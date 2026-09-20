@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" commit="be8c50ce15c1580d5abd5944d8e457faf261a803">
+  <category name="TS_TrackAnalyser">
+    <reapack name="TS_TrackAnalyser.lua" type="script" desc="Track Analyser -- measured response over the spectrum, over dynamics">
+      <version name="1.0.0" author="Tim Shadgett (with Claude)" time="2026-09-20T08:36:10Z">
+        <source main="main">https://github.com///raw/be8c50ce15c1580d5abd5944d8e457faf261a803/TS_TrackAnalyser/TS_TrackAnalyser.lua</source>
+        <source main="main" file="TS_TA_InsertProbes.lua">https://github.com///raw/be8c50ce15c1580d5abd5944d8e457faf261a803/TS_TrackAnalyser/TS_TA_InsertProbes.lua</source>
+        <source main="main" file="TS_TA_QuietProbes.lua">https://github.com///raw/be8c50ce15c1580d5abd5944d8e457faf261a803/TS_TrackAnalyser/TS_TA_QuietProbes.lua</source>
+        <source file="TS_TA_Chain.lua">https://github.com///raw/be8c50ce15c1580d5abd5944d8e457faf261a803/TS_TrackAnalyser/TS_TA_Chain.lua</source>
+        <source file="TS_TA_Strip.lua">https://github.com///raw/be8c50ce15c1580d5abd5944d8e457faf261a803/TS_TrackAnalyser/TS_TA_Strip.lua</source>
+        <source file="TS_TA_Mask.lua">https://github.com///raw/be8c50ce15c1580d5abd5944d8e457faf261a803/TS_TrackAnalyser/TS_TA_Mask.lua</source>
+        <source type="effect" file="TS_TrackProbe.jsfx">https://github.com///raw/be8c50ce15c1580d5abd5944d8e457faf261a803/TS_TrackAnalyser/TS_TrackProbe.jsfx</source>
+      </version>
+    </reapack>
+  </category>
+</index>
