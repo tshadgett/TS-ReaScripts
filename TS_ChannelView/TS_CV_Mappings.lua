@@ -1,3 +1,5 @@
+-- @noindex
+-- Not a package of its own: installed by TS_ChannelView.lua's @provides.
 --[[
   TS_CV_Mappings.lua -- the layout library.
 

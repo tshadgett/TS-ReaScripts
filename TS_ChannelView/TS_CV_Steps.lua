@@ -1,3 +1,5 @@
+-- @noindex
+-- Not a package of its own: installed by TS_ChannelView.lua's @provides.
 --[[
   TS_CV_Steps.lua -- a disk cache of stepped parameters' choices.
 

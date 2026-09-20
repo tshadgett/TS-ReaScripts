@@ -1,3 +1,5 @@
+-- @noindex
+-- Not a package of its own: installed by TS_ChannelView.lua's @provides.
 --[[
   TS_CV_Sends.lua -- the Sends panel, pinned to the right.
 

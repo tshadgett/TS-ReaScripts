@@ -1,3 +1,5 @@
+-- @noindex
+-- Not a package of its own: installed by TS_ChannelView.lua's @provides.
 --[[
   TS_CV_Diag.lua -- dump what REAPER reports about the selected track's FX.
 

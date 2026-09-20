@@ -1,3 +1,5 @@
+-- @noindex
+-- Not a package of its own: installed by TS_ChannelView.lua's @provides.
 --[[
   TS_CV_Util.lua -- small helpers shared by the rest of ChannelView.
   No ImGui in here; this file is pure Lua plus a few reaper.* calls, so
