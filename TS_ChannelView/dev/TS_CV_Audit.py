@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# @noindex  (a development tool, not a package: never installed)
 """
 TS_CV_Audit.py -- check every ImGui.* call site in this folder against the
 signatures of the ReaImGui build actually installed.

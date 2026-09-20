@@ -1,3 +1,4 @@
+-- @noindex  (a development tool, not a package: never installed)
 -- Offline harness: fake just enough of REAPER to exercise the pure-Lua
 -- parts (name cleaning, INI round-trip, layout parsing, panel geometry).
 --
