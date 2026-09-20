@@ -50,6 +50,21 @@ controls:
   models, what the Collisions overlay is actually computing, and what it
   deliberately does not model.
 
+## Working on these
+
+The live copies run from REAPER's own `Scripts/` and `Effects/` folders;
+this repo is what gets published. `tools/sync-from-reaper.sh` copies one
+way, REAPER to repo, and skips the two things that must never ship: the
+`.ini` layout and step caches, which are personal data, and a second copy
+of LICENSE.
+
+    ./tools/sync-from-reaper.sh          # from Git Bash
+
+It then checks something easy to forget: **ReaPack pins a version to the
+commit where it first appeared**, so changing a file without bumping
+`@version` delivers nothing to anyone — no index change, no error, no
+warning. The script says so plainly when it happens.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Use it, change it, ship it; just keep the
