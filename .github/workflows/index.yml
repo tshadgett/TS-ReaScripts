@@ -27,6 +27,12 @@ jobs:
 
       - run: gem install reapack-index
 
+      # reapack-index converts each package's @about from Markdown to RTF for
+      # ReaPack's About panel, and shells out to pandoc to do it. Without this
+      # every package carrying an @about fails -- which is why ChannelView
+      # failed while Track Analyser, which has no @about, passed.
+      - run: sudo apt-get update && sudo apt-get install -y pandoc
+
       # Printed before anything is generated, and it names every file it can
       # and cannot read metadata from. Without this a file with a header
       # reapack-index does not understand is simply absent from the
@@ -39,5 +45,5 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          reapack-index --no-progress --commit
+          reapack-index --no-progress --commit --name 'TS-ReaScripts'
           git push
