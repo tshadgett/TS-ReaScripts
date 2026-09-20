@@ -45,5 +45,16 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          reapack-index --no-progress --commit --name 'TS-ReaScripts'
+          # --rebuild: clear the index and rescan the whole history, every time.
+          #
+          # Without it reapack-index only writes a version's sources when that
+          # version is NEW -- so Track Analyser 1.0.0, first indexed with
+          # broken URLs, kept them even after the URL bug was fixed, because
+          # 1.0.0 was no longer new. A wrong entry would have stayed wrong
+          # until the next version bump.
+          #
+          # Rebuilding makes index.xml a pure function of the repo's contents:
+          # fix a file, push, and the catalogue is correct. It rescans all
+          # history each run, which costs nothing at this size.
+          reapack-index --no-progress --commit --rebuild --name 'TS-ReaScripts'
           git push
