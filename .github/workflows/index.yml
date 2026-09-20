@@ -1,0 +1,36 @@
+# Builds ReaPack's catalogue (index.xml) on GitHub, so releasing is nothing
+# more than: bump the @version in a file, commit, push.
+#
+# reapack-index reads the git HISTORY to work out which versions exist and
+# what changed, which is why this checks out the full history rather than
+# the usual shallow clone. It then commits index.xml back to the repo.
+name: Build ReaPack index
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # reapack-index needs every commit, not just the last
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - run: gem install reapack-index
+
+      - name: Generate and commit index.xml
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          reapack-index --no-progress --commit \
+            --url-template 'https://github.com/$owner/$repo/raw/$commit/$path'
+          git push

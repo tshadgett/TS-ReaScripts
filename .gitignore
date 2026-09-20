@@ -1,0 +1,14 @@
+# Python bytecode from the ChannelView audit tool
+__pycache__/
+*.pyc
+
+# Editor / OS noise
+.vscode/
+Thumbs.db
+desktop.ini
+
+# User data, never published: layouts and step caches are created on first
+# save and belong to whoever is running the script.
+TS_ChannelView_Mappings.ini
+TS_ChannelView_Mappings.bak.ini
+TS_ChannelView_Steps.ini

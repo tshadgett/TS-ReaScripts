@@ -1,0 +1,495 @@
+desc:- TS_TrackProbe -
+version: 1.0.0
+author: Tim Shadgett (with Claude)
+// MIT licence -- see LICENSE in the TS-ReaScripts repository.
+//========================================================================
+// One JSFX, two jobs. Put a copy either side of InfiniStrip inside an FX
+// container and the panel gets both the untouched signal and the processed
+// one, from the same audio thread, on the same block boundaries.
+//
+// It does not alter the audio. It reads it.
+//
+// WHY IT HAS A "Publish" SWITCH
+//   The panel never inserts or removes anything. You bake the container into
+//   your track templates and every track carries a pair of these, idle. The
+//   panel arms the pair on the selected track by writing one parameter, and
+//   disarms the previous pair the same way. An idle probe does no FFT, no
+//   windowing, no gmem writes -- it costs a branch per sample. Fifty armed
+//   templates cost nothing.
+//
+// WHY IT HAS A "Position" SWITCH
+//   Pre and post write to different regions of gmem. You do not have to set
+//   this: the panel works out which probe comes first in the chain and sets
+//   it for you. It is a slider only so you can see what the panel decided,
+//   and so the thing still works if you drive it by hand.
+//
+// gmem namespace TS_TA_Mem, shared with the measurement tools.
+//   0  - 19    TS_TA_Cal        (calibration rig -- do not reuse)
+//   20 - 23    TS_TA_WaveProbe  (superseded, left alone)
+//   64 - 95    control, panel -> probes
+//   0x10000    PRE  block
+//   0x20000    POST block
+//   0x30000    COMPARISON block -- the post probe of the track the panel
+//              is comparing against, for the masking overlay
+//
+// Control block (the panel writes these; 0 means "use my default"):
+//   64  epoch      bump to make both probes restart in step
+//   65  fft size   power of two, 256 .. 4096
+//   66  slice      samples per scope column
+//   67  heartbeat  panel is alive
+//   68  measure    1 = accumulate a linear power average for measurement
+//
+// MEASURING A PLUGIN WITH TWO PROBES
+//   Both probes live in the same audio thread, take the same FFT size, and
+//   restart together on the epoch, so their frames are sample-aligned. The
+//   difference between their averaged spectra is therefore the magnitude
+//   response of whatever sits between them -- the whole curve at 1024
+//   points, from one capture, instead of a stepped tone sweep.
+//
+//   That matters for narrow features. A Q 20 bell at 632 Hz is about
+//   0.036 octaves wide; the tone sweep that measured the filters stepped
+//   0.23 octaves and never landed on the peak. Bin spacing here is about
+//   0.001 octaves there.
+//
+//   The source never has to be spectrally flat: any colour in it cancels in
+//   the ratio between the two probes. What does NOT cancel is
+//   non-linearity, so a reading taken through heavy saturation describes
+//   the saturation as much as the filter.
+//
+//   The probe used to be able to generate its own excitation for the
+//   stepped-measurement rig. Those scripts are archived and the generator
+//   went with them: it replaced the incoming audio when armed, which is a
+//   sharp edge to leave on a plugin that lives in every track template.
+//
+// Probe block, relative to its base:
+//    0  seq            increments on every publication -- the panel waits
+//                      for this to advance rather than sampling on a clock,
+//                      which is what fixed the measurement rig
+//    3  srate
+//    4  nbins
+//    5  fft size
+//    6  slice
+//    7  epoch ack
+//    8  scope cursor   next column to be written
+//    9  scope columns
+//   10  block counter  heartbeat, panel uses it to spot a dead probe
+//   11  role           0 pre, 1 post, 2 comparison
+//   12  channels
+//   15  average count  frames in the measurement average, 0 when not measuring
+// 4096  + col*3 + 0            scope minimum
+// 4096  + col*3 + 1            scope maximum
+// 4096  + col*3 + 2            scope RMS
+// 16384 + band*4 + 0           display level, dB, ballistic
+// 16384 + band*4 + 1           band average, dB, mean power
+// 16384 + band*4 + 2           response, dB          (post probe only)
+// 16384 + band*4 + 3           excitation, dB <= 0   (post probe only)
+//
+// SLOTS 1, 2, 13 AND 14 ARE RESERVED, NOT PUBLISHED. They carried RMS and
+// peak meters that nothing ever read; the per-sample work behind them is
+// gone. Named here so nothing else claims them.
+//========================================================================
+
+options:gmem=TS_TA_Mem
+
+slider1:role=0<0,2,1{Pre -- before the strip,Post -- after the strip,Comparison track}>Position
+slider2:publish=0<0,1,1{Idle,Publishing}>Publish
+slider3:rel_ms=400<50,2000,10>Spectrum release (ms)
+
+in_pin:left
+in_pin:right
+out_pin:left
+out_pin:right
+
+@init
+
+  CTRL_EPOCH = 64;
+  CTRL_FFT   = 65;
+  CTRL_SLICE = 66;
+  CTRL_BEAT  = 67;
+  CTRL_MEAS  = 68;   // 0 = off, 1 = accumulate (one capture), 2 = running
+  CTRL_TAU   = 69;   // running-average time constant in ms, mode 2 only
+  CTRL_SMOO  = 70;   // response smoothing width in OCTAVES, 0 = none
+
+  PRE_BASE  = 0x10000;
+  POST_BASE = 0x20000;
+  // A third region, written by the POST probe of whatever track the panel
+  // is comparing against. It is a separate base rather than a slot scheme
+  // because the comparison is between exactly two tracks: the one you are
+  // looking at and the one you picked.
+  CMP_BASE  = 0x30000;
+
+  H_SEQ=0; H_RMS=1; H_PEAK=2; H_SRATE=3; H_NBINS=4; H_FFTSZ=5;
+  H_SLICE=6; H_EPOCHACK=7; H_CUR=8; H_COLS=9; H_BLOCKS=10;
+  H_ROLE=11; H_NCH=12; H_PKL=13; H_PKR=14; H_AVGN=15;
+  H_BANDN=16; H_BANDLO=17; H_BANDHI=18;
+
+  // OFF_SPEC (64) and OFF_AVG (2048) used to carry a per-bin spectrum and
+  // a per-bin average into gmem, about two thousand writes per frame per
+  // probe. Nothing reads them: the panel reads the band summary below and
+  // the scope ring, and the measurement scripts that wanted per-bin data
+  // are archived with the probe they were written against. The regions are
+  // left unwritten rather than reused, so an old tool reads zeros instead
+  // of something that looks plausible and is not.
+  OFF_SCOPE = 4096;
+  SCOPE_COLS = 4096;              // 8.2 s of history at 2 ms per column
+
+  // THE LOG-SPACED SUMMARY, AND WHY IT IS DONE HERE
+  //   The panel used to read every one of 1024 bins from both probes and
+  //   then draw a quad per pixel column -- about three thousand gmem reads
+  //   and four thousand marshalled draw calls a frame, which is what made
+  //   it lag. Nothing about that work needs to happen in Lua: this is one
+  //   pass over data the DSP already has in front of it.
+  //
+  //   Summarising to a log grid is also the fix for the jagged response
+  //   curve. A per-bin difference shows every bit of bin-to-bin noise in
+  //   the average; a band holding a dozen bins averages it away, and it
+  //   holds most bins exactly where the jaggedness was -- the top end.
+  //
+  //   Per point, stride 4:
+  //     0  display level, dB, ballistic, loudest bin in the band
+  //     1  measurement average, dB, mean POWER over the band
+  //     2  response, dB   (post probe only: this band minus the pre probe's)
+  //     3  excitation, dB below the loudest band  (post probe only, <= 0)
+  OFF_BAND  = 16384;
+  BANDS   = 256;
+  BAND_LO = 20;
+  BAND_HI = 20000;
+
+  FFT_MAX = 4096;
+
+  // Local buffers. The FFT workspace sits at offset 0 so it satisfies any
+  // alignment REAPER wants, whatever the size ends up being.
+  BUF_FFT = 0;                    // FFT_MAX*2, interleaved re/im
+  BUF_ACC = 8192;                 // FFT_MAX,   accumulating input
+  BUF_WIN = 16384;                // FFT_MAX,   Hann window
+  BUF_MAG = 24576;                // FFT_MAX/2, smoothed dB per bin
+  BUF_AVG = 32768;                // FFT_MAX/2, accumulated power for the
+                                  //            measurement average
+  BUF_BEDGE = 40960;              // BANDS+1, band edges in bins
+  BUF_BA    = 41472;              // BANDS,   this probe's band average, dB
+  BUF_BR    = 41728;              // BANDS,   the response before smoothing
+  BUF_BT    = 41984;              // BANDS,   smoothing scratch
+  BUF_BV    = 42240;              // BANDS,   1 where the band has real data
+
+  fftsz = 0;                      // forces buildWindow on the first block
+  last_meas = -1;                 // forces one clearAvg on the first block
+  slice = 0;
+  seq = 0;
+  blocks = 0;
+  last_epoch = -1;
+
+  function buildWindow(n) local(i, ph) (
+    i = 0;
+    loop(n,
+      ph = 2 * $pi * i / n;
+      BUF_WIN[i] = 0.5 - 0.5 * cos(ph);
+      i += 1;
+    );
+  );
+
+  // Instant attack, exponential release, per hop. An analyser that averages
+  // the attack as well hides exactly the transients you are looking at.
+  function setBallistics() (
+    rel = exp(-1 * (hop / srate) / (max(rel_ms, 10) * 0.001));
+  );
+
+  // The average is cleared on its own as well as with everything else,
+  // because switching between the one-shot and running modes changes what
+  // BUF_AVG holds -- a sum of powers in one, a mean power in the other --
+  // and carrying a sum into a mean is nonsense. Clearing it must NOT take
+  // the scope ring with it: panel 2 should not blank because panel 1
+  // changed its averaging.
+  function clearAvg() local(i) (
+    avgn = 0;
+    gmem[base + H_AVGN] = 0;
+    i = 0; loop(FFT_MAX / 2, BUF_AVG[i] = 0; i += 1; );
+  );
+
+  function restart() local(i) (
+    cur = 0;
+    sacc = 0; smin = 1; smax = -1; ssq = 0;
+    fill = 0;
+    gmem[base + H_CUR] = 0;
+    i = 0; loop(SCOPE_COLS * 3, gmem[base + OFF_SCOPE + i] = 0; i += 1; );
+    // The measurement average restarts with everything else, so a capture
+    // can never contain a frame from before the setting changed.
+    clearAvg();
+  );
+
+  // Where each band starts and ends, in bins. Recomputed only when the FFT
+  // size or the sample rate changes, so the per-frame pass has no logs in it.
+  function buildBands() local(i, ratio) (
+    ratio = log(BAND_HI / BAND_LO);
+    i = 0;
+    loop(BANDS + 1,
+      BUF_BEDGE[i] = BAND_LO * exp(ratio * i / BANDS) * fftsz / srate;
+      i += 1;
+    );
+  );
+
+  function reconfigure(newsz, newslice) local(i) (
+    fftsz = newsz;
+    nbins = fftsz / 2;
+    hop   = fftsz / 2;
+    slice = newslice;
+    buildWindow(fftsz);
+    buildBands();
+    setBallistics();
+    i = 0; loop(nbins, BUF_MAG[i] = -180; i += 1; );
+    restart();
+  );
+
+@slider
+
+  base = role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
+  fftsz > 0 ? setBallistics();
+
+@block
+
+  base = role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
+  active = publish >= 0.5;
+
+  active ? (
+    // What size does the panel want? Fall back to something sane if it has
+    // not said, or has said something silly.
+    want = gmem[CTRL_FFT];
+    (want != 256 && want != 512 && want != 1024 && want != 2048 && want != 4096) ? want = 2048;
+
+    wantslice = gmem[CTRL_SLICE];
+    (wantslice < 8 || wantslice > srate) ? wantslice = max(8, floor(srate * 0.002));
+
+    (want != fftsz || wantslice != slice) ? reconfigure(want, wantslice);
+
+    ep = gmem[CTRL_EPOCH];
+    ep != last_epoch ? ( last_epoch = ep; restart(); gmem[base + H_EPOCHACK] = ep; );
+
+    // 1 = accumulate for one capture, 2 = keep a running average so a panel
+    // can watch the response change while knobs move.
+    measmode = gmem[CTRL_MEAS];
+    meas = measmode > 0.5;
+    live = measmode > 1.5;
+    measmode != last_meas ? ( last_meas = measmode; clearAvg(); );
+
+    smoo_oct = gmem[CTRL_SMOO];
+    (smoo_oct < 0 || smoo_oct > 2) ? smoo_oct = 0;
+
+    tau_s = gmem[CTRL_TAU] * 0.001;
+    (tau_s < 0.05 || tau_s > 30) ? tau_s = 1.0;
+    avg_k = 1 - exp(-1 * (hop / srate) / tau_s);
+
+    blocks += 1;
+    gmem[base + H_SRATE]  = srate;
+    gmem[base + H_NBINS]  = nbins;
+    gmem[base + H_FFTSZ]  = fftsz;
+    gmem[base + H_SLICE]  = slice;
+    gmem[base + H_COLS]   = SCOPE_COLS;
+    gmem[base + H_BLOCKS] = blocks;
+    gmem[base + H_ROLE]   = role;
+    gmem[base + H_NCH]    = num_ch;
+    gmem[base + H_BANDN]  = BANDS;
+    gmem[base + H_BANDLO] = BAND_LO;
+    gmem[base + H_BANDHI] = BAND_HI;
+  );
+
+@sample
+
+  active ? (
+
+    m = (spl0 + spl1) * 0.5;
+
+    //-- scope column -------------------------------------------------
+    m < smin ? smin = m;
+    m > smax ? smax = m;
+    ssq += m * m;
+    sacc += 1;
+
+    sacc >= slice ? (
+      gmem[base + OFF_SCOPE + cur * 3 + 0] = smin;
+      gmem[base + OFF_SCOPE + cur * 3 + 1] = smax;
+      gmem[base + OFF_SCOPE + cur * 3 + 2] = sqrt(ssq / slice);
+      cur += 1;
+      cur >= SCOPE_COLS ? cur = 0;
+      gmem[base + H_CUR] = cur;
+      smin = 1; smax = -1; ssq = 0; sacc = 0;
+    );
+
+    //-- spectrum -----------------------------------------------------
+    BUF_ACC[fill] = m;
+    fill += 1;
+
+    fill >= fftsz ? (
+      i = 0;
+      loop(fftsz,
+        BUF_FFT[i * 2]     = BUF_ACC[i] * BUF_WIN[i];
+        BUF_FFT[i * 2 + 1] = 0;
+        i += 1;
+      );
+      fft(BUF_FFT, fftsz);
+      fft_permute(BUF_FFT, fftsz);
+
+      // A Hann window has a coherent gain of 0.5, and REAPER's fft is
+      // unnormalised, so a sine of amplitude A lands at A*fftsz/4.
+      sc = 4 / fftsz;
+
+      i = 0;
+      loop(nbins,
+        re = BUF_FFT[i * 2];
+        im = BUF_FFT[i * 2 + 1];
+        pw = re * re + im * im;
+        mag = sqrt(pw) * sc;
+        d = mag > 0.000000001 ? 20 * log10(mag) : -180;
+        d > BUF_MAG[i] ? BUF_MAG[i] = d
+                       : BUF_MAG[i] = d + (BUF_MAG[i] - d) * rel;
+        // Measurement average: linear in POWER, no ballistics. Both probes
+        // hit this on the same block with the same frame alignment, so the
+        // difference between the two averages is the magnitude response
+        // and nothing else.
+        meas ? (
+          live ? BUF_AVG[i] += (pw - BUF_AVG[i]) * avg_k
+               : BUF_AVG[i] += pw;
+        );
+        i += 1;
+      );
+
+      // The average itself stays in BUF_AVG, which the band summary reads
+      // a few lines down. Only the count is published, so the panel can
+      // tell a running average from a cold one.
+      meas ? ( avgn += 1; gmem[base + H_AVGN] = avgn; );
+
+      //-- log-spaced band summary ------------------------------------
+      anorm = live ? 1 : (avgn > 0 ? 1 / avgn : 0);
+      scdb  = 20 * log10(sc);
+      bi = 0;
+      loop(BANDS,
+        b0 = BUF_BEDGE[bi]; b1 = BUF_BEDGE[bi + 1];
+        k0 = ceil(b0); k1 = floor(b1);
+        dmax = -180; psum = 0; pn = 0;
+        (k1 >= k0 && k0 >= 1 && k1 <= nbins - 1) ? (
+          kk = k0;
+          loop(k1 - k0 + 1,
+            BUF_MAG[kk] > dmax ? dmax = BUF_MAG[kk];
+            psum += BUF_AVG[kk]; pn += 1;
+            kk += 1;
+          );
+        ) : (
+          // Narrower than a bin, which below about a kilohertz is every
+          // band. Interpolate rather than leaving a hole.
+          bc = (b0 + b1) * 0.5;
+          kk = floor(bc); tt = bc - kk;
+
+          // THE LEFT EDGE, AND WHY IT WAS BLANK
+          //   A band whose centre falls below bin 1 has no pair of bins to
+          //   interpolate between, so this test failed and the band kept
+          //   its -180 -- which the panel draws at the floor. That is the
+          //   gap at the bottom of the display: 20 Hz to the first bin,
+          //   about 23 Hz at 2048 points and 48 kHz.
+          //
+          //   Bin 1 is still the nearest thing that was actually measured,
+          //   and the energy down there is real even though the transform
+          //   cannot resolve where in the band it sits. So the value is
+          //   HELD from bin 1 rather than dropped: the trace runs flat to
+          //   the axis instead of falling into a hole. It is the same
+          //   thing TS_Visualizer does by construction -- its axis starts
+          //   at bin 1, so its leftmost pixel IS bin 1.
+          //
+          //   The TOP end is deliberately not treated this way. Above
+          //   Nyquist there is no energy to represent, so a floor there is
+          //   the truth and a held value would be an invention.
+          kk < 1 ? ( kk = 1; tt = 0; );
+
+          (kk >= 1 && kk <= nbins - 2) ? (
+            dmax = BUF_MAG[kk] + (BUF_MAG[kk + 1] - BUF_MAG[kk]) * tt;
+            psum = BUF_AVG[kk] + (BUF_AVG[kk + 1] - BUF_AVG[kk]) * tt;
+            pn = 1;
+          );
+        );
+        gmem[base + OFF_BAND + bi * 4] = dmax;
+        // Whether this band has a value at all. With the left edge held
+        // from bin 1 the only bands that fail this now are the ones above
+        // Nyquist, where a floor is the truth. A band with no value is
+        // kept out of the response smoothing below, so two floors cannot
+        // average a false zero into their neighbours -- which is what put
+        // a little hook on the bottom of the high-pass.
+        BUF_BV[bi] = pn > 0 ? 1 : 0;
+        pwb = pn > 0 ? psum / pn * anorm : 0;
+        BUF_BA[bi] = pwb > 0.000000000000000001 ? 10 * log10(pwb) + scdb : -240;
+        gmem[base + OFF_BAND + bi * 4 + 1] = BUF_BA[bi];
+        bi += 1;
+      );
+
+      //-- the response, computed by the POST probe -------------------
+      // Within a block REAPER runs the whole of the pre probe before the
+      // whole of the post probe, and both FFTs fire on the same sample
+      // index because they restart together on the epoch. So by the time
+      // this runs the pre probe has already published this frame's bands.
+      // ROLE 1 ONLY. The response is this track's post minus this
+      // track's pre; a comparison probe lives on a different track, where
+      // PRE_BASE holds somebody else's audio entirely, and subtracting
+      // that would be meaningless rather than merely wrong.
+      (role >= 0.5 && role < 1.5 && meas) ? (
+        pmax = -400;
+        bi = 0;
+        loop(BANDS,
+          pv = gmem[PRE_BASE + OFF_BAND + bi * 4 + 1];
+          pv > pmax ? pmax = pv;
+          bi += 1;
+        );
+        bi = 0;
+        loop(BANDS,
+          pv = gmem[PRE_BASE + OFF_BAND + bi * 4 + 1];
+          BUF_BR[bi] = BUF_BA[bi] - pv;
+          // How far below the loudest band this one's excitation sits. The
+          // panel gates on that rather than on an absolute level, so the
+          // curve does not vanish when the track is quiet.
+          gmem[base + OFF_BAND + bi * 4 + 3] = pv - pmax;
+          bi += 1;
+        );
+        // SMOOTHING ACROSS FREQUENCY, IN OCTAVES
+        //
+        // The grid is uniform in LOG frequency, which is what makes this
+        // easy: a fixed number of points is a fixed fraction of an octave
+        // everywhere. 256 points across three decades is 25.7 per octave,
+        // so the window in points follows straight from the width asked
+        // for, and one setting behaves the same at 40 Hz as at 10 kHz.
+        //
+        // Two box passes rather than one, which gives a triangular window
+        // -- smooth, where a single box leaves corners. Bands with no data
+        // are excluded rather than averaged in, so the empty region below
+        // the first bin cannot pull its neighbours toward zero.
+        hw = floor(smoo_oct * (BANDS / (log(BAND_HI / BAND_LO) / log(2))) * 0.5 + 0.5);
+        hw = max(0, min(64, hw));
+        hw > 0 ? (
+          sp = 0;
+          loop(2,
+            bi = 0;
+            loop(BANDS,
+              ba = max(0, bi - hw); bb = min(BANDS - 1, bi + hw);
+              acc = 0; cnt = 0;
+              kk = ba;
+              loop(bb - ba + 1,
+                BUF_BV[kk] > 0.5 ? ( acc += BUF_BR[kk]; cnt += 1; );
+                kk += 1;
+              );
+              BUF_BT[bi] = cnt > 0 ? acc / cnt : BUF_BR[bi];
+              bi += 1;
+            );
+            bi = 0; loop(BANDS, BUF_BR[bi] = BUF_BT[bi]; bi += 1; );
+            sp += 1;
+          );
+        );
+        bi = 0;
+        loop(BANDS,
+          gmem[base + OFF_BAND + bi * 4 + 2] = BUF_BR[bi];
+          bi += 1;
+        );
+      );
+
+      // Published last, and only once everything above is in place: the
+      // panel treats a change here as "a complete new frame is ready".
+      seq += 1;
+      gmem[base + H_SEQ] = seq;
+
+      memcpy(BUF_ACC, BUF_ACC + hop, hop);
+      fill = hop;
+    );
+  );
