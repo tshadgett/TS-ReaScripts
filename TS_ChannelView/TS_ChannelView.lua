@@ -1,50 +1,48 @@
---[[
- @description ChannelView -- docked channel strip: one editable control panel per plugin
- @author Tim Shadgett (with Claude)
- @version 1.0.0
- @license MIT
- @provides
-   [main]   TS_CV_Diag.lua
-   [nomain] TS_CV_Browser.lua
-   [nomain] TS_CV_Channel.lua
-   [nomain] TS_CV_Config.lua
-   [nomain] TS_CV_Editor.lua
-   [nomain] TS_CV_FXIndex.lua
-   [nomain] TS_CV_FXTree.lua
-   [nomain] TS_CV_Mappings.lua
-   [nomain] TS_CV_Panel.lua
-   [nomain] TS_CV_Sends.lua
-   [nomain] TS_CV_Startup.lua
-   [nomain] TS_CV_State.lua
-   [nomain] TS_CV_Steps.lua
-   [nomain] TS_CV_TrackStrip.lua
-   [nomain] TS_CV_Util.lua
-   [nomain] TS_CV_Widgets.lua
- @about
-   A dockable window showing one panel per plugin on the selected track.
-   Each panel carries a float button, a bypass button and a set of knobs
-   and buttons wired straight to that plugin's parameters -- what you
-   assign to a panel is remembered per plugin, so the same plugin always
-   comes up looking the same wherever it turns up.
-
-   Panels are a fixed height and grow in COLUMNS: rows fall out of the
-   window height, controls flow down a column and wrap into a new one, so
-   a panel never scrolls vertically -- the row of panels scrolls sideways
-   instead. The track strip along the bottom mirrors REAPER's own track
-   selection both ways.
-
-   Lineage. The parameter-mapping idea and the layout-library file format
-   were taken from Wormhole Labs' StripLink -- the concepts and the file
-   format, not its code: nothing here is copied from it. StripLink puts
-   that idea behind a JSFX embedded UI; this is a ReaImGui window that
-   writes parameters directly.
-
-   The container-aware FX chain walk is ported from RackLib.lua, shared by
-   my own Plugin Rack.lua and Docked Plugin Display.lua. That is my code,
-   not a third party's.
-
-   Requires the ReaImGui extension (v0.9 or newer).
---]]
+-- @description ChannelView -- docked channel strip: one editable control panel per plugin
+-- @author Tim Shadgett (with Claude)
+-- @version 1.0.0
+-- @license MIT
+-- @provides
+--  [main]   TS_CV_Diag.lua
+--  [nomain] TS_CV_Browser.lua
+--  [nomain] TS_CV_Channel.lua
+--  [nomain] TS_CV_Config.lua
+--  [nomain] TS_CV_Editor.lua
+--  [nomain] TS_CV_FXIndex.lua
+--  [nomain] TS_CV_FXTree.lua
+--  [nomain] TS_CV_Mappings.lua
+--  [nomain] TS_CV_Panel.lua
+--  [nomain] TS_CV_Sends.lua
+--  [nomain] TS_CV_Startup.lua
+--  [nomain] TS_CV_State.lua
+--  [nomain] TS_CV_Steps.lua
+--  [nomain] TS_CV_TrackStrip.lua
+--  [nomain] TS_CV_Util.lua
+--  [nomain] TS_CV_Widgets.lua
+-- @about
+--  A dockable window showing one panel per plugin on the selected track.
+--  Each panel carries a float button, a bypass button and a set of knobs
+--  and buttons wired straight to that plugin's parameters -- what you
+--  assign to a panel is remembered per plugin, so the same plugin always
+--  comes up looking the same wherever it turns up.
+--
+--  Panels are a fixed height and grow in COLUMNS: rows fall out of the
+--  window height, controls flow down a column and wrap into a new one, so
+--  a panel never scrolls vertically -- the row of panels scrolls sideways
+--  instead. The track strip along the bottom mirrors REAPER's own track
+--  selection both ways.
+--
+--  Lineage. The parameter-mapping idea and the layout-library file format
+--  were taken from Wormhole Labs' StripLink -- the concepts and the file
+--  format, not its code: nothing here is copied from it. StripLink puts
+--  that idea behind a JSFX embedded UI; this is a ReaImGui window that
+--  writes parameters directly.
+--
+--  The container-aware FX chain walk is ported from RackLib.lua, shared by
+--  my own Plugin Rack.lua and Docked Plugin Display.lua. That is my code,
+--  not a third party's.
+--
+--  Requires the ReaImGui extension (v0.9 or newer).
 
 -- ---------------------------------------------------------------------
 -- module loading
