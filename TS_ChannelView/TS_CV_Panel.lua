@@ -630,6 +630,10 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
     end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)
+  else
+    -- Culled: still occupy the space, or the parent's bounds
+    -- never grow past it. See W.child_skipped.
+    W.child_skipped(ctx, w, avail_h)
   end
 
   return w, req, collapsed

@@ -308,6 +308,10 @@ function SD.draw(ctx, track, avail_h)
       end
     end
     ImGui.EndChild(ctx)
+  else
+    -- Culled: still occupy the space, or the parent's bounds
+    -- never grow past it. See W.child_skipped.
+    W.child_skipped(ctx, w, avail_h)
   end
   return w, req
 end

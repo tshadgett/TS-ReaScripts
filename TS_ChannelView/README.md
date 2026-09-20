@@ -411,6 +411,29 @@ measuring rather than guessing:
   is proportional and the space width moves with the UI scale, so a count
   that's right on one machine overlaps the plugin name on another.
 
+## A culled child still owes the layout its space
+
+ReaImGui keeps Dear ImGui's **pre-1.90** convention: `EndChild` is called
+only when `BeginChild` returned true. The catch nobody mentions is that a
+culled child then submits **no item at all** — so the parent's content
+bounds never grow past it, the `SameLine` after it starts from the wrong
+place, and if the cursor was moved by hand beforehand the frame ends with:
+
+    ImGui_End: Code uses SetCursorPos()/SetCursorScreenPos() to extend
+    window/parent boundaries. Please submit an item e.g. Dummy()
+    afterwards in order to grow window/parent boundaries.
+
+...raised from `End`, hundreds of lines from the child that caused it, and
+only when the window happens to be small enough for something to be
+culled. Every `BeginChild` here now has an `else` that calls
+`W.child_skipped(ctx, w, h)` — a `Dummy` of the size the child would have
+taken.
+
+The track-colour rule moves the cursor by hand and then trusts the panels
+below to draw at it, so it submits a zero `Dummy` of its own rather than
+relying on that. Moving the cursor is a promise to draw something there;
+this keeps the promise outright instead of hoping the next thing does.
+
 ## The cursor is not a scratch variable
 
 `SetCursorScreenPos` followed by no item is an assertion at `EndChild`:

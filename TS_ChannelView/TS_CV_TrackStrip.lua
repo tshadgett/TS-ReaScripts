@@ -84,6 +84,10 @@ function S.draw(ctx, height, cur_track)
     end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)
+  else
+    -- Culled: still occupy the space, or the parent's bounds
+    -- never grow past it. See W.child_skipped.
+    W.child_skipped(ctx, 0, height)
   end
 
   if clicked then

@@ -9,7 +9,7 @@
 
 local C = {}
 
-C.VERSION   = "1.0.0"
+C.VERSION   = "1.0.1"
 C.EXT_SECT  = "TS_ChannelView"       -- reaper.SetExtState section
 C.WIN_TITLE = "ChannelView"
 

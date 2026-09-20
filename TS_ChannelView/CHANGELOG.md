@@ -1,5 +1,29 @@
 # ChannelView — changelog
 
+## 1.0.1
+
+- **Fixed a crash in a small window.** ReaImGui keeps Dear ImGui's
+  pre-1.90 convention, where `EndChild` is called only when `BeginChild`
+  returned true — and a culled child then submits no item at all, so the
+  parent's content bounds never grow past it. With the track-colour rule
+  moving the cursor by hand, that ended the frame with *"Code uses
+  SetCursorPos() to extend window/parent boundaries"*, raised from `End`
+  and nowhere near the child responsible. Every child now occupies its
+  space even when it is skipped. The same bug was quietly misplacing the
+  `SameLine` after a culled panel.
+
+### Already in 1.0.0, just never written down
+
+- **The gain-reduction meter reverts to zero when a plugin is bypassed.**
+  `GainReduction_dB` keeps answering after bypass — the plugin stopped
+  processing, not talking — so the meter froze at whatever it was doing
+  when you switched it off.
+- Collapsed panels keep the stacked-letter label. A rotated version is
+  written and switched off behind `C.ROT_TEXT`: it draws the text into a
+  LICE bitmap and puts it on a turned quad, but LICE has no idea what size
+  ImGui is really rendering at, so on a scaled display the result is
+  unreadable.
+
 ## 1.0.0 — first public release
 
 Released under the MIT Licence. No change to behaviour from 0.1.0.

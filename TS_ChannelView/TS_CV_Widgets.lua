@@ -1152,4 +1152,21 @@ function W.vertical_text(ctx, dl, cx, y, text, col, max_h)
   return used
 end
 
+-- A child that BeginChild declined to draw.
+--
+-- ReaImGui keeps Dear ImGui's PRE-1.90 convention: EndChild is called
+-- only when BeginChild returned true. The catch is that a culled child
+-- then submits NO ITEM at all, so the parent's content bounds never grow
+-- past it -- which breaks the SameLine after it, and, if the cursor was
+-- moved by hand beforehand, ends the frame with
+--
+--   "Code uses SetCursorPos()/SetCursorScreenPos() to extend
+--    window/parent boundaries. Please submit an item e.g. Dummy()"
+--
+-- ...raised from End, hundreds of lines from the child that caused it.
+-- So a skipped child still occupies its space.
+function W.child_skipped(ctx, w, h)
+  ImGui.Dummy(ctx, math.max(0, w or 0), math.max(0, h or 0))
+end
+
 return W

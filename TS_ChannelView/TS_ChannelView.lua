@@ -1,6 +1,6 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett (with Claude)
--- @version 1.0.0
+-- @version 1.0.1
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -916,6 +916,10 @@ local function panel_row(row_h, row_w)
     end
 
     ImGui.EndChild(ctx)
+  else
+    -- Culled: still occupy the space, or the parent's bounds
+    -- never grow past it. See W.child_skipped.
+    W.child_skipped(ctx, row_w or 0, row_h)
   end
 end
 
@@ -1035,6 +1039,11 @@ local function frame()
       -- rule may overlap the menu bar, the panels may not.
       ImGui.SetCursorScreenPos(ctx, cx,
         math.max(ry + C.RULE_H + C.ROW_TOP_GAP, wy + start_y))
+      -- Moving the cursor is a promise to draw something there. The
+      -- panels below normally keep it, but any of them can be culled,
+      -- and ImGui only complains at End -- hundreds of lines away from
+      -- the line it is actually about. This keeps the promise outright.
+      ImGui.Dummy(ctx, 0, 0)
     end
 
     local _, avail_h = ImGui.GetContentRegionAvail(ctx)
