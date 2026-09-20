@@ -1,6 +1,9 @@
 desc:- TS_TrackProbe -
 version: 1.0.0
 author: Tim Shadgett (with Claude)
+// @noindex
+// Ships as part of the Track Analyser package (its @provides lists this
+// file as [effect]); it is not a package to install on its own.
 // MIT licence -- see LICENSE in the TS-ReaScripts repository.
 //========================================================================
 // One JSFX, two jobs. Put a copy either side of InfiniStrip inside an FX
