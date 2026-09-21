@@ -546,7 +546,16 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
     else
       local p        = ctl.param
-      local value    = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+      -- Reverse is applied at the BOUNDARY and nowhere else: the value
+      -- is flipped on the way in and flipped back on the way out, so
+      -- every widget, tooltip and default below deals in what the
+      -- control shows and the plugin only ever sees its own numbers.
+      -- Knobs and toggles only -- a combo's steps are positions in the
+      -- plugin's own scale, and mirroring those means mirroring the
+      -- list, which is a different job.
+      local rev      = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle")
+      local raw      = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+      local value    = rev and (1 - raw) or raw
       local shown    = U.fmt_value(track, fx.addr, p)
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, p, "")
       local label    = M.display_name(key, p, ctl.label, pname)
@@ -578,10 +587,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       end
 
       if act and act.double_click then
-        nv, changed = U.param_mid_norm(track, fx.addr, p), true
+        local d = U.param_mid_norm(track, fx.addr, p)
+        nv, changed = rev and (1 - d) or d, true
       end
       if changed then
-        reaper.TrackFX_SetParamNormalized(track, fx.addr, p, nv)
+        reaper.TrackFX_SetParamNormalized(track, fx.addr, p,
+          rev and (1 - nv) or nv)
       end
       if act and act.right_click then req.ctx_control = i end
     end

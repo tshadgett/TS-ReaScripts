@@ -258,6 +258,43 @@ function SD.draw_menu(ctx, track)
 end
 
 -- ---------------------------------------------------------------------
+-- routing
+-- ---------------------------------------------------------------------
+
+-- REAPER's own routing window, via the action that opens it for the
+-- last-touched track. There is no API that takes a track, so the track
+-- has to BE the last-touched one first -- which it normally already is,
+-- since this window follows the selection both ways, but not if the
+-- selection was changed from a script or a control surface since.
+local ROUTING_ACTION = 40293   -- Track: View routing and I/O for current track
+
+function SD.open_routing(track)
+  if not track then return end
+  -- Only reselect if we have to. Clobbering a multi-track selection to
+  -- open a window the user could have opened from the mixer would be a
+  -- poor trade, and this window follows the selection anyway, so the
+  -- track is almost always already the one.
+  if track ~= reaper.GetSelectedTrack2(0, 0, true) then
+    reaper.SetOnlyTrackSelected(track)
+  end
+  reaper.Main_OnCommand(ROUTING_ACTION, 0)
+end
+
+-- { parent/master send, sends out, receives in } -- the same three the
+-- routing button in REAPER's mixer lights up.
+function SD.route_leds(track)
+  if not track then return { false, false, false } end
+  local master = (track == reaper.GetMasterTrack(0))
+  return {
+    -- The master has nowhere to send to, so its lamp is off rather than
+    -- reporting on a property it does not have.
+    (not master) and (reaper.GetMediaTrackInfo_Value(track, "B_MAINSEND") or 0) > 0.5 or false,
+    (reaper.GetTrackNumSends(track, 0)  or 0) > 0,
+    (reaper.GetTrackNumSends(track, -1) or 0) > 0,
+  }
+end
+
+-- ---------------------------------------------------------------------
 -- drawing
 -- ---------------------------------------------------------------------
 
@@ -295,6 +332,20 @@ function SD.draw(ctx, track, avail_h)
       ImGui.DrawList_AddText(dl, x + 6, y + (C.HEADER_H - th) * 0.5,
         C.COL.header_text, "Sends")
       local btn = C.ICON_SIZE
+
+      -- Routing, to the left of the collapse control. The lamps report
+      -- what the panel below cannot: sends are in view here, but the
+      -- parent send and anything arriving from elsewhere are not.
+      local leds = SD.route_leds(track)
+      ImGui.SetCursorScreenPos(ctx, x + ww - btn * 2 - 9, y + 3)
+      if W.route_button(ctx, "sdroute", btn, btn, leds,
+          ("Routing and I/O\n%s\n%s\n%s")
+          :format(leds[1] and "Sends to parent/master" or "No parent/master send",
+                  leds[2] and "Sends to other tracks"  or "No sends",
+                  leds[3] and "Receives from elsewhere" or "No receives")) then
+        SD.open_routing(track)
+      end
+
       ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + 3)
       if W.icon_button(ctx, "sdcol", "collapse", btn, false, "Collapse the sends") then
         St.toggle_collapsed(KEY)

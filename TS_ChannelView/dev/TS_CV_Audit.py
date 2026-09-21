@@ -257,13 +257,39 @@ def indent_of(line):
     return len(line) - len(line.lstrip())
 
 
+# Every C.COL.<name> has to be a name the palette actually defines.
+#
+# A palette entry is data, not code, so nothing else notices when one is
+# renamed or dropped -- the read just yields nil, and the draw call that
+# gets it paints in whatever nil means to ImGui rather than raising. That
+# is the worst kind of bug to have in a colour: it is invisible in the
+# tests and only slightly wrong on screen. So it is checked here.
+PALETTE_DEF_RE = re.compile(r'^\s{2}(\w+)\s*=\s*\{\s*"', re.M)
+PALETTE_USE_RE = re.compile(r"C\.COL\.(\w+)")
+
+
+def check_palette(sources, config_src, problems):
+    defined = set(PALETTE_DEF_RE.findall(config_src))
+    if not defined:
+        return      # the palette moved; better silent than crying wolf
+    for name in sorted(sources):
+        for m in PALETTE_USE_RE.finditer(sources[name]):
+            if m.group(1) in defined:
+                continue
+            problems.append((
+                "NO SUCH COLOUR", name,
+                sources[name][:m.start()].count("\n") + 1,
+                "C.COL." + m.group(1),
+                "the palette in TS_CV_Config.lua defines no such entry", ""))
+
+
 # REAPER answers nil -- not 0 -- when a track or send does not HAVE the
 # thing you asked about: record arm, input monitoring and phase invert on
 # the master track, most obviously. `nil > 0.5` is a hard error rather
 # than a false, so one unguarded read takes the whole window down the
 # moment the master is selected, and only then.
 INFO_VALUE_RE = re.compile(
-    r"reaper\.Get\w*Info_Value\s*\([^()]*\)\s*(?:[<>]=?|~=|==|[-+*/%])")
+    r"reaper\.Get\w*Info_Value\s*\([^()]*\)\s*([<>]=?|~=|==|[-+*/%])\s*(\w+)?")
 
 
 def check_info_value(fname, lines, problems):
@@ -271,6 +297,11 @@ def check_info_value(fname, lines, problems):
     for i, line in enumerate(lines):
         m = INFO_VALUE_RE.search(line)
         if not m:
+            continue
+        # `x ~= nil` and `x == nil` ARE the guard -- that line is the test
+        # itself, not a use of the value, and telling it to add `or 0`
+        # would turn a working check into one that can never fire.
+        if m.group(1) in ("~=", "==") and m.group(2) == "nil":
             continue
         # `(reaper.GetMediaTrackInfo_Value(tr, "I_FXEN") or 1) < 0.5` is the
         # correct shape, and puts the `or` before the operator.
@@ -559,6 +590,8 @@ def main():
         check_info_value(name, code, problems)
         check_multivalue_splat(name, sources[name], sigs, problems)
 
+    check_palette(sources, raws.get("TS_CV_Config.lua", ""), problems)
+
     own_sigs = module_signatures(sources)
     for name, src in sorted(sources.items()):
         check_call_arity(name, src, raws[name], own_sigs, problems)
@@ -566,7 +599,7 @@ def main():
     for kind, fname, line, fn, detail, src_line in problems:
         label = fn if kind in ("CALLED TOO EARLY", "USED TOO EARLY",
                                 "UNGUARDED nil?", "ARG COUNT",
-                                "SPLATS") else "ImGui." + fn
+                                "SPLATS", "NO SUCH COLOUR") else "ImGui." + fn
         print("%-16s %s:%d  %s  %s" % (kind, fname, line, label, detail))
         if src_line:
             print("                 %s" % src_line)

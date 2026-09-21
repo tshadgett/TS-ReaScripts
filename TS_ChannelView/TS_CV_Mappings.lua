@@ -90,10 +90,19 @@ local function parse_section(sect)
     local p, t, bi, label = raw:match("^%s*(-?%d+)%s*|%s*(%a*)%s*|%s*(%d*)%s*|?(.*)$")
     if p then
       t = (t ~= "" and VALID_TYPE[t]) and t or "knob"
+      -- Field three is a BITMASK, and used to be a plain 0/1 for
+      -- "bipolar". Bit 0 still means exactly that, so every layout
+      -- written before reverse existed reads back the same; bit 1 is
+      -- reverse. Adding a fifth "|" field instead would have been the
+      -- obvious move and the wrong one -- the label is field four and
+      -- is allowed to be empty, so an old line and a new one with no
+      -- label are indistinguishable once you start counting separators.
+      local f = tonumber(bi) or 0
       controls[#controls + 1] = {
         param   = tonumber(p),
         type    = t,
-        bipolar = (bi == "1"),
+        bipolar = (f & 1) ~= 0,
+        invert  = (f & 2) ~= 0,
         label   = U.trim(label),
       }
     end
@@ -114,10 +123,12 @@ local function serialize(layout)
     end
   end
   for i, c in ipairs(layout.controls or {}) do
+    -- See parse_section: bit 0 bipolar, bit 1 reverse.
+    local flags = (c.bipolar and 1 or 0) | (c.invert and 2 or 0)
     out["Ctl" .. (i - 1)] = string.format("%d|%s|%d|%s",
       c.param or -1,
       c.type or "knob",
-      c.bipolar and 1 or 0,
+      flags,
       (c.label or ""):gsub("[|\r\n]", " "))
   end
   return out
@@ -290,7 +301,8 @@ function M.copy(layout)
     out.meter = { on = layout.meter.on, range = layout.meter.range }
   end
   for i, c in ipairs(layout.controls or {}) do
-    out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar, label = c.label }
+    out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
+                        invert = c.invert, label = c.label }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   return out

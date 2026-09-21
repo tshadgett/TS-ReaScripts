@@ -123,18 +123,49 @@ check("default picks toggle", def.controls[5].type, "toggle")
 M.set(key, { controls = {
   { param = 0, type = "knob",   bipolar = false, label = "In"        },
   { param = 5, type = "knob",   bipolar = true,  label = "Pan | wide" },
-  { param = 4, type = "toggle", bipolar = false, label = ""          },
+  { param = 4, type = "toggle", bipolar = false, label = "",
+    invert = true },
   { param = -1,type = "blank",  bipolar = false, label = ""          },
+  { param = 7, type = "knob",   bipolar = true,  label = "Both",
+    invert = true },
 } })
 M.save()
 M.reload()
 local back = M.get(key)
-check("round-trip count",   #back.controls, 4)
+check("round-trip count",   #back.controls, 5)
 check("round-trip param",   back.controls[2].param, 5)
 check("round-trip bipolar", back.controls[2].bipolar, true)
 check("pipe stripped",      back.controls[2].label, "Pan   wide")
 check("round-trip blank",   back.controls[4].type, "blank")
 check("saved is not default", select(2, M.get_or_default(key, nil, 0, "g1")), false)
+
+-- Reverse rides in the same field as bipolar, as bit 1. The two are
+-- independent, and neither must leak into the other.
+check("round-trip reverse",        back.controls[3].invert, true)
+check("reverse alone is not centred", back.controls[3].bipolar, false)
+check("centred alone is not reversed", back.controls[2].invert, false)
+check("both together survive",
+      back.controls[5].bipolar and back.controls[5].invert, true)
+check("neither is neither",
+      back.controls[1].bipolar == false and back.controls[1].invert == false, true)
+check("and M.copy carries it", M.copy(back).controls[3].invert, true)
+
+-- Bit 0 still means what it always meant, so every layout written
+-- before reverse existed reads back unchanged. This is the old shape,
+-- hand-written into the library the way an existing file has it.
+do
+  local old_key = "OldFormat"
+  M.set(old_key, { controls = { { param = 1, type = "knob", label = "x" } } })
+  M.save()
+  local raw = io.open(M.file_path(), "rb"):read("a")
+  raw = raw:gsub("%[OldFormat%]\r?\n[^\n]*", "[OldFormat]\nCtl0=3|knob|1|x")
+  local f = io.open(M.file_path(), "wb"); f:write(raw); f:close()
+  M.reload()
+  local o = M.get(old_key).controls[1]
+  check("an old layout still reads as centred", o.bipolar, true)
+  check("and is not silently reversed",         o.invert, false)
+  M.remove(old_key); M.save(); M.reload()
+end
 
 -- panel geometry: fixed height, grows in columns
 local function n_knobs(n)
@@ -165,7 +196,7 @@ M.save(); M.reload()
 check("alias round-trip",      M.get_alias(key, 2), "Recovery")
 check("alias survives reload", M.get_alias(key, 5), "Width")
 check("alias absent -> nil",   M.get_alias(key, 99), nil)
-check("controls kept on alias write", #M.get(key).controls, 4)
+check("controls kept on alias write", #M.get(key).controls, 5)
 check("display: slot label wins", M.display_name(key, 2, "Rec", "Release"), "Rec")
 check("display: alias next",      M.display_name(key, 2, "",    "Release"), "Recovery")
 check("display: plugin name last",M.display_name(key, 7, "",    "Ratio"),   "Ratio")
@@ -1437,6 +1468,66 @@ do
 
   check("keys are independent", near(W.level_rms("other", -20, 99), -20), true)
 
+  -- The peak HOLD, which is a different animal: it jumps straight to a
+  -- new maximum, sits on it for LEVEL_HOLD seconds, then falls at a
+  -- fixed rate. Each channel now keeps its own -- the meter draws one
+  -- hold line per bar, and drawing the louder channel's figure across
+  -- the quieter one's bar was saying something untrue about it -- so
+  -- the keys really having nothing to do with each other matters more
+  -- than it used to.
+  W.clear_peaks()
+  local T = 100
+  check("takes a new maximum at once", W.level_peak("p", -12, T), -12)
+  check("and holds it while the signal drops",
+        W.level_peak("p", -40, T + C.LEVEL_HOLD * 0.5), -12)
+  -- `near`, not equality: T + C.LEVEL_HOLD does not land exactly on
+  -- C.LEVEL_HOLD once it has been through a float, so this instant is
+  -- either the last of the hold or the first femtosecond of the fall,
+  -- and either is correct.
+  check("still holding at the end of the hold",
+        near(W.level_peak("p", -40, T + C.LEVEL_HOLD), -12, 0.001), true)
+  -- A second past the hold is LEVEL_FALL dB down.
+  check("then falls at the set rate",
+        near(W.level_peak("p", -60, T + C.LEVEL_HOLD + 1), -12 - C.LEVEL_FALL, 0.1),
+        true)
+  -- It never falls below what is actually there.
+  check("but never below the signal",
+        W.level_peak("p", -20, T + C.LEVEL_HOLD + 60) >= -20, true)
+  -- A louder moment resets the hold rather than being averaged in.
+  W.clear_peaks()
+  W.level_peak("q", -30, T)
+  check("a louder moment takes over", W.level_peak("q", -3, T + 0.1), -3)
+
+  -- Two channels, two holds. L peaks and R does not; R must not inherit
+  -- L's figure.
+  W.clear_peaks()
+  W.level_peak("chL", -3,  T)
+  W.level_peak("chR", -30, T)
+  check("the left channel holds its own",  W.level_peak("chL", -40, T + 0.2), -3)
+  check("and the right holds its own",     W.level_peak("chR", -40, T + 0.2), -30)
+  check("which are not the same figure",
+        W.level_peak("chL", -40, T + 0.2) ~= W.level_peak("chR", -40, T + 0.2),
+        true)
+
+  -- The RMS hairline is a fixed few pixels, not a share of the bar, so
+  -- it stays a hairline however wide the meter gets.
+  check("the RMS strip is a hairline",
+        C.RMS_STRIP_W > 0 and C.RMS_STRIP_W < C.LEVEL_METER_W / 8, true)
+
+  -- The RMS READOUT is held, the strip beside the bar is not. Both go
+  -- through the same machinery, so what this pins down is that they are
+  -- fed from different keys and really can differ: the live figure has
+  -- fallen away while the held one is still up.
+  W.clear_peaks(); W.clear_rms()
+  local live = W.level_rms("hL", -6, C.RMS_WINDOW)
+  local held = W.level_peak("hL#r", live, T)
+  check("the held figure takes the live one", near(held, live), true)
+  local quiet = W.level_rms("hL", -math.huge, C.RMS_WINDOW * 3)
+  check("the live figure falls away", quiet < live - 3, true)
+  check("while the held one stays up",
+        near(W.level_peak("hL#r", quiet, T + C.LEVEL_HOLD * 0.5), held), true)
+  check("and the two keys never collide",
+        W.level_peak("hL", -60, T) ~= held, true)
   -- Silence is silence, not a very small number.
   W.clear_rms()
   check("silence reads -inf", W.level_rms("s", -math.huge, WIN), -math.huge)
@@ -1449,6 +1540,75 @@ do
   check("and normal is the caller's", W.level_colour(-12, 99), 99)
   check("nothing is the caller's",    W.level_colour(nil, 99), 99)
   check("the two reds differ",        C.COL.level_over ~= C.COL.level_clip, true)
+
+  -- The bar is green, then red, then a harder red. Three colours, and
+  -- the old amber step at -6 is gone: -6 dBFS is not a warning about
+  -- anything, so a colour change there meant nothing and did it thirty
+  -- times a second on every strip at once.
+  check("a quiet bar is green",    W.level_bar_colour(-40), C.COL.level_lo)
+  check("and -6 is still green",   W.level_bar_colour(-6),  C.COL.level_lo)
+  check("no step at -6",
+        W.level_bar_colour(-6) == W.level_bar_colour(-6.1), true)
+  check("hot is red",              W.level_bar_colour(-0.1), C.COL.level_clip)
+  check("over is the harder red",  W.level_bar_colour(0.5), C.COL.level_over)
+  check("and the bar has three colours in all",
+        (W.level_bar_colour(-40) ~= W.level_bar_colour(-0.1))
+        and (W.level_bar_colour(-0.1) ~= W.level_bar_colour(0.5)), true)
+  -- The readout and the bar must agree, or a red number over a green
+  -- bar is two opinions about one signal.
+  check("bar and readout agree at the top",
+        W.level_bar_colour(1.0), W.level_colour(1.0, C.COL.level_lo))
+
+  -- The dB ladder is printed OVER the bars now, which only works if the
+  -- two inks really do contrast with what they land on. That is a
+  -- property of the palette, and a palette is data -- nothing else would
+  -- notice a theme change that quietly made the scale invisible. So it
+  -- is measured.
+  local function lum(c)
+    local r, g, b = (c >> 24) & 0xff, (c >> 16) & 0xff, (c >> 8) & 0xff
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  end
+  -- A tenth of the range apart is barely visible; a third is comfortable.
+  local FLOOR = 0.25
+  check("the light ink reads on an unlit bar",
+        math.abs(lum(C.COL.meter_ink) - lum(C.COL.knob_body)) > FLOOR, true)
+  for _, bar in ipairs({ "level_lo", "level_clip", "level_over" }) do
+    check("the dark ink reads on " .. bar,
+          math.abs(lum(C.COL.meter_ink_lit) - lum(C.COL[bar])) > FLOOR, true)
+  end
+  -- And they have to be on opposite sides of everything, or "dark ink
+  -- over a lit bar" is not a rule, it is a coincidence.
+  check("the two inks straddle the bars",
+        lum(C.COL.meter_ink_lit) < lum(C.COL.knob_body)
+        and lum(C.COL.meter_ink) > lum(C.COL.level_lo), true)
+end
+
+-- ---------------------------------------------------------------------
+-- how many bars a meter draws
+-- ---------------------------------------------------------------------
+-- REAPER never takes a track below two channels, so in practice this
+-- always answers two -- but it asks rather than assuming, and the
+-- question is worth asking properly, because the number decides how many
+-- bars, how many peak holds and how many columns of figures get drawn.
+do
+  local real = reaper.GetMediaTrackInfo_Value
+  local NCH
+  reaper.GetMediaTrackInfo_Value = function(_, k)
+    if k == "I_NCHAN" then return NCH end
+    return 0
+  end
+  local TR = {}
+
+  NCH = 2   check("a stereo track has two bars", W.meter_channels(TR), 2)
+  NCH = 1   check("a one-channel track has one", W.meter_channels(TR), 1)
+  -- Two is the ceiling: at fifty pixels a third bar is a stripe.
+  NCH = 4   check("four channels still show two", W.meter_channels(TR), 2)
+  NCH = 64  check("and so do sixty-four",         W.meter_channels(TR), 2)
+  -- Nonsense is not allowed to produce a meter with no bars in it.
+  NCH = 0   check("zero is floored at one",       W.meter_channels(TR), 1)
+  NCH = nil check("no answer means stereo",       W.meter_channels(TR), 2)
+  check("and nothing is not a track",             W.meter_channels(nil), 2)
+  reaper.GetMediaTrackInfo_Value = real
 end
 
 -- ---------------------------------------------------------------------
@@ -1563,6 +1723,461 @@ do
   check("and so does nothing at all",       C.format_col(nil).bg ~= nil, true)
   check("text is lighter than its badge",
         (C.format_col("VST3").fg >> 24) > (C.format_col("VST3").bg >> 24), true)
+end
+
+-- ---------------------------------------------------------------------
+-- automation mode
+-- ---------------------------------------------------------------------
+-- Six modes, and the button has to survive REAPER answering with one it
+-- has never heard of -- which is exactly what happens when a future
+-- version adds a seventh and this script is the old one.
+do
+  local CHn = require "TS_CV_Channel"
+  local real = reaper.GetMediaTrackInfo_Value
+  local MODE = 0
+  reaper.GetMediaTrackInfo_Value = function(_, k)
+    if k == "I_AUTOMODE" then return MODE end
+    return 0
+  end
+
+  for i = 0, 5 do
+    MODE = i
+    check(("mode %d reads back"):format(i), CHn.auto_mode({}), i)
+    check(("mode %d has a label"):format(i), CHn.AUTO[i].text ~= nil, true)
+    check(("mode %d has a colour"):format(i),
+          C.COL[CHn.AUTO[i].col] ~= nil, true)
+  end
+
+  -- REAPER hands these back as doubles, and a seventh mode from a newer
+  -- REAPER must not index a nil.
+  MODE = 3.0
+  check("a float is still an integer mode", CHn.auto_mode({}), 3)
+  MODE = 9
+  check("an unknown mode falls back to trim", CHn.auto_mode({}), 0)
+  MODE = -1
+  check("and so does a negative one", CHn.auto_mode({}), 0)
+
+  -- Trim is the only one that reads as "off" on the button.
+  check("trim is the unlit state", CHn.AUTO[0].col, "auto_trim")
+  check("write is not trim's colour",
+        CHn.AUTO[3].col ~= CHn.AUTO[0].col, true)
+
+  reaper.GetMediaTrackInfo_Value = real
+end
+
+-- ---------------------------------------------------------------------
+-- mixer view: which tracks, and what reads on them
+-- ---------------------------------------------------------------------
+-- A mixer strip IS the Channel panel with a different id prefix, so
+-- there is little new drawing to check. What IS new is the track set and
+-- the contrast rule that keeps a name readable on a colour the user
+-- picked, and both are pure.
+do
+  local MX = require "TS_CV_Mixer"
+  local CHn = require "TS_CV_Channel"
+  local St = require "TS_CV_State"
+  -- The collapse store lives in the project file, which the offline
+  -- harness has none of. A table stands in for it.
+  local PROJ = {}
+  reaper.GetProjExtState = function(_, ns, k) return 1, PROJ[ns .. k] or "" end
+  reaper.SetProjExtState = function(_, ns, k, v) PROJ[ns .. k] = v end
+
+  local real = {
+    CountTracks = reaper.CountTracks,
+    GetTrack = reaper.GetTrack,
+    GetMasterTrack = reaper.GetMasterTrack,
+    GetTrackGUID = reaper.GetTrackGUID,
+    GetMediaTrackInfo_Value = reaper.GetMediaTrackInfo_Value,
+    GetSetMediaTrackInfo_String = reaper.GetSetMediaTrackInfo_String,
+  }
+  local TRACKS = {
+    { name = "Kick",  show = 1, space = 0 },
+    { name = "Snare", show = 0, space = 0 },   -- hidden from the mixer
+    { name = "Bass",  show = 1, space = 1 },
+  }
+  local MASTER = { name = "MASTER" }
+  reaper.GetMasterTrack = function() return MASTER end
+  reaper.CountTracks = function() return #TRACKS end
+  reaper.GetTrack = function(_, i) return TRACKS[i + 1] end
+  reaper.GetTrackGUID = function(t) return "{" .. (t.name or "?") .. "}" end
+  reaper.GetSetMediaTrackInfo_String = function(t, k)
+    if k == "P_NAME" then return true, t.name or "" end
+    return true, ""
+  end
+  reaper.GetMediaTrackInfo_Value = function(t, k)
+    if k == "B_SHOWINMIXER" then return t.show end
+    if k == "I_SPACER" then return t.space end
+    if k == "I_CUSTOMCOLOR" then return 0 end
+    return 0
+  end
+
+  check("hidden from REAPER's mixer is hidden here",
+        MX.in_mixer(TRACKS[2]), false)
+  check("shown stays shown", MX.in_mixer(TRACKS[1]), true)
+  -- A track that has never had an opinion should not vanish.
+  check("no answer means shown", MX.in_mixer({ name = "x" }), true)
+  check("and nothing is not a track", MX.in_mixer(nil), false)
+
+  local list = MX.tracks()
+  check("the master leads",        list[1].name, "MASTER")
+  check("then the shown tracks",   #list, 3)
+  check("Kick is there",           list[2].name, "Kick")
+  check("Snare is not",            list[3].name, "Bass")
+  check("numbered as in the project", list[3].num, 3)
+  check("the spacer comes with it",   list[3].space, true)
+  check("guids key the strips",       list[2].guid, "{Kick}")
+  -- The master's number is 0, which is what tells the header to print
+  -- its name alone rather than "0 MASTER".
+  check("the master has no number", list[1].num, 0)
+
+  -- The mixer and the track strip are ONE object: a button lines up
+  -- under its own strip, so both take their width from here and neither
+  -- owns a size of its own.
+  local wide = MX.col_width("{Kick}")
+  St.set_collapsed("mx:{Kick}", true)
+  local narrow = MX.col_width("{Kick}")
+  check("a collapsed strip is narrower", narrow < wide, true)
+  check("and matches the panel that drew it", narrow, CHn.width(true))
+  St.set_collapsed("mx:{Kick}", false)
+  check("expanding puts it back", MX.col_width("{Kick}"), wide)
+  check("the master has a column too", MX.col_width("master") > 0, true)
+
+  -- -------------------------------------------------------------------
+  -- selection: plain, Ctrl, Shift
+  -- -------------------------------------------------------------------
+  -- The one piece of genuinely new logic in this module, and the one
+  -- where getting it wrong loses somebody's selection, so it is worth
+  -- standing a project up in front of it.
+  do
+    local sel_real = {
+      SetTrackSelected = reaper.SetTrackSelected,
+      SetOnlyTrackSelected = reaper.SetOnlyTrackSelected,
+      CountSelectedTracks2 = reaper.CountSelectedTracks2,
+      Main_OnCommand = reaper.Main_OnCommand,
+      UpdateArrange = reaper.UpdateArrange,
+      GetMediaTrackInfo_Value = reaper.GetMediaTrackInfo_Value,
+    }
+    local ALL = { MASTER, TRACKS[1], TRACKS[2], TRACKS[3] }
+    local function clear() for _, t in ipairs(ALL) do t.sel = false end end
+    local function selected_names()
+      local out = {}
+      for _, t in ipairs(ALL) do if t.sel then out[#out + 1] = t.name end end
+      table.sort(out)
+      return table.concat(out, ",")
+    end
+
+    reaper.SetTrackSelected = function(t, on) t.sel = on and true or false end
+    reaper.SetOnlyTrackSelected = function(t) clear(); t.sel = true end
+    reaper.CountSelectedTracks2 = function()
+      local n = 0
+      for _, t in ipairs(ALL) do if t.sel then n = n + 1 end end
+      return n
+    end
+    reaper.Main_OnCommand = function(id) if id == 40297 then clear() end end
+    reaper.UpdateArrange = function() end
+    reaper.GetMediaTrackInfo_Value = function(t, k)
+      if k == "I_SELECTED" then return t.sel and 1 or 0 end
+      if k == "B_SHOWINMIXER" then return t.show end
+      if k == "I_SPACER" then return t.space end
+      if k == "I_CUSTOMCOLOR" then return 0 end
+      return 0
+    end
+
+    -- MX.click reads the modifiers out of ImGui's bitmask, so it needs
+    -- one. These are the only three constants it touches.
+    MX.attach({ Mod_Ctrl = 2, Mod_Shift = 1, Mod_Super = 8 })
+    local NONE, SHIFT, CTRL = 0, 1, 2
+
+    clear()
+    MX.click(TRACKS[1], "{Kick}", NONE)
+    check("a plain click takes the track", selected_names(), "Kick")
+    check("and drops whatever was there", reaper.CountSelectedTracks2(0, true), 1)
+
+    MX.click(TRACKS[3], "{Bass}", CTRL)
+    check("ctrl adds to it", selected_names(), "Bass,Kick")
+    MX.click(TRACKS[3], "{Bass}", CTRL)
+    check("and ctrl again takes it away", selected_names(), "Kick")
+    MX.click(TRACKS[1], "{Kick}", CTRL)
+    check("but never down to nothing", selected_names(), "Kick")
+
+    -- Cmd is Ctrl on the other machine, and this runs on both.
+    MX.click(TRACKS[3], "{Bass}", 8)
+    check("cmd does what ctrl does", selected_names(), "Bass,Kick")
+
+    -- A plain click sets the anchor; the shift-click then reaches back
+    -- to it.
+    MX.click(TRACKS[1], "{Kick}", NONE)
+    MX.click(TRACKS[3], "{Bass}", SHIFT)
+    check("shift takes the range", selected_names(), "Bass,Kick")
+    -- Snare sits between them in the project but is hidden from the
+    -- mixer, so it is not in the range: the range is what you can see.
+    check("a hidden track is not in it", TRACKS[2].sel, false)
+
+    -- The master is not part of any range -- it is pinned to the front
+    -- and a range through it would mean selecting every track.
+    MX.click(MASTER, "master", SHIFT)
+    check("shift onto the master is a plain click", selected_names(), "MASTER")
+
+    MX.click(TRACKS[1], "{Kick}", NONE)
+    MX.anchor = "{Gone}"
+    MX.click(TRACKS[3], "{Bass}", SHIFT)
+    check("a stale anchor falls back to a plain click", selected_names(), "Bass")
+    check("and becomes the new anchor", MX.anchor, "{Bass}")
+
+    -- Clicking the empty space past the last strip clears the lot.
+    MX.click(TRACKS[1], "{Kick}", NONE)
+    MX.click(TRACKS[3], "{Bass}", CTRL)
+    check("two are selected before", reaper.CountSelectedTracks2(0, true), 2)
+    MX.clear_selection()
+    check("empty space clears them",  selected_names(), "")
+    check("and forgets the anchor",   MX.anchor, nil)
+
+    -- Put one back for the reads below.
+    MX.click(TRACKS[3], "{Bass}", NONE)
+    check("selected is read from REAPER", MX.selected(TRACKS[3]), true)
+    check("and unselected likewise", MX.selected(TRACKS[1]), false)
+    check("nothing is not selected", MX.selected(nil), false)
+
+    for k, v in pairs(sel_real) do reaper[k] = v end
+    MX.anchor = nil
+  end
+
+  for k, v in pairs(real) do reaper[k] = v end
+  reaper.GetProjExtState, reaper.SetProjExtState = nil, nil
+  St.clear_cache()
+end
+
+-- ---------------------------------------------------------------------
+-- ganged edits: one move, every selected track
+-- ---------------------------------------------------------------------
+-- The riskiest arithmetic in the project, because getting it wrong
+-- flattens somebody's balance and the undo is one step. All of it is
+-- pure bar the reaper.* reads, so it stands up in front of a fake
+-- project without drawing anything.
+do
+  local G = require "TS_CV_Gang"
+  local real = {
+    GetMediaTrackInfo_Value = reaper.GetMediaTrackInfo_Value,
+    SetMediaTrackInfo_Value = reaper.SetMediaTrackInfo_Value,
+    CountSelectedTracks2 = reaper.CountSelectedTracks2,
+    GetSelectedTrack2 = reaper.GetSelectedTrack2,
+    GetTrackGUID = reaper.GetTrackGUID,
+  }
+
+  -- A and B are selected, C is not, M is the master -- which has no
+  -- record arm at all, and so answers nil for it.
+  local A = { name = "A", vol = 1.00, pan =  0.0, sel = true  }
+  local B = { name = "B", vol = 0.50, pan = -0.5, sel = true  }
+  local Z = { name = "C", vol = 0.25, pan =  0.8, sel = false }
+  local M = { name = "M", vol = 1.00, pan =  0.0, sel = false, master = true }
+  local ALL = { A, B, Z, M }
+
+  reaper.GetMediaTrackInfo_Value = function(t, k)
+    if k == "I_SELECTED" then return t.sel and 1 or 0 end
+    if k == "D_VOL"   then return t.vol end
+    if k == "D_PAN"   then return t.pan end
+    if k == "B_MUTE"  then return t.mute or 0 end
+    -- The master has no record arm, and REAPER says so with a nil.
+    if k == "I_RECARM" then
+      if t.master then return nil end
+      return t.rec or 0
+    end
+    return 0
+  end
+  reaper.SetMediaTrackInfo_Value = function(t, k, v)
+    if k == "D_VOL" then t.vol = v
+    elseif k == "D_PAN" then t.pan = v
+    elseif k == "B_MUTE" then t.mute = v
+    elseif k == "I_RECARM" then t.rec = v end
+  end
+  reaper.CountSelectedTracks2 = function()
+    local n = 0
+    for _, t in ipairs(ALL) do if t.sel then n = n + 1 end end
+    return n
+  end
+  reaper.GetSelectedTrack2 = function(_, i)
+    local n = 0
+    for _, t in ipairs(ALL) do
+      if t.sel then
+        if n == i then return t end
+        n = n + 1
+      end
+    end
+  end
+  reaper.GetTrackGUID = function(t) return "{" .. t.name .. "}" end
+
+  local function near(a, b) return math.abs(a - b) < 1e-9 end
+
+  check("a selected track among several gangs", G.ganged(A), true)
+  check("an unselected one does not",           G.ganged(Z), false)
+  check("and nothing is not a track",           G.ganged(nil), false)
+
+  -- Volume by ratio: the track you dragged lands exactly where you put
+  -- it, and the rest keep their relationship to it.
+  G.vol(A, 2.0)
+  check("the dragged fader lands where it was put", near(A.vol, 2.0), true)
+  check("and the gang moves by the same ratio",     near(B.vol, 1.0), true)
+  -- A constant ratio on the linear gain IS a constant number of dB,
+  -- which is what "move them together" means to an engineer.
+  local gap = U.val2db(A.vol) - U.val2db(B.vol)
+  check("which leaves them the same dB apart", math.abs(gap - 6.0206) < 0.001, true)
+  check("the balance is kept exactly",              near(A.vol / B.vol, 2.0), true)
+  check("an unselected track is left alone",        near(Z.vol, 0.25), true)
+
+  -- Touching an UNSELECTED track moves that track and nothing else,
+  -- however many others are selected.
+  G.vol(Z, 0.5)
+  check("touching outside the selection is one track", near(Z.vol, 0.5), true)
+  check("and leaves the selection where it was",       near(A.vol, 2.0), true)
+
+  -- A fader at -inf stays at -inf: anything times zero is zero, and the
+  -- bottom of the travel is a decision rather than an accident.
+  B.vol = 0
+  G.vol(A, 4.0)
+  check("a track at -inf stays there", near(B.vol, 0), true)
+  -- And dragging the one that IS at -inf has no ratio to offer, so it
+  -- moves alone rather than doing something arbitrary to the others.
+  A.vol, B.vol = 0, 0.5
+  G.vol(A, 1.0)
+  check("dragging from -inf moves that track", near(A.vol, 1.0), true)
+  check("and leaves the gang alone",           near(B.vol, 0.5), true)
+
+  -- Pan by OFFSET. A ratio would leave a centred track centred no
+  -- matter how far you dragged, which is not what anybody means.
+  A.pan, B.pan = 0.0, -0.5
+  G.pan(A, 0.25)
+  check("pan moves by the offset",      near(A.pan,  0.25), true)
+  check("and the gang comes with it",   near(B.pan, -0.25), true)
+  check("a centred track does move",    B.pan ~= -0.5, true)
+  -- Clamped at the ends rather than wrapping or running off.
+  A.pan, B.pan = 0.0, 0.9
+  G.pan(A, 0.5)
+  check("pan clamps at hard right", near(B.pan, 1.0), true)
+  A.pan, B.pan = 0.0, -0.9
+  G.pan(A, -0.5)
+  check("and at hard left",         near(B.pan, -1.0), true)
+
+  -- Absolute: everybody takes the same value.
+  A.mute, B.mute, Z.mute = 0, 0, 0
+  G.set(A, "B_MUTE", 1)
+  check("muting one mutes the gang", A.mute == 1 and B.mute == 1, true)
+  check("but not the rest of the project", Z.mute, 0)
+
+  -- A track that hasn't GOT the property is skipped, not written to.
+  M.sel = true
+  A.rec, M.rec = 0, nil
+  G.set(A, "I_RECARM", 1)
+  check("record arm reaches the track that has one", A.rec, 1)
+  check("and skips the master, which has not",       M.rec, nil)
+  M.sel = false
+
+  -- Collapse is not a track property, but it gangs by the same rule.
+  local keys = G.collapse_keys(A, "mx:")
+  table.sort(keys)
+  check("collapse keys cover the gang", table.concat(keys, ","),
+        "mx:{A},mx:{B}")
+  check("and an unselected track is just itself",
+        table.concat(G.collapse_keys(Z, "mx:"), ","), "mx:{C}")
+
+  for k, v in pairs(real) do reaper[k] = v end
+end
+
+-- A strip's header IS the track's colour, and the track's colour is
+-- whatever was picked -- pale yellow on one row, near-black on the next.
+do
+  -- The selected-strip outline. In "track" mode it is the track's own
+  -- colour lightened -- used straight it would vanish into the fill it
+  -- is supposed to be outlining.
+  check("lighten moves towards white",
+        U.lighten(0x000000ff, 1.0), 0xffffffff)
+  check("and nothing stays nothing at zero",
+        U.lighten(0x336699ff, 0), 0x336699ff)
+  check("alpha is left alone",
+        U.lighten(0x33669980, 0.5) & 0xff, 0x80)
+  check("white cannot get whiter",
+        U.lighten(0xffffffff, 0.5), 0xffffffff)
+  check("track mode brightens the track's colour",
+        U.sel_colour("track", 0x336699ff, 0x00ff00ff) ~= 0x336699ff, true)
+  check("and is not the accent",
+        U.sel_colour("track", 0x336699ff, 0x00ff00ff) ~= 0x00ff00ff, true)
+  check("accent mode is the accent",
+        U.sel_colour("accent", 0x336699ff, 0x00ff00ff), 0x00ff00ff)
+  -- The master often has no colour of its own, and a nil there must not
+  -- leave the strip with no outline at all.
+  check("no track colour falls back to the accent",
+        U.sel_colour("track", nil, 0x00ff00ff), 0x00ff00ff)
+
+  check("dark background takes light text",
+        U.contrast_text(0x101010ff) > 0x800000ff, true)
+  check("light background takes dark text",
+        U.contrast_text(0xf0f0f0ff) < 0x800000ff, true)
+  -- Luma, not an average: the eye is far more sensitive to green than to
+  -- blue, so a plain mean calls saturated blue "light" and puts black on
+  -- it. Green and blue of the same numeric value must disagree.
+  check("saturated blue is dark",  U.contrast_text(0x0000ffff) > 0x800000ff, true)
+  check("saturated green is light", U.contrast_text(0x00ff00ff) < 0x800000ff, true)
+  check("no colour still reads",   U.contrast_text(nil) ~= nil, true)
+end
+
+-- ---------------------------------------------------------------------
+-- the routing lamps
+-- ---------------------------------------------------------------------
+-- Three lamps, and the whole point of them is to report what the panel
+-- below cannot: the sends are in view, the parent send and anything
+-- arriving from elsewhere are not.
+do
+  local SD = require "TS_CV_Sends"
+  local TR, MASTER = {"track"}, {"master"}
+  local real = {
+    GetMasterTrack = reaper.GetMasterTrack,
+    GetTrackNumSends = reaper.GetTrackNumSends,
+    GetMediaTrackInfo_Value = reaper.GetMediaTrackInfo_Value,
+  }
+  local MAIN, NSEND, NRECV = 1, 0, 0
+  reaper.GetMasterTrack = function() return MASTER end
+  reaper.GetTrackNumSends = function(_, cat)
+    if cat == 0 then return NSEND end
+    if cat == -1 then return NRECV end
+    return 0
+  end
+  reaper.GetMediaTrackInfo_Value = function(_, k)
+    if k == "B_MAINSEND" then return MAIN end
+    return 0
+  end
+
+  local function leds() local l = SD.route_leds(TR); return l[1], l[2], l[3] end
+
+  MAIN, NSEND, NRECV = 1, 0, 0
+  local p, sn, rc = leds()
+  check("parent send lights on its own", p, true)
+  check("no sends",                      sn, false)
+  check("no receives",                   rc, false)
+
+  MAIN, NSEND, NRECV = 0, 2, 0
+  p, sn, rc = leds()
+  check("parent off when disabled", p, false)
+  check("sends light",              sn, true)
+
+  MAIN, NSEND, NRECV = 0, 0, 3
+  p, sn, rc = leds()
+  check("receives light",            rc, true)
+  check("and sends stay dark",       sn, false)
+
+  MAIN, NSEND, NRECV = 1, 1, 1
+  p, sn, rc = leds()
+  check("all three at once", p and sn and rc, true)
+
+  -- The master has nowhere to send to, so its parent lamp is off rather
+  -- than reporting on a property it does not have.
+  MAIN = 1
+  local m = SD.route_leds(MASTER)
+  check("the master has no parent lamp", m[1], false)
+
+  check("nothing selected is three dark lamps",
+        (function() local l = SD.route_leds(nil)
+           return l[1] == false and l[2] == false and l[3] == false end)(), true)
+
+  for k, v in pairs(real) do reaper[k] = v end
 end
 
 -- ---------------------------------------------------------------------

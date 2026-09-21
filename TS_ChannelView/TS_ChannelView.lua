@@ -1,6 +1,6 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett (with Claude)
--- @version 1.0.1
+-- @version 1.1.0
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -10,7 +10,9 @@
 --  [nomain] TS_CV_Editor.lua
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
+--  [nomain] TS_CV_Gang.lua
 --  [nomain] TS_CV_Mappings.lua
+--  [nomain] TS_CV_Mixer.lua
 --  [nomain] TS_CV_Panel.lua
 --  [nomain] TS_CV_Sends.lua
 --  [nomain] TS_CV_Startup.lua
@@ -82,10 +84,11 @@ local B  = require("TS_CV_Browser")
 local SC = require("TS_CV_Steps")
 local CH = require("TS_CV_Channel")
 local SD = require("TS_CV_Sends")
+local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
-CH.attach(ImGui); SD.attach(ImGui)
+CH.attach(ImGui); SD.attach(ImGui); MX.attach(ImGui)
 
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
@@ -122,6 +125,8 @@ local app = {
   last_scan    = 0,
   menu_fx      = nil,   -- index into app.chain, for the panel menu
   ctl_menu     = nil,   -- {fx = index, ctl = index}, for the control menu
+  row_dbl      = false, -- the plugin row's empty space was double-clicked
+  header_dbl   = false, -- the window header was double-clicked
   open_panel_menu = false,
   open_ctl_menu   = false,
   rename_buf   = "",
@@ -144,7 +149,9 @@ end
 
 local dock_id = tonumber(ext_get("dock", "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
-C.SHOW_TRACKS = ext_get("show_tracks", C.SHOW_TRACKS and "1" or "0") == "1"
+-- Which of the two views is up. Persisted, because reopening the window
+-- into the view you were not in is a small daily annoyance.
+C.MIXER_VIEW  = ext_get("mixer_view", "0") == "1"
 C.FLOW        = ext_get("flow", C.FLOW)
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 C.BASE_HUE    = tonumber(ext_get("base_hue", C.BASE_HUE)) or C.BASE_HUE
@@ -494,6 +501,26 @@ end
 -- without a banner taking height away from the controls -- and bracketing
 -- the window means the colour is in view wherever you happen to be
 -- looking, including down at the track strip.
+-- Forward: the view toggle and the double-click handlers all switch
+-- views, and they are written above the function that does it.
+local set_view
+
+-- Switching views. The peak stores are keyed per strip, and the strips
+-- that are about to disappear would otherwise hold their last reading
+-- until you came back and found a meter frozen at a level from minutes
+-- ago.
+function set_view(mixer)
+  C.MIXER_VIEW = mixer and true or false
+  ext_set("mixer_view", C.MIXER_VIEW and "1" or "0")
+  W.clear_levels()
+  W.clear_rms()
+  W.clear_peaks()
+  W.clear_tips()
+  -- A swipe that started in the view we are leaving has nothing left to
+  -- paint onto.
+  W.end_paint()
+end
+
 local function track_rule(dl, x, y, w)
   if not app.track then return end
   local col = U.track_colour(app.track, 0xff)
@@ -516,6 +543,22 @@ end
 -- TOP of the row, so anything drawn by hand has to be told where the
 -- middle is or it rides high -- which is what had the track name and this
 -- button sitting above the menus.
+-- Channel view or mixer view. The icon shows the view you would GET,
+-- because a button should say what it does rather than where you are.
+local function view_toggle(ctx, mid_y)
+  local to_mixer = not C.MIXER_VIEW
+  if mid_y then
+    local cx = ImGui.GetCursorScreenPos(ctx)
+    ImGui.SetCursorScreenPos(ctx, cx, mid_y - C.ICON_SIZE * 0.5)
+  end
+  if W.icon_button(ctx, "viewtog", to_mixer and "mixer" or "channel",
+      C.ICON_SIZE, false,
+      to_mixer and "Mixer view \u{2014} every track's channel"
+                or "Channel view \u{2014} this track's plugins") then
+    set_view(to_mixer)
+  end
+end
+
 local function fx_bypass_button(ctx, mid_y)
   if not app.track then return end
   local on = (reaper.GetMediaTrackInfo_Value(app.track, "I_FXEN") or 1) < 0.5
@@ -598,10 +641,6 @@ local function menu_bar()
     if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
       C.SHOW_VALUES = not C.SHOW_VALUES
       ext_set("show_values", C.SHOW_VALUES and "1" or "0")
-    end
-    if ImGui.MenuItem(ctx, "Track list", nil, C.SHOW_TRACKS) then
-      C.SHOW_TRACKS = not C.SHOW_TRACKS
-      ext_set("show_tracks", C.SHOW_TRACKS and "1" or "0")
     end
 
     ImGui.Separator(ctx)
@@ -752,7 +791,38 @@ local function menu_bar()
     fx_bypass_button(ctx, mid_y)
   end
 
+  -- The view toggle sits left of the FX bypass, which means measuring
+  -- back from where the bypass started rather than from the right edge.
+  do
+    local tw = C.ICON_SIZE + 10
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
+      view_toggle(ctx, mid_y)
+      fx_left = fx_left - tw
+    end
+  end
+
   track_title(ctx, menus_right + 12, fx_left - 12, mid_y)
+
+  -- Double-clicking the header switches views, the same as the toggle.
+  -- Only where nothing else lives: IsAnyItemHovered catches the menus,
+  -- the toggle and the bypass, so this is the bar's own empty space and
+  -- the track name drawn on it, which is not an item at all.
+  --
+  -- The bar is centred on mid_y and starts at the window top, so its
+  -- height falls out of that rather than needing MenuBarHeight -- which
+  -- ImGui does not report, as the header arithmetic found out the hard
+  -- way.
+  if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left)
+     and not ImGui.IsAnyItemHovered(ctx) then
+    local wx, wy = ImGui.GetWindowPos(ctx)
+    local ww = ImGui.GetWindowSize(ctx)
+    local mx, my = ImGui.GetMousePos(ctx)
+    if mx >= wx and mx <= wx + ww and my >= wy and my <= 2 * mid_y - wy then
+      app.header_dbl = true
+    end
+  end
 
   ImGui.EndMenuBar(ctx)
 end
@@ -803,6 +873,23 @@ local function panel_row(row_h, row_w)
   if ok then
     local _, inner_h = ImGui.GetContentRegionAvail(ctx)
     app.panel_rects = {}
+
+    -- The row's empty space is a double-click target: back to mixer
+    -- view. Submitted first, so every panel and control drawn after it
+    -- takes precedence -- this only ever catches the gaps.
+    do
+      local bw, bh = ImGui.GetContentRegionAvail(ctx)
+      if bw > 0 and bh > 0 then
+        local bx, by = ImGui.GetCursorScreenPos(ctx)
+        W.allow_overlap(ctx)
+        ImGui.InvisibleButton(ctx, "rowbg", bw, bh)
+        if ImGui.IsItemHovered(ctx)
+           and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
+          app.row_dbl = true
+        end
+        ImGui.SetCursorScreenPos(ctx, bx, by)
+      end
+    end
 
     if not app.track then
       ImGui.TextDisabled(ctx, "Select a track.")
@@ -980,6 +1067,11 @@ local function frame()
   end
   ImGui.PopStyleVar(ctx)
 
+  if app.header_dbl then
+    app.header_dbl = false
+    set_view(not C.MIXER_VIEW)
+  end
+
   if visible then
     do  -- the track's colour as a hairline across the top of the panel row
       local dl = ImGui.GetWindowDrawList(ctx)
@@ -1047,7 +1139,7 @@ local function frame()
     end
 
     local _, avail_h = ImGui.GetContentRegionAvail(ctx)
-    local strip_h = C.SHOW_TRACKS and (C.STRIP_H + 6) or 0
+    local strip_h = C.STRIP_H + 6
     local row_h = math.max(C.CELL_H + C.HEADER_H + C.PANEL_PAD * 2,
                            avail_h - strip_h)
     -- Channel pinned left, Sends pinned right, the plugin row scrolling
@@ -1058,14 +1150,57 @@ local function frame()
     local sd_w   = SD.width_for(app.track, row_h)
     local mid_w  = math.max(80, full_w - ch_w - sd_w - C.PANEL_GAP * 2)
 
-    CH.draw(ctx, app.track, row_h)
-    ImGui.SameLine(ctx, 0, C.PANEL_GAP)
-    panel_row(row_h, mid_w)
-    ImGui.SameLine(ctx, 0, C.PANEL_GAP)
-    local _, sd_req = SD.draw(ctx, app.track, row_h)
-    if sd_req and sd_req.changed then rescan(true) end
+    if C.MIXER_VIEW then
+      -- Mixer view takes the whole upper area. The track strip below
+      -- stays: it is the one thing both views share, and losing it would
+      -- make switching feel like changing windows rather than changing
+      -- what you are looking at.
+      local open_it = MX.draw(ctx, row_h, app.track)
+      if MX.want_channel then
+        MX.want_channel = false
+        set_view(false)
+      end
+      if open_it then
+        reaper.SetOnlyTrackSelected(open_it)
+        reaper.UpdateArrange()
+        app.track = open_it
+        S.request_scroll()
+        rescan(true)
+        set_view(false)
+      end
+    else
+      CH.draw(ctx, app.track, row_h)
+      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+      panel_row(row_h, mid_w)
+      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+      local _, sd_req = SD.draw(ctx, app.track, row_h)
+      if sd_req and sd_req.changed then rescan(true) end
 
-    if C.SHOW_TRACKS then S.draw(ctx, C.STRIP_H, app.track) end
+      -- Double-clicking the Channel panel's background -- not the fader,
+      -- which still means unity -- goes back to the mixer.
+      if CH.want_mixer then
+        CH.want_mixer = false
+        set_view(true)
+      end
+      if app.row_dbl then
+        app.row_dbl = false
+        set_view(true)
+      end
+    end
+
+    S.draw(ctx, C.STRIP_H, app.track)
+
+    -- Double-clicking a name in the track list opens that track in
+    -- channel view, the same as double-clicking its strip above. S.draw
+    -- has already selected it; all that is left is the view.
+    if S.want_channel then
+      local tr = S.want_channel
+      S.want_channel = false
+      app.track = tr
+      S.request_scroll()
+      rescan(true)
+      set_view(false)
+    end
 
     do  -- and the matching rule along the bottom edge of the window
       local dl = ImGui.GetWindowDrawList(ctx)

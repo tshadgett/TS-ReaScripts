@@ -44,6 +44,31 @@ function W.attach(imgui) ImGui = imgui end
 local meter_font = nil
 function W.set_meter_font(f) meter_font = f end
 
+-- The smaller face, for readouts. Always a pair: when there is no font
+-- attached both are no-ops, so the push and the pop stay balanced
+-- whether or not one was ever set.
+function W.push_small(ctx)
+  if meter_font then ImGui.PushFont(ctx, meter_font, C.METER_FONT) end
+end
+
+function W.pop_small(ctx)
+  if meter_font then ImGui.PopFont(ctx) end
+end
+
+-- How many channels a track's meter should show. REAPER never takes a
+-- track below two, so in practice this always answers two -- which is
+-- also what REAPER itself draws for a mono track, two bars, and this
+-- deliberately matches it. A mono SOURCE on a stereo track has a silent
+-- right channel and should look like it; do not "fix" this into
+-- collapsing to one bar. The guard is only so that a track that did
+-- report one channel gets one bar instead of a second pinned at -inf.
+-- Two is the ceiling: at fifty pixels a third bar is a stripe.
+function W.meter_channels(track)
+  local n = track and reaper.GetMediaTrackInfo_Value(track, "I_NCHAN")
+  n = math.floor(n or 2)
+  return math.max(1, math.min(2, n))
+end
+
 -- The wheel is contested: a knob under the pointer uses it to change a
 -- value, and the panel row uses it to scroll sideways. Widgets flag when
 -- they've taken it, so the row can tell the difference instead of doing
@@ -467,6 +492,10 @@ end
 -- `unity` is the 0..1 position of the detent mark, or nil for none.
 -- Returns changed, value, act -- act.double_click meaning "put it back
 -- where it started", which for a fader is unity.
+-- Faders that are mid-drag, keyed by id: false while the press has not
+-- moved, true once it has. Only used to tell a click from a drag.
+local fader_moved = {}
+
 function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost)
   local dl = ImGui.GetWindowDrawList(ctx)
   ImGui.SetCursorScreenPos(ctx, x, y)
@@ -478,6 +507,7 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost)
     right_click  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right),
     double_click = hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
   }
+  if ImGui.IsItemActivated(ctx) then fader_moved[id] = false end
 
   local changed = false
   if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
@@ -488,6 +518,7 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost)
       if (mods & ImGui.Mod_Shift) ~= 0 then sens = sens * C.FINE_MULT end
       value = math.max(0, math.min(1, value - dy * sens))
       changed = true
+      fader_moved[id] = true
     end
     ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
   elseif hovered then
@@ -499,6 +530,17 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost)
       changed = true
       W.take_wheel()
     end
+  end
+
+  -- A press that was let go without ever moving. Reported on RELEASE,
+  -- which is the whole point: the ghost fader on a collapsed strip lies
+  -- over the meter, where a plain click is meant to pick the track --
+  -- and selecting on mouse-DOWN would throw a gang away the instant you
+  -- reached for the fader. So the fader keeps the press, and only hands
+  -- back a click once it knows the press was not a drag.
+  if ImGui.IsItemDeactivated(ctx) then
+    act.click = (fader_moved[id] == false)
+    fader_moved[id] = nil
   end
 
   local cx = x + w * 0.5
@@ -591,15 +633,29 @@ end
 -- inside each channel; `opts_scale` puts a labelled ladder down the RIGHT
 -- of the meter, which is where a console puts it and where it doesn't sit
 -- between you and the bars.
+-- The ink for one mark of the dB ladder, given the level of the bar it
+-- is about to be drawn on: dark over a lit bar, light over an unlit one.
+-- A file local rather than a closure inside the meter -- thirty strips
+-- at sixty frames a second is not the place to allocate one per frame.
+local function scale_ink(db, mark)
+  return (db >= mark) and C.COL.meter_ink_lit or C.COL.meter_ink
+end
+
 function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body, 2.0)
   ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.knob_ring, 2.0, 0, 1.0)
 
-  -- The ladder needs somewhere to live. Printed over the bars it is
-  -- unreadable the moment there is signal, so it gets a gutter and the
-  -- bars take what's left.
+  -- The ladder is printed OVER the bars, the way REAPER's own meters do
+  -- it, so the bars get the whole width instead of giving a third of it
+  -- to a gutter of numbers. "Unreadable the moment there is signal" was
+  -- the reason for the gutter, and it is a real problem with one fixed
+  -- ink -- but each figure knows whether the bar behind it is lit at
+  -- that level, so it can take a dark ink over a lit bar and a light one
+  -- over an unlit one, and be readable either way. See below.
+  --
+  -- C.METER_SCALE_OVER false puts the gutter back.
   local gut = 0
-  if opts_scale then
+  if opts_scale and not C.METER_SCALE_OVER then
     for _, mark in ipairs(C.METER_MARKS) do
       -- Bound to a name, NOT splatted into math.max: ReaImGui hands
       -- optional parameters back as extra return values, so
@@ -614,6 +670,10 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
   local bar_l, bar_r = x + 1.5, x + w - 1.5 - gut
   local n  = math.max(1, #chans)
   local bw = (bar_r - bar_l - (n - 1)) / n
+  -- The RMS hairline's width, worked out once: the bars draw it and the
+  -- peak-hold lines stop short of it, and those two had better agree
+  -- about how wide it is.
+  local rms_w = math.min(C.RMS_STRIP_W, math.max(2, bw * 0.4))
   for i = 1, n do
     local db = chans[i] or -150
     local f  = W.level_frac(db)
@@ -627,12 +687,18 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
     -- left of the left bar, right of the right one. Peak stays the wide
     -- bar and the thing you read first; the RMS sits beside it without
     -- ever being mistaken for a channel of its own.
+    --
+    -- A FIXED few pixels, not a fraction of the bar. It used to be 28%
+    -- of the bar width, which was fine while the bars were narrow and
+    -- became a second meter once they were not -- the whole point of the
+    -- strip is that it is a hairline beside the bar, and a proportion
+    -- does not keep a hairline a hairline.
     local rdb = rms_db
     if type(rdb) == "table" then rdb = rdb[i] end
     if rdb then
       local rf = W.level_frac(rdb)
       if rf > 0 then
-        local rw = math.max(2, bw * 0.28)
+        local rw = rms_w
         local rl = (i == n and n > 1) and (bx + bw - rw) or bx
         local rtop = y + 2 + (h - 4) * (1 - rf)
         ImGui.DrawList_AddRectFilled(dl, rl, rtop, rl + rw, y + h - 2,
@@ -641,7 +707,53 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
     end
   end
 
-  if opts_scale then
+  if opts_scale and C.METER_SCALE_OVER then
+    -- Over the bars: the figure in the middle, a dash reaching in from
+    -- each edge. Centring it is what makes it read as a scale rather
+    -- than as a column of numbers stuck down one side, and the dashes
+    -- carry the eye out to the bars the figure belongs to.
+    --
+    -- Ink switching: every mark asks whether the bar behind it is lit at
+    -- its own level and takes dark ink if it is, light ink if it isn't.
+    -- No plate punched through the bars, no halo, no outlined text.
+    --
+    -- A centred figure straddles both channels, and the two are not
+    -- always lit to the same height -- so it is drawn TWICE, each half
+    -- clipped to its own channel and inked from that channel. Two draws
+    -- and two clip rects per mark, which is cheap next to getting it
+    -- wrong: with one ink taken from the louder channel, half the glyph
+    -- would vanish into the quieter one's unlit bar every time the two
+    -- sat either side of a mark.
+    --
+    -- The dashes sit squarely on one bar each, so they just ask it.
+    local mid   = (bar_l + bar_r) * 0.5
+    local first = chans[1] or -150
+    local last  = chans[n] or -150
+    for _, mark in ipairs(C.METER_MARKS) do
+      local my = y + 2 + (h - 4) * (1 - W.level_frac(mark))
+      if my > y + 6 and my < y + h - 4 then
+        local lbl = tostring(mark)
+        local lw, lh = ImGui.CalcTextSize(ctx, lbl)
+        local half = lw * 0.5 + 2
+        ImGui.DrawList_AddLine(dl, bar_l, my, mid - half - 1, my,
+          scale_ink(first, mark), 1.0)
+        ImGui.DrawList_AddLine(dl, mid + half + 1, my, bar_r, my,
+          scale_ink(last, mark), 1.0)
+
+        local tx, ty = mid - lw * 0.5, my - lh * 0.5
+        if n > 1 then
+          ImGui.DrawList_PushClipRect(dl, tx - 1, ty, mid, ty + lh, true)
+          ImGui.DrawList_AddText(dl, tx, ty, scale_ink(first, mark), lbl)
+          ImGui.DrawList_PopClipRect(dl)
+          ImGui.DrawList_PushClipRect(dl, mid, ty, tx + lw + 1, ty + lh, true)
+          ImGui.DrawList_AddText(dl, tx, ty, scale_ink(last, mark), lbl)
+          ImGui.DrawList_PopClipRect(dl)
+        else
+          ImGui.DrawList_AddText(dl, tx, ty, scale_ink(first, mark), lbl)
+        end
+      end
+    end
+  elseif opts_scale then
     for _, mark in ipairs(C.METER_MARKS) do
       local my = y + 2 + (h - 4) * (1 - W.level_frac(mark))
       if my > y + 6 and my < y + h - 4 then
@@ -660,12 +772,34 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
     end
   end
 
-  if peak_db and peak_db > C.METER_FLOOR then
-    local py = y + 2 + (h - 4) * (1 - W.level_frac(peak_db))
-    -- The hold line takes the colour the BAR would be at that level, so
-    -- the line and the bar under it never say different things.
-    ImGui.DrawList_AddLine(dl, bar_l, py, bar_r, py,
-      W.level_bar_colour(peak_db), 2.0)
+  -- Peak hold, ONE LINE PER CHANNEL, each only as wide as its own bar.
+  -- It used to be a single line the width of the whole meter, which said
+  -- that both channels had peaked at the same place -- they had not; it
+  -- was the louder one's figure drawn across the quieter one's bar.
+  -- `peak_db` takes a table of per-channel holds, or a single number for
+  -- a meter that has only one to give.
+  if peak_db then
+    for i = 1, n do
+      local pd = (type(peak_db) == "table") and peak_db[i] or peak_db
+      if pd and pd > C.METER_FLOOR then
+        local bx = bar_l + (i - 1) * (bw + 1)
+        local py = y + 2 + (h - 4) * (1 - W.level_frac(pd))
+        -- Stop at the RMS hairline rather than running over it. They are
+        -- two different readings of the same channel, and a hold line
+        -- laid across the RMS strip hides whichever of them you were
+        -- looking at -- so each gets its own lane down the bar.
+        local pl, pr = bx, bx + bw
+        local rdb = rms_db
+        if type(rdb) == "table" then rdb = rdb[i] end
+        if rdb and W.level_frac(rdb) > 0 then
+          if i == n and n > 1 then pr = pr - rms_w else pl = pl + rms_w end
+        end
+        -- The hold line takes the colour the BAR would be at that level,
+        -- so the line and the bar under it never say different things.
+        ImGui.DrawList_AddLine(dl, pl, py, pr, py,
+          W.level_bar_colour(pd), 2.0)
+      end
+    end
   end
 end
 
@@ -680,10 +814,16 @@ function W.level_colour(db, under)
   return under
 end
 
--- The bar's own colour at a given level, all four steps.
+-- The bar's own colour at a given level.
+--
+-- Green, then red, then a harder red over zero. There used to be an
+-- amber band from -6 up, and it was noise: -6 dBFS is not a warning
+-- about anything, so a colour change there is a colour change that
+-- means nothing, thirty times a second, on every strip at once. The two
+-- reds are kept because they DO mean something different -- approaching
+-- full scale, and past it.
 function W.level_bar_colour(db)
-  if db and db >= -6 then return W.level_colour(db, C.COL.level_hi) end
-  return C.COL.level_lo
+  return W.level_colour(db, C.COL.level_lo)
 end
 
 -- A small x in the bottom-left corner of a cell: "take this out".
@@ -738,8 +878,53 @@ function W.remove_badge(ctx, id, x, y, cw, ch, tooltip, inset)
   return pressed
 end
 
+-- Swiping a state across tracks.
+--
+-- Press on one track's mute and drag along the row: every mute you cross
+-- goes the same way as the first, which is how a console with a row of
+-- them works and how REAPER's own mixer behaves. The FIRST button decides
+-- the direction -- pressing a lit one turns the whole swipe into an
+-- unmute -- so a half-lit row resolves rather than inverting.
+--
+-- `seen` stops a button being set twice by the same gesture: the pointer
+-- can leave and re-enter one while the button is still down, and without
+-- this that would toggle it back.
+local paint = nil
+
+function W.end_paint() paint = nil end
+
+-- Returns the value this button should take because of a swipe, or nil.
+--
+-- The hover test is by RECTANGLE, not by item, and that is the whole
+-- trick. The moment you press a button it becomes ImGui's active item,
+-- and from then until you let go ImGui reports every OTHER item as not
+-- hovered -- correctly, since a click belongs to the thing you pressed.
+-- A swipe is the one gesture where that is exactly wrong: the buttons
+-- it is about are the ones you cross with the mouse still down. So we
+-- ask the only question that still has a true answer: is the pointer
+-- inside this button's rectangle? (Clipped, so a strip scrolled out of
+-- view is not painted by a drag going past where it would have been.)
+local function paint_value(ctx, id, kind, on, x, y, w, h)
+  if not kind then return nil end
+  if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+    paint = nil
+    return nil
+  end
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+    paint = { kind = kind, val = not on, seen = {} }
+  end
+  if not paint or paint.kind ~= kind or paint.seen[id] then return nil end
+  if not ImGui.IsMouseHoveringRect(ctx, x, y, x + w, y + h) then return nil end
+  paint.seen[id] = true
+  if on == paint.val then return nil end
+  return paint.val
+end
+
 -- A compact labelled button for channel states (M, S, rec, phase...).
-function W.state_button(ctx, id, text, x, y, w, h, on, on_col, tooltip)
+-- `paint_kind` opts this button into swipe painting ("mute", "solo",
+-- "rec"...). Returns pressed, double_clicked, want -- where `want` is the
+-- value a click or a swipe asks for, or nil for neither.
+function W.state_button(ctx, id, text, x, y, w, h, on, on_col, tooltip, paint_kind)
   local dl = ImGui.GetWindowDrawList(ctx)
   ImGui.SetCursorScreenPos(ctx, x, y)
   local pressed = ImGui.InvisibleButton(ctx, id, w, h)
@@ -759,12 +944,21 @@ function W.state_button(ctx, id, text, x, y, w, h, on, on_col, tooltip)
   -- as two clicks, but on a three-state one (monitoring) it is the only
   -- way back to off without cycling, and the caller decides what its
   -- default is.
-  return pressed, hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left)
+  -- The guard is here rather than inside paint_value so that the
+  -- argument reads as optional where it is used -- to anyone looking,
+  -- and to the arity checker, which decides what is optional from how a
+  -- function treats its own parameters.
+  local want
+  if paint_kind then want = paint_value(ctx, id, paint_kind, on, x, y, w, h) end
+
+  return pressed,
+         hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
+         want
 end
 
 -- The same button drawn with an icon instead of a label, for states that
 -- have a symbol everyone already knows (record).
-function W.state_icon(ctx, id, icon, x, y, w, h, on, on_col, tooltip)
+function W.state_icon(ctx, id, icon, x, y, w, h, on, on_col, tooltip, paint_kind)
   local dl = ImGui.GetWindowDrawList(ctx)
   ImGui.SetCursorScreenPos(ctx, x, y)
   local pressed = ImGui.InvisibleButton(ctx, id, w, h)
@@ -783,7 +977,16 @@ function W.state_icon(ctx, id, icon, x, y, w, h, on, on_col, tooltip)
   end
 
   W.tip(ctx, id, tooltip, hovered, false)
-  return pressed, hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left)
+  -- The guard is here rather than inside paint_value so that the
+  -- argument reads as optional where it is used -- to anyone looking,
+  -- and to the arity checker, which decides what is optional from how a
+  -- function treats its own parameters.
+  local want
+  if paint_kind then want = paint_value(ctx, id, paint_kind, on, x, y, w, h) end
+
+  return pressed,
+         hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
+         want
 end
 
 -- ---------------------------------------------------------------------
@@ -981,7 +1184,32 @@ local function icon_record(dl, x, y, sz, col)
   ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.5, y + sz * 0.5, sz * 0.30, col, 16)
 end
 
+-- Two views, two icons. The mixer is a row of faders; the channel is one
+-- strip with its plugins beside it. Each icon shows the view you would
+-- GET, not the one you are in -- a button says what it does.
+local function icon_mixer(dl, x, y, sz, col)
+  local n, gap = 4, sz / 4
+  for i = 0, n - 1 do
+    local bx = x + 1 + i * gap
+    local h  = sz * (0.45 + 0.13 * ((i % 2 == 0) and 1 or 0))
+    ImGui.DrawList_AddRectFilled(dl, bx, y + sz - h - 2, bx + gap - 2,
+      y + sz - 2, col, 0.5)
+  end
+end
+
+local function icon_channel(dl, x, y, sz, col)
+  -- one tall strip, then the panels it opens onto
+  ImGui.DrawList_AddRectFilled(dl, x + 1, y + 2, x + sz * 0.3, y + sz - 2, col, 0.5)
+  local bx = x + sz * 0.42
+  for i = 0, 1 do
+    local by = y + 2 + i * (sz * 0.5)
+    ImGui.DrawList_AddRectFilled(dl, bx, by, x + sz - 1, by + sz * 0.38, col, 0.5)
+  end
+end
+
 W.ICONS = {
+  mixer    = icon_mixer,
+  channel  = icon_channel,
   plus     = icon_plus,
   record   = icon_record,
   power    = icon_power,
@@ -1011,6 +1239,42 @@ function W.icon_button(ctx, id, icon, size, active, tooltip, on_col)
     local col = active and C.COL.icon_on
                        or (hovered and C.COL.icon_hot or C.COL.icon)
     draw(dl, x, y, size, col)
+  end
+
+  W.tip(ctx, id, tooltip, hovered, false)
+  return pressed
+end
+
+-- The routing button.
+--
+-- Three lamps stacked in a column, the way REAPER's own routing button
+-- carries them: parent/master send at the top, sends out in the middle,
+-- receives in at the bottom. Drawn rather than iconified because each
+-- line needs its own colour, which an icon glyph cannot give.
+--
+-- `leds` is { parent, sends, receives }. Returns true when clicked.
+function W.route_button(ctx, id, w, h, leds, tooltip)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local pressed = ImGui.InvisibleButton(ctx, id, w, h)
+  local hovered = ImGui.IsItemHovered(ctx)
+
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h,
+    hovered and C.COL.knob_body_hi or C.COL.knob_body, 2.5)
+  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.knob_ring, 2.5, 0, 1.0)
+
+  local cols = { C.COL.route_parent, C.COL.route_send, C.COL.route_recv }
+  local lw   = w - 7
+  local lh   = 2
+  local gap  = 2
+  local top  = y + (h - (lh * 3 + gap * 2)) * 0.5
+  for i = 1, 3 do
+    local ly = top + (i - 1) * (lh + gap)
+    -- An unlit lamp is drawn, not omitted: three slots that are always
+    -- there say which one is missing, where two lines and a space only
+    -- say "two of something".
+    local col = leds[i] and cols[i] or C.COL.route_off
+    ImGui.DrawList_AddRectFilled(dl, x + 3.5, ly, x + 3.5 + lw, ly + lh, col, 1.0)
   end
 
   W.tip(ctx, id, tooltip, hovered, false)

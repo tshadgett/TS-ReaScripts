@@ -15,6 +15,181 @@ the selected track.
     │ [MASTER][1 Kick In][2 Snr Top][3 OH L][4 Bass DI][5 Gtr L]  ···  │
     └──────────────────────────────────────────────────────────────────┘
 
+## Two views
+
+A toggle in the header swaps the upper area between them, as does a
+double-click on the header itself — anywhere nothing else lives, which
+`IsAnyItemHovered` sorts out for us. The track list
+along the bottom belongs to both.
+
+**Channel view** is one track in depth: its plugins, its channel strip,
+its sends. **Mixer view** is every track at a glance, one strip each.
+
+A mixer strip *is* the Channel panel — `CH.draw_body`, the same function,
+given a different track and a different id prefix. That is the whole
+design and the reason it was worth doing: a second implementation of a
+fader, a meter and a mute button would drift from the first inside a
+week, and this way it is the same fader taper, the same peak hold, the
+same swipe and the same double-click-for-default, because it is the same
+code. The id prefix is what makes it possible — without it every strip
+would share one set of ImGui ids and one peak store, and they would all
+fight over both.
+
+Double-click a strip to open it in channel view; double-click the Channel
+panel's background, the empty space between plugin panels, or the empty
+space to the right of the last mixer strip, to come back. Not the fader:
+that still means unity. Both targets are submitted *before* the controls
+they sit under, so anything you can actually click takes precedence and
+only the gaps switch views.
+
+The track list is the mixer's ruler, not a separate list that happens to
+agree. Each button asks `MX.col_width` for its width, which asks the
+Channel panel — so a collapsed strip's button collapses with it, and the
+written-down number that would have drifted does not exist. The gap
+between columns and the TCP visual spacer are the same constants in both,
+and the two scroll as one: whichever view is in front writes
+`MX.scroll_x`, the other reads it, and mixer view suppresses its own
+horizontal scrollbar so there is only ever one. Channel view uses the
+same widths, so nothing under the divider moves when you switch — the
+mixer stays where it was and one track's detail is laid over the top of
+it. That also means channel view's track list is as wide as the mixer
+needs it to be rather than as narrow as channel view could get away with,
+which is the trade we wanted.
+
+Mixer strip headers carry the track colour and no name. The name is
+directly below at full width in the track list, and the header could only
+have shown a truncation of it. Unselected, the header and its button
+below dim to the same alpha -- one object, one selected state.
+
+Clicking anywhere on a strip selects its track, the meter and the fader
+included. That is a window hover rather than a background button: an item
+on top of the background swallows the background's click, but nothing can
+swallow the fact that the mouse went down inside the strip. Ctrl (or Cmd)
+adds and removes, Shift takes the range back to the last click, and the
+track buttons answer the same gestures through the same function --
+`MX.click` -- because a button and the strip above it had better not
+disagree about what a ctrl-click means. Hidden tracks are not in a range:
+the range is what you can see. And ctrl can never take the selection down
+to nothing, because channel view has to have a track to show.
+
+## Ganging
+
+Select six tracks, touch one, and all six follow. `TS_CV_Gang.lua` is the
+layer between a control deciding what it wants and the tracks that end up
+with it, and it draws nothing and knows nothing about ImGui.
+
+Two kinds of edit. Mute, solo, record arm, phase, monitoring, automation
+mode and collapse are **absolute** -- every ganged track takes the same
+value, because there is no sensible "proportionally muted". Volume and
+pan are **relative** -- every track keeps its own value and moves *by*
+the same amount. Volume by the same ratio, which on linear gain is the
+same number of dB; pan by the same offset, because a ratio would leave a
+centred track centred however far you dragged. A balance you spent an
+hour on is a thing you are trying to move, not a thing you are trying to
+flatten.
+
+Double-click is the exception inside the exception: unity and centre are
+places rather than distances, so they set the whole gang *to* them.
+
+An edit gangs only when the track you touched is itself one of several
+selected. Touching an unselected track's fader while five others are
+selected moves that one track -- you reached for it specifically, and an
+edit that jumped to five tracks you did not touch is the kind of surprise
+that ends in an undo and a lost afternoon. A track at -inf stays at -inf,
+and a track that hasn't got the property at all (record arm on the
+master, where REAPER answers nil rather than 0) is skipped rather than
+written to.
+
+Everything absolute goes through one function -- the Channel panel's
+`set` *is* `G.set` -- so there is no control that quietly forgot.
+
+A collapsed strip is the exception that proves the rule. Its ghost fader
+lies right over the meter, so there is no background left to click -- and
+selecting on the press would break a gang the instant you reached for the
+level. `W.fader` therefore reports a press that was let go without ever
+moving, on release rather than on press, and the collapsed strip selects
+on that. Click picks the track, drag rides the level.
+
+Grabbing a control does not select the track. That is REAPER's own
+behaviour, and it is the one that works: select three tracks to gang
+them, reach for a fader, and a select-on-touch would throw the other two
+away before the move started. The select target is the strip's background
+button, submitted before everything else, so a knob or a fader under the
+pointer swallows the click; the header, the meter and the space around
+things fall through to it. That is also why the meter's tooltip hovers by
+rectangle rather than hanging off an invisible button -- a button is an
+item, and an item over the meter ate the click the background needed.
+
+## The level meter
+
+The dB ladder is printed over the bars rather than in a gutter beside
+them, which is what lets the bars have the meter's whole width. A gutter
+was needed while the scale had one fixed ink -- any single colour is
+unreadable over signal for half its range. Each figure instead asks
+whether the bar directly behind it is lit at its own level and takes dark
+ink if it is, light ink if it is not. That is one comparison and one draw
+per figure, which is the part that matters: thirty strips redrawing five
+figures sixty times a second leaves no room for haloes or outlined text.
+
+The figure itself is centred, with a dash reaching in from each edge. A
+centred figure straddles both channels, and the two are not always lit to
+the same height, so it is drawn twice -- each half clipped to one channel
+and inked from that channel. Taking one ink from the louder bar would
+lose half the glyph into the quieter one's unlit bar every time the two
+sat either side of a mark, and two draws with two clip rects are cheap
+next to that. The dashes sit squarely on one bar each, so they simply ask
+it.
+
+The two inks are theme colours, not fixed ones, and a test measures that
+they straddle the bar colours by a comfortable margin in luminance. A
+palette entry is data, so nothing in the code would otherwise notice a
+theme change that made the scale invisible.
+
+Both figures under the meter are held and both are per channel, one
+column under each bar. The RMS figure holds with the same hold and fall
+as the peak one: it used to be live, which made it a number that changed
+sixty times a second sitting next to one that did not, and neither of
+those is readable for the same reason. The moving strip beside the bar is
+still live -- that is what a strip is for, and what a figure is for is
+catching a value and keeping it still long enough to look at.
+
+How many bars get drawn comes from the track's own channel count, capped
+at two. REAPER never takes a track below two channels, so this always
+answers two in practice -- which is also what REAPER itself draws for a
+mono track, and matching it is deliberate. A mono source on a stereo
+track has a silent right channel and ought to look like it.
+
+Peak hold is kept per channel and drawn per channel, each line only as
+wide as its own bar: one line across the whole meter is the louder
+channel's peak printed on the quieter one's bar, which is a statement
+about the right channel that happens to be about the left. Each line also
+stops at the RMS hairline instead of running over it -- peak and RMS are
+two readings of the same channel, and a hold line laid across the strip
+hides whichever one you were looking at, so each gets a lane of its own. The readout
+under the meter still takes the higher of the two, because one number for
+the strip is what a readout is for. The RMS hairline beside each bar is a
+fixed few pixels (`C.RMS_STRIP_W`) rather than a share of the bar width --
+a proportion stops being a hairline as soon as the bars get wider.
+
+## Selection marks
+
+The selected strip is outlined in a brightened version of its own track
+colour rather than in one accent colour for every track (`C.SEL_OUTLINE`,
+`"track"` or `"accent"`). It has to be brightened rather than used
+straight: on the selected strip the fill is already that colour, so the
+outline would have nothing to stand against.
+
+The outline is inset by half its own stroke width. ImGui centres a stroke
+on the path it is given, so a rect drawn on the child's bounds spills half
+a line-width past them on every side -- except that the child's clip rect
+eats the spill on the right and the bottom and not on the left and the
+top. That asymmetry is a visibly fatter left-hand edge, and insetting is
+the fix rather than nudging the coordinates.
+
+It is also drawn last, after the header and the body, or the header paints
+out the two corners it just rounded; and the header is capped to the
+strip's own radius so the two shapes agree about what a strip is.
+
 ## What it does
 
 * **Channel** pinned hard left — pan across the top, then the fader (with a
@@ -29,6 +204,15 @@ the selected track.
   reachable. Monitoring cycles – / IN / AU and shows *auto* in its own
   colour — auto is a different behaviour from input monitoring, not a
   stronger one, so the same green would read as "on, but more".
+* A **routing button** on the Sends header — opens REAPER's routing and
+  I/O window for the track, with the same three lamps as its mixer button:
+  parent/master send, sends out, receives in. An unlit lamp is drawn
+  rather than omitted, because three slots that are always there say
+  *which* one is missing, where two lines and a space only say "two of
+  something". There is no API that takes a track, only an action for the
+  last-touched one, so the track is selected first — and only if it isn't
+  already, since clobbering a multi-track selection to open a window would
+  be a poor trade.
 * **Sends** pinned hard right — laid out on **the same grid the plugin
   panels use, in double-width cells**, so a send lines up row-for-row with
   the parameters beside it. The destination's colour is a bar down the LEFT
@@ -113,8 +297,7 @@ the selected track.
   flow.
 * **Remove a plugin** from a panel's menu. One undo step, no prompt — same
   as deleting from REAPER's own FX chain.
-* *View ▸ Track list* hides the track strip when you want the height back,
-  and *View ▸ Panel alignment* centres the panels instead of packing them
+* *View ▸ Panel alignment* centres the panels instead of packing them
   left.
 * *View ▸ Colour* has a **base hue** slider: the whole palette is generated
   from one hue, so it can be brought into line with a REAPER theme without
@@ -226,7 +409,7 @@ Needs the **ReaImGui** extension (ReaPack). SWS is optional — it only powers
 ## Tests
 
 `dev/TS_CV_Test.lua` fakes enough of the REAPER API to exercise the parts
-that don't need a GUI — 392 assertions covering plugin-name cleaning, the
+that don't need a GUI — 442 assertions covering plugin-name cleaning, the
 layout file round-trip, control type guessing, the panel and sends
 geometry, the gain maths and fader taper, the GR meter's peak hold and
 scale, the tooltips' place-once-then-freeze behaviour, and the

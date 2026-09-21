@@ -47,6 +47,9 @@ local st = {
   drag_from = nil,       -- row being dragged in the panel list
   params    = nil,       -- cached {index, name} for this plugin
   was_saved = false,
+  applied   = false,     -- Apply has pushed the scratch into the library
+  original  = nil,       -- what to put back if it is then cancelled
+  in_lib    = false,     -- ... or whether to take it out entirely
 }
 
 function E.attach(imgui) ImGui = imgui end
@@ -84,6 +87,25 @@ function E.open(track, fx, key, layout)
   st.reports_gr = require("TS_CV_FXTree").reports_gr(track, fx.addr, fx.guid)
   st.params    = load_params(track, fx)
   st.was_saved = false
+  -- Apply pushes the scratch copy into the LIVE mapping so the panel
+  -- behind the dialog redraws while you are still editing -- which is
+  -- the only way to see whether a layout works. Cancel then has
+  -- something to undo, so the state it would undo TO is taken now: the
+  -- layout as it stood, and whether it was in the library at all. An
+  -- applied-then-cancelled layout that was only ever a generated
+  -- default has to leave no trace, not be written back as if somebody
+  -- had built it.
+  st.applied   = false
+  st.original  = M.copy(layout or { controls = {}, aliases = {} })
+  st.in_lib    = M.has(key)
+end
+
+-- Put the library back the way Apply found it. Nothing here touches the
+-- file: Apply never wrote one.
+local function revert_applied()
+  if not st.applied then return end
+  if st.in_lib then M.set(st.key, st.original) else M.remove(st.key) end
+  st.applied = false
 end
 
 local function assigned_has(param)
@@ -329,6 +351,22 @@ local function draw_entry_editor(ctx)
       ImGui.SetTooltip(ctx, "Fill the knob outward from 12 o'clock instead of from the minimum.")
     end
   end
+
+  -- Knobs and toggles only. A combo's entries are positions in the
+  -- plugin's own scale, so reversing one means reversing the list, which
+  -- is a different job and a worse idea.
+  if c.type == "knob" or c.type == "toggle" then
+    ImGui.SameLine(ctx)
+    local rch, rv = ImGui.Checkbox(ctx, "Reverse", c.invert and true or false)
+    if rch then c.invert = rv or nil end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Turn the control the other way: what the plugin calls minimum\n" ..
+        "sits at the top. For the parameters that are wired backwards --\n" ..
+        "a \"threshold\" that opens as it falls, a mix control labelled dry.\n" ..
+        "The plugin still sees its own value; only the control is flipped.")
+    end
+  end
 end
 
 local function poll_learn(track)
@@ -358,8 +396,16 @@ function E.draw(ctx, track)
   -- Auto-size rather than a fixed guess: the dialog then always fits its
   -- contents exactly, and stays right if the list height or the button row
   -- ever changes.
+  -- Barely dim the window behind. This dialog has an Apply button whose
+  -- whole job is to let you look at the panel while you edit, and the
+  -- default modal scrim puts a heavy wash over the thing you are trying
+  -- to look at. Pushed and popped either side of Begin, which is where
+  -- the scrim is drawn, so the pair balances whether or not the popup is
+  -- visible this frame.
+  ImGui.PushStyleColor(ctx, ImGui.Col_ModalWindowDimBg, 0x0a0d1233)
   local visible, open = ImGui.BeginPopupModal(ctx, TITLE, true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_AlwaysAutoResize)
+  ImGui.PopStyleColor(ctx)
   local result = nil
 
   if visible then
@@ -419,7 +465,22 @@ function E.draw(ctx, track)
       ImGui.CloseCurrentPopup(ctx)
     end
     ImGui.SameLine(ctx)
+    -- Live, not saved. The panel behind the dialog picks it up on the
+    -- next frame because it reads the mapping every frame, so you can
+    -- watch a layout take shape instead of saving, looking, reopening
+    -- and guessing again.
+    if ImGui.Button(ctx, "Apply", 90) then
+      M.set(st.key, M.copy(st.scratch))
+      st.applied = true
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Show it on the panel now, without writing to the library.\n" ..
+        "Cancel still puts everything back.")
+    end
+    ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel", 90) then
+      revert_applied()
       result = "cancelled"
       ImGui.CloseCurrentPopup(ctx)
     end
@@ -449,6 +510,9 @@ function E.draw(ctx, track)
   end
 
   if not open then
+    -- Closed with the title-bar X or Escape rather than the button.
+    -- Same meaning, so the same undo.
+    revert_applied()
     result = result or "cancelled"
   end
   if result then st.open = false end

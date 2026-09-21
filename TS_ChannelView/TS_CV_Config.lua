@@ -9,7 +9,7 @@
 
 local C = {}
 
-C.VERSION   = "1.0.1"
+C.VERSION   = "1.1.0"
 C.EXT_SECT  = "TS_ChannelView"       -- reaper.SetExtState section
 C.WIN_TITLE = "ChannelView"
 
@@ -63,14 +63,44 @@ C.HIDE_BUILTIN    = true  -- hide REAPER's trailing Wet/Bypass/Delta params
 -- Header buttons are drawn as vector icons on the draw list rather than
 -- set as text, so they don't depend on the font having the glyph and they
 -- stay crisp at any size. See TS_CV_Widgets.icon_button / W.ICONS.
-C.ICON_SIZE = 14          -- header button hit area (the glyph sits inside)
+C.ICON_SIZE = 14
+-- The track strip along the bottom and the mixer above it are ONE thing:
+-- every button lines up under its own strip, and scrolls with it. So the
+-- gap between them is a single number rather than one each, and a button
+-- takes its width from the strip above rather than a fixed size.
+C.MIX_GAP = 4
 
--- Collapsed panels: a narrow vertical bar carrying the name, bypass and
--- float only. Wide enough for the icons plus stacked capitals.
--- Wide enough for the meter's stacked readout ("12.4" over "dB") when a
--- collapsed panel is metering; without those few extra pixels the decimal
--- would have to be dropped exactly where the bar is the only thing you
--- can see.
+-- The strip header's name. Off by default: the track button directly
+-- underneath carries the name already, and now that the two line up,
+-- printing it twice in a column an inch tall is just noise.
+C.MIX_STRIP_NAME = false
+
+-- What marks the selected strip, and the selected button under it:
+--   "track"   -- a lightened version of that track's own colour
+--   "accent"  -- C.COL.strip_sel, the same colour for every track
+-- "track" by default. A console is a row of coloured channels with one
+-- of them lit; one blue outline in among them reads as a different KIND
+-- of thing rather than as the same thing selected.
+C.SEL_OUTLINE = "track"
+
+-- The corner radius of a mixer strip. Its header is capped to the same
+-- radius and its outline traced at it, so the three agree about what
+-- shape a strip is -- and the track button below uses it too.
+C.STRIP_ROUND = 3.0
+
+-- Unselected strips and track buttons are dimmed to this alpha, so the
+-- selected one is the only thing at full strength, and lift to the
+-- hover alpha under the mouse. The mixer header and the track button
+-- below it use the SAME pair: they are one object, and a header at full
+-- colour over a dimmed name badge looked like a bug rather than a
+-- decision.
+C.DIM_ALPHA   = 0x66
+C.HOVER_ALPHA = 0xaa
+
+C.AUTO_BTN_W = 32         -- the automation-mode button in a panel header.
+                          -- Wide enough for "LTCH", which is the longest
+                          -- of the six labels.
+
 -- Collapsed panels run their label down the bar. Two ways of doing that:
 -- letters stacked one per line, or the label genuinely rotated.
 --
@@ -90,6 +120,12 @@ C.ROT_FONT  = "Arial"     -- the LICE side has no access to ImGui's font
 C.ROT_UP    = true        -- reading bottom-to-top, the way a book spine
                           -- does everywhere except the United States
 
+-- Collapsed panels: a narrow vertical bar carrying the name, bypass and
+-- float only. Wide enough for the icons plus stacked capitals, and wide
+-- enough for the meter's stacked readout ("12.4" over "dB") when a
+-- collapsed panel is metering -- without those few extra pixels the
+-- decimal would have to be dropped exactly where the bar is the only
+-- thing you can see.
 C.COLLAPSED_W = 30
 
 -- Gain-reduction meter: a full-height strip down the edge of the panel
@@ -159,11 +195,17 @@ C.CHANNEL_W   = 112       -- expanded width of the Channel panel
 C.FADER_W     = 26        -- the fader's own track within its half
 C.FADER_CAP_H = 16        -- the moving cap: big enough to grab and to
                           -- read the unity mark against
-C.LEVEL_METER_W = 44      -- the level meter's own width within its half,
-                          -- so it sits centred like the fader rather than
-                          -- flush against the panel edge. (C.METER_W, way
-                          -- above, is the GAIN REDUCTION bar -- different
-                          -- meter, different panel.)
+C.LEVEL_METER_W = 52      -- the level meter's own width within its half.
+                          -- Wider than it was, because the dB ladder is
+                          -- printed OVER the bars now instead of in a
+                          -- gutter beside them (C.METER_SCALE_OVER) --
+                          -- the bars got the gutter's width back and
+                          -- then the meter got the rest of its half. It
+                          -- is still capped at the half, so it sits
+                          -- centred like the fader rather than flush
+                          -- against the panel edge. (C.METER_W, way
+                          -- above, is the GAIN REDUCTION bar --
+                          -- different meter, different panel.)
 -- A send is a DOUBLE-WIDTH cell on the same grid the plugin panels use,
 -- so sends line up row-for-row with parameters: knob in the left half,
 -- its buttons in the right. The add tile is simply the next cell.
@@ -178,6 +220,21 @@ C.SENDS_MAX_W = 3 * C.SEND_W + C.SEND_COL_GAP * 2 + C.PANEL_PAD * 2
 -- Level metering: floor of the scale, and how the peak behaves.
 C.METER_FLOOR = -60       -- dB at the bottom of the level meter
 C.METER_MARKS = { 0, -6, -12, -24, -48 }   -- labelled on the channel meter
+-- The ladder goes ON the bars, the way REAPER's own meters do it, rather
+-- than in a gutter of numbers beside them -- at this width the gutter was
+-- taking a third of the meter to print five short numbers. Each figure
+-- takes dark ink where the bar behind it is lit and light ink where it
+-- isn't, which is what makes an overlaid scale readable at all. False
+-- puts the gutter back.
+C.METER_SCALE_OVER = true
+-- The RMS hairline beside each bar. Fixed pixels, not a fraction of the
+-- bar: the point of it is to be a hairline, and a proportion stops being
+-- one as soon as the bars get wider.
+C.RMS_STRIP_W = 3
+-- The RMS hairline beside each bar. Fixed pixels, not a fraction of the
+-- bar: the point of it is to be a hairline, and a proportion stops being
+-- one as soon as the bars get wider.
+C.RMS_STRIP_W = 3
 C.LEVEL_HOLD  = 1.2       -- seconds the peak line holds
 C.LEVEL_FALL  = 24        -- dB per second it falls after that
 C.LEVEL_CLIP  = 0.0       -- at or above this the meter goes hard red
@@ -210,10 +267,6 @@ C.WHEEL_SCROLL_PX = 70
 
 -- The trailing "+" tile that adds a plugin to the end of the chain.
 C.ADD_TILE_W = 34
-
--- Track strip visible by default; the View menu toggles it and the choice
--- is remembered.
-C.SHOW_TRACKS = true
 
 -- Breathing room between the track-colour hairline and the top of the
 -- panels, so the panel borders don't sit on the rule.
@@ -370,18 +423,46 @@ C.PALETTE = {
   float_on      = { "solid",  -14.0, 0.661, 0.573 },
   fader_cap  = { "tint",   -2.3, 0.196, 0.820 },
   level_lo   = { "fixed",  130.2, 0.388, 0.475 },
-  level_hi   = { "fixed",   43.1, 0.645, 0.569 },
-  level_clip = { "fixed",   16.9, 0.645, 0.569 },
+  -- Green below LEVEL_HOT, red at it, a harder red past LEVEL_CLIP.
+  -- There was an amber step from -6 up; it was removed because -6 dBFS
+  -- is not a warning about anything, and a colour change that means
+  -- nothing is worse than no colour change at all.
+  level_clip = { "fixed",    6.0, 0.720, 0.560 },
   -- Clipping is a different KIND of news from "hot", so it gets a colour
   -- of its own rather than more of the same orange: pure red, and lighter
   -- than anything else on the meter so it reads at a glance.
   level_over = { "fixed",    0.0, 0.870, 0.560 },
   level_rms  = { "fixed",  130.2, 0.330, 0.720 },
+  -- The dB ladder printed over the bars, in two inks. Neither is a
+  -- "fixed" colour: they are the meter's own furniture and should follow
+  -- the theme like the rest of the greys. The pair only has to satisfy
+  -- one thing -- meter_ink readable on the unlit bar (lightness 0.127),
+  -- meter_ink_lit readable on a lit one (0.475 to 0.560) -- so one is
+  -- well above that range and the other well below it.
+  meter_ink     = { "tint",  0.0, 0.110, 0.620 },
+  meter_ink_lit = { "tint",  0.0, 0.240, 0.105 },
   rec_on     = { "fixed",  358.8, 0.650, 0.563 },
   solo_on    = { "fixed",   43.1, 0.645, 0.569 },
   mute_on    = { "fixed",   16.9, 0.645, 0.569 },
   mon_on     = { "fixed",  130.2, 0.388, 0.475 },
   mon_auto   = { "fixed",  213.0, 0.645, 0.569 },
+  -- The routing button's three lamps. Distinct hues rather than three
+  -- shades of the accent: they mean different things and you read them
+  -- at a glance, not by counting rows.
+  route_parent = { "fixed",   43.1, 0.645, 0.569 },
+  route_send   = { "fixed",  199.0, 0.600, 0.560 },
+  route_recv   = { "fixed",  130.2, 0.450, 0.520 },
+  route_off    = { "tint",    0.0,  0.120, 0.230 },
+  -- Automation modes. Read is the safe one and gets the safe colour;
+  -- write and latch are the ones that change your session while you are
+  -- not looking at them, so they get the ones that carry alarm. Fixed
+  -- hues: these are transport conventions, not decoration.
+  auto_trim    = { "tint",    0.0,  0.120, 0.300 },
+  auto_read    = { "fixed",  130.2, 0.450, 0.480 },
+  auto_touch   = { "fixed",   43.1, 0.600, 0.520 },
+  auto_write   = { "fixed",  358.8, 0.650, 0.540 },
+  auto_latch   = { "fixed",   16.9, 0.645, 0.540 },
+  auto_preview = { "fixed",  280.0, 0.500, 0.560 },
 }
 
 -- Plugin formats get a swatch each, and the hues are ABSOLUTE rather than

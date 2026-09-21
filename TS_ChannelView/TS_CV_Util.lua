@@ -340,6 +340,22 @@ end
 -- colour
 -- ---------------------------------------------------------------------
 
+-- Black or white, whichever can actually be read on this background.
+--
+-- A mixer strip's header IS the track's colour, and the track's colour is
+-- whatever the user picked -- pale yellow one row, near-black the next.
+-- Rec. 709 luma rather than a plain average: the eye is far more
+-- sensitive to green than to blue, so averaging calls a saturated blue
+-- "light" and puts black text on it.
+function U.contrast_text(col)
+  if not col then return 0xffffffff end
+  local r = ((col >> 24) & 0xff) / 255
+  local g = ((col >> 16) & 0xff) / 255
+  local b = ((col >> 8)  & 0xff) / 255
+  local luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return (luma > 0.55) and 0x121418ff or 0xf2f4f8ff
+end
+
 -- REAPER native colour -> ImGui 0xRRGGBBAA, or nil when unset.
 function U.native_to_imgui(native, alpha)
   if not native or native == 0 then return nil end
@@ -368,6 +384,35 @@ function U.is_light(col)
   local g = (col >> 16) & 0xff
   local b = (col >> 8) & 0xff
   return (0.299 * r + 0.587 * g + 0.114 * b) > 140
+end
+
+-- Pull a colour towards white by `amt` (0..1). Alpha is left alone.
+function U.lighten(col, amt)
+  amt = math.max(0, math.min(1, amt or 0.5))
+  local r = (col >> 24) & 0xff
+  local g = (col >> 16) & 0xff
+  local b = (col >>  8) & 0xff
+  local a =  col        & 0xff
+  r = math.floor(r + (255 - r) * amt + 0.5)
+  g = math.floor(g + (255 - g) * amt + 0.5)
+  b = math.floor(b + (255 - b) * amt + 0.5)
+  return (r << 24) | (g << 16) | (b << 8) | a
+end
+
+-- What marks the selected strip. `mode` is C.SEL_OUTLINE.
+--
+-- In "track" mode the outline is a lightened version of the track's own
+-- colour: the row then reads as a set of coloured channels with one of
+-- them lit, rather than a set of coloured channels and a blue one. It
+-- has to be lightened rather than used straight, or on the selected
+-- strip -- where the fill is already that colour -- there would be
+-- nothing to see.
+--
+-- The palette colours arrive as arguments because this file knows
+-- nothing about the palette, and is the better for it.
+function U.sel_colour(mode, track_col, accent)
+  if mode == "track" and track_col then return U.lighten(track_col, 0.55) end
+  return accent
 end
 
 return U
