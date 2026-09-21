@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="1660db21394b05efb4bb970d265f374f6d846503" name="TS-ReaScripts">
+<index version="1" commit="0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0" name="TS-ReaScripts">
   <category name="TS_ChannelView">
     <reapack name="TS_ChannelView.lua" type="script" desc="ChannelView -- docked channel strip: one editable control panel per plugin">
       <metadata>
@@ -52,6 +52,27 @@
         <source file="TS_CV_TrackStrip.lua">https://github.com/tshadgett/TS-ReaScripts/raw/1660db21394b05efb4bb970d265f374f6d846503/TS_ChannelView/TS_CV_TrackStrip.lua</source>
         <source file="TS_CV_Util.lua">https://github.com/tshadgett/TS-ReaScripts/raw/1660db21394b05efb4bb970d265f374f6d846503/TS_ChannelView/TS_CV_Util.lua</source>
         <source file="TS_CV_Widgets.lua">https://github.com/tshadgett/TS-ReaScripts/raw/1660db21394b05efb4bb970d265f374f6d846503/TS_ChannelView/TS_CV_Widgets.lua</source>
+      </version>
+      <version name="1.1.0" author="Tim Shadgett (with Claude)" time="2026-09-21T10:37:22Z">
+        <source main="main">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_ChannelView.lua</source>
+        <source main="main" file="TS_CV_Diag.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Diag.lua</source>
+        <source file="TS_CV_Browser.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Browser.lua</source>
+        <source file="TS_CV_Channel.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Channel.lua</source>
+        <source file="TS_CV_Config.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Config.lua</source>
+        <source file="TS_CV_Editor.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Editor.lua</source>
+        <source file="TS_CV_FXIndex.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_FXIndex.lua</source>
+        <source file="TS_CV_FXTree.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_FXTree.lua</source>
+        <source file="TS_CV_Gang.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Gang.lua</source>
+        <source file="TS_CV_Mappings.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Mappings.lua</source>
+        <source file="TS_CV_Mixer.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Mixer.lua</source>
+        <source file="TS_CV_Panel.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Panel.lua</source>
+        <source file="TS_CV_Sends.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Sends.lua</source>
+        <source file="TS_CV_Startup.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Startup.lua</source>
+        <source file="TS_CV_State.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_State.lua</source>
+        <source file="TS_CV_Steps.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Steps.lua</source>
+        <source file="TS_CV_TrackStrip.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_TrackStrip.lua</source>
+        <source file="TS_CV_Util.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Util.lua</source>
+        <source file="TS_CV_Widgets.lua">https://github.com/tshadgett/TS-ReaScripts/raw/0e3cf35843308bfeb8e4a7d9cce6a83e82953ed0/TS_ChannelView/TS_CV_Widgets.lua</source>
       </version>
     </reapack>
   </category>
