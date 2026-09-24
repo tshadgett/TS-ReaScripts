@@ -20,10 +20,16 @@
       Alias<p> = <your name for parameter p>
       Meter    = <1|0>|<full-scale dB>
 
-  <type> is knob | toggle | combo | blank | divider.  "blank" is a
-  deliberate empty cell, so a layout can leave a gap where a hardware strip
-  would have one; "divider" ends the current column and draws a rule,
-  separating one group of controls from the next.
+  <type> is knob | toggle | combo | blank | divider | half_gap.  "blank"
+  is a deliberate empty cell, so a layout can leave a gap where a hardware
+  strip would have one; "divider" ends the current column and, by
+  default, draws a rule separating one group of controls from the next --
+  bit 2 of the bipolar field (see below) turns the rule off while keeping
+  the column break, for pure spacing between groups that don't need a
+  line between them. "half_gap" staggers the control that follows it
+  half a row down, to mimic the staggered knob layouts some hardware
+  (and hardware-emulation plugins) use -- see P.layout in TS_CV_Panel.lua
+  for how. Column flow only ("row"-flow panels ignore it).
 
   An ALIAS renames a parameter for this plugin everywhere -- on every
   panel and in the editor's lists -- which is the fix for plugins whose
@@ -63,7 +69,7 @@ local def_cache   = {}   -- fx guid -> generated default layout
 local dirty       = false
 
 local VALID_TYPE = { knob = true, toggle = true, combo = true,
-                     blank = true, divider = true }
+                     blank = true, divider = true, half_gap = true }
 
 -- ---------------------------------------------------------------------
 
@@ -97,12 +103,18 @@ local function parse_section(sect)
       -- obvious move and the wrong one -- the label is field four and
       -- is allowed to be empty, so an old line and a new one with no
       -- label are indistinguishable once you start counting separators.
+      -- Bit 2: for a divider only, "no rule" -- it still ends the
+      -- column and opens the same C.DIVIDER_W gap, just without the
+      -- line. Unused (and unset) on every other type, the same as bit
+      -- 0/1 already are on blank and divider -- one flags field for the
+      -- whole slot, read differently by whichever type it's on.
       local f = tonumber(bi) or 0
       controls[#controls + 1] = {
         param   = tonumber(p),
         type    = t,
         bipolar = (f & 1) ~= 0,
         invert  = (f & 2) ~= 0,
+        no_rule = (f & 4) ~= 0,
         label   = U.trim(label),
       }
     end
@@ -123,8 +135,9 @@ local function serialize(layout)
     end
   end
   for i, c in ipairs(layout.controls or {}) do
-    -- See parse_section: bit 0 bipolar, bit 1 reverse.
+    -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule.
     local flags = (c.bipolar and 1 or 0) | (c.invert and 2 or 0)
+                                          | (c.no_rule and 4 or 0)
     out["Ctl" .. (i - 1)] = string.format("%d|%s|%d|%s",
       c.param or -1,
       c.type or "knob",

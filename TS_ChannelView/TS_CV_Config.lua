@@ -40,6 +40,33 @@ C.PANEL_MIN_W = 132       -- a panel never narrower than this (header needs room
 C.STRIP_H     = 30        -- bottom track-selector strip height
 C.MIN_ROWS    = 1         -- never compute fewer rows than this
 
+-- "trackrow" (the track-name row shared by both views, and its own
+-- padding probe, MX.row_pad_y) push THIS as their vertical WindowPadding
+-- instead of taking ReaImGui's own default -- measured at 8.0 on the
+-- themes this has been tested against (see the track-rule derivation in
+-- TS_ChannelView.lua for how that 8.0 was read off, with no GetStyleVar
+-- to just ask for it). A full WindowPadding's worth of empty space sits
+-- both above the track buttons and below them, under the scrollbar --
+-- more than either edge needs just to keep the buttons off the border
+-- and the scrollbar off the button row. This is applied to trackrow and
+-- ONLY trackrow (PushStyleVar/PopStyleVar around its BeginChild/EndChild,
+-- and identically around row_pad_y's probe, so the probe keeps measuring
+-- what the real row actually gets) -- horizontal WindowPadding is left
+-- exactly as ReaImGui set it, measured rather than guessed at, so the
+-- track buttons don't shift sideways as a side effect of this.
+C.TRACKROW_PAD_Y = 4
+
+-- Only used on the vanishingly unlikely frame where the child-window
+-- padding probe in TS_ChannelView.lua itself gets culled, so there is
+-- no real measurement to fall back on yet. Scaled down from the 14 that
+-- matched the probe under ReaImGui's own default WindowPadding, by the
+-- same amount TRACKROW_PAD_Y trims off each of the two edges (8 -> 4 is
+-- 4 fewer pixels top and bottom). Being exactly right barely matters --
+-- this frame is rare enough that it was never observed, only guarded
+-- against -- but it should stay in the right ballpark rather than drift
+-- back toward the old, larger default.
+C.CHILD_PAD_Y_FALLBACK = 6
+
 -- Control flow within a panel:
 --   "column" -- fill a column top-to-bottom, then start a new column.
 --              Neighbours stay put when the dock height changes.

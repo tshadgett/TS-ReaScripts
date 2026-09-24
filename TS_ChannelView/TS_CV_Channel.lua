@@ -449,6 +449,7 @@ function CH.draw(ctx, track, avail_h)
   local collapsed = St.is_collapsed(KEY)
   local w = CH.width(collapsed)
 
+  local cp_x, cp_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "chanpanel", w, avail_h, 0,
     ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
   if ok then
@@ -496,7 +497,7 @@ function CH.draw(ctx, track, avail_h)
   else
     -- Culled: still occupy the space, or the parent's bounds
     -- never grow past it. See W.child_skipped.
-    W.child_skipped(ctx, w, avail_h)
+    W.child_skipped(ctx, w, avail_h, cp_x, cp_y)
   end
   return w
 end

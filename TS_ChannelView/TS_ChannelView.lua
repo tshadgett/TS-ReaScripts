@@ -1,6 +1,6 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett (with Claude)
--- @version 1.1.0
+-- @version 1.2.0
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -401,8 +401,8 @@ local function panel_menu()
 end
 
 local TYPE_LABELS = { knob = "Knob", toggle = "Button", combo = "Stepped value",
-                      blank = "Gap", divider = "Divider" }
-local TYPE_ORDER  = { "knob", "toggle", "combo", "blank", "divider" }
+                      blank = "Gap", half_gap = "Half gap", divider = "Divider" }
+local TYPE_ORDER  = { "knob", "toggle", "combo", "blank", "half_gap", "divider" }
 
 local function control_menu()
   if not ImGui.BeginPopup(ctx, "ctlmenu") then return end
@@ -467,6 +467,11 @@ local function control_menu()
   if ImGui.MenuItem(ctx, "Insert gap before") then
     local l = commit()
     table.insert(l.controls, cm.ctl, { param = -1, type = "blank", bipolar = false, label = "" })
+    M.set(key, l); M.save()
+  end
+  if ImGui.MenuItem(ctx, "Insert half-gap before") then
+    local l = commit()
+    table.insert(l.controls, cm.ctl, { param = -1, type = "half_gap", bipolar = false, label = "" })
     M.set(key, l); M.save()
   end
   if c.type == "combo" and ImGui.MenuItem(ctx, "Rescan choices") then
@@ -868,6 +873,7 @@ local function add_tile(h)
 end
 
 local function panel_row(row_h, row_w)
+  local pr_x, pr_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "panelrow", row_w or 0, row_h, 0,
     ImGui.WindowFlags_HorizontalScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
   if ok then
@@ -1006,7 +1012,7 @@ local function panel_row(row_h, row_w)
   else
     -- Culled: still occupy the space, or the parent's bounds
     -- never grow past it. See W.child_skipped.
-    W.child_skipped(ctx, row_w or 0, row_h)
+    W.child_skipped(ctx, row_w or 0, row_h, pr_x, pr_y)
   end
 end
 
@@ -1073,6 +1079,13 @@ local function frame()
   end
 
   if visible then
+    -- trackrow's own horizontal WindowPadding (see C.TRACKROW_PAD_Y):
+    -- read off the main window below, alongside win_pad (its vertical
+    -- counterpart), since nothing between here and "trackrow" ever
+    -- pushes a different one. Horizontal has no menu bar to cancel out,
+    -- so unlike win_pad this is usable as-is: GetCursorStartPos().x IS
+    -- WindowPadding.x, no arithmetic required.
+    local win_pad_x = 0
     do  -- the track's colour as a hairline across the top of the panel row
       local dl = ImGui.GetWindowDrawList(ctx)
       local cx, cy = ImGui.GetCursorScreenPos(ctx)
@@ -1102,9 +1115,10 @@ local function frame()
       -- with NoScrollbar.
       local _, wy = ImGui.GetWindowPos(ctx)
       local _, wh = ImGui.GetWindowSize(ctx)
-      local _, start_y = ImGui.GetCursorStartPos(ctx)
+      local start_x, start_y = ImGui.GetCursorStartPos(ctx)
       local _, avail_h = ImGui.GetContentRegionAvail(ctx)
       local win_pad = wh - avail_h - start_y
+      win_pad_x = start_x
 
       local ry = wy + win_pad + ImGui.GetFrameHeight(ctx) + def_isy
                  + C.HEADER_NUDGE
@@ -1139,9 +1153,86 @@ local function frame()
     end
 
     local _, avail_h = ImGui.GetContentRegionAvail(ctx)
-    local strip_h = C.STRIP_H + 6
+
+    -- The Channel/plugin-row/Sends panels (channel view) and a mixer
+    -- strip's own body (mixer view, inside MX.draw_row's "trackrow"
+    -- child) both want to end up the SAME height for the SAME track,
+    -- or the strip visibly resizes every time you switch views.
+    --
+    -- What eats the difference between avail_h and what a strip
+    -- actually gets is "trackrow" itself: WindowPadding top and bottom
+    -- (C.TRACKROW_PAD_Y, trimmed below ReaImGui's own default -- see
+    -- that constant), plus its own horizontal scrollbar's height,
+    -- reserved ALWAYS now, not only on a frame the row's content
+    -- actually overflows (see MX.row_pad_y) -- so this is one constant,
+    -- the same in both views,
+    -- rather than something worked out from row content width versus
+    -- the window's, which is what used to make this need "trackrow"'s
+    -- own live bookkeeping: bookkeeping that isn't available yet here
+    -- anyway, since "trackrow" doesn't exist until after these panels
+    -- do, so their height has to be decided before it can be asked.
+    --
+    -- MX.row_pad_y is called exactly HERE, once per frame, and its
+    -- result is handed into every MX.draw_row call below rather than
+    -- measured a second time in there. It used to be a second copy in
+    -- MX.draw_row too -- which wasn't just redundant: row_pad_y's probe
+    -- is a stable, reused child id, and reopening the same child id a
+    -- second time in the same frame is undefined enough to plausibly
+    -- explain "we've reserved almost double what the scrollbar needs"
+    -- on its own (see row_pad_y). One call, one number, handed down.
+    local child_pad_y = MX.row_pad_y(ctx, win_pad_x)
+
+    -- There is a SECOND gap neither child_pad_y nor either panel's own
+    -- height accounts for: CH.draw / panel_row / SD.draw sit on one
+    -- SameLine'd line, but nothing SameLine's that line with
+    -- MX.draw_row's "trackrow" child below it -- so ImGui inserts its
+    -- own ItemSpacing.y between them, same as it would between any two
+    -- ordinary stacked widgets. Mixer view never pays this: it hands
+    -- MX.draw_row the whole avail_h as a single item, nothing stacked
+    -- under it. Channel view splits avail_h between two stacked items,
+    -- so this gap has to come out of that split too, or the second
+    -- item (the track row, scrollbar included) lands short of the
+    -- window's bottom edge by however many pixels this is -- exactly
+    -- the "padded up" mismatch against mixer view.
+    --
+    -- No GetStyleVar here either, so it's measured the same way as
+    -- child_pad_y: a zero-height Dummy has no height of its own, so the
+    -- entire distance the cursor advances past it IS ItemSpacing.y.
+    -- Restored immediately after, like the probe above -- this must be
+    -- invisible to everything drawn below it.
+    local spacing_y = 0
+    do
+      local sx0, sy0 = ImGui.GetCursorPos(ctx)
+      ImGui.Dummy(ctx, 0, 0)
+      local _, sy1 = ImGui.GetCursorPos(ctx)
+      spacing_y = sy1 - sy0
+      ImGui.SetCursorPos(ctx, sx0, sy0)
+    end
+
+    -- The standalone name row (channel view) needs a total height that
+    -- lands ITS OWN "trackrow" child at exactly the height mixer view's
+    -- gets for the same track -- not merely enough for the name button
+    -- (STRIP_H - 8 tall, see name_button) to fit inside it without a
+    -- scrollbar, which is the weaker thing this used to solve for.
+    --
+    -- It used to subtract a literal 8 here -- the button's own height
+    -- offset, reused by coincidence rather than by reason. The button
+    -- fit either way, so nothing here ever grew a scrollbar, and the
+    -- only symptom was row_h below landing a few pixels taller than
+    -- mixer view's strip: row_h spends spacing_y once, to clear the gap
+    -- ImGui puts above this row (see spacing_y above), and this is the
+    -- other side of that same ledger entry -- what it has to give back
+    -- is spacing_y, not an unrelated constant that only ever happened
+    -- to equal it back when STRIP_H's padding was first chosen.
+    local strip_h = (C.STRIP_H - spacing_y) + child_pad_y
+
+    -- And row_h (the Channel/plugin-row/Sends height) is everything
+    -- left in avail_h once strip_h AND the ItemSpacing.y between the
+    -- two of them are both spent -- so row_h + spacing_y + strip_h
+    -- lands on avail_h exactly, the same total mixer view gets, split
+    -- differently rather than shrunk.
     local row_h = math.max(C.CELL_H + C.HEADER_H + C.PANEL_PAD * 2,
-                           avail_h - strip_h)
+                           avail_h - spacing_y - strip_h)
     -- Channel pinned left, Sends pinned right, the plugin row scrolling
     -- between them. Both pinned panels are measured first so the row in
     -- the middle knows what is left for it.
@@ -1150,14 +1241,26 @@ local function frame()
     local sd_w   = SD.width_for(app.track, row_h)
     local mid_w  = math.max(80, full_w - ch_w - sd_w - C.PANEL_GAP * 2)
 
+    -- A double-click on a NAME BUTTON opens that track in channel view,
+    -- in either branch below -- the button means the same thing whether
+    -- it's sitting under a strip or on its own. One place to act on it,
+    -- since MX.draw_row hands it back the same way from both views.
+    local function open_from_name(tr)
+      app.track = tr
+      S.request_scroll()
+      rescan(true)
+      set_view(false)
+    end
+
     if C.MIXER_VIEW then
-      -- Mixer view takes the whole upper area. The track strip below
-      -- stays: it is the one thing both views share, and losing it would
-      -- make switching feel like changing windows rather than changing
-      -- what you are looking at.
-      local open_it = MX.draw(ctx, row_h, app.track)
-      if MX.want_channel then
-        MX.want_channel = false
+      -- Mixer view takes the whole upper area. The track row underneath
+      -- -- strips and their name buttons together, one scrolling child
+      -- -- stays: it is the one thing both views share, and losing it
+      -- would make switching feel like changing windows rather than
+      -- changing what you are looking at.
+      local open_it, want_view, dbl_track =
+        MX.draw_row(ctx, avail_h, app.track, true, child_pad_y, win_pad_x)
+      if want_view then
         set_view(false)
       end
       if open_it then
@@ -1167,6 +1270,8 @@ local function frame()
         S.request_scroll()
         rescan(true)
         set_view(false)
+      elseif dbl_track then
+        open_from_name(dbl_track)
       end
     else
       CH.draw(ctx, app.track, row_h)
@@ -1186,20 +1291,21 @@ local function frame()
         app.row_dbl = false
         set_view(true)
       end
-    end
 
-    S.draw(ctx, C.STRIP_H, app.track)
-
-    -- Double-clicking a name in the track list opens that track in
-    -- channel view, the same as double-clicking its strip above. S.draw
-    -- has already selected it; all that is left is the view.
-    if S.want_channel then
-      local tr = S.want_channel
-      S.want_channel = false
-      app.track = tr
-      S.request_scroll()
-      rescan(true)
-      set_view(false)
+      -- The track row, on its own now -- same window id as mixer view's
+      -- row, just without the strips above the names, so the scroll
+      -- position it lands on here is exactly the one mixer view left it
+      -- at. Double-clicking its empty background (past the last name
+      -- button) is the mirror of mixer view's own empty-space
+      -- double-click: back to mixer, same as double-clicking the
+      -- Channel panel or the empty plugin row already do.
+      local _, want_mixer, dbl_track =
+        MX.draw_row(ctx, strip_h, app.track, false, child_pad_y, win_pad_x)
+      if want_mixer then
+        set_view(true)
+      elseif dbl_track then
+        open_from_name(dbl_track)
+      end
     end
 
     do  -- and the matching rule along the bottom edge of the window

@@ -56,17 +56,49 @@ end
 --
 -- The rule is vertical in either flow, because it separates groups, and
 -- that reads as a vertical break whichever way the controls run.
+--
+-- A "half_gap" control staggers what comes after it: instead of landing
+-- on the next whole row, the control following a half_gap lands half a
+-- row down, the way some hardware panels stagger their knobs. Only
+-- meaningful in "column" flow -- a "row" layout would need a HORIZONTAL
+-- half-step instead, a different feature nobody asked for -- so a
+-- section with no half_gap in it, or a "row"-flow panel, takes the
+-- exact same path this always has: idx/rows arithmetic, one slot per
+-- control, nothing new to verify for any layout that doesn't use one.
+--
+-- A section WITH a half_gap, in column flow, is laid out by simulating
+-- the fill instead: a running cursor in HALF-cell units (half_rows =
+-- rows*2), where a real control costs 2 units (one full CELL_H, same
+-- spacing as always) and a half_gap costs 1 (half a CELL_H, drawn as
+-- nothing) and only advances the cursor. `cols = ceil(n/rows)`, which
+-- this file has always used, assumes every item costs the same -- true
+-- with no gaps, false the moment one is in the mix, because a gap that
+-- lands near a column's bottom edge can wrap the rest of that column's
+-- controls into a fresh one early. Predicting the resulting column
+-- count with a formula means predicting exactly where every gap will
+-- land -- simulating the fill sidesteps that by never needing to
+-- predict it: it discovers the count the same way it discovers each
+-- control's own position, one item at a time, wrapping to a new column
+-- only when the next item genuinely doesn't fit in the one it's in.
 function P.layout(controls, panel_h)
   local rows  = P.rows_for(panel_h)
+  local half_rows = rows * 2
+  local half_h    = C.CELL_H * 0.5
   local items, rules = {}, {}
 
   -- split the control list at dividers; a leading, trailing or doubled
   -- divider simply yields an empty section, which costs a rule and no
-  -- columns
-  local sections, cur = {}, {}
+  -- columns.
+  --
+  -- `dividers` keeps the actual divider control alongside each split, in
+  -- step with `sections` (dividers[n] is the one that opened
+  -- sections[n+1]) -- so the loop below can ask THAT divider whether it
+  -- wants its rule drawn, rather than every split looking the same.
+  local sections, dividers, cur = {}, {}, {}
   for _, ctl in ipairs(controls) do
     if ctl.type == "divider" then
       sections[#sections + 1] = cur
+      dividers[#dividers + 1] = ctl
       cur = {}
     else
       cur[#cur + 1] = ctl
@@ -77,30 +109,75 @@ function P.layout(controls, panel_h)
   local x, deepest = 0, 0
   for si, sec in ipairs(sections) do
     if si > 1 then
-      rules[#rules + 1] = x + C.DIVIDER_W * 0.5
+      -- The gap is unconditional -- a no-rule divider still ends the
+      -- column and opens the same C.DIVIDER_W space, it just never adds
+      -- an entry to `rules`, so the draw side (which only walks `rules`)
+      -- has nothing left to draw for this one.
+      local div = dividers[si - 1]
+      if not (div and div.no_rule) then
+        rules[#rules + 1] = x + C.DIVIDER_W * 0.5
+      end
       x = x + C.DIVIDER_W
     end
 
-    local n    = #sec
-    local cols = math.ceil(n / rows)
-    for i, ctl in ipairs(sec) do
-      local idx = i - 1
-      local col, row
-      if C.FLOW == "row" then
-        col = idx % cols
-        row = math.floor(idx / cols)
-      else
-        col = math.floor(idx / rows)
-        row = idx % rows
+    local has_gap = false
+    if C.FLOW == "column" then
+      for _, ctl in ipairs(sec) do
+        if ctl.type == "half_gap" then has_gap = true; break end
       end
-      items[#items + 1] = { ctl = ctl, x = x + col * C.CELL_W, y = row * C.CELL_H }
-      if row + 1 > deepest then deepest = row + 1 end
     end
-    x = x + cols * C.CELL_W
+
+    if not has_gap then
+      -- Unchanged from before half_gap existed -- see the comment above
+      -- P.layout for why this stays the fast, already-proven path for
+      -- every section that has no reason to take the other one.
+      local n    = #sec
+      local cols = math.ceil(n / rows)
+      for i, ctl in ipairs(sec) do
+        local idx = i - 1
+        local col, row
+        if C.FLOW == "row" then
+          col = idx % cols
+          row = math.floor(idx / cols)
+        else
+          col = math.floor(idx / rows)
+          row = idx % rows
+        end
+        items[#items + 1] = { ctl = ctl, x = x + col * C.CELL_W, y = row * C.CELL_H }
+        if (row + 1) * 2 > deepest then deepest = (row + 1) * 2 end
+      end
+      x = x + cols * C.CELL_W
+    else
+      -- The fill simulation -- see the comment above P.layout. col_i
+      -- counts columns from 0 within this section; half_cursor is how
+      -- far down the CURRENT column the next item would start, in
+      -- half-cell units.
+      local col_i, half_cursor = 0, 0
+      for _, ctl in ipairs(sec) do
+        local cost = (ctl.type == "half_gap") and 1 or 2
+        if half_cursor + cost > half_rows then
+          -- Doesn't fit what's left in this column -- a fresh one
+          -- starts at 0, whether it was a control or a half_gap that
+          -- triggered the wrap. A half_gap that opens a new column has
+          -- nothing left to offset, so it's spent for nothing rather
+          -- than carried across the wrap -- the same way a divider
+          -- doesn't carry anything across ITS column break either.
+          col_i = col_i + 1
+          half_cursor = 0
+        end
+        if ctl.type ~= "half_gap" then
+          items[#items + 1] = { ctl = ctl, x = x + col_i * C.CELL_W, y = half_cursor * half_h }
+          if half_cursor + cost > deepest then deepest = half_cursor + cost end
+        end
+        half_cursor = half_cursor + cost
+      end
+      -- +1: col_i is the index of the last column touched, 0-based.
+      x = x + (col_i + 1) * C.CELL_W
+    end
   end
 
   return { rows = rows, items = items, rules = rules, width = x,
-           height = math.max(1, math.min(rows, deepest)) * C.CELL_H }
+           height = math.max(1, math.min(half_rows, deepest)) * half_h }
 end
 
 function P.width(n_or_controls, avail_h, collapsed, has_meter)
@@ -527,14 +604,30 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
     local id = ("c%d##%s_%d"):format(i, fx.guid, i)
 
-    if ctl.type == "blank" then
+    if ctl.type == "half_gap" then
+      -- Nothing to draw -- it's pure vertical spacing for whatever
+      -- comes after it (see P.layout). Column flow never lands one
+      -- here at all (P.layout leaves it out of lay.items entirely,
+      -- same as a divider); this guard only matters if C.FLOW is ever
+      -- "row", where half_gap isn't a stagger and P.layout falls back
+      -- to placing it like any other control -- without this, THAT
+      -- would fall through to "out of range parameter" below, since a
+      -- half_gap carries no real param.
+    elseif ctl.type == "blank" then
       local _, _, act = W.blank(ctx, id)
       if act.right_click then req.ctx_control = i end
 
     elseif not ctl.param or ctl.param < 0 or ctl.param >= nparams then
       -- The layout refers to a parameter this instance doesn't have --
       -- a plugin updated, or two different plugins sharing a name.
-      ImGui.SetCursorScreenPos(ctx, gx0 + col * C.CELL_W, gy0 + row * C.CELL_H)
+      --
+      -- The cursor is already at this item's own cell -- SetCursorScreenPos
+      -- above, from item.x/item.y, positions every item in lay.items the
+      -- same way regardless of which branch below actually draws it. This
+      -- used to reposition it a second time from `col`/`row`, a stray pair
+      -- of GLOBALS that exist only inside P.layout's own loop (see there),
+      -- not here -- every out-of-range parameter cell threw this exact
+      -- "arithmetic on a nil value" the moment it was reached.
       local px, py = ImGui.GetCursorScreenPos(ctx)
       ImGui.InvisibleButton(ctx, id, C.CELL_W, C.CELL_H)
       W.tip(ctx, "oob" .. id, ("parameter %s is out of range for this plugin")
@@ -618,6 +711,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
   local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil)
 
+  local pn_x, pn_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
     ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
   if ok then
@@ -644,7 +738,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   else
     -- Culled: still occupy the space, or the parent's bounds
     -- never grow past it. See W.child_skipped.
-    W.child_skipped(ctx, w, avail_h)
+    W.child_skipped(ctx, w, avail_h, pn_x, pn_y)
   end
 
   return w, req, collapsed

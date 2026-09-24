@@ -31,8 +31,8 @@ local ImGui
 
 local TITLE = "Setup Edit Parameters"
 
-local TYPES       = { "knob", "toggle", "combo", "blank", "divider" }
-local TYPES_COMBO = "knob\0toggle\0combo\0blank\0divider\0"
+local TYPES       = { "knob", "toggle", "combo", "blank", "half_gap", "divider" }
+local TYPES_COMBO = "knob\0toggle\0combo\0blank\0half_gap\0divider\0"
 
 local st = {
   open      = false,
@@ -167,6 +167,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
         label = ("%2d  \u{2502}\u{2502}\u{2502} divider"):format(i)
       elseif c.type == "blank" then
         label = ("%2d  \u{2014} blank \u{2014}"):format(i)
+      elseif c.type == "half_gap" then
+        label = ("%2d  \u{2044} half gap"):format(i)
       else
         local shown = c.label
         if not shown or shown == "" then shown = st.scratch.aliases[c.param] end
@@ -240,6 +242,19 @@ local function draw_assigned(ctx, track, list_w, list_h)
     ImGui.SetTooltip(ctx, "An empty cell, for spacing a layout out like a hardware strip.")
   end
   ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Add half-gap", 90) then
+    local at = (sel >= 1 and sel < n) and (sel + 1) or (n + 1)
+    table.insert(st.scratch.controls, at,
+      { param = -1, type = "half_gap", bipolar = false, label = "" })
+    st.sel_asg = at
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx,
+      "Staggers the control right after it half a row down, to mimic\n" ..
+      "staggered hardware knobs. Column layouts only -- see the type's\n" ..
+      "own note in TS_ChannelView_Mappings.ini.")
+  end
+  ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Add divider", 78) then
     local at = (sel >= 1 and sel < n) and (sel + 1) or (n + 1)
     table.insert(st.scratch.controls, at,
@@ -249,7 +264,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
       "A rule between groups of controls. Ends the current column,\n" ..
-      "so it separates sections rather than taking a cell.")
+      "so it separates sections rather than taking a cell. Select it\n" ..
+      "below to turn its line off and keep only the spacing.")
   end
 end
 
@@ -309,7 +325,7 @@ local function draw_entry_editor(ctx)
     if p.index == c.param then pname = p.name break end
   end
 
-  if c.type ~= "blank" and c.type ~= "divider" then
+  if c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap" then
     ImGui.SetNextItemWidth(ctx, 170)
     local ach, av = ImGui.InputTextWithHint(ctx, "Alias",
       pname ~= "" and pname or "name\u{2026}", st.scratch.aliases[c.param] or "")
@@ -343,7 +359,19 @@ local function draw_entry_editor(ctx)
   local tch, ti = ImGui.Combo(ctx, "Type", cur, TYPES_COMBO)
   if tch then c.type = TYPES[ti + 1] or "knob" end
 
-  if c.type ~= "blank" and c.type ~= "divider" then
+  if c.type == "divider" then
+    ImGui.SameLine(ctx)
+    local lch, lv = ImGui.Checkbox(ctx, "Line", not c.no_rule)
+    if lch then c.no_rule = (not lv) or nil end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "On: the usual rule between the two groups. Off: still ends\n" ..
+        "the column and opens the same gap, just without the line --\n" ..
+        "pure spacing, for groups that don't need a line between them.")
+    end
+  end
+
+  if c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap" then
     ImGui.SameLine(ctx)
     local bch, bv = ImGui.Checkbox(ctx, "Centred", c.bipolar and true or false)
     if bch then c.bipolar = bv end

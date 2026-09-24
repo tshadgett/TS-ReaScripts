@@ -46,15 +46,27 @@ The track list is the mixer's ruler, not a separate list that happens to
 agree. Each button asks `MX.col_width` for its width, which asks the
 Channel panel — so a collapsed strip's button collapses with it, and the
 written-down number that would have drifted does not exist. The gap
-between columns and the TCP visual spacer are the same constants in both,
-and the two scroll as one: whichever view is in front writes
-`MX.scroll_x`, the other reads it, and mixer view suppresses its own
-horizontal scrollbar so there is only ever one. Channel view uses the
-same widths, so nothing under the divider moves when you switch — the
-mixer stays where it was and one track's detail is laid over the top of
-it. That also means channel view's track list is as wide as the mixer
-needs it to be rather than as narrow as channel view could get away with,
-which is the trade we wanted.
+between columns and the TCP visual spacer are the same constants in both.
+
+The strips and the track list aren't two windows kept in sync any more —
+they're one window. `MX.draw_row` draws both, on a single BeginChild
+called `trackrow` in both views: the strips with a name button under
+each in mixer view, just the name buttons in channel view. Same id
+either way, so ImGui's own per-window scroll memory is what keeps them
+lined up — there is no variable being copied back and forth, and so
+nothing to fall out of step. (There used to be one — `MX.scroll_x`,
+written by whichever view was up, read by the other — and it's exactly
+where two real scroll bugs turned up: the mouse wheel not reaching a
+strip's own nested child window, and the track list never having wheel
+handling of its own at all. One shared window closes off that whole
+class of bug rather than patching the instances of it.) Channel view
+uses the same widths, so nothing under the divider moves when you
+switch — the mixer stays scrolled where it was and one track's detail is
+shown instead of it, not drawn over it: the strips aren't rendered while
+channel view is up, only parked at the same position for when you switch
+back. That also means channel view's track list is as wide as the mixer
+needs it to be rather than as narrow as channel view could get away
+with, which is the trade we wanted.
 
 Mixer strip headers carry the track colour and no name. The name is
 directly below at full width in the track list, and the header could only
@@ -294,7 +306,14 @@ strip's own radius so the two shapes agree about what a strip is.
   whatever follows one always starts a new column — however the previous
   section ended, part-filled, padded with gaps, or exactly full. The rule
   itself is a narrow gutter rather than a cell, and is vertical in either
-  flow.
+  flow. Its "Line" checkbox in the editor turns the rule off while
+  keeping the column break, for spacing two groups apart without a
+  visible line between them.
+* **Half-gap** — a control type that staggers whatever comes after it
+  half a row down, to mimic the staggered knob layouts some hardware
+  (and hardware-emulation plugins) use. It costs no cell of its own —
+  it's pure vertical offset for the next control — and, like a divider,
+  it's a column-flow feature only.
 * **Remove a plugin** from a panel's menu. One undo step, no prompt — same
   as deleting from REAPER's own FX chain.
 * *View ▸ Panel alignment* centres the panels instead of packing them
@@ -383,7 +402,8 @@ panel everywhere, which the dialog says at the top.
 | `TS_CV_Widgets.lua` | knob / button / stepped-value drawing |
 | `TS_CV_Panel.lua` | one plugin's panel |
 | `TS_CV_Editor.lua` | the Setup Edit Parameters dialog |
-| `TS_CV_TrackStrip.lua` | the track selector |
+| `TS_CV_Mixer.lua` | mixer view, and the shared track row (`MX.draw_row`) both views draw into |
+| `TS_CV_TrackStrip.lua` | asks the track row to scroll to the selection -- everything else moved into TS_CV_Mixer.lua |
 | `TS_CV_Browser.lua` | the add-a-plugin picker |
 | `TS_CV_FXIndex.lua` | REAPER's Developers / Categories / FX Folders metadata |
 | `TS_CV_Channel.lua` | the pinned Channel panel |

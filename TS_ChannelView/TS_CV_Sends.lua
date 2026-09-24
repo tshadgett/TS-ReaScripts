@@ -303,6 +303,7 @@ function SD.draw(ctx, track, avail_h)
   local sends = collapsed and {} or SD.collect(track)
   local w = SD.width(collapsed, #sends, avail_h)
 
+  local sp_x, sp_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "sendspanel", w, avail_h, 0,
     ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
   local req = {}
@@ -362,7 +363,7 @@ function SD.draw(ctx, track, avail_h)
   else
     -- Culled: still occupy the space, or the parent's bounds
     -- never grow past it. See W.child_skipped.
-    W.child_skipped(ctx, w, avail_h)
+    W.child_skipped(ctx, w, avail_h, sp_x, sp_y)
   end
   return w, req
 end

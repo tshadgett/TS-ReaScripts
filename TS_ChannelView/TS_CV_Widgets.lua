@@ -1429,7 +1429,32 @@ end
 --
 -- ...raised from End, hundreds of lines from the child that caused it.
 -- So a skipped child still occupies its space.
-function W.child_skipped(ctx, w, h)
+--
+-- BUT: a BeginChild that returns false is not the no-op it looks like
+-- either. It still runs ITS OWN item-placement bookkeeping before
+-- bailing out -- cursor.x snaps back to the line start and cursor.y
+-- advances by a full line (the child's own height plus item spacing),
+-- exactly as if a normal item had just been placed and closed. That
+-- happens BEFORE we ever get here, so by the time child_skipped runs,
+-- the cursor is sitting one whole row below (and back at column 0 of)
+-- where the caller explicitly parked it with SetCursorPos.
+--
+-- Dummy() has no position argument -- it always submits at the CURRENT
+-- cursor. Call it there unmoved and it lands a second row's worth of
+-- height below the first, and THAT doubled extent is what gets baked
+-- into the window's content size (GetScrollMaxY), not just the single
+-- row the caller asked for. On a horizontally-scrolled row where a
+-- track's own strip only gets culled once it scrolls fully out of the
+-- visible width, this is exactly what turns on a bogus vertical
+-- scrollbar the moment a horizontal one appears: one stray culled child
+-- is enough to double the row's registered height.
+--
+-- So the caller passes the (x, y) it set immediately before its
+-- BeginChild call -- the position the child was actually meant to
+-- occupy -- and this restores it before submitting the placeholder,
+-- cancelling out BeginChild's own phantom advance.
+function W.child_skipped(ctx, w, h, x, y)
+  if x and y then ImGui.SetCursorPos(ctx, x, y) end
   ImGui.Dummy(ctx, math.max(0, w or 0), math.max(0, h or 0))
 end
 
