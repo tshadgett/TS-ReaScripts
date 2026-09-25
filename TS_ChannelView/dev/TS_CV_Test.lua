@@ -150,6 +150,66 @@ check("neither is neither",
       back.controls[1].bipolar == false and back.controls[1].invert == false, true)
 check("and M.copy carries it", M.copy(back).controls[3].invert, true)
 
+-- Bit 2, no-rule (a divider's line, off): the actual bug this guards
+-- against was M.copy's own field list not being updated when no_rule was
+-- added, which silently dropped it on every scratch-copy the editor makes
+-- opening a layout AND on every M.copy the save path itself makes -- so a
+-- saved "no line" divider read back as "line on" the moment the editor
+-- (or materialise, in TS_ChannelView.lua) touched it, not just on disk.
+do
+  local dkey = "DividerLine"
+  M.set(dkey, { controls = {
+    { param = -1, type = "divider", no_rule = true  },
+    { param = -1, type = "divider", no_rule = false },
+  } })
+  M.save()
+  M.reload()
+  local dback = M.get(dkey)
+  check("round-trip no_rule true",  dback.controls[1].no_rule, true)
+  check("round-trip no_rule false", dback.controls[2].no_rule, false)
+  check("M.copy carries no_rule true",  M.copy(dback).controls[1].no_rule, true)
+  check("M.copy carries no_rule false", M.copy(dback).controls[2].no_rule, false)
+  M.remove(dkey); M.save(); M.reload()
+end
+
+-- "stepped" (a knob quantised to the parameter's own step grid, an
+-- alternative to combo's dropdown -- see TS_CV_Widgets.W.knob's
+-- step_norm). A brand new TYPE name, not a flag on an existing one, so the
+-- thing actually worth guarding is VALID_TYPE and M.copy both knowing
+-- about it -- the exact shape of bug no_rule had above, just one type
+-- string short of "silently downgrades to a knob" instead of "silently
+-- drops a flag".
+do
+  local skey = "SteppedType"
+  M.set(skey, { controls = { { param = 2, type = "stepped", label = "Slope" } } })
+  M.save()
+  M.reload()
+  local sback = M.get(skey)
+  check("round-trip stepped type",   sback.controls[1].type, "stepped")
+  check("M.copy carries stepped type", M.copy(sback).controls[1].type, "stepped")
+  M.remove(skey); M.save(); M.reload()
+end
+
+-- "half_gap" has an underscore in its type name, and parse_section's
+-- line pattern used to accept only %a (letters) for the type field --
+-- %a* stops at "_", the whole anchored match then fails, and the
+-- control line is silently dropped on load. Round-tripping through an
+-- actual save+reload (not just M.set/M.get, which never touch the ini
+-- parser) is what catches this; M.copy's field list was never the
+-- issue here since parse_section never got far enough to build the
+-- control at all.
+do
+  local hkey = "HalfGapType"
+  M.set(hkey, { controls = { { param = -1, type = "half_gap", label = "" },
+                             { param = 3, type = "knob", label = "After" } } })
+  M.save()
+  M.reload()
+  local hback = M.get(hkey)
+  check("half_gap control survives save+reload", hback.controls[1] and hback.controls[1].type, "half_gap")
+  check("the control after it survives too",      hback.controls[2] and hback.controls[2].type, "knob")
+  M.remove(hkey); M.save(); M.reload()
+end
+
 -- Bit 0 still means what it always meant, so every layout written
 -- before reverse existed reads back unchanged. This is the old shape,
 -- hand-written into the library the way an existing file has it.

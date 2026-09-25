@@ -20,16 +20,20 @@
       Alias<p> = <your name for parameter p>
       Meter    = <1|0>|<full-scale dB>
 
-  <type> is knob | toggle | combo | blank | divider | half_gap.  "blank"
-  is a deliberate empty cell, so a layout can leave a gap where a hardware
-  strip would have one; "divider" ends the current column and, by
-  default, draws a rule separating one group of controls from the next --
-  bit 2 of the bipolar field (see below) turns the rule off while keeping
-  the column break, for pure spacing between groups that don't need a
-  line between them. "half_gap" staggers the control that follows it
-  half a row down, to mimic the staggered knob layouts some hardware
-  (and hardware-emulation plugins) use -- see P.layout in TS_CV_Panel.lua
-  for how. Column flow only ("row"-flow panels ignore it).
+  <type> is knob | toggle | combo | fader | blank | divider | half_gap.
+  "blank" is a deliberate empty cell, so a layout can leave a gap where a
+  hardware strip would have one; "divider" ends the current column and,
+  by default, draws a rule separating one group of controls from the
+  next -- bit 2 of the bipolar field (see below) turns the rule off
+  while keeping the column break, for pure spacing between groups that
+  don't need a line between them. "half_gap" staggers the control that
+  follows it half a row down, to mimic the staggered knob layouts some
+  hardware (and hardware-emulation plugins) use -- see P.layout in
+  TS_CV_Panel.lua for how. Column flow only ("row"-flow panels ignore
+  it). "fader" is a real parameter, same as knob or toggle, just drawn
+  as a vertical slider that claims a whole column to itself at the
+  panel's full height rather than one CELL_H cell -- see P.layout for
+  how it forces a fresh column the same way a divider does.
 
   An ALIAS renames a parameter for this plugin everywhere -- on every
   panel and in the editor's lists -- which is the fix for plugins whose
@@ -68,8 +72,8 @@ local cache       = {}   -- plugin_key -> parsed layout
 local def_cache   = {}   -- fx guid -> generated default layout
 local dirty       = false
 
-local VALID_TYPE = { knob = true, toggle = true, combo = true,
-                     blank = true, divider = true, half_gap = true }
+local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
+                     fader = true, blank = true, divider = true, half_gap = true }
 
 -- ---------------------------------------------------------------------
 
@@ -93,7 +97,10 @@ local function parse_section(sect)
   while true do
     local raw = sect["Ctl" .. i]
     if not raw then break end
-    local p, t, bi, label = raw:match("^%s*(-?%d+)%s*|%s*(%a*)%s*|%s*(%d*)%s*|?(.*)$")
+    -- Type names can contain an underscore ("half_gap"), so %a alone
+    -- isn't enough -- it stops at the "_" and the whole anchored match
+    -- fails, silently dropping the control line on load. [%a_] covers it.
+    local p, t, bi, label = raw:match("^%s*(-?%d+)%s*|%s*([%a_]*)%s*|%s*(%d*)%s*|?(.*)$")
     if p then
       t = (t ~= "" and VALID_TYPE[t]) and t or "knob"
       -- Field three is a BITMASK, and used to be a plain 0/1 for
@@ -315,7 +322,7 @@ function M.copy(layout)
   end
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
-                        invert = c.invert, label = c.label }
+                        invert = c.invert, no_rule = c.no_rule, label = c.label }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   return out

@@ -8,12 +8,14 @@
 --  [nomain] TS_CV_Channel.lua
 --  [nomain] TS_CV_Config.lua
 --  [nomain] TS_CV_Editor.lua
+--  [nomain] TS_CV_EQPanel.lua
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
 --  [nomain] TS_CV_Gang.lua
 --  [nomain] TS_CV_Mappings.lua
 --  [nomain] TS_CV_Mixer.lua
 --  [nomain] TS_CV_Panel.lua
+--  [nomain] TS_CV_ReaEQ.lua
 --  [nomain] TS_CV_Sends.lua
 --  [nomain] TS_CV_Startup.lua
 --  [nomain] TS_CV_State.lua
@@ -401,8 +403,9 @@ local function panel_menu()
 end
 
 local TYPE_LABELS = { knob = "Knob", toggle = "Button", combo = "Stepped value",
+                      fader = "Fader",
                       blank = "Gap", half_gap = "Half gap", divider = "Divider" }
-local TYPE_ORDER  = { "knob", "toggle", "combo", "blank", "half_gap", "divider" }
+local TYPE_ORDER  = { "knob", "toggle", "combo", "fader", "blank", "half_gap", "divider" }
 
 local function control_menu()
   if not ImGui.BeginPopup(ctx, "ctlmenu") then return end
@@ -566,7 +569,7 @@ end
 
 local function fx_bypass_button(ctx, mid_y)
   if not app.track then return end
-  local on = (reaper.GetMediaTrackInfo_Value(app.track, "I_FXEN") or 1) < 0.5
+  local on = T.chain_bypassed(app.track)
   if mid_y then
     local cx = ImGui.GetCursorScreenPos(ctx)
     ImGui.SetCursorScreenPos(ctx, cx, mid_y - C.ICON_SIZE * 0.5)
@@ -906,11 +909,11 @@ local function panel_row(row_h, row_w)
       if C.ROW_ALIGN == "centre" and #app.chain > 0 then
         local total = C.PANEL_GAP + C.ADD_TILE_W
         for i, fx in ipairs(app.chain) do
-          local lay = layout_for(fx)
+          local lay, k = layout_for(fx)
           local has_meter = M.meter_of(lay) ~= nil
                             and T.reports_gr(app.track, fx.addr, fx.guid)
           total = total + P.width(lay.controls or {}, inner_h,
-                                  St.is_collapsed(fx.guid), has_meter)
+                                  St.is_collapsed(fx.guid), has_meter, k)
           if i > 1 then total = total + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)

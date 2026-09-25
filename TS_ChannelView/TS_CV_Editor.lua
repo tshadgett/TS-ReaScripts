@@ -31,8 +31,8 @@ local ImGui
 
 local TITLE = "Setup Edit Parameters"
 
-local TYPES       = { "knob", "toggle", "combo", "blank", "half_gap", "divider" }
-local TYPES_COMBO = "knob\0toggle\0combo\0blank\0half_gap\0divider\0"
+local TYPES       = { "knob", "toggle", "combo", "stepped", "fader", "blank", "half_gap", "divider" }
+local TYPES_COMBO = "knob\0toggle\0combo\0stepped\0fader\0blank\0half_gap\0divider\0"
 
 local st = {
   open      = false,
@@ -231,7 +231,6 @@ local function draw_assigned(ctx, track, list_w, list_h)
   if ImGui.Button(ctx, "\u{25BC} Down", 62) and sel >= 1 and sel < n then
     move_control(sel, sel + 1)
   end
-  ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Add gap", 60) then
     local at = (sel >= 1 and sel < n) and (sel + 1) or (n + 1)
     table.insert(st.scratch.controls, at,

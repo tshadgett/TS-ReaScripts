@@ -280,6 +280,56 @@ C.FADER_MAX_DB = 12
 -- a cell, since it separates rather than occupies.
 C.DIVIDER_W = 9
 
+-- ---------------------------------------------------------------------
+-- ReaEQ panel -- see TS_CV_ReaEQ.lua / TS_CV_EQPanel.lua.
+-- ---------------------------------------------------------------------
+-- Whenever the plugin mapped to a panel IS ReaEQ, that panel's whole body
+-- becomes the draggable-node curve canvas instead of the ordinary knob
+-- grid -- a fixed width, the same way the grid's width would otherwise
+-- fall out of P.layout, because there's no grid here to measure.
+C.EQ_PANEL_W  = 480
+
+-- The canvas axes. Frequency is drawn log-scaled end to end (a straight
+-- read of what "extremes / a little in / the broad middle" means as
+-- pixel positions); gain is linear, +-EQ_GAIN_RANGE dB top to bottom.
+-- Genuinely large boosts/cuts still draw -- they just run off the top or
+-- bottom of the canvas rather than stretching every ordinary band flat.
+C.EQ_FREQ_LO    = 20
+C.EQ_FREQ_HI    = 20000
+C.EQ_GAIN_RANGE = 18
+
+-- Where a double-click lands a node, by Tim's own description: the
+-- extremes are a pass filter, a little further in is a shelf, and the
+-- broad middle -- low mids to high mids -- is a bell. Four numbers, easy
+-- to retune without hunting through the drawing code for them.
+C.EQ_HP_MAX      = 40      -- below this: high pass
+C.EQ_LOSHELF_MAX = 150     -- below this (and above HP_MAX): low shelf
+C.EQ_HISHELF_MIN = 5000    -- above this (and below LP_MIN): high shelf
+C.EQ_LP_MIN      = 12000   -- above this: low pass
+                            -- between LOSHELF_MAX and HISHELF_MIN: a bell
+
+C.EQ_NODE_R      = 5       -- node marker radius, and roughly its grab size
+C.EQ_CURVE_SEGS  = 160     -- points sampled across the canvas width for
+                            -- each drawn curve -- combined response, each
+                            -- band's own trace, and the live preview
+C.EQ_FILL_STRIDE = 1       -- sample stride of the per-band gradient-fill
+                            -- strips (see EQPanel) -- one rect per sampled
+                            -- point, same as TS_TrackAnalyser's own
+                            -- spectrum fill. Was 3: a flat-topped rect
+                            -- spanning three samples reads as a visible
+                            -- staircase on any part of the curve with real
+                            -- slope (peaks, rolloffs, notches) -- the extra
+                            -- draw calls at 1 are the same order TA already
+                            -- pays per frame for its 256-band fill.
+
+-- Cycled by a band's position in RQ.read's list, so bands keep a stable
+-- colour frame to frame without needing identity beyond that. Spaced by
+-- the golden angle so no two adjacent bands land on similar hues even as
+-- more are added, rather than marching evenly around the wheel and
+-- occasionally producing near-neighbours.
+C.EQ_HUE_START = 200
+C.EQ_HUE_STEP  = 137.5
+
 -- Dragging a panel header past this many pixels starts a reorder rather
 -- than counting as a click.
 C.DRAG_THRESHOLD = 4
@@ -449,6 +499,16 @@ C.PALETTE = {
   bypass_on     = { "alert",   -0.1, 0.645, 0.569 },
   float_on      = { "solid",  -14.0, 0.661, 0.573 },
   fader_cap  = { "tint",   -2.3, 0.196, 0.820 },
+  -- ReaEQ canvas chrome. Grid follows the theme like every other rule in
+  -- the panel; the combined-response curve gets the same accent everything
+  -- else uses for "the one thing that's really happening" (drop_marker,
+  -- strip_sel); the spectrum backdrop is deliberately dim -- it's context
+  -- for the curve, not something competing with it for attention.
+  eq_grid      = { "tint",  0.0, 0.130, 0.230 },
+  eq_grid_0db  = { "tint",  0.0, 0.160, 0.360 },
+  eq_curve     = { "solid", -14.0, 0.661, 0.573 },
+  eq_preview   = { "tint",  0.0, 0.148, 0.500 },
+  eq_spectrum  = { "tint",  0.0, 0.160, 0.220 },
   level_lo   = { "fixed",  130.2, 0.388, 0.475 },
   -- Green below LEVEL_HOT, red at it, a harder red past LEVEL_CLIP.
   -- There was an amber step from -6 up; it was removed because -6 dBFS

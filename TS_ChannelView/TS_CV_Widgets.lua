@@ -212,8 +212,16 @@ end
 -- label     : short name drawn above the knob
 -- value     : 0..1
 -- formatted : the plugin's own value string, drawn below
--- opts      : { bipolar, tooltip, dim }
+-- opts      : { bipolar, tooltip, dim, step_norm }
 -- returns   : changed, value, act   (act = {right_click, double_click})
+--
+-- opts.step_norm -- one step in normalised units (see TS_CV_Panel.step_norm,
+-- the same reading W.combo snaps to) -- turns this into a "stepped knob":
+-- same dial, same drag and wheel gestures, but the value can only land on
+-- the parameter's own discrete positions instead of moving continuously.
+-- For a plugin with a handful of named choices (a slope, a mode) where a
+-- full combo list feels heavier than the panel needs. Falsy/nil (the
+-- default) behaves exactly as before -- a plain continuous knob.
 function W.knob(ctx, id, label, value, formatted, opts)
   opts = opts or {}
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -232,21 +240,36 @@ function W.knob(ctx, id, label, value, formatted, opts)
     double_click = hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
   }
 
+  local st = (opts.step_norm and opts.step_norm > 0) and opts.step_norm or nil
+
   local changed = false
   -- The cell accepts right-clicks so it can raise its context menu, which
   -- also makes IsItemActive true during a right-drag. Only a LEFT drag may
   -- move the value.
   if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     local nv = drag_value(ctx, value)
+    -- Same continuous drag as always, just snapped to the step grid before
+    -- it's compared against the current value -- so it only reports
+    -- "changed" once the drag has actually crossed into the next position,
+    -- the same way turning a hardware detented knob feels.
+    if nv and st then nv = math.max(0, math.min(1, math.floor(nv / st + 0.5) * st)) end
     if nv and nv ~= value then value, changed = nv, true end
     ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
   elseif hovered then
     local wheel = ImGui.GetMouseWheel(ctx)
     if wheel ~= 0 then
-      local mods = ImGui.GetKeyMods(ctx)
-      local step = C.WHEEL_STEP
-      if (mods & ImGui.Mod_Shift) ~= 0 then step = step * C.FINE_MULT end
-      value = math.max(0, math.min(1, value + wheel * step))
+      if st then
+        -- One position per notch, snapping to the grid first so repeated
+        -- notches can't drift off it -- same bump this file's W.combo
+        -- already does for its own wheel handling.
+        local k = math.floor(value / st + 0.5) + (wheel > 0 and 1 or -1)
+        value = math.max(0, math.min(1, k * st))
+      else
+        local mods = ImGui.GetKeyMods(ctx)
+        local step = C.WHEEL_STEP
+        if (mods & ImGui.Mod_Shift) ~= 0 then step = step * C.FINE_MULT end
+        value = math.max(0, math.min(1, value + wheel * step))
+      end
       changed = true
       W.take_wheel()
     end

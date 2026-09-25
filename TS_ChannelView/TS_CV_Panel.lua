@@ -11,18 +11,20 @@
   scrolls sideways instead.
 --]]
 
-local C  = require("TS_CV_Config")
-local U  = require("TS_CV_Util")
-local W  = require("TS_CV_Widgets")
-local T  = require("TS_CV_FXTree")
-local M  = require("TS_CV_Mappings")
-local SC = require("TS_CV_Steps")
-local St = require("TS_CV_State")
+local C   = require("TS_CV_Config")
+local U   = require("TS_CV_Util")
+local W   = require("TS_CV_Widgets")
+local T   = require("TS_CV_FXTree")
+local M   = require("TS_CV_Mappings")
+local SC  = require("TS_CV_Steps")
+local St  = require("TS_CV_State")
+local RQ  = require("TS_CV_ReaEQ")
+local EQP = require("TS_CV_EQPanel")
 
 local P   = {}
 local ImGui
 
-function P.attach(imgui) ImGui = imgui end
+function P.attach(imgui) ImGui = imgui; EQP.attach(imgui) end
 
 -- ---------------------------------------------------------------------
 -- geometry
@@ -80,25 +82,39 @@ end
 -- predict it: it discovers the count the same way it discovers each
 -- control's own position, one item at a time, wrapping to a new column
 -- only when the next item genuinely doesn't fit in the one it's in.
+--
+-- A "fader" SPLITS THE PANEL THE SAME WAY A DIVIDER DOES -- it never
+-- shares a column with anything else -- but unlike a divider it isn't a
+-- rule-only gap: it's a real, drawn control that claims that whole
+-- column for itself, at the panel's full height (half_rows worth,
+-- always -- the same height every OTHER column is merely capped at),
+-- rather than one CELL_H cell among others. So a fader control is
+-- handled at exactly the point a divider already is -- the section
+-- split -- rather than inside either per-section layout path above:
+-- both of those place items ONE CELL AT A TIME within a column a fader
+-- has no business sharing. `splitters` (renamed from the old
+-- `dividers`, now that it holds both kinds) keeps whichever control
+-- opened each split, same as before, so the loop below can ask it
+-- which kind it is.
 function P.layout(controls, panel_h)
   local rows  = P.rows_for(panel_h)
   local half_rows = rows * 2
   local half_h    = C.CELL_H * 0.5
   local items, rules = {}, {}
 
-  -- split the control list at dividers; a leading, trailing or doubled
-  -- divider simply yields an empty section, which costs a rule and no
-  -- columns.
+  -- split the control list at dividers and faders; a leading, trailing
+  -- or doubled one simply yields an empty section in between, which
+  -- costs that splitter's own space and no columns of section content.
   --
-  -- `dividers` keeps the actual divider control alongside each split, in
-  -- step with `sections` (dividers[n] is the one that opened
-  -- sections[n+1]) -- so the loop below can ask THAT divider whether it
-  -- wants its rule drawn, rather than every split looking the same.
-  local sections, dividers, cur = {}, {}, {}
+  -- `splitters` keeps the actual divider/fader control alongside each
+  -- split, in step with `sections` (splitters[n] is the one that opened
+  -- sections[n+1]) -- so the loop below can ask THAT control which kind
+  -- it is, and a divider whether it wants its rule drawn.
+  local sections, splitters, cur = {}, {}, {}
   for _, ctl in ipairs(controls) do
-    if ctl.type == "divider" then
+    if ctl.type == "divider" or ctl.type == "fader" then
       sections[#sections + 1] = cur
-      dividers[#dividers + 1] = ctl
+      splitters[#splitters + 1] = ctl
       cur = {}
     else
       cur[#cur + 1] = ctl
@@ -109,15 +125,26 @@ function P.layout(controls, panel_h)
   local x, deepest = 0, 0
   for si, sec in ipairs(sections) do
     if si > 1 then
-      -- The gap is unconditional -- a no-rule divider still ends the
-      -- column and opens the same C.DIVIDER_W space, it just never adds
-      -- an entry to `rules`, so the draw side (which only walks `rules`)
-      -- has nothing left to draw for this one.
-      local div = dividers[si - 1]
-      if not (div and div.no_rule) then
-        rules[#rules + 1] = x + C.DIVIDER_W * 0.5
+      local sp = splitters[si - 1]
+      if sp.type == "fader" then
+        -- Placed here, at the split, rather than inside either
+        -- per-section path below -- see the comment above P.layout.
+        -- Full height always: a fader is the one item in this file
+        -- that isn't capped by `deepest`, it SETS it, the same way it
+        -- would set panel_h if it were the only thing on the panel.
+        items[#items + 1] = { ctl = sp, x = x, y = 0 }
+        if half_rows > deepest then deepest = half_rows end
+        x = x + C.CELL_W
+      else
+        -- The gap is unconditional -- a no-rule divider still ends the
+        -- column and opens the same C.DIVIDER_W space, it just never adds
+        -- an entry to `rules`, so the draw side (which only walks `rules`)
+        -- has nothing left to draw for this one.
+        if not sp.no_rule then
+          rules[#rules + 1] = x + C.DIVIDER_W * 0.5
+        end
+        x = x + C.DIVIDER_W
       end
-      x = x + C.DIVIDER_W
     end
 
     local has_gap = false
@@ -180,8 +207,13 @@ function P.layout(controls, panel_h)
            height = math.max(1, math.min(half_rows, deepest)) * half_h }
 end
 
-function P.width(n_or_controls, avail_h, collapsed, has_meter)
+-- `key` is optional (existing callers that only ever draw a plain grid
+-- don't have to pass one) and only ever matters for one thing: a ReaEQ
+-- panel isn't a grid at all, so none of the layout below applies to it --
+-- it gets a fixed canvas width instead. See TS_CV_EQPanel.lua.
+function P.width(n_or_controls, avail_h, collapsed, has_meter, key)
   if collapsed then return C.COLLAPSED_W end
+  if key and RQ.is_eq(key) then return C.EQ_PANEL_W end
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -363,9 +395,18 @@ end
 local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   local h = C.HEADER_H
   local dragging = req.is_drag_source
+  -- A plugin can read as bypassed for either of two independent reasons:
+  -- its own enabled flag is off, or the whole chain is (T.chain_bypassed,
+  -- I_FXEN) -- the latter doesn't touch any one FX's own enabled state, so
+  -- without this a panel would keep its plain header even while every FX
+  -- on the track, itself included, is silently doing nothing. Only the
+  -- tint follows the chain state here: `enabled` itself stays exactly what
+  -- it was (this FX's own flag), since that's still what the bypass button
+  -- toggles and what its tooltip and icon state describe.
+  local tint_bypassed = (not enabled) or T.chain_bypassed(track)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h,
     dragging and C.COL.header_drag
-      or (enabled and C.COL.header_bg or C.COL.header_bg_byp), 0)
+      or (tint_bypassed and C.COL.header_bg_byp or C.COL.header_bg), 0)
   ImGui.DrawList_AddLine(dl, x, y + h, x + w, y + h, C.COL.panel_border, 1.0)
 
   local btn = C.ICON_SIZE
@@ -643,10 +684,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       -- is flipped on the way in and flipped back on the way out, so
       -- every widget, tooltip and default below deals in what the
       -- control shows and the plugin only ever sees its own numbers.
-      -- Knobs and toggles only -- a combo's steps are positions in the
-      -- plugin's own scale, and mirroring those means mirroring the
-      -- list, which is a different job.
-      local rev      = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle")
+      -- Knobs, stepped knobs and toggles only -- a combo's steps are
+      -- positions in the plugin's own scale, and mirroring those means
+      -- mirroring the list, which is a different job. A stepped knob
+      -- turns like a knob (see W.knob's step_norm), not a list, so it
+      -- reverses the same way a plain one does.
+      local rev      = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle"
+                                        or ctl.type == "stepped")
       local raw      = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
       local value    = rev and (1 - raw) or raw
       local shown    = U.fmt_value(track, fx.addr, p)
@@ -674,6 +718,34 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             pending_open[id] = true
           end
         end
+      elseif ctl.type == "fader" then
+        -- A fader's item already claims a whole column at the panel's
+        -- full height (see P.layout) -- SetCursorScreenPos above put the
+        -- cursor at its top-left for that reason, but W.fader wants an
+        -- explicit rect of its own rather than the ambient cursor, so
+        -- it's recomputed here from the same item.x/item.y. Centred at
+        -- C.FADER_W within the column, the same width the channel
+        -- strip's own fader uses, rather than stretched to the full
+        -- CELL_W -- a fader needs a defined width to grab, not a whole
+        -- cell. `value` is the plain normalized parameter (rev already
+        -- applied above), not REAPER's volume taper -- there is no
+        -- taper to speak of for an arbitrary plugin parameter, and
+        -- W.fader doesn't care what 0..1 means, only that the caller
+        -- does.
+        local fx0 = gx0 + item.x + (C.CELL_W - C.FADER_W) * 0.5
+        local fy0 = gy0 + item.y
+        changed, nv, act = W.fader(ctx, id, fx0, fy0, C.FADER_W, lay.height,
+          value, label .. "   " .. shown, ctl.bipolar and 0.5 or nil, false)
+      elseif ctl.type == "stepped" then
+        -- Same dial as a plain knob, just quantised to the parameter's own
+        -- step grid -- see W.knob's own header for why this needs nothing
+        -- from the (separate, sweep-and-cache) combo_steps machinery: the
+        -- step SIZE is a cheap, un-cached native read, and the readout
+        -- text above is already the plugin's own formatted value for any
+        -- control type, choice name included.
+        changed, nv, act = W.knob(ctx, id, label, value, shown,
+          { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
+            step_norm = step_norm(track, fx.addr, p, key) })
       else
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr) })
@@ -707,9 +779,13 @@ end
 function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local req = { is_drag_source = is_drag_source }
   local collapsed = St.is_collapsed(fx.guid)
-  local meter = M.meter_of(layout)
+  local is_eq = RQ.is_eq(key)
+  -- ReaEQ has nothing to meter -- T.reports_gr would already say no for
+  -- it, but skipping the check entirely is one fewer FX-parameter scan
+  -- for the one plugin type that's never going to answer yes.
+  local meter = (not is_eq) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
-  local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil)
+  local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key)
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
@@ -730,8 +806,15 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
       draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
     else
       draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
-      draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
-                    key, req, meter)
+      if is_eq then
+        -- The whole body becomes the draggable-node curve canvas rather
+        -- than the ordinary parameter grid -- Tim's call: a ReaEQ panel
+        -- IS the EQ view, not a grid you can optionally switch away from.
+        EQP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H, track, fx, req)
+      else
+        draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
+                      key, req, meter)
+      end
     end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)

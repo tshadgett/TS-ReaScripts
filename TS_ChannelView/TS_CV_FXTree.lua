@@ -133,6 +133,16 @@ function T.set_enabled(track, addr, on)
   pcall(reaper.TrackFX_SetEnabled, track, addr, on)
 end
 
+-- The whole track's FX chain can be bypassed at once (I_FXEN), independent
+-- of any single plugin's own enabled state -- see TS_ChannelView.lua's
+-- fx_bypass_button for the control that flips it, and TS_CV_Panel.lua's
+-- draw_header for where a panel's own header reflects it.
+function T.chain_bypassed(track)
+  local pok, val = pcall(reaper.GetMediaTrackInfo_Value, track, "I_FXEN")
+  if pok and val then return val < 0.5 end
+  return false
+end
+
 -- The GUID of whatever currently sits at `addr`. An FX address is a
 -- POSITION, so it stops meaning the same plugin the moment anything is
 -- moved or deleted -- in this window or in REAPER's own FX chain. This is
