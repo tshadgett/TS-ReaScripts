@@ -34,9 +34,8 @@ SU.BEGIN = "-- >>> ChannelView (added by TS_ChannelView.lua)"
 SU.END   = "-- <<< ChannelView"
 
 -- The markers are full of Lua pattern metacharacters -- ( ) - . > -- so
--- they cannot be used as patterns raw. Matching them unescaped is what
--- made Track Analyser report a block it had just written as somebody
--- else's hand-edit.
+-- they cannot be used as patterns raw. Matching them unescaped would make
+-- the script misread its own fenced block as a hand-edit.
 local function esc(s) return (s:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")) end
 local BEGIN_PAT, END_PAT = esc(SU.BEGIN), esc(SU.END)
 

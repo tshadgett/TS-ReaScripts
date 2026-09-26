@@ -184,8 +184,9 @@ local function rescan(force)
   -- moved it. Throwing away the caches is a separate matter, and must
   -- follow the chain actually CHANGING -- REAPER's project change count
   -- moves on every parameter write, so a forced rescan happens on every
-  -- frame of every knob drag, and clearing there reset the meters' peak
-  -- hold and re-anchored the tooltip to the pointer sixty times a second.
+  -- frame of every knob drag, and clearing there would reset the meters'
+  -- peak hold and re-anchor the tooltip to the pointer sixty times a
+  -- second.
   local moved = (h ~= app.chain_hash)
   if force or moved then
     app.chain, app.chain_hash = list, h
@@ -1098,12 +1099,11 @@ local function frame()
       -- rule sits at WindowPadding.y + a frame-height header row +
       -- ItemSpacing.y below the window top.
       --
-      -- Every previous attempt at this failed the same way: it needed
-      -- WindowPadding.y, and there is no GetStyleVar in this build, so
-      -- the number got written down -- ImGui's default, then a measured
-      -- guess, then MenuBarHeight worked back from the font. All three
-      -- were wrong, because ReaImGui's defaults are not ImGui's and its
-      -- menu bar is not FontSize + 2*FramePadding either.
+      -- WindowPadding.y is not available through GetStyleVar in this
+      -- build, and there is no fixed value to assume in its place:
+      -- ReaImGui's own defaults don't match Dear ImGui's, and its menu
+      -- bar isn't FontSize + 2*FramePadding either, so neither an
+      -- assumed constant nor a MenuBarHeight-based estimate holds up.
       --
       -- So it is MEASURED, from three things the window will tell us:
       --
@@ -1125,21 +1125,12 @@ local function frame()
 
       local ry = wy + win_pad + ImGui.GetFrameHeight(ctx) + def_isy
                  + C.HEADER_NUDGE
-      -- Clamped to the content start, never to our own cursor further
-      -- down: the cursor is what this is correcting for.
-      -- Clamped to the WINDOW, and to nothing else.
-      --
-      -- It used to be clamped to the content start, which sounded
-      -- careful and was in fact the bug: our content begins BELOW the
-      -- menu bar, TA's rule sits above where ours would, so the clamp
-      -- fired every frame and quietly replaced the answer with the
-      -- cursor. The metrics said it plainly -- computed 26.5, "the rule
-      -- went to 36.5" -- and a HEADER_NUDGE of -6 had no effect at all,
-      -- which is what a fudge sitting behind a clamp looks like.
-      --
-      -- So the rule is allowed to sit a few pixels up into the menu
-      -- bar's lower margin, which is empty space under the labels, and
-      -- is exactly where Track Analyser's lands.
+      -- Clamped to the WINDOW position, never to the content start: the
+      -- content area begins below the menu bar, but the rule is meant
+      -- to sit a few pixels up into the menu bar's lower margin --
+      -- empty space under the labels -- which is exactly where Track
+      -- Analyser's own rule lands. Clamping to content start instead
+      -- would push the rule down below the menu bar.
       ry = math.max(ry, wy)
 
       track_rule(dl, cx, ry, rule_w)
@@ -1169,20 +1160,17 @@ local function frame()
     -- reserved ALWAYS now, not only on a frame the row's content
     -- actually overflows (see MX.row_pad_y) -- so this is one constant,
     -- the same in both views,
-    -- rather than something worked out from row content width versus
-    -- the window's, which is what used to make this need "trackrow"'s
-    -- own live bookkeeping: bookkeeping that isn't available yet here
+    -- rather than something computed from trackrow's own content width
+    -- versus the window's -- that bookkeeping isn't available here
     -- anyway, since "trackrow" doesn't exist until after these panels
     -- do, so their height has to be decided before it can be asked.
     --
     -- MX.row_pad_y is called exactly HERE, once per frame, and its
     -- result is handed into every MX.draw_row call below rather than
-    -- measured a second time in there. It used to be a second copy in
-    -- MX.draw_row too -- which wasn't just redundant: row_pad_y's probe
-    -- is a stable, reused child id, and reopening the same child id a
-    -- second time in the same frame is undefined enough to plausibly
-    -- explain "we've reserved almost double what the scrollbar needs"
-    -- on its own (see row_pad_y). One call, one number, handed down.
+    -- measured a second time in there: row_pad_y's probe is a stable,
+    -- reused child id, and reopening the same child id twice in one
+    -- frame is undefined and can double-count the reserved padding.
+    -- One call, one number, handed down.
     local child_pad_y = MX.row_pad_y(ctx, win_pad_x)
 
     -- There is a SECOND gap neither child_pad_y nor either panel's own
@@ -1216,17 +1204,14 @@ local function frame()
     -- lands ITS OWN "trackrow" child at exactly the height mixer view's
     -- gets for the same track -- not merely enough for the name button
     -- (STRIP_H - 8 tall, see name_button) to fit inside it without a
-    -- scrollbar, which is the weaker thing this used to solve for.
+    -- scrollbar.
     --
-    -- It used to subtract a literal 8 here -- the button's own height
-    -- offset, reused by coincidence rather than by reason. The button
-    -- fit either way, so nothing here ever grew a scrollbar, and the
-    -- only symptom was row_h below landing a few pixels taller than
-    -- mixer view's strip: row_h spends spacing_y once, to clear the gap
-    -- ImGui puts above this row (see spacing_y above), and this is the
-    -- other side of that same ledger entry -- what it has to give back
-    -- is spacing_y, not an unrelated constant that only ever happened
-    -- to equal it back when STRIP_H's padding was first chosen.
+    -- What gets subtracted here is spacing_y, not the button's own
+    -- height offset (a coincidentally similar constant): row_h below
+    -- spends spacing_y once, to clear the gap ImGui puts above this row
+    -- (see spacing_y above), and strip_h has to give back that same
+    -- amount for row_h + spacing_y + strip_h to land on avail_h
+    -- exactly, matching mixer view's total for the same track.
     local strip_h = (C.STRIP_H - spacing_y) + child_pad_y
 
     -- And row_h (the Channel/plugin-row/Sends height) is everything
@@ -1349,12 +1334,12 @@ local function frame()
 end
 
 -- A runtime error inside a deferred function is reported by REAPER with
--- the file and line it happened ON -- which, when a nil is handed to a
--- drawing helper, names the helper rather than the caller that produced
--- the nil. That is the hard part of every bug this window has had, so the
--- loop runs through xpcall: the console gets a full traceback naming
--- every frame on the way down, the layouts are saved, and the loop stops
--- rather than throwing the same error sixty times a second.
+-- only the file and line it happened ON -- which, when a nil is handed to
+-- a drawing helper, names the helper rather than the caller that produced
+-- the nil. The loop runs through xpcall instead: the console gets a full
+-- traceback naming every frame on the way down, the layouts are saved,
+-- and the loop stops rather than throwing the same error sixty times a
+-- second.
 function safe_frame()
   local ok, err = xpcall(frame, function(e)
     return debug.traceback(tostring(e), 2)

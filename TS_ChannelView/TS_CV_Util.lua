@@ -16,8 +16,6 @@ function U.trim(s)
   return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
--- Shorten to `n` characters with a trailing ellipsis. Used for panel
--- headers and knob labels, where the cell width is fixed.
 -- Greedy word wrap, for the odd multi-line note in a menu. Menus have no
 -- width to wrap against, so the column count is given rather than
 -- measured -- these notes are fixed strings, not user text.
@@ -38,6 +36,8 @@ function U.wrap_note(text, cols)
   return table.concat(out, "\n")
 end
 
+-- Shorten to `n` characters with a trailing ellipsis. Used for panel
+-- headers and knob labels, where the cell width is fixed.
 function U.truncate(s, n)
   s = tostring(s or "")
   if #s <= n then return s end

@@ -237,12 +237,10 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey)
     end
   end
 
-  -- Under the meter: the level, in dB. It used to be the strip's name
-  -- run down the bar, and at thirty pixels wide with twenty to spare
-  -- there was room for exactly one stacked letter -- so what it
-  -- actually showed, always, was a single ellipsis. The name is in the
-  -- track list directly below; the number is the thing you collapsed
-  -- the strip to keep an eye on.
+  -- Under the meter: the level, in dB, not the track's name -- the name
+  -- is already shown in the track list directly below, and at thirty
+  -- pixels wide there isn't room to run it down the bar legibly anyway.
+  -- The number is the thing you collapsed the strip to keep an eye on.
   local vt = U.db_text(vol)
   local tw = ImGui.CalcTextSize(ctx, vt)
   ImGui.DrawList_AddText(dl, cx - tw * 0.5, y + h - 16, C.COL.value, vt)
@@ -410,16 +408,14 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
 
     -- Peak on the first line, RMS on the second, and ONE COLUMN PER
     -- CHANNEL, each centred under the bar it is about -- a stereo track
-    -- has two levels and printing the louder one on its own was a
-    -- number you could not act on, since it never said which side it
-    -- came from.
+    -- has two levels, and a single combined figure wouldn't say which
+    -- side it came from.
     --
-    -- In the smaller face, because two columns of "-12.3" do not fit a
-    -- fifty-pixel column at the body size, and a readout is the one
-    -- place where a smaller face costs nothing. The RMS line dropped
-    -- its trailing "r": with two columns that was two more marks for
-    -- something the colour and the position already say, and the
-    -- tooltip names them outright.
+    -- Shown in the smaller face, because two columns of "-12.3" don't fit
+    -- a fifty-pixel column at the body size, and a readout is the one
+    -- place where a smaller face costs nothing. The RMS figure carries no
+    -- trailing "r": with two columns already in play, the colour and the
+    -- position say enough, and the tooltip names them outright.
     W.push_small(ctx)
     local _, rh = ImGui.CalcTextSize(ctx, "0")
     local mbl = mx + 1.5                          -- the bars' own left

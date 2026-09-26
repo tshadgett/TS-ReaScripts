@@ -15,8 +15,7 @@
   Filter and search compose: pick FabFilter, then type "pro" to narrow to
   their Pro- series.
 
-  Two details carried over from Plugin Rack.lua -- my own earlier,
-  unreleased script -- both learned the hard way there:
+  Two implementation details worth knowing:
 
     * Insert by `ident`, never by display name. EnumInstalledFX hands back
       a type-prefixed identifier precisely so it round-trips into
@@ -30,7 +29,6 @@
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local IX = require("TS_CV_FXIndex")
-local W  = require("TS_CV_Widgets")   -- for child_skipped only
 
 local B = {}
 local ImGui
@@ -561,12 +559,6 @@ function B.draw(ctx, track)
         end
       end
       ImGui.EndChild(ctx)
-    else
-      -- Culled: still occupy the space, or the parent's bounds never grow
-      -- past it and the Add / Cancel row below lands in the wrong place.
-      -- See W.child_skipped.
-      local aw, ah = ImGui.GetContentRegionAvail(ctx)
-      W.child_skipped(ctx, aw, math.max(0, ah - 30))
     end
 
     if ImGui.Button(ctx, "Add", 90) then

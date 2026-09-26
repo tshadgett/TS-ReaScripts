@@ -293,46 +293,39 @@ end
 -- deferred, cross-frame binary-search correction for a just-created
 -- band's gain and Q.
 --
--- RQ.add_band's own real-value writes for gain and Q both land wrong
--- (see its header): a positive gain overshoots, a negative gain always
--- pins to exactly 0dB (not "wrong", the same fixed value every time),
--- and Q comes out inverted. A whole half of the range collapsing to one
--- fixed value is a clamp signature, not a scale or sign error -- the
--- working theory is that SetEQParam's "real" value (isnorm=false) for
--- gain/Q on this native effect is silently treated AS IF it were
--- normalized (0..1), unlike freq, which genuinely takes real Hz. So
--- rather than guess further at what the real-value write actually means
--- (two wrong guesses already: a linear correction at gain alone, and
--- freq's own earlier one), this measures its way there: write a
--- candidate value IN THE [0,1] BRACKET (see the job-scheduling site in
--- EQP.draw -- that's where `lo`/`hi` are set, not here), read back what
--- it actually produced (RQ.read -- trusted; see its header, and
--- confirmed live down to the pixel for both freq and gain), and narrow
--- in via RQ.eq_search_narrow until the read-back value is within
--- tolerance of the target. job.target itself stays in real dB/Q units
--- throughout -- only the written-value bracket is [0,1]. This doesn't
--- assume which way increasing the written value moves the reading --
--- the first two steps probe the search bounds to establish that
+-- RQ.add_band's real-value (isnorm=false) writes for gain and Q on this
+-- native effect are unreliable (see its header): a positive gain
+-- overshoots, a negative gain always pins to exactly 0dB, and Q comes
+-- out inverted. This is consistent with SetEQParam's "real" value for
+-- gain/Q being silently treated as if it were normalized (0..1) on this
+-- effect, unlike freq, which genuinely takes real Hz.
+--
+-- Rather than rely on a fixed correction formula, this corrects by
+-- measurement: write a candidate value IN THE [0,1] BRACKET (see the
+-- job-scheduling site in EQP.draw, where `lo`/`hi` are set), read back
+-- what it actually produced via RQ.read (see its header), and narrow in
+-- via RQ.eq_search_narrow until the read-back value is within tolerance
+-- of the target. job.target itself stays in real dB/Q units throughout
+-- -- only the written-value bracket is [0,1]. This doesn't assume which
+-- way increasing the written value moves the reading -- the first two
+-- steps probe the search bounds to establish that
 -- (RQ.eq_search_direction), whichever way it goes.
 --
 -- One step per real UI frame, against `bands` -- the read EQP.draw
 -- already does every frame regardless, so this adds nothing beyond the
--- correction writes themselves, and keeps every read well clear of the
--- same-script-tick lag that sank an earlier version of this fix (see
--- RQ.add_band's header): freq already reads back correctly starting the
--- frame after creation, not the same frame, and by the time this is
--- running at all, at least one frame has already passed.
+-- correction writes themselves. freq reads back correctly starting the
+-- frame after creation, not the same frame, so this only needs to start
+-- running once at least one frame has passed.
 --
 -- `ps.eq_fix` is a small queue (a fresh band schedules up to two jobs --
 -- gain and Q). Every job in it advances one step EVERY frame, not just
 -- the front one -- they write different paramtypes (or different bands
 -- entirely, if a second double-click lands while the first is still
--- converging) so there's no reason for one to wait on another, and doing
--- gain and Q at the same time instead of back to back was the other half
--- of "creation takes up to 2 seconds to settle" (the SETTLE_FRAMES cut
--- above was the first half). A job that's still waiting on a band that
--- hasn't shown up yet (see the `not b` branch just below) simply doesn't
--- block whichever other job in the queue already can run.
+-- converging) so there's no reason for one to wait on another; running
+-- gain and Q concurrently rather than back to back roughly halves how
+-- long a fresh band takes to settle. A job that's still waiting on a
+-- band that hasn't shown up yet (see the `not b` branch just below)
+-- simply doesn't block whichever other job in the queue already can run.
 -- ---------------------------------------------------------------------
 
 -- Advances one job by one step. Returns true once the job is finished
@@ -344,41 +337,24 @@ local function advance_eq_fix_job(track, addr, bands, job)
     return job.tries > 180   -- a few seconds, give up
   end
 
-  -- WHICH WRITE FUNCTION, round three, and this one's conclusive rather
-  -- than inferred. The SETTLE_FRAMES trace (see chat) ruled out timing
-  -- entirely: gain sat at the EXACT same -inf for over 90 straight frames
-  -- no matter what was written -- including written=1, held for dozens of
-  -- frames -- and Q sat at the EXACT same 1.0 just as long. Not "slow to
-  -- update" -- reaper.TrackFX_SetParamNormalized simply never changed
-  -- anything this read path could see, at any point in that trace. What
-  -- both traces actually show is add_band's own leftover value from
-  -- BEFORE eq_fix_step ever touched either parameter, frozen, because
-  -- nothing after it landed.
-  --
-  -- SetEQParam's isnorm=false write, by contrast, demonstrably DOES
-  -- change real state (that's how the -inf-floor / 0dB-ceiling shape of
-  -- its range got mapped out at all) -- it just only reaches the cut side
-  -- of it. The one combination never actually tried until now is that
-  -- same function with isnorm=TRUE: a real, intentional normalized write
-  -- through the call already confirmed to update immediately, rather
-  -- than either a coerced isnorm=false or a generic paramidx call this
-  -- native effect ignores outright.
+  -- Written through TrackFX_SetEQParam with isnorm=true: a normalized
+  -- write through the EQ-specific call, which this native effect (ReaEQ)
+  -- honours and updates on the very next read for both gain and Q.
+  -- reaper.TrackFX_SetParamNormalized and a generic paramidx call do not
+  -- reliably update these params on this effect; SetEQParam's real-value
+  -- (isnorm=false) form does change state, but only usably on the cut
+  -- side of the range (see the note above on why the [0,1] bracket is
+  -- used instead).
   local function write(norm)
     reaper.TrackFX_SetEQParam(track, addr, job.bandtype, job.bandidx, job.paramtype, norm, true)
   end
 
   local value = (job.paramtype == 1) and (b.gain or 0) or (b.q or 1.0)
 
-  -- SETTLING TIME. One frame -- confirmed via live debug tracing (now
-  -- pulled; see git history if it's ever needed again) that a
-  -- TrackFX_SetEQParam(isnorm=true) write is reliably visible on the very
-  -- next read, for both gain and Q. The previous margin of 2 frames per
-  -- step, times ~13 steps per job (two probes plus up to 11 search
-  -- iterations to close a 60dB/20Q range to tolerance), times two jobs
-  -- run back to back for a fresh band, was the whole of the "creation
-  -- takes up to 2 seconds to settle" complaint -- this alone cuts that
-  -- roughly in half, and the per-frame ShowConsoleMsg that used to run
-  -- alongside it (now pulled) was adding real overhead on top of that.
+  -- SETTLING TIME. One frame is enough: a TrackFX_SetEQParam(isnorm=true)
+  -- write is reliably visible on the very next read, for both gain and Q,
+  -- so there's no need to wait any longer before reading back a probe or
+  -- search step.
   local SETTLE_FRAMES = 1
 
   local function settled()
@@ -518,11 +494,11 @@ function EQP.draw(ctx, dl, x, y, w, h, track, fx, req)
   --
   -- That "later wins" behaviour isn't the default, though -- it only
   -- applies once the EARLIER, larger item has explicitly said it's fine
-  -- for something else to claim the same pixels. Without this, the
-  -- background button owns every pixel of the canvas for itself and the
-  -- node buttons drawn afterward never see a click or a drag at all,
-  -- which is exactly the bug this fixes. W.knob and friends all do the
-  -- same thing for exactly this reason -- see W.allow_overlap.
+  -- for something else to claim the same pixels. Without this call, the
+  -- background button would own every pixel of the canvas for itself,
+  -- and the node buttons drawn afterward would never see a click or a
+  -- drag. W.knob and friends all do the same thing for exactly this
+  -- reason -- see W.allow_overlap.
   W.allow_overlap(ctx)
   ImGui.SetCursorScreenPos(ctx, gx0, gy0)
   ImGui.InvisibleButton(ctx, "eqbg##" .. fx.guid, gw, gh,
@@ -543,25 +519,18 @@ function EQP.draw(ctx, dl, x, y, w, h, track, fx, req)
       if not ok then
         ps.add_failed_t = reaper.time_precise()
       else
-        -- Both the band's own gain and Q writes are known wrong -- see
+        -- Both the band's own gain and Q writes need correcting -- see
         -- eq_fix_step. The search brackets below are [0,1], not the real
         -- dB/Q range: on this native effect, TrackFX_SetEQParam's
-        -- "real value" (isnorm=false) for gain/Q appears to be silently
-        -- treated AS IF it were normalized (0..1) -- unlike freq, which
-        -- genuinely takes real Hz. That explains every symptom seen:
-        -- positive gain worked by coincidence (real dB range overlaps
-        -- [0,1] on the boost side), negative gain always pinned to the
-        -- exact same value (the floor of a clamped range, not "wrong
-        -- scale"), and Q reading "reversed" (a search almost entirely
-        -- outside the one sliver of input space that's actually live).
-        -- So: search [0,1] as the WRITTEN-value bracket; job.target
+        -- "real value" (isnorm=false) for gain/Q is treated as if it were
+        -- normalized (0..1), unlike freq, which genuinely takes real Hz.
+        -- So [0,1] is searched as the WRITTEN-value bracket; job.target
         -- stays in real dB/Q units throughout, compared against the
         -- trusted real-unit read-back -- eq_fix_step itself needs no
         -- change, only where each job starts its search.
-        -- Gain is skipped when it's already 0: there's nothing a
-        -- clamp bug could do to a value that's already 0. Q always
-        -- gets queued -- every band gets a real target Q
-        -- (RQ.DEFAULT_Q), never "leave it wherever".
+        -- Gain is skipped when it's already 0: a value that's already 0
+        -- needs no correction. Q always gets queued -- every band gets a
+        -- real target Q (RQ.DEFAULT_Q), never left wherever it landed.
         ps.eq_fix = ps.eq_fix or {}
         if preview_gain ~= 0 then
           ps.eq_fix[#ps.eq_fix + 1] = { bandtype = abt, bandidx = abi, paramtype = 1,
@@ -616,13 +585,11 @@ function EQP.draw(ctx, dl, x, y, w, h, track, fx, req)
       -- math, same clamp the curve trace already applies per sample in
       -- sample_curve, so a fully-cut band's node pins at the canvas edge
       -- instead of handing ImGui a non-finite coordinate. For a band type
-      -- with no gain axis of its own, ReaEQ's reported "gain" for it isn't
-      -- meaningful curve-wise, and trusting it here was pinning the node
-      -- off at whatever that value happened to clamp to -- often flush
-      -- against the very top or bottom edge, where it read as no handle
-      -- at all rather than just a node sitting at an odd height. Those
-      -- band types pin to the 0dB centre line instead, matching that they
-      -- don't move on the gain axis in the drag handler below either.
+      -- with no gain axis of its own, ReaEQ's reported "gain" for it
+      -- isn't meaningful curve-wise, so those band types (hipass, lopass,
+      -- notch, bandpass) pin their node to the 0dB centre line instead of
+      -- using that value -- matching that they don't move on the gain
+      -- axis in the drag handler below either.
       local node_db = has_gain
         and math.max(-C.EQ_GAIN_RANGE * 1.5, math.min(C.EQ_GAIN_RANGE * 1.5, b.gain or 0))
         or 0

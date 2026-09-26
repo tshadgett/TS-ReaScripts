@@ -29,10 +29,10 @@ function P.attach(imgui) ImGui = imgui; EQP.attach(imgui) end
 -- ---------------------------------------------------------------------
 -- geometry
 -- ---------------------------------------------------------------------
--- One layout pass, used by BOTH the width calculation and the draw. They
--- used to compute columns separately and disagreed once already, which
--- put controls outside their own panel border; dividers make that far
--- easier to get wrong, so there is now exactly one place that decides.
+-- One layout pass, used by BOTH the width calculation and the draw. Computing
+-- columns separately for each would risk the two disagreeing, which would put
+-- controls outside their own panel border; dividers make that easy to get
+-- wrong, so there is exactly one place that decides.
 
 -- How many rows fit in a panel of `panel_h`.
 function P.rows_for(panel_h)
@@ -92,10 +92,9 @@ end
 -- handled at exactly the point a divider already is -- the section
 -- split -- rather than inside either per-section layout path above:
 -- both of those place items ONE CELL AT A TIME within a column a fader
--- has no business sharing. `splitters` (renamed from the old
--- `dividers`, now that it holds both kinds) keeps whichever control
--- opened each split, same as before, so the loop below can ask it
--- which kind it is.
+-- has no business sharing. `splitters` keeps whichever control (divider
+-- or fader) opened each split, so the loop below can ask it which kind
+-- it is.
 function P.layout(controls, panel_h)
   local rows  = P.rows_for(panel_h)
   local half_rows = rows * 2
@@ -155,9 +154,9 @@ function P.layout(controls, panel_h)
     end
 
     if not has_gap then
-      -- Unchanged from before half_gap existed -- see the comment above
-      -- P.layout for why this stays the fast, already-proven path for
-      -- every section that has no reason to take the other one.
+      -- The plain arithmetic path -- see the comment above P.layout. Used
+      -- for every section that has no half_gap in it, since every item
+      -- costs the same slot and the column count can be computed directly.
       local n    = #sec
       local cols = math.ceil(n / rows)
       for i, ctl in ipairs(sec) do
@@ -244,9 +243,8 @@ local function step_norm(track, addr, param, key)
   local v = step_cache[ck]
   if v ~= nil then return v end
   local ok, step = reaper.TrackFX_GetParameterStepSizes(track, addr, param)
-  -- GetParamEx returns the VALUE first, then min/max/mid. Getting this
-  -- wrong here made every stepped parameter look like it had no step at
-  -- all, which is why clicking one appeared to do nothing.
+  -- GetParamEx returns the VALUE first, then min/max/mid -- mixing up the
+  -- argument order silently breaks step detection for every parameter.
   local _, minv, maxv = reaper.TrackFX_GetParamEx(track, addr, param)
   local out = false
   if ok and step and step > 0 and minv and maxv and maxv > minv then
@@ -664,11 +662,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       --
       -- The cursor is already at this item's own cell -- SetCursorScreenPos
       -- above, from item.x/item.y, positions every item in lay.items the
-      -- same way regardless of which branch below actually draws it. This
-      -- used to reposition it a second time from `col`/`row`, a stray pair
-      -- of GLOBALS that exist only inside P.layout's own loop (see there),
-      -- not here -- every out-of-range parameter cell threw this exact
-      -- "arithmetic on a nil value" the moment it was reached.
+      -- same way regardless of which branch below actually draws it; this
+      -- branch must not try to recompute a position from `col`/`row`, which
+      -- are local to P.layout's own loop and don't exist here.
       local px, py = ImGui.GetCursorScreenPos(ctx)
       ImGui.InvisibleButton(ctx, id, C.CELL_W, C.CELL_H)
       W.tip(ctx, "oob" .. id, ("parameter %s is out of range for this plugin")
@@ -808,8 +804,8 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
       draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
       if is_eq then
         -- The whole body becomes the draggable-node curve canvas rather
-        -- than the ordinary parameter grid -- Tim's call: a ReaEQ panel
-        -- IS the EQ view, not a grid you can optionally switch away from.
+        -- than the ordinary parameter grid: a ReaEQ panel IS the EQ view,
+        -- not a grid you can optionally switch away from.
         EQP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H, track, fx, req)
       else
         draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,

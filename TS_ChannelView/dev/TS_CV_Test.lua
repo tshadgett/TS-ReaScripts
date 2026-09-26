@@ -150,12 +150,12 @@ check("neither is neither",
       back.controls[1].bipolar == false and back.controls[1].invert == false, true)
 check("and M.copy carries it", M.copy(back).controls[3].invert, true)
 
--- Bit 2, no-rule (a divider's line, off): the actual bug this guards
--- against was M.copy's own field list not being updated when no_rule was
--- added, which silently dropped it on every scratch-copy the editor makes
--- opening a layout AND on every M.copy the save path itself makes -- so a
--- saved "no line" divider read back as "line on" the moment the editor
--- (or materialise, in TS_ChannelView.lua) touched it, not just on disk.
+-- Bit 2, no_rule (a divider's line, off), must survive both the ini
+-- round trip and M.copy. M.copy's own field list has to be kept in sync
+-- with every control flag, since it is used both when the editor
+-- scratch-copies a layout and when the save path copies it -- a flag
+-- missing from that list is silently dropped on every copy, not just on
+-- disk.
 do
   local dkey = "DividerLine"
   M.set(dkey, { controls = {
@@ -174,11 +174,9 @@ end
 
 -- "stepped" (a knob quantised to the parameter's own step grid, an
 -- alternative to combo's dropdown -- see TS_CV_Widgets.W.knob's
--- step_norm). A brand new TYPE name, not a flag on an existing one, so the
--- thing actually worth guarding is VALID_TYPE and M.copy both knowing
--- about it -- the exact shape of bug no_rule had above, just one type
--- string short of "silently downgrades to a knob" instead of "silently
--- drops a flag".
+-- step_norm) is a brand new TYPE name, not a flag on an existing one.
+-- VALID_TYPE and M.copy both have to recognise it, or it silently
+-- downgrades to a plain knob instead of surviving the round trip.
 do
   local skey = "SteppedType"
   M.set(skey, { controls = { { param = 2, type = "stepped", label = "Slope" } } })
@@ -190,14 +188,10 @@ do
   M.remove(skey); M.save(); M.reload()
 end
 
--- "half_gap" has an underscore in its type name, and parse_section's
--- line pattern used to accept only %a (letters) for the type field --
--- %a* stops at "_", the whole anchored match then fails, and the
--- control line is silently dropped on load. Round-tripping through an
--- actual save+reload (not just M.set/M.get, which never touch the ini
--- parser) is what catches this; M.copy's field list was never the
--- issue here since parse_section never got far enough to build the
--- control at all.
+-- Type names may contain underscores (e.g. half_gap); the ini line
+-- parser must accept those, not just plain letters. This has to
+-- round-trip through an actual save+reload, since M.set/M.get never
+-- touch the ini parser and so would not catch a parser regression here.
 do
   local hkey = "HalfGapType"
   M.set(hkey, { controls = { { param = -1, type = "half_gap", label = "" },
@@ -1113,9 +1107,10 @@ l = P.layout(ctrls("|kkkk|kkkk"), H)
 check("leading divider counted", #l.rules, 2)
 check("leading divider offsets", l.items[1].x, C.DIVIDER_W)
 
--- P.width agrees with the layout, which is the bug this refactor prevents
--- 12 knobs is 3 columns, comfortably past PANEL_MIN_W, so the clamp
--- isn't masking the comparison (8 knobs would be: 128px clamps to 132).
+-- P.width must agree with what P.layout actually computes, not drift out
+-- of sync with it. 12 knobs is 3 columns, comfortably past PANEL_MIN_W,
+-- so the clamp isn't masking the comparison (8 knobs would be: 128px
+-- clamps to 132).
 local w_plain = P.width(ctrls("kkkkkkkkkkkk"), H, false, false)
 local w_div   = P.width(ctrls("kkkk|kkkkkkkk"), H, false, false)
 check("width difference is the gutter", w_div - w_plain, C.DIVIDER_W)
@@ -1402,11 +1397,11 @@ do
     W.tip(nil, "a", "A", true, false)
     local r = frame(); return r and r.x end)(), 7 + 14)
 
-  -- Kept inside the WINDOW. A control at its right-hand edge -- the
-  -- Sends panel, every time -- otherwise throws its tooltip out past the
-  -- edge, where the foreground draw list clips it away. There is plenty
-  -- of monitor out there, which is why clamping to the viewport alone
-  -- fixed nothing.
+  -- Kept inside the WINDOW, not just the viewport. A control at its
+  -- right-hand edge -- the Sends panel, every time -- would otherwise
+  -- throw its tooltip out past the window edge, where the foreground
+  -- draw list clips it away. There is plenty of monitor out there, so
+  -- clamping to the viewport alone is not tight enough.
   local LBL = "a long enough label"
   W.clear_tips()
   MX, MY = 380, 300
@@ -1417,8 +1412,8 @@ do
   check("and flipped to the other side of the pointer", e and e.x < MX, true)
   check("not merely slid to the margin", e and e.x < WIN[3] - #LBL * 6, true)
 
-  -- The same position with no window bound would have been left alone,
-  -- which is the bug this replaces.
+  -- The same position, checked against the viewport bound alone, would
+  -- be left unclamped -- the window is the tighter of the two bounds here.
   W.clear_tips()
   MX, MY = 380, 470
   W.tip(nil, "low", "near the floor", true, false)
@@ -1481,8 +1476,8 @@ do
   check("volume defaults to unity",    CH.read(nil, "D_VOL", 1), 1)
   check("no track reads as the default", CH.read(nil, "B_MUTE"), 0)
 
-  -- The comparisons the panel actually does, which is where the crash
-  -- was: nil > 0.5 raises, it does not return false.
+  -- The comparisons the panel actually performs must resolve safely:
+  -- nil > 0.5 raises, it does not return false.
   check("the comparison is safe now",
         (function() return CH.read(MASTER, "I_RECARM") > 0.5 end)(), false)
   check("and so is the modulo",
@@ -1528,13 +1523,12 @@ do
 
   check("keys are independent", near(W.level_rms("other", -20, 99), -20), true)
 
-  -- The peak HOLD, which is a different animal: it jumps straight to a
-  -- new maximum, sits on it for LEVEL_HOLD seconds, then falls at a
-  -- fixed rate. Each channel now keeps its own -- the meter draws one
-  -- hold line per bar, and drawing the louder channel's figure across
-  -- the quieter one's bar was saying something untrue about it -- so
-  -- the keys really having nothing to do with each other matters more
-  -- than it used to.
+  -- The peak HOLD is a different animal: it jumps straight to a new
+  -- maximum, sits on it for LEVEL_HOLD seconds, then falls at a fixed
+  -- rate. Each channel keeps its own hold -- the meter draws one hold
+  -- line per bar, and a louder channel's figure showing across the
+  -- quieter channel's bar would misrepresent it -- so the keys must stay
+  -- fully independent.
   W.clear_peaks()
   local T = 100
   check("takes a new maximum at once", W.level_peak("p", -12, T), -12)
@@ -1679,12 +1673,12 @@ end
 -- row + ItemSpacing.y below the window top. Ours has to reach the same
 -- place from under a menu bar.
 --
--- Three attempts failed because WindowPadding.y got written down --
--- ImGui's default, then a screenshot measurement, then MenuBarHeight
--- worked back from the font. ReaImGui's defaults are not ImGui's, and its
--- menu bar is not FontSize + 2*FramePadding either. So it is measured
--- instead, out of three things the window reports, and this checks that
--- the identity behind that measurement actually holds.
+-- WindowPadding.y cannot be assumed from ImGui's own default, a
+-- screenshot measurement, or FontSize + 2*FramePadding, because
+-- ReaImGui's defaults and menu bar height both differ from stock ImGui.
+-- It is derived instead from three values the window reports at
+-- runtime, and this checks that the identity behind that derivation
+-- actually holds.
 do
   local function padding_from(wh, avail_h, start_y) return wh - avail_h - start_y end
 
@@ -1718,10 +1712,10 @@ do
   end
   check("and the two rules meet", bad, 0)
   -- The derivation stands on its own, so there is nothing left to add.
-  -- A non-zero nudge means something above it has gone wrong again --
-  -- twice now it has been a clamp quietly discarding the answer, with
-  -- the nudge behind it measuring the discard rather than any real
-  -- offset.
+  -- A non-zero nudge would mean the derivation above is not actually
+  -- correct -- for example a clamp elsewhere quietly discarding part of
+  -- the answer, with the nudge then masking that loss rather than
+  -- reflecting any real offset.
   check("no fudge is needed", C.HEADER_NUDGE, 0)
   -- Same rect as TA_Panel draws, so the two cover the same rows for the
   -- same reason rather than by being tuned to each other.

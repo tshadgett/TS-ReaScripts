@@ -387,9 +387,9 @@ function SD.draw_sends(ctx, dl, x, y, w, h, track, sends)
     local cxp, cyp = cell(n - 1)
 
     -- The destination's colour is a bar down the LEFT edge, the way a
-    -- mixer marks a strip. Across the top it was stealing the row the
-    -- name wanted and pushing everything else down; down the side it
-    -- costs four pixels and leaves the cell to its contents.
+    -- mixer marks a strip: down the side it costs four pixels and leaves
+    -- the rest of the cell to its own contents, rather than competing
+    -- with the name for the same row across the top.
     local BAR = 4
     ImGui.DrawList_AddRectFilled(dl, cxp + 2, cyp,
       cxp + 2 + BAR, cyp + C.CELL_H - 4,
@@ -399,10 +399,10 @@ function SD.draw_sends(ctx, dl, x, y, w, h, track, sends)
     local iw  = C.SEND_W - (ix - cxp) - 3  -- and what's left of the cell
 
     -- The name goes in the band the knob already reserves for a label,
-    -- just drawn across the rest of the cell rather than over one half of
-    -- it. The knob itself stays at the TOP of its cell: lift it and its
-    -- value readout drops out of the bottom, drop it and the name and the
-    -- knob's face collide -- which is what they were doing.
+    -- drawn across the rest of the cell rather than over one half of it.
+    -- The knob itself stays at the TOP of its cell: lowering it would run
+    -- its value readout off the bottom of the cell and put its face
+    -- behind the name.
     local nm  = U.truncate(sd.name, 22)
     local ntw = ImGui.CalcTextSize(ctx, nm)
     while ntw > iw and #nm > 2 do

@@ -11,10 +11,9 @@
   exercised by a standalone harness the same way P.layout's fader math
   was, with no REAPER instance involved.
 
-  THE API SURFACE, confirmed against REAPER's OWN SDK header comments
-  (reaper-sdk's reaper_plugin_functions.h, not the reascripthelp.html page,
-  which is a stale mirror -- it still says "0=lhipass" instead of the
-  current "0=hipass"):
+  THE API SURFACE (reaper-sdk's reaper_plugin_functions.h; the
+  reascripthelp.html page is a stale mirror -- it still says "0=lhipass"
+  instead of the current "0=hipass"):
 
     TrackFX_GetEQ(track, instantiate)              -> fx index of ReaEQ
     TrackFX_GetEQParam(track, fx, paramidx)         -> ok, bandtype, bandidx,
@@ -31,30 +30,28 @@
 
   GetEQParam's own paramidx IS the plugin's ordinary flat FX-parameter
   index -- the same space TrackFX_GetFormattedParamValue already uses
-  elsewhere in this codebase. THE GENERIC TrackFX_GetParam IS NOT: an
-  earlier version of this file used it to fetch a "real" Hz/dB/Q number
-  for that same paramidx, and every band came back pinned to 20Hz no
-  matter where it was clicked or dragged. REAPER's own built-in effects
-  (ReaEQ among them) don't implement TrackFX_GetParam's real-value/min/max
+  elsewhere in this codebase. THE GENERIC TrackFX_GetParam IS NOT usable
+  for real Hz/dB/Q values here: REAPER's own built-in effects (ReaEQ
+  among them) don't implement TrackFX_GetParam's real-value/min/max
   distinction the way third-party plugins do -- it hands back the same
-  0..1 normalized number GetParamNormalized would, and that then got
-  clamped straight down to the 20Hz floor of this canvas's frequency
-  range. RQ.read below gets real units the way the rest of this codebase
-  already does for every ordinary knob (U.fmt_value): off ReaEQ's own
-  formatted string, via TrackFX_GetFormattedParamValue, which native
-  effects DO implement correctly since it's their own display text.
+  0..1 normalized number GetParamNormalized would, which would clamp
+  straight down to the 20Hz floor of this canvas's frequency range
+  regardless of the band's actual position. RQ.read below gets real
+  units the way the rest of this codebase already does for every
+  ordinary knob (U.fmt_value): off ReaEQ's own formatted string, via
+  TrackFX_GetFormattedParamValue, which native effects DO implement
+  correctly since it's their own display text.
 
-  TWO THINGS THIS FILE CANNOT CONFIRM FROM DOCUMENTATION ALONE, because
-  REAPER exposes no "add band" or "remove band" call and the public docs
-  don't say what SetEQParam does to a (bandtype, bandidx) pair that isn't
-  there yet:
+  TWO THINGS UNDOCUMENTED, because REAPER exposes no "add band" or
+  "remove band" call and the public docs don't say what SetEQParam does
+  to a (bandtype, bandidx) pair that isn't there yet:
 
   ADDING A BAND. There is no separate insert function anywhere in the EQ
   API, so writing freq/gain/Q for a bandidx one past the current count of
   that type is the only candidate mechanism scripting has at all --
   RQ.add_band does exactly that, and then RE-READS the band to confirm it
-  actually took, rather than assuming success. Needs a real REAPER session
-  to prove out; the panel surfaces it plainly if it doesn't.
+  actually took, rather than assuming success; the panel surfaces it
+  plainly if it doesn't.
 
   REMOVING A BAND. Scripting can only disable one (SetEQBandEnabled), never
   delete it. So "remove" and "change this node's type" (which has no
@@ -89,8 +86,8 @@ RQ.TYPE_NAME = {
 
 -- The types offered on the "change type" menu and inferred from where you
 -- double-click. Bandpass/parallel-bandpass exist in the API (and stay
--- readable/drawable if a project already has one) but aren't part of
--- Tim's five-type spec, so they're left off both.
+-- readable/drawable if a project already has one) but aren't part of the
+-- five supported types, so they're left off both.
 RQ.MENU_TYPES = { 0, 1, 2, 3, 4, 5 }
 
 -- A sane starting Q per type, used only when a node is first created.
@@ -115,25 +112,17 @@ function RQ.is_eq(key) return key == "ReaEQ" end
 -- as "+"/nothing falls out positive -- but so does a true Unicode minus
 -- sign (U+2212) or any other dash a locale/build might format negative
 -- numbers with, none of which match a literal "%-" in a Lua pattern
--- (patterns work byte-by-byte, and those are multi-byte UTF-8). Gain cuts
--- read back through here (see RQ.read) -- a build that uses one of those
--- glyphs for a negative dB value used to fail this parse entirely, fall
--- back to the hardcoded 0, and snap a cut node straight back to the 0dB
--- line every single frame.
+-- (patterns work byte-by-byte, and those are multi-byte UTF-8). This
+-- matters because gain cuts read back through here (see RQ.read), so a
+-- build that formats a negative dB value with one of those glyphs must
+-- still parse as negative rather than silently falling back to 0.
 --
 -- "-inf dB" IS A REAL, LEGITIMATE READING, not a formatting glitch: it is
 -- what ReaEQ's own gain slider shows once a band's gain has been driven
--- all the way to its floor (confirmed live -- see EQP.draw's eq_fix_step
--- header for how a band lands there). "inf" has no digits at all, so the
--- digit-anchored match below used to fail on it outright, and the exact
--- same "parse failed -> silently fall back to 0" masking bug as the
--- Unicode-minus case above turned a genuinely full-negative band into one
--- that drew and behaved as if it were sitting at 0dB -- worse than the
--- Unicode-minus case, because this one didn't just mis-draw a real
--- number, it hid a real number (the true state) behind a fake one (0)
--- that looked perfectly plausible on its own. Checked before the
--- digit-anchored match, using the same "read the sign from what's
--- there" logic.
+-- all the way to its floor. "inf" has no digits at all, so it is checked
+-- before the digit-anchored match below, using the same "read the sign
+-- from what's there" logic -- a fully-cut band must read back as -inf,
+-- not silently fall back to 0 and be drawn/treated as sitting at 0dB.
 local function parse_num(s)
   if not s then return nil end
   local pre_inf, inf = s:lower():match("^%s*(%S-)%s*(inf)")
@@ -263,16 +252,15 @@ function RQ.set_freq(track, addr, band, hz)
   band.freq = hz
 end
 
--- DRAGGING AN EXISTING NODE. Confirmed live (see chat history): a raw
--- isnorm=false write for gain or Q -- what this used to do -- sends a cut
--- straight to -inf and a boost straight to this file's own GAIN_CLAMP
--- ceiling, not a scaled-wrong version of the target. isnorm=TRUE is the
--- write that's confirmed to actually work (see RQ.eq_search_direction's
--- header and EQP.draw's eq_fix_step for how that got proven out for
--- creation), but a drag can't afford eq_fix_step's multi-frame
--- probe-then-bisect -- that's built to tolerate looking wrong for up to
--- a couple dozen frames, which reads as a visible stall under a live
--- drag, not a settle.
+-- DRAGGING AN EXISTING NODE. A raw isnorm=false write for gain or Q sends
+-- a cut straight to -inf and a boost straight to this file's own
+-- GAIN_CLAMP ceiling, not a scaled-wrong version of the target --
+-- isnorm=true (normalized 0..1 space) is the write that actually lands
+-- where asked (see RQ.eq_search_direction's header and EQP.draw's
+-- eq_fix_step for the same fact applied at band-creation time). But a
+-- drag can't afford eq_fix_step's multi-frame probe-then-bisect -- that's
+-- built to tolerate looking wrong for up to a couple dozen frames, which
+-- reads as a visible stall under a live drag, not a settle.
 --
 -- So dragging uses a plain secant method instead (RQ.secant_step below,
 -- pure and unit-tested on its own): every frame already hands this file
@@ -319,11 +307,10 @@ function RQ.set_gain(track, addr, band, db, state)
     -- No usable slope yet: either this is the first frame of a fresh
     -- gesture (state.prev_norm is nil), or the previous write didn't
     -- move the read-back value at all (cur_norm == prev_norm). Writing
-    -- nothing in that case -- the old behaviour -- meant a second,
-    -- distinct sample would NEVER arrive, permanently stalling the drag
-    -- (this was the "gain/Q do nothing at all" regression). Take one
-    -- small step toward the target instead so next frame has two real
-    -- samples to build a slope from.
+    -- nothing in that case would mean a second, distinct sample never
+    -- arrives, permanently stalling the drag. Take one small step toward
+    -- the target instead so next frame has two real samples to build a
+    -- slope from.
     local dir = (db >= cur_real) and 1 or -1
     next_norm = math.max(0, math.min(1, cur_norm + dir * BOOTSTRAP_PROBE))
   end
@@ -389,44 +376,40 @@ function RQ.eq_search_narrow(lo, hi, direction, written, read, target)
   return lo, written
 end
 
--- Creates a band of `bandtype` at (freq, gain, q) -- see the file header
--- for why this is the one mechanism available and why it's unconfirmed.
+-- Creates a band of `bandtype` at (freq, gain, q). See the file header's
+-- "ADDING A BAND" note: this is the only mechanism scripting has for
+-- creating a band at all, and it relies on undocumented API behavior.
 -- ENABLED FIRST, THEN freq/gain/Q: a (bandtype, bandidx) pair that
 -- doesn't exist yet may only actually come into being on the enable call
 -- -- writing its params first, before that slot exists, is a plausible
 -- way for a freshly added band to land at whatever ReaEQ defaults a new
 -- band of that type to rather than where it was clicked.
 --
--- GAIN AND Q ARE BEST-EFFORT ONLY HERE, AND KNOWN WRONG. freq (right
--- above) reliably lands where asked with a straight real-Hz write
--- through SetEQParam's isnorm=false path -- confirmed live. Gain and Q
--- do not: a boost overshoots well past what was asked for, and a cut
--- drives the band all the way to its floor -- -inf dB, ReaEQ's own
--- genuine reading, not a "0dB clamp" (that was this file's own read path
--- silently swallowing an unparsed "-inf" and reporting 0 instead -- see
--- parse_num); Q comes out inverted (a narrow-intending high Q produces a
--- wide band). Consistent with SetEQParam's isnorm=false write for these
--- two paramtypes on this native effect actually landing in normalized
--- (0..1) space regardless of the flag -- unlike freq, which genuinely
--- takes real Hz -- so a raw dB/Q number gets clamped into [0,1] and
--- mapped back through whatever curve ReaEQ's own normalized<->real
--- conversion uses for that parameter (evidently one where 0.0 normalized
--- is -inf dB, not 0dB).
+-- GAIN AND Q ARE BEST-EFFORT ONLY HERE. freq (right above) reliably lands
+-- where asked with a straight real-Hz write through SetEQParam's
+-- isnorm=false path. Gain and Q do not: a boost overshoots well past what
+-- was asked for, and a cut drives the band all the way to its floor --
+-- -inf dB, ReaEQ's own genuine reading, not a "0dB clamp" (an unparsed
+-- "-inf" falling back to 0 would be this file's own read path failing --
+-- see parse_num); Q comes out inverted (a narrow-intending high Q
+-- produces a wide band). Both are consistent with SetEQParam's
+-- isnorm=false write for these two paramtypes actually landing in
+-- normalized (0..1) space on this native effect regardless of the flag --
+-- unlike freq, which genuinely takes real Hz -- so a raw dB/Q number gets
+-- clamped into [0,1] and mapped back through whatever curve ReaEQ's own
+-- normalized<->real conversion uses for that parameter (evidently one
+-- where 0.0 normalized is -inf dB, not 0dB).
 --
--- An earlier version of this function tried to solve that with a single
--- linear correction (measure two points, solve for a normalized value,
--- write it via TrackFX_SetParamNormalized) and it changed nothing --
--- read on to EQP.draw's eq_fix_step, which replaced it, for why: partly
--- that the measurement it needed (RQ.read, walking REAPER's flat generic
--- parameter list) doesn't catch up with a just-enabled band inside the
--- same script tick the way the direct bandtype+bandidx calls do, and
--- partly that a single linear extrapolation was never guaranteed to hold
--- across the whole range even once that timing was fixed. The actual fix
--- now lives in EQP.draw: a real binary search, deferred across several
--- UI frames so every read happens well after that same flat list has
--- caught up (the same reason freq already reads back correctly one frame
--- after creation, not the same frame), using RQ.eq_search_direction /
--- RQ.eq_search_narrow above for the pure part of the arithmetic.
+-- Correcting for this needs more than a single linear extrapolation: the
+-- relationship isn't guaranteed linear across the whole range, and a
+-- just-enabled band's read-back (via RQ.read, REAPER's flat generic
+-- parameter list) doesn't catch up within the same script tick the way
+-- the direct bandtype+bandidx calls do. The actual correction lives in
+-- EQP.draw: a real binary search, deferred across several UI frames so
+-- every read happens well after that flat list has caught up (the same
+-- reason freq already reads back correctly one frame after creation, not
+-- the same frame), using RQ.eq_search_direction / RQ.eq_search_narrow
+-- above for the pure part of the arithmetic.
 -- Returns ok, bandtype, bandidx: ok is true only once GetEQBandEnabled
 -- reads the new band back as present, not merely "the calls didn't error".
 function RQ.add_band(track, addr, bandtype, freq, gain, q)
@@ -478,11 +461,11 @@ function RQ.frac_to_gain(frac, range)
   return range - frac * 2 * range
 end
 
--- Where a freshly double-clicked node should land, from Tim's own spec:
--- extremes are a pass filter, a little in from there is a shelf, and the
--- broad middle -- low mids to high mids -- is a bell. Four thresholds,
--- five zones; kept as plain numbers rather than buried in the drawing
--- code so they're the one place to retune.
+-- Where a freshly double-clicked node should land: extremes are a pass
+-- filter, a little in from there is a shelf, and the broad middle -- low
+-- mids to high mids -- is a bell. Four thresholds, five zones; kept as
+-- plain numbers rather than buried in the drawing code so they're the
+-- one place to retune.
 function RQ.infer_type(freq_hz)
   if freq_hz < C.EQ_HP_MAX      then return RQ.BAND_TYPE.HIPASS  end
   if freq_hz < C.EQ_LOSHELF_MAX then return RQ.BAND_TYPE.LOSHELF end
@@ -499,11 +482,10 @@ end
 -- ---------------------------------------------------------------------
 
 -- math.log10 was removed as a separate function from Lua's standard
--- library in 5.2+ and REAPER's embedded Lua doesn't carry the 5.1
--- compatibility shim for it (it errored as a nil call, even though a
--- plain desktop `lua5.4` used to verify this file's math happened to have
--- it enabled) -- math.log(x) alone, base e, is the one form guaranteed to
--- exist everywhere, so log10 is built from that once here instead.
+-- library in 5.2+, and REAPER's embedded Lua doesn't carry the 5.1
+-- compatibility shim for it. math.log(x) alone, base e, is the one form
+-- guaranteed to exist everywhere, so log10 is built from that once here
+-- instead.
 local LOG10 = math.log(10)
 
 local function coeffs(bandtype, freq, gain_db, q, sr)
@@ -512,16 +494,14 @@ local function coeffs(bandtype, freq, gain_db, q, sr)
   local w0 = 2 * math.pi * freq / sr
   local cw, sw = math.cos(w0), math.sin(w0)
   -- The RBJ cookbook's own alpha, sw/(2*q), is the standard convention
-  -- where a bigger Q means a NARROWER band -- but that's backwards from
-  -- what ReaEQ's own "Q" actually does: Tim compared the two side by side
-  -- at the same Q value and ours got narrower going up while ReaEQ's own
-  -- panel got wider. Whatever ReaEQ calls "Q" internally, this curve needs
-  -- to widen as it goes up too, to read the same way ReaEQ's own display
-  -- does. Feeding 1/q into the textbook formula in place of q flips just
-  -- that relationship (sw/(2*(1/q)) == sw*q/2) without touching what "q"
-  -- means anywhere else in this file -- still the real value read
-  -- straight from ReaEQ, still what eq_fix_step's search targets, still
-  -- what the wheel handler scales by.
+  -- where a bigger Q means a NARROWER band -- but ReaEQ's own "Q"
+  -- parameter is inverted from that convention: in ReaEQ, a HIGHER Q
+  -- value produces a WIDER band, not a narrower one. Feeding 1/q into the
+  -- textbook formula in place of q accounts for that inversion
+  -- (sw/(2*(1/q)) == sw*q/2) without touching what "q" means anywhere
+  -- else in this file -- still the real value read straight from ReaEQ,
+  -- still what eq_fix_step's search targets, still what the wheel
+  -- handler scales by.
   local alpha = sw * q / 2
   local A = 10 ^ ((gain_db or 0) / 40)
   local BT = RQ.BAND_TYPE
@@ -542,21 +522,20 @@ local function coeffs(bandtype, freq, gain_db, q, sr)
   elseif bandtype == BT.LOSHELF or bandtype == BT.HISHELF then
     -- Shelves don't take the plain peaking alpha above at all in the
     -- textbook cookbook -- they have their own formula for how sharply the
-    -- transition overshoots, and that formula has a real floor: past a
-    -- certain point the term under the square root bottoms out at 0 (the
-    -- gentlest possible shelf, no overshoot) and CANNOT get any gentler no
-    -- matter how far past that point the input goes. That's exactly what
-    -- Tim found comparing ours to ReaEQ's own display: Q could keep going
-    -- down, but the shelf's shape stopped changing partway there. Reusing
-    -- the plain peaking alpha here (as this file did until now) has no
-    -- such floor, so ours kept flattening forever while ReaEQ's own had
-    -- already stopped.
+    -- transition overshoots, and that formula has a real mathematical
+    -- floor: past a certain point the term under the square root bottoms
+    -- out at 0 (the gentlest possible shelf, no overshoot) and cannot get
+    -- any gentler no matter how far past that point the input goes. This
+    -- matches ReaEQ's own display, where a shelf's shape stops changing
+    -- once Q is driven low enough. Reusing the plain peaking alpha here
+    -- has no such floor and keeps flattening indefinitely, which does not
+    -- match ReaEQ's behavior.
     --
-    -- The same q -> 1/q flip as the peaking alpha above still applies here
-    -- (same file, same "q" meaning throughout -- still the real value read
-    -- straight from ReaEQ) -- substituted into the cookbook's own Q-based
-    -- shelf alpha, sw/2 * sqrt((A+1/A)*(1/Q-1)+2), with Q = 1/q that's
-    -- sw/2 * sqrt((A+1/A)*(q-1)+2).
+    -- The same q -> 1/q substitution as the peaking alpha above still
+    -- applies here (same file, same "q" meaning throughout -- still the
+    -- real value read straight from ReaEQ) -- substituted into the
+    -- cookbook's own Q-based shelf alpha, sw/2 * sqrt((A+1/A)*(1/Q-1)+2),
+    -- with Q = 1/q that's sw/2 * sqrt((A+1/A)*(q-1)+2).
     local inner = (A + 1 / A) * (q - 1) + 2
     local shelf_alpha = sw / 2 * math.sqrt(math.max(0, inner))
     local sqA = math.sqrt(A)

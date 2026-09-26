@@ -3,9 +3,8 @@
 --[[
   TS_CV_Editor.lua -- "Setup Edit Parameters".
 
-  Two lists and an Add/Remove pair, same shape as the dialog in the
-  reference screenshot: everything the plugin exposes on the right,
-  what the panel actually shows on the left, in panel order.
+  Two lists and an Add/Remove pair: everything the plugin exposes on
+  the right, what the panel actually shows on the left, in panel order.
 
   Two kinds of naming, which the dialog keeps apart:
 

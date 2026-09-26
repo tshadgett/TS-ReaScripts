@@ -298,10 +298,10 @@ C.EQ_FREQ_LO    = 20
 C.EQ_FREQ_HI    = 20000
 C.EQ_GAIN_RANGE = 18
 
--- Where a double-click lands a node, by Tim's own description: the
--- extremes are a pass filter, a little further in is a shelf, and the
--- broad middle -- low mids to high mids -- is a bell. Four numbers, easy
--- to retune without hunting through the drawing code for them.
+-- Where a double-click lands a node: the extremes are a pass filter, a
+-- little further in is a shelf, and the broad middle -- low mids to high
+-- mids -- is a bell. Four numbers, easy to retune without hunting through
+-- the drawing code for them.
 C.EQ_HP_MAX      = 40      -- below this: high pass
 C.EQ_LOSHELF_MAX = 150     -- below this (and above HP_MAX): low shelf
 C.EQ_HISHELF_MIN = 5000    -- above this (and below LP_MIN): high shelf
@@ -398,31 +398,26 @@ C.RULE_H = 2
 -- The residual between where the calculation puts the rule and where
 -- Track Analyser's lands. It is ZERO, and the derivation stands on its
 -- own. Keep it that way: a number here means something above it is wrong.
+-- The rule must NOT be clamped to this window's own content start -- that
+-- sits below where TA's rule goes, since this window has a menu bar and
+-- TA does not.
 --
--- It was briefly -6, then -2, and both were measuring the same mistake.
--- The rule was clamped to our own content start, which sits BELOW where
--- TA's rule goes -- we have a menu bar, TA does not -- so the clamp
--- discarded the answer every frame and the nudge behind it did nothing.
--- Once the clamp was corrected the -2 was still there, overcorrecting by
--- exactly itself. The metrics from a real session:
---
---   font 12.0   frame_h 20.5   itemspacing_y 4.0
---   window 536 high, content start 36.5, avail 491.5 -> WindowPadding.y 8.0
---
--- 8 + 20.5 + 4 = 32.5, and TA's rule measures 32.5 below the same window
--- top. Exactly.
+-- Example: with font 12.0, frame_h 20.5, itemspacing_y 4.0, and a window
+-- 536 high with content start 36.5 (avail 491.5, giving WindowPadding.y
+-- 8.0): 8 + 20.5 + 4 = 32.5, and TA's rule measures 32.5 below the same
+-- window top. Exactly.
 --
 -- One half-pixel remains, and it is not ours to fix. Measured side by
 -- side: the BOTTOM rules land on identical rows, and at the top TA's
--- covers three rows to our two. Both draw the same 2px rect; TA's
--- happens to straddle a pixel boundary and ours lands on one, so ours is
--- the crisper of the two. That is the two panes starting half a pixel
--- apart in the docker, not a difference in the arithmetic.
+-- covers three rows to our two. Both draw the same 2px rect; TA's happens
+-- to straddle a pixel boundary and ours lands on one, so ours is the
+-- crisper of the two. That is the two panes starting half a pixel apart
+-- in the docker, not a difference in the arithmetic.
 --
--- This accepts fractions, so -0.5 here makes ours straddle the same way
--- and cover the same three rows. It trades a crisp rule for a matching
--- one; left at 0 because a blurred edge to imitate somebody else's
--- rounding is a strange thing to ship.
+-- This accepts fractions, so -0.5 here would make ours straddle the same
+-- way and cover the same three rows. It trades a crisp rule for a
+-- matching one; left at 0 because a blurred edge to imitate someone
+-- else's rounding is a strange thing to ship.
 C.HEADER_NUDGE = 0
 
 -- The gap a TCP spacer opens in the track strip along the bottom.

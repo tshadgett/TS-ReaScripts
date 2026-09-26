@@ -129,8 +129,8 @@ function W.draw_tip(ctx)
   -- into, so a tooltip that fits on the monitor but hangs past the right
   -- edge of a docked ChannelView is simply cut off -- which is exactly
   -- what happens to every tooltip in the Sends panel, since that panel IS
-  -- the right edge. Clamping to the viewport did nothing about it: there
-  -- was plenty of screen out there.
+  -- the right edge. Clamping to the viewport alone does not help, since
+  -- the window itself can end well short of the viewport's own edge.
   --
   -- It flips to the other side of the pointer rather than merely sliding,
   -- so the box never ends up covering the control it describes.
@@ -711,11 +711,9 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
     -- bar and the thing you read first; the RMS sits beside it without
     -- ever being mistaken for a channel of its own.
     --
-    -- A FIXED few pixels, not a fraction of the bar. It used to be 28%
-    -- of the bar width, which was fine while the bars were narrow and
-    -- became a second meter once they were not -- the whole point of the
-    -- strip is that it is a hairline beside the bar, and a proportion
-    -- does not keep a hairline a hairline.
+    -- A FIXED few pixels, not a fraction of the bar width: a proportional
+    -- strip widens along with the bar and stops reading as a hairline
+    -- once the bar itself is wide, which defeats the point of it.
     local rdb = rms_db
     if type(rdb) == "table" then rdb = rdb[i] end
     if rdb then
@@ -796,9 +794,9 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
   end
 
   -- Peak hold, ONE LINE PER CHANNEL, each only as wide as its own bar.
-  -- It used to be a single line the width of the whole meter, which said
-  -- that both channels had peaked at the same place -- they had not; it
-  -- was the louder one's figure drawn across the quieter one's bar.
+  -- A single line spanning the whole meter would claim both channels
+  -- peaked at the same place, when in fact it would just be the louder
+  -- channel's figure drawn across the quieter one's bar.
   -- `peak_db` takes a table of per-channel holds, or a single number for
   -- a meter that has only one to give.
   if peak_db then
@@ -839,12 +837,11 @@ end
 
 -- The bar's own colour at a given level.
 --
--- Green, then red, then a harder red over zero. There used to be an
--- amber band from -6 up, and it was noise: -6 dBFS is not a warning
--- about anything, so a colour change there is a colour change that
--- means nothing, thirty times a second, on every strip at once. The two
--- reds are kept because they DO mean something different -- approaching
--- full scale, and past it.
+-- Green, then red, then a harder red over zero. No amber band from -6
+-- up: -6 dBFS is not a warning about anything, so a colour change there
+-- would mean nothing, thirty times a second, on every strip at once.
+-- The two reds are kept because they DO mean something different --
+-- approaching full scale, and past it.
 function W.level_bar_colour(db)
   return W.level_colour(db, C.COL.level_lo)
 end

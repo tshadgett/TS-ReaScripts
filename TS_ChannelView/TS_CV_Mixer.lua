@@ -261,9 +261,9 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
   -- the fill's.
   local base = t.col or C.COL.header_bg
   -- Rounded at the top to the same radius as the strip, so the header
-  -- is a cap ON the strip rather than a rectangle laid across it. It
-  -- used to be square, which left the outline's rounded corners cut
-  -- off by the colour and the two shapes visibly disagreeing.
+  -- is a cap ON the strip rather than a rectangle laid across it --
+  -- matching STRIP_ROUND here keeps the header's corners and the
+  -- strip outline's rounded corners in agreement.
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, base, C.STRIP_ROUND,
                                ImGui.DrawFlags_RoundCornersTop)
   ImGui.DrawList_AddLine(dl, x, y + h, x + w, y + h, C.COL.panel_border, 1.0)
@@ -431,53 +431,33 @@ end
 
 -- The padding+scrollbar height "trackrow" reserves along its bottom
 -- edge -- ALWAYS, not only on a frame the row's content actually
--- overflows. Tim's call, after three different ways the "only when it's
--- real" version found to disagree with itself: forced worst-case (an
--- earlier attempt, before this file's history) wasted a strip of height
--- whenever the row was short enough not to need a scrollbar; the honest
--- content-width comparison that replaced it needed its own probes to
--- decide, and those probes turned out to inherit "trackrow"'s own
--- horizontal scroll the moment they were measured from inside it, so
--- the SAME frame could measure two different answers depending where
--- the row happened to be scrolled. Reserving one constant, every frame,
--- removes the second answer instead of trying to keep two answers in
--- step forever -- there is nothing left for the two views, or two
--- frames, to disagree about.
+-- overflows. A constant reserved every frame is what keeps mixer view,
+-- channel view, and successive frames from ever disagreeing about the
+-- row's height; a comparison that only reserved the height when content
+-- genuinely overflowed would have to probe for that, and a probe taken
+-- from inside "trackrow" itself inherits whatever horizontal scroll the
+-- row is already at, which is not a stable thing to measure from.
 --
--- That constant used to leave a real gap on its own once in a while: a
--- track list short enough not to need a scrollbar still had the strip
--- reserved, but "trackrow" only shows a horizontal scrollbar when its
--- OWN content actually overflows, so the reserved strip sat empty --
--- reserved space with nothing drawn in it reads as a mistake, not as a
--- scrollbar. WindowFlags_AlwaysHorizontalScrollbar (below, and on
--- "trackrow" itself in MX.draw_row) is what closes that: it shows
--- REAPER's scrollbar unconditionally, overflow or not, so what's
--- reserved is always what's drawn there -- never a blank strip.
--- WindowFlags_HorizontalScrollbar still has to stay alongside it: that's
--- the flag that turns horizontal scrolling on at all, and Always* only
--- changes ImGui's answer to "show it or not", not whether the machinery
--- exists to ask.
+-- WindowFlags_AlwaysHorizontalScrollbar (below, and on "trackrow" itself
+-- in MX.draw_row) makes REAPER's scrollbar show unconditionally, overflow
+-- or not, so the reserved strip is always what gets drawn there -- never
+-- empty space with nothing to explain it. WindowFlags_HorizontalScrollbar
+-- still has to stay alongside it: that's the flag that turns horizontal
+-- scrolling on at all, and Always* only changes ImGui's answer to "show
+-- it or not", not whether the machinery exists to ask.
 --
--- Still nothing here to ask GetStyleVar for, so it's still measured: one
--- throwaway child says exactly what the always-visible scrollbar costs.
--- It no longer needs forcing to overflow first -- Always* shows it (and
--- reserves its height) from the very first frame, real content or none,
--- so there's nothing left to fake.
+-- There's no GetStyleVar to ask for this height directly, so it's
+-- measured empirically: one throwaway child window, using the same
+-- Always* flag as the real row, reports exactly what the always-visible
+-- scrollbar costs from its very first frame.
+--
 -- Called exactly ONCE per frame -- see MX.draw_row below, which takes
--- this value as a parameter rather than measuring it again itself. This
--- id ("mxpadprobe") is a stable, reused child window, and asking ImGui
--- to BeginChild the SAME id a second time in the SAME frame is not a
--- harmless re-measurement: it's undefined here in the way reopening any
--- window twice in one frame is, and it was happening on every single
--- channel-view frame -- once for child_pad_y, in TS_ChannelView.lua,
--- before the row exists, and again for MX.draw_row's own inner_h, once
--- the row does. Two BeginChild/EndChild pairs sharing one id in one
--- frame is exactly the kind of thing that can leave a SECOND overflow
--- stacked on the first rather than replacing it -- which is a plausible
--- account of "we've reserved almost double what the scrollbar needs":
--- not a wrong measurement, but the same measurement taken twice and
--- somehow not cancelling out. Called once, there is nothing left to
--- collide with itself.
+-- this value as a parameter rather than measuring it again itself. The
+-- id ("mxpadprobe") is a stable, reused child window, and calling
+-- BeginChild with the SAME id a second time in the SAME frame is
+-- undefined, the same as reopening any window twice in one frame would
+-- be -- so this is measured exactly once and threaded through as a
+-- parameter rather than re-measured at each call site.
 --
 -- `pad_x` is trackrow's own horizontal WindowPadding, measured once in
 -- TS_ChannelView.lua off the main window (nothing ever pushes a
@@ -519,18 +499,15 @@ end
 -- `pad_y` is MX.row_pad_y's own result, measured ONCE by the caller
 -- (TS_ChannelView.lua, every frame, before either view branch) and
 -- handed in here rather than measured again -- see row_pad_y's own
--- comment for why calling it a second time in the same frame is not
--- merely redundant but was quietly reserving close to double the real
--- amount. It used to be measured again in here too, and used to be
--- measured from inside "trackrow" before that -- nested inside a row
--- that can be scrolled horizontally, row_pad_y's own probe (an ordinary
--- BeginChild placed at whatever the cursor already is) sits at content-x
--- 0, exactly where the row starts and exactly what scrolls out of view
--- first: scroll the row right past the probe's own 40px and it gets
--- clipped the same as any other fully-clipped child, and the measurement
--- silently fell back to a guess. Taking pad_y as a parameter removes
--- both problems at once, rather than fixing each one at its own call
--- site.
+-- comment for why the same "mxpadprobe" id can't safely be measured a
+-- second time in one frame. It also can't be measured from inside
+-- "trackrow" itself: nested inside a row that scrolls horizontally, an
+-- ordinary probe child sits at content-x 0 -- exactly where the row
+-- starts and exactly what scrolls out of view first -- so scrolling the
+-- row past the probe's own width would clip it like any other
+-- fully-clipped child and return a wrong measurement. Taking pad_y as a
+-- parameter avoids both: it is measured once, outside "trackrow", and
+-- threaded down to wherever it's needed.
 --
 -- `pad_x` is the same horizontal WindowPadding row_pad_y's probe was
 -- handed, pushed here around this BeginChild too -- see row_pad_y's own

@@ -97,24 +97,21 @@ local function parse_section(sect)
   while true do
     local raw = sect["Ctl" .. i]
     if not raw then break end
-    -- Type names can contain an underscore ("half_gap"), so %a alone
-    -- isn't enough -- it stops at the "_" and the whole anchored match
-    -- fails, silently dropping the control line on load. [%a_] covers it.
+    -- The type field may contain letters and underscores (e.g.
+    -- "half_gap"), so the character class has to allow both.
     local p, t, bi, label = raw:match("^%s*(-?%d+)%s*|%s*([%a_]*)%s*|%s*(%d*)%s*|?(.*)$")
     if p then
       t = (t ~= "" and VALID_TYPE[t]) and t or "knob"
-      -- Field three is a BITMASK, and used to be a plain 0/1 for
-      -- "bipolar". Bit 0 still means exactly that, so every layout
-      -- written before reverse existed reads back the same; bit 1 is
-      -- reverse. Adding a fifth "|" field instead would have been the
-      -- obvious move and the wrong one -- the label is field four and
-      -- is allowed to be empty, so an old line and a new one with no
-      -- label are indistinguishable once you start counting separators.
-      -- Bit 2: for a divider only, "no rule" -- it still ends the
-      -- column and opens the same C.DIVIDER_W gap, just without the
-      -- line. Unused (and unset) on every other type, the same as bit
-      -- 0/1 already are on blank and divider -- one flags field for the
-      -- whole slot, read differently by whichever type it's on.
+      -- Field three is a bitmask: bit 0 is bipolar (its original,
+      -- sole meaning, so a layout written before reverse existed still
+      -- reads back the same), bit 1 is reverse, bit 2 is "no rule" --
+      -- for a divider only, it still ends the column and opens the same
+      -- C.DIVIDER_W gap, just without the line. Bit 2 is unused (and
+      -- unset) on every other type, the same as bits 0/1 already are on
+      -- blank and divider -- one flags field for the whole slot, read
+      -- differently by whichever type it's on. The label is always
+      -- field four, present but allowed to be empty, so it never gets
+      -- confused with the flags field regardless of which bits are set.
       local f = tonumber(bi) or 0
       controls[#controls + 1] = {
         param   = tonumber(p),
@@ -298,9 +295,9 @@ function M.remove(key)
   dirty = true
 end
 
--- Writes the library, keeping one generation of backup -- the same
--- safety net StripLink's connector has, for the same reason: this file is
--- the only place a hand-built layout lives.
+-- Writes the library, keeping one generation of backup: this file is the
+-- only place a hand-built layout lives, so a failed or interrupted write
+-- should not be able to take it out entirely.
 function M.save()
   if not dirty then return true end
   local src = io.open(path(), "rb")

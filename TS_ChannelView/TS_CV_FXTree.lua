@@ -3,10 +3,9 @@
 --[[
   TS_CV_FXTree.lua -- container-aware enumeration of a track's FX chain.
 
-  Ported from RackLib.lua -- my own, shared by Plugin Rack.lua and
-  Docked Plugin Display.lua, neither of them released -- so ChannelView
-  stands on its own and the projects can evolve separately. No third-party
-  code is involved here.
+  Ported from an internal, unreleased FX-tree library shared with other
+  projects, so ChannelView stands on its own and can evolve independently
+  of them. No third-party code is involved here.
 
   The container-addressing math is a community reverse-engineering of
   REAPER 7's FX Containers, not documented API, so every call into it is
@@ -163,10 +162,10 @@ end
 -- is why this module meters gain reduction and nothing else.
 -- Returns a POSITIVE number of dB of reduction, or nil.
 function T.gain_reduction(track, addr)
-  -- A BYPASSED plugin keeps reporting whatever it last measured -- it has
-  -- stopped processing, not stopped answering -- so the meter sat frozen
-  -- at the reduction it was doing when you switched it off, which is a
-  -- reading that is not true of anything. Bypassed means no reduction.
+  -- A bypassed plugin keeps reporting whatever it last measured -- it has
+  -- stopped processing, not stopped answering -- so without this check the
+  -- meter would show a frozen, stale reading rather than the true current
+  -- state. Bypassed means no reduction.
   if not T.get_enabled(track, addr) then return 0 end
 
   local pok, ok, str = pcall(reaper.TrackFX_GetNamedConfigParm,
