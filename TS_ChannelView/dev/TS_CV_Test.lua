@@ -2502,6 +2502,24 @@ do
   reaper.GetProjExtState, reaper.SetProjExtState = rg, rs
 end
 
+-- Keyboard focus goes back to REAPER only after a click here, and only
+-- once nothing here still wants the keyboard.
+do
+  local F = require "TS_CV_Focus"
+  local s = {}
+  local function f(c, b, p) return F.step(s, { clicked = c, busy = b, popup = p }) end
+  check("nothing clicked, nothing happens",   f(false, false, false), false)
+  check("not while the button is held",       f(true, true, false), false)
+  check("on release after a click",            f(false, false, false), true)
+  check("and only once",                       f(false, false, false), false)
+  f(true, true, false)                        -- click that opens a menu
+  check("not while a menu is open",            f(false, true, true), false)
+  check("but as soon as it closes",            f(false, false, false), true)
+  check("a text field keeps it",               (function() f(true, true, false); return f(false, true, false) end)(), false)
+  check("until it's done with",                f(false, false, false), true)
+  check("a popup closing hands back too",      (function() f(false, true, true); return f(false, false, false) end)(), true)
+end
+
 -- ---------------------------------------------------------------------
 -- the module surface
 -- ---------------------------------------------------------------------
@@ -2520,7 +2538,7 @@ do
     "TS_CV_Editor", "TS_CV_Browser", "TS_CV_TrackStrip", "TS_CV_Mappings",
     "TS_CV_FXTree", "TS_CV_FXIndex", "TS_CV_Steps", "TS_CV_State", "TS_CV_Util",
     "TS_CV_Startup", "TS_CV_Mixer", "TS_CV_TrackMenu", "TS_CV_TrackOps",
-    "TS_CV_Receives",
+    "TS_CV_Receives", "TS_CV_Focus",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.

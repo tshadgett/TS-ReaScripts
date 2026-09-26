@@ -1,5 +1,17 @@
 # ChannelView — changelog
 
+## 1.3.1 — shortcuts keep working
+
+- **Keyboard focus goes back to REAPER.** Clicking a ReaImGui window
+  gives it the keyboard, and REAPER's ordinary shortcuts -- Space,
+  navigation, your own Main bindings -- only run while REAPER's own
+  windows have it. Now, once a click or drag in ChannelView is finished,
+  focus returns to the arrange view, so the next key press is REAPER's.
+  Text fields, menus and dialogs keep the keyboard until you're done
+  with them. On by default; View > Return keyboard focus to REAPER turns
+  it off. Needs the js_ReaScriptAPI or SWS extension to move focus; with
+  neither, the option is greyed out and nothing changes.
+
 ## 1.3.0 — the EQ curve, and tracks you can manage from here
 
 - **ReaEQ gets a curve editor.** A ReaEQ panel is now a draggable

@@ -1,14 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett (with Claude)
--- @version 1.3.0
+-- @version 1.3.1
 -- @changelog
---  ReaEQ panels become a draggable curve editor.
---  Track management in the track row and mixer: insert tracks and track
---  templates, right-click track menu (rename, spacer, folders, colour),
---  three-state folder button, drag headers to reorder.
---  New Receives panel; Sends can create their destination track.
---  New "stepped knob" control type.
---  Fixes: half-gaps and divider line settings are remembered.
+--  Keyboard focus goes back to REAPER after a click or drag in
+--  ChannelView, so Space, navigation and your other shortcuts keep
+--  working (View > Return keyboard focus to REAPER; needs js_ReaScriptAPI
+--  or SWS).
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -17,6 +14,7 @@
 --  [nomain] TS_CV_Config.lua
 --  [nomain] TS_CV_Editor.lua
 --  [nomain] TS_CV_EQPanel.lua
+--  [nomain] TS_CV_Focus.lua
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
 --  [nomain] TS_CV_Gang.lua
@@ -101,6 +99,7 @@ local RV = require("TS_CV_Receives")
 local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
 local TM = require("TS_CV_TrackMenu")
+local FO = require("TS_CV_Focus")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui)
@@ -171,6 +170,7 @@ C.FLOW        = ext_get("flow", C.FLOW)
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 C.BASE_HUE    = tonumber(ext_get("base_hue", C.BASE_HUE)) or C.BASE_HUE
 C.TINT        = tonumber(ext_get("tint", C.TINT)) or C.TINT
+C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
 C.build_palette()
 
 -- ---------------------------------------------------------------------
@@ -663,6 +663,24 @@ local function menu_bar()
     if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
       C.SHOW_VALUES = not C.SHOW_VALUES
       ext_set("show_values", C.SHOW_VALUES and "1" or "0")
+    end
+
+    -- Keyboard focus back to REAPER after a click here, so its shortcuts
+    -- keep working. See TS_CV_Focus.
+    do
+      local how = FO.mechanism()
+      if ImGui.MenuItem(ctx, "Return keyboard focus to REAPER", nil,
+          C.FOCUS_BACK and how ~= nil, how ~= nil) then
+        C.FOCUS_BACK = not C.FOCUS_BACK
+        ext_set("focus_back", C.FOCUS_BACK and "1" or "0")
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, how and
+          "After a click or drag in ChannelView, the keyboard goes back to\n" ..
+          "REAPER's arrange view, so Space and your other shortcuts keep\n" ..
+          "working. Text fields and menus keep it until you're done."
+          or "Needs the js_ReaScriptAPI or SWS extension (both on ReaPack).")
+      end
     end
 
     ImGui.Separator(ctx)
@@ -1333,6 +1351,8 @@ local function frame()
     if B.draw_menu(ctx, app.track) then rescan(true) end
     if B.draw(ctx, app.track) then rescan(true) end
     if TM.draw(ctx) then rescan(true) end
+
+    FO.update(ctx, ImGui, C.FOCUS_BACK)
 
     -- Last thing in the frame, on the foreground draw list: a tooltip
     -- that is following a control being dragged has to sit above every
