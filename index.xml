@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="6022f7f689d4a8bacbf2a15ff0343a7ab98874ec" name="TS-ReaScripts">
+<index version="1" commit="bf262a41748d1fdaaad70866854b1795a46d4f78" name="TS-ReaScripts">
   <category name="TS_ChannelView">
     <reapack name="TS_ChannelView.lua" type="script" desc="ChannelView -- docked channel strip: one editable control panel per plugin">
       <metadata>
