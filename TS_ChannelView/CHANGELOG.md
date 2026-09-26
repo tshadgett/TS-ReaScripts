@@ -1,5 +1,70 @@
 # ChannelView — changelog
 
+## 1.3.0 — the EQ curve, and tracks you can manage from here
+
+- **ReaEQ gets a curve editor.** A ReaEQ panel is now a draggable
+  frequency-response canvas instead of a knob grid. Double-click empty
+  space to add a band -- where you click picks the type: the far ends
+  are high/low pass, a little further in is a shelf, the middle is a
+  bell -- and a faint preview shows the shape before you commit. Drag a
+  node for frequency and gain, use the mouse wheel over it for Q,
+  right-click to change its type or remove it. Each band has its own
+  colour with a fill toward the 0 dB line. If TS_TrackAnalyser's probe
+  is running on the track, its spectrum is drawn behind the curve.
+  - The curve follows ReaEQ's own conventions: its Q runs the opposite
+    way to the textbook one (higher is wider), and shelves stop changing
+    shape once Q is low enough, exactly as ReaEQ's display does.
+  - ReaEQ itself limits boost to +12 dB (cut goes much deeper); the
+    panel shows that limit rather than working around it.
+- **Stepped knob.** A new control type for parameters with a handful of
+  fixed positions -- an alternative to the dropdown. It turns like a
+  knob but snaps to the plugin's own steps and shows the plugin's own
+  text for each one. Available in the editor's Type list and in a
+  control's right-click "Show as" menu (where the dropdown is now simply
+  called "Dropdown").
+- **Insert tracks from the row.** A dashed "+" at the end of the track
+  row (both views) offers *Insert new track* and *Insert from track
+  template*. Templates are listed from REAPER's TrackTemplates folder,
+  subfolders as submenus, each with a swatch of its colour. New tracks go
+  after the track you're on, the same place REAPER's own insert puts
+  them.
+- **Track right-click menu**, on a name button, a mixer strip or the
+  Channel panel: rename, visual spacer before the track, move into the
+  folder above / out of the folder, folder children (full, collapsed,
+  hidden), and colour. Colour and spacer apply to the whole selection
+  when you right-click a selected track.
+- **Colour dialog** with REAPER's 16 custom colours (whatever palette is
+  loaded -- SWS palettes land in the same place) for one-click picks,
+  plus a full RGB picker and "Remove colour".
+- **Folder button.** Folder tracks carry a folder icon on their name
+  button that cycles the folder the same way REAPER's track panel does:
+  children full, children collapsed (drawn as collapsed strips), children
+  hidden. It's REAPER's own folder state, so the two always agree.
+- **Drag to reorder.** Drag a mixer strip's header, or a name button in
+  either view, to move the track; a marker shows where it will land. A
+  selected track brings the whole selection, a folder brings its
+  children, and Escape cancels.
+- **Receives panel.** A companion to Sends, pinned after it and
+  collapsed by default: every track sending into this one, with level,
+  bypass, sidechain and pre/post, and an add menu listing the tracks it
+  could receive from.
+- **Sends can create their destination.** The send menu (and the
+  receive menu) now starts with *New track* and *New track from
+  template*: the track is made at the end of the project and routed in
+  one step, without moving your selection.
+- A whole-chain FX bypass now tints every plugin header, the same as a
+  bypassed plugin does.
+- Collapsed mixer strips keep a full-height colour cap, so a row of
+  mixed strips lines up; header buttons pick light or dark ink from the
+  track colour.
+- The Setup Edit Parameters editor puts Add gap / Add half-gap / Add
+  divider on a row of their own.
+- **Fixed: half-gaps weren't remembered** -- they were dropped every
+  time a layout was read back.
+- **Fixed: a divider's "no line" setting** reset to a line whenever the
+  editor was opened.
+- Source comments tidied throughout.
+
 ## 1.2.0 — one track row, no seams
 
 - **Half-gap: staggered controls.** A new control type for the

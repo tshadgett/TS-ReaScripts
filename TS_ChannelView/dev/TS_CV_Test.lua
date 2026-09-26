@@ -721,6 +721,23 @@ local TRACKS = {
   check("an already-wide track is left alone", NCHAN[7], 8)
   check("no send to itself",        SD.add_send(1, 1, false), false)
   check("no send to nothing",       SD.add_send(1, nil, false), false)
+
+  -- Receives: the same send, made from the other end. Track 4 receiving
+  -- from track 1 is a send FROM 1 TO 4, and a sidechain widens track 4 --
+  -- the panel's own track, since that's the one receiving.
+  do
+    local RV = require "TS_CV_Receives"
+    local before = #SENDS
+    NCHAN[4] = nil
+    check("receive created",          RV.add_send(4, 1, true), true)
+    check("as a send from the source", SENDS[#SENDS].src, 1)
+    check("to the panel's own track", SENDS[#SENDS].dst, 4)
+    check("sidechain widens the receiver", NCHAN[4], 4)
+    check("sidechain receive lands on 3/4", DSTCHAN[#SENDS - 1], 2)
+    check("one send made",            #SENDS, before + 1)
+    check("no receive from itself",   RV.add_send(4, 4, false), false)
+    check("receives share the width rules", RV.width(false, 0, 300), SD.width(false, 0, 300))
+  end
   
   -- Panel widths. Sends sit on the same grid the plugin panels use, in
   -- double-width cells, so the width is a whole number of columns and
@@ -2304,6 +2321,188 @@ reaper.Main_OnCommand(reaper.NamedCommandLookup(grid), 0)
 end
 
 -- ---------------------------------------------------------------------
+-- track operations: folders, colours, templates
+-- ---------------------------------------------------------------------
+-- The folder arithmetic and the file parsing behind the track menus are
+-- pure functions over plain values, so they're checked here directly.
+do
+  local TO = require "TS_CV_TrackOps"
+  local function same(a, b)
+    if #a ~= #b then return false end
+    for i = 1, #a do if a[i] ~= b[i] then return false end end
+    return true
+  end
+  local function str(t) return table.concat(t, ",") end
+
+  -- Levels are the running sum of the depths above each track.
+  check("levels of a folder",
+        str(TO.levels({ 1, 0, -1, 0 })), "0,1,1,0")
+  check("levels of a nested folder",
+        str(TO.levels({ 1, 1, -2, 0 })), "0,1,2,0")
+
+  -- A block is one ordinary track, or a folder parent and its subtree.
+  check("an ordinary track is its own block", TO.block_end({ 0, 0, 0 }, 2), 2)
+  check("a folder's block ends at its last child",
+        TO.block_end({ 0, 1, 0, -1, 0 }, 2), 4)
+  check("a nested folder's block ends where it closes",
+        TO.block_end({ 1, 0, 1, -2, 0 }, 3), 4)
+  check("an unclosed folder runs to the end",
+        TO.block_end({ 0, 1, 0, 0 }, 2), 4)
+
+  -- Into the folder above: the track above opens (or stops closing) one
+  -- level, and the block's last track closes one more.
+  check("indent under an ordinary track makes it a parent",
+        str(TO.indent_plan({ 0, 0, 0 }, 2)), "1,-1,0")
+  check("indent after a folder's last child joins that folder",
+        str(TO.indent_plan({ 1, -1, 0 }, 3)), "1,0,-1")
+  check("indent a folder moves its children with it",
+        str(TO.indent_plan({ 0, 1, -1, 0 }, 2)), "1,1,-2,0")
+  check("the first track can't indent", TO.indent_plan({ 0, 0 }, 1), nil)
+  check("a folder's first child can't indent further",
+        TO.indent_plan({ 1, 0, -1 }, 2), nil)
+
+  -- Out of the folder: only the last block in a folder can go.
+  check("outdent an only child dissolves the folder",
+        str(TO.outdent_plan({ 1, -1 }, 2)), "0,0")
+  check("outdent the last child",
+        str(TO.outdent_plan({ 1, 0, -1, 0 }, 3)), "1,-1,0,0")
+  check("outdent a nested folder keeps its children",
+        str(TO.outdent_plan({ 1, 0, 1, -2, 0 }, 3)), "1,-1,1,-1,0")
+  check("a top-level track can't outdent", TO.outdent_plan({ 0, 0 }, 2), nil)
+  check("a middle child can't outdent",
+        TO.outdent_plan({ 1, 0, 0, -1 }, 2), nil)
+  do
+    -- Every plan keeps the structure valid: levels never go negative and
+    -- no track sits more than one level below the track above it.
+    local cases = { { 0, 0, 0 }, { 1, -1, 0 }, { 0, 1, -1, 0 }, { 1, 0, 1, -2, 0 },
+                    { 1, 1, -1, 0, -1 }, { 1, 0, -1, 1, -1 } }
+    local ok = true
+    for _, d in ipairs(cases) do
+      for k = 1, #d do
+        for _, plan in ipairs({ (TO.indent_plan(d, k)), (TO.outdent_plan(d, k)) }) do
+          local lv = TO.levels(plan)
+          for i = 1, #plan do
+            if lv[i] < 0 then ok = false end
+            if i > 1 and lv[i] > lv[i - 1] + 1 then ok = false end
+          end
+          local total = 0
+          for i = 1, #plan do total = total + plan[i] end
+          local before = 0
+          for i = 1, #d do before = before + d[i] end
+          if total ~= before then ok = false end
+        end
+      end
+    end
+    check("every folder move keeps the tree valid", ok, true)
+  end
+
+  -- Collapsed folders hide their whole subtree; small (1) hides nothing.
+  check("collapsed folder hides its children",
+        str((function()
+          local h = TO.hidden_by_folders({ 1, 0, -1, 0 }, { 2, 0, 0, 0 })
+          local o = {} for i = 1, #h do o[i] = h[i] and 1 or 0 end return o
+        end)()), "0,1,1,0")
+  check("small folder hides nothing",
+        str((function()
+          local h = TO.hidden_by_folders({ 1, 0, -1, 0 }, { 1, 0, 0, 0 })
+          local o = {} for i = 1, #h do o[i] = h[i] and 1 or 0 end return o
+        end)()), "0,0,0,0")
+  check("a collapsed outer folder hides an open inner one",
+        str((function()
+          local h = TO.hidden_by_folders({ 1, 1, -2, 0 }, { 2, 0, 0, 0 })
+          local o = {} for i = 1, #h do o[i] = h[i] and 1 or 0 end return o
+        end)()), "0,1,1,0")
+  check("a collapsed inner folder hides only its own children",
+        str((function()
+          local h = TO.hidden_by_folders({ 1, 1, -1, 0, -1, 0 }, { 0, 2, 0, 0, 0, 0 })
+          local o = {} for i = 1, #h do o[i] = h[i] and 1 or 0 end return o
+        end)()), "0,0,1,0,0,0")
+
+  -- A small folder (1) draws its children collapsed, and says which
+  -- folder did it so that expanding one of them can open that folder.
+  do
+    local h, f, by = TO.folder_view({ 1, 0, -1, 0 }, { 1, 0, 0, 0 })
+    check("small folder folds its children",
+          (f[2] and f[3] and not f[1] and not f[4]) and true or false, true)
+    check("and hides none of them", (h[2] or h[3]) and true or false, false)
+    check("and names itself as the cause", by[2] and by[2][1], 1)
+    local h2, f2 = TO.folder_view({ 1, 1, -2, 0 }, { 1, 2, 0, 0 })
+    check("hidden beats folded", (h2[3] and not f2[3]) and true or false, true)
+    check("an inner parent in a small folder is folded too", f2[2], true)
+  end
+
+  -- What moves when a track is dragged, and when it isn't really a move.
+  check("drag an ordinary track", str(TO.move_set({ 0, 0, 0 }, 2, {})), "2")
+  check("drag a folder brings its children",
+        str(TO.move_set({ 0, 1, 0, -1, 0 }, 2, {})), "2,3,4")
+  check("drag a selected track moves the selection",
+        str(TO.move_set({ 0, 0, 0, 0 }, 2, { [2] = true, [4] = true })), "2,4")
+  check("drag an unselected track leaves the selection",
+        str(TO.move_set({ 0, 0, 0, 0 }, 3, { [2] = true, [4] = true })), "3")
+  check("dropping into its own gap is no move", TO.is_move({ 2 }, 2), false)
+  check("dropping just after itself is no move", TO.is_move({ 2 }, 3), false)
+  check("dropping further along is a move", TO.is_move({ 2 }, 4), true)
+  check("dropping inside a moved folder is no move", TO.is_move({ 2, 3, 4 }, 3), false)
+  check("scattered tracks gathered after the last is a move",
+        TO.is_move({ 2, 4 }, 5), true)
+
+  -- REAPER's custom colours, as reaper.ini stores them: sixteen R G B pad
+  -- groups, plus a trailing byte of REAPER's own that has to be ignored.
+  local CUST = "1E48A800B21B1B0012620C00F36D3400F5EE1A00808000001ECAC100B21B4D00"
+            .. "654DA100000000000000000000000000000000000000000000000000000000001D"
+  local cc = TO.parse_custcolors(CUST)
+  check("sixteen custom colours", #cc, 16)
+  check("custom colour 1", ("%02X%02X%02X"):format(cc[1][1], cc[1][2], cc[1][3]), "1E48A8")
+  check("custom colour 8", ("%02X%02X%02X"):format(cc[8][1], cc[8][2], cc[8][3]), "B21B4D")
+  check("an unset slot is black", cc[16][1] + cc[16][2] + cc[16][3], 0)
+  check("no custom colours is an empty list", #TO.parse_custcolors(nil), 0)
+  check("custcolors read from the REAPER section only",
+        TO.custcolors_from_ini("[other]\ncustcolors=FFFFFF00\n[REAPER]\nfoo=1\nCustColors=" .. CUST .. "\n[x]\n"),
+        CUST)
+  check("no REAPER section, no custcolors",
+        TO.custcolors_from_ini("[other]\ncustcolors=FFFFFF00\n"), nil)
+
+  -- A template's colour is its first track's PEAKCOL, flagged as set.
+  local TPL = "<TRACK\n  NAME Acoust\n  PEAKCOL 23509357\n  BEAT -1\n"
+           .. "  <TRACK\n  PEAKCOL 16777215\n"
+  check("template colour from PEAKCOL", TO.template_colour(TPL), 23509357 & 0xffffff)
+  check("an unset PEAKCOL is no colour",
+        TO.template_colour("<TRACK\n  NAME x\n  PEAKCOL 16576\n"), nil)
+  check("no PEAKCOL is no colour", TO.template_colour("<TRACK\n  NAME x\n"), nil)
+  check("template name drops the extension",
+        TO.template_name("Drums\\Kit 1.RTrackTemplate"), "Kit 1")
+  check("template extension is case-insensitive",
+        TO.is_template("bass.rtracktemplate"), true)
+  check("other files are not templates", TO.is_template("notes.txt"), false)
+end
+
+-- Collapse state with a default: an untouched panel shows its default,
+-- and only a departure from it is written to the project.
+do
+  local St = require "TS_CV_State"
+  local store = {}
+  local rg, rs = reaper.GetProjExtState, reaper.SetProjExtState
+  reaper.GetProjExtState = function(_, _, k) return 1, store[k] or "" end
+  reaper.SetProjExtState = function(_, _, k, v) store[k] = v end
+  St.clear_cache()
+  check("untouched, default collapsed",   St.is_collapsed("##rx", true), true)
+  check("untouched, default expanded",    St.is_collapsed("##sx"), false)
+  St.toggle_collapsed("##rx", true)
+  check("toggled open from collapsed",    St.is_collapsed("##rx", true), false)
+  check("and that is written as a 0",     store["collapsed:##rx"], "0")
+  St.clear_cache()
+  check("which survives a re-read",       St.is_collapsed("##rx", true), false)
+  St.toggle_collapsed("##rx", true)
+  check("back to the default clears it",  store["collapsed:##rx"], "")
+  St.set_collapsed("##sx", true)
+  check("a plain collapse is still a 1",  store["collapsed:##sx"], "1")
+  St.set_collapsed("##sx", false)
+  check("and a plain expand still clears", store["collapsed:##sx"], "")
+  St.clear_cache()
+  reaper.GetProjExtState, reaper.SetProjExtState = rg, rs
+end
+
+-- ---------------------------------------------------------------------
 -- the module surface
 -- ---------------------------------------------------------------------
 -- Everything here is split across modules that call each other by field
@@ -2320,7 +2519,8 @@ do
     "TS_ChannelView", "TS_CV_Panel", "TS_CV_Widgets", "TS_CV_Channel", "TS_CV_Sends",
     "TS_CV_Editor", "TS_CV_Browser", "TS_CV_TrackStrip", "TS_CV_Mappings",
     "TS_CV_FXTree", "TS_CV_FXIndex", "TS_CV_Steps", "TS_CV_State", "TS_CV_Util",
-    "TS_CV_Startup",
+    "TS_CV_Startup", "TS_CV_Mixer", "TS_CV_TrackMenu", "TS_CV_TrackOps",
+    "TS_CV_Receives",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.

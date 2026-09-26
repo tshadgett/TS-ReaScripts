@@ -20,18 +20,19 @@
 
   The track name row along the bottom is drawn HERE too, by the same
   MX.draw_row that draws the strips, in both views -- not by a second
-  module keeping its own scroll position in step with this one. Two
-  windows with two independently-tracked scroll offsets, synced by hand,
-  is exactly the kind of thing that looks done until someone finds the
-  one gesture that wasn't: the wheel not reaching a strip's own child
-  window, the wheel not being handled at all on the row underneath. Both
-  were real bugs, both lived in the sync code, and the fix that actually
-  closes the class of bug is to stop having two scroll positions. One
-  BeginChild, one id ("trackrow"), used by both views -- ImGui remembers
-  a window's scroll position on its own, for free, which is a better
-  guarantee than any variable we could write and maintain by hand. In
-  channel view the same window draws just the name buttons, at the
-  scroll position mixer view left it at.
+  module keeping its own scroll position in step with this one. One
+  BeginChild, one id ("trackrow"), used by both views: ImGui remembers a
+  window's scroll position on its own, so the two views can never
+  disagree about it, and wheel handling lives in one place. In channel
+  view the same window draws just the name buttons, at the scroll
+  position mixer view left it at.
+
+  Folders: a folder parent's name button carries a folder icon that
+  collapses and expands it -- REAPER's own I_FOLDERCOMPACT, so the track
+  panel follows -- and the children of a collapsed folder are left out
+  of the row in both views. The row ends in a "+" tile for inserting a
+  track, and right-clicking a name button or a strip opens the track
+  menu (TS_CV_TrackMenu.lua).
 --]]
 
 local C  = require("TS_CV_Config")
@@ -41,6 +42,8 @@ local CH = require("TS_CV_Channel")
 
 local St = require("TS_CV_State")
 local G  = require("TS_CV_Gang")
+local TO = require("TS_CV_TrackOps")
+local TM = require("TS_CV_TrackMenu")
 
 local MX = {}
 local ImGui
@@ -49,17 +52,18 @@ function MX.attach(imgui) ImGui = imgui end
 
 -- Set by TS_CV_TrackStrip.request_scroll() when the selection changed
 -- from outside this window (the arrange view, the track manager). Read
--- and cleared here, in channel view only, the same as before the merge
--- -- the mixer doesn't chase a selection made elsewhere, only the one
--- track list does.
+-- and cleared here, in channel view only -- the mixer doesn't chase a
+-- selection made elsewhere, only the name row does.
 MX.scroll_to_sel = false
 
 -- How wide this track's column is, in BOTH views. Channel view has no
 -- mixer to line up with, but the buttons keep these widths anyway: a
 -- track strip that changes shape when you switch views would undo the
--- point of them being the same object.
-function MX.col_width(guid)
-  return CH.width(St.is_collapsed("mx:" .. guid))
+-- point of them being the same object. `folded` is true when the track
+-- sits in a folder whose children are collapsed, which draws it
+-- collapsed whatever its own state is.
+function MX.col_width(guid, folded)
+  return CH.width(folded or St.is_collapsed("mx:" .. guid))
 end
 
 -- ---------------------------------------------------------------------
@@ -73,6 +77,12 @@ end
 -- name button's label too, now that one loop over this list draws both
 -- the strip and the button under it -- no second, separate re-read of
 -- the track's name and colour for the row underneath.
+--
+-- `folder` is true on a folder parent and `fmode` is its state (0 full,
+-- 1 children collapsed, 2 children hidden). A track in a folder whose
+-- children are collapsed has `folded` set and `fold_by` listing the
+-- folder tracks responsible; a track whose folder hides its children
+-- isn't in the list at all.
 function MX.tracks()
   local out = {}
   local master = reaper.GetMasterTrack(0)
@@ -80,9 +90,11 @@ function MX.tracks()
     out[#out + 1] = { track = master, num = 0, name = "MASTER",
                       guid = "master", col = U.track_colour(master, 0xff) }
   end
+  local depths, compact = TO.folder_state()
+  local hidden, folded, by = TO.folder_view(depths, compact)
   for i = 0, reaper.CountTracks(0) - 1 do
     local tr = reaper.GetTrack(0, i)
-    if MX.in_mixer(tr) then
+    if not hidden[i + 1] and MX.in_mixer(tr) then
       local _, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
       nm = U.trim(nm)
       out[#out + 1] = {
@@ -92,6 +104,11 @@ function MX.tracks()
         guid  = reaper.GetTrackGUID(tr) or ("t" .. i),
         col   = U.track_colour(tr, 0xff),
         space = (reaper.GetMediaTrackInfo_Value(tr, "I_SPACER") or 0) > 0.5,
+        folder  = (depths[i + 1] or 0) > 0,
+        fmode   = ((compact[i + 1] or 0) >= 2) and 2
+                  or (((compact[i + 1] or 0) >= 1) and 1 or 0),
+        folded  = folded[i + 1],
+        fold_by = by[i + 1],
       }
     end
   end
@@ -190,14 +207,65 @@ end
 -- about with the length of each track's name. Used both under a strip
 -- (mixer view) and on its own (channel view): the same object either
 -- way, so it had better look and answer like one.
-local function name_button(ctx, label, col, selected, id, w)
+-- ---------------------------------------------------------------------
+-- dragging to reorder
+-- ---------------------------------------------------------------------
+-- A strip's header, or a name button, is a drag handle: past the drag
+-- threshold it becomes a move, and on release the track (or the whole
+-- selection, when the dragged track is part of it) moves to the gap
+-- under the pointer. The move itself is TO.move_tracks.
+
+MX.drag = nil          -- { track, guid } while a drag is in progress
+local press = { pending = nil }   -- see column(): a click held back for a possible drag
+
+-- Call right after the item that is the handle. `limit_y`, when given,
+-- only counts presses that started above it -- the header's lower edge,
+-- when the handle is the whole strip background.
+local function drag_source(ctx, t, limit_y)
+  if t.num == 0 or MX.drag then return end
+  if not (ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)) then
+    return
+  end
+  if limit_y then
+    local _, py = ImGui.GetMouseClickedPos(ctx, ImGui.MouseButton_Left)
+    if py > limit_y then return end
+  end
+  -- x and y are output slots in the Lua API and must be passed as nil;
+  -- the button is the fourth argument.
+  local dx = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
+  if math.abs(dx) >= C.DRAG_THRESHOLD then
+    MX.drag = { track = t.track, guid = t.guid }
+    press.pending = nil
+  end
+end
+
+local FOLDER_ICON = { [0] = "folder_full", [1] = "folder_collapsed", [2] = "folder_hidden" }
+local FOLDER_TIP  = {
+  [0] = "Folder: children full \u{2014} click to collapse them",
+  [1] = "Folder: children collapsed \u{2014} click to hide them",
+  [2] = "Folder: children hidden \u{2014} click to show them in full",
+}
+
+-- `t` is the track's entry from MX.tracks(). Returns: clicked,
+-- double-clicked, right-clicked. A folder parent's button carries a
+-- folder icon at its left end that collapses and expands the folder; a
+-- click on the icon is the icon's, not the button's.
+local function name_button(ctx, label, col, selected, id, w, t)
   local h = C.STRIP_H - 8
   local dl = ImGui.GetWindowDrawList(ctx)
   local tw, th = ImGui.CalcTextSize(ctx, label)
+  local folder = t and t.folder
 
   local x, y = ImGui.GetCursorScreenPos(ctx)
+  -- The folder icon is submitted after the button and sits on top of it,
+  -- so the button has to allow that.
+  if folder then W.allow_overlap(ctx) end
   local pressed = ImGui.InvisibleButton(ctx, "tsname" .. id, w, h)
   local hovered = ImGui.IsItemHovered(ctx)
+  local rclick  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
+  if t then drag_source(ctx, t) end
+  -- The release that ends a drag isn't a click.
+  if MX.drag then pressed = false end
 
   -- Always full strength, the same as the strip header above and the
   -- TCP itself: a track's own colour is never faded for being
@@ -214,15 +282,32 @@ local function name_button(ctx, label, col, selected, id, w)
               or C.COL.panel_border,
     C.STRIP_ROUND, 0, lw)
 
-  -- Picks its ink from THIS button's own fill, unconditionally, the
-  -- same as strip_header does above -- not only while selected. That
-  -- was fine reasoning back when an unselected fill was dimmed towards
-  -- the background and a fixed light ink read against almost anything;
-  -- now that a track's colour is always full strength, a light colour
-  -- (a bright yellow, say) needs dark ink whether or not it happens to
-  -- be selected right now.
+  -- Ink is picked from THIS button's own fill: a track's colour is always
+  -- shown at full strength, so a light colour (a bright yellow, say)
+  -- needs dark ink whether or not it's selected.
   local text_col = U.contrast_text(col)
-  local clip = w - 10
+
+  -- The folder icon, in its own square at the left end.
+  local left = 0
+  if folder then
+    local isz = h - 6
+    local ix, iy = x + 3, y + 3
+    ImGui.SetCursorScreenPos(ctx, ix, iy)
+    if ImGui.InvisibleButton(ctx, "tsfold" .. id, isz, isz) then
+      TO.cycle_folder(t.track)
+    end
+    local ihov = ImGui.IsItemHovered(ctx)
+    if ihov then
+      ImGui.DrawList_AddRectFilled(dl, ix, iy, ix + isz, iy + isz,
+        U.with_alpha(text_col, 0x33), 2.0)
+    end
+    local m = t.fmode or 0
+    W.ICONS[FOLDER_ICON[m]](dl, ix, iy, isz, text_col)
+    W.tip(ctx, "tsfold" .. id, FOLDER_TIP[m], ihov, false)
+    left = isz + 4
+  end
+
+  local clip = w - 10 - left
   local shown = label
   if tw > clip then
     local k = #shown
@@ -233,11 +318,13 @@ local function name_button(ctx, label, col, selected, id, w)
       if tw <= clip then shown = t2 break end
     end
   end
-  ImGui.DrawList_AddText(dl, x + w * 0.5 - tw * 0.5, y + h * 0.5 - th * 0.5, text_col, shown)
+  local cx = x + left + (w - left) * 0.5
+  ImGui.DrawList_AddText(dl, cx - tw * 0.5, y + h * 0.5 - th * 0.5, text_col, shown)
 
   W.tip(ctx, "tsname" .. id, label, hovered, false)
   return pressed,
-         hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left)
+         hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
+         rclick
 end
 
 -- The label a name button shows: "3  Kick Drum", or just "MASTER" --
@@ -293,9 +380,11 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
       U.contrast_text(base), label)
   end
 
+  -- Inked from the header's own colour, like the name, so it reads on
+  -- a light track colour as well as a dark one.
   ImGui.SetCursorScreenPos(ctx, x + w - btn - 3, y + 3)
   if W.icon_button(ctx, "mxc" .. t.guid, "collapse", btn, false,
-      "Collapse this strip") then
+      "Collapse this strip", nil, U.contrast_text(base)) then
     CH.set_collapse("mx:" .. t.guid, t.track, true)
   end
 
@@ -314,13 +403,29 @@ end
 -- clicked rather than dragged, which on a collapsed strip means "this
 -- track": there is nothing else down there to click.
 local function strip_collapsed(ctx, dl, x, y, w, h, t, selected)
-  -- Always full strength, same as the expanded header -- see strip_header.
+  -- Always full strength, same as the expanded header -- see strip_header
+  -- -- and the same height, so a row of mixed strips keeps one line of
+  -- colour caps across the top. The expand button sits in it, inked
+  -- from the colour like the collapse button on a full strip.
   local base = t.col or C.COL.header_bg
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + 4, base, C.STRIP_ROUND,
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + C.HEADER_H, base, C.STRIP_ROUND,
                                ImGui.DrawFlags_RoundCornersTop)
+  ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + w, y + C.HEADER_H,
+                         C.COL.panel_border, 1.0)
 
+  -- Collapsed because its folder is: the expand button opens the folder.
+  local expand, tip = nil, nil
+  if t.folded and t.fold_by then
+    expand = function()
+      local parents = {}
+      for _, k in ipairs(t.fold_by) do parents[#parents + 1] = reaper.GetTrack(0, k - 1) end
+      TO.set_folder_mode(parents, 0)
+    end
+    tip = "Show this folder's children in full"
+  end
   return CH.draw_collapsed(ctx, dl, x, y, w, h, t.track,
-                           "mx" .. t.guid, "mx:" .. t.guid)
+                           "mx" .. t.guid, "mx:" .. t.guid, expand, tip,
+                           U.contrast_text(base))
 end
 
 -- Draws one column: the strip (full or collapsed) plus its name button
@@ -330,8 +435,8 @@ end
 -- double-clicked), and the track a name-button double-click wants opened
 -- -- which may be the same track, or nil, independently.
 local function column(ctx, t, avail_h, cur_track)
-  local collapsed = St.is_collapsed("mx:" .. t.guid)
-  local w = MX.col_width(t.guid)
+  local collapsed = t.folded or St.is_collapsed("mx:" .. t.guid)
+  local w = MX.col_width(t.guid, t.folded)
   -- Selected as REAPER sees it, so a multi-selection lights every strip
   -- in it -- with the track channel view is showing always lit, even on
   -- the master, which REAPER does not always report as selected.
@@ -339,9 +444,9 @@ local function column(ctx, t, avail_h, cur_track)
   local open_it, dbl_name = nil, nil
 
   -- The name button's own fixed-height slot at the bottom of the
-  -- column -- the same STRIP_H the track row used on its own before the
-  -- merge, with the button itself STRIP_H - 8 tall and a 4px gap above
-  -- it so it isn't jammed against the strip.
+  -- column -- the same STRIP_H as the name row in channel view, with the
+  -- button itself STRIP_H - 8 tall and a 4px gap above it so it isn't
+  -- jammed against the strip.
   local name_h    = C.STRIP_H
   local name_gap  = 4
   local strip_h   = math.max(0, avail_h - name_h)
@@ -376,12 +481,29 @@ local function column(ctx, t, avail_h, cur_track)
     ImGui.SetCursorScreenPos(ctx, x, y)
     W.allow_overlap(ctx)
     ImGui.InvisibleButton(ctx, "mxbg" .. t.guid, ww, strip_h)
+    local mods = ImGui.GetKeyMods(ctx)
     if ImGui.IsItemHovered(ctx) then
       if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
         open_it = t.track
       elseif ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
-        MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx))
+        -- A plain press on a track that's already selected waits for the
+        -- release before selecting it alone: it may be the start of
+        -- dragging the whole selection by its header.
+        if mods == 0 and MX.selected(t.track) then
+          press.pending = t.guid
+        else
+          MX.click(t.track, t.guid, mods)
+        end
+      elseif ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+        TM.open_context(t.track)
       end
+    end
+    -- The header is the drag handle; the rest of the strip isn't, so a
+    -- sweep across the meters never turns into a move.
+    drag_source(ctx, t, y + C.HEADER_H)
+    if press.pending == t.guid and ImGui.IsItemDeactivated(ctx) then
+      if not MX.drag then MX.click(t.track, t.guid, 0) end
+      press.pending = nil
     end
 
     if collapsed then
@@ -408,15 +530,20 @@ local function column(ctx, t, avail_h, cur_track)
     local o  = lw * 0.5
     ImGui.DrawList_AddRect(dl, x + o, y + o, x + ww - o, y + strip_h - o,
       selected and sel_col or C.COL.panel_border, C.STRIP_ROUND, 0, lw)
+    if MX.drag and MX.drag.guid == t.guid then
+      ImGui.DrawList_AddRect(dl, x + 1, y + 1, x + ww - 1, y + strip_h - 1,
+        C.COL.drop_marker, C.STRIP_ROUND, 0, 2.0)
+    end
 
     -- The name button, in its own slot right below -- same object, same
     -- click semantics as the strip above it, drawn by the one function
     -- channel view also uses for this button on its own.
     ImGui.SetCursorScreenPos(ctx, x, y + strip_h + name_gap)
-    local nb_hit, nb_dbl = name_button(ctx, track_label(t), t.col or C.COL.header_bg,
-                                       selected, t.guid, ww)
+    local nb_hit, nb_dbl, nb_menu = name_button(ctx, track_label(t),
+      t.col or C.COL.header_bg, selected, t.guid, ww, t)
     if nb_hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
     if nb_dbl then dbl_name = t.track end
+    if nb_menu then TM.open_context(t.track) end
 
     ImGui.EndChild(ctx)
   else
@@ -571,6 +698,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
     -- cursor.
     local row_y = select(2, ImGui.GetCursorPos(ctx))
     local x_off = 0
+    local rects = {}      -- each column's screen x and width, for dropping
 
     for i, t in ipairs(list) do
       local gap = 0
@@ -593,7 +721,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
           rx, by + 2, rx, by + inner_h - 2, C.COL.panel_border, 1.0)
       end
 
-      local w = MX.col_width(t.guid)
+      local w = MX.col_width(t.guid, t.folded)
+      rects[#rects + 1] = { x = (ImGui.GetCursorScreenPos(ctx)), w = w, num = t.num }
 
       if strips then
         local want, dbl = column(ctx, t, inner_h, cur_track)
@@ -607,10 +736,11 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
         -- blank track (C.COL.header_bg, the resolved theme colour) --
         -- not a second, hardcoded guess at it, which is how a blank
         -- track ended up a visibly different grey in each view.
-        local hit, dbl = name_button(ctx, track_label(t), t.col or C.COL.header_bg,
-                                     selected, t.guid, w)
+        local hit, dbl, menu = name_button(ctx, track_label(t),
+          t.col or C.COL.header_bg, selected, t.guid, w, t)
         if hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
         if dbl then dbl_track = t.track end
+        if menu then TM.open_context(t.track) end
         -- Bring a selection made elsewhere (the arrange view, the track
         -- manager) into view. Mixer view doesn't chase this -- it has
         -- its own scrollbar to drag, and a strip disappearing off to
@@ -623,6 +753,68 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
       end
 
       x_off = x_off + w
+    end
+
+    -- The insert tile, after the last track: as tall as a strip in mixer
+    -- view, as tall as a name button in channel view. It inserts after
+    -- the track channel view is showing, the same place REAPER's own
+    -- insert puts one, or at the end when there isn't one.
+    do
+      if #list > 0 then x_off = x_off + C.MIX_GAP end
+      ImGui.SetCursorPos(ctx, x_off, row_y)
+      local th = strips and math.max(C.STRIP_H - 8, inner_h - C.STRIP_H)
+                         or (C.STRIP_H - 8)
+      if W.dashed_plus(ctx, "mxadd", C.ADD_TILE_W, th,
+          "Insert a track\u{2026}") then
+        TM.open_insert(cur_track)
+      end
+      x_off = x_off + C.ADD_TILE_W
+    end
+
+    -- A drag in progress: the gap under the pointer, a marker in it, and
+    -- the move on release. Gaps are only ever between real tracks -- the
+    -- master stays first. Escape cancels.
+    if MX.drag then
+      local drag = MX.drag
+      local mx = ImGui.GetMousePos(ctx)
+      local before, line_x = nil, nil
+      for _, r in ipairs(rects) do
+        if r.num > 0 and mx < r.x + r.w * 0.5 then
+          before, line_x = r.num - 1, r.x - C.MIX_GAP * 0.5
+          break
+        end
+      end
+      if not before then
+        local last = rects[#rects]
+        before = reaper.CountTracks(0)
+        line_x = last and (last.x + last.w + C.MIX_GAP * 0.5)
+      end
+
+      local wx, wy = ImGui.GetWindowPos(ctx)
+      local ww = ImGui.GetWindowSize(ctx)
+      if line_x then
+        ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),
+          line_x - 1.5, wy + 2, line_x + 1.5, wy + inner_h - 2,
+          C.COL.drop_marker, 1.0)
+      end
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
+
+      -- Near either end of the row, scroll it along.
+      local edge = 40
+      if mx < wx + edge then
+        ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - C.WHEEL_SCROLL_PX * 0.25)
+      elseif mx > wx + ww - edge then
+        ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) + C.WHEEL_SCROLL_PX * 0.25)
+      end
+
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+        MX.drag = nil
+      elseif not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+        MX.drag = nil
+        if reaper.ValidatePtr2(0, drag.track, "MediaTrack*") then
+          TO.move_tracks(drag.track, before)
+        end
+      end
     end
 
     -- Pin the row back to a single explicit line, regardless of

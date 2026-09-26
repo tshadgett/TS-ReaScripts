@@ -1,6 +1,14 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett (with Claude)
--- @version 1.2.0
+-- @version 1.3.0
+-- @changelog
+--  ReaEQ panels become a draggable curve editor.
+--  Track management in the track row and mixer: insert tracks and track
+--  templates, right-click track menu (rename, spacer, folders, colour),
+--  three-state folder button, drag headers to reorder.
+--  New Receives panel; Sends can create their destination track.
+--  New "stepped knob" control type.
+--  Fixes: half-gaps and divider line settings are remembered.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -16,10 +24,13 @@
 --  [nomain] TS_CV_Mixer.lua
 --  [nomain] TS_CV_Panel.lua
 --  [nomain] TS_CV_ReaEQ.lua
+--  [nomain] TS_CV_Receives.lua
 --  [nomain] TS_CV_Sends.lua
 --  [nomain] TS_CV_Startup.lua
 --  [nomain] TS_CV_State.lua
 --  [nomain] TS_CV_Steps.lua
+--  [nomain] TS_CV_TrackMenu.lua
+--  [nomain] TS_CV_TrackOps.lua
 --  [nomain] TS_CV_TrackStrip.lua
 --  [nomain] TS_CV_Util.lua
 --  [nomain] TS_CV_Widgets.lua
@@ -86,11 +97,13 @@ local B  = require("TS_CV_Browser")
 local SC = require("TS_CV_Steps")
 local CH = require("TS_CV_Channel")
 local SD = require("TS_CV_Sends")
+local RV = require("TS_CV_Receives")
 local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
+local TM = require("TS_CV_TrackMenu")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
-CH.attach(ImGui); SD.attach(ImGui); MX.attach(ImGui)
+CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui)
 
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
@@ -403,10 +416,10 @@ local function panel_menu()
   ImGui.EndPopup(ctx)
 end
 
-local TYPE_LABELS = { knob = "Knob", toggle = "Button", combo = "Stepped value",
-                      fader = "Fader",
+local TYPE_LABELS = { knob = "Knob", toggle = "Button", combo = "Dropdown",
+                      stepped = "Stepped knob", fader = "Fader",
                       blank = "Gap", half_gap = "Half gap", divider = "Divider" }
-local TYPE_ORDER  = { "knob", "toggle", "combo", "fader", "blank", "half_gap", "divider" }
+local TYPE_ORDER  = { "knob", "toggle", "combo", "stepped", "fader", "blank", "half_gap", "divider" }
 
 local function control_menu()
   if not ImGui.BeginPopup(ctx, "ctlmenu") then return end
@@ -1221,13 +1234,14 @@ local function frame()
     -- differently rather than shrunk.
     local row_h = math.max(C.CELL_H + C.HEADER_H + C.PANEL_PAD * 2,
                            avail_h - spacing_y - strip_h)
-    -- Channel pinned left, Sends pinned right, the plugin row scrolling
-    -- between them. Both pinned panels are measured first so the row in
-    -- the middle knows what is left for it.
+    -- Channel pinned left, Sends and Receives pinned right, the plugin
+    -- row scrolling between them. The pinned panels are measured first so
+    -- the row in the middle knows what is left for it.
     local full_w = ImGui.GetContentRegionAvail(ctx)
     local ch_w   = CH.width(CH.is_collapsed())
+    local rv_w   = RV.width_for(app.track, row_h)
     local sd_w   = SD.width_for(app.track, row_h)
-    local mid_w  = math.max(80, full_w - ch_w - sd_w - C.PANEL_GAP * 2)
+    local mid_w  = math.max(80, full_w - ch_w - rv_w - sd_w - C.PANEL_GAP * 3)
 
     -- A double-click on a NAME BUTTON opens that track in channel view,
     -- in either branch below -- the button means the same thing whether
@@ -1268,6 +1282,9 @@ local function frame()
       ImGui.SameLine(ctx, 0, C.PANEL_GAP)
       local _, sd_req = SD.draw(ctx, app.track, row_h)
       if sd_req and sd_req.changed then rescan(true) end
+      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+      local _, rv_req = RV.draw(ctx, app.track, row_h)
+      if rv_req and rv_req.changed then rescan(true) end
 
       -- Double-clicking the Channel panel's background -- not the fader,
       -- which still means unity -- goes back to the mixer.
@@ -1311,8 +1328,11 @@ local function frame()
     E.draw(ctx, app.track)
     if SD.draw_menu(ctx, app.track) then rescan(true) end
     if SD.draw_ctx(ctx, app.track) then rescan(true) end
+    if RV.draw_menu(ctx, app.track) then rescan(true) end
+    if RV.draw_ctx(ctx, app.track) then rescan(true) end
     if B.draw_menu(ctx, app.track) then rescan(true) end
     if B.draw(ctx, app.track) then rescan(true) end
+    if TM.draw(ctx) then rescan(true) end
 
     -- Last thing in the frame, on the foreground draw list: a tooltip
     -- that is following a control being dragged has to sit above every

@@ -1227,6 +1227,25 @@ local function icon_channel(dl, x, y, sz, col)
   end
 end
 
+-- A folder: tab on the top left, body below it, filled to show how much
+-- of what's inside is out of sight -- an outline for "full" (everything
+-- showing), half filled for "collapsed", solid for "hidden".
+-- `fill` is 0, 0.5 or 1.
+local function icon_folder(dl, x, y, sz, col, fill)
+  local x0, x1 = x + sz * 0.10, x + sz * 0.90
+  local ty, by0, by1 = y + sz * 0.20, y + sz * 0.32, y + sz * 0.82
+  ImGui.DrawList_AddRectFilled(dl, x0, ty, x0 + sz * 0.36, by0 + 1, col, 1.0)
+  if fill >= 1 then
+    ImGui.DrawList_AddRectFilled(dl, x0, by0, x1, by1, col, 1.0)
+    return
+  end
+  ImGui.DrawList_AddRect(dl, x0, by0, x1, by1, col, 1.0, 0, 1.3)
+  if fill > 0 then
+    local my = by1 - (by1 - by0) * fill
+    ImGui.DrawList_AddRectFilled(dl, x0, my, x1, by1, col, 1.0)
+  end
+end
+
 W.ICONS = {
   mixer    = icon_mixer,
   channel  = icon_channel,
@@ -1237,27 +1256,75 @@ W.ICONS = {
   menu     = icon_menu,
   collapse = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
   expand   = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
+  folder_full      = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 0)   end,
+  folder_collapsed = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 0.5) end,
+  folder_hidden    = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 1)   end,
 }
+
+-- A dashed "+" placeholder: the add-something tile at the end of a row.
+-- Deliberately not styled as whatever it adds -- it isn't one yet.
+-- Returns true when clicked.
+function W.dashed_plus(ctx, id, w, h, tooltip)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local pressed = ImGui.InvisibleButton(ctx, id, w, h)
+  local hovered = ImGui.IsItemHovered(ctx)
+
+  local col = hovered and C.COL.accent or C.COL.panel_border
+  -- hand-drawn dashes: ImGui's rect has no dashed stroke
+  local dash, gap = 5, 4
+  local function dashed_h(yy)
+    local px = x
+    while px < x + w do
+      ImGui.DrawList_AddLine(dl, px, yy, math.min(px + dash, x + w), yy, col, 1.0)
+      px = px + dash + gap
+    end
+  end
+  local function dashed_v(xx)
+    local py = y
+    while py < y + h do
+      ImGui.DrawList_AddLine(dl, xx, py, xx, math.min(py + dash, y + h), col, 1.0)
+      py = py + dash + gap
+    end
+  end
+  dashed_h(y); dashed_h(y + h - 1); dashed_v(x); dashed_v(x + w - 1)
+
+  local sz = math.max(8, math.min(18, h - 6, w - 6))
+  icon_plus(dl, x + (w - sz) * 0.5, y + (h - sz) * 0.5, sz,
+    hovered and C.COL.icon_hot or C.COL.icon)
+
+  W.tip(ctx, id, tooltip, hovered, false)
+  return pressed
+end
 
 -- A small icon button for the panel header. `on_col`, when the button is
 -- lit, tints the background -- bypass goes amber, float goes blue -- so
 -- the two states read differently at a glance without needing a label.
-function W.icon_button(ctx, id, icon, size, active, tooltip, on_col)
+-- `ink`, when given, is the icon's colour regardless of state, for a
+-- button sitting on a coloured background (a track-coloured header)
+-- where the palette's icon colours can't be relied on to show up; its
+-- hover highlight is then a translucent wash of the same ink.
+function W.icon_button(ctx, id, icon, size, active, tooltip, on_col, ink)
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local pressed = ImGui.InvisibleButton(ctx, id, size, size)
   local hovered = ImGui.IsItemHovered(ctx)
 
-  local bg = active and (on_col or C.COL.accent)
-                    or (hovered and C.COL.knob_body_hi or nil)
+  local bg
+  if ink and not active then
+    bg = hovered and U.with_alpha(ink, 0x33) or nil
+  else
+    bg = active and (on_col or C.COL.accent)
+                or (hovered and C.COL.knob_body_hi or nil)
+  end
   if bg then
     ImGui.DrawList_AddRectFilled(dl, x, y, x + size, y + size, bg, 2.5)
   end
 
   local draw = W.ICONS[icon]
   if draw then
-    local col = active and C.COL.icon_on
-                       or (hovered and C.COL.icon_hot or C.COL.icon)
+    local col = ink or (active and C.COL.icon_on
+                               or (hovered and C.COL.icon_hot or C.COL.icon))
     draw(dl, x, y, size, col)
   end
 

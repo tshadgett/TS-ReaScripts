@@ -18,6 +18,7 @@ local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
 local St = require("TS_CV_State")
 local G  = require("TS_CV_Gang")
+local TM = require("TS_CV_TrackMenu")
 
 local CH = {}
 local ImGui
@@ -164,13 +165,16 @@ end
 -- The collapsed bar, for the pinned Channel panel AND for a collapsed
 -- mixer strip -- the same argument as CH.draw_body below. `idp` is the
 -- widget-id prefix and the peak-hold key, `ckey` the collapse-state key
--- to toggle, `label` what runs down the bar. The defaults are the
--- pinned panel's, so the one call that had none still reads as it did.
+-- to toggle. The defaults are the pinned panel's.
+-- `expand`, when given, replaces what the expand button does: a strip
+-- that's collapsed because its folder is collapsed expands the folder,
+-- not just itself. `expand_tip` is that button's tooltip. `ink`, when
+-- given, colours the expand button for a track-coloured cap behind it.
 -- Returns true when the ghost fader was CLICKED rather than dragged --
 -- see W.fader. The caller uses it to select the track, since on a
 -- collapsed strip the fader lies right over the meter and a plain click
 -- there means "this one", not "move the level".
-function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey)
+function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey, expand, expand_tip, ink)
   idp   = idp or "ch"
   ckey  = ckey or KEY
   local bare = false
@@ -178,9 +182,10 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey)
   local cx  = x + w * 0.5
 
   ImGui.SetCursorScreenPos(ctx, cx - btn * 0.5, y + 4)
+  -- ink is optional: without it the button takes the palette's colours.
   if W.icon_button(ctx, idp .. "exp", "expand", btn, false,
-      "Expand this strip") then
-    CH.set_collapse(ckey, track, false)
+      expand_tip or "Expand this strip", nil, ink or nil) then
+    if expand then expand() else CH.set_collapse(ckey, track, false) end
   end
 
   local muted = get(track, "B_MUTE") > 0.5
@@ -459,12 +464,17 @@ function CH.draw(ctx, track, avail_h)
     -- The panel's own background is a double-click target: back to mixer
     -- view. Submitted BEFORE the controls so all of them sit on top of
     -- it -- a double-click on the fader is the fader's, and means unity.
+    -- A right-click on it opens the track menu, the same as on a mixer
+    -- strip or a name button.
     ImGui.SetCursorScreenPos(ctx, x, y)
     W.allow_overlap(ctx)
     ImGui.InvisibleButton(ctx, "chbg", ww, wh)
     if ImGui.IsItemHovered(ctx)
        and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
       CH.want_mixer = true
+    end
+    if track and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+      TM.open_context(track)
     end
 
     -- With no track selected the frame and the collapse control stay --
