@@ -2520,6 +2520,15 @@ do
   check("a popup closing hands back too",      (function() f(false, true, true); return f(false, false, false) end)(), true)
 end
 
+-- Track icons: no icon, or one whose file can't be found, draws nothing.
+do
+  local IC = require "TS_CV_Icons"
+  check("no icon resolves to nothing",      IC.resolve(nil), nil)
+  check("an empty icon resolves to nothing", IC.resolve(""), nil)
+  check("a missing file resolves to nothing", IC.resolve("no_such_icon_here.png"), nil)
+  check("and stays missing on a second look", IC.resolve("no_such_icon_here.png"), nil)
+end
+
 -- ---------------------------------------------------------------------
 -- the module surface
 -- ---------------------------------------------------------------------
@@ -2538,7 +2547,7 @@ do
     "TS_CV_Editor", "TS_CV_Browser", "TS_CV_TrackStrip", "TS_CV_Mappings",
     "TS_CV_FXTree", "TS_CV_FXIndex", "TS_CV_Steps", "TS_CV_State", "TS_CV_Util",
     "TS_CV_Startup", "TS_CV_Mixer", "TS_CV_TrackMenu", "TS_CV_TrackOps",
-    "TS_CV_Receives", "TS_CV_Focus",
+    "TS_CV_Receives", "TS_CV_Focus", "TS_CV_Icons",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.

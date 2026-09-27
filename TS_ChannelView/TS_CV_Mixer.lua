@@ -44,6 +44,7 @@ local St = require("TS_CV_State")
 local G  = require("TS_CV_Gang")
 local TO = require("TS_CV_TrackOps")
 local TM = require("TS_CV_TrackMenu")
+local IC = require("TS_CV_Icons")
 
 local MX = {}
 local ImGui
@@ -55,6 +56,9 @@ function MX.attach(imgui) ImGui = imgui end
 -- and cleared here, in channel view only -- the mixer doesn't chase a
 -- selection made elsewhere, only the name row does.
 MX.scroll_to_sel = false
+
+-- True when a track in the row has an icon; see MX.tracks().
+MX.any_icon = false
 
 -- How wide this track's column is, in BOTH views. Channel view has no
 -- mixer to line up with, but the buttons keep these widths anyway: a
@@ -88,7 +92,8 @@ function MX.tracks()
   local master = reaper.GetMasterTrack(0)
   if master then
     out[#out + 1] = { track = master, num = 0, name = "MASTER",
-                      guid = "master", col = U.track_colour(master, 0xff) }
+                      guid = "master", col = U.track_colour(master, 0xff),
+                      icon = C.TRACK_ICONS and IC.path_of(master) or nil }
   end
   local depths, compact = TO.folder_state()
   local hidden, folded, by = TO.folder_view(depths, compact)
@@ -109,9 +114,15 @@ function MX.tracks()
                   or (((compact[i + 1] or 0) >= 1) and 1 or 0),
         folded  = folded[i + 1],
         fold_by = by[i + 1],
+        icon    = C.TRACK_ICONS and IC.path_of(tr) or nil,
       }
     end
   end
+  -- Whether the row needs its icon strip (read at the start of the next
+  -- frame, see C.set_icon_row).
+  local any = false
+  for _, t in ipairs(out) do if t.icon then any = true break end end
+  MX.any_icon = any
   return out
 end
 
@@ -251,7 +262,8 @@ local FOLDER_TIP  = {
 -- folder icon at its left end that collapses and expands the folder; a
 -- click on the icon is the icon's, not the button's.
 local function name_button(ctx, label, col, selected, id, w, t)
-  local h = C.STRIP_H - 8
+  local full_h = C.STRIP_H - 8
+  local h = C.STRIP_BASE_H - 8          -- the coloured name pill itself
   local dl = ImGui.GetWindowDrawList(ctx)
   local tw, th = ImGui.CalcTextSize(ctx, label)
   local folder = t and t.folder
@@ -260,27 +272,53 @@ local function name_button(ctx, label, col, selected, id, w, t)
   -- The folder icon is submitted after the button and sits on top of it,
   -- so the button has to allow that.
   if folder then W.allow_overlap(ctx) end
-  local pressed = ImGui.InvisibleButton(ctx, "tsname" .. id, w, h)
+  -- One button for the whole slot, icon block included: clicking the
+  -- icon is clicking the track.
+  local pressed = ImGui.InvisibleButton(ctx, "tsname" .. id, w, full_h)
   local hovered = ImGui.IsItemHovered(ctx)
   local rclick  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
   if t then drag_source(ctx, t) end
   -- The release that ends a drag isn't a click.
   if MX.drag then pressed = false end
 
-  -- Always full strength, the same as the strip header above and the
-  -- TCP itself: a track's own colour is never faded for being
-  -- unselected. Selection reads from the outline below, not from how
-  -- saturated the fill is.
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, col, C.STRIP_ROUND)
-  -- Inset by half the stroke, the same as the strip above: centred on
-  -- the bounds it would spill outwards, and the clip rect would eat the
-  -- spill on one side only.
+  -- With an icon row, the button is one rectangle in two parts: the icon
+  -- on the neutral panel colour, where any icon reads, under a thin
+  -- stripe of the track's own colour; and the name in the track's colour
+  -- below it, as it always was. Tracks without an icon get the same
+  -- top part, empty, so the row stays one even height.
+  local block = full_h - h
+  local sel_ring = selected and U.sel_colour(C.SEL_OUTLINE, col, C.COL.strip_sel)
+                             or C.COL.panel_border
   local lw = selected and 2.0 or 1.0
   local o  = lw * 0.5
-  ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + h - o,
-    selected and U.sel_colour(C.SEL_OUTLINE, col, C.COL.strip_sel)
-              or C.COL.panel_border,
-    C.STRIP_ROUND, 0, lw)
+  if block > 0 then
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + block, C.COL.panel_bg,
+                                 C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersTop)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + 3, col,
+                                 C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersTop)
+    if t and t.icon then
+      local pad = 4
+      IC.draw(ctx, dl, t.icon, x + pad, y + 3 + pad, w - pad * 2, block - 3 - pad * 2)
+    end
+    -- The name part: track colour, rounded only at the bottom, so the two
+    -- parts meet square and read as one button.
+    ImGui.DrawList_AddRectFilled(dl, x, y + block, x + w, y + full_h, col,
+                                 C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersBottom)
+    -- One outline round the whole thing, inset by half the stroke: centred
+    -- on the bounds it would spill outwards, and the clip rect would eat
+    -- the spill on one side only.
+    ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + full_h - o,
+      sel_ring, C.STRIP_ROUND, 0, lw)
+    y = y + block                       -- the name part is laid out below
+  else
+    -- Always full strength, the same as the strip header above and the
+    -- TCP itself: a track's own colour is never faded for being
+    -- unselected. Selection reads from the outline, not from how
+    -- saturated the fill is.
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, col, C.STRIP_ROUND)
+    ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + h - o,
+      sel_ring, C.STRIP_ROUND, 0, lw)
+  end
 
   -- Ink is picked from THIS button's own fill: a track's colour is always
   -- shown at full strength, so a light colour (a bright yellow, say)
@@ -361,6 +399,7 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
   -- these across a session, so leaving it to channel view would mean
   -- visiting every track to do what the row is for.
   local room = (w - btn - aw - 14 > 8)
+
 
   if C.MIX_STRIP_NAME then
     local label = track_label(t)

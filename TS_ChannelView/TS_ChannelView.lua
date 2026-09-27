@@ -1,11 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett (with Claude)
--- @version 1.3.1
+-- @version 1.3.2
 -- @changelog
---  Keyboard focus goes back to REAPER after a click or drag in
---  ChannelView, so Space, navigation and your other shortcuts keep
---  working (View > Return keyboard focus to REAPER; needs js_ReaScriptAPI
---  or SWS).
+--  Optional track icons (View > Track icons, off by default): REAPER's
+--  track icons shown above each name button, in both views.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -18,6 +16,7 @@
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
 --  [nomain] TS_CV_Gang.lua
+--  [nomain] TS_CV_Icons.lua
 --  [nomain] TS_CV_Mappings.lua
 --  [nomain] TS_CV_Mixer.lua
 --  [nomain] TS_CV_Panel.lua
@@ -100,9 +99,10 @@ local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
 local TM = require("TS_CV_TrackMenu")
 local FO = require("TS_CV_Focus")
+local IC = require("TS_CV_Icons")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
-CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui)
+CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
 
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
@@ -171,6 +171,7 @@ C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 C.BASE_HUE    = tonumber(ext_get("base_hue", C.BASE_HUE)) or C.BASE_HUE
 C.TINT        = tonumber(ext_get("tint", C.TINT)) or C.TINT
 C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
+C.TRACK_ICONS = ext_get("track_icons", "0") == "1"
 C.build_palette()
 
 -- ---------------------------------------------------------------------
@@ -665,6 +666,15 @@ local function menu_bar()
       ext_set("show_values", C.SHOW_VALUES and "1" or "0")
     end
 
+    if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
+      C.TRACK_ICONS = not C.TRACK_ICONS
+      ext_set("track_icons", C.TRACK_ICONS and "1" or "0")
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Show REAPER's track icons above the name buttons.\n" ..
+        "The row only grows when a track actually has one.")
+    end
+
     -- Keyboard focus back to REAPER after a click here, so its shortcuts
     -- keep working. See TS_CV_Focus.
     do
@@ -1063,6 +1073,11 @@ local function frame()
   W.begin_frame()
   P.begin_frame()
   follow_selection()
+  -- The name row's height for this whole frame: taller while any track
+  -- in it has an icon to show. Set once, here, before anything is laid
+  -- out (the row itself reports what it found at the end of the last
+  -- frame).
+  C.set_icon_row(C.TRACK_ICONS and MX.any_icon)
 
   local cc = reaper.GetProjectStateChangeCount(0)
   if cc ~= app.change_count then

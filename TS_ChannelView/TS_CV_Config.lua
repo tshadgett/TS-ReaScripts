@@ -37,7 +37,17 @@ C.GRID_TOP_PAD = C.PANEL_PAD
 C.PANEL_GAP   = 6         -- gap between adjacent panels
 C.HEADER_H    = 20        -- panel header bar height
 C.PANEL_MIN_W = 132       -- a panel never narrower than this (header needs room)
-C.STRIP_H     = 30        -- bottom track-selector strip height
+C.STRIP_H     = 30        -- bottom track-selector strip height (see C.set_icon_row)
+C.STRIP_BASE_H = C.STRIP_H  -- that height with no icon row
+C.ICON_ROW_H  = 44        -- what an icon row adds: stripe and icon
+
+-- The name row grows by C.ICON_ROW_H while track icons are shown. Every
+-- layout that depends on the row's height reads C.STRIP_H, so changing
+-- it here, once, at the start of a frame, keeps both views and the
+-- mixer strips in agreement exactly as before.
+function C.set_icon_row(on)
+  C.STRIP_H = C.STRIP_BASE_H + (on and C.ICON_ROW_H or 0)
+end
 C.MIN_ROWS    = 1         -- never compute fewer rows than this
 
 -- "trackrow" (the track-name row shared by both views, and its own
@@ -101,6 +111,10 @@ C.MIX_GAP = 4
 -- underneath carries the name already, and now that the two line up,
 -- printing it twice in a column an inch tall is just noise.
 C.MIX_STRIP_NAME = false
+
+-- Draw REAPER's track icons (P_ICON) above the name buttons. Off by
+-- default; the View menu setting overrides this.
+C.TRACK_ICONS = false
 
 -- What marks the selected strip, and the selected button under it:
 --   "track"   -- a lightened version of that track's own colour

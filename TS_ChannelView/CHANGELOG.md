@@ -1,5 +1,16 @@
 # ChannelView — changelog
 
+## 1.3.2 — track icons
+
+- **Track icons (optional).** View > Track icons shows each track's
+  REAPER icon above its name button, in both views. The name button
+  becomes one taller button: a thin stripe of the track colour along the
+  top, the icon on the neutral panel colour (where any icon reads,
+  whatever the track colour), and the name in the track colour below.
+  Tracks without an icon keep the same shape, empty, so the row stays
+  even; with no icons in the project the row stays its usual height.
+  Off by default.
+
 ## 1.3.1 — shortcuts keep working
 
 - **Keyboard focus goes back to REAPER.** Clicking a ReaImGui window
