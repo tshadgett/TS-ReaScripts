@@ -1,5 +1,26 @@
 # ChannelView — changelog
 
+## 1.3.3 — one palette across the TS_ tools
+
+- **Hue and tint moved to a shared section.** They now live in their own
+  ExtState section, `TS_Palette`, rather than in ChannelView's -- read
+  and written by ChannelView, the TCP window, TS_Visualizer, its editor
+  and TS_TrackAnalyser alike. Change the hue in any of them and the rest
+  follow within half a second, the same poll the two ChannelView windows
+  already shared.
+
+  They lived here because ChannelView had them first, and three other
+  scripts reached across into this section to find them -- which worked
+  only for as long as ChannelView was the one that owned them. Nothing
+  about the controls or the palette maths changed.
+
+  The old location is still read when the new one is empty, so an
+  existing setting survives the update rather than snapping back to
+  stock. Nothing supplies a default from the shared section: absent
+  means "no shared setting" and each tool keeps its own, so ChannelView
+  still runs with neither of the others installed.
+
+
 ## 1.3.2 — track icons
 
 - **Track icons (optional).** View > Track icons shows each track's

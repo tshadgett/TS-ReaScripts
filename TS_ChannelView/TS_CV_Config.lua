@@ -138,6 +138,7 @@ C.STRIP_ROUND = 3.0
 C.DIM_ALPHA   = 0x66
 C.HOVER_ALPHA = 0xaa
 
+C.INFX_BTN_W = 22         -- the input FX button in a strip header
 C.AUTO_BTN_W = 32         -- the automation-mode button in a panel header.
                           -- Wide enough for "LTCH", which is the longest
                           -- of the six labels.
@@ -436,6 +437,55 @@ C.HEADER_NUDGE = 0
 
 -- The gap a TCP spacer opens in the track strip along the bottom.
 C.STRIP_SPACER = 14
+
+-- ---------------------------------------------------------------------
+-- The TCP (TS_ChannelView_TCP.lua)
+-- ---------------------------------------------------------------------
+-- A second window, docked beside the arrange view, that draws its own
+-- track panel lined up with REAPER's arrange row for row. Its sizes live
+-- here with everything else so the two windows can't drift apart.
+C.TCP_EXT_SECT   = "TS_ChannelView_TCP"   -- its own settings; colour stays
+                                          -- in C.EXT_SECT, shared with CV
+C.TCP_WIN_TITLE  = "ChannelView TCP"
+-- The track-colour mark: the TCP's strip down the left of a row, and the
+-- stripe along the bottom of ChannelView's name buttons. One number, so
+-- the two stay the same thickness.
+C.COLOUR_STRIPE  = 7
+C.TCP_STRIP_W    = C.COLOUR_STRIPE
+C.TCP_INDENT     = 8      -- per folder level, the way REAPER indents
+C.TCP_INDENT_FOLDERS = true  -- indent at all (settings menu)
+C.TCP_PAD        = 4      -- inner padding of a row
+C.TCP_METER_H    = 12     -- the horizontal meter under the name
+C.TCP_METER_THIN = 4      -- ...and the line it shrinks to on short rows
+C.TCP_ICON_MAX   = 40     -- the track icon's box is never bigger than this
+C.TCP_LANES      = true   -- fixed item lane controls (settings menu)
+C.TCP_LANE_W     = 18     -- their column (one button), reserved on every row while any
+                          -- track in the project uses fixed lanes
+C.TCP_CHIP       = 13     -- the M / S / rec chips shown while one is on
+C.TCP_STATE_CHIPS = true  -- show them at all
+C.TCP_ICONS      = true   -- track icons on the right of a row (settings)
+C.TCP_EDGE       = 6      -- the grab zone straddling a row's bottom edge
+C.TCP_ADD_H      = 22     -- the "+" tile under the last track
+C.TCP_PANEL_H    = 320    -- the channel flyout's height (clamped to the
+                          -- arrange view's)
+C.TCP_WHEEL_PX   = 60     -- arrange pixels per wheel notch over the TCP
+C.TB_BTN         = 24     -- a toolbar button: square, icon or label
+C.TB_GAP         = 3
+C.TB_MIN_H       = 18     -- below this there's no toolbar row to draw in
+
+-- Apply a hue and tint read from somewhere else -- the other window's
+-- setting, via ExtState. Returns true when it changed anything, so the
+-- caller only rebuilds what depends on the palette when it has to.
+function C.apply_colour(hue, tint)
+  hue, tint = tonumber(hue), tonumber(tint)
+  if not hue or not tint then return false end
+  if math.abs(hue - C.BASE_HUE) < 1e-6 and math.abs(tint - C.TINT) < 1e-4 then
+    return false
+  end
+  C.BASE_HUE, C.TINT = hue, tint
+  C.build_palette()
+  return true
+end
 
 -- Where the panels sit when they're narrower than the window:
 --   "left"   -- packed against the left edge

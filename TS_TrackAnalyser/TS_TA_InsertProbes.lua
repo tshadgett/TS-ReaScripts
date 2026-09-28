@@ -2,7 +2,7 @@
 -- @noindex
 -- @title TS_TA_InsertProbes
 -- @description Track Analyser -- put a probe at each end of the chain
--- @author Tim Shadgett (with Claude)
+-- @author Tim Shadgett
 -- @version 1.0.0
 -- MIT licence -- see LICENSE in the TS-ReaScripts repository.
 --========================================================

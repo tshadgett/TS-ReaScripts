@@ -2529,6 +2529,160 @@ do
   check("and stays missing on a second look", IC.resolve("no_such_icon_here.png"), nil)
 end
 
+-- Record input: REAPER packs it into one number.
+do
+  local IN = require "TS_CV_Inputs"
+  local names = { [0] = "Mic", [1] = "DI" }
+  local function nm(i) return names[i] end
+  check("no input",                 IN.label(-1, nm), "No input")
+  check("mono input 1",             IN.audio(0, false), 0)
+  check("stereo 3/4",               IN.audio(2, true), 1024 + 2)
+  check("all MIDI, all channels",   IN.midi(63, 0), 6112)
+  check("MIDI device 2, channel 10", IN.midi(2, 10), 4096 + 64 + 10)
+  check("decodes MIDI device",      IN.decode(IN.midi(2, 10)).dev, 2)
+  check("decodes MIDI channel",     IN.decode(IN.midi(2, 10)).ch, 10)
+  check("decodes a stereo pair",    IN.decode(1024 + 2).stereo, true)
+  check("and its first channel",    IN.decode(1024 + 2).first, 2)
+  check("mono label uses the name", IN.label(0, nm), "Mic")
+  check("stereo label names both",  IN.label(IN.audio(0, true), nm), "Mic/DI")
+  check("unnamed input numbered",   IN.label(5, nm), "In 6")
+  check("all MIDI label",           IN.label(6112, nm), "All MIDI")
+  check("VKB channel label",        IN.label(IN.midi(62, 3), nm), "VKB ch 3")
+  check("multichannel label",       IN.label(2048 + 0, nm), "Mic+")
+end
+
+-- Dragging a track onto another: the outer quarters are the gaps either
+-- side, the middle half is "make it a child of this one".
+do
+  local TO = require "TS_CV_TrackOps"
+  check("top edge is the gap before",     TO.drop_zone(0.1), "before")
+  check("above the track is the gap too", TO.drop_zone(-2), "before")
+  check("the middle is into",             TO.drop_zone(0.5), "into")
+  check("a quarter in is into",           TO.drop_zone(0.25), "into")
+  check("bottom edge is the gap after",   TO.drop_zone(0.9), "after")
+  check("nest into another track",        TO.can_nest({ 3 }, 5), true)
+  check("not into itself",                TO.can_nest({ 3 }, 3), false)
+  check("not into its own child",         TO.can_nest({ 3, 4, 5 }, 4), false)
+  check("not into the master",            TO.can_nest({ 3 }, nil), false)
+  check("nothing to nest",                TO.can_nest({}, 2), false)
+
+  -- The TCP's module, where it's installed alongside.
+  local has_ar, AR = pcall(require, "TS_CV_Arrange")
+  if has_ar then
+  -- Three drawn rows 20 tall at y 0, 20, 40; track 3 hidden (a folded
+  -- child), track 4 at y 40; the master first.
+  local rows = {
+    { master = true, num = 0, y = -30, h = 30, env = 0 },
+    { num = 1, y = 0,  h = 20, env = 0 },
+    { num = 2, y = 20, h = 20, env = 0 },
+    { num = 3, y = 40, h = 0,  env = 0 },
+    { num = 4, y = 40, h = 20, env = 10 },
+  }
+  local b, ly, into = AR.drop_target(rows, 2, 4)
+  check("top of track 1: before it",       b, 0)
+  check("  marker at its top",             ly, 0)
+  b, ly, into = AR.drop_target(rows, 10, 4)
+  check("middle of track 1: into it",      into and into.num, 1)
+  check("  and no gap",                    b, nil)
+  b, ly, into = AR.drop_target(rows, 38, 4)
+  check("bottom of track 2: before the next drawn row", b, 3)
+  check("  marker at its bottom",          ly, 40)
+  b = AR.drop_target(rows, 65, 4)
+  check("envelope lanes: the gap after",   b, 4)
+  b, ly = AR.drop_target(rows, 200, 4)
+  check("below everything: the end",       b, 4)
+  check("  marker under the last lanes",   ly, 70)
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- ChannelView TCP: envelope state chunks
+-- ---------------------------------------------------------------------
+do
+  local EN = require "TS_CV_Envelopes"
+  local ch = "<PARMENV 3 0 1 0.5\nACT 1 -1\nVIS 1 1 1\nLANEHEIGHT 0 0\nARM 0\nDEFSHAPE 0 -1 -1\nPT 0 0.5 0\n>"
+  local f = EN.parse_flags(ch)
+  check("envelope: active read",            f.act, true)
+  check("envelope: visible read",           f.vis, true)
+  check("envelope: in its own lane",        f.lane, true)
+  check("envelope: not armed",              f.arm, false)
+  local c2 = EN.set_flag(EN.set_flag(ch, "arm", true), "act", false)
+  local f2 = EN.parse_flags(c2)
+  check("arm set",                          f2.arm, true)
+  check("bypass set",                       f2.act, false)
+  check("and nothing else moved",           f2.vis and f2.lane, true)
+  check("ACT keeps its second field",       c2:find("\nACT 0 %-1") ~= nil, true)
+  local c3 = EN.set_flag(ch, "lane", false)
+  check("lane off leaves visible on",       EN.parse_flags(c3).vis, true)
+  check("and turns the lane off",           EN.parse_flags(c3).lane, false)
+  check("VIS keeps its third field",        c3:find("\nVIS 1 0 1") ~= nil, true)
+  local bare = "<VOLENV2\nPT 0 1 0\n>"
+  check("missing lines read as defaults",   EN.parse_flags(bare).act and EN.parse_flags(bare).vis, true)
+  local c4 = EN.set_flag(bare, "arm", true)
+  check("a missing line is added",          EN.parse_flags(c4).arm, true)
+  check("after the envelope's own tag",     c4:sub(1, 13), "<VOLENV2\nARM ")
+  check("points untouched",                 c4:find("PT 0 1 0", 1, true) ~= nil, true)
+  check("lane height replaced",              EN.set_lane_height("<X\nLANEHEIGHT 40 0\nPT 0 1\n>", 72.4):find("\nLANEHEIGHT 72 0\n") ~= nil, true)
+  check("lane height added when missing",   EN.set_lane_height("<X\nPT 0 1\n>", 30):sub(1, 18), "<X\nLANEHEIGHT 30 0")
+  check("zero is REAPER's default",         EN.set_lane_height("<X\nLANEHEIGHT 55 1\n>", 0):find("LANEHEIGHT 0 1") ~= nil, true)
+  check("no points: one at the start",       EN.write_plan(0, false), "first")
+  check("one point: move it (flat line)",   EN.write_plan(1, false), "only")
+  check("a point here: move it",            EN.write_plan(5, true), "move")
+  check("otherwise: insert one",            EN.write_plan(5, false), "insert")
+  local tchunk = "<TRACK\nNAME x\nMAINSEND 1 0\n<FXCHAIN\nSHOW 0\n>\n>"
+  local withenv = EN.insert_env_block(tchunk, EN.env_block("<VOLENV2"))
+  check("envelope block goes before the FX chain", withenv:find("<VOLENV2", 1, true) < withenv:find("<FXCHAIN", 1, true), true)
+  check("and the chunk still ends the track",      withenv:sub(-2), "\n>")
+  local bare = EN.insert_env_block("<TRACK\nNAME x\n>", EN.env_block("<PANENV2"))
+  check("no FX chain or items: before the end",    bare, "<TRACK\nNAME x\n<PANENV2\nACT 1 -1\nVIS 1 1 1\nLANEHEIGHT 0 0\nARM 0\nDEFSHAPE 0 -1 -1\nPT 0 0 0\n>\n>")
+  check("a new envelope starts with a point", EN.env_block("<VOLENV2", 0.5):find("\nPT 0 0.5 0\n", 1, true) ~= nil, true)
+  check("mute's point is square",           EN.env_block("<MUTEENV", 1, 1):find("\nPT 0 1 1\n", 1, true) ~= nil, true)
+  do
+    local SUm = require "TS_CV_Startup"
+    local SUt = SUm.make("ChannelView TCP", "TS_ChannelView_TCP.lua", "channelview_tcp_cmd")
+    local both = SUt.fenced_add(SUm.fenced_add("-- start\n", "_RSaaa"), "_RSbbb")
+    check("two scripts, two startup blocks",  SUm.classify(both, "_RSaaa") .. "/" .. SUt.classify(both, "_RSbbb"), "ours/ours")
+    local less = SUt.fenced_remove(both)
+    check("removing the TCP's keeps ChannelView's", SUm.classify(less, "_RSaaa") .. "/" .. SUt.classify(less, "_RSbbb"), "ours/none")
+    local less2 = SUm.fenced_remove(both)
+    check("and the other way round",          SUm.classify(less2, "_RSaaa") .. "/" .. SUt.classify(less2, "_RSbbb"), "none/ours")
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- ChannelView TCP: fixed item lanes
+-- ---------------------------------------------------------------------
+do
+  local LN = require "TS_CV_Lanes"
+  local fr = LN.fractions(4, { [2] = { y = 0.52, h = 0.24 } })
+  check("lanes without items share evenly",   fr[0].y .. "/" .. fr[0].h, "0.0/0.25")
+  check("a lane with an item uses its place",  fr[2].y .. "/" .. fr[2].h, "0.52/0.24")
+  check("the last lane still gets its share",  fr[3].y, 0.75)
+  check("click a silent lane: plays alone",    LN.next_play(0, false), 1)
+  check("click the lone lane: stops",          LN.next_play(1, false), 0)
+  check("click one playing along: alone",      LN.next_play(2, false), 1)
+  check("ctrl-click a silent lane: along",     LN.next_play(0, true), 2)
+  check("ctrl-click one playing along: stops", LN.next_play(2, true), 0)
+  check("ctrl-click the lone lane: along",     LN.next_play(1, true), 2)
+  local pl = { [0] = 1, [1] = 0, [2] = 2, [3] = 0 }
+  local iso = LN.isolate_for_delete(pl, 4, 1)
+  check("delete lane 2: only it goes silent",  ("%d%d%d%d"):format(iso[0], iso[1], iso[2], iso[3]), "1022")
+  local aft = LN.after_delete(pl, 4, 1)
+  check("and the rest move up after",          ("%d%d%d"):format(aft[0], aft[1], aft[2]), "120")
+  check("nothing past the new end",            aft[3], nil)
+end
+
+-- FX chains: REAPER's own .RfxChain files, named without the extension.
+do
+  local CN = require "TS_CV_Chains"
+  check("a chain file",               CN.is_chain("Lead Vocal.RfxChain"), true)
+  check("any case",                   CN.is_chain("drums.RFXCHAIN"), true)
+  check("not a track template",       CN.is_chain("Bus.RTrackTemplate"), false)
+  check("not a chain in its name",    CN.is_chain("RfxChain notes.txt"), false)
+  check("named without the extension", CN.chain_name("Lead Vocal.RfxChain"), "Lead Vocal")
+  check("dots in the name kept",      CN.chain_name("Mix v2.1.rfxchain"), "Mix v2.1")
+end
+
 -- ---------------------------------------------------------------------
 -- the module surface
 -- ---------------------------------------------------------------------
@@ -2547,7 +2701,9 @@ do
     "TS_CV_Editor", "TS_CV_Browser", "TS_CV_TrackStrip", "TS_CV_Mappings",
     "TS_CV_FXTree", "TS_CV_FXIndex", "TS_CV_Steps", "TS_CV_State", "TS_CV_Util",
     "TS_CV_Startup", "TS_CV_Mixer", "TS_CV_TrackMenu", "TS_CV_TrackOps",
-    "TS_CV_Receives", "TS_CV_Focus", "TS_CV_Icons",
+    "TS_CV_Receives", "TS_CV_Focus", "TS_CV_Icons", "TS_CV_Inputs",
+    "TS_ChannelView_TCP", "TS_CV_Arrange", "TS_CV_Toolbar", "TS_CV_Envelopes", "TS_CV_Actions", "TS_CV_Lanes",
+    "TS_CV_Chains",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.
@@ -2559,9 +2715,12 @@ do
   end
 
   local missing, checked = {}, 0
+  local attached = {}   -- modules something calls .attach() on
+  local present  = {}   -- files that exist here (the TCP's may not)
   for _, file in ipairs(FILES) do
     local fh = io.open(HERE .. "../" .. file .. ".lua", "r")
     if fh then
+      present[file] = true
       local src = strip(fh:read("a")); fh:close()
 
       local bind = {}
@@ -2571,6 +2730,7 @@ do
 
       for alias, fn in src:gmatch("([%w_]+)%.([%w_]+)%s*%(") do
         local mod = bind[alias]
+        if mod and fn == "attach" then attached[mod] = true end
         if mod then
           checked = checked + 1
           local m = require(mod)
@@ -2585,6 +2745,20 @@ do
   check("every cross-module call resolves",
         #missing == 0 and "none" or table.concat(missing, "; "), "none")
   check("and there were calls to check", checked > 150, true)
+
+  -- A module that keeps its own ImGui upvalue gets it only through
+  -- attach(); one nobody attaches fails on its first ImGui call.
+  local unattached = {}
+  for _, file in ipairs(FILES) do
+    if present[file] and file:match("^TS_CV_") and file ~= "TS_CV_Receives" then
+      local m = require(file)
+      if type(m) == "table" and type(m.attach) == "function" and not attached[file] then
+        unattached[#unattached + 1] = file
+      end
+    end
+  end
+  check("every module with attach() is attached",
+        #unattached == 0 and "none" or table.concat(unattached, ", "), "none")
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

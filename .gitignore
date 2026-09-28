@@ -12,3 +12,8 @@ desktop.ini
 TS_ChannelView_Mappings.ini
 TS_ChannelView_Mappings.bak.ini
 TS_ChannelView_Steps.ini
+
+# Working scratch that lives beside the repo but is not part of it
+TS_ChannelView_checkpoints/
+_to_delete/
+*.bak

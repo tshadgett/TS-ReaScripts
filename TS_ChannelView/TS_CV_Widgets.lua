@@ -824,6 +824,68 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
   end
 end
 
+-- The same meter lying on its side, for the TCP: channels stacked top to
+-- bottom, level growing left to right. Everything that decides what a
+-- meter SAYS is shared with the upright one -- the scale (W.level_frac),
+-- the bar colours (W.level_bar_colour), the RMS hairline on each bar's
+-- outer edge, the per-channel hold line stopping short of that hairline,
+-- and the scale ink that flips between lit and unlit -- so a track reads
+-- the same here as in the mixer. Only the geometry is new.
+--
+-- No ladder at all: a TCP meter is a few pixels tall, and figures or
+-- ticks squeezed into it only get in the way of the bars.
+function W.level_meter_h(ctx, dl, x, y, w, h, chans, peak_db, rms_db)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body, 1.5)
+
+  local n = math.max(1, #chans)
+  local bar_l, bar_r = x + 1, x + w - 1
+  local span = bar_r - bar_l
+  local top, bot = y + 1, y + h - 1
+  local bh = (bot - top - (n - 1)) / n
+  -- The hairline is thinner here than upright: it is measured across a
+  -- bar that may only be three or four pixels tall.
+  local rms_h = math.min(C.RMS_STRIP_W - 1, math.max(1, bh * 0.35))
+  if bh < 3 then rms_h = 0 end
+
+  for i = 1, n do
+    local db = chans[i] or -150
+    local f  = W.level_frac(db)
+    local by = top + (i - 1) * (bh + 1)
+    if f > 0 then
+      ImGui.DrawList_AddRectFilled(dl, bar_l, by, bar_l + span * f, by + bh,
+        W.level_bar_colour(db), 0.5)
+    end
+    local rdb = rms_db
+    if type(rdb) == "table" then rdb = rdb[i] end
+    if rdb and rms_h > 0 then
+      local rf = W.level_frac(rdb)
+      if rf > 0 then
+        -- Outer edge: the top of the first bar, the bottom of the last.
+        local ry = (i == n and n > 1) and (by + bh - rms_h) or by
+        ImGui.DrawList_AddRectFilled(dl, bar_l, ry, bar_l + span * rf, ry + rms_h,
+          C.COL.level_rms, 0.5)
+      end
+    end
+  end
+
+  if peak_db then
+    for i = 1, n do
+      local pd = (type(peak_db) == "table") and peak_db[i] or peak_db
+      if pd and pd > C.METER_FLOOR then
+        local by = top + (i - 1) * (bh + 1)
+        local px = bar_l + span * W.level_frac(pd)
+        local pt, pb = by, by + bh
+        local rdb = rms_db
+        if type(rdb) == "table" then rdb = rdb[i] end
+        if rdb and rms_h > 0 and W.level_frac(rdb) > 0 then
+          if i == n and n > 1 then pb = pb - rms_h else pt = pt + rms_h end
+        end
+        ImGui.DrawList_AddLine(dl, px, pt, px, pb, W.level_bar_colour(pd), 2.0)
+      end
+    end
+  end
+end
+
 -- What a dB figure should be printed in: the same steps the bars use, so
 -- a red readout and a red bar always mean the same thing. `under` is what
 -- to use below the hot band -- the bars want their own green there, a
@@ -1246,7 +1308,26 @@ local function icon_folder(dl, x, y, sz, col, fill)
   end
 end
 
+-- A play triangle: a lane's play button.
+local function icon_play(dl, x, y, sz, col)
+  ImGui.DrawList_AddTriangleFilled(dl, x + sz * 0.30, y + sz * 0.22,
+    x + sz * 0.30, y + sz * 0.78, x + sz * 0.78, y + sz * 0.50, col)
+end
+
+-- Two chain links, overlapping: loading an FX chain.
+local function icon_chain(dl, x, y, sz, col)
+  local h  = sz * 0.34
+  local cy = y + sz * 0.5
+  local r  = h * 0.5
+  ImGui.DrawList_AddRect(dl, x + sz * 0.08, cy - h * 0.5 - sz * 0.08,
+    x + sz * 0.58, cy + h * 0.5 - sz * 0.08, col, r, 0, 1.5)
+  ImGui.DrawList_AddRect(dl, x + sz * 0.42, cy - h * 0.5 + sz * 0.08,
+    x + sz * 0.92, cy + h * 0.5 + sz * 0.08, col, r, 0, 1.5)
+end
+
 W.ICONS = {
+  chain    = icon_chain,
+  play_tri = icon_play,
   mixer    = icon_mixer,
   channel  = icon_channel,
   plus     = icon_plus,
@@ -1260,6 +1341,40 @@ W.ICONS = {
   folder_collapsed = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 0.5) end,
   folder_hidden    = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 1)   end,
 }
+
+-- A compact dropdown field: the current choice, left-aligned, with a
+-- caret at the right -- the same look as a panel's dropdown control,
+-- sized to fit a strip. Returns true when clicked; the caller opens its
+-- own popup.
+function W.dropdown(ctx, id, text, x, y, w, h, tooltip)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  local pressed = ImGui.InvisibleButton(ctx, id, w, h)
+  local hovered = ImGui.IsItemHovered(ctx)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h,
+    hovered and C.COL.knob_body_hi or C.COL.knob_body, 2.5)
+  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.knob_ring, 2.5, 0, 1.0)
+
+  local inner = w - 16
+  local txt = text or ""
+  local tw, th = ImGui.CalcTextSize(ctx, txt)
+  if tw > inner then
+    local n = #txt
+    while n > 1 do
+      n = n - 1
+      local t = txt:sub(1, n) .. "."
+      tw = ImGui.CalcTextSize(ctx, t)
+      if tw <= inner then txt = t break end
+    end
+  end
+  ImGui.DrawList_AddText(dl, x + 4, y + (h - th) * 0.5, C.COL.value, txt)
+  local ax, ay = x + w - 6, y + h * 0.5 + 1
+  ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2,
+    hovered and C.COL.icon_hot or C.COL.header_dim)
+
+  W.tip(ctx, id, tooltip, hovered, false)
+  return pressed
+end
 
 -- A dashed "+" placeholder: the add-something tile at the end of a row.
 -- Deliberately not styled as whatever it adds -- it isn't one yet.

@@ -3,7 +3,7 @@
 -- @title TS_TA_Chain
 -- @description Track Analyser -- find the probes and the strip on a track,
 --              through containers, and arm the right pair
--- @author Tim Shadgett (with Claude)
+-- @author Tim Shadgett
 -- @version 1.0.0
 -- MIT licence -- see LICENSE in the TS-ReaScripts repository.
 --========================================================
@@ -315,6 +315,13 @@ M.gmem = {
   CTRL_MEAS  = 68,   -- 0 off, 1 accumulate for one capture, 2 running average
   CTRL_TAU   = 69,   -- running-average time constant, ms
   CTRL_SMOO  = 70,   -- response smoothing width in octaves, 0 = none
+  -- Samples of latency reported by the FX BETWEEN the probes. The PRE probe
+  -- delays itself by this much so that its column N and the post probe's
+  -- column N hold the same slice of audio. REAPER compensates PDC at the
+  -- track output, not inside a chain, so nothing has put this right before
+  -- it reaches the probes.
+  CTRL_LAG   = 71,
+  CTRL_GRB   = 72,   -- 1 = run the gain-reduction filterbank in the probes
 
   PRE_BASE   = 0x10000,
   POST_BASE  = 0x20000,
@@ -348,6 +355,18 @@ M.gmem = {
   H_BANDHI  = 18,
   OFF_BAND  = 16384,
   BAND_STRIDE = 4,
+
+  -- THE GAIN-REDUCTION FILTERBANK. A level per band per scope column, so
+  -- the measured trace can be built from per-band ratios instead of one
+  -- broadband one. See TS_TA_GR.lua for why that distinction is the whole
+  -- ballgame. Linear, not decibels -- it is an RMS straight out of the DSP.
+  --   OFF_GRB + col * GRB_N + band,  band = 0 .. GRB_N-1
+  H_GRBN    = 19,    -- 0 when the probe is not running the bank
+  H_GRBLO   = 20,
+  H_GRBHI   = 21,
+  H_LAG     = 22,    -- the delay the probe actually applied
+  OFF_GRB   = 17408,
+  GRB_N     = 10,
 }
 
 -- Ask the probes for a running average of the spectrum, which is what makes

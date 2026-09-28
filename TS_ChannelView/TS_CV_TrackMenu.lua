@@ -23,6 +23,8 @@
 
 local C  = require("TS_CV_Config")
 local TO = require("TS_CV_TrackOps")
+local IC = require("TS_CV_Icons")
+local LN = require("TS_CV_Lanes")
 
 local TM = {}
 local ImGui
@@ -39,7 +41,7 @@ local SWATCH_W  = 12     -- template colour chip in the insert menu
 local CHIP_LEFT = 4
 
 local st = {
-  ctx_req    = nil,  ctx_track  = nil,
+  ctx_req    = nil,  ctx_track  = nil, ctx_tree = nil,
   ren_req    = false, ren_track = nil, ren_buf = "", ren_focus = false,
   col_req    = false, col_tracks = nil, col_rgb = 0x808080, col_swatches = nil,
   ins_req    = false, ins_anchor = nil, ins_tree = nil,
@@ -50,6 +52,13 @@ local st = {
 -- ---------------------------------------------------------------------
 
 function TM.open_context(track) st.ctx_req = track end
+
+-- Straight to the rename box, without the menu: a double-click on a
+-- TCP name, which is where REAPER's own track panel renames too.
+function TM.open_rename(track)
+  if not track or TO.is_master(track) then return end
+  st.ren_req, st.ren_track, st.ren_buf = true, track, TO.name(track)
+end
 
 -- `after`: the track a new one should follow, or nil for the end.
 function TM.open_insert(after)
@@ -96,6 +105,7 @@ local function context_menu(ctx)
   if st.ctx_req then
     st.ctx_track = st.ctx_req
     st.ctx_req = nil
+    st.ctx_tree = nil                      -- templates re-read per opening
     ImGui.OpenPopup(ctx, CTX_ID)
   end
   if not ImGui.BeginPopup(ctx, CTX_ID) then return false end
@@ -115,6 +125,32 @@ local function context_menu(ctx)
     (#tg > 1 and ("   (+%d selected)"):format(#tg - 1) or ""))
   ImGui.Separator(ctx)
 
+  -- The "+" menu's two choices, landing after this track (at the end of
+  -- the project from the master).
+  if ImGui.BeginMenu(ctx, "Add track") then
+    if ImGui.MenuItem(ctx, master and "New track at the end"
+                                  or "New track after this one") then
+      TO.insert_new(tr)
+      changed = true
+    end
+    -- Read the first time the submenu opens, not on every right-click.
+    if not st.ctx_tree then st.ctx_tree = TO.list_templates() end
+    local tree = st.ctx_tree
+    if ImGui.BeginMenu(ctx, "New track from template", TM.has_templates(tree)) then
+      TM.template_items(ctx, tree, function(path)
+        TO.insert_template(path, tr)
+        changed = true
+      end)
+      ImGui.EndMenu(ctx)
+    end
+    if not TM.has_templates(tree) then
+      tip_if_hovered(ctx, "No track templates found in " .. (TO.templates_dir()))
+    end
+    ImGui.EndMenu(ctx)
+  end
+
+  ImGui.Separator(ctx)
+
   if ImGui.MenuItem(ctx, "Rename\u{2026}", nil, false, not master) then
     st.ren_req, st.ren_track, st.ren_buf = true, tr, TO.name(tr)
   end
@@ -125,6 +161,21 @@ local function context_menu(ctx)
     changed = true
   end
   tip_if_hovered(ctx, "A gap before this track, here and in REAPER's track panel.")
+
+  local fixed = LN.is_fixed(tr)
+  if ImGui.MenuItem(ctx, "Fixed item lanes", nil, fixed, not master) then
+    LN.set_fixed(tg, not fixed)
+    changed = true
+  end
+  tip_if_hovered(ctx, "REAPER 7's lanes: several lanes of items inside the track,\n" ..
+    "for takes and comping. Each gets a play button in the TCP.")
+  if fixed and LN.count(tr) > 1 then
+    local col = LN.collapsed(tr)
+    if ImGui.MenuItem(ctx, "Collapse lanes", nil, col) then
+      LN.set_collapsed(tr, not col)
+      changed = true
+    end
+  end
 
   ImGui.Separator(ctx)
 
@@ -162,6 +213,22 @@ local function context_menu(ctx)
     st.col_req    = true
     st.col_tracks = tg
     st.col_rgb    = TO.colour_rgb(tr) or 0x808080
+  end
+  if ImGui.MenuItem(ctx, "Icon\u{2026}") then
+    st.ico_req, st.ico_tracks = true, tg
+  end
+
+  ImGui.Separator(ctx)
+  local many = #tg > 1
+  if ImGui.MenuItem(ctx, many and ("Duplicate %d tracks"):format(#tg) or "Duplicate track",
+      nil, false, not master) then
+    TO.duplicate_tracks(tg)
+    changed = true
+  end
+  if ImGui.MenuItem(ctx, many and ("Remove %d tracks"):format(#tg) or "Remove track",
+      nil, false, not master) then
+    TO.remove_tracks(tg)
+    changed = true
   end
 
   ImGui.EndPopup(ctx)
@@ -386,11 +453,121 @@ end
 
 -- Draws whichever track popup is open. Call once per frame from the main
 -- window, outside any child. Returns true on a frame something changed.
+-- ---------------------------------------------------------------------
+-- icon
+-- ---------------------------------------------------------------------
+
+-- REAPER's track icons live in Data/track_icons. Picking one sets P_ICON
+-- -- the field REAPER's own "Set track icon" writes -- so its TCP and
+-- mixer show it as well as ours. Applies to the selection when the
+-- clicked track is part of it, like colour.
+local ICON_ID  = "tm_icon"
+local ICO_CELL = 40
+local ico = { list = nil, dir = nil, filter = "" }
+
+local function list_track_icons()
+  local root = reaper.GetResourcePath()
+  local sep = root:find("\\", 1, true) and "\\" or "/"
+  local dir = root .. sep .. "Data" .. sep .. "track_icons"
+  local out, i = {}, 0
+  while true do
+    local f = reaper.EnumerateFiles(dir, i)
+    if not f then break end
+    local l = f:lower()
+    if l:match("%.png$") or l:match("%.jpe?g$") or l:match("%.ico$") or l:match("%.bmp$") then
+      out[#out + 1] = { name = f, path = dir .. sep .. f }
+    end
+    i = i + 1
+  end
+  table.sort(out, function(a, b) return a.name:lower() < b.name:lower() end)
+  return out, dir
+end
+
+local function set_icon(tracks, path)
+  reaper.Undo_BeginBlock()
+  for _, tr in ipairs(tracks) do
+    if valid(tr) then reaper.GetSetMediaTrackInfo_String(tr, "P_ICON", path or "", true) end
+  end
+  reaper.Undo_EndBlock(path and "ChannelView: set track icon"
+                            or "ChannelView: remove track icon", -1)
+  reaper.TrackList_AdjustWindows(false)
+end
+
+local function icon_picker(ctx)
+  if st.ico_req then
+    st.ico_req = false
+    ico.list, ico.dir = list_track_icons()
+    ico.filter = ""
+    ImGui.OpenPopup(ctx, ICON_ID)
+  end
+  if not ImGui.BeginPopup(ctx, ICON_ID) then return false end
+  local changed = false
+  local tracks = {}
+  for _, tr in ipairs(st.ico_tracks or {}) do
+    if valid(tr) then tracks[#tracks + 1] = tr end
+  end
+  if #tracks == 0 then
+    ImGui.CloseCurrentPopup(ctx)
+    ImGui.EndPopup(ctx)
+    return false
+  end
+
+  ImGui.TextDisabled(ctx, #tracks == 1 and label_of(tracks[1]) or (#tracks .. " tracks"))
+  ImGui.SetNextItemWidth(ctx, 200)
+  local ch, v = ImGui.InputTextWithHint(ctx, "##icoflt", "filter\u{2026}", ico.filter)
+  if ch then ico.filter = v end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "No icon") then
+    set_icon(tracks, nil)
+    changed = true
+    ImGui.CloseCurrentPopup(ctx)
+  end
+
+  local list = ico.list or {}
+  if #list == 0 then
+    ImGui.TextDisabled(ctx, "No icons in " .. tostring(ico.dir))
+  else
+    local cols = 10
+    if ImGui.BeginChild(ctx, "icogrid", cols * (ICO_CELL + 4) + 12, 320) then
+      local dl = ImGui.GetWindowDrawList(ctx)
+      local flt = ico.filter:lower()
+      local n = 0
+      for _, f in ipairs(list) do
+        if flt == "" or f.name:lower():find(flt, 1, true) then
+          if n % cols ~= 0 then ImGui.SameLine(ctx, 0, 4) end
+          n = n + 1
+          local x, y = ImGui.GetCursorScreenPos(ctx)
+          if ImGui.InvisibleButton(ctx, "ico" .. f.name, ICO_CELL, ICO_CELL) then
+            set_icon(tracks, f.path)
+            changed = true
+            ImGui.CloseCurrentPopup(ctx)
+          end
+          local hov = ImGui.IsItemHovered(ctx)
+          if hov then
+            ImGui.DrawList_AddRectFilled(dl, x, y, x + ICO_CELL, y + ICO_CELL,
+              C.COL.knob_body_hi, 2.5)
+          end
+          -- Only what's scrolled into view is loaded.
+          if ImGui.IsItemVisible(ctx) then
+            IC.draw(ctx, dl, f.path, x + 3, y + 3, ICO_CELL - 6, ICO_CELL - 6)
+          end
+          if hov then ImGui.SetTooltip(ctx, f.name) end
+        end
+      end
+      if n == 0 then ImGui.TextDisabled(ctx, "Nothing matches.") end
+      ImGui.EndChild(ctx)
+    end
+  end
+  ImGui.EndPopup(ctx)
+  return changed
+end
+
 function TM.draw(ctx)
   local changed = false
   if context_menu(ctx)  then changed = true end
   if rename_popup(ctx)  then changed = true end
   if colour_dialog(ctx) then changed = true end
+  if icon_picker(ctx)   then changed = true end
   if insert_menu(ctx)   then changed = true end
   return changed
 end

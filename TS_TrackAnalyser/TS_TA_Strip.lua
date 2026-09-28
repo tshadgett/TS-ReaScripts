@@ -2,7 +2,7 @@
 -- @noindex
 -- @title TS_TA_Strip
 -- @description Track Analyser -- read gain reduction from whatever reports it
--- @author Tim Shadgett (with Claude)
+-- @author Tim Shadgett
 -- @version 1.0.0
 -- MIT licence -- see LICENSE in the TS-ReaScripts repository.
 --========================================================

@@ -2,7 +2,7 @@
 -- @noindex
 -- @title TS_TA_QuietProbes
 -- @description Track Analyser -- make the probes visually recede
--- @author Tim Shadgett (with Claude)
+-- @author Tim Shadgett
 -- @version 1.0.0
 -- MIT licence -- see LICENSE in the TS-ReaScripts repository.
 --========================================================

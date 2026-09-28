@@ -19,11 +19,15 @@ local W  = require("TS_CV_Widgets")
 local St = require("TS_CV_State")
 local G  = require("TS_CV_Gang")
 local TM = require("TS_CV_TrackMenu")
+local IN = require("TS_CV_Inputs")
+local B  = require("TS_CV_Browser")
 
 local CH = {}
 local ImGui
 
-function CH.attach(imgui) ImGui = imgui end
+-- Inputs draws its menu from inside the strip body, so it is attached
+-- here along with the module that uses it.
+function CH.attach(imgui) ImGui = imgui; IN.attach(imgui) end
 
 local KEY = "##channel"        -- collapse state key, not an FX GUID
 
@@ -138,27 +142,129 @@ function CH.auto_button(ctx, x, y, w, h, track, idp)
   end
 end
 
-function CH.draw_header(ctx, dl, x, y, w, track)
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + C.HEADER_H, C.COL.header_bg, 0)
+-- The input FX button: lit when the track has input FX (the bypass
+-- colour when every one of them is bypassed), and opening that chain.
+-- On the master it's the monitoring FX chain instead.
+function CH.infx_button(ctx, x, y, w, h, track, idp)
+  if not track then return end
+  local master = CH.is_master(track)
+  local n, any_on = IN.fx_state(track)
+  local label = master and "MON" or "IN"
+  local noun  = master and "monitoring FX" or "input FX"
+  local tip = ((n > 0) and ((master and "Monitoring FX: " or "Input FX: ") .. n
+                             .. (any_on and "" or " (all bypassed)"))
+                        or ((master and "Monitoring FX" or "Input FX") .. ": none"))
+
+  local id = idp .. "infx"
+  if W.state_button(ctx, id, label, x, y, w, h, n > 0,
+      any_on and C.COL.accent or C.COL.bypass_on, tip) then
+    ImGui.OpenPopup(ctx, id .. "pop")
+  end
+
+  -- The same menu a plugin panel's add tile opens -- Search, Recent,
+  -- Folders, Categories, Developers -- adding to the input chain instead,
+  -- above the plugins already there.
+  if ImGui.BeginPopup(ctx, id .. "pop") then
+    ImGui.TextDisabled(ctx, master and "Monitoring FX" or "Input FX")
+    ImGui.Separator(ctx)
+    for i = 0, n - 1 do
+      local addr = 0x1000000 + i
+      local _, nm = reaper.TrackFX_GetFXName(track, addr, "")
+      local on = reaper.TrackFX_GetEnabled(track, addr)
+      if ImGui.BeginMenu(ctx, U.clean_fx_name(nm or "?") .. (on and "" or "  (bypassed)")
+                              .. "##infx" .. i) then
+        if ImGui.MenuItem(ctx, "Open the plugin's window") then
+          reaper.TrackFX_Show(track, addr, 3)
+        end
+        if ImGui.MenuItem(ctx, "Bypass", nil, not on) then
+          reaper.TrackFX_SetEnabled(track, addr, not on)
+        end
+        if ImGui.MenuItem(ctx, "Remove") then
+          reaper.Undo_BeginBlock()
+          reaper.TrackFX_Delete(track, addr)
+          reaper.Undo_EndBlock("ChannelView: remove " .. noun, -1)
+        end
+        ImGui.EndMenu(ctx)
+      end
+    end
+    if n > 0 then ImGui.Separator(ctx) end
+    if ImGui.BeginMenu(ctx, "Add " .. noun) then
+      B.menu_items(ctx, track, { track = track, input = true })
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.MenuItem(ctx, "Show the " .. noun .. " chain") then IN.open_fx(track) end
+    ImGui.EndPopup(ctx)
+  end
+end
+
+-- `opts`, all optional, is for the same header drawn somewhere else --
+-- ChannelView TCP's flyout -- so both get every button this header
+-- grows, rather than one of them drifting behind:
+--   title     text instead of "Channel" (cut to fit rather than dropped)
+--   base      the cap's colour (a track colour) instead of header_bg
+--   ink       text and icon colour on that cap
+--   on_close  the right-hand button closes rather than collapses
+--   idp       widget-id prefix, default "ch"
+function CH.draw_header(ctx, dl, x, y, w, track, opts)
+  opts = opts or {}
+  local idp = opts.idp or "ch"
+  if opts.base then
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + C.HEADER_H, opts.base,
+      C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersTop)
+  else
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + C.HEADER_H, C.COL.header_bg, 0)
+  end
   ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + w, y + C.HEADER_H,
     C.COL.panel_border, 1.0)
 
-  local _, th = ImGui.CalcTextSize(ctx, "Channel")
-  ImGui.DrawList_AddText(dl, x + 6, y + (C.HEADER_H - th) * 0.5,
-    C.COL.header_text, "Channel")
-
   local btn = C.ICON_SIZE
   ImGui.SetCursorScreenPos(ctx, x + w - btn - 3, y + 3)
-  if W.icon_button(ctx, "chcol", "collapse", btn, false, "Collapse the channel strip") then
+  if opts.on_close then
+    if W.icon_button(ctx, idp .. "close", "collapse", btn, false,
+        "Close", nil, opts.ink) then
+      opts.on_close()
+    end
+  elseif W.icon_button(ctx, idp .. "col", "collapse", btn, false, "Collapse the channel strip") then
     St.toggle_collapsed(KEY)
   end
 
   -- Automation mode, left of the collapse control -- the same corner the
-  -- Sends panel keeps its routing button in.
+  -- Sends panel keeps its routing button in. Input FX sits at the left
+  -- edge, where the signal enters the strip. The "Channel" title takes
+  -- whatever room is left between them, and gives way when there isn't
+  -- enough, as a mixer strip's header does.
+  local left_of_buttons = x + w - btn - 3
+  local title_x = x + 6
   local aw = C.AUTO_BTN_W
   if w - aw - btn - 12 > 20 then
     CH.auto_button(ctx, x + w - btn - aw - 8, y + 3, aw, C.HEADER_H - 6,
-                   track, "ch")
+                   track, idp)
+    left_of_buttons = x + w - btn - aw - 8
+    local iw = C.INFX_BTN_W
+    if w - aw - iw - btn - 16 > 20 then
+      CH.infx_button(ctx, x + 3, y + 3, iw, C.HEADER_H - 6, track, idp)
+      title_x = x + 3 + iw + 5
+    end
+  end
+
+  local title = opts.title or "Channel"
+  local room  = left_of_buttons - 4 - title_x
+  local tw, th = ImGui.CalcTextSize(ctx, title)
+  if opts.title then
+    -- A track name is worth a truncated version; "Channel" isn't.
+    while tw > room and #title > 1 do
+      title = title:sub(1, #title - 1)
+      tw = ImGui.CalcTextSize(ctx, title .. ".")
+      if tw <= room then title = title .. "." break end
+    end
+  end
+  if tw <= room then
+    ImGui.DrawList_AddText(dl, title_x, y + (C.HEADER_H - th) * 0.5,
+      opts.ink or C.COL.header_text, title)
+  end
+  if opts.title then
+    W.tip(ctx, idp .. "title", opts.title,
+      ImGui.IsWindowHovered(ctx) and ImGui.IsMouseHoveringRect(ctx, title_x, y, left_of_buttons, y + C.HEADER_H), false)
   end
 end
 
@@ -258,10 +364,29 @@ end
 -- per-track one, because this same body is every strip in mixer view.
 -- Without it every strip would share one set of ImGui ids and one peak
 -- store, and they would all fight over both.
+-- Height of the record-input row across the top of the body.
+CH.INPUT_ROW_H = 18
+
 function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   idp = idp or "ch"
   local pad = 5
   local now = reaper.time_precise()
+
+  -- The record input, as a dropdown across the top. The master has no
+  -- input, but keeps the row empty so its fader lines up with the rest.
+  if not CH.is_master(track) then
+    local pid = idp .. "inpop"
+    if W.dropdown(ctx, idp .. "inp", IN.text(track), x + pad, y + 3,
+        w - pad * 2, CH.INPUT_ROW_H - 4, "Record input: " .. IN.text(track)) then
+      ImGui.OpenPopup(ctx, pid)
+    end
+    if ImGui.BeginPopup(ctx, pid) then
+      IN.menu(ctx, track)
+      ImGui.EndPopup(ctx)
+    end
+  end
+  y = y + CH.INPUT_ROW_H
+  h = h - CH.INPUT_ROW_H
 
   -- pan across the top
   local pan = get(track, "D_PAN")

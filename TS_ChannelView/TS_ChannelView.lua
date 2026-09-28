@@ -1,22 +1,30 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
--- @author Tim Shadgett (with Claude)
--- @version 1.3.2
+-- @author Tim Shadgett
+-- @version 1.3.3
 -- @changelog
 --  Optional track icons (View > Track icons, off by default): REAPER's
 --  track icons shown above each name button, in both views.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
+--  [main]   TS_ChannelView_TCP.lua
+--  [nomain] TS_CV_Actions.lua
+--  [nomain] TS_CV_Arrange.lua
+--  [nomain] TS_CV_Toolbar.lua
 --  [nomain] TS_CV_Browser.lua
+--  [nomain] TS_CV_Chains.lua
 --  [nomain] TS_CV_Channel.lua
 --  [nomain] TS_CV_Config.lua
 --  [nomain] TS_CV_Editor.lua
+--  [nomain] TS_CV_Envelopes.lua
 --  [nomain] TS_CV_EQPanel.lua
 --  [nomain] TS_CV_Focus.lua
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
 --  [nomain] TS_CV_Gang.lua
 --  [nomain] TS_CV_Icons.lua
+--  [nomain] TS_CV_Inputs.lua
+--  [nomain] TS_CV_Lanes.lua
 --  [nomain] TS_CV_Mappings.lua
 --  [nomain] TS_CV_Mixer.lua
 --  [nomain] TS_CV_Panel.lua
@@ -100,9 +108,11 @@ local SU = require("TS_CV_Startup")
 local TM = require("TS_CV_TrackMenu")
 local FO = require("TS_CV_Focus")
 local IC = require("TS_CV_Icons")
+local CN = require("TS_CV_Chains")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
+CN.attach(ImGui)
 
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
@@ -161,6 +171,39 @@ local function ext_set(k, v)
   reaper.SetExtState(C.EXT_SECT, k, tostring(v), true)
 end
 
+-- ---------------------------------------------------------------------
+-- THE SHARED PALETTE
+--
+--   Hue and tint are one choice for the whole TS_ family, not one per
+--   tool, so they live in their own ExtState section rather than in any
+--   one tool's. Before this they lived in ChannelView's section and the
+--   TCP window, TS_Visualizer and its editor all reached across into it
+--   -- which worked only because ChannelView happened to be the one that
+--   owned them, and made every other tool depend on a name that is none
+--   of its business.
+--
+--   Reading falls through to the old location once, so an existing
+--   setting survives the update instead of everybody's colours snapping
+--   back to stock. Nothing anywhere returns a default: nil means "no
+--   shared setting", and each tool keeps its own, which is what lets any
+--   of them run on its own.
+-- ---------------------------------------------------------------------
+local PAL_SECT   = "TS_Palette"
+local PAL_LEGACY = "TS_ChannelView"
+
+local function pal_get()
+  local h = reaper.GetExtState(PAL_SECT, "base_hue")
+  local t = reaper.GetExtState(PAL_SECT, "tint")
+  if h == "" then h = reaper.GetExtState(PAL_LEGACY, "base_hue") end
+  if t == "" then t = reaper.GetExtState(PAL_LEGACY, "tint") end
+  return tonumber(h), tonumber(t)
+end
+
+local function pal_set(h, t)
+  reaper.SetExtState(PAL_SECT, "base_hue", tostring(math.floor(h)), true)
+  reaper.SetExtState(PAL_SECT, "tint", string.format("%.3f", t), true)
+end
+
 local dock_id = tonumber(ext_get("dock", "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
@@ -168,8 +211,11 @@ C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 C.MIXER_VIEW  = ext_get("mixer_view", "0") == "1"
 C.FLOW        = ext_get("flow", C.FLOW)
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
-C.BASE_HUE    = tonumber(ext_get("base_hue", C.BASE_HUE)) or C.BASE_HUE
-C.TINT        = tonumber(ext_get("tint", C.TINT)) or C.TINT
+do
+  local h, t = pal_get()
+  C.BASE_HUE = h or C.BASE_HUE
+  C.TINT     = t or C.TINT
+end
 C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
 C.TRACK_ICONS = ext_get("track_icons", "0") == "1"
 C.build_palette()
@@ -747,7 +793,7 @@ local function menu_bar()
       if hch then
         C.BASE_HUE = hv
         C.build_palette()
-        ext_set("base_hue", hv)
+        pal_set(hv, C.TINT)
       end
 
       ImGui.SetNextItemWidth(ctx, 190)
@@ -755,7 +801,7 @@ local function menu_bar()
       if tch then
         C.TINT = tv
         C.build_palette()
-        ext_set("tint", string.format("%.3f", tv))
+        pal_set(C.BASE_HUE, tv)
       end
       W.tip(ctx, "tint",
         "How far the greys lean toward the hue.\n0 is neutral grey, 1 is the default.",
@@ -778,7 +824,7 @@ local function menu_bar()
       if ImGui.MenuItem(ctx, "Reset to default") then
         C.BASE_HUE, C.TINT = 219, 1.0
         C.build_palette()
-        ext_set("base_hue", 219); ext_set("tint", "1.000")
+        pal_set(219, 1.0)
       end
       ImGui.EndMenu(ctx)
     end
@@ -841,14 +887,28 @@ local function menu_bar()
     fx_bypass_button(ctx, mid_y)
   end
 
-  -- The view toggle sits left of the FX bypass, which means measuring
-  -- back from where the bypass started rather than from the right edge.
+  -- The view toggle sits on the left, straight after the menus; the
+  -- title's left limit moves past it.
   do
     local tw = C.ICON_SIZE + 10
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
-      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
+      ImGui.SetCursorScreenPos(ctx, menus_right + 6, mid_y - C.ICON_SIZE * 0.5)
       view_toggle(ctx, mid_y)
+      menus_right = menus_right + tw
+    end
+  end
+
+  -- Load an FX chain, left of the FX bypass.
+  if app.track then
+    local tw = C.ICON_SIZE + 6
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
+      if W.icon_button(ctx, "fxchainload", "chain", C.ICON_SIZE, false,
+          "Load an FX chain onto this track") then
+        CN.open(app.track)
+      end
       fx_left = fx_left - tw
     end
   end
@@ -1069,10 +1129,29 @@ end
 -- through itself, so every iteration goes through the error trap below.
 local safe_frame
 
+-- Hue and Tint, track icons, values under controls and keyboard focus
+-- can all be changed from ChannelView TCP as well, which writes the same
+-- keys; looked at twice a second so the two windows keep one setting.
+local colour_poll = 0
+
 local function frame()
   W.begin_frame()
   P.begin_frame()
   follow_selection()
+  do
+    local now = reaper.time_precise()
+    if now - colour_poll > 0.5 then
+      colour_poll = now
+      do
+        local h, t = pal_get()
+        C.apply_colour(h or C.BASE_HUE, t or C.TINT)
+      end
+      -- and the view options the two windows share
+      C.TRACK_ICONS = ext_get("track_icons", "0") == "1"
+      C.SHOW_VALUES = ext_get("show_values", "1") == "1"
+      C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
+    end
+  end
   -- The name row's height for this whole frame: taller while any track
   -- in it has an icon to show. Set once, here, before anything is laid
   -- out (the row itself reports what it found at the end of the last
@@ -1366,6 +1445,7 @@ local function frame()
     if B.draw_menu(ctx, app.track) then rescan(true) end
     if B.draw(ctx, app.track) then rescan(true) end
     if TM.draw(ctx) then rescan(true) end
+    if CN.draw(ctx) then rescan(true) end
 
     FO.update(ctx, ImGui, C.FOCUS_BACK)
 

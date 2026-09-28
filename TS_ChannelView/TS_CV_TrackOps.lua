@@ -195,6 +195,27 @@ function TO.is_move(idxs, before)
   return true
 end
 
+-- Where along a track a drag is pointing, as a fraction of its length in
+-- the direction of the drag (0 = its top or left edge, 1 = its bottom or
+-- right): the outer quarters mean the gap on that side, the middle half
+-- means the track itself -- make the dragged tracks its children.
+function TO.drop_zone(frac)
+  if frac < 0.25 then return "before" end
+  if frac > 0.75 then return "after" end
+  return "into"
+end
+
+-- Whether the tracks `idxs` (a move set, 1-based, dragged folders'
+-- children included) can become children of 1-based track `k`: not the
+-- master, and not one of themselves -- a folder can't go inside itself.
+function TO.can_nest(idxs, k)
+  if not k or k < 1 or #idxs == 0 then return false end
+  for _, i in ipairs(idxs) do
+    if i == k then return false end
+  end
+  return true
+end
+
 -- ---------------------------------------------------------------------
 -- colours (pure)
 -- ---------------------------------------------------------------------
@@ -425,29 +446,68 @@ end
 -- Drags a track to just before 0-based position `before` (the track
 -- count for the end). Returns true when something moved. The moved
 -- tracks end up selected, as after a drag in REAPER's track panel.
-function TO.move_tracks(track, before)
+-- The tracks a drag of `track` carries, as a sorted 1-based move set:
+-- the selection when the track is part of it, the track alone when not,
+-- each with its folder's children.
+local function carried(track)
   local k = track and index_of(track)
-  if not k then return false end
+  if not k then return nil end
   local depths = folder_state()
   local selected = {}
   for i = 0, reaper.CountSelectedTracks(0) - 1 do
     local j = index_of(reaper.GetSelectedTrack(0, i))
     if j then selected[j] = true end
   end
-  local idxs = TO.move_set(depths, k, selected)
-  if not TO.is_move(idxs, before + 1) then return false end
+  return TO.move_set(depths, k, selected)
+end
 
+-- Selects exactly the tracks `idxs` and hands them to REAPER's reorder,
+-- as one undo point. `mode` is ReorderSelectedTracks' makePrevFolder: 0
+-- a plain move, 1 into the track before `before` as its children.
+local function reorder(idxs, before, mode, undo_one, undo_many, prep)
   local tracks = {}
   for _, i in ipairs(idxs) do tracks[#tracks + 1] = reaper.GetTrack(0, i - 1) end
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
+  if prep then prep() end
   reaper.Main_OnCommand(40297, 0)          -- Track: Unselect all tracks
   for _, tr in ipairs(tracks) do reaper.SetTrackSelected(tr, true) end
-  reaper.ReorderSelectedTracks(before, 0)
+  reaper.ReorderSelectedTracks(before, mode)
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock(#tracks == 1 and "ChannelView: move track"
-                                     or "ChannelView: move tracks", -1)
+  reaper.Undo_EndBlock("ChannelView: " .. (#tracks == 1 and undo_one or undo_many), -1)
   reaper.TrackList_AdjustWindows(false)
+end
+
+-- Moves `track` (with the selection, if it's selected, and any folder
+-- children) to just before 0-based position `before`.
+function TO.move_tracks(track, before)
+  local idxs = carried(track)
+  if not idxs or not TO.is_move(idxs, before + 1) then return false end
+  reorder(idxs, before, 0, "move track", "move tracks")
+  return true
+end
+
+-- Whether a drag of `track` could be dropped into `target`.
+function TO.can_nest_into(track, target)
+  local idxs = carried(track)
+  return idxs ~= nil and TO.can_nest(idxs, target and index_of(target))
+end
+
+-- Makes `track` (with the selection, if it's selected, and any folder
+-- children) the first children of `target`, which becomes a folder if it
+-- isn't one. A folder whose children were hidden is opened, so what was
+-- dropped doesn't vanish.
+function TO.nest_tracks(track, target)
+  local idxs = carried(track)
+  local k = target and index_of(target)
+  if not idxs or not TO.can_nest(idxs, k) then return false end
+  -- Position k (0-based) is just after the target, so mode 1 makes the
+  -- target the parent.
+  reorder(idxs, k, 1, "move track into folder", "move tracks into folder", function()
+    if TO.folder_mode(target) == 2 then
+      reaper.SetMediaTrackInfo_Value(target, "I_FOLDERCOMPACT", 0)
+    end
+  end)
   return true
 end
 
@@ -471,6 +531,52 @@ local function touch(anchor)
   if not anchor then return end
   reaper.SetOnlyTrackSelected(anchor)
   reaper.Main_OnCommand(40914, 0)
+end
+
+-- Removes `tracks` (never the master), as one undo point -- the same as
+-- REAPER's own "Remove tracks", which doesn't ask either: undo is the
+-- safety net.
+function TO.remove_tracks(tracks)
+  local list = {}
+  for _, tr in ipairs(tracks) do
+    if tr and not TO.is_master(tr) and reaper.ValidatePtr2(0, tr, "MediaTrack*") then
+      list[#list + 1] = tr
+    end
+  end
+  if #list == 0 then return false end
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  for _, tr in ipairs(list) do reaper.DeleteTrack(tr) end
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock(#list == 1 and "ChannelView: remove track"
+                                  or "ChannelView: remove tracks", -1)
+  reaper.TrackList_AdjustWindows(false)
+  return true
+end
+
+-- Duplicates `tracks` with REAPER's own action, so everything a track
+-- carries comes along -- items, FX, envelopes, routing -- each copy
+-- landing after its original. The copies end up selected, as they do
+-- from REAPER's menu.
+function TO.duplicate_tracks(tracks)
+  local AC = require("TS_CV_Actions")
+  local list = {}
+  for _, tr in ipairs(tracks) do
+    if tr and not TO.is_master(tr) and reaper.ValidatePtr2(0, tr, "MediaTrack*") then
+      list[#list + 1] = tr
+    end
+  end
+  if #list == 0 then return false end
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  reaper.Main_OnCommand(40297, 0)          -- Track: Unselect all tracks
+  for _, tr in ipairs(list) do reaper.SetTrackSelected(tr, true) end
+  local ok = AC.run("Track: Duplicate tracks", 40062)
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock(#list == 1 and "ChannelView: duplicate track"
+                                  or "ChannelView: duplicate tracks", -1)
+  reaper.TrackList_AdjustWindows(false)
+  return ok
 end
 
 function TO.insert_new(after)

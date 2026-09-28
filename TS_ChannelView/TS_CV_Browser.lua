@@ -45,6 +45,8 @@ local st = {
   open      = false,
   request   = false,
   insert_at = nil,     -- top-level slot, or nil to append
+  track     = nil,     -- the track to insert on, when not the caller's
+  input     = false,   -- into the input (monitoring) FX chain instead
   query     = "",
   kind      = "",          -- "", "folder", "cat", "dev"
   val       = nil,         -- folder id, or category/developer name
@@ -211,10 +213,14 @@ end
 -- ---------------------------------------------------------------------
 
 -- insert_at: top-level chain slot to insert before, or nil to append.
-function B.open(insert_at)
+-- `opts`, optional: { track = the track to add to (when it isn't the one
+-- the dialog is drawn for), input = true for the input FX chain }.
+function B.open(insert_at, opts)
   st.open      = true
   st.request   = true
   st.insert_at = insert_at
+  st.track     = opts and opts.track or nil
+  st.input     = (opts and opts.input) and true or false
   st.query     = ""
   st.kind, st.val, st.fkey = "", nil, ""
   st.devfilt   = ""
@@ -224,12 +230,14 @@ function B.open(insert_at)
   st.focus     = true
 end
 
-local function insert(track, entry, at)
+-- `input` puts it at the end of the input FX chain instead -- the
+-- monitoring FX chain on the master, which is where REAPER keeps those.
+local function insert(track, entry, at, input)
   if not track or not entry then return false end
   -- instantiate doubles as a position: -1000 - n inserts at slot n.
-  local instantiate = at and (-1000 - at) or -1
+  local instantiate = (at and not input) and (-1000 - at) or -1
   reaper.Undo_BeginBlock()
-  local idx = reaper.TrackFX_AddByName(track, entry.ident, false, instantiate)
+  local idx = reaper.TrackFX_AddByName(track, entry.ident, input and true or false, instantiate)
   reaper.Undo_EndBlock("ChannelView: add " .. entry.short, -1)
   if idx and idx >= 0 then
     remember(entry.ident)
@@ -248,6 +256,11 @@ end
 
 local MENU_ID = "addfxmenu"
 local menu = { request = false, insert_at = nil }
+
+-- Where the menu's items insert: set by B.draw_menu for the chain, or by
+-- B.menu_items when the same list is shown somewhere else (the input FX
+-- button's menu).
+local cur = { insert_at = nil, track = nil, input = false }
 
 function B.open_menu(insert_at)
   menu.request   = true
@@ -298,7 +311,7 @@ local function plugin_items(ctx, track, list)
   local pad = badge_pad(ctx)
   for i, e in ipairs(list or {}) do
     if ImGui.MenuItem(ctx, ("%s%s##m%d"):format(pad, e.short, i)) then
-      if insert(track, e, menu.insert_at) then inserted_now = true end
+      if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
     end
     badge(ctx, dl, e.fmt)
   end
@@ -314,24 +327,12 @@ local function group_menu(ctx, track, label, list)
   end
 end
 
--- Returns true on the frame a plugin was inserted from the menu.
-function B.draw_menu(ctx, track)
-  if menu.request then
-    ImGui.OpenPopup(ctx, MENU_ID)
-    menu.request = false
-    installed()                       -- index now, not mid-hover
-  end
-  inserted_now = false
-  if not ImGui.BeginPopup(ctx, MENU_ID) then return false end
-
-  local where = menu.insert_at
-    and ("Insert at position " .. (menu.insert_at + 1))
-    or "Add to the end of the chain"
-  ImGui.TextDisabled(ctx, where)
-  ImGui.Separator(ctx)
-
+-- The menu's body: Search, Recent, and the plugin trees. Shared by the
+-- chain's own add menu and anything else that adds plugins.
+local function items(ctx, track)
+  installed()
   if ImGui.MenuItem(ctx, "Search\u{2026}") then
-    B.open(menu.insert_at)
+    B.open(cur.insert_at, { track = cur.track, input = cur.input })
   end
 
   local rec = {}
@@ -380,6 +381,38 @@ function B.draw_menu(ctx, track)
     ImGui.EndMenu(ctx)
   end
 
+end
+
+-- The same list, drawn inside a menu that's already open -- a submenu of
+-- the input FX button, say. `opts` as for B.open. Returns true on the
+-- frame a plugin was inserted.
+function B.menu_items(ctx, track, opts)
+  inserted_now = false
+  cur.insert_at = opts and opts.insert_at or nil
+  cur.track     = opts and opts.track or nil
+  cur.input     = (opts and opts.input) and true or false
+  items(ctx, track)
+  return inserted_now
+end
+
+-- Returns true on the frame a plugin was inserted from the menu.
+function B.draw_menu(ctx, track)
+  if menu.request then
+    ImGui.OpenPopup(ctx, MENU_ID)
+    menu.request = false
+    installed()                       -- index now, not mid-hover
+  end
+  inserted_now = false
+  if not ImGui.BeginPopup(ctx, MENU_ID) then return false end
+
+  local where = menu.insert_at
+    and ("Insert at position " .. (menu.insert_at + 1))
+    or "Add to the end of the chain"
+  ImGui.TextDisabled(ctx, where)
+  ImGui.Separator(ctx)
+
+  cur.insert_at, cur.track, cur.input = menu.insert_at, nil, false
+  items(ctx, track)
   ImGui.EndPopup(ctx)
   return inserted_now
 end
@@ -401,8 +434,8 @@ function B.draw(ctx, track)
   if visible then
     if st.last_q ~= st.query or st.last_v ~= st.fkey then rebuild() end
 
-    local where = st.insert_at
-      and ("insert at position " .. (st.insert_at + 1))
+    local where = st.input and "add to the input FX chain"
+      or (st.insert_at and ("insert at position " .. (st.insert_at + 1)))
       or "add to the end of the chain"
     ImGui.TextDisabled(ctx, where)
 
@@ -522,7 +555,7 @@ function B.draw(ctx, track)
       end
       if ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
          or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter) then
-        inserted = insert(track, st.results[st.sel], st.insert_at)
+        inserted = insert(st.track or track, st.results[st.sel], st.insert_at, st.input)
         if inserted then ImGui.CloseCurrentPopup(ctx); st.open = false end
       end
     end
@@ -550,7 +583,7 @@ function B.draw(ctx, track)
         end
         if ImGui.IsItemHovered(ctx)
            and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
-          inserted = insert(track, e, st.insert_at)
+          inserted = insert(st.track or track, e, st.insert_at, st.input)
           if inserted then ImGui.CloseCurrentPopup(ctx); st.open = false end
         end
         if st.sel == i and st.scroll then
@@ -562,7 +595,7 @@ function B.draw(ctx, track)
     end
 
     if ImGui.Button(ctx, "Add", 90) then
-      inserted = insert(track, st.results[st.sel], st.insert_at)
+      inserted = insert(st.track or track, st.results[st.sel], st.insert_at, st.input)
       if inserted then ImGui.CloseCurrentPopup(ctx); st.open = false end
     end
     ImGui.SameLine(ctx)

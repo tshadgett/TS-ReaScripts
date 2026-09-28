@@ -1,8 +1,8 @@
 --========================================================
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
--- @author Tim Shadgett (with Claude)
--- @version 1.0.0
+-- @author Tim Shadgett
+-- @version 1.2.0
 -- @license MIT
 -- @provides
 --   [main]   TS_TA_InsertProbes.lua
@@ -10,6 +10,7 @@
 --   [nomain] TS_TA_Chain.lua
 --   [nomain] TS_TA_Strip.lua
 --   [nomain] TS_TA_Mask.lua
+--   [nomain] TS_TA_GR.lua
 --   [effect] TS_TrackProbe.jsfx
 --========================================================
 --
@@ -303,8 +304,14 @@ local Strip = need("TS_TA_Strip", true, {
 local Mask = need("TS_TA_Mask", true, {
   "grid", "spreading", "excitation", "collide",
 })
+-- The gain-reduction arithmetic, out here for the same reason: it is
+-- testable on synthetic band levels with a known answer, and this file is
+-- not. See its header for why the measured trace is no longer a broadband
+-- ratio.
+local GR = need("TS_TA_GR", true, { "shape" })
 if not Strip then return end
 if not Mask then return end
+if not GR then return end
 
 -- The measured models are no longer part of drawing. They are kept for the
 -- measurement tools and are not loaded here at all -- the panel must not
@@ -398,6 +405,15 @@ local S = {
   cWavePre  = 0x6E767Eff,
   cWavePost = 0x4E9AC8ff,
   cGR       = 0xF0A860ff,
+
+  -- Each data colour follows the base hue until you take it off auto by
+  -- unticking the box beside it. See DERIVED.
+  autoSpecPre  = true,
+  autoSpecPost = true,
+  autoWavePre  = true,
+  autoWavePost = true,
+  autoCurve    = true,
+  autoGR       = true,
 }
 
 ----------------------------------------------------------
@@ -488,6 +504,47 @@ end
 -- Rebuilt IN PLACE, because everything else holds a reference to COL.
 local COL = {}
 
+-- THE DATA COLOURS, DERIVED FROM THE SAME HUE
+--
+--   The spectrum, waveform, curve and reduction colours were seven hand
+--   picked hex values, which meant moving the Hue slider recoloured the
+--   furniture and left the data sitting on the old scheme.
+--
+--   Each is written here as the offset, saturation and lightness that
+--   reproduces the hand-picked value EXACTLY at hue 219 -- every entry
+--   round-trips to its original hex -- so turning this on changes
+--   nothing until you move the hue.
+--
+--   Two families, and the split is not arbitrary. The unprocessed and
+--   processed pairs sit within about sixteen degrees of the base: they
+--   are the subject, and they belong to it. The response curve and the
+--   reduction trace come out at -175 and +171 -- complementary, which is
+--   what makes them readable ON TOP of the first pair rather than lost
+--   in it. Those were the numbers already in the file; naming them is
+--   the only thing that changed.
+--
+--   cMask is deliberately absent. Collision red is a fixed colour for a
+--   fixed purpose, like a bypass lamp, and a warning that changes colour
+--   with the furniture is not a warning.
+--
+--   { role, hue offset, saturation, lightness, alpha }
+local DERIVED = {
+  cSpecPre  = { "tint",   -9.0, 0.078, 0.451, 0.200 },
+  cSpecPost = { "solid", -15.9, 0.531, 0.384, 0.341 },
+  cWavePre  = { "tint",   -9.0, 0.068, 0.463, 1.000 },
+  cWavePost = { "solid", -16.4, 0.526, 0.545, 1.000 },
+  cCurve    = { "solid",-175.1, 0.755, 0.631, 1.000 },
+  cGR       = { "solid", 171.0, 0.828, 0.659, 1.000 },
+}
+
+-- Which of them are following the hue. One flag per colour, so overriding
+-- the reduction trace does not drag the spectrum out with it.
+local DERIVED_AUTO = {
+  cSpecPre  = "autoSpecPre",  cSpecPost = "autoSpecPost",
+  cWavePre  = "autoWavePre",  cWavePost = "autoWavePost",
+  cCurve    = "autoCurve",    cGR       = "autoGR",
+}
+
 local function buildPalette()
   local base = S.baseHue or 219
   local tint = S.tint or 1.0
@@ -498,6 +555,17 @@ local function buildPalette()
     elseif role == "tint" then h, sa = base + dh, sat * tint
     else h, sa = base + dh, sat end
     COL[name] = hsl(h, sa, lum, 0xff)
+  end
+
+  -- The data colours follow the same two knobs, except where you have
+  -- said otherwise. Alpha is carried through untouched: on the spectrum
+  -- it is the control, not decoration.
+  for name, e in pairs(DERIVED) do
+    if S[DERIVED_AUTO[name]] ~= false then
+      local role, dh, sat, lum, a = e[1], e[2], e[3], e[4], e[5]
+      local sa = (role == "tint") and sat * tint or sat
+      S[name] = hsl(base + dh, sa, lum, math.floor(a * 255 + 0.5))
+    end
   end
   return COL
 end
@@ -716,6 +784,54 @@ end
 ----------------------------------------------------------
 
 local EXT = "TS_TrackAnalyser"
+
+-- ---------------------------------------------------------------------
+-- THE SHARED PALETTE
+--
+--   Hue and tint are one choice across ChannelView, this panel and
+--   TS_Visualizer, so they live in a section of their own rather than in
+--   any one tool's. They used to live in ChannelView's, which three other
+--   scripts reached across into -- workable only for as long as
+--   ChannelView was the one that happened to own them.
+--
+--   The old location is still read when the new one is empty, so an
+--   existing setting survives the update rather than everybody's colours
+--   snapping back to stock. Nothing here supplies a default: nil means
+--   "no shared setting", and this panel then keeps its own, which is what
+--   lets it run with neither of the other tools installed.
+-- ---------------------------------------------------------------------
+local PAL_SECT   = "TS_Palette"
+local PAL_LEGACY = "TS_ChannelView"
+
+local function palGet()
+  local h = r.GetExtState(PAL_SECT, "base_hue")
+  local t = r.GetExtState(PAL_SECT, "tint")
+  if h == "" then h = r.GetExtState(PAL_LEGACY, "base_hue") end
+  if t == "" then t = r.GetExtState(PAL_LEGACY, "tint") end
+  return tonumber(h), tonumber(t)
+end
+
+local function palSet(h, t)
+  r.SetExtState(PAL_SECT, "base_hue", tostring(math.floor(h)), true)
+  r.SetExtState(PAL_SECT, "tint", string.format("%.3f", t), true)
+end
+
+-- Poll rather than push, at the same half second ChannelView and its TCP
+-- window use. ExtState is a string lookup; twice a second costs nothing
+-- measurable, and it means no tool has to know which others exist.
+local palPoll = -1
+local function palFollow(now)
+  if now - palPoll < 0.5 then return end
+  palPoll = now
+  local h, t = palGet()
+  if not h or not t then return end
+  if math.abs(h - (S.baseHue or 219)) < 1e-6
+     and math.abs(t - (S.tint or 1)) < 1e-4 then return end
+  -- Applying does NOT write back. Two tools that each wrote what they
+  -- read would ping-pong for ever over the last decimal place.
+  S.baseHue, S.tint = h, t
+  buildPalette()
+end
 local settingsDirty, settingsAt = false, 0
 local function touchSettings() settingsDirty = true end
 
@@ -757,6 +873,14 @@ local function loadSettings()
 end
 
 loadSettings()
+-- The SHARED hue and tint win over this panel's own copy when one has
+-- been set, so opening the panel next to ChannelView does not briefly
+-- show a different colour before the first poll lands.
+do
+  local h, t = palGet()
+  if h then S.baseHue = math.max(0, math.min(359, math.floor(h))) end
+  if t then S.tint    = math.max(0, math.min(2, t)) end
+end
 -- The palette follows whatever hue and tint came back from ExtState.
 buildPalette()
 
@@ -837,6 +961,10 @@ local rigSources = {}     -- everything between the probes that reports reductio
 local rigOutside = {}     -- reduction reporters that are NOT between them
 local lock       = {}     -- the scope trigger: anchor, step, ring length
 local chainSig   = nil    -- what the chain looked like last time we looked
+local rigLag     = 0      -- samples of latency reported by the FX between
+                          -- the probes; the pre probe delays itself by it
+local grShape    = {}     -- reused, so the trace allocates nothing a frame
+local grScratch  = {}
 local nextScan   = 0
 local lastChange = -1     -- REAPER's own project change counter
 
@@ -1111,8 +1239,54 @@ local function confirmInsertProbes()
   end
 end
 
+-- THE LATENCY BETWEEN THE PROBES
+--
+--   Everything between the probes delays the post one by its own reported
+--   PDC. REAPER compensates delay at the track OUTPUT, so that tracks line
+--   up with each other; it does not time-travel inside a chain, and nothing
+--   puts this right before it reaches the probes.
+--
+--   Uncorrected it is not a small error. At 32 samples -- a third of a
+--   scope column, which is what one oversampled plugin costs -- the
+--   measured trace's error against a known reduction goes from 0.01 dB to
+--   2.36 dB and its correlation from 1.00 to 0.74. At one whole column a
+--   silent gap in one ring lines up with a transient in the other and it
+--   stops being wrong and starts being noise: 226 dB spikes on a 12 dB
+--   reduction.
+--
+--   Walked in CHAIN ORDER rather than by comparing indices, because an FX
+--   inside a container carries an encoded index and `i > lo and i < hi` is
+--   not true of it in any useful way. Containers themselves are skipped and
+--   their children counted, so nothing is added twice. Disabled and offline
+--   plugins are skipped because REAPER does not run them.
+local function chainLatency(tr, rg)
+  if not (tr and rg and rg.pre and rg.post) then return 0 end
+  if rg.pre.idx == rg.post.idx then return 0 end
+  local seen, total = false, 0
+  for _, fx in ipairs(rg.chain or {}) do
+    if fx.idx == rg.pre.idx then
+      seen = true
+    elseif fx.idx == rg.post.idx then
+      break
+    elseif seen and not fx.isContainer then
+      local on = r.TrackFX_GetEnabled(tr, fx.idx)
+      local off = r.TrackFX_GetOffline(tr, fx.idx)
+      if on and not off then
+        local ok, v = r.TrackFX_GetNamedConfigParm(tr, fx.idx, "pdc")
+        local n = ok and tonumber(v)
+        if n and n > 0 then total = total + n end
+      end
+    end
+  end
+  -- Clamped to what the probe's delay line can hold. Past this something is
+  -- either misreporting or doing something the measured trace was never
+  -- going to describe.
+  return math.min(math.floor(total), 65536)
+end
+
 local function setUpRig(tr, keepPre, keepPost)
   rigTrack, rig, rigNote, rigNeedsProbes = tr, nil, nil, false
+  rigLag = 0
   clearState(keepPre ~= nil)
   if not tr then rigNote = "No track selected." return end
   local found, why = TA.find(tr)
@@ -1121,8 +1295,7 @@ local function setUpRig(tr, keepPre, keepPost)
     -- fixed, from any other reason find() refused.
     rigNeedsProbes = (why or ""):find(TA.PROBE_NAME or "Probe", 1, true) ~= nil
     rigNote = rigNeedsProbes and "No probes on track"
-              or ((why or "No probes on this track.") ..
-                  "  Settings has a button to add them.")
+              or (why or "No probes on this track.")
     return
   end
   rig = found
@@ -1139,6 +1312,8 @@ local function setUpRig(tr, keepPre, keepPost)
   rigSources, rigOutside = Strip.reductionSources(rigTrack, rig.chain,
                  rig.pre and rig.pre.idx or -1,
                  rig.post and rig.post.idx or -1)
+
+  rigLag = chainLatency(rigTrack, rig)
 
   -- Only the VST3 route is drawn. It reports decibels directly, so there is
   -- no law to calibrate, no staleness to detect and nothing to hold through
@@ -1403,10 +1578,20 @@ local function pumpScope(which, base)
   sc.slice = math.max(1, r.gmem_read(base + G.H_SLICE) or 96)
   local cur = math.floor(r.gmem_read(base + G.H_CUR) or 0) % len
   if sc.cur < 0 then sc.cur = cur return end
+  -- Zero unless the panel has asked for the filterbank, so this costs
+  -- nothing at all when the measured trace is not on screen.
+  local nbg = math.floor(r.gmem_read(base + G.H_GRBN) or 0)
+  if nbg > G.GRB_N then nbg = G.GRB_N end
+  sc.nbg = nbg
   local i, guard = sc.cur, 0
   while i ~= cur and guard < len do
     local b = base + G.OFF_SCOPE + i * 3
-    sc.cols[i] = { r.gmem_read(b), r.gmem_read(b + 1), r.gmem_read(b + 2) }
+    local col = { r.gmem_read(b), r.gmem_read(b + 1), r.gmem_read(b + 2) }
+    if nbg > 0 then
+      local gb = base + G.OFF_GRB + i * G.GRB_N
+      for q = 0, nbg - 1 do col[4 + q] = r.gmem_read(gb + q) end
+    end
+    sc.cols[i] = col
     i = (i + 1) % len
     guard = guard + 1
   end
@@ -2235,6 +2420,15 @@ local function drawPanel2(dl, x0, y0, w, h)
   --   So a reporting plugin is required. It is what makes the number
   --   mean decibels of reduction, and it is what puts the trace at the
   --   right height. Without one, nothing is drawn and the panel says so.
+  -- WANTED versus GOT. These were one variable, and that was a hole: the
+  -- reported trace was suppressed whenever the measured one was ASKED for,
+  -- whether or not it turned out to have anything to draw. While the
+  -- measured route was a broadband ratio it always had something, so the
+  -- hole never opened. Now that it can legitimately come up empty -- a
+  -- probe from before the filterbank, a window that has not filled yet --
+  -- a chain with a compressor reporting perfectly well drew no trace at
+  -- all and said nothing about why.
+  local measuredDrew = false
   local measured = (S.grTraceSrc == 2) and anyUsable
                    and rig and rig.pre and rig.post
   if S.showGRTrace and measured and ok and total >= 4 then
@@ -2244,23 +2438,69 @@ local function drawPanel2(dl, x0, y0, w, h)
     -- Ratios, not decibels, in the inner loop: one logarithm per PIXEL at
     -- the end instead of one per column, which is 840 rather than 2000
     -- and does not grow when you zoom out.
-    local lowest, base = {}, nil
-    for px = px0, px1 do
-      local k0 = math.floor((px - px0) / span * total)
-      local k1 = math.max(k0, math.floor((px + 1 - px0) / span * total) - 1)
-      local lo = nil
-      for k = k0, math.min(k1, total - 1) do
-        local i = (oldest + k) % sc.len
-        local a, b = pre.cols[i], sc.cols[i]
-        if a and b and a[3] and b[3] and a[3] > 1e-7 and b[3] > 1e-7 then
-          local ratio = b[3] / a[3]
-          if not lo   or ratio < lo   then lo = ratio end
-          if not base or ratio > base then base = ratio end
-        end
-      end
-      lowest[px] = lo
+    -- A LEVEL GATE, BECAUSE A RATIO OF TWO SMALL NUMBERS IS NOISE.
+    --
+    --   The only guard here was a[3] > 1e-7, which is -140 dBFS -- so in
+    --   the gaps between notes the trace was dividing one noise floor by
+    --   another and drawing whatever came out. On quiet material that is
+    --   a spike to the bottom of the scale on every gap.
+    --
+    --   Two thresholds, because one will not do. An absolute floor, since
+    --   below about -70 dBFS there is no signal to take a ratio of. And a
+    --   relative one, because a track riding at -50 has real gaps far
+    --   above any fixed floor: anything more than 45 dB below the loudest
+    --   moment in the window is not what the compressor is working on
+    --   either.
+    --
+    --   Gated columns are HELD, not dropped to zero. A gap in the audio
+    --   is not a moment of no gain reduction; it is a moment we cannot
+    --   measure, and the honest thing is to carry the last real reading
+    --   across it.
+    --
+    --   It matters for the height as well as the spikes: the offset that
+    --   slides this onto the reported level is a mean, and garbage in the
+    --   gaps drags the whole trace off.
+    -- PER BAND, NOT BROADBAND.
+    --
+    --   This used to be post RMS over pre RMS. That is the span's LEVEL
+    --   change, which equals its gain only while nothing in the span
+    --   touches the spectrum -- and one EQ band is enough to break it. A
+    --   static +6 dB at 100 Hz adds six decibels to the ratio through a
+    --   bass note and nothing through a cymbal, so the EQ's contribution
+    --   swings with the programme and lands on the trace looking exactly
+    --   like compression. Against a true 13 dB reduction it drew 39 dB.
+    --
+    --   The bands come from the probes' own filterbank and the separation
+    --   is done in TS_TA_GR.lua, where it can be tested. Both probes have
+    --   to be publishing the same number of bands: a mismatch means one of
+    --   them is an older build, and half a measurement is not one.
+    local nbg  = math.floor(r.gmem_read(G.POST_BASE + G.H_GRBN) or 0)
+    local pnbg = math.floor(r.gmem_read(G.PRE_BASE  + G.H_GRBN) or 0)
+    local grOut, grLive = nil, 0
+    if nbg >= 4 and pnbg == nbg then
+      grOut, grLive = GR.shape(pre.cols, sc.cols, sc.len, oldest, total, nbg,
+                               grShape, grScratch)
     end
-    if base and base > 0 then
+
+    local lowest, base = {}, nil
+    if grLive > 0 then
+      for px = px0, px1 do
+        local k0 = math.floor((px - px0) / span * total)
+        local k1 = math.max(k0, math.floor((px + 1 - px0) / span * total) - 1)
+        local lo = nil
+        for k = k0, math.min(k1, total - 1) do
+          local v = grOut[k]
+          if v then
+            -- the deepest reduction inside the pixel, and the
+            -- least-reducing moment anywhere in the window as the zero
+            if not lo   or v < lo   then lo = v end
+            if not base or v > base then base = v end
+          end
+        end
+        lowest[px] = lo
+      end
+    end
+    if base then
       -- THE SHAPE IS MEASURED; THE LEVEL IS WHAT THE PLUGIN REPORTS.
       --
       --   Zeroing at the window's least-reducing moment gives a trace
@@ -2286,8 +2526,8 @@ local function drawPanel2(dl, x0, y0, w, h)
       local sSum, sN = 0, 0
       local held = 0
       for px = px0, px1 do
-        local rr = lowest[px]
-        if rr and rr > 0 then held = 20 * math.log(base / rr, 10) end
+        local v = lowest[px]
+        if v then held = base - v end
         shape[px] = held
         sSum, sN = sSum + held, sN + 1
       end
@@ -2308,12 +2548,13 @@ local function drawPanel2(dl, x0, y0, w, h)
         n = n + 1 ; gx[n] = px ; gy[n] = yGR(shape[px] + offset)
       end
       polyline(dl, gx, gy, 1, n, alpha(S.cGR, 0.95), 1.6)
+      measuredDrew = true
     end
   end
 
   for _, m in ipairs(series) do
     local idx, col = m[1], m[2]
-    if ok and total >= 4 and not measured then
+    if ok and total >= 4 and not measuredDrew then
       local gx, gy, n = {}, {}, 0
       local px0, px1 = math.floor(x0), math.floor(x1)
       local span = math.max(1, px1 - px0)
@@ -2453,8 +2694,32 @@ local openSettings = false
 -- limited, so a genuinely stuck panel does not also flood the console.
 local wd = { last = 0, worst = 0 }
 
+-- THE PANEL'S OWN FRAME RATE.
+--
+--   The publish-rate figure counts how often the reduction value
+--   CHANGES, which is only the plugin's update rate if we are looking
+--   more often than it changes. If the panel runs at 18 frames a second
+--   then we look 18 times, every look shows a change, and the figure
+--   reports our frame rate wearing the plugin's name.
+--
+--   Printed next to it so the two can be compared. Equal means we are
+--   the bottleneck; publish clearly below fps means the plugin is.
+local fps = { t = -1, v = 0 }
+local function tickFps(now)
+  if fps.t > 0 then
+    local dt = now - fps.t
+    if dt > 0 then
+      local inst = 1 / dt
+      fps.v = (fps.v > 0) and (fps.v * 0.9 + inst * 0.1) or inst
+    end
+  end
+  fps.t = now
+end
+
 local function frame()
   local tA = r.time_precise()
+  tickFps(tA)
+  palFollow(tA)
   followTrack()
 
   if rig then
@@ -2473,6 +2738,13 @@ local function frame()
     -- The probes report the real sample rate once they are publishing, and
     -- the FFT size and the scope slice both follow it.
     applyAnalysis(false)
+    -- Written every frame rather than on change: a probe that restarted --
+    -- a new epoch, a sample-rate change, a reload -- comes back with these
+    -- at zero, and a trace that is silently uncompensated is worse than one
+    -- that is obviously missing.
+    r.gmem_write(G.CTRL_LAG, rigLag)
+    r.gmem_write(G.CTRL_GRB,
+      (S.showGRTrace and S.grTraceSrc == 2) and 1 or 0)
     updateGR()
     pumpGR()
     -- Ask the probes for a running average unless a measurement tool has
@@ -2775,27 +3047,72 @@ local function frame()
         end
 
         if ImGui.BeginPopup and ImGui.BeginPopup(ctx, "##maskMenu") then
+          local dl2 = ImGui.GetWindowDrawList(ctx)
+          local selDim = (ImGui.SelectableFlags_Disabled
+                          and ImGui.SelectableFlags_Disabled()) or 0
+
+          -- THE COLOUR SWATCH, drawn INTO the row after it is laid out.
+          -- Same device as ChannelView's send menu: three leading spaces
+          -- reserve the column, and the colour goes down in absolute
+          -- coordinates over the item's own rectangle. Two lists that
+          -- name the project's tracks should read as the same list.
+          local function swatch(tr2, dim)
+            local ix, iy  = ImGui.GetItemRectMin(ctx)
+            local _,  iy2 = ImGui.GetItemRectMax(ctx)
+            local sw = trackColour(tr2) or COL.grid
+            if dim then sw = alpha(sw, 0.38) end
+            ImGui.DrawList_AddRectFilled(dl2, ix + 2, iy + 2, ix + 9, iy2 - 2, sw, 1.5)
+          end
+
           ImGui.TextColored(ctx, COL.textDim, "COMPARE AGAINST")
           ImGui.Separator(ctx)
-          if ImGui.Selectable(ctx, "none", cmpGuid == nil) then
+          if ImGui.Selectable(ctx, "   none##tanone", cmpGuid == nil) then
             setCompare(nil) ; cmpName = ""
           end
+
+          -- A track named with nothing but punctuation is a template
+          -- spacer, and REAPER's own I_SPACER puts a gap above a track.
+          -- Both are grouping you set up in the project; flattening them
+          -- out would make this list harder to read than the track panel
+          -- it is describing. Never a rule before the first entry -- that
+          -- reads as something missing above it.
+          local pendingGap, first = false, true
           for i = 0, r.CountTracks(0) - 1 do
             local tr2 = r.GetTrack(0, i)
             local _, nm = r.GetSetMediaTrackInfo_String(tr2, "P_NAME", "", false)
             local _, gu = r.GetSetMediaTrackInfo_String(tr2, "GUID", "", false)
-            if nm == "" then nm = ("Track %d"):format(i + 1) end
-            if tr2 == rigTrack then
-              -- Listed, greyed. Seeing your own track in the list and
-              -- unavailable answers "why is mine not there" before it
-              -- gets asked.
-              ImGui.TextColored(ctx, COL.grid, ("%d  %s"):format(i + 1, nm))
-            elseif ImGui.Selectable(ctx, ("%d  %s"):format(i + 1, nm), gu == cmpGuid) then
-              setCompare(gu)
-              -- Choosing a track to compare against, while collisions
-              -- are off, otherwise does nothing visible at all. The lamp
-              -- lighting is the feedback that the choice landed.
-              if not S.showMask then S.showMask = true ; touchSettings() end
+            local trimmed = (nm or ""):match("^%s*(.-)%s*$")
+            if trimmed ~= "" and trimmed:match("^[%-%_%=%~%.%*%s]+$") then
+              pendingGap = true
+            else
+              local space = (r.GetMediaTrackInfo_Value(tr2, "I_SPACER") or 0) > 0.5
+              if (pendingGap or space) and not first then ImGui.Separator(ctx) end
+              pendingGap, first = false, false
+
+              local shown = (trimmed ~= "") and trimmed or ("Track %d"):format(i + 1)
+              -- The id suffix, not the text, is what tells two rows apart:
+              -- two tracks can carry the same name, and ImGui would treat
+              -- them as one item.
+              local label = ("   %d  %s##ta%d"):format(i + 1, shown, i + 1)
+
+              if tr2 == rigTrack then
+                -- Listed, disabled, swatch dimmed. Seeing your own track
+                -- there and unavailable answers "why is mine not in the
+                -- list" before it gets asked; a number missing from the
+                -- middle reads as a fault in the list itself.
+                ImGui.Selectable(ctx, label, false, selDim)
+                swatch(tr2, true)
+              else
+                local hit = ImGui.Selectable(ctx, label, gu == cmpGuid)
+                swatch(tr2, false)
+                if hit then
+                  setCompare(gu)
+                  -- Choosing a track to compare against, while collisions
+                  -- are off, otherwise does nothing visible at all. The lamp
+                  -- lighting is the feedback that the choice landed.
+                  if not S.showMask then S.showMask = true ; touchSettings() end
+                end
+              end
             end
           end
           ImGui.EndPopup(ctx)
@@ -2871,6 +3188,28 @@ local function frame()
         cflags = cflags | ImGui.ColorEditFlags_AlphaPreviewHalf()
       end
 
+      -- A data colour and its auto box. Auto GREYS the picker rather than
+      -- hiding it: the point of following the hue is to see what the hue
+      -- produced, and a control that vanishes when it is doing its job
+      -- leaves you wondering where the colour came from. Untick to take
+      -- that one colour off the hue; the others carry on following.
+      local canDis = (ImGui.BeginDisabled and ImGui.EndDisabled) and true or false
+      local function colAuto(key, label)
+        local flag = DERIVED_AUTO[key]
+        local on   = S[flag] ~= false
+        if canDis and on then ImGui.BeginDisabled(ctx) end
+        local ch, v = ImGui.ColorEdit4(ctx, label, S[key], cflags)
+        if ch then S[key] = v ; touchSettings() end
+        if canDis and on then ImGui.EndDisabled(ctx) end
+        ImGui.SameLine(ctx, 0, 3)
+        local ch2, v2 = ImGui.Checkbox(ctx, '##' .. key .. 'auto', on)
+        if ch2 then S[flag] = v2 ; buildPalette() ; touchSettings() end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx,
+            "Follow the hue.\nUntick to set this one colour by hand.")
+        end
+      end
+
       ---------------------------------------------- appearance
       heading("APPEARANCE")
       -- The same two controls ChannelView has, over the same palette
@@ -2878,11 +3217,17 @@ local function frame()
       -- together. 219 and 1.00 are the hand-picked colours exactly.
       ImGui.SetNextItemWidth(ctx, 190)
       local hch, hv = ImGui.SliderInt(ctx, 'Hue', math.floor(S.baseHue), 0, 359)
-      if hch then S.baseHue = hv ; buildPalette() ; touchSettings() end
+      if hch then
+        S.baseHue = hv ; buildPalette() ; touchSettings()
+        palSet(hv, S.tint)
+      end
       ImGui.SameLine(ctx)
       ImGui.SetNextItemWidth(ctx, 150)
       local tch, tv = ImGui.SliderDouble(ctx, 'Tint', S.tint, 0.0, 2.0, "%.2f")
-      if tch then S.tint = tv ; buildPalette() ; touchSettings() end
+      if tch then
+        S.tint = tv ; buildPalette() ; touchSettings()
+        palSet(S.baseHue, tv)
+      end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
           "How far the greys lean toward the hue.\n0 is neutral grey, 1 is the default.")
@@ -2904,7 +3249,13 @@ local function frame()
       rv, S.trackRule = ImGui.Checkbox(ctx, 'Track colour rule', S.trackRule) ; mark(rv)
       ImGui.SameLine(ctx)
       if ImGui.SmallButton(ctx, 'Reset') then
-        S.baseHue, S.tint = 219, 1.0 ; buildPalette() ; touchSettings()
+        S.baseHue, S.tint = 219, 1.0
+        -- Reset means reset: any colour taken off the hue by hand comes
+        -- back onto it, which is the only way back to the stock scheme
+        -- without hunting six tick boxes.
+        for _, f in pairs(DERIVED_AUTO) do S[f] = true end
+        buildPalette() ; touchSettings()
+        palSet(219, 1.0)
       end
 
       ImGui.Separator(ctx)
@@ -2956,14 +3307,14 @@ local function frame()
       local function dimOff() if canDim and not havePre then ImGui.EndDisabled(ctx) end end
       dimOn()
       rv, S.showPre   = ImGui.Checkbox(ctx, 'Pre spectrum',  S.showPre)   ; mark(rv) ; ImGui.SameLine(ctx)
-      rv, S.cSpecPre  = ImGui.ColorEdit4(ctx, '##cspre',  S.cSpecPre,  cflags) ; mark(rv)
+      colAuto('cSpecPre', '##cspre')
       dimOff()
       ImGui.SameLine(ctx)
       rv, S.showPost  = ImGui.Checkbox(ctx, 'Post spectrum', S.showPost)  ; mark(rv) ; ImGui.SameLine(ctx)
-      rv, S.cSpecPost = ImGui.ColorEdit4(ctx, '##cspost', S.cSpecPost, cflags) ; mark(rv)
+      colAuto('cSpecPost', '##cspost')
 
       rv, S.showCurve = ImGui.Checkbox(ctx, 'Response curve', S.showCurve) ; mark(rv) ; ImGui.SameLine(ctx)
-      rv, S.cCurve    = ImGui.ColorEdit4(ctx, '##ccurve', S.cCurve, cflags) ; mark(rv) ; ImGui.SameLine(ctx)
+      colAuto('cCurve', '##ccurve') ; ImGui.SameLine(ctx)
       rv, S.curveFill = ImGui.Checkbox(ctx, 'Curve fill',     S.curveFill) ; mark(rv) ; ImGui.SameLine(ctx)
       rv, S.autoScale = ImGui.Checkbox(ctx, 'Auto expand',    S.autoScale) ; mark(rv)
 
@@ -3076,9 +3427,55 @@ local function frame()
             bits[#bits + 1] = ("%s %.1f/s"):format(src.tag or "?", cps / g)
           end
         end
+        -- WHAT THE MEASURED TRACE IS STANDING ON. Both of these are
+        -- invisible when they work and indistinguishable from a broken
+        -- trace when they do not, which is exactly the kind of thing that
+        -- belongs on screen rather than in a comment.
+        do
+          local applied = math.floor(r.gmem_read(G.PRE_BASE + G.H_LAG) or 0)
+          local sr = (scope.post and scope.post.sr) or 48000
+          local nbg = math.floor(r.gmem_read(G.POST_BASE + G.H_GRBN) or 0)
+          local lagTxt
+          if rigLag <= 0 then
+            lagTxt = "chain latency: none"
+          elseif applied == rigLag then
+            lagTxt = ("chain latency: %d smp (%.1f ms) compensated")
+                     :format(rigLag, rigLag / sr * 1000)
+          else
+            lagTxt = ("chain latency: %d smp -- probe applied %d, not compensated")
+                     :format(rigLag, applied)
+          end
+          ImGui.TextColored(ctx, COL.textDim, lagTxt ..
+            (nbg > 0 and ("      GR bands: %d"):format(nbg)
+                     or  "      GR bands: off"))
+        end
         if #bits > 0 then
           ImGui.TextColored(ctx, COL.textDim,
-            "publish rate:  " .. table.concat(bits, "   "))
+            "publish rate:  " .. table.concat(bits, "   ") ..
+            ("      panel frame rate: %.1f/s"):format(fps.v))
+          -- Which of the two is the bottleneck, said rather than left to
+          -- be worked out from the numbers.
+          --
+          -- THE FASTEST SOURCE, NOT THE FIRST. Keying this to grGapEma[1]
+          -- meant it stayed silent whenever source one happened to be the
+          -- idle plugin -- which with three reporters on a track is most
+          -- of the time. What matters is whether ANY of them is keeping
+          -- up with the panel.
+          local pub = 0
+          for i = 1, #rigSources do
+            local g = grGapEma[i]
+            if g and g > 0 then
+              local rate = cps / g
+              if rate > pub then pub = rate end
+            end
+          end
+          if pub > 0 and fps.v > 1 then
+            ImGui.TextColored(ctx, COL.textDim, (pub > fps.v * 0.9)
+              and ("the plugin is keeping up; the panel's frame rate is the " ..
+                   "limit (no script can poll faster than about 30/s)")
+              or  ("the plugin is publishing more slowly than the panel is " ..
+                   "looking, so this is the plugin's rate"))
+          end
         end
       end
 
@@ -3104,9 +3501,17 @@ local function frame()
           for _, src in ipairs(rigSources) do
             if src.usable then haveSrc = true break end
           end
+          local nbg = math.floor(r.gmem_read(G.POST_BASE + G.H_GRBN) or 0)
           if not (rig and rig.pre) then
             ImGui.TextColored(ctx, COL.warn,
               "measuring needs both probes -- falling back to what the plugin reports")
+          elseif rig.pre and rig.post and nbg < 4 then
+            -- A probe from before the filterbank. It cannot publish the
+            -- per-band levels the measured trace is built from, and the
+            -- panel will not guess: it says so and draws the reported one.
+            ImGui.TextColored(ctx, COL.warn,
+              "these probes are older than the panel -- reload the FX, or re-run " ..
+              "TS_TA_InsertProbes.  Showing what the plugin reports meanwhile")
           elseif not haveSrc then
             ImGui.TextColored(ctx, COL.warn,
               "nothing here reports reduction, so there is no level to anchor the " ..
@@ -3125,45 +3530,11 @@ local function frame()
       rv, S.showPreWave = ImGui.Checkbox(ctx, 'Unprocessed behind', S.showPreWave) ; mark(rv)
       dimOff()
 
-      rv, S.cWavePre  = ImGui.ColorEdit4(ctx, 'Unprocessed', S.cWavePre, cflags) ; mark(rv)
+      colAuto('cWavePre', 'Unprocessed')
       ImGui.SameLine(ctx)
-      rv, S.cWavePost = ImGui.ColorEdit4(ctx, 'Processed',   S.cWavePost, cflags) ; mark(rv)
+      colAuto('cWavePost', 'Processed')
       ImGui.SameLine(ctx)
-      rv, S.cGR       = ImGui.ColorEdit4(ctx, 'Reduction',   S.cGR, cflags) ; mark(rv)
-
-      ImGui.Separator(ctx)
-
-      ---------------------------------------------- probes
-      heading("PROBES")
-      -- WHY THIS IS A BUTTON AND NOT AUTOMATIC.
-      --
-      --   Inserting a plugin rebuilds the FX chain, and that is not
-      --   something that should happen because you clicked a track. The
-      --   panel arms and disarms probes -- one parameter write, no chain
-      --   rebuild -- and it will never add or remove one on its own.
-      --
-      --   A button you press is a different thing from a side effect of
-      --   selecting a track, so the script it has always lived in is run
-      --   from here rather than reimplemented here. Same code, same
-      --   undo point, same rules: it only ever ADDS, and it skips a track
-      --   that already has a pair.
-      do
-        local nsel = r.CountSelectedTracks(0)
-        local label = (nsel == 1) and "Insert probes on the selected track"
-                   or ("Insert probes on %d selected tracks"):format(math.max(nsel, 0))
-        local dim = (nsel == 0) and ImGui.BeginDisabled and ImGui.EndDisabled
-        if dim then ImGui.BeginDisabled(ctx) end
-        -- No confirmation here: you came to Settings, found the PROBES
-        -- heading and pressed a button that says what it does. The header
-        -- prompt asks first because that one sits under your pointer while
-        -- you are looking at something else.
-        if ImGui.Button(ctx, label) and nsel > 0 then runInsertProbes() end
-        if dim then ImGui.EndDisabled(ctx) end
-        ImGui.SameLine(ctx)
-        ImGui.TextColored(ctx, COL.textDim,
-          (nsel == 0) and "select a track first"
-                       or "adds only; a track that already has a pair is left alone")
-      end
+      colAuto('cGR', 'Reduction')
 
       ImGui.Separator(ctx)
 

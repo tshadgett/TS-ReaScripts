@@ -2,7 +2,7 @@
 -- @noindex
 -- @title TS_TA_Mask
 -- @description Track Analyser -- perceptual masking between two tracks
--- @author Tim Shadgett (with Claude)
+-- @author Tim Shadgett
 -- @version 1.0.0
 -- MIT licence -- see LICENSE in the TS-ReaScripts repository.
 --========================================================

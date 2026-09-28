@@ -281,55 +281,45 @@ local function name_button(ctx, label, col, selected, id, w, t)
   -- The release that ends a drag isn't a click.
   if MX.drag then pressed = false end
 
-  -- With an icon row, the button is one rectangle in two parts: the icon
-  -- on the neutral panel colour, where any icon reads, under a thin
-  -- stripe of the track's own colour; and the name in the track's colour
-  -- below it, as it always was. Tracks without an icon get the same
-  -- top part, empty, so the row stays one even height.
+  -- A neutral button with the track's colour as a stripe along its
+  -- bottom edge -- the same thickness as the TCP's colour strip
+  -- (C.COLOUR_STRIPE), so the two read as the same mark. With an icon
+  -- row, the icon sits in the top part on the same neutral fill, and the
+  -- stripe runs along the bottom of the whole button. Tracks without an
+  -- icon get the same top part, empty, so the row stays one even height.
   local block = full_h - h
   local sel_ring = selected and U.sel_colour(C.SEL_OUTLINE, col, C.COL.strip_sel)
                              or C.COL.panel_border
   local lw = selected and 2.0 or 1.0
   local o  = lw * 0.5
-  if block > 0 then
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + block, C.COL.panel_bg,
-                                 C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersTop)
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + 3, col,
-                                 C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersTop)
-    if t and t.icon then
-      local pad = 4
-      IC.draw(ctx, dl, t.icon, x + pad, y + 3 + pad, w - pad * 2, block - 3 - pad * 2)
-    end
-    -- The name part: track colour, rounded only at the bottom, so the two
-    -- parts meet square and read as one button.
-    ImGui.DrawList_AddRectFilled(dl, x, y + block, x + w, y + full_h, col,
-                                 C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersBottom)
-    -- One outline round the whole thing, inset by half the stroke: centred
-    -- on the bounds it would spill outwards, and the clip rect would eat
-    -- the spill on one side only.
-    ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + full_h - o,
-      sel_ring, C.STRIP_ROUND, 0, lw)
-    y = y + block                       -- the name part is laid out below
-  else
-    -- Always full strength, the same as the strip header above and the
-    -- TCP itself: a track's own colour is never faded for being
-    -- unselected. Selection reads from the outline, not from how
-    -- saturated the fill is.
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, col, C.STRIP_ROUND)
-    ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + h - o,
-      sel_ring, C.STRIP_ROUND, 0, lw)
+  local sh = C.COLOUR_STRIPE
+  local fill = selected and C.COL.header_bg or (hovered and C.COL.knob_body_hi or C.COL.panel_bg)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + full_h, fill, C.STRIP_ROUND)
+  if block > 0 and t and t.icon then
+    local pad = 4
+    IC.draw(ctx, dl, t.icon, x + pad, y + pad, w - pad * 2, block - pad * 2)
   end
+  -- One outline round the whole thing, inset by half the stroke: centred
+  -- on the bounds it would spill outwards, and the clip rect would eat the
+  -- spill on one side only.
+  ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + full_h - o,
+    sel_ring, C.STRIP_ROUND, 0, lw)
+  -- The stripe goes on AFTER the outline and out to the button's edge, so
+  -- it covers the border along the bottom rather than sitting inside it
+  -- with a pixel of fill showing between the two.
+  ImGui.DrawList_AddRectFilled(dl, x, y + full_h - sh, x + w, y + full_h,
+    col or C.COL.panel_border, C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersBottom)
+  y = y + block                         -- the name part is laid out below
+  local text_h = h - sh                 -- what the stripe leaves for the name
 
-  -- Ink is picked from THIS button's own fill: a track's colour is always
-  -- shown at full strength, so a light colour (a bright yellow, say)
-  -- needs dark ink whether or not it's selected.
-  local text_col = U.contrast_text(col)
+  -- The fill is always the neutral one now, so the ink is too.
+  local text_col = C.COL.header_text
 
   -- The folder icon, in its own square at the left end.
   local left = 0
   if folder then
-    local isz = h - 6
-    local ix, iy = x + 3, y + 3
+    local isz = math.max(8, text_h - 2)
+    local ix, iy = x + 3, y + (text_h - isz) * 0.5
     ImGui.SetCursorScreenPos(ctx, ix, iy)
     if ImGui.InvisibleButton(ctx, "tsfold" .. id, isz, isz) then
       TO.cycle_folder(t.track)
@@ -357,7 +347,7 @@ local function name_button(ctx, label, col, selected, id, w, t)
     end
   end
   local cx = x + left + (w - left) * 0.5
-  ImGui.DrawList_AddText(dl, cx - tw * 0.5, y + h * 0.5 - th * 0.5, text_col, shown)
+  ImGui.DrawList_AddText(dl, cx - tw * 0.5, y + text_h * 0.5 - th * 0.5, text_col, shown)
 
   W.tip(ctx, "tsname" .. id, label, hovered, false)
   return pressed,
@@ -399,11 +389,19 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
   -- these across a session, so leaving it to channel view would mean
   -- visiting every track to do what the row is for.
   local room = (w - btn - aw - 14 > 8)
-
+  -- Input FX at the left edge, where the signal enters the strip, when
+  -- there's room for it as well; the name starts after it.
+  local iw = C.INFX_BTN_W
+  local show_in = room and (w - btn - aw - iw - 18 > 8)
+  local name_x = x + 5
+  if show_in then
+    CH.infx_button(ctx, x + 3, y + 3, iw, h - 6, t.track, "mx" .. t.guid)
+    name_x = x + 3 + iw + 4
+  end
 
   if C.MIX_STRIP_NAME then
     local label = track_label(t)
-    local avail = w - btn - 10 - (room and (aw + 4) or 0)
+    local avail = (x + w) - name_x - btn - 5 - (room and (aw + 4) or 0)
     local tw, th = ImGui.CalcTextSize(ctx, label)
     while tw > avail and #label > 1 do
       label = label:sub(1, #label - 1)
@@ -411,12 +409,11 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
     end
     -- Readable on any track colour, which is the one thing a
     -- user-chosen background cannot be trusted to allow. The header is
-    -- always at full track colour now (not just when selected), so the
-    -- text has to be judged against that colour unconditionally --
-    -- there is no dimmed, colour-neutral state to fall back to a fixed
-    -- light text for any more.
-    ImGui.DrawList_AddText(dl, x + 5, y + (h - th) * 0.5,
-      U.contrast_text(base), label)
+    -- always at full track colour, so the text is judged against that.
+    if avail > 0 then
+      ImGui.DrawList_AddText(dl, name_x, y + (h - th) * 0.5,
+        U.contrast_text(base), label)
+    end
   end
 
   -- Inked from the header's own colour, like the name, so it reads on
@@ -761,7 +758,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
       end
 
       local w = MX.col_width(t.guid, t.folded)
-      rects[#rects + 1] = { x = (ImGui.GetCursorScreenPos(ctx)), w = w, num = t.num }
+      rects[#rects + 1] = { x = (ImGui.GetCursorScreenPos(ctx)), w = w, num = t.num,
+                           track = t.track, name = track_label(t) }
 
       if strips then
         local want, dbl = column(ctx, t, inner_h, cur_track)
@@ -810,28 +808,47 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
       x_off = x_off + C.ADD_TILE_W
     end
 
-    -- A drag in progress: the gap under the pointer, a marker in it, and
-    -- the move on release. Gaps are only ever between real tracks -- the
-    -- master stays first. Escape cancels.
+    -- A drag in progress. Over the outer quarters of a strip it's a move
+    -- to the gap on that side, marked with a line; over the middle half
+    -- it's a move INTO that track, as its children, marked by outlining
+    -- the strip. Gaps are only ever between real tracks -- the master
+    -- stays first and takes no children. Escape cancels.
     if MX.drag then
       local drag = MX.drag
       local mx = ImGui.GetMousePos(ctx)
-      local before, line_x = nil, nil
-      for _, r in ipairs(rects) do
-        if r.num > 0 and mx < r.x + r.w * 0.5 then
-          before, line_x = r.num - 1, r.x - C.MIX_GAP * 0.5
+      local before, line_x, into = nil, nil, nil
+      for i, r in ipairs(rects) do
+        if r.num > 0 and mx < r.x + r.w then
+          local zone = TO.drop_zone((mx - r.x) / math.max(1, r.w))
+          if zone == "before" then
+            before, line_x = r.num - 1, r.x - C.MIX_GAP * 0.5
+          elseif zone == "into" then
+            if TO.can_nest_into(drag.track, r.track) then into = r end
+          else
+            local nx = rects[i + 1]
+            before = nx and (nx.num - 1) or reaper.CountTracks(0)
+            line_x = nx and (nx.x - (nx.x - r.x - r.w) * 0.5)
+                        or (r.x + r.w + C.MIX_GAP * 0.5)
+          end
           break
         end
       end
-      if not before then
+      if not before and not into then
         local last = rects[#rects]
-        before = reaper.CountTracks(0)
-        line_x = last and (last.x + last.w + C.MIX_GAP * 0.5)
+        if not (last and mx < last.x + last.w) then
+          before = reaper.CountTracks(0)
+          line_x = last and (last.x + last.w + C.MIX_GAP * 0.5)
+        end
       end
 
       local wx, wy = ImGui.GetWindowPos(ctx)
       local ww = ImGui.GetWindowSize(ctx)
-      if line_x then
+      if into then
+        ImGui.DrawList_AddRect(ImGui.GetWindowDrawList(ctx),
+          into.x - 1, wy + 1, into.x + into.w + 1, wy + inner_h - 1,
+          C.COL.drop_marker, C.STRIP_ROUND, 0, 3.0)
+        ImGui.SetTooltip(ctx, "Into " .. into.name)
+      elseif line_x then
         ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),
           line_x - 1.5, wy + 2, line_x + 1.5, wy + inner_h - 2,
           C.COL.drop_marker, 1.0)
@@ -851,7 +868,13 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
       elseif not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
         MX.drag = nil
         if reaper.ValidatePtr2(0, drag.track, "MediaTrack*") then
-          TO.move_tracks(drag.track, before)
+          if into then
+            if reaper.ValidatePtr2(0, into.track, "MediaTrack*") then
+              TO.nest_tracks(drag.track, into.track)
+            end
+          elseif before then
+            TO.move_tracks(drag.track, before)
+          end
         end
       end
     end

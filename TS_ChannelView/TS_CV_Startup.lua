@@ -26,18 +26,26 @@
   Ported from Track_Analyser/TA_Panel.lua, which does the same job.
 --]]
 
-local SU = {}
-
 local SEP = package.config:sub(1, 1)
 
-SU.BEGIN = "-- >>> ChannelView (added by TS_ChannelView.lua)"
-SU.END   = "-- <<< ChannelView"
+-- One instance per script that can start with REAPER -- ChannelView and
+-- ChannelView TCP each have their own fenced block and their own command
+-- id, so turning one off never takes the other with it. `label` names
+-- the block, `script` is the file credited in its first line, `var` the
+-- local the block declares.
+local function make(label, script, var)
+local SU = {}
+
+SU.BEGIN = ("-- >>> %s (added by %s)"):format(label, script)
+SU.END   = "-- <<< " .. label
 
 -- The markers are full of Lua pattern metacharacters -- ( ) - . > -- so
 -- they cannot be used as patterns raw. Matching them unescaped would make
 -- the script misread its own fenced block as a hand-edit.
 local function esc(s) return (s:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")) end
-local BEGIN_PAT, END_PAT = esc(SU.BEGIN), esc(SU.END)
+-- END is followed by a line break (or the end of the file), so one
+-- label's end marker can't be read as the start of a longer one's.
+local BEGIN_PAT, END_PAT = esc(SU.BEGIN), esc(SU.END) .. "%f[\n\0]"
 
 -- ---------------------------------------------------------------------
 -- the text surgery (pure)
@@ -59,9 +67,9 @@ function SU.fenced_add(txt, cmd)
   txt = txt or "-- REAPER startup script\n"
   if SU.classify(txt, cmd) ~= "none" then return txt end
   if not txt:match("\n$") then txt = txt .. "\n" end
-  return txt .. ("\n%s\nlocal channelview_cmd = '%s'\n" ..
-                 "reaper.Main_OnCommand(reaper.NamedCommandLookup(channelview_cmd), 0)\n%s\n")
-    :format(SU.BEGIN, cmd, SU.END)
+  return txt .. ("\n%s\nlocal %s = '%s'\n" ..
+                 "reaper.Main_OnCommand(reaper.NamedCommandLookup(%s), 0)\n%s\n")
+    :format(SU.BEGIN, var, cmd, var, SU.END)
 end
 
 -- Removes ONLY the fenced block, and leaves the file ending in exactly
@@ -178,4 +186,9 @@ function SU.remove()
   return ok, why
 end
 
+return SU
+end   -- make
+
+local SU = make("ChannelView", "TS_ChannelView.lua", "channelview_cmd")
+SU.make = make
 return SU

@@ -65,6 +65,13 @@ done
 copy_one "$REAPER_DIR/Effects/TS_TrackAnalyser/TS_TrackProbe.jsfx" \
          "$REPO/TS_TrackAnalyser/TS_TrackProbe.jsfx"
 
+# ---- Hide Docker Tabs: one loose script in Scripts/. It needs a folder of
+# its own in the repo because reapack-index ignores files at the repo root --
+# a package's category IS its directory, so a root file has no category and is
+# never indexed.
+copy_one "$REAPER_DIR/Scripts/TS_HideDockerTabs.lua" \
+         "$REPO/TS_HideDockerTabs/TS_HideDockerTabs.lua"
+
 echo
 if [ "$copied" -eq 0 ]; then
   echo "Nothing changed. The repo already matches your REAPER folder."
@@ -81,7 +88,8 @@ echo
 cd "$REPO" || exit 1
 echo "--- version check ---"
 stale=0
-for pkg in TS_ChannelView/TS_ChannelView.lua TS_TrackAnalyser/TS_TrackAnalyser.lua; do
+for pkg in TS_ChannelView/TS_ChannelView.lua TS_TrackAnalyser/TS_TrackAnalyser.lua \
+           TS_HideDockerTabs/TS_HideDockerTabs.lua; do
   dir="$(dirname "$pkg")"
   git diff --quiet -- "$dir" && continue          # nothing changed in this package
   now="$(grep -m1 -oE '@version[[:space:]]+[0-9][^[:space:]]*' "$pkg" | awk '{print $2}')"
@@ -95,6 +103,29 @@ for pkg in TS_ChannelView/TS_ChannelView.lua TS_TrackAnalyser/TS_TrackAnalyser.l
   fi
 done
 [ "$stale" -eq 0 ] && echo "  (all changed packages have a new version)"
+
+# This script only ever COPIES. Delete a module in REAPER and its stale twin
+# stays in the repo, still listed in @provides, still published. Nothing here
+# removes it -- deleting from a repo is not a thing to do behind your back --
+# but it does say so.
+echo
+echo "--- orphan check ---"
+orphans=0
+check_orphans() {   # check_orphans <repo dir> <reaper dir...>
+  local rdir="$1"; shift
+  for f in "$REPO/$rdir"/*.lua "$REPO/$rdir"/*.jsfx; do
+    [ -e "$f" ] || continue
+    local b found; b="$(basename "$f")"; found=0
+    for s in "$@"; do [ -f "$s/$b" ] && found=1; done
+    if [ "$found" -eq 0 ]; then
+      echo "  !! $rdir/$b is in the repo but no longer in REAPER"
+      orphans=1
+    fi
+  done
+}
+check_orphans TS_ChannelView    "$REAPER_DIR/Scripts/TS_ChannelView"
+check_orphans TS_TrackAnalyser  "$REAPER_DIR/Scripts/TS_TrackAnalyser" "$REAPER_DIR/Effects/TS_TrackAnalyser"
+[ "$orphans" -eq 0 ] && echo "  (none)"
 
 echo
 echo "Next:  git add -A && git commit -m '...' && git pull && git push"

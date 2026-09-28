@@ -1,6 +1,6 @@
 desc:- TS_TrackProbe -
 version: 1.0.0
-author: Tim Shadgett (with Claude)
+author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
 // file as [effect]); it is not a package to install on its own.
@@ -112,6 +112,13 @@ out_pin:right
   CTRL_MEAS  = 68;   // 0 = off, 1 = accumulate (one capture), 2 = running
   CTRL_TAU   = 69;   // running-average time constant in ms, mode 2 only
   CTRL_SMOO  = 70;   // response smoothing width in OCTAVES, 0 = none
+  CTRL_LAG   = 71;   // samples of latency reported by the FX BETWEEN the
+                     // probes. The pre probe delays itself by this much so
+                     // that its column N and the post probe's column N hold
+                     // the same slice of audio. See THE DELAY below.
+  CTRL_GRB   = 72;   // 1 = run the gain-reduction filterbank. Off unless the
+                     // panel is drawing the measured trace, because it is
+                     // the only per-sample work here that is not free.
 
   PRE_BASE  = 0x10000;
   POST_BASE = 0x20000;
@@ -125,6 +132,10 @@ out_pin:right
   H_SLICE=6; H_EPOCHACK=7; H_CUR=8; H_COLS=9; H_BLOCKS=10;
   H_ROLE=11; H_NCH=12; H_PKL=13; H_PKR=14; H_AVGN=15;
   H_BANDN=16; H_BANDLO=17; H_BANDHI=18;
+  H_GRBN=19; H_GRBLO=20; H_GRBHI=21;
+  H_LAG=22;                       // the delay actually applied, so the panel
+                                  // can show what it compensated rather than
+                                  // what it asked for
 
   // OFF_SPEC (64) and OFF_AVG (2048) used to carry a per-bin spectrum and
   // a per-bin average into gmem, about two thousand writes per frame per
@@ -158,6 +169,37 @@ out_pin:right
   BAND_LO = 20;
   BAND_HI = 20000;
 
+  // THE GAIN-REDUCTION FILTERBANK, AND WHY IT EXISTS
+  //   The measured trace used to be post RMS over pre RMS across the whole
+  //   span. That is not gain: it is the span's LEVEL change, and when
+  //   anything in the span changes the SPECTRUM, the level change depends
+  //   on where the programme's energy happens to be sitting. One EQ band,
+  //   +6 dB at 100 Hz, adds +6 dB to the ratio through a bass note and
+  //   nothing through a cymbal. The EQ never moved; the music did, and it
+  //   went onto the trace as if it were compression. Measured on a 13 dB
+  //   reduction it drew a 39 dB one.
+  //
+  //   A per-BAND ratio does not have that property. Band b's ratio is the
+  //   EQ's gain in band b whatever the programme is doing. So each probe
+  //   publishes a per-band level per scope column, and the panel takes the
+  //   part that MOVES and is COMMON TO EVERY BAND -- which is compression --
+  //   after subtracting each band's own average, which is the static EQ.
+  //
+  //   Ten bands over 30 Hz to 18 kHz, two cascaded bandpass sections each.
+  //   One section is not enough: its skirts overlap so far that neighbouring
+  //   bands leak into each other and the separation that the whole idea
+  //   rests on stops working. Measured over six EQ and saturation chains,
+  //   one section gave 1.53 dB of error against the true reduction, two
+  //   gave 0.86 -- the same as a 4th-order design costing twice as much.
+  OFF_GRB = 17408;                // SCOPE_COLS * GRB_N, ends at 58368
+  GRB_N   = 10;
+  GRB_LO  = 30;
+  GRB_HI  = 18000;
+
+  // Long enough for any plugin that reports honestly -- a linear-phase EQ
+  // at 4096 and a lookahead limiter at 50 ms both fit several times over.
+  DLY_MAX = 65536;
+
   FFT_MAX = 4096;
 
   // Local buffers. The FFT workspace sits at offset 0 so it satisfies any
@@ -173,9 +215,16 @@ out_pin:right
   BUF_BR    = 41728;              // BANDS,   the response before smoothing
   BUF_BT    = 41984;              // BANDS,   smoothing scratch
   BUF_BV    = 42240;              // BANDS,   1 where the band has real data
+  BUF_GRC   = 42496;              // GRB_N*4, bandpass coefficients
+  BUF_GRS   = 42624;              // GRB_N*4, two sections of state per band
+  BUF_GRQ   = 42752;              // GRB_N,   squares accumulating this column
+  BUF_DLY   = 49152;              // DLY_MAX+1, the pre probe's alignment delay
 
   fftsz = 0;                      // forces buildWindow on the first block
   last_meas = -1;                 // forces one clearAvg on the first block
+  lagn = -1;                      // forces one setLag on the first block
+  dpos = 0;
+  grbon = 0;
   slice = 0;
   seq = 0;
   blocks = 0;
@@ -208,12 +257,62 @@ out_pin:right
     i = 0; loop(FFT_MAX / 2, BUF_AVG[i] = 0; i += 1; );
   );
 
+  // The filterbank's own state: the two sections per band, and the squares
+  // part-way through the column being accumulated. Carrying either across a
+  // restart puts audio from before the change into the column after it.
+  function clearGR() local(i) (
+    i = 0; loop(GRB_N * 4, BUF_GRS[i] = 0; i += 1; );
+    i = 0; loop(GRB_N,     BUF_GRQ[i] = 0; i += 1; );
+  );
+
+  // Ten bandpass filters, log-spaced, two identical sections each. Only the
+  // three coefficients a bandpass actually needs are kept: b1 is zero and b2
+  // is -b0, so storing them would be storing a constant.
+  //
+  // The top edge is held below Nyquist rather than trusted to be: at 32 kHz
+  // an 18 kHz band centre is not a filter, it is a division by zero waiting
+  // for somebody working at a rate nobody tested.
+  function buildGRBands() local(i, ratio, lo, hi, f0, q, w0, al, a0, hiC) (
+    hiC = min(GRB_HI, srate * 0.45);
+    ratio = log(hiC / GRB_LO);
+    i = 0;
+    loop(GRB_N,
+      lo = GRB_LO * exp(ratio * i / GRB_N);
+      hi = GRB_LO * exp(ratio * (i + 1) / GRB_N);
+      f0 = sqrt(lo * hi);
+      q  = f0 / max(hi - lo, 1);
+      w0 = 2 * $pi * f0 / srate;
+      al = sin(w0) / (2 * q);
+      a0 = 1 + al;
+      BUF_GRC[i * 4 + 0] = al / a0;                 // b0
+      BUF_GRC[i * 4 + 1] = (-2 * cos(w0)) / a0;     // a1
+      BUF_GRC[i * 4 + 2] = (1 - al) / a0;           // a2
+      BUF_GRC[i * 4 + 3] = 0;
+      i += 1;
+    );
+    clearGR();
+  );
+
+  // Only as much of the line as is in use is cleared, and only when the
+  // length changes: this runs on a block boundary, and wiping 64k of memory
+  // every time the panel repeats itself is a dropout waiting to happen.
+  function setLag(n) local(i) (
+    n = max(0, min(DLY_MAX, floor(n)));
+    n != lagn ? (
+      lagn = n;
+      dpos = 0;
+      i = 0; loop(lagn + 1, BUF_DLY[i] = 0; i += 1; );
+    );
+  );
+
   function restart() local(i) (
     cur = 0;
     sacc = 0; smin = 1; smax = -1; ssq = 0;
     fill = 0;
     gmem[base + H_CUR] = 0;
     i = 0; loop(SCOPE_COLS * 3, gmem[base + OFF_SCOPE + i] = 0; i += 1; );
+    i = 0; loop(SCOPE_COLS * GRB_N, gmem[base + OFF_GRB + i] = 0; i += 1; );
+    clearGR();
     // The measurement average restarts with everything else, so a capture
     // can never contain a frame from before the setting changed.
     clearAvg();
@@ -237,6 +336,7 @@ out_pin:right
     slice = newslice;
     buildWindow(fftsz);
     buildBands();
+    buildGRBands();
     setBallistics();
     i = 0; loop(nbins, BUF_MAG[i] = -180; i += 1; );
     restart();
@@ -276,6 +376,17 @@ out_pin:right
     smoo_oct = gmem[CTRL_SMOO];
     (smoo_oct < 0 || smoo_oct > 2) ? smoo_oct = 0;
 
+    // THE DELAY. The FX between the probes cost this many samples, so the
+    // post probe is seeing what the pre probe saw that long ago. REAPER
+    // compensates PDC at the track OUTPUT, not inside a chain, so nothing
+    // has put this right before it reaches us. Only the pre probe delays --
+    // the post probe is the one already late.
+    wantlag = gmem[CTRL_LAG];
+    (wantlag < 0 || wantlag > DLY_MAX) ? wantlag = 0;
+    setLag(role < 0.5 ? wantlag : 0);
+
+    grbon = gmem[CTRL_GRB] > 0.5;
+
     tau_s = gmem[CTRL_TAU] * 0.001;
     (tau_s < 0.05 || tau_s > 30) ? tau_s = 1.0;
     avg_k = 1 - exp(-1 * (hop / srate) / tau_s);
@@ -292,6 +403,10 @@ out_pin:right
     gmem[base + H_BANDN]  = BANDS;
     gmem[base + H_BANDLO] = BAND_LO;
     gmem[base + H_BANDHI] = BAND_HI;
+    gmem[base + H_GRBN]   = grbon ? GRB_N : 0;
+    gmem[base + H_GRBLO]  = GRB_LO;
+    gmem[base + H_GRBHI]  = min(GRB_HI, srate * 0.45);
+    gmem[base + H_LAG]    = lagn;
   );
 
 @sample
@@ -300,16 +415,56 @@ out_pin:right
 
     m = (spl0 + spl1) * 0.5;
 
+    //-- the alignment delay ------------------------------------------
+    //   Pre probe only. Without it, column N of one probe and column N of
+    //   the other hold audio taken at different moments, and on a transient
+    //   the ratio between them is not a measurement of anything. At one
+    //   whole column of skew a silent gap in one ring lines up with a hit
+    //   in the other and the trace stops being wrong and starts being
+    //   nonsense.
+    lagn > 0 ? (
+      BUF_DLY[dpos] = m;
+      dpos += 1; dpos > lagn ? dpos = 0;
+      m = BUF_DLY[dpos];
+    );
+
     //-- scope column -------------------------------------------------
     m < smin ? smin = m;
     m > smax ? smax = m;
     ssq += m * m;
     sacc += 1;
 
+    //-- the gain-reduction filterbank --------------------------------
+    //   Off unless the panel is drawing the measured trace. It is the only
+    //   per-sample work in here that costs anything worth naming, and a
+    //   probe on a track nobody is looking at should not be paying it.
+    grbon ? (
+      grb = 0;
+      loop(GRB_N,
+        grc = BUF_GRC + grb * 4;
+        grs = BUF_GRS + grb * 4;
+        gy = grc[0] * m + grs[0];
+        grs[0] = grs[1] - grc[1] * gy;
+        grs[1] = -grc[0] * m - grc[2] * gy;
+        gz = grc[0] * gy + grs[2];
+        grs[2] = grs[3] - grc[1] * gz;
+        grs[3] = -grc[0] * gy - grc[2] * gz;
+        BUF_GRQ[grb] += gz * gz;
+        grb += 1;
+      );
+    );
+
     sacc >= slice ? (
       gmem[base + OFF_SCOPE + cur * 3 + 0] = smin;
       gmem[base + OFF_SCOPE + cur * 3 + 1] = smax;
       gmem[base + OFF_SCOPE + cur * 3 + 2] = sqrt(ssq / slice);
+      grb = 0;
+      loop(GRB_N,
+        gmem[base + OFF_GRB + cur * GRB_N + grb] =
+          grbon ? sqrt(BUF_GRQ[grb] / slice) : 0;
+        BUF_GRQ[grb] = 0;
+        grb += 1;
+      );
       cur += 1;
       cur >= SCOPE_COLS ? cur = 0;
       gmem[base + H_CUR] = cur;
