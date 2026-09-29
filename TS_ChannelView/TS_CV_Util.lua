@@ -45,6 +45,139 @@ function U.truncate(s, n)
   return s:sub(1, n - 1) .. "\u{2026}"
 end
 
+-- ---------------------------------------------------------------------
+-- abbreviating a parameter name to fit
+-- ---------------------------------------------------------------------
+-- The same idea as a control surface's scribble strip: take away the
+-- least informative characters first, and only as many as it takes.
+-- Each stage runs only while the name still doesn't fit, and within a
+-- stage one character goes at a time, so a name loses the least it can:
+--
+--   1. anything in brackets        "Threshold (dB)"    -> "Threshold"
+--   2. the audio world's own short forms, which read better than anything
+--      worked out letter by letter: Frequency -> Freq, Attack -> Atk,
+--      Resonance -> Reso, High -> Hi
+--   3. words that say nothing on a control: "Resonance Control" -> "Reso"
+--   4. lowercase vowels, from the right, never a word's first letter:
+--      "Drive" -> "Drv", "Decay" -> "Dcy"
+--   5. doubled letters: "Fill" -> "Fil"
+--   6. the spaces, capitalising what follows: "Lo Cut" -> "LoCut" (also
+--      tried before step 4, and taken there if that alone is enough)
+--   7. and only then cut, with a dot to show it was cut
+--
+-- `fits(s)` answers whether s fits -- a pixel measure in the panel, a
+-- character count in the tests.
+
+U.SHORT = {
+  frequency = "Freq", threshold = "Thresh", attack = "Atk", release = "Rel",
+  resonance = "Reso", bandwidth = "BW", output = "Out", input = "In",
+  volume = "Vol", level = "Lvl", feedback = "Fdbk", delay = "Dly",
+  predelay = "PreDly", ["pre-delay"] = "PreDly", saturation = "Sat",
+  distortion = "Dist", compression = "Comp", compressor = "Comp",
+  sidechain = "SC", ["side-chain"] = "SC", modulation = "Mod",
+  envelope = "Env", oscillator = "Osc", high = "Hi", low = "Lo",
+  middle = "Mid", medium = "Med", highpass = "HP", ["high-pass"] = "HP",
+  lowpass = "LP", ["low-pass"] = "LP", deesser = "DeEss", ["de-esser"] = "DeEss",
+  amount = "Amt", control = "Ctrl", transient = "Trans", sustain = "Sus",
+  presence = "Pres", ambience = "Amb", reverb = "Verb", character = "Char",
+  harmonics = "Harm", limiter = "Lim", range = "Rng", lookahead = "LkAhd",
+  ["look-ahead"] = "LkAhd", bypass = "Byp", polarity = "Pol",
+  channel = "Ch", parameter = "Par", damping = "Damp", diffusion = "Diff",
+  density = "Dens", reflections = "Refl", speed = "Spd", emphasis = "Emph",
+  ceiling = "Ceil", stereo = "St", frequencies = "Freqs",
+}
+
+-- Words that can go when there's something else left to say it.
+U.FILLER = { control = true, amount = true, parameter = true, param = true,
+             knob = true, value = true, adjust = true }
+
+local function recase(orig, short)
+  if #orig > 1 and orig == orig:upper() then return short:upper() end
+  if orig == orig:lower() then return short:lower() end
+  return short
+end
+
+function U.abbreviate(text, fits)
+  local s = U.trim(text)
+  if s == "" or fits(s) then return s end
+
+  -- 1. brackets
+  local t = U.trim((s:gsub("%b()", ""):gsub("%b[]", ""):gsub("%s+", " ")))
+  if t ~= "" then s = t end
+  s = s:gsub("_", " ")
+  if fits(s) then return s end
+
+  -- 2. short forms
+  s = s:gsub("%a[%a%-]*%a", function(w)
+    local short = U.SHORT[w:lower()]
+    return short and recase(w, short) or w
+  end)
+  if fits(s) then return s end
+
+  -- 3. filler words, keeping at least one word
+  local words = {}
+  for w in s:gmatch("%S+") do words[#words + 1] = w end
+  if #words > 1 then
+    local kept = {}
+    for _, w in ipairs(words) do
+      local base = w:lower()
+      local long
+      for k, v in pairs(U.SHORT) do
+        if v:lower() == base then long = k break end
+      end
+      if not (U.FILLER[base] or (long and U.FILLER[long])) then kept[#kept + 1] = w end
+    end
+    if #kept > 0 then s = table.concat(kept, " ") end
+    if fits(s) then return s end
+  end
+
+  -- Closing the spaces up is tried here too, but only kept if that alone
+  -- makes it fit: "Output Gain" reads better as "OutGain" than "Out Gan".
+  local function closed(x)
+    return (x:gsub(" +(%S)", function(c) return c:upper() end))
+  end
+  if s:find(" ") and fits(closed(s)) then return closed(s) end
+
+  -- 4. vowels, right to left, never a word's first letter
+  local i = #s
+  while i > 1 do
+    local c, prev = s:sub(i, i), s:sub(i - 1, i - 1)
+    if c:match("[aeiou]") and prev:match("%a") then
+      s = s:sub(1, i - 1) .. s:sub(i + 1)
+      if fits(s) then return s end
+    end
+    i = i - 1
+  end
+
+  -- 5. doubled letters
+  i = #s
+  while i > 1 do
+    local c = s:sub(i, i)
+    if c:match("%l") and c == s:sub(i - 1, i - 1) then
+      s = s:sub(1, i - 1) .. s:sub(i + 1)
+      if fits(s) then return s end
+    end
+    i = i - 1
+  end
+
+  -- 6. spaces, right to left
+  while true do
+    local a = s:find(" [^ ]*$")
+    if not a then break end
+    s = s:sub(1, a - 1) .. s:sub(a + 1, a + 1):upper() .. s:sub(a + 2)
+    if fits(s) then return s end
+  end
+
+  -- 7. cut
+  local n = #s
+  while n > 1 do
+    n = n - 1
+    local c = s:sub(1, n) .. "."
+    if fits(c) then return c end
+  end
+  return s:sub(1, 1)
+end
+
 -- "VST3: DF-SMACK (Dawesome)" -> "DF-SMACK"
 -- "VST: ReaComp (Cockos)"     -> "ReaComp"
 -- "JS: Volume/Pan Smoother"   -> "Volume/Pan Smoother"

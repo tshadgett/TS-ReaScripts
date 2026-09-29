@@ -19,6 +19,7 @@
       Ctl<n>   = <param index>|<type>|<bipolar>|<label>
       Alias<p> = <your name for parameter p>
       Meter    = <1|0>|<full-scale dB>
+      Live     = 1
 
   <type> is knob | toggle | combo | fader | blank | divider | half_gap.
   "blank" is a deliberate empty cell, so a layout can leave a gap where a
@@ -43,6 +44,14 @@
   parameter needs a shorter caption in a cramped layout. Resolution order
   is label, then alias, then whatever the plugin calls it.
 
+  LIVE names are for plugins that rename their own parameters as you use
+  them -- Softube Console 1 and Flow name their macros after whatever is
+  loaded into them. A saved label or alias would freeze whatever the name
+  was on the day. Live=1 makes every control on the panel show what the
+  plugin calls its parameter right now; bit 3 of the flags field does the
+  same for one slot. Either way the label and alias are kept, just not
+  shown, so turning live off brings them back.
+
   METER turns the gain-reduction strip on for this plugin and sets its
   full-scale range. It sits at the layout level rather than in the control
   list because a plugin has exactly one gain reduction, not one per
@@ -63,7 +72,9 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. ";   type: knob | toggle | combo | blank\n"
                 .. ";   label overrides the alias for that one slot only\n"
                 .. "; Alias<param>=<your name for that parameter, used everywhere>\n"
-                .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>"
+                .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>\n"
+                .. "; Live=1: every control shows the plugin's current name for its\n"
+                .. ";   parameter (flags bit 8 does the same for one slot)"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -119,16 +130,19 @@ local function parse_section(sect)
         bipolar = (f & 1) ~= 0,
         invert  = (f & 2) ~= 0,
         no_rule = (f & 4) ~= 0,
+        live    = (f & 8) ~= 0,
         label   = U.trim(label),
       }
     end
     i = i + 1
   end
-  return { controls = controls, aliases = aliases, meter = meter }
+  return { controls = controls, aliases = aliases, meter = meter,
+           live = (U.trim(sect.Live or "") == "1") or nil }
 end
 
 local function serialize(layout)
   local out = {}
+  if layout.live then out.Live = "1" end
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
                               layout.meter.range or C.MAX_GR_DB)
@@ -139,9 +153,10 @@ local function serialize(layout)
     end
   end
   for i, c in ipairs(layout.controls or {}) do
-    -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule.
+    -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
+    -- bit 3 live name.
     local flags = (c.bipolar and 1 or 0) | (c.invert and 2 or 0)
-                                          | (c.no_rule and 4 or 0)
+                | (c.no_rule and 4 or 0) | (c.live and 8 or 0)
     out["Ctl" .. (i - 1)] = string.format("%d|%s|%d|%s",
       c.param or -1,
       c.type or "knob",
@@ -269,8 +284,14 @@ function M.set_alias(key, param, name)
 end
 
 -- What a parameter should be called, most specific first: a slot's own
--- label, then the plugin-wide alias, then the plugin's own name for it.
-function M.display_name(key, param, slot_label, plugin_name)
+-- label, then the plugin-wide alias, then the plugin's own name for it --
+-- or, when `live` (the slot's or the whole layout's), the plugin's own
+-- name regardless.
+function M.display_name(key, param, slot_label, plugin_name, live)
+  if live then
+    local n = plugin_name and U.trim(plugin_name) or ""
+    return (n ~= "") and n or ("P" .. tostring(param))
+  end
   if slot_label and slot_label ~= "" then return slot_label end
   local a = M.get_alias(key, param)
   if a then return a end
@@ -313,13 +334,14 @@ end
 
 -- Deep copy, so the editor can work on a scratch layout and discard it.
 function M.copy(layout)
-  local out = { controls = {}, aliases = {} }
+  local out = { controls = {}, aliases = {}, live = layout.live }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range }
   end
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
-                        invert = c.invert, no_rule = c.no_rule, label = c.label }
+                        invert = c.invert, no_rule = c.no_rule, live = c.live,
+                        label = c.label }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   return out

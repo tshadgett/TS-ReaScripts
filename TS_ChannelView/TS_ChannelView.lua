@@ -1,9 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.3.3
+-- @version 1.3.4
 -- @changelog
---  Optional track icons (View > Track icons, off by default): REAPER's
---  track icons shown above each name button, in both views.
+--  Live parameter names, per plugin or per control, for plugins that rename
+--  their own parameters (Softube Console 1, Flow). Knob labels too wide for
+--  their cell are abbreviated (Freq, Thresh, dropped vowels) instead of cut.
+--  "Show the input FX chain" opens the chain rather than the Add FX browser.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

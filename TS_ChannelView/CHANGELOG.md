@@ -1,5 +1,40 @@
 # ChannelView — changelog
 
+## 1.3.4 — names that keep up
+
+- **Live parameter names.** Some plugins rename their own parameters as
+  you use them -- Softube Console 1 and Flow name each macro after
+  whatever is loaded into it. A saved label or alias froze the name as it
+  was on the day. Two new switches in Setup Edit Parameters:
+  - **Live parameter names** (under Gain reduction meter): every control
+    on that plugin's panel shows what the plugin calls its parameter
+    right now.
+  - **Live name** (in the Selected control row): the same, for one slot.
+
+  Labels and aliases are kept, just greyed out, so turning live off
+  brings them back. The dialog's own parameter lists now refresh twice a
+  second, so they follow the plugin too. Stored as `Live=1` on the
+  plugin's section, or bit 3 of a control's flags field.
+
+- **Smarter abbreviations.** A caption too wide for its cell used to be
+  chopped at the end. It's now shortened the way a console scribble strip
+  does it, one step at a time and only as far as needed: brackets
+  ("Threshold (dB)"), then the audio world's own short forms (Frequency →
+  Freq, Attack → Atk, Resonance → Reso, High → Hi), then filler words
+  ("Resonance Control" → "Reso"), then closing up spaces if that alone is
+  enough ("Output Gain" → "OutGain"), then vowels from the right, never a
+  word's first letter ("Reverb Drive" → "Verb Drv"), and only then a cut.
+  Values are never abbreviated, only cut. The short forms are the
+  `U.SHORT` table in TS_CV_Util.lua, easy to add to.
+
+- **Fixed: "Show the input FX chain"** opened REAPER's Add FX browser.
+  The item is now greyed out while the input chain is empty (an empty
+  chain is REAPER's cue to open the browser; "Add input FX" above it is
+  the way in), and with plugins in it, the chain window itself opens,
+  falling back to REAPER's own "View input FX chain" action if it
+  doesn't.
+
+
 ## 1.3.3 — one palette across the TS_ tools
 
 - **Hue and tint moved to a shared section.** They now live in their own
@@ -19,6 +54,31 @@
   stock. Nothing supplies a default from the shared section: absent
   means "no shared setting" and each tool keeps its own, so ChannelView
   still runs with neither of the others installed.
+
+
+- **Also in 1.3.3**, released without notes of their own:
+  - **ChannelView TCP**, a second window (its own action, installed with
+    ChannelView) docked beside the arrange view: a track panel in
+    ChannelView's style, lined up with REAPER's arrange row for row, with
+    a toolbar of REAPER actions above the first track and ChannelView's
+    own channel panel opening beside a clicked track. Needs
+    js_ReaScriptAPI.
+  - **Record input and input FX.** A record-input dropdown across the top
+    of every strip (No input / Mono / Stereo / MIDI devices and channels /
+    Record mode), and an **IN** button at the left of each strip header
+    (**MON** on the master) for the input FX chain: lit when there are
+    input FX, amber when they're all bypassed, with a menu to add, bypass,
+    remove and show them.
+  - **Drag a track onto another to make it a child.** The middle of a
+    strip (or a TCP row) nests the dragged tracks inside it, outlined as
+    you hover; the outer quarters still reorder. A folder with hidden
+    children opens so what you dropped stays in view.
+  - **Add track in the right-click menu:** a new track, or one from a
+    template, after the track you clicked.
+  - **Load FX chain** button in the header bar: your FXChains folder as a
+    menu, added to the end of the chain, or replacing it with "Replace the
+    existing FX" ticked. One undo step either way.
+  - The channel/mixer view toggle moved to the left of the header bar.
 
 
 ## 1.3.2 — track icons

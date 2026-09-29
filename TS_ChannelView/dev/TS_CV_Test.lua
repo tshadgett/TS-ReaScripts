@@ -188,6 +188,29 @@ do
   M.remove(skey); M.save(); M.reload()
 end
 
+-- Live names survive the ini: the layout's Live=1 and a slot's flag bit,
+-- alongside the other flag bits rather than instead of them.
+do
+  local lkey = "LiveNames"
+  M.set(lkey, { live = true, controls = {
+    { param = 0, type = "knob", label = "Macro 1", live = true, invert = true },
+    { param = 1, type = "knob", label = "Macro 2", bipolar = true } } })
+  M.save()
+  M.reload()
+  local b = M.get(lkey)
+  check("round-trip layout live",        b.live, true)
+  check("round-trip slot live",          b.controls[1].live, true)
+  check("  reverse kept beside it",      b.controls[1].invert, true)
+  check("  label kept, just not shown",  b.controls[1].label, "Macro 1")
+  check("other slot not live",           b.controls[2].live, false)
+  check("  centred kept",                b.controls[2].bipolar, true)
+  M.set(lkey, { controls = { { param = 0, type = "knob", label = "X" } } })
+  M.save()
+  M.reload()
+  check("live off stays off",            M.get(lkey).live, nil)
+  M.remove(lkey); M.save(); M.reload()
+end
+
 -- Type names may contain underscores (e.g. half_gap); the ini line
 -- parser must accept those, not just plain letters. This has to
 -- round-trip through an actual save+reload, since M.set/M.get never
@@ -2670,6 +2693,39 @@ do
   local aft = LN.after_delete(pl, 4, 1)
   check("and the rest move up after",          ("%d%d%d"):format(aft[0], aft[1], aft[2]), "120")
   check("nothing past the new end",            aft[3], nil)
+end
+
+-- Abbreviating a name to fit: short forms, then filler words, then
+-- vowels from the right, then spaces, and only then a cut.
+do
+  local function ab(s, n) return U.abbreviate(s, function(x) return #x <= n end) end
+  check("fits already: untouched",       ab("Drive", 8), "Drive")
+  check("brackets go first",             ab("Threshold (dB)", 9), "Threshold")
+  check("audio short form",              ab("Frequency", 6), "Freq")
+  check("short forms keep their case",   ab("low frequency", 8), "lo freq")
+  check("all caps stays caps",           ab("STEREO WIDTH", 8), "ST WIDTH")
+  check("filler word dropped",           ab("Resonance Control", 8), "Reso")
+  check("closing spaces when enough",    ab("Output Gain", 7), "OutGain")
+  check("vowels from the right",         ab("Reverb Drive", 8), "Verb Drv")
+  check("never a word's first letter",   ab("Band 2 Gain", 6), "Bnd2Gn")
+  check("cut last, with a dot",          ab("Dry/Wet Mix", 7), "Dry/Wt.")
+  check("never longer than asked",       #ab("Supercalifragilistic Level", 5) <= 5, true)
+end
+
+-- Live names: for plugins that rename their own parameters.
+do
+  local M = require "TS_CV_Mappings"
+  check("label wins normally",           M.display_name("nokey", 3, "Macro 1", "Deess"), "Macro 1")
+  check("live: the plugin's name",       M.display_name("nokey", 3, "Macro 1", "Deess", true), "Deess")
+  check("live: trimmed",                 M.display_name("nokey", 3, "", "  Deess ", true), "Deess")
+  check("live with no name: numbered",   M.display_name("nokey", 3, "Macro 1", "", true), "P3")
+  local l = { live = true, aliases = {}, controls = {
+    { param = 0, type = "knob", label = "Macro 1", live = true },
+    { param = 1, type = "knob", label = "Macro 2" } } }
+  local c = M.copy(l)
+  check("copy keeps plugin-level live",  c.live, true)
+  check("copy keeps slot live",          c.controls[1].live, true)
+  check("and leaves the others off",     c.controls[2].live, nil)
 end
 
 -- FX chains: REAPER's own .RfxChain files, named without the extension.

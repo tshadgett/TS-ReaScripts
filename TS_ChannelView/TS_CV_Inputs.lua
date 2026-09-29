@@ -210,20 +210,29 @@ function IN.fx_state(track)
   return n, any_on
 end
 
--- Opens the input FX chain (the monitoring FX chain on the master). With
--- none there yet, REAPER's own action opens the empty chain for the last
--- touched track, so the track is made that first.
+-- Opens the input FX chain (the monitoring FX chain on the master)
+-- showing what's in it. Only for a chain that has something in it:
+-- REAPER answers an EMPTY chain being opened with its Add FX browser,
+-- which is what adding is for, not showing. TrackFX_Show is asked first;
+-- if the chain still isn't up, REAPER's own "view input FX chain" action
+-- is run for the track (made the last touched one first, which that
+-- action needs). Returns false when there was nothing to show.
 function IN.open_fx(track)
+  if not track or (reaper.TrackFX_GetRecCount(track) or 0) == 0 then return false end
   local master = track == reaper.GetMasterTrack(0)
-  if (reaper.TrackFX_GetRecCount(track) or 0) > 0 then
-    reaper.TrackFX_Show(track, 0x1000000, 1)
-  elseif master then
+  reaper.TrackFX_Show(track, 0x1000000, 1)
+  if reaper.TrackFX_GetRecChainVisible
+     and reaper.TrackFX_GetRecChainVisible(track) ~= -1 then
+    return true
+  end
+  if master then
     reaper.Main_OnCommand(41882, 0)        -- View: Show monitoring FX chain
   else
     reaper.SetOnlyTrackSelected(track)
     reaper.Main_OnCommand(40914, 0)        -- Track: Set first selected track as last touched
     reaper.Main_OnCommand(40844, 0)        -- Track: View input FX chain for current/last touched track
   end
+  return true
 end
 
 return IN

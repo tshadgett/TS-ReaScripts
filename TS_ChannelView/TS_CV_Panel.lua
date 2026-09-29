@@ -691,7 +691,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       local value    = rev and (1 - raw) or raw
       local shown    = U.fmt_value(track, fx.addr, p)
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, p, "")
-      local label    = M.display_name(key, p, ctl.label, pname)
+      local label    = M.display_name(key, p, ctl.label, pname,
+                                      ctl.live or layout.live)
       -- Just the value. The plugin's name is on the header two
       -- centimetres away and the parameter index is an implementation
       -- detail -- neither is what you're hovering to find out.

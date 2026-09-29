@@ -170,6 +170,7 @@ local function draw_assigned(ctx, track, list_w, list_h)
         label = ("%2d  \u{2044} half gap"):format(i)
       else
         local shown = c.label
+        if c.live or st.scratch.live then shown = pname end
         if not shown or shown == "" then shown = st.scratch.aliases[c.param] end
         if not shown or shown == "" then shown = pname end
         label = ("%2d  %-14s  %-6s  %s"):format(i,
@@ -323,7 +324,12 @@ local function draw_entry_editor(ctx)
     if p.index == c.param then pname = p.name break end
   end
 
-  if c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap" then
+  local is_param = c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap"
+  -- A live name overrides both fields below; they stay as they are, just
+  -- greyed, so turning live off again brings them back.
+  local live = is_param and (c.live or st.scratch.live) or false
+  if live then ImGui.BeginDisabled(ctx, true) end
+  if is_param then
     ImGui.SetNextItemWidth(ctx, 170)
     local ach, av = ImGui.InputTextWithHint(ctx, "Alias",
       pname ~= "" and pname or "name\u{2026}", st.scratch.aliases[c.param] or "")
@@ -350,6 +356,7 @@ local function draw_entry_editor(ctx)
 
     ImGui.SameLine(ctx)
   end
+  if live then ImGui.EndDisabled(ctx) end
 
   local cur = 0
   for i, t in ipairs(TYPES) do if t == c.type then cur = i - 1 break end end
@@ -378,6 +385,21 @@ local function draw_entry_editor(ctx)
     end
   end
 
+  if is_param then
+    ImGui.SameLine(ctx)
+    if st.scratch.live then ImGui.BeginDisabled(ctx, true) end
+    local vch, vv = ImGui.Checkbox(ctx, "Live name", live)
+    if vch then c.live = vv or nil end
+    if st.scratch.live then ImGui.EndDisabled(ctx) end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, st.scratch.live and
+        "On for every control: \"Live parameter names\" is ticked above." or
+        "Show whatever the plugin calls this parameter right now, instead\n" ..
+        "of the label or alias -- for plugins that rename their parameters\n" ..
+        "as you use them. Currently: " .. (pname ~= "" and pname or "?"))
+    end
+  end
+
   -- Knobs and toggles only. A combo's entries are positions in the
   -- plugin's own scale, so reversing one means reversing the list, which
   -- is a different job and a worse idea.
@@ -392,6 +414,20 @@ local function draw_entry_editor(ctx)
         "a \"threshold\" that opens as it falls, a mix control labelled dry.\n" ..
         "The plugin still sees its own value; only the control is flipped.")
     end
+  end
+end
+
+-- Plugins that rename their parameters as you use them (Softube Console 1,
+-- Flow) would leave these lists showing whatever the names were when the
+-- dialog opened; twice a second they're read again.
+local function refresh_names(track)
+  local now = reaper.time_precise()
+  if st.names_at and now - st.names_at < 0.5 then return end
+  st.names_at = now
+  for _, p in ipairs(st.params or {}) do
+    local _, nm = reaper.TrackFX_GetParamName(track, st.fx.addr, p.index, "")
+    nm = U.trim(nm or "")
+    p.name = (nm ~= "") and nm or ("Param " .. p.index)
   end
 end
 
@@ -436,6 +472,7 @@ function E.draw(ctx, track)
 
   if visible then
     poll_learn(track)
+    refresh_names(track)
 
     ImGui.Text(ctx, U.clean_fx_name(st.fx.name))
     ImGui.SameLine(ctx)
@@ -465,6 +502,17 @@ function E.draw(ctx, track)
       end
     else
       ImGui.TextDisabled(ctx, "This plugin doesn't report gain reduction.")
+    end
+
+    -- Also panel-level: for plugins that rename their own parameters.
+    local lvch, lvv = ImGui.Checkbox(ctx, "Live parameter names", st.scratch.live and true or false)
+    if lvch then st.scratch.live = lvv or nil end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Every control shows what the plugin calls its parameter right now,\n" ..
+        "instead of a saved label or alias. For plugins that rename their\n" ..
+        "parameters as you use them, like Softube Console 1 and Flow, whose\n" ..
+        "macros take the names of whatever is loaded into them.")
     end
 
     ImGui.Separator(ctx)
@@ -514,9 +562,11 @@ function E.draw(ctx, track)
     if ImGui.Button(ctx, "Auto-fill", 90) then
       local aliases = st.scratch.aliases          -- names you've set are kept
       local meter   = st.scratch.meter
+      local live    = st.scratch.live
       st.scratch = M.build_default(track, st.fx.addr)
       st.scratch.aliases = aliases
       st.scratch.meter   = meter
+      st.scratch.live    = live
       st.sel_asg = math.min(1, #st.scratch.controls)
     end
     if ImGui.IsItemHovered(ctx) then
@@ -526,7 +576,7 @@ function E.draw(ctx, track)
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Clear all", 90) then
       st.scratch = { controls = {}, aliases = st.scratch.aliases,
-                     meter = st.scratch.meter }
+                     meter = st.scratch.meter, live = st.scratch.live }
       st.sel_asg = 0
     end
     ImGui.SameLine(ctx, 0, 24)

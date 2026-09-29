@@ -192,7 +192,11 @@ function CH.infx_button(ctx, x, y, w, h, track, idp)
       B.menu_items(ctx, track, { track = track, input = true })
       ImGui.EndMenu(ctx)
     end
-    if ImGui.MenuItem(ctx, "Show the " .. noun .. " chain") then IN.open_fx(track) end
+    -- Only with something in it: an empty chain opens as REAPER's Add FX
+    -- browser, which is the item above.
+    if ImGui.MenuItem(ctx, "Show the " .. noun .. " chain", nil, false, n > 0) then
+      IN.open_fx(track)
+    end
     ImGui.EndPopup(ctx)
   end
 end

@@ -169,18 +169,35 @@ end
 -- small helpers
 -- ---------------------------------------------------------------------
 
-local function centred_text(ctx, dl, cx, y, text, col, max_w)
+-- A name too wide for its cell is abbreviated (U.abbreviate: short forms,
+-- then vowels, then cut) when `abbrev`; anything else -- a value, whose
+-- digits all matter -- is simply cut. The result is kept per text, width
+-- and font size, so the work is done once, not every frame.
+local fit_cache, fit_count = {}, 0
+
+local function centred_text(ctx, dl, cx, y, text, col, max_w, abbrev)
   if not text or text == "" then return end
   local tw, th = ImGui.CalcTextSize(ctx, text)
   if max_w and tw > max_w then
-    -- crude but predictable: drop characters until it fits
-    local n = #text
-    while n > 1 do
-      n = n - 1
-      local t = text:sub(1, n) .. "."
-      tw = ImGui.CalcTextSize(ctx, t)
-      if tw <= max_w then text = t break end
+    local key = text .. "\0" .. math.floor(max_w) .. "\0" .. th .. (abbrev and "a" or "")
+    local fitted = fit_cache[key]
+    if not fitted then
+      local function fits(s) return ImGui.CalcTextSize(ctx, s) <= max_w end
+      if abbrev then
+        fitted = U.abbreviate(text, fits)
+      else
+        fitted = text:sub(1, 1)
+        for n = #text - 1, 1, -1 do
+          local t = text:sub(1, n) .. "."
+          if fits(t) then fitted = t break end
+        end
+      end
+      if fit_count > 4000 then fit_cache, fit_count = {}, 0 end
+      fit_cache[key] = fitted
+      fit_count = fit_count + 1
     end
+    text = fitted
+    tw = ImGui.CalcTextSize(ctx, text)
   end
   ImGui.DrawList_AddText(dl, cx - tw * 0.5, y, col, text)
   return th
@@ -281,7 +298,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local cy = y + label_h + C.LABEL_GAP + r
 
   -- name
-  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2)
+  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
 
   -- body + track
   ImGui.DrawList_AddCircleFilled(dl, cx, cy, r,
@@ -352,7 +369,7 @@ function W.toggle(ctx, id, label, value, formatted, opts)
   local bx2, by2 = x + cw - 6, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
   local cx = x + cw * 0.5
 
-  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2)
+  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
 
   local bg = on and C.COL.toggle_on or C.COL.toggle_off
   if hovered then bg = U.with_alpha(bg, 0xdd) end
@@ -463,7 +480,7 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   local bx2, by2 = x + cw - 4, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
   local cx = x + cw * 0.5
 
-  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2)
+  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
   ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
     hovered and C.COL.knob_body_hi or C.COL.knob_body, 3.0)
   ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
