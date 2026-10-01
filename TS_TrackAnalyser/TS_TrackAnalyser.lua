@@ -2,7 +2,36 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 1.2.0
+-- @version 1.4.0
+-- @changelog
+--  First public release. A docked two-panel display of what your
+--  processing does to the selected track, measured from the audio by a
+--  TS_TrackProbe at each end of the FX chain: the measured EQ response over
+--  the spectrum, a before/after waveform with gain reduction over it, and
+--  a masking (Collisions) view against another track. The waveform window
+--  can be set in beats at the project tempo and locked to the beat, like a
+--  triggered scope. New in this release:
+--  gain reduction for plugins ChannelView measures, one 500-a-second trace
+--  per compressor, and traces lined up with the waveform.
+-- @about
+--  # Track Analyser
+--
+--  Shows what your processing is actually doing to the selected track,
+--  measured from the audio rather than modelled from parameter values.
+--
+--  A TS_TrackProbe sits at each end of the FX chain (the header's Install
+--  button adds them). The difference between what the two hear IS the
+--  magnitude response of everything between them, so it is right about
+--  bypass, saturation and plugins nobody has characterised.
+--
+--  * Panel 1: the spectrum with the measured EQ response over it, and a
+--    Collisions overlay that shows where another track masks this one.
+--  * Panel 2: the waveform before and after, with gain reduction per
+--    compressor over it. Its window can be a number of beats at the
+--    project tempo, locked to the beat so hits land in the same place.
+--
+--  Needs ReaImGui. Works on its own; with ChannelView installed it also
+--  shows gain reduction for plugins that don't report it.
 -- @license MIT
 -- @provides
 --   [main]   TS_TA_InsertProbes.lua
@@ -405,6 +434,7 @@ local S = {
   cWavePre  = 0x6E767Eff,
   cWavePost = 0x4E9AC8ff,
   cGR       = 0xF0A860ff,
+  cGRMeas   = 0xD2609Bff,     -- reduction MEASURED by a probe tap: ChannelView's pink
 
   -- Each data colour follows the base hue until you take it off auto by
   -- unticking the box beside it. See DERIVED.
@@ -414,6 +444,7 @@ local S = {
   autoWavePost = true,
   autoCurve    = true,
   autoGR       = true,
+  autoGRMeas   = true,
 }
 
 ----------------------------------------------------------
@@ -535,6 +566,9 @@ local DERIVED = {
   cWavePost = { "solid", -16.4, 0.526, 0.545, 1.000 },
   cCurve    = { "solid",-175.1, 0.755, 0.631, 1.000 },
   cGR       = { "solid", 171.0, 0.828, 0.659, 1.000 },
+  -- Measured by a probe tap rather than reported: the same colour
+  -- ChannelView uses for it (its gr_measured), so the two tools agree.
+  cGRMeas   = { "solid", 110.0, 0.560, 0.600, 1.000 },
 }
 
 -- Which of them are following the hue. One flag per colour, so overriding
@@ -543,6 +577,7 @@ local DERIVED_AUTO = {
   cSpecPre  = "autoSpecPre",  cSpecPost = "autoSpecPost",
   cWavePre  = "autoWavePre",  cWavePost = "autoWavePost",
   cCurve    = "autoCurve",    cGR       = "autoGR",
+  cGRMeas   = "autoGRMeas",
 }
 
 local function buildPalette()
@@ -951,6 +986,12 @@ end
 ----------------------------------------------------------
 
 local G = TA.gmem
+
+-- Probe taps (plugins measured rather than reported): the heartbeat slot
+-- that keeps them running, and where the post probe writes each tap's
+-- reduction per scope column while this panel has the track armed.
+local TAP_HB, TAP_TRACE, TAP_COLS = 73, 0x50000, 4096
+local tapBeat = 0
 TA.attach()
 
 local rig, rigTrack, rigNote = nil, nil, nil
@@ -961,6 +1002,7 @@ local rigSources = {}     -- everything between the probes that reports reductio
 local rigOutside = {}     -- reduction reporters that are NOT between them
 local lock       = {}     -- the scope trigger: anchor, step, ring length
 local chainSig   = nil    -- what the chain looked like last time we looked
+local lagCheckedAt = 0
 local rigLag     = 0      -- samples of latency reported by the FX between
                           -- the probes; the pre probe delays itself by it
 local grShape    = {}     -- reused, so the trace allocates nothing a frame
@@ -1185,6 +1227,11 @@ local function signatureOf(tr)
         r.TrackFX_GetEnabled(tr, fx.idx) and "1" or "0")
     end
   end
+  -- ChannelView laying or lifting probe taps changes which plugins are
+  -- measured without changing the chain itself, so its record is part of
+  -- what the sources were built from.
+  local okt, taps = r.GetSetMediaTrackInfo_String(tr, "P_EXT:TS_CV_TAPS", "", false)
+  parts[#parts + 1] = okt and taps or ""
   return table.concat(parts, "|")
 end
 
@@ -1284,6 +1331,38 @@ local function chainLatency(tr, rg)
   return math.min(math.floor(total), 65536)
 end
 
+-- HOW LATE A SOURCE'S READING MUST BE DRAWN, in samples.
+--   The waveform is the post probe's input. Everything after a plugin and
+--   before the post probe delays that plugin's output by its own latency
+--   -- REAPER compensates at the track's output, not inside the chain --
+--   so a reduction read at the plugin is early against the waveform by
+--   that much.
+--     * a tap reads the plugin's OUTPUT (on spare channels nothing else
+--       touches), so only what comes after it counts
+--     * a reported reading comes from the plugin's detector, which runs
+--       ahead of its own output by its own latency -- a lookahead
+--       compressor's meter moves before the audio it is turning down
+--       comes out -- so its own latency counts as well
+--   Bypassed and offline plugins add nothing, as in chainLatency.
+local function sourceDelay(tr, rg, src)
+  if not (tr and rg and rg.post and src) then return 0 end
+  local function lat(idx)
+    if not r.TrackFX_GetEnabled(tr, idx) or r.TrackFX_GetOffline(tr, idx) then return 0 end
+    local ok, v = r.TrackFX_GetNamedConfigParm(tr, idx, "pdc")
+    local n = ok and tonumber(v)
+    return (n and n > 0) and n or 0
+  end
+  local seen, total = false, 0
+  for _, fx in ipairs(rg.chain or {}) do
+    if fx.idx == rg.post.idx then break end
+    if seen and not fx.isContainer then total = total + lat(fx.idx) end
+    if fx.idx == src.fx then seen = true end
+  end
+  if not seen then return 0 end
+  if not src.est then total = total + lat(src.fx) end
+  return math.min(math.floor(total), 65536)
+end
+
 local function setUpRig(tr, keepPre, keepPost)
   rigTrack, rig, rigNote, rigNeedsProbes = tr, nil, nil, false
   rigLag = 0
@@ -1314,6 +1393,7 @@ local function setUpRig(tr, keepPre, keepPost)
                  rig.post and rig.post.idx or -1)
 
   rigLag = chainLatency(rigTrack, rig)
+  lagCheckedAt = 0          -- the sources' own delays, on the next frame
 
   -- Only the VST3 route is drawn. It reports decibels directly, so there is
   -- no law to calibrate, no staleness to detect and nothing to hold through
@@ -1329,7 +1409,10 @@ local function setUpRig(tr, keepPre, keepPost)
   --   gets them.
   local nUsable = 0
   for _, s in ipairs(rigSources) do
-    s.usable = (s.route and s.route.kind == "named") or false
+    -- Reported in decibels, or measured by a probe tap: both are drawn.
+    -- A tap is an estimate, and said so wherever it is shown.
+    s.usable = (s.route and (s.route.kind == "named" or s.route.kind == "tap")) or false
+    s.est = (s.route and s.route.kind == "tap") or false
     if s.usable then nUsable = nUsable + 1 end
   end
 
@@ -1684,6 +1767,22 @@ local function updateGR()
   for i = #rigSources + 1, #GRsrc do GRsrc[i] = nil end
 end
 
+-- True when any source REPORTS its reduction (rather than being measured
+-- by a probe tap): those are the ones the span trace is drawn for.
+local function anyReported()
+  for _, src in ipairs(rigSources) do
+    if src.usable and not src.est then return true end
+  end
+  return false
+end
+local function anyTap()
+  for _, src in ipairs(rigSources) do
+    if src.usable and src.est then return true end
+  end
+  return false
+end
+local rigFitA = nil   -- the last span-to-report scale, for Settings
+
 local function pumpGR()
   local sc = scope.post
   if sc.cur < 0 or sc.len < 16 then return end
@@ -1759,6 +1858,29 @@ local function pumpGR()
       local ema = grGapEma[j]
       grGapEma[j] = ema and (ema * 0.8 + gap * 0.2) or gap
       grChangeVal[j], grChangeCol[j] = v[j], cur
+    end
+  end
+
+  -- TAP SOURCES DON'T NEED THE LINE.
+  --   A plugin measured by a probe tap has its reduction written by the
+  --   post probe once per scope column, on the scope's own clock (see
+  --   TS_TrackProbe.jsfx). So those columns are real readings, 500 a
+  --   second, and they replace the interpolation between frame readings
+  --   above -- the trace for a measured plugin is sharper than for a
+  --   reported one, not blurrier.
+  if grLastCol and span > 0 and span <= MAX_BRIDGE then
+    for j, src in ipairs(rigSources) do
+      if src.est and src.route and src.route.index then
+        local tb = TAP_TRACE + (src.route.index - 1) * TAP_COLS
+        local i, k = grLastCol, 0
+        while k <= span do
+          local row = grHist[i] or {}
+          row[j] = r.gmem_read(tb + (i % TAP_COLS)) or row[j]
+          grHist[i] = row
+          i = (i + 1) % sc.len
+          k = k + 1
+        end
+      end
     end
   end
 
@@ -2186,12 +2308,37 @@ local function drawPanel2(dl, x0, y0, w, h)
   -- the other cluttering the waveform.
   local series = {}
   local anyUsable = false
+  local nUse, grTotal = 0, 0
+  -- Two sources of the same kind would be two bars and two traces in one
+  -- colour. The second and third of a kind are drawn paler -- the same
+  -- hue, so "reported" and "measured" still read at a glance -- and each
+  -- bar matches its trace.
+  local function paler(c, f)
+    local function ch(sh) local v = (c >> sh) & 0xFF ; return math.floor(v + (255 - v) * f + 0.5) end
+    return (ch(24) << 24) | (ch(16) << 16) | (ch(8) << 8) | (c & 0xFF)
+  end
+  local nthRep, nthMeas = 0, 0
   for i, src in ipairs(rigSources) do
     if src.usable then
       anyUsable = true
-      if S.showGR then bar(src.tag or "GR", S.cGR, GRsrc[i]) end
-      if S.showGRTrace then series[#series + 1] = { i, S.cGR } end
+      nUse = nUse + 1
+      grTotal = grTotal + (GRsrc[i] or 0)
+      -- A measured source in its own colour: an estimate, not a report.
+      local col
+      if src.est then nthMeas = nthMeas + 1 ; col = paler(S.cGRMeas, (nthMeas - 1) * 0.3)
+      else nthRep = nthRep + 1 ; col = paler(S.cGR, (nthRep - 1) * 0.3) end
+      if S.showGR then bar(src.tag or "GR", col, GRsrc[i]) end
+      if S.showGRTrace then series[#series + 1] = { i, col } end
     end
+  end
+  -- The track's whole reduction, when more than one thing contributes:
+  -- compressors in series multiply, so their decibels add.
+  if S.showGR and nUse > 1 then
+    local allMeas = true
+    for _, src in ipairs(rigSources) do
+      if src.usable and not src.est then allMeas = false end
+    end
+    bar("\u{03A3}", allMeas and S.cGRMeas or S.cGR, grTotal)
   end
 
   -- THE TAG IS GONE, and the column is the better for it. It cost twelve
@@ -2429,7 +2576,13 @@ local function drawPanel2(dl, x0, y0, w, h)
   -- a chain with a compressor reporting perfectly well drew no trace at
   -- all and said nothing about why.
   local measuredDrew = false
-  local measured = (S.grTraceSrc == 2) and anyUsable
+  -- WHO DRAWS WHAT.
+  --   A plugin measured by a probe tap draws its own series: 500 a
+  --   second already, with a zero measured while stopped -- the same
+  --   number its meter shows. The REPORTING plugins, at 18 a second, get
+  --   one trace from the span between the probes with the taps' share
+  --   taken out (below). Without a reporting plugin there is no span trace.
+  local measured = (S.grTraceSrc == 2) and anyReported()
                    and rig and rig.pre and rig.post
   if S.showGRTrace and measured and ok and total >= 4 then
     local pre = scope.pre
@@ -2482,79 +2635,135 @@ local function drawPanel2(dl, x0, y0, w, h)
                                grShape, grScratch)
     end
 
-    local lowest, base = {}, nil
+    -- THE SHAPE IS MEASURED; THE SCALE AND LEVEL ARE WHAT THE PLUGINS REPORT.
+    --
+    --   The span between the probes sees the whole chain's reduction, 500
+    --   times a second. Take away what the taps measured -- their plugins'
+    --   share, each at its own delay -- and what is left is the REPORTING
+    --   plugins' share, at full rate. Their reports (18 a second, joined
+    --   by straight lines) say how big it really is.
+    --
+    --   The two are matched by a straight-line fit over the visible
+    --   window, reported = a * span + b, rather than by sliding means
+    --   together as this used to:
+    --     * nothing reducing: the span's wobble has nothing in common
+    --       with reports of zero, a comes out 0, and the trace lies flat
+    --       on zero. Sliding means drew the wobble, half of it clipped
+    --       against the top -- the square wave beside meters reading 0.
+    --     * reducing: a comes out near 1 and the trace has the span's
+    --       detail at the reports' size.
+    --   The span is smoothed to about the reports' own rate (60 ms) for the
+    --   FIT only -- fitting a sharp signal against a blurred one shrinks a,
+    --   by a quarter in a test against a known reduction; smoothed, 0.96.
+    --   It is drawn sharp.
+    local rep, repN = {}, {}
+    local each = {}          -- per reporting source: its reports, column by column
+    local colsPerSec = sc.sr / math.max(1, sc.slice)
     if grLive > 0 then
-      for px = px0, px1 do
-        local k0 = math.floor((px - px0) / span * total)
-        local k1 = math.max(k0, math.floor((px + 1 - px0) / span * total) - 1)
-        local lo = nil
-        for k = k0, math.min(k1, total - 1) do
-          local v = grOut[k]
-          if v then
-            -- the deepest reduction inside the pixel, and the
-            -- least-reducing moment anywhere in the window as the zero
-            if not lo   or v < lo   then lo = v end
-            if not base or v > base then base = v end
+      local held = nil
+      local R = {}
+      for j, src in ipairs(rigSources) do
+        if src.usable and not src.est then each[j] = {} end
+      end
+      for k = 0, total - 1 do
+        local v = grOut[k]
+        local tapSum, repSum, haveRep = 0, 0, false
+        for j, src in ipairs(rigSources) do
+          if src.usable then
+            local g = grHist[(oldest + k - (src.delayCols or 0)) % sc.len]
+            local x = g and g[j]
+            if src.est then tapSum = tapSum + (x or 0)
+            elseif x then repSum = repSum + x ; haveRep = true ; each[j][k] = x end
           end
         end
-        lowest[px] = lo
+        if v then held = -v - tapSum end     -- gated columns hold
+        R[k] = held
+        repN[k] = haveRep and repSum or nil
+      end
+      -- the fit, on a 60 ms running mean of the span
+      local W = math.max(1, math.floor(0.06 * colsPerSec + 0.5))
+      local half = math.floor(W / 2)
+      -- running sums, so the window costs the same at any width
+      local PS, PC = { [0] = 0 }, { [0] = 0 }
+      for k = 0, total - 1 do
+        local v = R[k]
+        PS[k + 1] = PS[k] + (v or 0)
+        PC[k + 1] = PC[k] + (v and 1 or 0)
+      end
+      local n, sx, sy, sxx, sxy = 0, 0, 0, 0, 0
+      for c = 0, total - 1 do
+        local y = repN[c]
+        if y and R[c] then
+          local lo, hi = math.max(0, c - half), math.min(total, c - half + W)
+          local cnt = PC[hi] - PC[lo]
+          if cnt > 0 then
+            local xm = (PS[hi] - PS[lo]) / cnt
+            n = n + 1
+            sx, sy, sxx, sxy = sx + xm, sy + y, sxx + xm * xm, sxy + xm * y
+          end
+        end
+      end
+      if n >= 8 then
+        local mx, my = sx / n, sy / n
+        local vx = sxx / n - mx * mx
+        local a = 0
+        if vx > 1e-6 then a = (sxy / n - mx * my) / vx end
+        a = math.max(0, math.min(2, a))
+        local b = my - a * mx
+        for k = 0, total - 1 do
+          if R[k] then rep[k] = math.max(0, a * R[k] + b) end
+        end
+        rigFitA = a
       end
     end
-    if base then
-      -- THE SHAPE IS MEASURED; THE LEVEL IS WHAT THE PLUGIN REPORTS.
-      --
-      --   Zeroing at the window's least-reducing moment gives a trace
-      --   whose excursions are right and whose absolute position is
-      --   arbitrary. The meter beside it reports real decibels. Drawn
-      --   that way the two showed different quantities on one axis --
-      --   the bar sixty per cent down while the trace hugged the top --
-      --   which is worse than the low-resolution trace it replaced,
-      --   because it looks authoritative and is not comparable.
-      --
-      --   So the measured shape is SLID onto the reported level: the
-      --   mean of the two over the visible window is matched, and the
-      --   offset applied to every point. The detail comes from the
-      --   probes at 500 a second, the absolute position from the plugin.
-      --   Now -3.1 dB on the trace is -3.1 dB on the bar, and both mean
-      --   decibels of reduction.
-      --
-      --   Matched on the MEAN rather than pinned at the newest column,
-      --   because the reported value arrives 18 times a second and
-      --   pinning to whichever reading happened to be last would make
-      --   the whole trace jump each time a new one landed.
-      local shape = {}
-      local sSum, sN = 0, 0
-      local held = 0
-      for px = px0, px1 do
-        local v = lowest[px]
-        if v then held = base - v end
-        shape[px] = held
-        sSum, sN = sSum + held, sN + 1
+    -- ONE TRACE PER REPORTING PLUGIN.
+    --   The span can't tell two reporting compressors apart -- it sees
+    --   their sum. Their reports can: at each moment, each plugin's share
+    --   of what they report between them. So each plugin's trace is the
+    --   fitted span at that column times its share -- the detail from the
+    --   probes, the split from the plugins. Exact for one plugin; for two
+    --   that duck at the same instant it's as good as their reports'
+    --   timing allows, and the traces always add up to the fitted sum.
+    if next(rep) ~= nil then
+      local nRep = 0
+      for _ in pairs(each) do nRep = nRep + 1 end
+      for _, m in ipairs(series) do
+        local j = m[1]
+        local mine = each[j]
+        if mine then
+          local gx, gy, n = {}, {}, 0
+          local held = 0
+          for px = px0, px1 do
+            local k0 = math.floor((px - px0) / span * total)
+            local k1 = math.max(k0, math.floor((px + 1 - px0) / span * total) - 1)
+            local deepest = nil
+            for k = k0, math.min(k1, total - 1) do
+              local v = rep[k]
+              if v then
+                local tot = repN[k]
+                local share = (tot and tot > 0.05) and ((mine[k] or 0) / tot) or (1 / nRep)
+                v = v * share
+                if not deepest or v > deepest then deepest = v end
+              end
+            end
+            if deepest then held = deepest end
+            n = n + 1 ; gx[n] = px ; gy[n] = yGR(held)
+          end
+          polyline(dl, gx, gy, 1, n, alpha(m[2], 0.95), 1.6)
+        end
       end
-
-      -- The reported series over the same columns, from the same ring.
-      local rSum, rN = 0, 0
-      for k = 0, total - 1 do
-        local g = grHist[(oldest + k) % sc.len]
-        local v = g and g[1]
-        if v then rSum, rN = rSum + v, rN + 1 end
-      end
-
-      local offset = 0
-      if sN > 0 and rN > 0 then offset = (rSum / rN) - (sSum / sN) end
-
-      local gx, gy, n = {}, {}, 0
-      for px = px0, px1 do
-        n = n + 1 ; gx[n] = px ; gy[n] = yGR(shape[px] + offset)
-      end
-      polyline(dl, gx, gy, 1, n, alpha(S.cGR, 0.95), 1.6)
       measuredDrew = true
     end
   end
 
   for _, m in ipairs(series) do
     local idx, col = m[1], m[2]
-    if ok and total >= 4 and not measuredDrew then
+    -- Drawn late by the latency between where the reading comes from and
+    -- the post probe, so it sits on the transient it belongs to (see
+    -- sourceDelay).
+    local dly = (rigSources[idx] and rigSources[idx].delayCols) or 0
+    local src = rigSources[idx]
+    if ok and total >= 4 and not (measuredDrew and src and not src.est) then
       local gx, gy, n = {}, {}, 0
       local px0, px1 = math.floor(x0), math.floor(x1)
       local span = math.max(1, px1 - px0)
@@ -2564,7 +2773,7 @@ local function drawPanel2(dl, x0, y0, w, h)
         local k1 = math.max(k0, math.floor((px + 1 - px0) / span * total) - 1)
         local deepest = nil
         for k = k0, math.min(k1, total - 1) do
-          local g = grHist[(oldest + k) % sc.len]
+          local g = grHist[(oldest + k - dly) % sc.len]
           local v = g and g[idx]
           if v and (not deepest or v > deepest) then deepest = v end
         end
@@ -2742,9 +2951,26 @@ local function frame()
     -- a new epoch, a sample-rate change, a reload -- comes back with these
     -- at zero, and a trace that is silently uncompensated is worse than one
     -- that is obviously missing.
+    -- Re-read twice a second, not only when the track is picked: bypassing
+    -- a plugin with latency changes the delay between the probes, and an
+    -- alignment that has gone stale turns every transient into a spike.
+    local tnow = r.time_precise()
+    if rig and tnow - (lagCheckedAt or 0) > 0.5 then
+      lagCheckedAt = tnow
+      rigLag = chainLatency(rigTrack, rig)
+      local slice = math.max(1, (scope.post and scope.post.slice) or 96)
+      for _, src in ipairs(rigSources) do
+        src.delaySmp = sourceDelay(rigTrack, rig, src)
+        src.delayCols = math.floor(src.delaySmp / slice + 0.5)
+      end
+    end
     r.gmem_write(G.CTRL_LAG, rigLag)
+    -- Keeps the probe's taps measuring (see TS_TrackProbe.jsfx): they stop
+    -- when nothing is reading them.
+    tapBeat = (tapBeat + 1) % 1000000
+    r.gmem_write(TAP_HB, tapBeat)
     r.gmem_write(G.CTRL_GRB,
-      (S.showGRTrace and S.grTraceSrc == 2) and 1 or 0)
+      (S.showGRTrace and S.grTraceSrc == 2 and anyReported()) and 1 or 0)
     updateGR()
     pumpGR()
     -- Ask the probes for a running average unless a measurement tool has
@@ -3512,13 +3738,17 @@ local function frame()
             ImGui.TextColored(ctx, COL.warn,
               "these probes are older than the panel -- reload the FX, or re-run " ..
               "TS_TA_InsertProbes.  Showing what the plugin reports meanwhile")
+          elseif not anyReported() then
+            ImGui.TextColored(ctx, COL.textDim,
+              "every source here is measured by a probe tap -- each drawn as its meter reads")
           elseif not haveSrc then
             ImGui.TextColored(ctx, COL.warn,
               "nothing here reports reduction, so there is no level to anchor the " ..
               "measured shape to -- no trace is drawn")
           else
             ImGui.TextColored(ctx, COL.textDim,
-              "shape from the probes, level from the plugin -- so it lines up with the meter")
+              ("shape from the probes, size and level from the plugin's reports%s"):format(
+                rigFitA and (" (scale %.2f)"):format(rigFitA) or ""))
           end
         end
       end
@@ -3535,6 +3765,8 @@ local function frame()
       colAuto('cWavePost', 'Processed')
       ImGui.SameLine(ctx)
       colAuto('cGR', 'Reduction')
+      ImGui.SameLine(ctx)
+      colAuto('cGRMeas', 'Measured')
 
       ImGui.Separator(ctx)
 
@@ -3581,18 +3813,30 @@ local function frame()
       end
       for i, src in ipairs(rigSources) do
         local note
-        if not src.usable then
+        if src.est then
+          local z = rigTrack and Strip.tapZero and Strip.tapZero(rigTrack, src.route)
+          note = "measured by the post probe -- an estimate"
+            .. ((z == 1 and ", zero measured at the last stop")
+             or (z == 2 and ", zero measured but level-dependent")
+             or (z == 3 and ", plugin touched since its zero")
+             or ", zero not measured yet: stop playback a moment")
+        elseif not src.usable then
           note = "no VST3 reduction readout -- listed, not drawn"
         elseif src.active == false then
           note = "BYPASSED -- counted as zero"
         else
           note = "decibels direct from REAPER"
         end
+        if src.usable and (src.delaySmp or 0) > 0 then
+          local sr = (scope.post and scope.post.sr) or 48000
+          note = note .. ("; trace drawn %.1f ms late to sit on the waveform")
+                         :format(src.delaySmp / sr * 1000)
+        end
         ImGui.TextColored(ctx,
           (src.usable and src.active ~= false) and COL.text or COL.warn,
           ("%-6s %-26s %6.2f dB   %s   %s"):format(
             src.tag or "?", src.plugin:sub(1, 26), GRsrc[i] or 0,
-            src.usable and "VST3 route" or "parameter only", note))
+            src.est and "probe tap " or (src.usable and "VST3 route" or "parameter only"), note))
       end
       for _, o in ipairs(rigOutside) do
         -- Only worth saying if it is actually doing something. A bypassed

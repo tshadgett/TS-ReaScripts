@@ -17,3 +17,8 @@ TS_ChannelView_Steps.ini
 TS_ChannelView_checkpoints/
 _to_delete/
 *.bak
+
+# What the scripts and dev tools write beside themselves: error logs,
+# diagnostic output. Your data, not part of a release.
+*.log
+TS_ChannelView/dev/*.txt

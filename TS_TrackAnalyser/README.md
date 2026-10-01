@@ -42,6 +42,13 @@ get by default.
 the untouched signal in grey behind, the processed one in front. A gain
 reduction bar runs down the right.
 
+Its window is set in the header: free (mouse wheel), milliseconds, or
+**beats** at the project tempo, 1 to 32, with a line per beat. **Lock**
+turns it into a triggered scope. It steps a beat at a time, aligned to the
+beat at the play position, so each hit lands in the same place and the
+compressor's attack and release can be watched rather than chased. In
+milliseconds, **Hold** steps by the window length.
+
 Reduction is drawn **only** from the VST3 named route
 (`GainReduction_dB`), where REAPER hands over decibels directly. Plugins
 that instead expose reduction as an ordinary parameter — InfiniStrip among
@@ -50,6 +57,14 @@ and in practice every one of those was a source of error: a calibration
 right for one module and wrong for another, a hold that plateaued, a
 staleness test that never released. So the waveforms still show what those
 plugins do, and the reduction trace does not pretend to.
+
+**Plugins ChannelView measures** (see ChannelView's *Measured gain
+reduction*) are drawn too, in pink: a bar and a trace at 500 readings a
+second straight from the probe. Reporting plugins get one trace each with
+the probes' detail. The span between the probes, minus what the measured
+plugins account for, is fitted to their reports and split by their share
+of them. Every trace is delayed by the latency of the plugins after it, so
+it sits on its transient.
 
 One measurement settled it (2026-08-31, Pro-C 3 + InfiniStrip): the named
 route answered on **all 159** samples, in decibels; the parameter path
@@ -154,6 +169,7 @@ only thing that changes is the label REAPER shows.
 | `TS_TA_InsertProbes.lua` | puts a probe at each end of a chain |
 | `TS_TA_QuietProbes.lua` | renames probes to a dot, and back |
 | `TS_TrackProbe.jsfx` | the probe itself. Goes in `Effects/TS_TrackAnalyser/` |
+| `dev/TS_TA_ProbeTapTest.py`, `dev/TS_TA_ProbeCalTest.py` | run the probe's own code offline under `loose_eel` against a synthetic compressor: the tap estimate, and the stop-time zero. Not installed |
 
 `TS_TA_Chain`, `TS_TA_Strip` and `TS_TA_Mask` are libraries, not scripts to
 run. The panel states what it needs from each by name, so a half-updated

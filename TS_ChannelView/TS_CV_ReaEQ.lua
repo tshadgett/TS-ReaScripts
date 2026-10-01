@@ -7,9 +7,8 @@
   both halves stay testable: reading and writing ReaEQ's own bands through
   REAPER's EQ-specific API, and computing the filter curve those bands
   produce. The curve math has no REAPER dependency at all -- it is plain
-  arithmetic on numbers this file was handed -- so it can be, and is,
-  exercised by a standalone harness the same way P.layout's fader math
-  was, with no REAPER instance involved.
+  arithmetic on numbers this file was handed -- so it can be checked with
+  no REAPER instance involved.
 
   THE API SURFACE (reaper-sdk's reaper_plugin_functions.h; the
   reascripthelp.html page is a stale mirror -- it still says "0=lhipass"
@@ -144,8 +143,6 @@ local function parse_freq(s)
   return n
 end
 
-RQ.parse_num  = parse_num   -- exposed for the standalone math harness
-RQ.parse_freq = parse_freq
 
 -- ---------------------------------------------------------------------
 -- reading
@@ -345,8 +342,7 @@ end
 
 -- ---------------------------------------------------------------------
 -- gain/Q creation-time binary search -- pure math only, pulled out on its
--- own so it can be checked by the standalone harness with no REAPER
--- instance involved. See EQP.draw's eq_fix_step for what drives this and
+-- own so it can be checked with no REAPER instance involved. See EQP.draw's eq_fix_step for what drives this and
 -- why: a straight SetEQParam real-value write for gain or Q, on a band
 -- this file just created, doesn't reliably mean what the read path
 -- (which IS trusted -- see RQ.read's own header) reports back. Gain

@@ -24,6 +24,7 @@
 local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
 local M = require("TS_CV_Mappings")
+local TP = require("TS_CV_Taps")
 
 local E = {}
 local ImGui
@@ -83,7 +84,10 @@ function E.open(track, fx, key, layout)
   st.filter    = ""
   st.learn     = false
   st.drag_from = nil
-  st.reports_gr = require("TS_CV_FXTree").reports_gr(track, fx.addr, fx.guid)
+  -- The plugin's OWN answer: a measured plugin is offered measuring, not
+  -- the plain meter switch.
+  st.reports_gr = require("TS_CV_FXTree").reports_gr_natively(track, fx.addr, fx.guid)
+  st.track     = track
   st.params    = load_params(track, fx)
   st.was_saved = false
   -- Apply pushes the scratch copy into the LIVE mapping so the panel
@@ -104,6 +108,7 @@ end
 local function revert_applied()
   if not st.applied then return end
   if st.in_lib then M.set(st.key, st.original) else M.remove(st.key) end
+  TP.invalidate()
   st.applied = false
 end
 
@@ -501,7 +506,61 @@ function E.draw(ctx, track)
         end
       end
     else
-      ImGui.TextDisabled(ctx, "This plugin doesn't report gain reduction.")
+      local on = st.scratch.measure == true
+      local mch, mv = ImGui.Checkbox(ctx, "Measure gain reduction (estimated)", on)
+      if mch then
+        st.scratch.measure = mv or nil
+        st.scratch.meter = st.scratch.meter or { range = C.MAX_GR_DB }
+        st.scratch.meter.on = mv
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx,
+          "This plugin doesn't report gain reduction to REAPER, so it's\n" ..
+          "measured instead: a copy of the audio going in and coming out is\n" ..
+          "routed on spare channels (5/6 up) to the track's post TS_TrackProbe.\n" ..
+          "Every instance between a probe pair is measured.\n\n" ..
+          "An estimate. Its zero -- what \"no reduction\" looks like -- is\n" ..
+          "measured each time playback stops, with a second of quiet test\n" ..
+          "noise that you don't hear. A plugin at 50% mix reads about half.")
+      end
+      if on then
+        ImGui.SameLine(ctx)
+        ImGui.SetNextItemWidth(ctx, 120)
+        local rch, rv = ImGui.SliderDouble(ctx, "full scale",
+          st.scratch.meter and st.scratch.meter.range or C.MAX_GR_DB, 3, 40, "%.0f dB")
+        if rch and st.scratch.meter then st.scratch.meter.range = rv end
+        -- Where this instance stands.
+        local status = st.track and TP.status(st.track, st.fx.guid) or "ok"
+        if status == "no_probes" then
+          ImGui.TextDisabled(ctx, "This track has no TS_TrackProbe pair to measure with.")
+          ImGui.SameLine(ctx)
+          if ImGui.SmallButton(ctx, "Add probes") then
+            local ok, why = TP.insert_probes(st.track)
+            if not ok then reaper.MB(why, "ChannelView", 0) end
+          end
+        elseif status == "outside" then
+          ImGui.TextDisabled(ctx, "Not between this track's probes, so not measured here.")
+        end
+        -- The zero: global, since it's how the probes behave on every track.
+        local zch, zv = ImGui.Checkbox(ctx, "Measure the zero while stopped (all tracks)", TP.zero_on())
+        if zch then TP.set_zero_on(zv) end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx,
+            "Each time playback stops, the pre probe plays a second of quiet\n" ..
+            "pink noise (-60 and -50 dBFS) through the chain while the post probe\n" ..
+            "stays silent, and that is taken as \"no reduction\". Without it the\n" ..
+            "zero is learnt from the music, and a compressor that never lets go\n" ..
+            "reads low.\n\n" ..
+            "Needs REAPER's \"Run FX when stopped\". Waits for a second of\n" ..
+            "silence and gives way the moment you play or anything arrives --\n" ..
+            "but on an instrument track played while stopped, the first note\n" ..
+            "after a stop can be swallowed. Turn it off if that bothers you.")
+        end
+        if st.track and st.fx then
+          local cs = TP.cal_status(st.track, st.fx.guid)
+          if cs then ImGui.TextDisabled(ctx, TP.cal_text(cs)) end
+        end
+      end
     end
 
     -- Also panel-level: for plugins that rename their own parameters.
@@ -533,6 +592,7 @@ function E.draw(ctx, track)
     ImGui.Separator(ctx)
     if ImGui.Button(ctx, "Save", 90) then
       M.set(st.key, st.scratch)
+      TP.invalidate()
       M.save()
       st.was_saved = true
       result = "saved"
@@ -545,6 +605,7 @@ function E.draw(ctx, track)
     -- and guessing again.
     if ImGui.Button(ctx, "Apply", 90) then
       M.set(st.key, M.copy(st.scratch))
+      TP.invalidate()
       st.applied = true
     end
     if ImGui.IsItemHovered(ctx) then

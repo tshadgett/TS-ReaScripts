@@ -20,6 +20,7 @@ local SC  = require("TS_CV_Steps")
 local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
+local TP  = require("TS_CV_Taps")
 
 local P   = {}
 local ImGui
@@ -376,15 +377,19 @@ local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter)
   -- pulls down harder than that, so a meter set for gentle bus compression
   -- still reads truthfully when something slams.
   local peak, range = W.gr_state(fx.guid, gr, now, meter.range)
-  W.gr_meter(ctx, dl, x, y, w, h, gr, peak, range)
+  local est = T.gr_estimated(track, fx.addr, fx.guid)
+  local zst = est and TP.cal_status(track, fx.guid) or nil
+  W.gr_meter(ctx, dl, x, y, w, h, gr, peak, range, est, zst == 0)
 
   ImGui.SetCursorScreenPos(ctx, x, y)
   ImGui.InvisibleButton(ctx, "gr##" .. fx.guid, w, h,
     ImGui.ButtonFlags_MouseButtonRight)
   W.tip(ctx, "gr##" .. fx.guid,
-    ("Gain reduction\n%.2f dB now, peak %.2f\nscale 0 to %g dB%s")
-    :format(gr, peak, range,
-            (range > (meter.range or 0)) and "  (expanded)" or ""),
+    ("Gain reduction%s\n%.2f dB now, peak %.2f\nscale 0 to %g dB%s")
+    :format(est and " (measured, estimated)" or "", gr, peak, range,
+            (range > (meter.range or 0)) and "  (expanded)" or "")
+    .. (est and ("\n\nMeasured by the track's TS_TrackProbe from the audio in\n" ..
+                 "and out.\n" .. TP.cal_text(TP.cal_status(track, fx.guid))) or ""),
     ImGui.IsItemHovered(ctx), false)
   return w
 end
@@ -755,6 +760,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       if changed then
         reaper.TrackFX_SetParamNormalized(track, fx.addr, p,
           rev and (1 - nv) or nv)
+        -- A measured plugin relearns its zero point when it's changed.
+        TP.touched(track, fx.guid)
       end
       if act and act.right_click then req.ctx_control = i end
     end

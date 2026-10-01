@@ -23,13 +23,16 @@
 
 local C  = require("TS_CV_Config")
 local TO = require("TS_CV_TrackOps")
+local CN = require("TS_CV_Chains")
 local IC = require("TS_CV_Icons")
 local LN = require("TS_CV_Lanes")
 
 local TM = {}
 local ImGui
 
-function TM.attach(imgui) ImGui = imgui end
+-- The chains menu items are drawn from inside these menus, so Chains is
+-- attached along with them -- the TCP window uses these menus too.
+function TM.attach(imgui) ImGui = imgui; CN.attach(imgui) end
 
 local CTX_ID    = "tm_ctx"
 local RENAME_ID = "tm_rename"
@@ -41,7 +44,7 @@ local SWATCH_W  = 12     -- template colour chip in the insert menu
 local CHIP_LEFT = 4
 
 local st = {
-  ctx_req    = nil,  ctx_track  = nil, ctx_tree = nil,
+  ctx_req    = nil,  ctx_track  = nil, ctx_tree = nil, ctx_chains = nil,
   ren_req    = false, ren_track = nil, ren_buf = "", ren_focus = false,
   col_req    = false, col_tracks = nil, col_rgb = 0x808080, col_swatches = nil,
   ins_req    = false, ins_anchor = nil, ins_tree = nil,
@@ -106,6 +109,7 @@ local function context_menu(ctx)
     st.ctx_track = st.ctx_req
     st.ctx_req = nil
     st.ctx_tree = nil                      -- templates re-read per opening
+    st.ctx_chains = nil
     ImGui.OpenPopup(ctx, CTX_ID)
   end
   if not ImGui.BeginPopup(ctx, CTX_ID) then return false end
@@ -146,6 +150,8 @@ local function context_menu(ctx)
     if not TM.has_templates(tree) then
       tip_if_hovered(ctx, "No track templates found in " .. (TO.templates_dir()))
     end
+    if not st.ctx_chains then st.ctx_chains = CN.list() end
+    if TM.chain_menu(ctx, st.ctx_chains, tr) then changed = true end
     ImGui.EndMenu(ctx)
   end
 
@@ -409,6 +415,24 @@ function TM.template_items(ctx, tree, on_pick)
   items(ctx, tree, chip_pad(ctx), on_pick)
 end
 
+-- "New track with FX chain" and its submenu: the FXChains tree, each
+-- chain making a new track (named after it) with the chain loaded, after
+-- `after`, or at the end with `at_end`. Returns the new track on the frame
+-- one was made. Draw inside an open menu or popup.
+function TM.chain_menu(ctx, chains, after, at_end, label)
+  at_end = at_end or false
+  local made = nil
+  local has = CN.has_chains(chains)
+  if ImGui.BeginMenu(ctx, label or "New track with FX chain", has) then
+    CN.items(ctx, chains, function(f) made = CN.new_track(f, after, at_end) end)
+    ImGui.EndMenu(ctx)
+  end
+  if not has then
+    tip_if_hovered(ctx, "No FX chains found in " .. (CN.dir()))
+  end
+  return made
+end
+
 function TM.has_templates(tree)
   return tree ~= nil and (#tree.files > 0 or #tree.dirs > 0)
 end
@@ -417,6 +441,7 @@ local function insert_menu(ctx)
   if st.ins_req then
     st.ins_req = false
     st.ins_tree = TO.list_templates()      -- once per opening, not per frame
+    st.ins_chains = CN.list()
     ImGui.OpenPopup(ctx, INSERT_ID)
   end
   if not ImGui.BeginPopup(ctx, INSERT_ID) then return false end
@@ -443,6 +468,9 @@ local function insert_menu(ctx)
   end
   if not TM.has_templates(tree) then
     tip_if_hovered(ctx, "No track templates found in " .. (TO.templates_dir()))
+  end
+  if TM.chain_menu(ctx, st.ins_chains, anchor, false, "Insert new track with FX chain") then
+    changed = true
   end
 
   ImGui.EndPopup(ctx)

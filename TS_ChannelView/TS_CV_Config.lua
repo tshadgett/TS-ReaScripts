@@ -185,7 +185,7 @@ C.METER_W     = 14        -- the bar
 C.METER_COL_W = 40        -- bar plus the room its readout needs
 C.METER_FONT  = 10        -- point size for the readout
 C.METER_SIDE = "left"     -- "left" or "right" edge of the panel body
-C.MAX_GR_DB  = 12         -- per-plugin MINIMUM full scale (it grows, below)
+C.MAX_GR_DB  = 18         -- per-plugin MINIMUM full scale (it grows, below)
 C.GR_HOLD    = 1.2        -- seconds the peak line holds before falling
 C.GR_FALL    = 18         -- dB per second it falls once released
 
@@ -194,7 +194,7 @@ C.GR_FALL    = 18         -- dB per second it falls once released
 -- fixed rungs rather than scaling continuously -- a scale that moved with
 -- every transient would be unreadable -- and only steps back down once the
 -- peak has stayed below the smaller rung for a while.
-C.GR_LADDER      = { 6, 12, 20, 30, 40, 60 }
+C.GR_LADDER      = { 6, 12, 18, 24, 30, 40, 60 }
 
 -- Learning a stepped parameter's choices means briefly sweeping it -- the
 -- API has no read-only enumeration -- so by default that waits until the
@@ -237,6 +237,7 @@ C.CHANNEL_W   = 112       -- expanded width of the Channel panel
 C.FADER_W     = 26        -- the fader's own track within its half
 C.FADER_CAP_H = 16        -- the moving cap: big enough to grab and to
                           -- read the unity mark against
+C.GR_BAR_W = 5          -- the track's total gain-reduction bar beside it
 C.LEVEL_METER_W = 52      -- the level meter's own width within its half.
                           -- Wider than it was, because the dB ladder is
                           -- printed OVER the bars now instead of in a
@@ -538,6 +539,11 @@ C.PALETTE = {
   knob_track    = { "tint",    0.0, 0.164, 0.239 },
   knob_fill     = { "solid",  -14.0, 0.661, 0.573 },
   knob_fill_bi  = { "solid",  178.2, 0.645, 0.569 },
+  -- Gain reduction MEASURED by a probe tap rather than reported by the
+  -- plugin: a hue of its own, well away from both the reported fill
+  -- (knob_fill_bi) and the accent, so the two can't be mistaken at a
+  -- glance. Follows the base hue like the reported fill does.
+  gr_measured   = { "solid",  110.0, 0.560, 0.600 },
   knob_body     = { "tint",    1.0, 0.165, 0.178 },
   knob_body_hi  = { "tint",   -2.3, 0.161, 0.220 },
   knob_pointer  = { "tint",   -2.1, 0.394, 0.935 },

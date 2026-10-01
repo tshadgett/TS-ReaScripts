@@ -1220,7 +1220,7 @@ C.FLOW = saved_flow
 -- auto-ranging scale
 W.clear_peaks()
 check("ladder picks the minimum",  W.pick_range(12, 0), 12)
-check("ladder covers the peak",    W.pick_range(12, 15), 20)
+check("ladder covers the peak",    W.pick_range(12, 15), 18)
 check("ladder steps again",        W.pick_range(12, 25), 30)
 check("ladder caps at the top",    W.pick_range(12, 999), C.GR_LADDER[#C.GR_LADDER])
 -- Stepped frame by frame, because the relax timer is only meaningful if
@@ -1240,10 +1240,10 @@ end
 NOW = 0
 local pk, rng = run(0.5, 3.0)
 check("scale starts at the minimum", rng, 12)
-pk, rng = W.gr_state("m", 18.0, NOW, 12)
-check("scale expands at once",       rng, 20)
+pk, rng = W.gr_state("m", 20.0, NOW, 12)
+check("scale expands at once",       rng, 24)
 pk, rng = run(C.GR_RANGE_RELAX - 0.5, 0.5)
-check("scale holds while relaxing",  rng, 20)
+check("scale holds while relaxing",  rng, 24)
 pk, rng = run(2.0, 0.5)
 check("scale steps back down",       rng, 12)
 check("and never below the minimum", W.pick_range(12, 0), 12)
@@ -2695,7 +2695,56 @@ do
   check("nothing past the new end",            aft[3], nil)
 end
 
--- Abbreviating a name to fit: short forms, then filler words, then
+-- Probe taps: channel bookkeeping and the record kept on the track.
+do
+  local TP = require "TS_CV_Taps"
+  local lo, hi = TP.bit(5)
+  check("channel 5 is bit 4",             lo, 16)
+  check("  in the low half",              hi, 0)
+  lo, hi = TP.bit(33)
+  check("channel 33 is the high half",    hi, 1)
+  local set = TP.channels_of(3 | 16, 2)
+  check("masks back to channels",         (set[1] or false) and (set[2] or false) and set[5] and set[34], true)
+  check("and nothing else",               set[3] or set[33] or false, false)
+
+  local used = { [1] = true, [2] = true, [3] = true, [4] = true }
+  local a = TP.alloc(used, 5, 2)
+  check("first pairs from 5/6",           a and (a[1] .. "," .. a[2]), "5,7")
+  used[7] = true
+  a = TP.alloc(used, 5, 2)
+  check("a used channel skips its pair",  a and (a[1] .. "," .. a[2]), "5,9")
+  check("alloc leaves the caller's set",  used[5], nil)
+  check("no room: nil",                   TP.alloc({}, 63, 2), nil)
+  check("start at 5 normally",            TP.start_channel(2), 5)
+  check("above a 6-channel parent",       TP.start_channel(6), 7)
+  check("an odd start stays odd",         TP.start_channel(8), 9)
+
+  local sc = TP.send_channels(4)                    -- stereo from 5/6
+  check("a stereo send covers two",       (sc[5] and sc[6] and not sc[7]) and true or false, true)
+  sc = TP.send_channels(1024 + 6)                   -- mono from 7
+  check("a mono send covers one",         (sc[7] and not sc[8]) and true or false, true)
+  sc = TP.send_channels(2 * 1024 + 0)               -- 4 channels from 1
+  check("a 4-channel send covers four",   (sc[4] and not sc[5]) and true or false, true)
+  check("no channel, nothing",            next(TP.send_channels(-1)), nil)
+
+  local rec = { level = "TOP", probe = "{P}", taps = {
+    { guid = "{A}", prev = "{Z}", pre = 5, post = 7, lag = 64 },
+    { guid = "{B}", prev = "{A}", pre = 9, post = 11, lag = 0 } } }
+  local back = TP.parse_record(TP.format_record(rec))
+  check("record round trip: taps",        back and #back.taps, 2)
+  check("  channels",                     back and (back.taps[2].pre .. "/" .. back.taps[2].post), "9/11")
+  check("  latency",                      back and back.taps[1].lag, 64)
+  check("  probe",                        back and back.probe, "{P}")
+  check("nothing recorded: empty string", TP.format_record(nil), "")
+  check("junk isn't a record",            TP.parse_record("hello"), nil)
+  check("same plugins, same shape",       TP.same_shape(rec, back), true)
+  local moved = TP.parse_record(TP.format_record(rec)); moved.taps[2].prev = "{Y}"
+  check("a different neighbour isn't",    TP.same_shape(rec, moved), false)
+  check("nothing and nothing agree",      TP.same_shape(nil, nil), true)
+  check("something and nothing don't",    TP.same_shape(rec, nil), false)
+end
+
+-- Abbreviating a name to fit:-- Abbreviating a name to fit: short forms, then filler words, then
 -- vowels from the right, then spaces, and only then a cut.
 do
   local function ab(s, n) return U.abbreviate(s, function(x) return #x <= n end) end
@@ -2737,6 +2786,10 @@ do
   check("not a chain in its name",    CN.is_chain("RfxChain notes.txt"), false)
   check("named without the extension", CN.chain_name("Lead Vocal.RfxChain"), "Lead Vocal")
   check("dots in the name kept",      CN.chain_name("Mix v2.1.rfxchain"), "Mix v2.1")
+  check("no chains: nothing to offer", CN.has_chains({ dirs = {}, files = {} }), false)
+  check("a chain in a subfolder counts", CN.has_chains({ files = {}, dirs = { { name = "Vox",
+    node = { dirs = {}, files = { { name = "Lead" } } } } } }), true)
+  check("no tree at all",              CN.has_chains(nil), false)
 end
 
 -- ---------------------------------------------------------------------
@@ -2759,7 +2812,7 @@ do
     "TS_CV_Startup", "TS_CV_Mixer", "TS_CV_TrackMenu", "TS_CV_TrackOps",
     "TS_CV_Receives", "TS_CV_Focus", "TS_CV_Icons", "TS_CV_Inputs",
     "TS_ChannelView_TCP", "TS_CV_Arrange", "TS_CV_Toolbar", "TS_CV_Envelopes", "TS_CV_Actions", "TS_CV_Lanes",
-    "TS_CV_Chains",
+    "TS_CV_Chains", "TS_CV_Taps",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.
@@ -2815,6 +2868,20 @@ do
   end
   check("every module with attach() is attached",
         #unattached == 0 and "none" or table.concat(unattached, ", "), "none")
+end
+
+-- Toolbar storage: separators ("-") and gaps ("_") round-trip, and a
+-- gap counts as a non-action (sep) everywhere actions are skipped.
+do
+  local ok, TB = pcall(require, "TS_CV_Toolbar")
+  if ok and type(TB) == "table" and TB.serialize then
+    local items = TB.parse("40001|a.png|Add;-;_;40005||")
+    check("toolbar parse count", #items, 4)
+    check("toolbar sep", items[2].sep == true and not items[2].gap, true)
+    check("toolbar gap", items[3].sep == true and items[3].gap == true, true)
+    check("toolbar label kept", items[1].label, "Add")
+    check("toolbar round-trip", TB.serialize(items), "40001|a.png|Add;-;_;40005||")
+  end
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

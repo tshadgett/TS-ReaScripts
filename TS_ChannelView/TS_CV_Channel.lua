@@ -20,6 +20,7 @@ local St = require("TS_CV_State")
 local G  = require("TS_CV_Gang")
 local TM = require("TS_CV_TrackMenu")
 local IN = require("TS_CV_Inputs")
+local TP = require("TS_CV_Taps")
 local B  = require("TS_CV_Browser")
 
 local CH = {}
@@ -521,9 +522,40 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     -- Centred in its half, the same way the fader's track is centred in
     -- the other one -- a meter flush to the panel edge beside a centred
     -- fader reads as a misalignment even though both are in their column.
-    local mw = math.min(half - 4, C.LEVEL_METER_W)
-    local mx = x + pad + half + (half - mw) * 0.5
+    -- The track's total gain reduction, when anything on it reports or
+    -- is measured: a slim bar to the meter's right, and the meter a little
+    -- narrower to make room, the pair centred together.
+    local grt, gre, grp = TP.track_total(track)
+    local gside = grt and (C.GR_BAR_W + 2) or 0
+    local mw = math.min(half - 4 - gside, C.LEVEL_METER_W)
+    local mx = x + pad + half + (half - mw - gside) * 0.5
     W.level_meter(ctx, dl, mx, top, mw, fh, lv, hold, true, rms_live)
+    if grt then
+      local gx = mx + mw + 2
+      local gpk, grange = W.gr_state(idp .. "#grt", grt, now, C.MAX_GR_DB)
+      local est_db = 0
+      for _, p in ipairs(grp) do if p.est then est_db = est_db + p.db end end
+      W.gr_bar(dl, gx, top, C.GR_BAR_W, fh, grt, gpk, grange, est_db)
+      local g_over = ImGui.IsWindowHovered(ctx)
+                     and ImGui.IsMouseHoveringRect(ctx, gx - 1, top, gx + C.GR_BAR_W + 1, top + fh)
+      local lines = { ("Gain reduction, whole track: %.1f dB (peak %.1f)"):format(grt, gpk) }
+      local unzeroed = false
+      for _, p in ipairs(grp) do
+        local tag = ""
+        if p.est then
+          tag = "  est."
+          if p.cal == 0 then tag, unzeroed = "  est., zero not measured", true end
+        end
+        lines[#lines + 1] = ("  %s  %.1f dB%s"):format(p.name, p.db, tag)
+      end
+      if gre then
+        lines[#lines + 1] = "\nest. = measured by the track's probes, not reported"
+        if unzeroed then
+          lines[#lines + 1] = "zero not measured = stop playback for a few seconds"
+        end
+      end
+      W.tip(ctx, idp .. "grt", table.concat(lines, "\n"), g_over, false)
+    end
 
     -- Hovering the meter reports what it is showing -- by RECTANGLE,
     -- not by an invisible button over it. A button here would be an

@@ -51,9 +51,15 @@ done
 for f in README.md CHANGELOG.md; do
   copy_one "$REAPER_DIR/Scripts/TS_ChannelView/$f" "$REPO/TS_ChannelView/$f"
 done
+# dev/ minus what the dev tools WRITE there (diagnostic output, logs).
 for f in "$REAPER_DIR/Scripts/TS_ChannelView/dev"/*; do
+  case "$f" in *.txt|*.log) continue ;; esac
   [ -f "$f" ] && copy_one "$f" "$REPO/TS_ChannelView/dev/$(basename "$f")"
 done
+# ChannelView ships the probe too (its measured gain reduction needs one,
+# with or without Track Analyser installed). The same file, one source.
+copy_one "$REAPER_DIR/Effects/TS_TrackAnalyser/TS_TrackProbe.jsfx" \
+         "$REPO/TS_ChannelView/TS_TrackProbe.jsfx"
 
 # ---- Track Analyser: scripts from Scripts/, the probe from Effects/.
 for f in "$REAPER_DIR/Scripts/TS_TrackAnalyser"/*.lua; do
@@ -64,6 +70,10 @@ for f in README.md CHANGELOG.md; do
 done
 copy_one "$REAPER_DIR/Effects/TS_TrackAnalyser/TS_TrackProbe.jsfx" \
          "$REPO/TS_TrackAnalyser/TS_TrackProbe.jsfx"
+for f in "$REAPER_DIR/Scripts/TS_TrackAnalyser/dev"/*; do
+  case "$f" in *.txt|*.log) continue ;; esac
+  [ -f "$f" ] && copy_one "$f" "$REPO/TS_TrackAnalyser/dev/$(basename "$f")"
+done
 
 # ---- Hide Docker Tabs: one loose script in Scripts/. It needs a folder of
 # its own in the repo because reapack-index ignores files at the repo root --
@@ -123,7 +133,7 @@ check_orphans() {   # check_orphans <repo dir> <reaper dir...>
     fi
   done
 }
-check_orphans TS_ChannelView    "$REAPER_DIR/Scripts/TS_ChannelView"
+check_orphans TS_ChannelView    "$REAPER_DIR/Scripts/TS_ChannelView" "$REAPER_DIR/Effects/TS_TrackAnalyser"
 check_orphans TS_TrackAnalyser  "$REAPER_DIR/Scripts/TS_TrackAnalyser" "$REAPER_DIR/Effects/TS_TrackAnalyser"
 [ "$orphans" -eq 0 ] && echo "  (none)"
 

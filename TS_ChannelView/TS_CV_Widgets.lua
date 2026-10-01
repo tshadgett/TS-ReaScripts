@@ -1103,8 +1103,18 @@ end
 -- needle does.
 -- `col_w` is the width the meter may use in total; the bar is drawn
 -- C.METER_W wide and centred in it, leaving the rest for the readout.
-function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db)
+-- `est`: the reading is measured by a probe tap rather than reported by
+-- the plugin, and the bar is drawn in its own colour (gr_measured) to say
+-- so. `dim`: measured, but its zero hasn't been measured yet -- a lighter
+-- wash of that colour.
+function W.gr_fill_col(est, dim)
+  local c = est and C.COL.gr_measured or C.COL.knob_fill_bi
+  return dim and U.with_alpha(c, 0x8c) or c
+end
+
+function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
   max_db = (max_db and max_db > 0) and max_db or 12
+  est = est or false
 
   local pushed = false
   if meter_font then
@@ -1138,7 +1148,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db)
   local frac = math.max(0, math.min(1, (gr_db or 0) / max_db))
   if frac > 0.001 then
     ImGui.DrawList_AddRectFilled(dl, x + 2, inner_y,
-      x + w - 2, inner_y + inner_h * frac, C.COL.knob_fill_bi, 1.0)
+      x + w - 2, inner_y + inner_h * frac, W.gr_fill_col(est, dim), 1.0)
   end
 
   -- scale marks: quarters of the range, so the ticks mean something
@@ -1172,6 +1182,34 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db)
   end
 
   if pushed then ImGui.PopFont(ctx) end
+end
+
+-- The slim total-reduction bar beside a strip's level meter: falls from
+-- the top, same scale ladder and hold as a panel's meter. `est_db` is how
+-- much of the total is MEASURED rather than reported (true means all of
+-- it): the reported part is drawn first, in the reported colour, and the
+-- measured part below it in gr_measured, so a mixed chain shows both.
+function W.gr_bar(dl, x, y, w, h, gr_db, peak_db, max_db, est_db)
+  max_db = (max_db and max_db > 0) and max_db or 12
+  gr_db = gr_db or 0
+  if est_db == true then est_db = gr_db
+  elseif type(est_db) ~= "number" then est_db = 0 end
+  est_db = math.max(0, math.min(gr_db, est_db))
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body, 1.0)
+  local frac = math.max(0, math.min(1, gr_db / max_db))
+  if frac > 0.001 then
+    local rep = math.max(0, math.min(1, (gr_db - est_db) / max_db))
+    if rep > 0.001 then
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h * rep, W.gr_fill_col(false), 1.0)
+    end
+    if frac - rep > 0.001 then
+      ImGui.DrawList_AddRectFilled(dl, x, y + h * rep, x + w, y + h * frac, W.gr_fill_col(true), 1.0)
+    end
+  end
+  if peak_db and peak_db > 0.05 then
+    local py = y + h * math.max(0, math.min(1, peak_db / max_db))
+    ImGui.DrawList_AddLine(dl, x, py, x + w, py, C.COL.knob_pointer, 1.5)
+  end
 end
 
 -- Per-FX peak state. Kept here rather than in the panel because it is
@@ -1342,7 +1380,21 @@ local function icon_chain(dl, x, y, sz, col)
     x + sz * 0.92, cy + h * 0.5 + sz * 0.08, col, r, 0, 1.5)
 end
 
+-- A probe pair: a plugin box with a pin at each end of the line through
+-- it -- the TS_TrackProbe at the start of the chain and the one at the end.
+local function icon_probe(dl, x, y, sz, col)
+  local cy = y + sz * 0.5
+  local r  = math.max(1.5, sz * 0.11)
+  ImGui.DrawList_AddLine(dl, x + sz * 0.12, cy, x + sz * 0.34, cy, col, 1.3)
+  ImGui.DrawList_AddLine(dl, x + sz * 0.66, cy, x + sz * 0.88, cy, col, 1.3)
+  ImGui.DrawList_AddRect(dl, x + sz * 0.34, y + sz * 0.30,
+    x + sz * 0.66, y + sz * 0.70, col, 1.0, 0, 1.3)
+  ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.12 + r * 0.5, cy, r, col)
+  ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.88 - r * 0.5, cy, r, col)
+end
+
 W.ICONS = {
+  probe    = icon_probe,
   chain    = icon_chain,
   play_tri = icon_play,
   mixer    = icon_mixer,

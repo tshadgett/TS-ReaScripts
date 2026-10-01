@@ -211,15 +211,18 @@ local function poll_shared(now)
   C.SHOW_VALUES = cv_get("show_values", "1") == "1"
 end
 
--- The channel panel follows the selection while it's open: select a
--- track in the arrange view and the panel shows that one. Only a CHANGE
--- of first-selected track moves it, so a click here that opens a panel
--- on some other track isn't immediately overruled.
+-- The channel panel follows the selection once it's open: select a
+-- track (here, in the arrange view or anywhere else) and the panel shows
+-- that one. It never OPENS on selection -- that takes a click on an
+-- already-selected track. Only a CHANGE of first-selected track moves
+-- it, and an empty selection leaves it where it is.
 local function follow_selection()
   local first = reaper.GetSelectedTrack2(0, 0, true)
-  -- Deliberately does NOT move the channel panel: it opens, closes and
-  -- changes track only on a click on a track here.
-  if first ~= app.first_sel then app.first_sel = first end
+  if first == app.first_sel then return end
+  app.first_sel = first
+  if app.fly and first and first ~= app.fly.track then
+    app.fly = { track = first, guid = reaper.GetTrackGUID(first) }
+  end
 end
 
 -- ---------------------------------------------------------------------

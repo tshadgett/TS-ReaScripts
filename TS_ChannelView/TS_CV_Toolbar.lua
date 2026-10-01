@@ -66,7 +66,8 @@ function TB.serialize(items)
   if #items == 0 then return "none" end
   local out = {}
   for _, it in ipairs(items) do
-    if it.sep then out[#out + 1] = "-"
+    if it.gap then out[#out + 1] = "_"
+    elseif it.sep then out[#out + 1] = "-"
     else out[#out + 1] = clean(it.cmd) .. "|" .. clean(it.icon) .. "|" .. clean(it.label) end
   end
   return table.concat(out, ";")
@@ -78,7 +79,7 @@ function TB.parse(s)
   if s == nil or s == "" then
     local out = {}
     for i, it in ipairs(DEFAULTS) do
-      out[i] = { sep = it.sep, cmd = it.cmd, icon = it.icon, label = it.label }
+      out[i] = { sep = it.sep, gap = it.gap, cmd = it.cmd, icon = it.icon, label = it.label }
     end
     return out
   end
@@ -87,6 +88,8 @@ function TB.parse(s)
   for part in (s .. ";"):gmatch("([^;]*);") do
     if part == "-" then
       out[#out + 1] = { sep = true }
+    elseif part == "_" then
+      out[#out + 1] = { sep = true, gap = true }
     elseif part ~= "" then
       local cmd, icon, label = part:match("^([^|]*)|?([^|]*)|?(.*)$")
       if cmd and cmd ~= "" then
@@ -263,6 +266,7 @@ local st = {
 
 -- The width a button will take: its icon's, or its label's.
 local function item_width(ctx, it, bh)
+  if it.gap then return math.floor(bh * 0.5 + 0.5) end
   if it.sep then return 7 end
   if it.icon ~= "" then
     local iw = icon_width(ctx, it.icon, bh)
@@ -279,6 +283,13 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh)
     ImGui.InvisibleButton(ctx, ID .. "sep" .. i, bw, bh)
     if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
       st.item_menu, st.open_item = i, true
+    end
+    if it.gap then
+      -- A gap is blank; a faint outline on hover shows where to right-click.
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.panel_border, 2.5, 0, 1.0)
+      end
+      return
     end
     local cx = math.floor(x + bw * 0.5) + 0.5
     ImGui.DrawList_AddLine(dl, cx, y + 4, cx, y + bh - 4, C.COL.panel_border, 1.0)
@@ -332,7 +343,7 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh)
 
   local name = TB.action_name(id)
   W.tip(ctx, ID .. i,
-    name and (it.label ~= "" and (it.label .. "\n" .. name) or name)
+    (it.label ~= "" and it.label) or name
          or ("Action not found: " .. tostring(it.cmd)),
     hovered, false)
   if pressed and id then reaper.Main_OnCommand(id, 0) end
@@ -440,7 +451,7 @@ local function item_menu(ctx)
   if not it then ImGui.EndPopup(ctx) return end
 
   if it.sep then
-    ImGui.TextDisabled(ctx, "Separator")
+    ImGui.TextDisabled(ctx, it.gap and "Gap" or "Separator")
   else
     ImGui.TextDisabled(ctx, U.truncate(TB.action_name(TB.resolve(it.cmd))
                                        or ("not found: " .. it.cmd), 40))
@@ -473,6 +484,9 @@ local function item_menu(ctx)
   if ImGui.MenuItem(ctx, "Insert separator before") then
     table.insert(TB.items, i, { sep = true }); TB.save()
   end
+  if ImGui.MenuItem(ctx, "Insert gap before") then
+    table.insert(TB.items, i, { sep = true, gap = true }); TB.save()
+  end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Remove") then
     table.remove(TB.items, i); TB.save()
@@ -486,6 +500,9 @@ local function bg_menu(ctx)
   if ImGui.MenuItem(ctx, "Add action\u{2026}") then TB.pick_start(nil) end
   if ImGui.MenuItem(ctx, "Add separator") then
     TB.items[#TB.items + 1] = { sep = true }; TB.save()
+  end
+  if ImGui.MenuItem(ctx, "Add gap") then
+    TB.items[#TB.items + 1] = { sep = true, gap = true }; TB.save()
   end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Reset to the default buttons") then

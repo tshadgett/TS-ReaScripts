@@ -407,6 +407,8 @@ panel everywhere, which the dialog says at the top.
 | `TS_CV_Browser.lua` | the add-a-plugin picker |
 | `TS_CV_FXIndex.lua` | REAPER's Developers / Categories / FX Folders metadata |
 | `TS_CV_Channel.lua` | the pinned Channel panel |
+| `TS_CV_Taps.lua` | routing for measured gain reduction, and reading it back |
+| `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
 | `TS_CV_Startup.lua` | the Run-when-REAPER-starts option, and the `__startup.lua` surgery |
 | `TS_CV_State.lua` | per-instance view state (collapsed), saved in the project |
@@ -1053,9 +1055,37 @@ plugin, with PDC compensation, and the reading would still only be a level
 *difference* that makeup gain and wet/dry quietly corrupt.
 
 That's a signal-path problem, and it belongs to Track Analyser, which has
-the probes for it. This window deliberately inserts nothing into your
-chains. GR answers "is this compressor working", which is a glanceable
-question; levels answer "is my staging right", which isn't.
+the probes for it. This window inserts nothing into your chains unless you
+press a button that says so. GR answers "is this compressor working", which
+is a glanceable question; levels answer "is my staging right", which isn't.
+
+### Measured gain reduction
+
+A plugin that doesn't report its reduction can still be *measured*. Tick
+**Measure gain reduction (estimated)** in its right-click menu or in Setup
+Edit Parameters. Every instance between a TS_TrackProbe pair (one at the
+start of the chain, one at the end) then gets a meter, in pink rather than
+the reported amber.
+
+The probes are a small JSFX installed with ChannelView. They don't change
+the audio while you play and sit idle until something reads them. The
+**Probes** button in the header bar adds a pair to the selected tracks
+that lack one, after asking. Inside a container is fine, so a pair baked into
+a track template works as is.
+
+Nothing is inserted next to the plugin. ChannelView routes a copy of what
+goes in and what comes out on spare channels, from 5/6 up, skipping any
+pair a plugin, send or receive already uses. The post probe compares the
+two in ten bands. Up to four plugins per track. What was changed is written
+on the track (`P_EXT:TS_CV_TAPS`) and taken out exactly when you untick it.
+
+Its zero, what "no reduction" looks like, is measured each time playback
+stops. The first probe plays a second of pink noise at −60 dBFS and one at
+−50 through the chain while the last probe keeps the track silent. It needs
+REAPER's *Run FX when stopped* (on by default). It's an estimate: a plugin
+at 50% mix reads about half, and after a make-up gain change it's out until
+the next stop. **Measure the zero while stopped** in Setup turns the
+stop-time measurement off, for instrument tracks you play while stopped.
 
 ## Where this came from
 

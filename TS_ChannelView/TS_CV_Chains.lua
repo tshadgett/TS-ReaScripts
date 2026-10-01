@@ -15,7 +15,8 @@
   is opened, and the menu bar is a place of its own.
 --]]
 
-local C = require("TS_CV_Config")
+local C  = require("TS_CV_Config")
+local TO = require("TS_CV_TrackOps")
 
 local CN = {}
 local ImGui
@@ -104,10 +105,7 @@ end
 -- .RfxChain directly; it's given the path under FXChains first, the way
 -- REAPER names chains itself, then the full path. Returns true when
 -- anything was added; when nothing could be, the track is left as it was.
-function CN.load(track, f, replace)
-  if not track or not f then return false end
-  reaper.Undo_BeginBlock()
-  reaper.PreventUIRefresh(1)
+local function add(track, f, replace)
   local before = reaper.TrackFX_GetCount(track)
   local kept = {}
   if replace then
@@ -128,10 +126,49 @@ function CN.load(track, f, replace)
       end
     end
   end
+  return ok
+end
+
+function CN.load(track, f, replace)
+  if not track or not f then return false end
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  local ok = add(track, f, replace)
   reaper.PreventUIRefresh(-1)
   reaper.Undo_EndBlock((replace and "ChannelView: replace FX with chain "
                                  or "ChannelView: load FX chain ") .. f.name, -1)
   return ok
+end
+
+-- A new track with the chain `f` on it, named after the chain -- the
+-- third way in beside "New track" and "New track from template". Placed
+-- after `after` the way the track menus insert (TO.insert_new), or, with
+-- `at_end`, at the end of the project without touching the selection,
+-- for the send and receive menus. One undo step. Returns the new track.
+function CN.new_track(f, after, at_end)
+  if not f then return nil end
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  local tr
+  if at_end then
+    tr = TO.new_track_at_end()
+  else
+    local had = {}
+    for i = 0, reaper.CountTracks(0) - 1 do had[reaper.GetTrack(0, i)] = true end
+    TO.insert_new(after)
+    for i = 0, reaper.CountTracks(0) - 1 do
+      local t = reaper.GetTrack(0, i)
+      if not had[t] then tr = t break end
+    end
+  end
+  if tr then
+    reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", f.name, true)
+    add(tr, f, false)
+  end
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock("ChannelView: new track with FX chain " .. f.name, -1)
+  reaper.TrackList_AdjustWindows(false)
+  return tr
 end
 
 -- ---------------------------------------------------------------------
@@ -164,6 +201,16 @@ local function items(ctx, node, pick)
   for i, f in ipairs(node.files) do
     if ImGui.MenuItem(ctx, f.name .. "##cn" .. i) then pick(f) end
   end
+end
+
+-- The FXChains tree (CN.list) as menu items -- subfolders as submenus.
+-- `pick(f)` is called for the one chosen. Draw inside an open menu.
+function CN.items(ctx, tree, pick)
+  if tree then items(ctx, tree, pick) end
+end
+
+function CN.has_chains(tree)
+  return tree ~= nil and (#tree.files > 0 or #tree.dirs > 0)
 end
 
 -- Draws the menu when it's open. Call once per frame from the main

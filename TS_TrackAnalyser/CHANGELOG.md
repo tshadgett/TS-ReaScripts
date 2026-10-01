@@ -1,5 +1,88 @@
 # Track Analyser — changelog
 
+## 1.4.0 — first public release
+
+Track Analyser has been in the repository for a while; this is the version
+it's announced with. It's a docked, two-panel display of what your
+processing is *actually doing* to the selected track, measured from the
+audio rather than modelled from parameter values. It was built for plugins
+with no GUI worth the name (PSP InfiniStrip, Scheps Omni Channel), but it
+works with anything.
+
+**How it works.** A **TS_TrackProbe** sits at each end of the track's FX
+chain. Both take their FFT on the same block boundaries, so the difference
+between what they hear *is* the magnitude response of everything between
+them, checked against stepped-tone models to 0.069 dB rms. It needs no
+parameter maps and no plugin profiles, and it's right about bypass,
+saturation and plugins nobody has characterised. The probes don't change the
+audio and sit idle until the panel arms the pair on the track you select.
+Select a track without them and the header offers **Install?**, after a
+yes/no. It only ever adds. A pair inside a container (baked into a track
+template) is found where it is.
+
+- **Panel 1:** the spectrum, pre and/or post, with the measured response of
+  the chain drawn over it. **Collisions** overlays, in red, where another
+  track you pick masks this one, using a perceptual (Bark/ERB) masking
+  model rather than raw overlap.
+- **Panel 2:** the waveform before (grey) and after, with gain reduction
+  over it: a bar per compressor, and a trace showing its shape.
+- **The waveform can follow the tempo.** The window is set from the header:
+  free (mouse wheel), a length in milliseconds, or a number of **beats**
+  (1–32) at the project tempo, with a grid line per beat. **Lock** makes it
+  behave like a triggered scope. The picture steps a beat at a time, lined
+  up with the beat at the play position, so a kick or snare lands in the
+  same place every time and you can watch the compressor's attack and
+  release on it rather than chase it. In milliseconds, **Hold** does the
+  same in steps of the window length.
+
+Needs ReaImGui 0.9 or newer. ChannelView isn't required. With it installed,
+Track Analyser also shows gain reduction for plugins that don't report it
+(below).
+
+### What's new in 1.4.0
+
+- **Plugins measured by ChannelView show up here.** When ChannelView is
+  set to measure a plugin that doesn't report its gain reduction (see its
+  1.4.0 notes), Track Analyser draws it too: a bar, and a trace at 500
+  readings a second straight from the probe, the same number as the
+  meter. They're pink, ChannelView's colour for measured reduction, with
+  their own swatch and Auto box in Settings. A **Σ** bar shows the track's
+  total when more than one plugin contributes. The Sources list says
+  whether each one's zero has been measured.
+
+- **One trace per reporting plugin, with the probes' detail.** Reported
+  values arrive about 18 times a second, so on their own they draw a
+  stepped line. The probes see the whole chain at 500 a second. Take away
+  what the measured plugins account for and what's left belongs to the
+  reporting ones. That is fitted to their reports (scale and offset, over
+  the visible window) and split between them by their share of the
+  reports at each moment. With nothing reducing, the fit goes to zero and
+  the trace lies flat. The old version slid the probes' shape onto the
+  meters' average, which drew a square wave beside meters reading 0. The
+  scale it settles on is shown in Settings.
+
+- **Traces sit on the transient.** REAPER compensates latency at the end
+  of the track, not inside the chain, so a reading taken at a plugin is
+  early against the waveform by the latency of everything after it. A
+  plugin's own meter is early by its own latency too (a lookahead
+  compressor's detector runs ahead of its output). Each trace is now drawn
+  that much later. The delay is listed per source in Settings.
+
+- **The chain latency is re-read twice a second**, not just when you pick
+  a track, so bypassing a plugin with latency doesn't leave the two probes
+  out of step.
+
+- **Paler second and third sources.** Two reporting plugins would have
+  been two bars and two traces in one colour. The second and third of a
+  kind are now paler, and each bar matches its trace.
+
+- **TS_TrackProbe 1.3.0.** Tap inputs for up to four measured plugins
+  (ChannelView sets them up), and the stop-time zero measurement described
+  above. It no longer resets its memory on every play and stop, so what
+  it has learnt survives the transport. ChannelView now ships the probe
+  as well, for anyone who doesn't have Track Analyser installed.
+
+
 ## 1.2.0 — one palette across the TS_ tools
 
 - **Hue and tint are now shared.** They live in their own ExtState

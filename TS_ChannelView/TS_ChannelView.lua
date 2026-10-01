@@ -1,11 +1,15 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.3.4
+-- @version 1.4.0
 -- @changelog
---  Live parameter names, per plugin or per control, for plugins that rename
---  their own parameters (Softube Console 1, Flow). Knob labels too wide for
---  their cell are abbreviated (Freq, Thresh, dropped vowels) instead of cut.
---  "Show the input FX chain" opens the chain rather than the Add FX browser.
+--  Gain reduction for plugins that don't report it. Needs a TS_TrackProbe
+--  at each end of the track's FX chain (installed with ChannelView; the new
+--  Probes button in the header adds the pair). Tick "Measure gain
+--  reduction" on a plugin and the probes measure it, with its zero measured
+--  whenever playback stops. Measured reduction is pink, reported is amber.
+--  A whole-track GR bar beside the level meter. GR meters default to an
+--  18 dB scale. "New track with FX chain" in every add-track menu. TCP: the
+--  channel panel follows the selection once open; toolbar gaps.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -36,11 +40,13 @@
 --  [nomain] TS_CV_Startup.lua
 --  [nomain] TS_CV_State.lua
 --  [nomain] TS_CV_Steps.lua
+--  [nomain] TS_CV_Taps.lua
 --  [nomain] TS_CV_TrackMenu.lua
 --  [nomain] TS_CV_TrackOps.lua
 --  [nomain] TS_CV_TrackStrip.lua
 --  [nomain] TS_CV_Util.lua
 --  [nomain] TS_CV_Widgets.lua
+--  [effect] TS_TrackProbe.jsfx
 -- @about
 --  A dockable window showing one panel per plugin on the selected track.
 --  Each panel carries a float button, a bypass button and a set of knobs
@@ -111,6 +117,7 @@ local TM = require("TS_CV_TrackMenu")
 local FO = require("TS_CV_Focus")
 local IC = require("TS_CV_Icons")
 local CN = require("TS_CV_Chains")
+local TP = require("TS_CV_Taps")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
@@ -405,9 +412,30 @@ local function panel_menu()
       M.set(key, l); M.save()
     end
   else
-    ImGui.MenuItem(ctx, "Gain reduction meter", nil, false, false)
+    -- Doesn't report it: it can be MEASURED instead, by the track's probe
+    -- pair (TS_CV_Taps).
+    local on = layout.measure == true
+    if ImGui.MenuItem(ctx, "Measure gain reduction (estimated)", nil, on) then
+      local l = materialise(fx)
+      l.measure = (not on) or nil
+      M.set_meter(l, not on)
+      M.set(key, l); M.save()
+      TP.invalidate()
+      if not on and TP.status(app.track, fx.guid) == "no_probes" then
+        if reaper.MB("This plugin doesn't report its gain reduction, so it's measured\n" ..
+                     "by a TS_TrackProbe pair: one at the start of the chain, one at\n" ..
+                     "the end. This track doesn't have them.\n\nAdd them now?",
+                     "ChannelView", 4) == 6 then
+          local ok, why = TP.insert_probes(app.track)
+          if not ok then reaper.MB(why, "ChannelView", 0) end
+        end
+      end
+    end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "This plugin doesn't report gain reduction to REAPER.")
+      ImGui.SetTooltip(ctx,
+        "This plugin doesn't report gain reduction to REAPER. Measure it\n" ..
+        "instead, from the audio going in and coming out -- every instance\n" ..
+        "between a TS_TrackProbe pair. An estimate: see the meter's tooltip.")
     end
   end
   if fx.is_top_level then
@@ -705,6 +733,54 @@ local DOCKS = {
   { "Docker 3", -3 }, { "Docker 4", -4 },
 }
 
+-- The probes button. The selected tracks that have no TS_TrackProbe pair
+-- (or just this one, if it isn't selected) get one, after a yes/no:
+-- inserting rebuilds the FX chain, so it never happens on a stray click.
+-- It only ever adds. Returns true when anything was added.
+local PROBES_ABOUT =
+  "A TS_TrackProbe at the start of the FX chain and another at the end.\n" ..
+  "They measure gain reduction for plugins that don't report it (tick\n" ..
+  "\"Measure gain reduction\" on the plugin), and they're what Track\n" ..
+  "Analyser reads. They don't change the audio, and sit idle until\n" ..
+  "something reads them."
+
+local function confirm_probes()
+  local list, need = {}, {}
+  local tr_sel = false
+  for i = 0, reaper.CountSelectedTracks(0) - 1 do
+    local t = reaper.GetSelectedTrack(0, i)
+    list[#list + 1] = t
+    if t == app.track then tr_sel = true end
+  end
+  if not tr_sel then list = { app.track } end
+  for _, t in ipairs(list) do
+    if t ~= reaper.GetMasterTrack(0) and not TP.has_probes(t) then need[#need + 1] = t end
+  end
+  if #need == 0 then
+    reaper.MB((#list > 1 and "These tracks already have their probes.\n\n"
+                         or "This track already has its probes.\n\n") .. PROBES_ABOUT,
+              "ChannelView", 0)
+    return false
+  end
+  local what = (#need > 1)
+    and ("Add probes to %d selected tracks?"):format(#need)
+     or "Add probes to this track?"
+  if reaper.MB(what .. "\n\n" .. PROBES_ABOUT .. "\n\nIt only ever adds: nothing is removed, " ..
+               "reordered or replaced.", "ChannelView", 4) ~= 6 then
+    return false
+  end
+  reaper.Undo_BeginBlock()
+  local failed
+  for _, t in ipairs(need) do
+    local ok, why = TP.insert_probes(t)
+    if not ok then failed = why break end
+  end
+  reaper.Undo_EndBlock("ChannelView: add TS_TrackProbe pairs", -1)
+  TP.invalidate()
+  if failed then reaper.MB(failed, "ChannelView", 0) end
+  return true
+end
+
 local function menu_bar()
   if not ImGui.BeginMenuBar(ctx) then return end
 
@@ -910,6 +986,22 @@ local function menu_bar()
       if W.icon_button(ctx, "fxchainload", "chain", C.ICON_SIZE, false,
           "Load an FX chain onto this track") then
         CN.open(app.track)
+      end
+      fx_left = fx_left - tw
+    end
+  end
+
+  -- Probes, left of the FX chain button: the TS_TrackProbe pair that
+  -- measured gain reduction (and Track Analyser) need.
+  if app.track then
+    local tw = C.ICON_SIZE + 6
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
+      local have = TP.has_probes(app.track)
+      if W.icon_button(ctx, "probes", "probe", C.ICON_SIZE, false,
+          have and "Probes in place" or "Add probes") then
+        if confirm_probes() then rescan(true) end
       end
       fx_left = fx_left - tw
     end
@@ -1449,6 +1541,9 @@ local function frame()
     if TM.draw(ctx) then rescan(true) end
     if CN.draw(ctx) then rescan(true) end
 
+    -- Probe taps: the heartbeat that keeps them measuring, and one
+    -- track's routing re-checked per frame.
+    TP.update()
     FO.update(ctx, ImGui, C.FOCUS_BACK)
 
     -- Last thing in the frame, on the foreground draw list: a tooltip
@@ -1483,10 +1578,15 @@ function safe_frame()
   end)
   if ok then return end
   M.save(); SC.save()
-  reaper.ShowConsoleMsg(
-    "\n--- ChannelView stopped on an error -------------------------\n" ..
+  local report = "\n--- ChannelView stopped on an error -------------------------\n" ..
     tostring(err) ..
-    "\n-------------------------------------------------------------\n")
+    "\n-------------------------------------------------------------\n"
+  reaper.ShowConsoleMsg(report)
+  -- And to a file beside the script: the console can open somewhere it
+  -- can't be seen (off a screen that's since been unplugged), and an
+  -- error nobody can read is an error nobody can fix.
+  local fh = io.open(script_dir .. "TS_ChannelView_error.log", "a")
+  if fh then fh:write(os.date("%Y-%m-%d %H:%M:%S"), report); fh:close() end
 end
 
 reaper.atexit(function() M.save(); SC.save() end)

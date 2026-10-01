@@ -170,10 +170,17 @@ function T.gain_reduction(track, addr)
 
   local pok, ok, str = pcall(reaper.TrackFX_GetNamedConfigParm,
                              track, addr, "GainReduction_dB")
-  if not pok or not ok then return nil end
-  local v = tonumber(str)
-  if not v then return nil end
-  return math.abs(v)
+  local v = (pok and ok) and tonumber(str) or nil
+  if v then return math.abs(v) end
+  -- Not reported: measured instead, when a tap is on it (TS_CV_Taps).
+  return require("TS_CV_Taps").reading(track, T.guid_at(track, addr))
+end
+
+-- Whether this plugin's reading is MEASURED by a probe tap rather than
+-- reported by the plugin -- an estimate, and drawn as one.
+function T.gr_estimated(track, addr, guid)
+  guid = (guid ~= nil and guid ~= "") and guid or T.guid_at(track, addr)
+  return require("TS_CV_Taps").is_tapped(track, guid)
 end
 
 -- Whether this plugin reports GR at all. Static for a given plugin, so
@@ -181,13 +188,21 @@ end
 local gr_cache = {}
 function T.clear_gr_cache() gr_cache = {} end
 
-function T.reports_gr(track, addr, guid)
+-- The plugin's own answer, cached; a tap is checked each time instead,
+-- since it comes and goes as routing is laid and lifted.
+function T.reports_gr_natively(track, addr, guid)
   local key = (guid ~= nil and guid ~= "") and guid or tostring(addr)
   local v = gr_cache[key]
   if v ~= nil then return v end
-  v = T.gain_reduction(track, addr) ~= nil
+  local pok, ok = pcall(reaper.TrackFX_GetNamedConfigParm, track, addr, "GainReduction_dB")
+  v = (pok and ok) and true or false
   gr_cache[key] = v
   return v
+end
+
+function T.reports_gr(track, addr, guid)
+  if T.reports_gr_natively(track, addr, guid) then return true end
+  return T.gr_estimated(track, addr, guid)
 end
 
 return T

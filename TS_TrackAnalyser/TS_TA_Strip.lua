@@ -128,10 +128,54 @@ end
 
 M.GR_KEY = "GainReduction_dB"
 
+----------------------------------------------------------
+-- TAPS: plugins measured by the post probe
+--
+-- ChannelView can route a before-and-after copy of a plugin that doesn't
+-- report its reduction to the post probe, which measures it (see the
+-- PER-PLUGIN GAIN REDUCTION notes in TS_TrackProbe.jsfx). What it routed
+-- is written on the track as P_EXT:TS_CV_TAPS:
+--   v1|<level>|<post probe guid>|<fx guid>,<prev guid>,<ch>,<ch>,<lag>|...
+-- The Nth entry is the probe's tap N, read off its tap_grN slider.
+----------------------------------------------------------
+
+M.TAP_EXT  = "P_EXT:TS_CV_TAPS"
+M.TAP_GR_PARAM = 14          -- tap_gr1's slider index, 0-based
+M.TAP_CAL_PARAM = 18         -- tap_cal1's: where that tap's zero stands
+
+-- A tap's zero (THE ZERO POINT in TS_TrackProbe.jsfx): 0 not measured
+-- yet, 1 measured at the last stop, 2 measured but the plugin was
+-- level-dependent at the test level, 3 measured, plugin touched since.
+-- nil when the route isn't a tap.
+function M.tapZero(tr, route)
+  if not (route and route.kind == "tap" and route.probe) then return nil end
+  local v = r.TrackFX_GetParam(tr, route.probe, M.TAP_CAL_PARAM + route.index - 1)
+  return v and math.floor(v + 0.5) or nil
+end
+
+function M.tapIndex(tr, fx)
+  local ok, rec = r.GetSetMediaTrackInfo_String(tr, M.TAP_EXT, "", false)
+  if not ok or rec == "" or rec:sub(1, 3) ~= "v1|" then return nil end
+  local guid = r.TrackFX_GetFXGUID(tr, fx)
+  if not guid then return nil end
+  local n = 0
+  for field in (rec .. "|"):gmatch("([^|]*)|") do
+    n = n + 1
+    if n >= 4 and field:sub(1, #guid) == guid then return n - 3 end
+  end
+  return nil
+end
+
 function M.reductionRoute(tr, fx)
   local ok, v = r.TrackFX_GetNamedConfigParm(tr, fx, M.GR_KEY)
   if ok and tonumber(v) then
     return { kind = "named", key = M.GR_KEY, label = M.GR_KEY .. " (dB, direct)" }
+  end
+  local ti = M.tapIndex(tr, fx)
+  if ti then
+    -- The probe's address is filled in by reductionSources, which knows it.
+    return { kind = "tap", index = ti,
+             label = ("measured by the post probe (tap %d)"):format(ti) }
   end
   local p, nm = M.findReduction(tr, fx)
   if p then
@@ -150,6 +194,11 @@ function M.readReduction(tr, fx, route, law)
     if not n then return nil end
     -- Reported as the gain change: negative while reducing.
     return math.max(0, -n)
+  end
+  if route.kind == "tap" then
+    if not route.probe then return nil end
+    local v = r.TrackFX_GetParam(tr, route.probe, M.TAP_GR_PARAM + route.index - 1)
+    return v and math.max(0, v) or nil
   end
   local raw = r.TrackFX_GetParam(tr, fx, route.param)
   if not raw then return nil end
@@ -207,6 +256,7 @@ function M.reductionSources(tr, chain, preIdx, postIdx)
       end
     elseif seen and not past and not fx.isContainer then
       local route = M.reductionRoute(tr, fx.idx)
+      if route and route.kind == "tap" then route.probe = postIdx end
       if route then
         local p, nm = route.param, route.paramName
         -- A level meter on the same plugin is the reliable staleness test:

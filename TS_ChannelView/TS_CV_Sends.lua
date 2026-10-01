@@ -38,6 +38,7 @@ local St = require("TS_CV_State")
 local P  = require("TS_CV_Panel")
 local TO = require("TS_CV_TrackOps")
 local TM = require("TS_CV_TrackMenu")
+local CN = require("TS_CV_Chains")
 
 local ImGui
 
@@ -158,6 +159,7 @@ local function make(kind)
 
   local pending_menu = false
   local templates    = nil     -- read when the add menu opens
+  local chains       = nil     -- likewise, the FXChains folder
   local ctx_send     = nil     -- send index whose right-click menu is open
   local want_ctx     = false
 
@@ -229,6 +231,9 @@ local function make(kind)
       end)
       ImGui.EndMenu(ctx)
     end
+    local tr = TM.chain_menu(ctx, chains, nil, true,
+                             "   New track with FX chain##" .. ID .. "tc")
+    if tr and SD.add_send(track, tr, sidechain) then added = true end
     ImGui.Separator(ctx)
     return added
   end
@@ -302,6 +307,7 @@ local function make(kind)
       ImGui.OpenPopup(ctx, ID .. "menu")
       pending_menu = false
       templates = TO.list_templates()        -- once per opening
+      chains = CN.list()
     end
     local added = false
     if ImGui.BeginPopup(ctx, ID .. "menu") then

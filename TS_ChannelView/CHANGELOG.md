@@ -1,5 +1,93 @@
 # ChannelView — changelog
 
+## 1.4.0 — gain reduction for plugins that don't report it
+
+### First, the probes
+
+Measuring a plugin needs a **TS_TrackProbe pair** on the track: one at the
+very start of the FX chain, one at the very end. The plugins to be measured
+sit between them. The probes are a small JSFX that ships with ChannelView
+(and with Track Analyser, which uses the same pair for its displays).
+
+- **What they do.** The last probe is where the measuring happens: it
+  compares a copy of each measured plugin's input with its output. The
+  first probe marks where the chain starts, and while playback is stopped
+  it supplies the quiet test signal that sets each plugin's zero (below).
+- **What they don't do.** They don't change your audio while you play. They
+  sit idle — a few instructions per sample — until ChannelView or Track
+  Analyser is open and reading them.
+- **Where they go.** Anywhere they bracket the plugins you want measured:
+  the top level of the chain, or inside a container (a probe pair baked into
+  your track templates works as is). Plugins outside the pair aren't
+  measured, and Setup says so.
+- **Adding them.** The new **Probes** button in the header bar (left of the
+  FX chain button) adds a pair to the selected tracks that don't have one,
+  after asking. Ticking *Measure gain reduction* on a track without them
+  offers the same. It only ever adds: nothing is removed, reordered or
+  replaced.
+
+### What's new
+
+- **Measure gain reduction.** Plenty of compressors never tell REAPER how
+  hard they're working, so there was nothing to meter. Tick **Measure gain
+  reduction (estimated)** in a plugin's right-click menu, or in Setup Edit
+  Parameters, and every instance of it that sits between a TS_TrackProbe
+  pair gets a meter anyway, on every track at once, with nothing to arm.
+  ChannelView routes a copy of the audio going into the plugin and coming
+  out of it on spare channels (from 5/6 up, skipping anything a plugin,
+  send or receive already uses) to the post probe, which compares the
+  two in ten bands. Up to four plugins per track. The routing is written on
+  the track and taken out exactly when you untick it. A track with no
+  probes is offered a pair.
+
+- **Its zero is measured while you're stopped.** A compressor that never
+  lets go has no "no reduction" moment to learn from. So each time
+  playback stops, the pre probe plays a second of quiet pink noise at
+  −60 dBFS and another at −50 dBFS through the chain. The post probe keeps
+  the track silent while it does. Whatever each plugin does to that is its
+  zero. It waits for a second of silence first, and gives way the moment
+  you press play or audio arrives. The meter's tooltip and Setup say
+  whether the zero has been measured. **Measure the zero while stopped
+  (all tracks)** in Setup turns it off, for instrument tracks you play
+  while stopped. It needs REAPER's "Run FX when stopped", which is on by
+  default.
+
+- **Probes button** in the header bar. Hover it to see whether the track has
+  its pair; click to add one to the selected tracks that don't, with a yes/no
+  first.
+
+- **Measured is pink, reported is amber.** A measured meter is drawn in a
+  colour of its own (`gr_measured`, following the hue), paler until its
+  zero has been measured.
+
+- **The whole track's gain reduction**, as a slim bar beside the level
+  meter in the Channel panel and every mixer strip. Its tooltip breaks it
+  down per plugin. Reported reduction is stacked above measured, in their
+  own colours.
+
+- **GR meters default to 18 dB full scale** instead of 12. The ladder the
+  scale steps up when reduction runs past it is now 6, 12, 18, 24, 30, 40,
+  60. Meters you've already set up keep their own scale.
+
+- **New track with FX chain** joins New track and New track from template
+  in every add-track menu: the track menu, the empty space under the last
+  track, and the send and receive menus. Your FXChains folder as
+  submenus; the new track is named after the chain.
+
+- **TCP: the channel panel follows the selection.** Once it's open,
+  selecting a track anywhere (here, in the arrange view, from an action)
+  moves it to that track. Selecting still never *opens* it.
+
+- **TCP: toolbar gaps.** Right-click the toolbar for **Add gap** or
+  **Insert gap before**: half a button of blank space for grouping, with
+  a faint outline on hover so it can still be right-clicked. A button's
+  tooltip is now just its label when it has one.
+
+- **Errors are written to a file too.** If ChannelView stops on an error,
+  the report also goes to `TS_ChannelView_error.log` beside the script, in
+  case the console opened somewhere you can't see it.
+
+
 ## 1.3.4 — names that keep up
 
 - **Live parameter names.** Some plugins rename their own parameters as
