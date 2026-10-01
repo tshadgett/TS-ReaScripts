@@ -1380,6 +1380,21 @@ local function icon_chain(dl, x, y, sz, col)
     x + sz * 0.92, cy + h * 0.5 + sz * 0.08, col, r, 0, 1.5)
 end
 
+-- A MIDI socket: a 5-pin DIN seen face on -- the ring, the pins on the
+-- upper arc, and the locating notch at the bottom.
+local function icon_midi(dl, x, y, sz, col)
+  local cx, cy = x + sz * 0.5, y + sz * 0.5
+  local R = sz * 0.46
+  ImGui.DrawList_AddCircle(dl, cx, cy, R, col, 0, 1.3)
+  local pr, pd = math.max(1.0, sz * 0.075), sz * 0.25
+  for _, deg in ipairs({ 180, 225, 270, 315, 0 }) do
+    local a = math.rad(deg)
+    ImGui.DrawList_AddCircleFilled(dl, cx + math.cos(a) * pd, cy + math.sin(a) * pd, pr, col)
+  end
+  ImGui.DrawList_AddRectFilled(dl, cx - sz * 0.07, cy + R - sz * 0.12,
+    cx + sz * 0.07, cy + R + 0.6, col)
+end
+
 -- A probe pair: a plugin box with a pin at each end of the line through
 -- it -- the TS_TrackProbe at the start of the chain and the one at the end.
 local function icon_probe(dl, x, y, sz, col)
@@ -1394,6 +1409,7 @@ local function icon_probe(dl, x, y, sz, col)
 end
 
 W.ICONS = {
+  midi     = icon_midi,
   probe    = icon_probe,
   chain    = icon_chain,
   play_tri = icon_play,

@@ -1,15 +1,18 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.4.0
+-- @version 1.4.1
 -- @changelog
---  Gain reduction for plugins that don't report it. Needs a TS_TrackProbe
---  at each end of the track's FX chain (installed with ChannelView; the new
---  Probes button in the header adds the pair). Tick "Measure gain
---  reduction" on a plugin and the probes measure it, with its zero measured
---  whenever playback stops. Measured reduction is pink, reported is amber.
---  A whole-track GR bar beside the level meter. GR meters default to an
---  18 dB scale. "New track with FX chain" in every add-track menu. TCP: the
---  channel panel follows the selection once open; toolbar gaps.
+--  MIDI sends and receives: a third mode beside Direct and Sidechain --
+--  MIDI only, all channels, no audio. In the add menu, the right-click
+--  menu, and on each send's mode button, which cycles DIR, SC and MIDI
+--  (a MIDI socket on blue).
+--
+--  1.4.0 (never reached ReaPack -- the index build stopped on three dev
+--  files; it arrives together with this one): gain reduction for plugins
+--  that don't report it, measured by a TS_TrackProbe pair (the new Probes
+--  button adds one), with its zero measured whenever playback stops;
+--  measured reduction pink, reported amber; a whole-track GR bar; 18 dB
+--  meter scale; "New track with FX chain"; TCP follows the selection.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

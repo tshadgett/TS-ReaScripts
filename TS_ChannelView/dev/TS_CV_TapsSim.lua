@@ -1,3 +1,4 @@
+-- @noindex  (a development tool, not a package: never installed)
 -- Offline check of TS_CV_Taps' routing against a pretend REAPER: which
 -- channels it picks, which pins it changes, what it records, and that
 -- taking it back out leaves every pin as it found it.

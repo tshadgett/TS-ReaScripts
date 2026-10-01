@@ -598,6 +598,9 @@ C.PALETTE = {
   mute_on    = { "fixed",   16.9, 0.645, 0.569 },
   mon_on     = { "fixed",  130.2, 0.388, 0.475 },
   mon_auto   = { "fixed",  213.0, 0.645, 0.569 },
+  -- A MIDI-only send or receive. Blue, as MIDI is in REAPER's own routing
+  -- window; fixed, because it's a kind of routing, not decoration.
+  midi_on    = { "fixed",  213.0, 0.645, 0.569 },
   -- The routing button's three lamps. Distinct hues rather than three
   -- shades of the accent: they mean different things and you read them
   -- at a glance, not by counting rows.

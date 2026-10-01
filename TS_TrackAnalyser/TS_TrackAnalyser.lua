@@ -2,9 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 1.4.0
+-- @version 1.4.1
 -- @changelog
---  First public release. A docked two-panel display of what your
+--  1.4.1 keeps Track Analyser in step with ChannelView; nothing in it
+--  changed. 1.4.0 never reached ReaPack, so this is the first public
+--  release. A docked two-panel display of what your
 --  processing does to the selected track, measured from the audio by a
 --  TS_TrackProbe at each end of the FX chain: the measured EQ response over
 --  the spectrum, a before/after waveform with gain reduction over it, and

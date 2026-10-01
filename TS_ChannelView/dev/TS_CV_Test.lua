@@ -712,8 +712,16 @@ local TRACKS = {
   reaper.CreateTrackSend = function(src, dst)
     SENDS[#SENDS+1] = { src = src, dst = dst }; return #SENDS - 1
   end
+  -- every send field, per send, for the mode tests; I_DSTCHAN also kept
+  -- where the older checks look for it
+  local SFIELD = {}
   reaper.SetTrackSendInfo_Value = function(_, _, i, k, v)
+    SFIELD[i] = SFIELD[i] or {}
+    SFIELD[i][k] = v
     if k == "I_DSTCHAN" then DSTCHAN[i] = v end
+  end
+  reaper.GetTrackSendInfo_Value = function(_, _, i, k)
+    return (SFIELD[i] or {})[k] or 0
   end
   reaper.GetTrackNumSends = function() return #SENDS end
   reaper.Undo_BeginBlock = function() end
@@ -744,6 +752,15 @@ local TRACKS = {
   check("an already-wide track is left alone", NCHAN[7], 8)
   check("no send to itself",        SD.add_send(1, 1, false), false)
   check("no send to nothing",       SD.add_send(1, nil, false), false)
+
+  -- MIDI: audio off, every MIDI channel on, nothing widened
+  NCHAN[9] = nil
+  check("MIDI send created",        SD.add_send(1, 9, "midi"), true)
+  local mi = #SENDS - 1
+  check("MIDI send has no audio",   SFIELD[mi].I_SRCCHAN, -1)
+  check("MIDI send, all channels",  SFIELD[mi].I_MIDIFLAGS, 0)
+  check("MIDI doesn't widen",       NCHAN[9], nil)
+  check("named modes work too",     SD.add_send(1, 9, "sidechain") and DSTCHAN[#SENDS - 1], 2)
 
   -- Receives: the same send, made from the other end. Track 4 receiving
   -- from track 1 is a send FROM 1 TO 4, and a sidechain widens track 4 --

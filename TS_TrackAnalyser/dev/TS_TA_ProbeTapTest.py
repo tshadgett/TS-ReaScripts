@@ -1,3 +1,4 @@
+# @noindex  (a development tool, not a package: never installed)
 """Offline test of TS_TrackProbe's per-plugin gain-reduction taps.
 
 Runs the probe's real EEL2 code under loose_eel (the standalone EEL2

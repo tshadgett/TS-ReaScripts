@@ -1,3 +1,4 @@
+# @noindex  (a development tool, not a package: never installed)
 """Usage: LOOSE_EEL=/path/to/loose_eel python3 TS_TA_ProbeCalTest.py <TS_TrackProbe.jsfx> [post] [pre]
 
 Stop-time zero calibration, offline, against TS_TrackProbe's real code.

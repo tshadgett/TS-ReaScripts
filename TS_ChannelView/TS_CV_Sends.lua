@@ -4,7 +4,7 @@
   TS_CV_Sends.lua -- the Sends and Receives panels, pinned to the right.
 
   One cell per send: the other track's name over its colour, a bypass,
-  a level knob and a pre/post button. Plus an add control in the same
+  a level knob, a mode button and a pre/post button. Plus an add control in the same
   dashed style as the insert one, opening the same kind of hover menu.
 
   Both panels are this one file. A receive is the same REAPER object as
@@ -14,12 +14,18 @@
   module itself is the Sends panel, and TS_CV_Receives.lua is
   SD.make("receive").
 
-  THE ADD MENU
+  THREE MODES, in the add menu and on each send's mode button
     Direct   -> the send lands on the receiving track's channels 1/2
     Sidechain-> channels 3/4, and the receiving track is widened to at
                 least four channels if it isn't already, because a
                 sidechain send into a two-channel track goes nowhere and
                 REAPER will not widen it for you.
+    MIDI     -> MIDI only, all channels, no audio (REAPER's own "audio:
+                none" and "MIDI: all"). For driving an instrument on
+                another track from this one.
+  Direct and sidechain leave the send's MIDI as REAPER set it. Going back
+  to either from MIDI turns the audio on and the MIDI off -- the MIDI was
+  the point of the MIDI mode, and leaving it on would make the button lie.
   Each starts with "New track" and "New track from template", which
   create the other track at the end of the project and route to or from
   it in one step. The selection is left where it was, so the panel stays
@@ -65,6 +71,25 @@ local function is_separator(name)
   local t = U.trim(name or "")
   return t ~= "" and t:match("^[%-%_%=%~%.%*%s]+$") ~= nil
 end
+
+-- The three modes. A send is MIDI when its audio is off (I_SRCCHAN -1)
+-- and its MIDI isn't (the low five bits of I_MIDIFLAGS are the source
+-- channel: 0 all, 1-16 one, 31 none).
+local DIRECT, SIDECHAIN, MIDI = "direct", "sidechain", "midi"
+local MIDI_OFF = 31
+
+local function mode_of(srcch, dstch, midiflags)
+  if (srcch or 0) < 0 and ((midiflags or 0) & 31) ~= MIDI_OFF then return MIDI end
+  if (dstch or 0) >= 2 then return SIDECHAIN end
+  return DIRECT
+end
+
+local MODE_TIP = {
+  [DIRECT]    = "Direct \u{2014} audio to channels 1/2",
+  [SIDECHAIN] = "Sidechain \u{2014} audio to channels 3/4",
+  [MIDI]      = "MIDI \u{2014} all channels, no audio",
+}
+local NEXT_MODE = { [DIRECT] = SIDECHAIN, [SIDECHAIN] = MIDI, [MIDI] = DIRECT }
 
 -- A sidechain needs somewhere to land: REAPER will happily route to
 -- channels 3/4 of a two-channel track and pass no audio.
@@ -124,6 +149,9 @@ local function make(kind)
         mute   = send_get(track, i, "B_MUTE") > 0.5,
         mode   = math.floor(send_get(track, i, "I_SENDMODE") or 0),
         dstch  = math.floor(send_get(track, i, "I_DSTCHAN") or 0),
+        route  = mode_of(math.floor(send_get(track, i, "I_SRCCHAN") or 0),
+                         math.floor(send_get(track, i, "I_DSTCHAN") or 0),
+                         math.floor(send_get(track, i, "I_MIDIFLAGS") or 0)),
       }
     end
     return out
@@ -188,23 +216,22 @@ local function make(kind)
     return out
   end
 
-  -- Creates the send between the panel's track and `other`: from the panel's
-  -- track to `other` on the Sends panel, from `other` to it on Receives. A
-  -- sidechain widens the receiving track first.
-  function SD.add_send(track, other, sidechain)
-    if not track or not other or track == other then return false end
-    local src, dst = track, other
-    if RECV then src, dst = other, track end
-    reaper.Undo_BeginBlock()
-    if sidechain then widen(dst) end
-    local idx = reaper.CreateTrackSend(src, dst)
-    if idx and idx >= 0 then
-      -- CreateTrackSend's index is on the sending track, category 0.
-      reaper.SetTrackSendInfo_Value(src, 0, idx, "I_DSTCHAN", sidechain and 2 or 0)
+  -- Puts a send into one of the three modes (see the top of this file).
+  -- `get`/`set` read and write its fields; `dst` is the receiving track.
+  local function apply_mode(get, set, dst, mode)
+    if mode == MIDI then
+      set("I_SRCCHAN", -1)
+      set("I_MIDIFLAGS", 0)                 -- all channels, to the originals
+      return
     end
-    reaper.Undo_EndBlock(("ChannelView: add %s%s"):format(
-      sidechain and "sidechain " or "", K.noun), -1)
-    return idx ~= nil and idx >= 0
+    if (get("I_SRCCHAN") or 0) < 0 then
+      -- Back from MIDI: audio on again, and the MIDI off with it.
+      set("I_SRCCHAN", 0)
+      local mf = math.floor(get("I_MIDIFLAGS") or 0)
+      set("I_MIDIFLAGS", (mf & ~31) | MIDI_OFF)
+    end
+    if mode == SIDECHAIN then widen(dst) end
+    set("I_DSTCHAN", mode == SIDECHAIN and 2 or 0)
   end
 
   -- The track that receives: the far end on Sends, the panel's own track on
@@ -214,32 +241,62 @@ local function make(kind)
     return reaper.GetTrackSendInfo_Value(track, CAT, i, K.other)
   end
 
+  -- Puts send `i` of the panel's track into `mode`.
+  local function set_mode(track, i, mode)
+    apply_mode(function(k) return send_get(track, i, k) end,
+               function(k, v) send_set(track, i, k, v) end,
+               receiver(track, i), mode)
+  end
+
+  -- Creates the send between the panel's track and `other`: from the panel's
+  -- track to `other` on the Sends panel, from `other` to it on Receives, in
+  -- `mode`: "direct" (or nil), "sidechain" or "midi"; true and false are
+  -- still taken as sidechain and direct.
+  function SD.add_send(track, other, mode)
+    if not track or not other or track == other then return false end
+    if mode == true then mode = SIDECHAIN
+    elseif mode ~= SIDECHAIN and mode ~= MIDI then mode = DIRECT end
+    local src, dst = track, other
+    if RECV then src, dst = other, track end
+    reaper.Undo_BeginBlock()
+    local idx = reaper.CreateTrackSend(src, dst)
+    if idx and idx >= 0 then
+      -- CreateTrackSend's index is on the sending track, category 0.
+      apply_mode(function(k) return reaper.GetTrackSendInfo_Value(src, 0, idx, k) end,
+                 function(k, v) reaper.SetTrackSendInfo_Value(src, 0, idx, k, v) end,
+                 dst, mode)
+    end
+    reaper.Undo_EndBlock(("ChannelView: add %s%s"):format(
+      mode == DIRECT and "" or (mode .. " "), K.noun), -1)
+    return idx ~= nil and idx >= 0
+  end
+
   -- "New track" / "New track from template" at the top of the add menu:
   -- the new track goes at the end of the project and is routed straight
   -- away. Returns true when a send was made.
-  local function new_track_items(ctx, track, sidechain)
+  local function new_track_items(ctx, track, mode)
     local added = false
     if ImGui.MenuItem(ctx, "   New track##" .. ID .. "nt") then
       local tr = TO.new_track_at_end()
-      if tr and SD.add_send(track, tr, sidechain) then added = true end
+      if tr and SD.add_send(track, tr, mode) then added = true end
     end
     if ImGui.BeginMenu(ctx, "   New track from template##" .. ID .. "tt",
                        TM.has_templates(templates)) then
       TM.template_items(ctx, templates, function(path)
         local tr = TO.template_at_end(path)
-        if tr and SD.add_send(track, tr, sidechain) then added = true end
+        if tr and SD.add_send(track, tr, mode) then added = true end
       end)
       ImGui.EndMenu(ctx)
     end
     local tr = TM.chain_menu(ctx, chains, nil, true,
                              "   New track with FX chain##" .. ID .. "tc")
-    if tr and SD.add_send(track, tr, sidechain) then added = true end
+    if tr and SD.add_send(track, tr, mode) then added = true end
     ImGui.Separator(ctx)
     return added
   end
 
-  local function track_items(ctx, track, sidechain)
-    local added = new_track_items(ctx, track, sidechain)
+  local function track_items(ctx, track, mode)
+    local added = new_track_items(ctx, track, mode)
     local pending_gap = false
     local first = true
     for _, t in ipairs(project_tracks(track)) do
@@ -264,7 +321,7 @@ local function make(kind)
         local sw = t.col or C.COL.panel_border
         if t.self then sw = U.with_alpha(sw, 0x60) end
         ImGui.DrawList_AddRectFilled(dl, ix + 2, iy + 2, ix + 9, iy2 - 2, sw, 1.5)
-        if hit and SD.add_send(track, t.track, sidechain) then added = true end
+        if hit and SD.add_send(track, t.track, mode) then added = true end
       end
     end
     return added
@@ -280,13 +337,17 @@ local function make(kind)
     if ImGui.BeginPopup(ctx, ID .. "ctx") then
       local i = ctx_send
       if i and track then
-        local dstch = math.floor(send_get(track, i, "I_DSTCHAN") or 0)
-        if ImGui.MenuItem(ctx, "Direct (channels 1/2)", nil, dstch < 2) then
-          send_set(track, i, "I_DSTCHAN", 0)
+        local m = mode_of(math.floor(send_get(track, i, "I_SRCCHAN") or 0),
+                          math.floor(send_get(track, i, "I_DSTCHAN") or 0),
+                          math.floor(send_get(track, i, "I_MIDIFLAGS") or 0))
+        if ImGui.MenuItem(ctx, "Direct (channels 1/2)", nil, m == DIRECT) then
+          set_mode(track, i, DIRECT)
         end
-        if ImGui.MenuItem(ctx, "Sidechain (channels 3/4)", nil, dstch >= 2) then
-          widen(receiver(track, i))
-          send_set(track, i, "I_DSTCHAN", 2)
+        if ImGui.MenuItem(ctx, "Sidechain (channels 3/4)", nil, m == SIDECHAIN) then
+          set_mode(track, i, SIDECHAIN)
+        end
+        if ImGui.MenuItem(ctx, "MIDI (all channels, no audio)", nil, m == MIDI) then
+          set_mode(track, i, MIDI)
         end
         ImGui.Separator(ctx)
         if ImGui.MenuItem(ctx, "Remove " .. K.noun) then
@@ -314,13 +375,19 @@ local function make(kind)
       if ImGui.BeginMenu(ctx, "Direct") then
         ImGui.TextDisabled(ctx, "to channels 1/2")
         ImGui.Separator(ctx)
-        if track_items(ctx, track, false) then added = true end
+        if track_items(ctx, track, DIRECT) then added = true end
         ImGui.EndMenu(ctx)
       end
       if ImGui.BeginMenu(ctx, "Sidechain") then
         ImGui.TextDisabled(ctx, "to channels 3/4")
         ImGui.Separator(ctx)
-        if track_items(ctx, track, true) then added = true end
+        if track_items(ctx, track, SIDECHAIN) then added = true end
+        ImGui.EndMenu(ctx)
+      end
+      if ImGui.BeginMenu(ctx, "MIDI") then
+        ImGui.TextDisabled(ctx, "all channels, no audio")
+        ImGui.Separator(ctx)
+        if track_items(ctx, track, MIDI) then added = true end
         ImGui.EndMenu(ctx)
       end
       ImGui.EndPopup(ctx)
@@ -491,7 +558,8 @@ local function make(kind)
       local ch, nv, act = W.knob(ctx, ID .. "v" .. sd.idx, "",
         U.vol_to_fader(sd.vol), U.db_text(sd.vol),
         { tooltip = ("%s\n%s dB   %s"):format(sd.name, U.db_text(sd.vol),
-            (sd.dstch >= 2) and "sidechain 3/4" or "direct 1/2") })
+            (sd.route == MIDI and "MIDI") or (sd.route == SIDECHAIN and "sidechain 3/4")
+            or "direct 1/2") })
       -- Double-click is unity here, the same as the channel fader: a send
       -- at 0 dB is the thing you keep coming back to.
       if act and act.double_click then nv, ch = U.UNITY_POS, true end
@@ -507,24 +575,32 @@ local function make(kind)
       local bh, bgap = 15, 3
       local by1   = face - (bh * 2 + bgap) * 0.5
       local by2   = by1 + bh + bgap
-      local hw    = (rw - bgap) * 0.5
-      local sc    = (sd.dstch or 0) >= 2
-
-      -- Mute and sidechain side by side: one is the send's own state, the
+      -- "M" is one letter; the mode button needs room for "DIR". The row
+      -- is split to suit, rather than in half.
+      local mw    = math.floor(rw * 0.4)
+      local hw    = rw - mw - bgap
+      -- Mute and the mode side by side: one is the send's own state, the
       -- other is where it lands, and stacking them implied an order that
       -- isn't there.
-      local hit, dbl = W.state_button(ctx, ID .. "m" .. sd.idx, "M", rx, by1, hw, bh,
+      local hit, dbl = W.state_button(ctx, ID .. "m" .. sd.idx, "M", rx, by1, mw, bh,
         sd.mute, C.COL.mute_on, "Bypass this " .. K.noun)
       if hit or dbl then send_set(track, sd.idx, "B_MUTE", (dbl or sd.mute) and 0 or 1) end
 
-      hit, dbl = W.state_button(ctx, ID .. "c" .. sd.idx, "SC", rx + hw + bgap, by1,
-        hw, bh, sc, C.COL.knob_fill_bi,
-        sc and "Sidechain \u{2014} channels 3/4" or "Direct \u{2014} channels 1/2")
-      if hit or dbl then
-        local want = (dbl or sc) and 0 or 2
-        if want == 2 then widen(receiver(track, sd.idx)) end
-        send_set(track, sd.idx, "I_DSTCHAN", want)
+      -- The mode: "DIR" for direct, "SC" lit for sidechain, a MIDI socket
+      -- on blue for MIDI. A click steps DIR -> SC -> MIDI -> DIR; a
+      -- double-click goes straight back to DIR.
+      local tip = MODE_TIP[sd.route] .. "\nClick for " .. NEXT_MODE[sd.route] ..
+                  ", double-click for direct"
+      if sd.route == MIDI then
+        hit, dbl = W.state_icon(ctx, ID .. "c" .. sd.idx, "midi", rx + mw + bgap, by1,
+          hw, bh, true, C.COL.midi_on, tip)
+      else
+        local sc = (sd.route == SIDECHAIN)
+        hit, dbl = W.state_button(ctx, ID .. "c" .. sd.idx, sc and "SC" or "DIR",
+          rx + mw + bgap, by1, hw, bh, sc, C.COL.knob_fill_bi, tip)
       end
+      if dbl then set_mode(track, sd.idx, DIRECT)
+      elseif hit then set_mode(track, sd.idx, NEXT_MODE[sd.route]) end
 
       local is_pre = (sd.mode ~= POST)
       hit, dbl = W.state_button(ctx, ID .. "p" .. sd.idx, is_pre and "PRE" or "POST",

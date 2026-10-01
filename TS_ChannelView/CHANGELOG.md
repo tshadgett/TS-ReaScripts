@@ -1,5 +1,21 @@
 # ChannelView — changelog
 
+## 1.4.1 — MIDI sends
+
+- **MIDI sends and receives.** A third mode beside Direct and Sidechain:
+  MIDI only, all channels, no audio, for driving an instrument on another
+  track. It's in the add menu, and on each send's mode button, which now
+  cycles **DIR** → **SC** → MIDI: DIR for direct, SC lit for sidechain, and a
+  MIDI socket on blue for MIDI.
+  Double-click still goes straight back to Direct, and the right-click menu
+  has all three. Switching back from MIDI turns the audio on and the MIDI
+  off.
+
+1.4.0 never reached ReaPack: three development files in the repository were
+missing the marker that tells the index builder they aren't packages, and the
+build stopped on them. Both versions arrive together with this one.
+
+
 ## 1.4.0 — gain reduction for plugins that don't report it
 
 ### First, the probes

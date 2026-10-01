@@ -101,7 +101,8 @@ stale=0
 for pkg in TS_ChannelView/TS_ChannelView.lua TS_TrackAnalyser/TS_TrackAnalyser.lua \
            TS_HideDockerTabs/TS_HideDockerTabs.lua; do
   dir="$(dirname "$pkg")"
-  git diff --quiet -- "$dir" && continue          # nothing changed in this package
+  # nothing changed in this package (dev/ isn't installed, so it doesn't count)
+  git diff --quiet -- "$dir" ":(exclude)$dir/dev" && continue
   now="$(grep -m1 -oE '@version[[:space:]]+[0-9][^[:space:]]*' "$pkg" | awk '{print $2}')"
   was="$(git show "HEAD:$pkg" 2>/dev/null | grep -m1 -oE '@version[[:space:]]+[0-9][^[:space:]]*' | awk '{print $2}')"
   if [ "$now" = "$was" ]; then
@@ -113,6 +114,21 @@ for pkg in TS_ChannelView/TS_ChannelView.lua TS_TrackAnalyser/TS_TrackAnalyser.l
   fi
 done
 [ "$stale" -eq 0 ] && echo "  (all changed packages have a new version)"
+
+# reapack-index treats EVERY .lua/.eel/.py/.jsfx/.txt below a category
+# folder as a package -- dev/ included. One without @version or @noindex
+# fails its check and the whole index build stops, so nothing at all is
+# published (1.4.0 was lost to exactly this). Say so before it's pushed.
+echo
+echo "--- package header check ---"
+bad=0
+while IFS= read -r f; do
+  head -n 60 "$f" | grep -qE '@(version|noindex)' && continue
+  echo "  !! $f has neither @version nor @noindex -- the ReaPack build will fail"
+  bad=1
+done < <(find TS_* -type f \( -iname '*.lua' -o -iname '*.eel' -o -iname '*.py' \
+                             -o -iname '*.jsfx' -o -iname '*.txt' \) | sort)
+[ "$bad" -eq 0 ] && echo "  (every file is a package or marked @noindex)"
 
 # This script only ever COPIES. Delete a module in REAPER and its stale twin
 # stays in the repo, still listed in @provides, still published. Nothing here

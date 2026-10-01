@@ -1,5 +1,12 @@
 # Track Analyser — changelog
 
+## 1.4.1 — in step with ChannelView
+
+No changes. The version moves to 1.4.1 to match ChannelView, so the two
+tools carry the same number. 1.4.0 never reached ReaPack (see ChannelView's
+1.4.1 notes), so the notes below arrive with this version.
+
+
 ## 1.4.0 — first public release
 
 Track Analyser has been in the repository for a while; this is the version
