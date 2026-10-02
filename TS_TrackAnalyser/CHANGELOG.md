@@ -1,5 +1,10 @@
 # Track Analyser — changelog
 
+## 1.7.1 — in step with ChannelView
+
+No changes. The version moves to 1.7.1 to match ChannelView.
+
+
 ## 1.7.0 — in step with ChannelView
 
 - No changes to Track Analyser. ChannelView's new web page draws Track

@@ -1,5 +1,11 @@
 # ChannelView — changelog
 
+## 1.7.1 — mixer alignment on the web page
+
+- **Web page:** in the mixer, each fader now sits directly under its pan
+  knob, with the meters and the pan value off to the right.
+
+
 ## 1.7.0 — the web companion, and a forgiving search
 
 - **ChannelView on a tablet.** A web page, served by REAPER's own web

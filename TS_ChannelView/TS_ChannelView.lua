@@ -1,16 +1,8 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.7.0
+-- @version 1.7.1
 -- @changelog
---  Web companion: ChannelView on a tablet. The selected track's panels, with
---  your layouts, styles and faceplates, in a browser -- plus the transport,
---  macro buttons, sends, the ReaEQ curve editor, gain-reduction traces, a
---  half-height mixer and a session navigator. Served by REAPER's own web
---  interface, with TS_ChannelView_Web.lua running alongside. Setup: see
---  "On a tablet" in the README.
---  The [+] add menu searches as you type, and plugin search is forgiving and
---  ranked: "proq", "pq4" and "saturm" all find what you meant, best match
---  first, recently used plugins nudged up.
+--  Web page: in the mixer, each fader now sits directly under its pan knob.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

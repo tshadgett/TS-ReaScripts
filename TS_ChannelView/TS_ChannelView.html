@@ -211,7 +211,10 @@ button { font: inherit; color: inherit; }
 /* no name: the track's button underneath carries it; a colour strip here */
 .mxs .mxc { width: 100%; height: 6px; flex-shrink: 0; border-radius: 3px; background: var(--c, var(--border)); }
 .mxs .pr { display: flex; align-items: center; gap: 4px; height: 32px; flex-shrink: 0; }
-.mxs .pr .val { width: 30px; font-size: 10px; }
+/* The pan knob sits over the fader: both rows are [control | 24px side]
+   with the same gap, centred, so the two controls share a centre line. */
+.mxs .pr .val { width: 24px; font-size: 10px; text-align: left; overflow: visible; }
+.mxs .mm { width: 24px; display: flex; gap: 4px; justify-content: center; flex-shrink: 0; }
 .mxs .sfr { gap: 4px; }
 .mxs .mtr { width: 6px; }
 .mxs .vdb { font-size: 10px; height: 12px; line-height: 12px; flex-shrink: 0; }
@@ -1324,7 +1327,8 @@ function buildMixer() {
     const fdr = makeFader(30, "flat", null);
     const ml = h("div", "mtr"), mlv = h("div", "lv"); ml.append(mlv);
     const mr = h("div", "mtr"), mrv = h("div", "lv"); mr.append(mrv);
-    fr.append(fdr.node, ml, mr);
+    const mm = h("div", "mm"); mm.append(ml, mr);
+    fr.append(fdr.node, mm);
     const vdb = h("div", "vdb", "");
     const r1 = h("div", "mrow");
     const bm = h("button", "m", "M"), bs = h("button", "s", "S");

@@ -1,12 +1,14 @@
 # TS-ReaScripts
 
-Two tools for REAPER, built for mixing through channel-strip plugins that
-either have no GUI worth using or hide what they are doing.
+Tools for REAPER, built for mixing through channel-strip plugins that
+either have no GUI worth using or hide what they are doing — and for seeing
+what the mix as a whole is doing.
 
 | | |
 |---|---|
 | **[ChannelView](TS_ChannelView/)** | A docked channel strip: one editable control panel per plugin on the selected track. Pick the parameters you actually reach for, lay them out once, and every instance of that plugin comes up the same way. Gain reduction meters for every compressor, including ones that don't report it. Also on a tablet, through REAPER's web interface. |
 | **[Track Analyser](TS_TrackAnalyser/)** | A docked two-panel display showing what your processing is *doing* — the measured magnitude response of whatever sits between two probes, drawn over the spectrum, plus a before/after waveform with gain reduction over it. Nothing is modelled; both panels read the audio. |
+| **[TS_Visualizer](TS_Visualizer/)** | A docked metering window: LUFS, goniometer, oscilloscope, spectrum, spectrogram, a Dynamics plot of loudness against PSR with targets, and a per-track spectrum overlay. A fork of Junki Kim's JKK_Visualizer, sharing the other tools' colour controls. |
 
 ### The probes
 
@@ -45,9 +47,11 @@ Download the repo, then:
   (ChannelView needs it too; one copy is enough)
 - `TS_ChannelView/TS_ChannelView.html` → `REAPER/reaper_www_root/` (the
   tablet page; optional — see ChannelView's README)
+- `TS_Visualizer/*.lua` → `REAPER/Scripts/TS_Visualizer/`, and
+  `TS_Visualizer/TS_Visualizer.jsfx` → `REAPER/Effects/TS_Visualizer/`
 
 Then **Actions ▸ Show action list ▸ New action ▸ Load ReaScript…** and pick
-`TS_ChannelView.lua` and `TS_TrackAnalyser.lua`.
+`TS_ChannelView.lua`, `TS_TrackAnalyser.lua` and `TS_Visualizer.lua`.
 
 Nothing assumes a fixed install path, so either route works.
 
@@ -62,6 +66,8 @@ controls:
 - [Track Analyser](TS_TrackAnalyser/README.md) — why it measures rather than
   models, what the Collisions overlay is actually computing, and what it
   deliberately does not model.
+- [TS_Visualizer](TS_Visualizer/README.md) — its modules, what this fork
+  added to Junki Kim's original, and the loudness and dynamics targets.
 
 ## Working on these
 
@@ -87,7 +93,13 @@ copyright notice.
 
 Written by Tim Shadgett, with Claude.
 
-No third-party code is reproduced in either tool. ChannelView took the
+**TS_Visualizer is a fork of JKK_Visualizer by Junki Kim**, released here
+with his permission. Its LUFS, goniometer, Symbiote, scope, spectrum and
+spectrogram modules are his design and, at heart, his rendering code; the
+Dynamics module, the per-track overlay, the colour system and the fixes
+listed in its README were added on top. See [its README](TS_Visualizer/README.md).
+
+No third-party code is reproduced in ChannelView or Track Analyser. ChannelView took the
 parameter-mapping idea and the layout file format from Wormhole Labs'
 **StripLink** — the concepts, not the source. Its container-aware FX chain
 walk is ported from my own earlier, unreleased Plugin Rack and Docked Plugin

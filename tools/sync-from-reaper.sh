@@ -78,6 +78,18 @@ for f in "$REAPER_DIR/Scripts/TS_TrackAnalyser/dev"/*; do
   [ -f "$f" ] && copy_one "$f" "$REPO/TS_TrackAnalyser/dev/$(basename "$f")"
 done
 
+# ---- Visualizer: the window, its Editor and theme helper (nested one
+# folder deeper in Scripts/, where its original installer put it), and its
+# JSFX from Effects/. No LICENSE: one copy, at the repo root.
+for f in "$REAPER_DIR/Scripts/TS_Visualizer/TS_Visualizer"/*.lua; do
+  copy_one "$f" "$REPO/TS_Visualizer/$(basename "$f")"
+done
+for f in README.md CHANGELOG.md; do
+  copy_one "$REAPER_DIR/Scripts/TS_Visualizer/TS_Visualizer/$f" "$REPO/TS_Visualizer/$f"
+done
+copy_one "$REAPER_DIR/Effects/TS_Visualizer/TS_Visualizer/TS_Visualizer.jsfx" \
+         "$REPO/TS_Visualizer/TS_Visualizer.jsfx"
+
 # ---- Hide Docker Tabs: one loose script in Scripts/. It needs a folder of
 # its own in the repo because reapack-index ignores files at the repo root --
 # a package's category IS its directory, so a root file has no category and is
@@ -102,7 +114,7 @@ cd "$REPO" || exit 1
 echo "--- version check ---"
 stale=0
 for pkg in TS_ChannelView/TS_ChannelView.lua TS_TrackAnalyser/TS_TrackAnalyser.lua \
-           TS_HideDockerTabs/TS_HideDockerTabs.lua; do
+           TS_Visualizer/TS_Visualizer.lua TS_HideDockerTabs/TS_HideDockerTabs.lua; do
   dir="$(dirname "$pkg")"
   # nothing changed in this package (dev/ isn't installed, so it doesn't count)
   git diff --quiet -- "$dir" ":(exclude)$dir/dev" && continue
@@ -154,6 +166,7 @@ check_orphans() {   # check_orphans <repo dir> <reaper dir...>
 }
 check_orphans TS_ChannelView    "$REAPER_DIR/Scripts/TS_ChannelView" "$REAPER_DIR/Effects/TS_TrackAnalyser"
 check_orphans TS_TrackAnalyser  "$REAPER_DIR/Scripts/TS_TrackAnalyser" "$REAPER_DIR/Effects/TS_TrackAnalyser"
+check_orphans TS_Visualizer     "$REAPER_DIR/Scripts/TS_Visualizer/TS_Visualizer" "$REAPER_DIR/Effects/TS_Visualizer/TS_Visualizer"
 [ "$orphans" -eq 0 ] && echo "  (none)"
 
 echo

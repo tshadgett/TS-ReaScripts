@@ -1,0 +1,309 @@
+noindex: true
+version: 2.1.0
+author Tim Shadgett (with Claude) -- fork of JKK_Visualizer by Junki Kim
+// @noindex
+// Ships as part of the TS_Visualizer package (its @provides lists this
+// file as [effect]); it is not a package to install on its own.
+desc: TS_Visualizer
+
+options:no_meter
+options:gmem=TS_Visualizer_Mem
+
+// --- Slider settings ---
+slider1:0.5<0,1,0.001>Gonio Gain
+slider2:0.5<0,1,0.001>Scope Gain
+slider3:0.5<0,1,0.001>Symbiote Gain
+slider4:0.5<0,1,0.001>Spectrum Gain
+slider5:0.25<0,1,0.001>Spectrum Floor (Macro %)
+// slider2:0.25<0,1,0.001>Spectrum Floor (Macro %)
+slider6:0<0,19,1{Off,-6 LUFS (Loud/Rock),-7 LUFS,-8 LUFS,-9 LUFS,-10 LUFS,-11 LUFS,-12 LUFS,-13 LUFS,-14 LUFS (Streaming),-15 LUFS,-16 LUFS,-17 LUFS,-18 LUFS,-19 LUFS,-20 LUFS,-21 LUFS,-22 LUFS,-23 LUFS,-24 LUFS (Broadcast)}Loudness Target
+slider7:0<0,13,1{Off,Universal,Acoustic,Classical,Country,EDM,Funk,Hip Hop,Jazz,Metal,Pop,R&B,Rock,Speech}Genre/Dynamics Target
+
+@init
+    slider5 = 0.25;
+    idx = 0;
+    buf_len = 100000;
+    fft_size = 4096;
+
+    update_interval_ms = 20; 
+    hop_size = (update_interval_ms * srate / 1000)|0; 
+    hop_size = min(hop_size, fft_size);
+    hop_cnt = 0;
+
+    fft_buf = 500000;
+    window = 600000;
+    fft_idx = 0;
+    i = 0;
+    loop(fft_size,
+        window[i] = 0.54 - 0.46 * cos(2 * $pi * i / (fft_size - 1));
+        i += 1;
+    );
+
+    last_m_visual = -144; 
+    last_s_visual = -144;
+    m_peak_hold = -144;
+    decay_speed = 0.1;
+
+    // === [LUFS engine init (based on Cockos Loudness Meter)] ===
+    LOUD_METER_UPDATE = 0.1;
+    m_win_cnt = 0.4 / LOUD_METER_UPDATE; // Momentary Window (400ms)
+    s_win_cnt = 3.0 / LOUD_METER_UPDATE; // Short-term Window (3000ms)
+
+    // Buffer allocation (using addresses from 700000 onward)
+    rms_buf = 800000;
+    lufs_buf = 810000;
+    lufs_buf2 = 820000;
+    peak_buf = 830000;   // Short-term (3s) true-peak sliding window, unweighted
+    rms_buf3 = 840000;   // Short-term (3s) unweighted RMS sliding window
+
+    // Variable init
+    win_pos = 0;
+    win_cnt = 0;
+    cur_buf = 0;
+    cur_buf2 = 0;
+
+    lufs_m_sum = 0; lufs_s_sum = 0;
+    lufs_i_sum = 0; lufs_i_cnt = 0;
+
+    lufs_m_db = -144; lufs_s_db = -144; lufs_i_db = -144;
+
+    // Variables for the PSR / Crest Factor engine (unweighted, 3s short-term)
+    cur_peak = 0;         // Max absolute value within the current 100ms block (true/sample peak)
+    lval2 = 0;             // Unweighted energy accumulated within the current 100ms block
+    rms_s_sum = 0;         // Unweighted short-term (3s) sliding energy sum
+    s_peak_db = -144;      // Short-term (3s) sliding true peak (dBFS)
+    s_rms_db = -144;       // Short-term (3s) sliding unweighted RMS (dBFS)
+
+    // Filter state variables
+    f1p1=f1p2=f2p1=f2p2=0;
+
+    // LUFS filter coefficient calculation function
+    function init_lufs_filters() (
+      db=3.999843853973347; f0=1681.974450955533; Q=0.7071752369554196;
+      K=tan($pi*f0/srate); Vh=pow(10, db/20); Vb=pow(Vh, 0.4996667741545416);
+      a0=1+K/Q+K*K;
+      f1a1=2*(K*K-1)/a0; f1a2=(1-K/Q+K*K)/a0;
+      f1b0=(Vh+Vb*K/Q+K*K)/a0; f1b1=2*(K*K-Vh)/a0; f1b2=(Vh-Vb*K/Q+K*K)/a0;
+
+      f0=38.13547087602444; Q=0.5003270373238773;
+      K=tan($pi*f0/srate);
+      f2a1=2*(K*K-1)/(1+K/Q+K*K); f2a2=(1-K/Q+K*K)/(1+K/Q+K*K);
+      f2b0=1; f2b1=-2; f2b2=1;
+    );
+    
+    init_lufs_filters();
+    
+    // Window length (in samples)
+    win_len = (LOUD_METER_UPDATE * srate)|0;
+    i_win_len = 1 / (m_win_cnt * win_len);
+    i_win_len2 = 1 / (s_win_cnt * win_len);
+
+    // Variable setup for FFT overlap
+    hop_size = 1024; 
+    hop_cnt = 0;
+    audio_buf = 900000;
+    audio_idx = 0;
+
+@slider
+    gmem[2] = slider1; // Gonio
+    gmem[6] = slider3; // Scope
+    gmem[7] = slider2; // Symbiote
+    gmem[8] = slider4; // Spectrum
+    gmem[3] = slider5; // Floor
+    gmem[25] = slider6; // Loudness Target
+    gmem[26] = slider7; // Genre/Dynamics Target
+
+@block
+    gmem[1] = srate;
+    abs(gmem[2] - slider1) > 0.00001 ? ( slider1 = gmem[2]; slider_automate(slider1); );
+    abs(gmem[6] - slider2) > 0.00001 ? ( slider2 = gmem[6]; slider_automate(slider3); );
+    abs(gmem[7] - slider3) > 0.00001 ? ( slider3 = gmem[7]; slider_automate(slider2); );
+    abs(gmem[8] - slider4) > 0.00001 ? ( slider4 = gmem[8]; slider_automate(slider4); );
+    abs(gmem[3] - slider5) > 0.00001 ? ( slider5 = gmem[3]; slider_automate(slider5); );
+    abs(gmem[25] - slider6) > 0.00001 ? ( slider6 = gmem[25]; slider_automate(slider6); );
+    abs(gmem[26] - slider7) > 0.00001 ? ( slider7 = gmem[26]; slider_automate(slider7); );
+
+    gmem[30] > 0 ? (
+        // 1. Reset the existing Integrated-related variables
+        lufs_i_sum = 0;
+        lufs_i_cnt = 0;
+        lufs_i_db = -144;
+
+        // 2. Reset the Momentary/Short-term/Peak values shown on screen
+        last_m_visual = -144;
+        last_s_visual = -144;
+        m_peak_hold = -144;
+
+        // 3. Reset the internal accumulated values
+        lufs_m_sum = 0;
+        lufs_s_sum = 0;
+        lval = 0;
+
+        // 3b. Reset the PSR / Crest Factor accumulators
+        rms_s_sum = 0;
+        lval2 = 0;
+        cur_peak = 0;
+        s_peak_db = -144;
+        s_rms_db = -144;
+
+        // 4. Fully reinitialize the sliding-window index and buffer arrays (very important)
+        win_pos = 0;
+        cur_buf = 0;
+        cur_buf2 = 0;
+        memset(lufs_buf, 0, m_win_cnt);  // Zero the Momentary buffer
+        memset(lufs_buf2, 0, s_win_cnt); // Zero the Short-term buffer
+        memset(peak_buf, 0, s_win_cnt);  // Zero the Short-term true-peak buffer
+        memset(rms_buf3, 0, s_win_cnt);  // Zero the Short-term unweighted RMS buffer
+
+        // 5. Clear the reset flag now that it's done
+        gmem[30] = 0;
+    );
+
+    // Recalculate filters when the sample rate changes
+    srate != last_sr ? (
+        init_lufs_filters();
+        win_len = (LOUD_METER_UPDATE * srate)|0;
+        i_win_len = 1 / (m_win_cnt * win_len);
+        i_win_len2 = 1 / (s_win_cnt * win_len);
+        last_sr = srate;
+    );
+
+@sample
+    in_l = spl0;
+    in_r = spl1;
+    in_mono = (in_l + in_r) * 0.5;
+
+    // Store waveform into gmem (for Gonio/Scope)
+    gmem[10000 + idx] = in_l;
+    gmem[110000 + idx] = in_r;
+    idx = (idx + 1) % buf_len;
+    gmem[0] = idx;
+
+    srate != last_sr ? (
+        hop_size = (update_interval_ms * srate / 1000)|0;
+        hop_size = min(hop_size, fft_size);
+        last_sr = srate;
+    );
+
+    audio_buf[audio_idx] = in_mono;
+    audio_idx = (audio_idx + 1) % fft_size; 
+    hop_cnt += 1;
+    hop_cnt >= hop_size ? 
+    (
+        hop_cnt = 0;
+
+        i = 0;
+        loop(fft_size,
+            read_pos = (audio_idx + i) % fft_size;
+            fft_buf[i * 2]     = audio_buf[read_pos] * window[i];
+            fft_buf[i * 2 + 1] = 0;
+            i += 1;
+        );
+
+        memcpy(700000, fft_buf, fft_size * 2);
+        fft(700000, fft_size);
+        fft_permute(700000, fft_size);
+        
+        k = 0;
+        loop(fft_size / 2,
+            re = 700000[k * 2]; 
+            im = 700000[k * 2 + 1];
+            gmem[300000 + k] = sqrt(re * re + im * im);
+            k += 1;
+        );
+    );
+    
+    // Left Filter
+    l_s1 = f1b0*in_l + f1b1*f1p1_L + f1b2*f1p2_L - f1a1*f1y1_L - f1a2*f1y2_L;
+    f1p2_L=f1p1_L; f1p1_L=in_l; f1y2_L=f1y1_L; f1y1_L=l_s1;
+    l_k = f2b0*l_s1 + f2b1*f2p1_L + f2b2*f2p2_L - f2a1*f2y1_L - f2a2*f2y2_L;
+    f2p2_L=f2p1_L; f2p1_L=l_s1; f2y2_L=f2y1_L; f2y1_L=l_k;
+
+    // Right Filter
+    r_s1 = f1b0*in_r + f1b1*f1p1_R + f1b2*f1p2_R - f1a1*f1y1_R - f1a2*f1y2_R;
+    f1p2_R=f1p1_R; f1p1_R=in_r; f1y2_R=f1y1_R; f1y1_R=r_s1;
+    r_k = f2b0*r_s1 + f2b1*f2p1_R + f2b2*f2p2_R - f2a1*f2y1_R - f2a2*f2y2_R;
+    f2p2_R=f2p1_R; f2p1_R=r_s1; f2y2_R=f2y1_R; f2y1_R=r_k;
+
+    // Power Sum (instantaneous energy)
+    curr_energy = l_k*l_k + r_k*r_k;
+
+    // Window accumulation (grouped into 100ms blocks)
+    lval += curr_energy;
+
+    // --- [For PSR / Crest Factor: unweighted Peak & RMS] ---
+    abs_l = abs(in_l); abs_r = abs(in_r);
+    abs_l > cur_peak ? cur_peak = abs_l;
+    abs_r > cur_peak ? cur_peak = abs_r;
+    curr_energy_uw = (in_l*in_l + in_r*in_r) * 0.5;
+    lval2 += curr_energy_uw;
+
+    (win_pos += 1) >= win_len ? (
+        win_pos = 0;
+        win_cnt += 1;
+        
+        // Circular Buffer Logic
+        prev_lval = lufs_buf[cur_buf];
+        lufs_buf[cur_buf] = lval;
+        prev_lval2 = lufs_buf2[cur_buf2];
+        lufs_buf2[cur_buf2] = lval;
+
+        // Update the PSR / Crest Factor buffers (same index as lufs_buf2, unweighted)
+        prev_lval3 = rms_buf3[cur_buf2];
+        rms_buf3[cur_buf2] = lval2;
+        peak_buf[cur_buf2] = cur_peak;
+
+        (cur_buf += 1) >= m_win_cnt ? cur_buf = 0;
+        (cur_buf2 += 1) >= s_win_cnt ? cur_buf2 = 0;
+
+        // Sliding Window Sum update
+        lufs_m_sum += (lval - prev_lval) * i_win_len;   // Momentary
+        lufs_s_sum += (lval - prev_lval2) * i_win_len2; // Short-term
+        rms_s_sum  += (lval2 - prev_lval3) * i_win_len2; // Short-term (unweighted)
+
+        lval = 0;
+        lval2 = 0;
+        cur_peak = 0;
+
+        // --- [3. Short-term (3s) True Peak: sliding window maximum] ---
+        s_peak = 0;
+        p_i = 0;
+        loop(s_win_cnt,
+            peak_buf[p_i] > s_peak ? s_peak = peak_buf[p_i];
+            p_i += 1;
+        );
+        s_peak_db = (s_peak > 0) ? (20 * log(s_peak) / log(10)) : -144;
+        gmem[23] = s_peak_db;
+
+        // --- [4. Short-term(3s) Unweighted RMS] ---
+        s_rms_db = (rms_s_sum > 0) ? (10 * log(rms_s_sum) / log(10)) : -144;
+        gmem[24] = s_rms_db;
+
+        
+        // --- [1. Momentary LUFS calculation and smoothing] ---
+        real_m_db = (lufs_m_sum > 0) ? (-0.691 + log(lufs_m_sum) * 10 / log(10)) : -144;
+        real_m_db > m_peak_hold ? m_peak_hold = real_m_db;
+
+        real_m_db > last_m_visual ? (
+            last_m_visual = real_m_db;
+        ) : (
+            last_m_visual -= decay_speed; 
+        );
+        gmem[20] = last_m_visual; // Send the smoothed value
+        gmem[22] = m_peak_hold;   // Peak-hold value
+
+        // --- [2. Short-term LUFS calculation and smoothing] ---
+        real_s_db = (lufs_s_sum > 0) ? (-0.691 + log(lufs_s_sum) * 10 / log(10)) : -144;
+
+        real_s_db > last_s_visual ? (
+            last_s_visual = real_s_db;
+        ) : (
+            last_s_visual -= decay_speed;
+        );
+        gmem[21] = last_s_visual;
+    );
+
+@gfx 120 30
+    gfx_set(0, 1, 0, 1);
+    gfx_x = 5; gfx_y = 10;
+    gfx_drawstr("DATA SERVER ACTIVE");
