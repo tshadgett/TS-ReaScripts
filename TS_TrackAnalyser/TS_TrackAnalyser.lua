@@ -2,10 +2,12 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 1.5.3
+-- @version 1.6.0
 -- @changelog
---  No changes. The version moves to 1.5.3 to match ChannelView, so the two
---  tools carry the same number.
+--  In step with ChannelView 1.6.0. TS_TrackProbe 1.5.0 also publishes each
+--  tapped plugin's own waveform and gain reduction for ChannelView's new
+--  gain-reduction trace. Nothing changes in Track Analyser itself; reopen
+--  projects to load the updated probe.
 -- @about
 --  # Track Analyser
 --

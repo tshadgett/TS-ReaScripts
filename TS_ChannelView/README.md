@@ -377,6 +377,29 @@ starting point.
 Nothing is written until you hit **Save** — and Save changes that plugin's
 panel everywhere, which the dialog says at the top.
 
+## Hardware looks
+
+Right-click a knob or fader ▸ **Style** to give it a hardware face, and the
+panel's **=** menu ▸ **Faceplate** to change the panel behind it.
+
+- **Knobs:** *Arc* (the theme's own, and the default), *Skirted*, *Pointer*
+  and *Trim pot*. **Faders:** *Flat* (the default), *Console* and *Rail*.
+- **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream and
+  Black. *Apply to every knob on this panel* copies one control's look to
+  the rest.
+- **Faceplates:** Theme, Charcoal, Gunmetal, Aluminium, Steel blue, Navy,
+  Cream, Racing green and Oxblood. Labels, values and scale ticks switch
+  ink to stay readable on each.
+
+Only *Theme* and the *Accent* cap follow Hue/Tint; every other faceplate and
+cap colour is fixed, the way hardware is. The menus stay open while you
+click through them, so you can try a few and watch the panel change.
+**View ▸ Faceplate texture** (on by default) gives the faceplates a gentle
+top-lit gradient and aluminium a brushed grain; Theme stays flat either way.
+
+Like everything else on a panel, the look is saved with the plugin's layout,
+so every instance of that plugin wears it.
+
 ## Controls
 
 | | |
@@ -1095,6 +1118,22 @@ probe copies. Under them is the change in level, output RMS minus input RMS.
 It works for any plugin between the probes, including ones that report their
 own reduction; those are tapped for their levels alone. Gain reduction and
 levels together share the limit of four plugins per track.
+
+### The gain-reduction trace
+
+**Click a gain-reduction meter** and it opens out into a trace beside it:
+the plugin's own output waveform, its input faintly behind, and its
+reduction drawn down from the top, the way Track Analyser draws the whole
+track, for just this plugin. Click the meter again to close it.
+Right-click the trace for its window: 1, 2, 4 or 8 beats (tempo-locked, so
+hits land in the same place every pass) or 1, 2 or 4 seconds. Stop the
+transport and the last pass stays on screen.
+
+The audio comes from the probes, so the track needs a TS_TrackProbe pair
+(1.5.0 or newer: reopen the project after updating). A measured plugin is
+already tapped; one that reports its own reduction is tapped for its levels
+while its trace is open, which counts toward the four taps a track can have.
+The waveform shown is one track's at a time, the selected one's.
 
 ### Wet
 

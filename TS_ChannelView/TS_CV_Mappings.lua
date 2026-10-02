@@ -18,8 +18,10 @@
 
       Ctl<n>   = <param index>|<type>|<bipolar>|<label>
       Alias<p> = <your name for parameter p>
-      Meter    = <1|0>|<full-scale dB>
+      Meter    = <1|0>|<full-scale dB>[|<trace window: 4b, 2s ...>]
       Live     = 1
+      Style<n> = <style>|<cap colour>
+      Plate    = <faceplate>
 
   <type> is knob | toggle | combo | fader | blank | divider | half_gap.
   "blank" is a deliberate empty cell, so a layout can leave a gap where a
@@ -60,6 +62,16 @@
   same for one slot. Either way the label and alias are kept, just not
   shown, so turning live off brings them back.
 
+  STYLE and PLATE are the hardware look (see "Hardware styles" in
+  TS_CV_Config.lua). Style<n> belongs to control n, the same index as its
+  Ctl<n> line, and holds the knob or fader style and the cap colour,
+  either of which may be empty for "the default". It is a line of its own
+  rather than more fields on Ctl<n> because the label is the LAST field of
+  that line and takes everything after it -- an older ChannelView reading
+  a fifth field would have shown it as part of the name. Plate is the
+  panel's faceplate. Both are names, not colours, so the palette they
+  name can be retuned without touching anyone's layouts.
+
   METER turns the gain-reduction strip on for this plugin and sets its
   full-scale range. It sits at the layout level rather than in the control
   list because a plugin has exactly one gain reduction, not one per
@@ -82,7 +94,9 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Alias<param>=<your name for that parameter, used everywhere>\n"
                 .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>\n"
                 .. "; Live=1: every control shows the plugin's current name for its\n"
-                .. ";   parameter (flags bit 8 does the same for one slot)"
+                .. ";   parameter (flags bit 8 does the same for one slot)\n"
+                .. "; Style<n>=<knob or fader style>|<cap colour>, for control n\n"
+                .. "; Plate=<faceplate>"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -103,9 +117,10 @@ local function parse_section(sect)
   local controls, aliases = {}, {}
   local meter = nil
   if sect.Meter then
-    local on, range = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)")
+    local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
     if on then
-      meter = { on = (on == "1"), range = tonumber(range) or C.MAX_GR_DB }
+      meter = { on = (on == "1"), range = tonumber(range) or C.MAX_GR_DB,
+                win = (win and win:match("^%d+[bs]$")) and win or nil }
     end
   end
   for k, v in pairs(sect) do
@@ -132,6 +147,7 @@ local function parse_section(sect)
       -- field four, present but allowed to be empty, so it never gets
       -- confused with the flags field regardless of which bits are set.
       local f = tonumber(bi) or 0
+      local sty, cap = (sect["Style" .. i] or ""):match("^%s*([%w_]*)%s*|?%s*([%w_]*)")
       controls[#controls + 1] = {
         param   = tonumber(p),
         type    = t,
@@ -140,6 +156,8 @@ local function parse_section(sect)
         no_rule = (f & 4) ~= 0,
         live    = (f & 8) ~= 0,
         label   = U.trim(label),
+        style   = (sty and sty ~= "") and sty or nil,
+        cap     = (cap and cap ~= "") and cap or nil,
       }
     end
     i = i + 1
@@ -147,7 +165,8 @@ local function parse_section(sect)
   return { controls = controls, aliases = aliases, meter = meter,
            live = (U.trim(sect.Live or "") == "1") or nil,
            measure = (U.trim(sect.Measure or "") == "1") or nil,
-           levels = (U.trim(sect.Levels or "") == "1") or nil }
+           levels = (U.trim(sect.Levels or "") == "1") or nil,
+           plate = C.plate_of(U.trim(sect.Plate or "")) and U.trim(sect.Plate) or nil }
 end
 
 local function serialize(layout)
@@ -155,9 +174,11 @@ local function serialize(layout)
   if layout.live then out.Live = "1" end
   if layout.measure then out.Measure = "1" end
   if layout.levels then out.Levels = "1" end
+  if layout.plate then out.Plate = layout.plate end
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
                               layout.meter.range or C.MAX_GR_DB)
+      .. (layout.meter.win and ("|" .. layout.meter.win) or "")
   end
   for p, name in pairs(layout.aliases or {}) do
     if U.trim(name) ~= "" then
@@ -174,6 +195,9 @@ local function serialize(layout)
       c.type or "knob",
       flags,
       (c.label or ""):gsub("[|\r\n]", " "))
+    if c.style or c.cap then
+      out["Style" .. (i - 1)] = (c.style or "") .. "|" .. (c.cap or "")
+    end
   end
   return out
 end
@@ -271,7 +295,7 @@ end
 function M.meter_of(layout)
   local m = layout and layout.meter
   if m and m.on then
-    return { on = true, range = m.range or C.MAX_GR_DB }
+    return { on = true, range = m.range or C.MAX_GR_DB, win = m.win }
   end
   return nil
 end
@@ -279,7 +303,8 @@ end
 function M.set_meter(layout, on, range)
   layout.meter = { on = on and true or false,
                    range = range or (layout.meter and layout.meter.range)
-                           or C.MAX_GR_DB }
+                           or C.MAX_GR_DB,
+                   win = layout.meter and layout.meter.win or nil }
 end
 
 -- ---------------------------------------------------------------------
@@ -359,14 +384,15 @@ end
 -- Deep copy, so the editor can work on a scratch layout and discard it.
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
-                measure = layout.measure, levels = layout.levels }
+                measure = layout.measure, levels = layout.levels,
+                plate = layout.plate }
   if layout.meter then
-    out.meter = { on = layout.meter.on, range = layout.meter.range }
+    out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
-                        label = c.label }
+                        label = c.label, style = c.style, cap = c.cap }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   return out

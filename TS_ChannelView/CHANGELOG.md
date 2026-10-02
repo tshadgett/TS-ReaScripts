@@ -1,5 +1,29 @@
 # ChannelView — changelog
 
+## 1.6.0 — hardware styles, and a gain-reduction trace
+
+- **Knobs and faders can wear a hardware look.** Right-click one ▸ *Style*:
+  *Skirted*, *Pointer* or *Trim pot* knobs beside the familiar *Arc*, and
+  *Console* or *Rail* fader caps beside *Flat*, each in one of nine cap
+  colours. *Apply to every knob on this panel* copies a look across.
+- **Faceplates.** The panel menu's *Faceplate* puts the panel on Charcoal,
+  Gunmetal, Aluminium, Steel blue, Navy, Cream, Racing green or Oxblood
+  instead of the theme's grey, with labels, values and scales inked to stay
+  readable on each. *View ▸ Faceplate texture*, on by default, adds a gentle
+  top-lit gradient, and brushed grain on aluminium.
+- Only the Theme faceplate and the Accent cap follow Hue/Tint; the rest are
+  fixed colours, like the hardware they're modelled on. Looks are saved with
+  the plugin's layout, so every instance shares them.
+- **Gain-reduction trace.** Click a plugin's gain-reduction meter and it
+  opens out into a trace: the plugin's own output waveform with its input
+  behind it, and its reduction drawn down from the top. Right-click it for
+  the window: 1 to 8 beats, tempo-locked, or 1 to 4 seconds. It freezes when
+  the transport stops. Needs TS_TrackProbe 1.5.0 (reopen the project after
+  updating); a plugin that reports its own reduction is tapped for its
+  levels while its trace is open.
+- The wet slider's **100%** button is gone; the slider does the same job.
+
+
 ## 1.5.3 — no measured reduction on ReaEQ
 
 - **ReaEQ can no longer be set to measure gain reduction.** An EQ has no

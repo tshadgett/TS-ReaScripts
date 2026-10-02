@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 1.4.0
+version: 1.5.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -36,8 +36,10 @@ author: Tim Shadgett
 //              is comparing against, for the masking overlay
 //   0x40000    Visualizer slots, + slot*2048
 //   0x4F000    tap header, 0x50000 tap traces (PER-PLUGIN GAIN REDUCTION)
+//   0x54000    per-tap waveforms, 0x5C000 their header (PER-PLUGIN WAVEFORMS)
 //   0x60000    measuring the taps' zero, + track index * 8 (THE ZERO POINT)
 //   73         tap heartbeat, bumped by any reader
+//   74         which track's post probe writes the per-tap waveforms
 //
 // INPUT AND OUTPUT LEVELS, PER TAP
 //   The same two copies a tap measures gain reduction from are also the
@@ -54,6 +56,22 @@ author: Tim Shadgett
 //   measurement. While the zero is being measured the levels fall away
 //   rather than show the test noise.
 //
+// PER-PLUGIN WAVEFORMS
+//   For ChannelView's expanded gain-reduction panel: each tapped plugin's
+//   output waveform (min and max), its input peak, and -- for a tap that
+//   measures it -- its gain reduction, one column every 4 ms, 2048 columns
+//   (8.2 s) per tap, advancing only while the transport runs. On a clock of their own, not the scope's: the scope
+//   only runs while Track Analyser publishes this track, and the panel
+//   must work without it.
+//   The region is shared by every probe in the project, so ONE track
+//   writes it: the one whose index + 1 ChannelView puts in gmem[74], and
+//   only while the tap heartbeat (73) is alive. 0 there and nobody writes.
+//     0x5C000  [0] newest column  [1] columns  [2] samples per column
+//              [3] sample rate    [4] writer (track index + 1)
+//              [5] columns written, ever (a reader spots a stalled writer)
+//     0x54000 + (tap * 2048 + column) * 4:
+//              [0] output min  [1] output max  [2] input peak  [3] GR dB
+
 // Control block (the panel writes these; 0 means "use my default"):
 //   64  epoch      bump to make both probes restart in step
 //   65  fft size   power of two, 256 .. 4096
@@ -596,6 +614,16 @@ out_pin:right
   tap_sr = 0; tap_sacc = 0; tap_on = 0; tap_live = 0;
   hb_last = -1; hb_age = 1000000000;
 
+  // per-plugin waveforms (PER-PLUGIN WAVEFORMS)
+  CTRL_TWTRK = 74;
+  TW_BASE = 0x54000;
+  TW_HDR  = 0x5C000;
+  TW_COLS = 2048;
+  TW_ACC  = 400000;               // per tap: min, max, input peak, GR -- clear of the taps
+  tw_on = 0; tw_cur = 0; tw_sacc = 0; tw_n = 0; tw_slice = 192;
+  t = 0; loop(TAP_MAX, TW_ACC[t * 4] = 1; TW_ACC[t * 4 + 1] = -1;
+                       TW_ACC[t * 4 + 2] = 0; TW_ACC[t * 4 + 3] = 0; t += 1; );
+
   // measuring the zero
   CAL_BASE   = 0x60000;           // + track index * CAL_STRIDE
   CAL_STRIDE = 8;
@@ -1049,6 +1077,25 @@ out_pin:right
   cal_slot = -1;
   cal_pl = get_host_placement();
   (cal_pl >= 0 && cal_pl < CAL_SLOTS) ? cal_slot = CAL_BASE + cal_pl * CAL_STRIDE;
+
+  // The per-tap waveforms: this track's post probe, while asked for.
+  tw_was = tw_on;
+  tw_on = tap_live && cal_pl >= 0 && gmem[CTRL_TWTRK] == cal_pl + 1;
+  // Columns only advance while the transport runs, so stopping leaves the
+  // last pass on screen to look at rather than scrolling it into silence.
+  tw_run = tw_on && (play_state & 1);
+  tw_on ? (
+    tw_slice = max(16, floor(srate * 0.004));
+    !tw_was ? (
+      tw_sacc = 0;
+      t = 0; loop(TAP_MAX, TW_ACC[t * 4] = 1; TW_ACC[t * 4 + 1] = -1;
+                           TW_ACC[t * 4 + 2] = 0; TW_ACC[t * 4 + 3] = 0; t += 1; );
+    );
+    gmem[TW_HDR + 1] = TW_COLS;
+    gmem[TW_HDR + 2] = tw_slice;
+    gmem[TW_HDR + 3] = srate;
+    gmem[TW_HDR + 4] = cal_pl + 1;
+  );
   cal_play = (play_state & 1) == 1;
 
   // A new routing: tap N may be another plugin now, so no zero is kept.
@@ -1441,6 +1488,49 @@ out_pin:right
     tap_sacc >= tap_slice ? (
       tap_sacc = 0;
       t = 0; loop(tap_cfg, tapIsGR(t) ? tapColumn(t); t += 1; );
+    );
+
+    // Per-plugin waveforms (PER-PLUGIN WAVEFORMS). Tap t's before pair is
+    // channels 2+4t/3+4t, its after pair 4+4t/5+4t, 0-based.
+    tw_run ? (
+      tw_t = 0;
+      loop(tap_cfg,
+        tw_a = TW_ACC + tw_t * 4;
+        cal_mute ? ( tw_o = 0; tw_i = 0; ) : (
+          tw_o = (spl(4 + tw_t * 4) + spl(5 + tw_t * 4)) * 0.5;
+          tw_i = max(abs(spl(2 + tw_t * 4)), abs(spl(3 + tw_t * 4)));
+        );
+        tw_o < tw_a[0] ? tw_a[0] = tw_o;
+        tw_o > tw_a[1] ? tw_a[1] = tw_o;
+        tw_i > tw_a[2] ? tw_a[2] = tw_i;
+        tapIsGR(tw_t) ? (
+          tw_g = (TAP_BASE + tw_t * TAP_STRIDE + TAP_S)[TS_LAST];
+          tw_g > tw_a[3] ? tw_a[3] = tw_g;
+        );
+        tw_t += 1;
+      );
+      tw_sacc += 1;
+      tw_sacc >= tw_slice ? (
+        tw_sacc = 0;
+        tw_t = 0;
+        loop(TAP_MAX,
+          tw_a = TW_ACC + tw_t * 4;
+          tw_b = TW_BASE + (tw_t * TW_COLS + tw_cur) * 4;
+          tw_t < tap_cfg ? (
+            gmem[tw_b] = (tw_a[0] <= tw_a[1] ? tw_a[0] : 0);
+            gmem[tw_b + 1] = (tw_a[0] <= tw_a[1] ? tw_a[1] : 0);
+            gmem[tw_b + 2] = tw_a[2];
+            gmem[tw_b + 3] = tw_a[3];
+          ) : (
+            gmem[tw_b] = 0; gmem[tw_b + 1] = 0; gmem[tw_b + 2] = 0; gmem[tw_b + 3] = 0;
+          );
+          tw_a[0] = 1; tw_a[1] = -1; tw_a[2] = 0; tw_a[3] = 0;
+          tw_t += 1;
+        );
+        gmem[TW_HDR] = tw_cur;
+        tw_cur += 1; tw_cur >= TW_COLS ? tw_cur = 0;
+        tw_n += 1; gmem[TW_HDR + 5] = tw_n;
+      );
     );
   );
 

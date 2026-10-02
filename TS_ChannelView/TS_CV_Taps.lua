@@ -50,6 +50,7 @@
 local U = require("TS_CV_Util")
 local M = require("TS_CV_Mappings")
 local RQ = require("TS_CV_ReaEQ")
+local St = require("TS_CV_State")
 
 local TP = {}
 
@@ -58,6 +59,7 @@ TP.MAX_TAPS   = 4
 TP.EXT_KEY    = "P_EXT:TS_CV_TAPS"
 TP.GMEM_NS    = "TS_TA_Mem"
 TP.HB_SLOT    = 73
+TP.WAVE_SLOT  = 74   -- which track's post probe writes the per-tap waveforms
 
 -- TS_TrackProbe slider indices, 0-based as TrackFX_GetParam sees them.
 TP.P_ROLE  = 0
@@ -305,6 +307,16 @@ local function wants_levels(tr, addr)
   return layout ~= nil and layout.levels == true
 end
 
+-- Whether this instance's gain-reduction meter is opened out into its trace
+-- (TS_CV_Panel): the trace needs the plugin's own audio, so a plugin that
+-- reports its reduction -- and so isn't otherwise tapped -- is tapped for
+-- its levels while it's open. Per instance, as the open state is.
+local function wants_wave(tr, addr)
+  if not St.is_gr_open(fx_guid(tr, addr)) then return false end
+  local layout = M.get(U.plugin_key(fx_name(tr, addr)))
+  return layout ~= nil and M.meter_of(layout) ~= nil
+end
+
 -- Whether a probe is new enough to measure levels (TS_TrackProbe 1.4.0+).
 -- A project keeps running the JSFX it compiled when it was opened, so after
 -- an update the old probe is still there until the project is reopened --
@@ -358,7 +370,8 @@ function TP.desired(tr)
     local gr = #r.taps < TP.MAX_TAPS and (container_count(tr, a) or 0) == 0
                and not is_probe(tr, a) and wants_measure(tr, a)
     local lvl = #r.taps < TP.MAX_TAPS and (container_count(tr, a) or 0) == 0
-                and not is_probe(tr, a) and wants_levels(tr, a)
+                and not is_probe(tr, a)
+                and (wants_levels(tr, a) or (not gr and wants_wave(tr, a)))
     if gr or lvl then
       local ok, pdc = reaper.TrackFX_GetNamedConfigParm(tr, a, "pdc")
       local writers, gs = {}, {}
@@ -707,6 +720,14 @@ local function tap_for(tr, guid, what)
   return i, rd
 end
 
+-- This plugin's tap, whatever it measures: its index (1..4) and the post
+-- probe's address, or nil. For the per-tap waveforms, which every tap has.
+function TP.tap_index(tr, guid)
+  local i, rd = tap_for(tr, guid, "")
+  if not i or not rd.probe then return nil end
+  return i, rd.probe
+end
+
 -- Whether this plugin's gain reduction is being measured by a tap.
 function TP.is_tapped(tr, guid)
   return tap_for(tr, guid, "g") ~= nil
@@ -850,10 +871,21 @@ local hb, attached = 0, false
 local rr, next_at = 0, {}
 local any_until = 0
 
+-- THE PER-TAP WAVEFORMS (PER-PLUGIN WAVEFORMS in TS_TrackProbe.jsfx) are
+-- written by one track's post probe at a time, the one named in
+-- gmem[WAVE_SLOT]. A panel showing a trace asks for its track each frame;
+-- TP.update names it, and stops naming it half a second after the last ask.
+local wave_tr, wave_at, wave_written = nil, -10, -1
+function TP.wave_track(tr)
+  wave_tr, wave_at = tr, reaper.time_precise()
+  if not TP.active then any_until = 0 end
+end
+
 -- Whether any plugin type is ticked for measuring, or any track still has
 -- routing to take out. Checked now and then, not every frame.
 local function anything_to_do()
   if M.any_measure() then return true end
+  if reaper.time_precise() - wave_at < 2 then return true end
   for i = 0, reaper.CountTracks(0) - 1 do
     local ok, s = reaper.GetSetMediaTrackInfo_String(reaper.GetTrack(0, i), TP.EXT_KEY, "", false)
     if ok and s ~= "" then return true end
@@ -875,6 +907,16 @@ function TP.update(now)
   if not attached then reaper.gmem_attach(TP.GMEM_NS); attached = true end
   hb = (hb + 1) % 1000000
   reaper.gmem_write(TP.HB_SLOT, hb)
+  do
+    local want = 0
+    if wave_tr and now - wave_at < 0.5 and reaper.ValidatePtr(wave_tr, "MediaTrack*") then
+      want = math.max(0, math.floor(reaper.GetMediaTrackInfo_Value(wave_tr, "IP_TRACKNUMBER")))
+    end
+    if want ~= wave_written then
+      reaper.gmem_write(TP.WAVE_SLOT, want)
+      wave_written = want
+    end
+  end
   poll_touched()
   local n = reaper.CountTracks(0)
   if n == 0 then return end

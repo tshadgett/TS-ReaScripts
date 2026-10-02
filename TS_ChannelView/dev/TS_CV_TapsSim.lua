@@ -46,12 +46,16 @@ local measure = { ["LA-2A"] = true, ["1176"] = true, ["Pro-C 2"] = true }
 package.loaded["TS_CV_Mappings"] = {
   get = function(key) return { measure = measure[key] or nil } end,
   any_measure = function() return next(measure) ~= nil end,
+  meter_of = function(l) return (l and l.meter and l.meter.on) and l.meter or nil end,
 }
 
 local function F(addr) return track.fx[addr + 1] end
 extstate = {}
 
+local projext = {}
 reaper = {
+  GetProjExtState = function(_, ns, k) return 0, projext[ns .. k] or "" end,
+  SetProjExtState = function(_, ns, k, v) projext[ns .. k] = v end,
   time_precise = function() return os.clock() end,
   CountTracks = function() return #project end,
   GetTrack = function(_, i) return project[i + 1] end,
@@ -272,6 +276,43 @@ levels = {}
 TP.invalidate()
 TP.sync(track)
 check("ReaEQ: measure alone, no tap",  F(5).params[TP.P_TAPN], 0)
+
+-- ---------------------------------------------------------------- the GR trace
+-- A gain-reduction meter opened out into its trace needs the plugin's own
+-- audio: a REPORTING plugin (Pro-C 2) is tapped for its levels while it's
+-- open, and lifted when it closes. A MEASURED one is already tapped, and
+-- opening its trace must not re-route it (a re-route forgets every zero).
+do
+  local St = require("TS_CV_State")
+  reset()
+  measure = { ["LA-2A"] = true }
+  local meters = { ["Pro-C 2"] = true, ["LA-2A"] = true }
+  package.loaded["TS_CV_Mappings"].get = function(key)
+    return { measure = measure[key] or nil,
+             meter = meters[key] and { on = true, range = 18 } or nil }
+  end
+  TP.invalidate(); St.clear_cache()
+  TP.sync(track)
+  check("trace: before, one tap",        F(5).params[TP.P_TAPN], 1)
+  St.set_gr_open("{C3}", true)
+  TP.invalidate()
+  check("trace: opening a reporter re-routes", TP.sync(track), true)
+  check("trace: it's tapped for levels", track.ext[TP.EXT_KEY]:match("{C3},[^|]*,(%a+)"), "l")
+  check("trace: its tap index",          (TP.tap_index(track, "{C3}")), 2)
+  local gen = F(5).params[TP.P_GEN]
+  St.set_gr_open("{C1}", true)
+  TP.invalidate()
+  check("trace: a measured one, no re-route", TP.sync(track), false)
+  check("  generation unchanged",        F(5).params[TP.P_GEN], gen)
+  St.set_gr_open("{C3}", false)
+  TP.invalidate()
+  check("trace: closing lifts the tap",  TP.sync(track) and F(5).params[TP.P_TAPN], 1)
+  meters["Pro-C 2"] = nil
+  St.set_gr_open("{C3}", true)
+  TP.invalidate()
+  check("trace: no meter, no tap",       TP.sync(track), false)
+  St.clear_cache()
+end
 
 print(fails == 0 and ("\nALL PASS (" .. checks .. ")") or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

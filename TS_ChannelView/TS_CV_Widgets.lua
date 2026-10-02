@@ -222,6 +222,162 @@ local function drag_value(ctx, value)
 end
 
 -- ---------------------------------------------------------------------
+-- knob faces
+-- ---------------------------------------------------------------------
+-- What a knob looks like, apart from what it does: W.knob draws one in its
+-- cell, the Style menu draws small ones as previews. `o` is
+--   style    "arc" (the theme's own), "skirted", "pointer" or "trim"
+--   cap      the cap colour, or nil for the style's usual one
+--   bipolar  fill from the centre (arc) / no difference (the others)
+--   dim      the plugin is bypassed: everything at reduced strength
+--   hot      hovered or being turned
+--
+-- The hardware faces are drawn in a design space of their own, scaled so
+-- the knob's BODY -- the skirt, the pointer's reach, the trim pot's rim --
+-- is the same size as the arc knob's: one set of numbers serves the
+-- 34-pixel panel knob and the preview in the menu alike. (Scaling the
+-- whole design, ticks included, into the arc's circle left the bodies a
+-- third smaller than the arc beside them.) The scale ticks sit just
+-- OUTSIDE the body, a fixed few pixels, in the air between the name and
+-- the knob; they use knob_ring, which a faceplate retints, so they read on
+-- cream as well as on charcoal.
+local FACE_BODY = { skirted = 38, pointer = 43, trim = 47 }  -- trim sits a size down
+
+-- The pointer knob's outline, in the design space: u along the pointer,
+-- v across it. Convex, so it fills as one polygon.
+local POINTER = { {45, 0}, {40, 3}, {30, 8}, {18, 12.5}, {5, 16}, {-10, 15.5},
+                  {-22, 11}, {-29, 5.5}, {-31, 0}, {-29, -5.5}, {-22, -11},
+                  {-10, -15.5}, {5, -16}, {18, -12.5}, {30, -8}, {40, -3} }
+local poly_buf, poly_ok = nil, true
+
+local function cap_ink(cap)
+  return U.is_light(cap) and 0x1d1e20ff or 0xf3f3f1ff
+end
+
+local function face_arc(dl, cx, cy, r, v, o)
+  local a = A_MIN + A_SPAN * v
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, r,
+    o.hot and C.COL.knob_body_hi or C.COL.knob_body, 32)
+  arc(dl, cx, cy, r - 2, A_MIN, A_MAX, C.COL.knob_track, 3.0)
+
+  local fill_col = o.cap or (o.bipolar and C.COL.knob_fill_bi or C.COL.knob_fill)
+  if o.dim then fill_col = U.with_alpha(fill_col, 0x66) end
+  if o.bipolar then
+    local a_mid = A_MIN + A_SPAN * 0.5
+    if a >= a_mid then arc(dl, cx, cy, r - 2, a_mid, a, fill_col, 3.0)
+    else               arc(dl, cx, cy, r - 2, a, a_mid, fill_col, 3.0) end
+    -- centre detent tick
+    local mx, my = cx + math.cos(a_mid) * (r - 5), cy + math.sin(a_mid) * (r - 5)
+    local mx2, my2 = cx + math.cos(a_mid) * (r + 1), cy + math.sin(a_mid) * (r + 1)
+    ImGui.DrawList_AddLine(dl, mx, my, mx2, my2, C.COL.knob_ring, 1.0)
+  else
+    arc(dl, cx, cy, r - 2, A_MIN, a, fill_col, 3.0)
+  end
+
+  -- pointer
+  local px1, py1 = cx + math.cos(a) * (r * 0.30), cy + math.sin(a) * (r * 0.30)
+  local px2, py2 = cx + math.cos(a) * (r - 5),    cy + math.sin(a) * (r - 5)
+  ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, C.COL.knob_pointer, 2.0)
+  ImGui.DrawList_AddCircle(dl, cx, cy, r, C.COL.knob_ring, 32, 1.0)
+end
+
+-- A cap colour by name (C.CAPS), or nil for none chosen. "accent" is the
+-- theme's own, so it follows Hue/Tint like the arc always has.
+function W.cap_col(key)
+  local c = key and C.CAP[key]
+  if not c then return nil end
+  return c.col or C.COL.knob_fill
+end
+
+function W.knob_face(dl, cx, cy, r, value, o)
+  o = o or {}
+  local v = math.max(0, math.min(1, value or 0))
+  local style = o.style
+  if not (style and C.KNOB_STYLE[style]) or style == "arc" then
+    return face_arc(dl, cx, cy, r, v, o)
+  end
+
+  local k   = r / FACE_BODY[style]
+  local a   = A_MIN + A_SPAN * v
+  local ca, sa = math.cos(a), math.sin(a)
+  local function at(rv) return cx + ca * rv * k, cy + sa * rv * k end
+  local function fade(col) return o.dim and U.with_alpha(col, 0x70) or col end
+  local cap  = fade(o.cap or C.CAP[C.KNOB_STYLE[style].cap].col)
+  local ink  = fade(cap_ink(o.cap or C.CAP[C.KNOB_STYLE[style].cap].col))
+  local tick = C.COL.knob_ring
+
+  local function scale()
+    local r0, r1 = r + 1.5, r + math.max(2.5, r * 0.26)
+    for i = 0, 10 do
+      local t = A_MIN + A_SPAN * i / 10
+      local c, s = math.cos(t), math.sin(t)
+      ImGui.DrawList_AddLine(dl, cx + c * r0, cy + s * r0,
+        cx + c * r1, cy + s * r1, tick, 1.0)
+    end
+  end
+
+  if style == "skirted" then
+    scale()
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, 37 * k, o.hot and 0x2a2c30ff or 0x18191bff, 32)
+    ImGui.DrawList_AddCircle(dl, cx, cy, 37 * k - 0.5, 0xffffff10, 32, 1.0)
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, 26 * k, cap, 32)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 7 * k, 11 * k, 0xffffff12, 24)
+    ImGui.DrawList_AddCircle(dl, cx, cy, 26 * k, 0x00000073, 32, 1.0)
+    local x1, y1 = at(26); local x2, y2 = at(36)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0xf3f3f1ff), math.max(1.5, 4 * k))
+    x1, y1 = at(8); x2, y2 = at(22)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, ink, math.max(1.5, 3.5 * k))
+
+  elseif style == "pointer" then
+    scale()
+    local drawn = false
+    if poly_ok and type(ImGui.DrawList_AddConvexPolyFilled) == "function"
+       and type(reaper.new_array) == "function" then
+      drawn = pcall(function()
+        poly_buf = poly_buf or reaper.new_array(#POINTER * 2)
+        for i, p in ipairs(POINTER) do
+          local u, w = p[1] * k, p[2] * k
+          poly_buf[i * 2 - 1] = cx + ca * u - sa * w
+          poly_buf[i * 2]     = cy + sa * u + ca * w
+        end
+        ImGui.DrawList_AddConvexPolyFilled(dl, poly_buf, cap)
+        if type(ImGui.DrawList_AddPolyline) == "function" then
+          ImGui.DrawList_AddPolyline(dl, poly_buf, 0x0000008c, ImGui.DrawFlags_Closed, 1.0)
+        end
+      end)
+      if not drawn then poly_ok = false end
+    end
+    if not drawn then
+      -- An older ReaImGui: a fat stroke stands in for the outline.
+      local x1, y1 = at(-28); local x2, y2 = at(42)
+      ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, cap, 20 * k)
+    end
+    local x1, y1 = at(17); local x2, y2 = at(40)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, ink, math.max(1.5, 3.5 * k))
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, 17 * k, cap, 24)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 8 * k, o.hot and 0xffffff40 or 0xffffff2a, 16)
+    ImGui.DrawList_AddCircle(dl, cx, cy, 17 * k, 0x00000080, 24, 1.0)
+
+  else -- trim
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, 40 * k, 0x232528ff, 32)
+    ImGui.DrawList_AddCircle(dl, cx, cy, 40 * k, 0x0e0f10ff, 32, 1.0)
+    for i = 0, 23 do
+      local t = a + i * TAU / 24
+      local c, s = math.cos(t), math.sin(t)
+      ImGui.DrawList_AddLine(dl, cx + c * 31 * k, cy + s * 31 * k,
+        cx + c * 37 * k, cy + s * 37 * k, 0x7b8087ff, 1.0)
+    end
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, 30 * k, fade(o.hot and 0xb3b8beff or 0xa1a6acff), 32)
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy - 7 * k, 21 * k, 0xffffff24, 32)
+    ImGui.DrawList_AddCircle(dl, cx, cy, 30 * k, 0x3c3f44ff, 32, 1.0)
+    local x1, y1 = at(-24); local x2, y2 = at(12)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, 0x2b2d31ff, math.max(1.5, 5 * k))
+    local dx, dy = at(21)
+    ImGui.DrawList_AddCircleFilled(dl, dx, dy, math.max(1.8, 4.5 * k), cap, 12)
+  end
+end
+
+-- ---------------------------------------------------------------------
 -- knob
 -- ---------------------------------------------------------------------
 
@@ -229,7 +385,8 @@ end
 -- label     : short name drawn above the knob
 -- value     : 0..1
 -- formatted : the plugin's own value string, drawn below
--- opts      : { bipolar, tooltip, dim, step_norm }
+-- opts      : { bipolar, tooltip, dim, step_norm, style, cap }
+--             style/cap: the face (see W.knob_face); nil is the theme's arc
 -- returns   : changed, value, act   (act = {right_click, double_click})
 --
 -- opts.step_norm -- one step in normalised units (see TS_CV_Panel.step_norm,
@@ -300,32 +457,9 @@ function W.knob(ctx, id, label, value, formatted, opts)
   -- name
   centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
 
-  -- body + track
-  ImGui.DrawList_AddCircleFilled(dl, cx, cy, r,
-    (hovered or active) and C.COL.knob_body_hi or C.COL.knob_body, 32)
-  arc(dl, cx, cy, r - 2, A_MIN, A_MAX, C.COL.knob_track, 3.0)
-
-  -- fill
-  local a = A_MIN + A_SPAN * math.max(0, math.min(1, value))
-  local fill_col = opts.bipolar and C.COL.knob_fill_bi or C.COL.knob_fill
-  if opts.dim then fill_col = U.with_alpha(fill_col, 0x66) end
-  if opts.bipolar then
-    local a_mid = A_MIN + A_SPAN * 0.5
-    if a >= a_mid then arc(dl, cx, cy, r - 2, a_mid, a, fill_col, 3.0)
-    else               arc(dl, cx, cy, r - 2, a, a_mid, fill_col, 3.0) end
-    -- centre detent tick
-    local mx, my = cx + math.cos(a_mid) * (r - 5), cy + math.sin(a_mid) * (r - 5)
-    local mx2, my2 = cx + math.cos(a_mid) * (r + 1), cy + math.sin(a_mid) * (r + 1)
-    ImGui.DrawList_AddLine(dl, mx, my, mx2, my2, C.COL.knob_ring, 1.0)
-  else
-    arc(dl, cx, cy, r - 2, A_MIN, a, fill_col, 3.0)
-  end
-
-  -- pointer
-  local px1, py1 = cx + math.cos(a) * (r * 0.30), cy + math.sin(a) * (r * 0.30)
-  local px2, py2 = cx + math.cos(a) * (r - 5),    cy + math.sin(a) * (r - 5)
-  ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, C.COL.knob_pointer, 2.0)
-  ImGui.DrawList_AddCircle(dl, cx, cy, r, C.COL.knob_ring, 32, 1.0)
+  W.knob_face(dl, cx, cy, r, value, {
+    style = opts.style, cap = opts.cap, bipolar = opts.bipolar,
+    dim = opts.dim, hot = hovered or active })
 
   -- value
   if C.SHOW_VALUES then
@@ -536,7 +670,41 @@ end
 -- moved, true once it has. Only used to tell a click from a drag.
 local fader_moved = {}
 
-function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost)
+-- `look` (optional) is a panel fader's hardware style: { style, cap } --
+-- "flat" (the default), "console" or "rail", and a cap colour or nil for
+-- the style's usual one. The channel strip's own fader passes none.
+local FADER_CAP = { console = 28, rail = 34 }
+local grad_ok = true
+local function vgrad(dl, x0, y0, x1, y1, top, bot)
+  if y1 - y0 < 0.5 then return end
+  if grad_ok and type(ImGui.DrawList_AddRectFilledMultiColor) == "function" then
+    if pcall(ImGui.DrawList_AddRectFilledMultiColor, dl, x0, y0, x1, y1, top, top, bot, bot) then
+      return
+    end
+    grad_ok = false
+  end
+  ImGui.DrawList_AddRectFilled(dl, x0, y0, x1, y1, bot)
+end
+local function hgrad(dl, x0, y0, x1, y1, left, right)
+  if x1 - x0 < 0.5 then return end
+  if grad_ok and type(ImGui.DrawList_AddRectFilledMultiColor) == "function" then
+    if pcall(ImGui.DrawList_AddRectFilledMultiColor, dl, x0, y0, x1, y1, left, right, right, left) then
+      return
+    end
+    grad_ok = false
+  end
+end
+W.vgrad = vgrad
+-- A rectangle with its own colour at each corner: upper-left, upper-right,
+-- lower-right, lower-left. Nothing on an older ReaImGui.
+function W.hgrad4(dl, x0, y0, x1, y1, ul, ur, br, bl)
+  if x1 - x0 < 0.5 or not grad_ok or type(ImGui.DrawList_AddRectFilledMultiColor) ~= "function" then return end
+  if not pcall(ImGui.DrawList_AddRectFilledMultiColor, dl, x0, y0, x1, y1, ul, ur, br, bl) then
+    grad_ok = false
+  end
+end
+
+function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   local dl = ImGui.GetWindowDrawList(ctx)
   ImGui.SetCursorScreenPos(ctx, x, y)
   ImGui.InvisibleButton(ctx, id, w, h,
@@ -584,7 +752,8 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost)
   end
 
   local cx = x + w * 0.5
-  local cap_h = C.FADER_CAP_H
+  local style = look and C.FADER_STYLE[look.style or ""] and look.style or "flat"
+  local cap_h = FADER_CAP[style] or C.FADER_CAP_H
   local trav  = h - 8 - cap_h
 
   -- A GHOST fader is drawn over something else -- the meter on a
@@ -604,10 +773,55 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost)
     ImGui.DrawList_AddLine(dl, cx + 3, uy, x + w, uy, C.COL.header_dim, 1.0)
   end
 
+  -- A styled fader gets a scale either side of its slot, like hardware.
+  if look then
+    for i = 0, 10 do
+      local ty = math.floor(y + 4 + cap_h * 0.5 + trav * i / 10) + 0.5
+      ImGui.DrawList_AddLine(dl, x, ty, x + 4, ty, C.COL.knob_ring, 1.0)
+      ImGui.DrawList_AddLine(dl, x + w - 4, ty, x + w, ty, C.COL.knob_ring, 1.0)
+    end
+  end
+
   -- cap
   local cy   = y + 4 + trav * (1 - math.max(0, math.min(1, value)))
   local lit  = (hovered or active)
-  local face = lit and C.COL.knob_pointer or C.COL.fader_cap
+
+  if style == "console" then
+    -- A dark moulded cap: lit from above, ridged for the fingers, with a
+    -- coloured line across its middle.
+    local ins = (look and look.cap) or C.CAP[C.FADER_STYLE.console.cap].col
+    ImGui.DrawList_AddRectFilled(dl, x, cy, x + w, cy + cap_h, 0x2a2d31ff, 3.0)
+    vgrad(dl, x + 1, cy + 1, x + w - 1, cy + cap_h * 0.5, 0x4c5056ff, 0x2a2d31ff)
+    vgrad(dl, x + 1, cy + cap_h * 0.5, x + w - 1, cy + cap_h - 1, 0x2a2d31ff, 0x1a1c1fff)
+    for _, f in ipairs({ -0.38, -0.26, 0.26, 0.38 }) do
+      local ry = math.floor(cy + cap_h * (0.5 + f)) + 0.5
+      ImGui.DrawList_AddLine(dl, x + 4, ry, x + w - 4, ry, 0x61656cff, 1.0)
+    end
+    ImGui.DrawList_AddRectFilled(dl, x, cy + cap_h * 0.5 - 1.5, x + w, cy + cap_h * 0.5 + 1.5, ins)
+    ImGui.DrawList_AddRect(dl, x, cy, x + w, cy + cap_h,
+      lit and C.COL.knob_pointer or 0x0b0c0dff, 3.0, 0, 1.0)
+    W.tip(ctx, id, label, hovered, active)
+    return changed, value, act
+  elseif style == "rail" then
+    -- A tall coloured cap, narrower than the slot's surround, rounded
+    -- like a cylinder by a light left edge and a dark right one.
+    local col = (look and look.cap) or C.CAP[C.FADER_STYLE.rail.cap].col
+    local x0, x1 = x + 3, x + w - 3
+    local mid = (x0 + x1) * 0.5
+    ImGui.DrawList_AddRectFilled(dl, x0, cy, x1, cy + cap_h, col, 4.0)
+    hgrad(dl, x0 + 1, cy + 2, mid, cy + cap_h - 2, 0xffffff4d, 0xffffff00)
+    hgrad(dl, mid, cy + 2, x1 - 1, cy + cap_h - 2, 0x00000000, 0x0000004d)
+    ImGui.DrawList_AddRectFilled(dl, x0, cy + cap_h * 0.5 - 1, x1, cy + cap_h * 0.5 + 1,
+      U.is_light(col) and 0x1d1e20ff or 0xf0f0eeff)
+    ImGui.DrawList_AddRect(dl, x0, cy, x1, cy + cap_h,
+      lit and C.COL.knob_pointer or 0x0000008c, 4.0, 0, 1.0)
+    W.tip(ctx, id, label, hovered, active)
+    return changed, value, act
+  end
+
+  local face
+  if look and look.cap then face = lit and U.lighten(look.cap, 0.18) or look.cap
+  else face = lit and C.COL.knob_pointer or C.COL.fader_cap end
   local a    = ghost and (lit and 0xcc or 0x70) or 0xff
   ImGui.DrawList_AddRectFilled(dl, x, cy, x + w, cy + cap_h,
     U.with_alpha(face, a), 2.5)
@@ -1112,6 +1326,8 @@ function W.gr_fill_col(est, dim)
   return dim and U.with_alpha(c, 0x8c) or c
 end
 
+-- Returns the bar's rectangle -- x, y, width, height -- so the panel's
+-- gain-reduction trace can sit flush against it and end where it ends.
 function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
   max_db = (max_db and max_db > 0) and max_db or 12
   est = est or false
@@ -1182,6 +1398,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
   end
 
   if pushed then ImGui.PopFont(ctx) end
+  return bx, y, w, bar_h
 end
 
 -- One of a plugin's level meters: its input (left of the panel) or its

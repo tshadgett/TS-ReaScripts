@@ -1,5 +1,14 @@
 # Track Analyser — changelog
 
+## 1.6.0 — in step with ChannelView
+
+- **TS_TrackProbe 1.5.0** publishes each tapped plugin's own waveform and
+  gain reduction, on a clock of its own, for ChannelView's new
+  gain-reduction trace. Only the track ChannelView asks for writes it, and
+  only while something is reading. Track Analyser itself is unchanged.
+  A project keeps the probe it was opened with, so reopen it to update.
+
+
 ## 1.5.3 — in step with ChannelView
 
 No changes here. ChannelView 1.5.3 stops ReaEQ being measured for gain

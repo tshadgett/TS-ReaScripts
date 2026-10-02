@@ -17,7 +17,9 @@ local S = {}
 
 local cache = {}   -- guid -> bool, so a frame doesn't hit ProjExtState per panel
 
-function S.clear_cache() cache = {} end
+local gr_open = {} -- guid -> bool: the gain-reduction meter opened out into its trace
+
+function S.clear_cache() cache = {}; gr_open = {} end
 
 -- `default` is what an instance nobody has touched shows as -- false
 -- (expanded) unless a caller says otherwise. Only a departure from the
@@ -47,6 +49,30 @@ end
 function S.toggle_collapsed(guid, default)
   default = default or false
   S.set_collapsed(guid, not S.is_collapsed(guid, default), default)
+end
+
+-- Whether this instance's gain-reduction meter is opened out into its
+-- trace (TS_CV_Panel). Per instance, like collapsed: you want to watch the
+-- vocal's compressor, not every copy of that compressor in the project.
+function S.is_gr_open(guid)
+  if guid == nil or guid == "" then return false end
+  local v = gr_open[guid]
+  if v ~= nil then return v end
+  local _, str = reaper.GetProjExtState(0, NS, "grview:" .. guid)
+  v = (str == "1")
+  gr_open[guid] = v
+  return v
+end
+
+function S.set_gr_open(guid, on)
+  if guid == nil or guid == "" then return end
+  on = on and true or false
+  gr_open[guid] = on
+  reaper.SetProjExtState(0, NS, "grview:" .. guid, on and "1" or "")
+end
+
+function S.toggle_gr_open(guid)
+  S.set_gr_open(guid, not S.is_gr_open(guid))
 end
 
 return S

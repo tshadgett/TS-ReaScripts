@@ -2928,6 +2928,122 @@ do
   check("io: input readout",        (W.io_readouts({ in_rms = -18, out_rms = -12 }, false, -6.04)), "-6.0")
 end
 
+-- Hardware styles: a control's style and cap colour, and the panel's
+-- faceplate, survive the ini and M.copy; a faceplate the palette doesn't
+-- know is dropped rather than kept as a name nothing can draw; and a
+-- layout with no styling writes no Style lines at all.
+do
+  local MP = require("TS_CV_Mappings")
+  local k = "StyledPlug"
+  MP.set(k, { plate = "aluminium", controls = {
+    { param = 0, type = "knob", label = "In", style = "skirted", cap = "red" },
+    { param = 1, type = "fader", label = "Out", style = "console" },
+    { param = 2, type = "knob", label = "Plain" },
+    { param = 3, type = "stepped", label = "Mode", cap = "blue" } } })
+  MP.save(); MP.reload()
+  local b = MP.get(k)
+  check("style: plate round-trips",        b.plate, "aluminium")
+  check("style: knob style",               b.controls[1].style, "skirted")
+  check("style: knob cap",                 b.controls[1].cap, "red")
+  check("style: fader style, no cap",      b.controls[2].style .. "/" .. tostring(b.controls[2].cap), "console/nil")
+  check("style: plain control untouched",  b.controls[3].style == nil and b.controls[3].cap == nil, true)
+  check("style: cap without a style",      tostring(b.controls[4].style) .. "/" .. b.controls[4].cap, "nil/blue")
+  local cp = MP.copy(b)
+  check("style: copy keeps them",          cp.plate .. cp.controls[1].style .. cp.controls[1].cap, "aluminiumskirtedred")
+  local f = io.open(MP.file_path(), "rb"); local txt = f and f:read("a") or ""; if f then f:close() end
+  check("style: Style2 not written",       txt:find("Style2=", 1, true) == nil, true)
+  check("style: Style0 written",           txt:find("Style0=skirted|red", 1, true) ~= nil, true)
+  MP.set(k, { plate = "nonsense", controls = {} })
+  MP.save(); MP.reload()
+  check("style: unknown plate dropped",    MP.get(k).plate, nil)
+  MP.remove(k); MP.save(); MP.reload()
+end
+
+-- The gain-reduction trace: its window is saved on the Meter line (and an
+-- older Meter line without one still reads), its labels, and the room it
+-- takes when open.
+do
+  local MP = require("TS_CV_Mappings")
+  local PP = require("TS_CV_Panel")
+  local CC = require("TS_CV_Config")
+  local k = "TracePlug"
+  MP.set(k, { meter = { on = true, range = 24, win = "2s" }, controls = {} })
+  MP.save(); MP.reload()
+  check("trace: window round-trips",     MP.get(k).meter.win, "2s")
+  check("trace: range beside it",        MP.get(k).meter.range, 24)
+  check("trace: meter_of carries it",    MP.meter_of(MP.get(k)).win, "2s")
+  local cp = MP.copy(MP.get(k)); MP.set_meter(cp, true)
+  check("trace: set_meter keeps it",     cp.meter.win, "2s")
+  MP.set(k, { meter = { on = true, range = 18 }, controls = {} })
+  MP.save(); MP.reload()
+  check("trace: no window, none saved",  MP.get(k).meter.win, nil)
+  MP.remove(k); MP.save(); MP.reload()
+  check("trace: label, beats",           PP.grv_label("4b"), "4 beats")
+  check("trace: label, one beat",        PP.grv_label("1b"), "1 beat")
+  check("trace: label, seconds",         PP.grv_label("2s"), "2 s")
+  check("trace: label, default",         PP.grv_label(nil), PP.grv_label(CC.GRV_DEFAULT))
+  local ctl = { { type = "knob" }, { type = "knob" } }
+  local w0 = PP.width(ctl, 300, false, true, "X", false, false)
+  local w1 = PP.width(ctl, 300, false, true, "X", false, true)
+  check("trace: open adds its width",    w1 - w0, CC.GRV_W + CC.PANEL_PAD)
+  check("trace: no meter, no trace",     PP.width(ctl, 300, false, false, "X", false, true),
+        PP.width(ctl, 300, false, false, "X", false, false))
+end
+
+-- Every knob face and fader style draws without error, bypassed or not,
+-- with and without ReaImGui's polygon call (an older ReaImGui has none:
+-- the pointer falls back to a stroke).
+do
+  local CC = require("TS_CV_Config")
+  local calls = {}
+  local function rec(name) return function() calls[name] = (calls[name] or 0) + 1 end end
+  local fake = setmetatable({
+    GetMouseDelta = function() return 0, 0 end,
+    GetMouseWheel = function() return 0 end,
+    GetMousePos = function() return 0, 0 end,
+    GetWindowDrawList = function() return "dl" end,
+    InvisibleButton = function() return false end,
+    DrawList_AddConvexPolyFilled = rec("poly"),
+    DrawList_AddPolyline = rec("polyline"),
+    DrawList_AddRectFilledMultiColor = rec("grad"),
+  }, { __index = function(_, key)
+    if key:find("Flags_") or key:find("MouseButton_") or key:find("MouseCursor_") then return 1 end
+    return rec(key)
+  end })
+  W.attach(fake)
+  local had = reaper.new_array
+  reaper.new_array = function(n) return {} end
+  local ok, err = pcall(function()
+    for _, st in ipairs(CC.KNOB_STYLES) do
+      for _, dim in ipairs({ false, true }) do
+        W.knob_face("dl", 50, 50, 17, 0.62, { style = st.key, dim = dim, hot = not dim,
+                    bipolar = dim, cap = W.cap_col(dim and "cream" or nil) })
+      end
+    end
+    W.knob_face("dl", 50, 50, 17, 0.3, { style = "nonsense" })
+  end)
+  check("faces: every knob style draws", ok and true or err, true)
+  check("faces: the pointer is a polygon", (calls.poly or 0) > 0, true)
+  reaper.new_array = nil
+  calls.poly = 0
+  ok = pcall(function()
+    W.knob_face("dl", 50, 50, 17, 0.62, { style = "pointer" })
+  end)
+  check("faces: pointer without new_array", ok and (calls.poly or 0) == 0, true)
+  reaper.new_array = had
+  ok, err = pcall(function()
+    for _, st in ipairs(CC.FADER_STYLES) do
+      W.fader(nil, "f" .. st.key, 0, 0, 26, 200, 0.7, "Lvl", 0.5, false,
+              { style = st.key, cap = W.cap_col("red") })
+    end
+    W.fader(nil, "fplain", 0, 0, 26, 200, 0.7, "Lvl", nil, false)
+  end)
+  check("faders: every style draws", ok and true or err, true)
+  check("faders: console and rail use gradients", (calls.grad or 0) >= 4, true)
+  check("cap colour: accent follows the theme", W.cap_col("accent"), CC.COL.knob_fill)
+  check("cap colour: unknown is none", W.cap_col("mauve"), nil)
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

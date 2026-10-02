@@ -184,6 +184,10 @@ C.COLLAPSED_W = 30
 C.METER_W     = 14        -- the bar
 C.METER_COL_W = 40        -- bar plus the room its readout needs
 C.IO_COL_W    = 28        -- a plugin's input or output meter, with its readout
+C.GRV_W       = 220       -- the gain-reduction trace, when a meter is opened out
+-- Its window: beats (tempo-locked, like Track Analyser's) or seconds.
+C.GRV_WINDOWS = { "1b", "2b", "4b", "8b", "1s", "2s", "4s" }
+C.GRV_DEFAULT = "4b"
 C.IO_BAR_W    = 8         -- the bar itself
 C.METER_FONT  = 10        -- point size for the readout
 -- "left" or "right" edge of the panel body. Right, so a panel reads the way
@@ -706,5 +710,97 @@ function C.format_col(fmt)
 end
 
 C.build_palette()
+
+-- ---------------------------------------------------------------------
+-- Hardware styles: faceplates, knobs and fader caps
+-- ---------------------------------------------------------------------
+-- A panel can wear a FACEPLATE in place of the theme's grey, and each knob
+-- or fader on it a STYLE and a CAP COLOUR, chosen by right-clicking. All
+-- three are saved with the plugin's layout (TS_CV_Mappings), so every
+-- instance of that plugin looks the same.
+--
+-- Only "theme" follows Hue/Tint. The other faceplates and every cap colour
+-- are fixed: a cream faceplate is cream and a red cap is red whatever the
+-- theme, the way hardware is -- "fixed colour for fixed purpose". Each
+-- faceplate carries its own inks (text, dim, tick) so the labels and
+-- scales on it stay readable, light on dark and dark on light.
+--
+-- PLATE_TEXTURE gives the faceplates a gentle top-lit gradient, and
+-- aluminium a fine brushed grain. A plate's `sheen` scales its gradient
+-- (1 when absent): near-black shows a lift toward white far more than a
+-- mid colour does, so Charcoal takes much less of one. Theme stays flat either way, so it still
+-- matches the rest of REAPER.
+C.PLATE_TEXTURE = true
+
+C.PLATES = {
+  { key = "theme",     label = "Theme" },
+  { key = "charcoal",  label = "Charcoal", sheen = 0.3,
+    bg = 0x19191bff, head = 0x111112ff, text = 0xd6d5d1ff, dim = 0x8f8e8aff,
+    tick = 0x606164ff, border = 0x2b2c2eff },
+  { key = "gunmetal",  label = "Gunmetal",
+    bg = 0x3d4044ff, head = 0x313337ff, text = 0xe2e3e4ff, dim = 0xa3a7abff,
+    tick = 0x8a8e93ff, border = 0x4b4f54ff },
+  { key = "aluminium", label = "Aluminium", brushed = true,
+    bg = 0xb9bcbfff, head = 0xa6a9adff, text = 0x1f2124ff, dim = 0x45494eff,
+    tick = 0x3c4044ff, border = 0x9ea2a6ff },
+  { key = "steel",     label = "Steel blue",
+    bg = 0x4a5866ff, head = 0x3a4652ff, text = 0xeef2f5ff, dim = 0xc0cad2ff,
+    tick = 0xcfd7deff, border = 0x5b6977ff },
+  { key = "navy",      label = "Navy",
+    bg = 0x1f2d4aff, head = 0x18233bff, text = 0xe5eaf3ff, dim = 0xa2b2caff,
+    tick = 0x8fa1bdff, border = 0x2b3b5dff },
+  { key = "cream",     label = "Cream",
+    bg = 0xd9d1bfff, head = 0xc8bfaaff, text = 0x2b2722ff, dim = 0x5c554bff,
+    tick = 0x4a443bff, border = 0xbcb29bff },
+  { key = "green",     label = "Racing green",
+    bg = 0x2e4639ff, head = 0x24382dff, text = 0xe6ebe4ff, dim = 0xadbbb0ff,
+    tick = 0xa6b6a9ff, border = 0x3c5748ff },
+  { key = "oxblood",   label = "Oxblood",
+    bg = 0x4a2428ff, head = 0x3a1c1fff, text = 0xf2e7e5ff, dim = 0xc8adabff,
+    tick = 0xbd9f9dff, border = 0x5b2f34ff },
+}
+
+-- Cap colours. "accent" has no colour of its own: it is the theme's accent,
+-- the one the arc knob has always used.
+C.CAPS = {
+  { key = "accent", label = "Accent" },
+  { key = "red",    label = "Red",    col = 0xc8453cff },
+  { key = "orange", label = "Orange", col = 0xd98a2fff },
+  { key = "yellow", label = "Yellow", col = 0xd9be45ff },
+  { key = "green",  label = "Green",  col = 0x4f9c62ff },
+  { key = "blue",   label = "Blue",   col = 0x3f74b8ff },
+  { key = "grey",   label = "Grey",   col = 0x8d9298ff },
+  { key = "cream",  label = "Cream",  col = 0xe6e0d2ff },
+  { key = "black",  label = "Black",  col = 0x26282bff },
+}
+
+-- The styles, each with the cap colour it wears until one is chosen. The
+-- first of each list is the default, and is what a control with no style
+-- saved is drawn as.
+C.KNOB_STYLES = {
+  { key = "arc",     label = "Arc",      cap = "accent" },
+  { key = "skirted", label = "Skirted",  cap = "black" },
+  { key = "pointer", label = "Pointer",  cap = "black" },
+  { key = "trim",    label = "Trim pot", cap = "grey" },
+}
+C.FADER_STYLES = {
+  { key = "flat",    label = "Flat" },
+  { key = "console", label = "Console",  cap = "cream" },
+  { key = "rail",    label = "Rail",     cap = "grey" },
+}
+
+C.PLATE, C.CAP, C.KNOB_STYLE, C.FADER_STYLE = {}, {}, {}, {}
+for _, p in ipairs(C.PLATES)       do C.PLATE[p.key] = p end
+for _, p in ipairs(C.CAPS)         do C.CAP[p.key] = p end
+for _, p in ipairs(C.KNOB_STYLES)  do C.KNOB_STYLE[p.key] = p end
+for _, p in ipairs(C.FADER_STYLES) do C.FADER_STYLE[p.key] = p end
+
+-- A faceplate by key, or nil for the theme's own (or anything unknown).
+function C.plate_of(key)
+  local p = key and C.PLATE[key]
+  if p and p.bg then return p end
+  return nil
+end
+
 
 return C

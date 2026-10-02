@@ -211,7 +211,7 @@ end
 -- don't have to pass one) and only ever matters for one thing: a ReaEQ
 -- panel isn't a grid at all, so none of the layout below applies to it --
 -- it gets a fixed canvas width instead. See TS_CV_EQPanel.lua.
-function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io)
+function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace)
   if collapsed then return C.COLLAPSED_W end
   if key and RQ.is_eq(key) then
     return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
@@ -228,6 +228,8 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io)
   -- The meter is a strip, not a column: it adds its own narrow width
   -- rather than pushing the panel out by a whole CELL_W.
   if has_meter then w = w + C.METER_COL_W + C.PANEL_PAD end
+  -- ...and opened out into its trace, the trace beside it.
+  if has_meter and has_trace then w = w + C.GRV_W + C.PANEL_PAD end
   if has_io then w = w + (C.IO_COL_W + C.PANEL_PAD) * 2 end
   return w
 end
@@ -289,7 +291,8 @@ local scan_budget = 0
 -- frame, keyed by the control's ImGui id.
 local pending_open = {}
 
-function P.begin_frame() scan_budget = C.SCAN_BUDGET end
+local frame_no = 0   -- the gain-reduction trace reads the probe once a frame
+function P.begin_frame() scan_budget = C.SCAN_BUDGET; frame_no = frame_no + 1 end
 
 -- Returns a list of choices, or:
 --   nil    not scanned yet, but scannable -- ask again, or force it
@@ -378,7 +381,324 @@ end
 
 -- Draws the gain-reduction strip and returns the width it consumed,
 -- including its gap, so the control grid can start beside it.
-local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter)
+-- ---------------------------------------------------------------------
+-- the gain-reduction trace
+-- ---------------------------------------------------------------------
+-- Click a gain-reduction meter and it opens out into a trace beside it:
+-- this plugin's own output waveform, its input faintly behind, and its
+-- reduction drawn down from the top -- the same picture Track Analyser
+-- draws for the whole track, for just this plugin.
+--
+-- The audio comes from the plugin's probe tap (PER-PLUGIN WAVEFORMS in
+-- TS_TrackProbe.jsfx): columns of output min/max, input peak and, for a
+-- measured plugin, its reduction, 4 ms apart. A plugin that reports its
+-- own reduction is tapped for its levels while open (TS_CV_Taps), and its
+-- reports are laid onto the same column clock here, late by the latency
+-- between it and the post probe so they sit on the audio they belong to.
+local TW_BASE, TW_HDR, TW_COLS = 0x54000, 0x5C000, 2048
+-- The panel's background colour at a height, for fading the trace into it:
+-- set up by the faceplate code further down (see bg_at there).
+local bg_at
+
+-- A mirror of the probe's columns. Only the columns written since the last
+-- frame are read, so an open trace costs a handful of reads a frame, not
+-- the 8000 a full window would.
+local tw = { n = -1, cur = 0, writer = -1, moved = -10, live = false, frame = -1 }
+for t = 1, 4 do tw[t] = { mn = {}, mx = {}, ip = {}, gr = {} } end
+
+local function tw_sync()
+  if tw.frame == frame_no then return tw.live end
+  tw.frame = frame_no
+  local rd = reaper.gmem_read
+  local n      = rd(TW_HDR + 5) or 0
+  local cur    = math.floor(rd(TW_HDR) or 0) % TW_COLS
+  local writer = rd(TW_HDR + 4) or 0
+  tw.slice, tw.sr = rd(TW_HDR + 2) or 0, rd(TW_HDR + 3) or 0
+  local now = reaper.time_precise()
+  if n ~= tw.n then tw.moved = now end
+  -- Live while the columns move -- or, with the transport stopped (the
+  -- probe stops advancing them then), while there's a pass to look at.
+  local stopped = (reaper.GetPlayState() & 1) == 0
+  tw.live = tw.slice > 0 and tw.sr > 0
+            and ((now - tw.moved) < 0.5 or (stopped and n > 0))
+  if n ~= tw.n or writer ~= tw.writer then
+    local todo = n - tw.n
+    if tw.n < 0 or writer ~= tw.writer or todo < 0 or todo >= TW_COLS then todo = TW_COLS end
+    for k = todo - 1, 0, -1 do
+      local c = (cur - k) % TW_COLS
+      for t = 1, 4 do
+        local b, d = TW_BASE + ((t - 1) * TW_COLS + c) * 4, tw[t]
+        d.mn[c], d.mx[c], d.ip[c], d.gr[c] = rd(b), rd(b + 1), rd(b + 2), rd(b + 3)
+      end
+    end
+    tw.n, tw.cur, tw.writer = n, cur, writer
+  end
+  return tw.live
+end
+
+-- Reported reduction, laid onto the probe's column clock, per instance.
+local reps = {}
+local function rep_record(guid, c, v)
+  local h = reps[guid]
+  if not h then h = { gr = {} }; reps[guid] = h end
+  if h.c then
+    local span = (c - h.c) % TW_COLS
+    if span == 0 then
+      h.gr[c] = math.max(h.gr[c] or 0, v)
+    elseif span < 256 then
+      for k = 1, span do h.gr[(h.c + k) % TW_COLS] = h.v + (v - h.v) * k / span end
+    else
+      h.gr[c] = v
+    end
+  else
+    h.gr[c] = v
+  end
+  h.c, h.v = c, v
+end
+
+-- Samples of latency between a plugin and the post probe: the plugins after
+-- it (its tapped copies pass through them), and for a reporting plugin its
+-- own as well, since it reports on audio it has yet to put out. Top-level
+-- chains only; anything else counts as none. Re-read once a second.
+local lat_cache = {}
+local function latency_to_probe(track, fx, probe, own)
+  local key = fx.guid .. (own and "+" or "")
+  local e = lat_cache[key]
+  local now = reaper.time_precise()
+  if e and now - e.t < 1 then return e.v end
+  local function pdc(a)
+    if not reaper.TrackFX_GetEnabled(track, a) or reaper.TrackFX_GetOffline(track, a) then return 0 end
+    local ok, v = reaper.TrackFX_GetNamedConfigParm(track, a, "pdc")
+    local n = ok and tonumber(v)
+    return (n and n > 0) and n or 0
+  end
+  local total = 0
+  if type(fx.addr) == "number" and type(probe) == "number" and fx.addr < probe
+     and fx.addr < 0x2000000 and probe < 0x2000000 then
+    for a = fx.addr + 1, probe - 1 do total = total + pdc(a) end
+    if own then total = total + pdc(fx.addr) end
+  end
+  lat_cache[key] = { t = now, v = total }
+  return total
+end
+
+-- Beat lock, as Track Analyser's: armed once from the play position, then
+-- stepped a whole beat at a time on the probe's own column count, so hits
+-- land in the same place every pass instead of crawling across.
+local locks = {}
+
+local function win_parts(win)
+  local n, u = tostring(win or ""):match("^(%d+)([bs])$")
+  if not n then n, u = C.GRV_DEFAULT:match("^(%d+)([bs])$") end
+  return tonumber(n), u
+end
+
+function P.grv_label(win)
+  local n, u = win_parts(win)
+  if u == "b" then return n == 1 and "1 beat" or (n .. " beats") end
+  return n .. " s"
+end
+
+local function trace_msg(ctx, dl, x, y, w, h, text, text2)
+  W.push_small(ctx)
+  local tw_, th = ImGui.CalcTextSize(ctx, text)
+  local ty = y + (h - th * (text2 and 2 or 1)) * 0.5
+  ImGui.DrawList_AddText(dl, x + (w - tw_) * 0.5, ty, C.COL.header_dim, text)
+  if text2 then
+    local tw2 = ImGui.CalcTextSize(ctx, text2)
+    ImGui.DrawList_AddText(dl, x + (w - tw2) * 0.5, ty + th, C.COL.header_dim, text2)
+  end
+  W.pop_small(ctx)
+end
+local waiting = {}   -- guid -> when the trace started waiting for the probe
+
+-- The far edge -- the one away from the meter -- fades into the panel,
+-- so the trace reads as coming out of the bar rather than as a box beside
+-- it. `fade` is that edge's side: "left" or "right".
+-- Two stages, so it eases out rather than stopping at a hard line: the
+-- outer part goes from solid panel to half, the inner from half to clear.
+local FADE_W = 110
+local function trace_fade(dl, x, y, w, h, side)
+  local fw = math.min(FADE_W, w * 0.5)
+  local f1 = fw * 0.4                       -- the solid-to-half stage
+  local top, bot = bg_at(y), bg_at(y + h)
+  local t0, b0 = U.with_alpha(top, 0), U.with_alpha(bot, 0)
+  local th, bh = U.with_alpha(top, 0x80), U.with_alpha(bot, 0x80)
+  if side == "right" then
+    W.hgrad4(dl, x + w - fw, y - 1, x + w - f1, y + h + 1, t0, th, bh, b0)
+    W.hgrad4(dl, x + w - f1, y - 1, x + w + 1, y + h + 1, th, top, bot, bh)
+  else
+    W.hgrad4(dl, x - 1, y - 1, x + f1, y + h + 1, top, th, bh, bot)
+    W.hgrad4(dl, x + f1, y - 1, x + fw, y + h + 1, th, t0, b0, bh)
+  end
+end
+
+local function draw_trace(ctx, dl, x, y, w, h, track, fx, meter, range, est, gr, req, fade)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, 0x00000038, 2.0)
+  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, U.with_alpha(C.COL.knob_ring, 0x90), 2.0, 0, 1.0)
+  local function done() trace_fade(dl, x, y, w, h, fade) end
+
+  -- the window menu, and a way to close the trace that isn't the meter
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.InvisibleButton(ctx, "grv##" .. fx.guid, w, h, ImGui.ButtonFlags_MouseButtonRight)
+  local pop = "grvwin##" .. fx.guid
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then ImGui.OpenPopup(ctx, pop) end
+  W.tip(ctx, "grv##" .. fx.guid, "Right-click: window", ImGui.IsItemHovered(ctx), false)
+  if ImGui.BeginPopup(ctx, pop) then
+    ImGui.TextDisabled(ctx, "Window")
+    local cur = meter.win or C.GRV_DEFAULT
+    for _, wv in ipairs(C.GRV_WINDOWS) do
+      if ImGui.MenuItem(ctx, P.grv_label(wv), nil, wv == cur) then req.grv_window = wv end
+    end
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Close the trace") then
+      St.set_gr_open(fx.guid, false); TP.invalidate()
+    end
+    ImGui.EndPopup(ctx)
+  end
+
+  TP.wave_track(track)
+  local ti, probe = TP.tap_index(track, fx.guid)
+  if not ti then
+    trace_msg(ctx, dl, x, y, w, h, TP.has_probes(track) and "connecting\u{2026}"
+                                                    or "needs TS_TrackProbe")
+    return done()
+  end
+  local live = tw_sync()
+  local mine = math.floor(reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER"))
+  if not live or tw.writer ~= mine then
+    -- A project keeps running the probe it loaded with, so after an update
+    -- the old one -- which writes no waveforms -- is there until reopened.
+    local since = waiting[fx.guid]
+    if not since then since = reaper.time_precise(); waiting[fx.guid] = since end
+    if reaper.time_precise() - since > 3 then
+      trace_msg(ctx, dl, x, y, w, h, "no waveform from the probe", "reopen the project to update it")
+    else
+      trace_msg(ctx, dl, x, y, w, h, "waiting for the probe\u{2026}")
+    end
+    return done()
+  end
+  waiting[fx.guid] = nil
+
+  -- the window, in columns
+  local cps = tw.sr / tw.slice
+  local n, unit = win_parts(meter.win)
+  local beat
+  local secs = n
+  if unit == "b" then
+    local bpm = reaper.Master_GetTempo()
+    beat = 60 / ((bpm and bpm > 1) and bpm or 120)
+    secs = n * beat
+  end
+  local total = math.max(8, math.min(TW_COLS - 16, math.floor(secs * cps)))
+  local newest = tw.cur
+  if beat then
+    local L = locks[fx.guid]
+    if not L then L = {}; locks[fx.guid] = L end
+    local step = beat * cps
+    if L.step ~= step or not L.anchor then
+      L.step, L.anchor = step, tw.cur
+      if (reaper.GetPlayState() & 1) == 1 then
+        local qn = reaper.TimeMap2_timeToQN(0, reaper.GetPlayPosition())
+        L.anchor = tw.cur - (qn - math.floor(qn)) * step
+      end
+    end
+    local guard = 0
+    while ((tw.cur - L.anchor) % TW_COLS) >= step and guard < 256 do
+      L.anchor = L.anchor + step
+      guard = guard + 1
+    end
+    L.anchor = L.anchor % TW_COLS
+    newest = math.floor(L.anchor) % TW_COLS
+  else
+    locks[fx.guid] = nil
+  end
+  local oldest = (newest - total) % TW_COLS
+
+  -- a reporting plugin's reports, laid onto the clock
+  if not est then
+    local lag = latency_to_probe(track, fx, probe, true)
+    rep_record(fx.guid, (tw.cur + math.floor(lag / tw.slice + 0.5)) % TW_COLS, gr or 0)
+  end
+  local d = tw[ti]
+  local gsrc = est and d.gr or (reps[fx.guid] and reps[fx.guid].gr) or {}
+
+  -- scale: the loudest moment in view, held so a quiet bar doesn't pump
+  local pk = 0
+  for k = 0, total - 1 do
+    local c = (oldest + k) % TW_COLS
+    local a = math.max(-(d.mn[c] or 0), d.mx[c] or 0, d.ip[c] or 0)
+    if a > pk then pk = a end
+  end
+  local sc = locks["s" .. fx.guid] or 0.05
+  sc = math.max(pk, sc * 0.985, 0.02)
+  locks["s" .. fx.guid] = sc
+
+  local ix0, ix1 = x + 2, x + w - 2
+  local mid, hh = y + h * 0.5, (h - 6) * 0.5
+  local top, gh = y + 2, h - 4
+  local pw = math.max(1, math.floor(ix1 - ix0))
+
+  -- beat lines
+  if beat and n > 1 then
+    for b = 1, n - 1 do
+      local bx = math.floor(ix0 + pw * b / n) + 0.5
+      ImGui.DrawList_AddLine(dl, bx, y + 1, bx, y + h - 1, U.with_alpha(C.COL.knob_ring, 0x60), 1.0)
+    end
+  end
+  ImGui.DrawList_AddLine(dl, ix0, mid, ix1, mid, U.with_alpha(C.COL.knob_ring, 0x50), 1.0)
+
+  local in_col  = U.with_alpha(C.COL.header_dim, 0x45)
+  local out_col = U.with_alpha(C.COL.value, 0xa8)
+  local gr_col  = W.gr_fill_col(est)
+  local fill    = U.with_alpha(gr_col, 0x24)
+  local gx, gy, gn = {}, {}, 0
+  for px = 0, pw - 1 do
+    local k0 = math.floor(px / pw * total)
+    local k1 = math.max(k0, math.floor((px + 1) / pw * total) - 1)
+    local mn, mx, ip, g = 0, 0, 0, nil
+    for k = k0, k1 do
+      local c = (oldest + k) % TW_COLS
+      local a, b, i = d.mn[c] or 0, d.mx[c] or 0, d.ip[c] or 0
+      if a < mn then mn = a end
+      if b > mx then mx = b end
+      if i > ip then ip = i end
+      local v = gsrc[c]
+      if v and (not g or v > g) then g = v end
+    end
+    local xx = ix0 + px + 0.5
+    if ip > 0 then
+      local e = math.min(1, ip / sc) * hh
+      ImGui.DrawList_AddLine(dl, xx, mid - e, xx, mid + e, in_col, 1.0)
+    end
+    local y0 = mid - math.min(1, mx / sc) * hh
+    local y1 = mid - math.max(-1, mn / sc) * hh
+    if y1 - y0 < 1 then y0, y1 = mid - 0.5, mid + 0.5 end
+    ImGui.DrawList_AddLine(dl, xx, y0, xx, y1, out_col, 1.0)
+    if g then
+      local gyy = top + math.min(1, math.max(0, g) / range) * gh
+      if gyy > top + 0.5 then ImGui.DrawList_AddLine(dl, xx, top, xx, gyy, fill, 1.0) end
+      gn = gn + 1; gx[gn], gy[gn] = xx, gyy
+    end
+  end
+  for i = 1, gn - 1 do
+    ImGui.DrawList_AddLine(dl, gx[i], gy[i], gx[i + 1], gy[i + 1], gr_col, 1.6)
+  end
+
+  done()
+  -- the window, in the corner by the meter, clear of the fade
+  W.push_small(ctx)
+  local lbl = P.grv_label(meter.win)
+  local lw = ImGui.CalcTextSize(ctx, lbl)
+  local lx = (fade == "right") and (x + 4) or (x + w - lw - 4)
+  ImGui.DrawList_AddText(dl, lx, y + h - 13, C.COL.header_dim, lbl)
+  W.pop_small(ctx)
+end
+
+-- The gain-reduction meter, and -- when it's opened out -- its trace to
+-- the left of it, `tw` wide. Returns the width used, 0 when there's no
+-- reading to show.
+local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter, tw_, req)
   local gr = T.gain_reduction(track, fx.addr)
   if not gr then return 0 end
   local now = reaper.time_precise()
@@ -388,15 +708,31 @@ local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter)
   local peak, range = W.gr_state(fx.guid, gr, now, meter.range)
   local est = T.gr_estimated(track, fx.addr, fx.guid)
   local zst = est and TP.cal_status(track, fx.guid) or nil
-  W.gr_meter(ctx, dl, x, y, w, h, gr, peak, range, est, zst == 0)
+  local bx, by, bw, bh = W.gr_meter(ctx, dl, x, y, w, h, gr, peak, range, est, zst == 0)
+  -- The trace sits flush against the bar and ends where the bar ends, over
+  -- the room P.width set aside beside the meter's column.
+  if tw_ and tw_ > 0 and bx then
+    if C.METER_SIDE == "right" then
+      local tx0 = x - C.PANEL_PAD - tw_
+      draw_trace(ctx, dl, tx0, by, bx - tx0, bh, track, fx, meter, range, est, gr, req, "left")
+    else
+      local tx1 = x + w + C.PANEL_PAD + tw_
+      draw_trace(ctx, dl, bx + bw, by, tx1 - (bx + bw), bh, track, fx, meter, range, est, gr, req, "right")
+    end
+  end
 
   ImGui.SetCursorScreenPos(ctx, x, y)
   ImGui.InvisibleButton(ctx, "gr##" .. fx.guid, w, h,
-    ImGui.ButtonFlags_MouseButtonRight)
+    ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+    St.toggle_gr_open(fx.guid)
+    TP.invalidate()
+  end
   W.tip(ctx, "gr##" .. fx.guid,
-    ("Gain reduction%s\n%.2f dB now, peak %.2f\nscale 0 to %g dB%s")
+    ("Gain reduction%s\n%.2f dB now, peak %.2f\nscale 0 to %g dB%s\n%s")
     :format(est and " (measured, estimated)" or "", gr, peak, range,
-            (range > (meter.range or 0)) and "  (expanded)" or "")
+            (range > (meter.range or 0)) and "  (expanded)" or "",
+            St.is_gr_open(fx.guid) and "Click to close the trace" or "Click for a trace")
     .. (est and ("\n\nMeasured by the track's TS_TrackProbe from the audio in\n" ..
                  "and out.\n" .. TP.cal_text(TP.cal_status(track, fx.guid))) or ""),
     ImGui.IsItemHovered(ctx), false)
@@ -585,10 +921,6 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
       ImGui.SetNextItemWidth(ctx, 160)
       local ch, nv = ImGui.SliderDouble(ctx, "##wet", wet_v * 100, 0, 100, "%.0f%%")
       if ch then reaper.TrackFX_SetParam(track, fx.addr, wet_p, nv / 100) end
-      ImGui.SameLine(ctx)
-      if ImGui.SmallButton(ctx, "100%") then
-        reaper.TrackFX_SetParam(track, fx.addr, wet_p, 1)
-      end
       ImGui.EndPopup(ctx)
     end
   end
@@ -712,9 +1044,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     local mx = (C.METER_SIDE == "right")
       and (grid_x0 + grid_w - C.METER_COL_W)
       or  grid_x0
+    local trace = St.is_gr_open(fx.guid) and C.GRV_W or 0
     local used = draw_meter(ctx, dl, mx, y + C.PANEL_PAD, C.METER_COL_W,
-                            h - C.PANEL_PAD * 2, track, fx, meter)
+                            h - C.PANEL_PAD * 2, track, fx, meter, trace, req)
     if used > 0 then
+      -- the trace, when open, sits on the grid's side of the meter
+      if trace > 0 then used = used + trace + C.PANEL_PAD end
       grid_w = grid_w - used - C.PANEL_PAD
       if C.METER_SIDE ~= "right" then grid_x0 = grid_x0 + used + C.PANEL_PAD end
     end
@@ -858,7 +1193,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         local fx0 = gx0 + item.x + (C.CELL_W - C.FADER_W) * 0.5
         local fy0 = gy0 + item.y
         changed, nv, act = W.fader(ctx, id, fx0, fy0, C.FADER_W, lay.height,
-          value, label .. "   " .. shown, ctl.bipolar and 0.5 or nil, false)
+          value, label .. "   " .. shown, ctl.bipolar and 0.5 or nil, false,
+          (ctl.style or ctl.cap) and { style = ctl.style, cap = W.cap_col(ctl.cap) } or nil)
       elseif ctl.type == "stepped" then
         -- Same dial as a plain knob, just quantised to the parameter's own
         -- step grid -- see W.knob's own header for why this needs nothing
@@ -868,10 +1204,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- control type, choice name included.
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            step_norm = step_norm(track, fx.addr, p, key) })
+            step_norm = step_norm(track, fx.addr, p, key),
+            style = ctl.style, cap = W.cap_col(ctl.cap) })
       else
         changed, nv, act = W.knob(ctx, id, label, value, shown,
-          { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr) })
+          { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
+            style = ctl.style, cap = W.cap_col(ctl.cap) })
       end
 
       if act and act.double_click then
@@ -895,6 +1233,86 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 end
 
 -- ---------------------------------------------------------------------
+-- faceplates
+-- ---------------------------------------------------------------------
+-- A panel with a faceplate (C.PLATES) is drawn with the palette's panel
+-- colours swapped for the plate's own for the length of its draw, and put
+-- back after. Everything inside -- header, labels, values, icons, scale
+-- ticks, dividers -- already reads those palette entries, so one swap
+-- retints the lot and no widget needs to know faceplates exist. The
+-- tooltip and anything else painted after the panels sees the theme again.
+-- Bypass keeps its own header colour: a bypassed plugin must still look
+-- bypassed on any faceplate.
+local PLATE_INKS = {
+  panel_bg = "bg", panel_border = "border", header_bg = "head",
+  header_text = "text", header_dim = "dim", label = "text", value = "dim",
+  icon = "dim", knob_ring = "tick", empty_text = "dim",
+}
+-- (icon_hot is left alone: a hovered header button lights a dark square
+-- behind its icon on every faceplate, so the hot icon stays the theme's
+-- light one.)
+
+local function push_plate(pl)
+  local saved = {}
+  for k, f in pairs(PLATE_INKS) do
+    saved[k] = C.COL[k]
+    C.COL[k] = pl[f]
+  end
+  return saved
+end
+
+local function pop_plate(saved)
+  for k, v in pairs(saved) do C.COL[k] = v end
+end
+
+local function mix(col, to, t)
+  local out = 0
+  for _, sh in ipairs({ 24, 16, 8 }) do
+    local a, b = (col >> sh) & 0xff, (to >> sh) & 0xff
+    out = out | (math.floor(a + (b - a) * t + 0.5) << sh)
+  end
+  return out | (col & 0xff)
+end
+
+-- The plate itself: flat, or with C.PLATE_TEXTURE a gentle top-lit
+-- gradient -- real faceplates catch the light from above, and a flat fill
+-- reads as a colour rather than a surface -- plus a fine brushed grain on
+-- aluminium. The border is drawn over it afterwards and tidies the corners.
+-- The background at height `yy` of the panel being drawn: what draw_plate
+-- painted there (gradient included), or the flat panel colour. The trace's
+-- fade blends into this.
+local cur_bg = { plate = nil, y = 0, h = 1 }
+bg_at = function(yy)
+  local pl = cur_bg.plate
+  if not (pl and C.PLATE_TEXTURE) then return C.COL.panel_bg end
+  local sh = pl.sheen or 1
+  local split = cur_bg.y + cur_bg.h * 0.4
+  if yy <= split then
+    local t = math.max(0, math.min(1, (yy - cur_bg.y) / math.max(1, split - cur_bg.y)))
+    return mix(mix(pl.bg, 0xffffffff, 0.08 * sh), pl.bg, t)
+  end
+  local t = math.max(0, math.min(1, (yy - split) / math.max(1, cur_bg.y + cur_bg.h - split)))
+  return mix(pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh), t)
+end
+
+local function draw_plate(dl, x, y, w, h, pl)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, 3.0)
+  if not C.PLATE_TEXTURE then return end
+  local split = y + h * 0.4
+  local sh = pl.sheen or 1
+  W.vgrad(dl, x + 1, y + 1, x + w - 1, split, mix(pl.bg, 0xffffffff, 0.08 * sh), pl.bg)
+  W.vgrad(dl, x + 1, split, x + w - 1, y + h - 1, pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh))
+  if pl.brushed then
+    for ly = y + 2, y + h - 2, 3 do
+      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, 0xffffff12, 1.0)
+    end
+    for ly = y + 4, y + h - 2, 7 do
+      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, 0x0000000c, 1.0)
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------
 -- public
 -- ---------------------------------------------------------------------
 
@@ -911,7 +1329,8 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local meter = (not is_eq) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
   local io = P.has_io(track, fx, layout)
-  local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key, io)
+  local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key, io,
+                    St.is_gr_open(fx.guid))
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
@@ -921,9 +1340,17 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
     local x, y = ImGui.GetWindowPos(ctx)
     local ww, wh = ImGui.GetWindowSize(ctx)
     local enabled = T.get_enabled(track, fx.addr)
+    local plate = C.plate_of(layout.plate)
+    local saved = plate and push_plate(plate)
+    cur_bg.plate, cur_bg.y, cur_bg.h = plate, y, wh
 
-    local bg = is_drag_source and C.COL.header_drag or C.COL.panel_bg
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, bg, 3.0)
+    if is_drag_source then
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, 3.0)
+    elseif plate then
+      draw_plate(dl, x, y, ww, wh, plate)
+    else
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
+    end
     ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh,
       is_drag_source and C.COL.drop_marker or C.COL.panel_border, 3.0, 0,
       is_drag_source and 2.0 or 1.0)
@@ -950,6 +1377,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
                       key, req, meter, io)
       end
     end
+    if saved then pop_plate(saved) end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)
   else

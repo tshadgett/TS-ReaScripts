@@ -1,12 +1,17 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.5.3
+-- @version 1.6.0
 -- @changelog
---  ReaEQ can no longer be set to measure gain reduction. An EQ has none:
---  the probe was reading the curve's effect on the programme, which Track
---  Analyser drew as a second measured trace bouncing several dB. The option
---  is gone from ReaEQ's menu and Edit Parameters, and a saved layout that
---  still has it is ignored -- ReaEQ is tapped for its levels only.
+--  Hardware styles: right-click a knob or fader > Style for Skirted, Pointer
+--  or Trim pot knobs and Console or Rail fader caps, in nine cap colours;
+--  the panel menu's Faceplate puts a panel on Charcoal, Gunmetal, Aluminium,
+--  Steel blue, Navy, Cream, Racing green or Oxblood, with a gentle texture
+--  (View > Faceplate texture). Saved with the plugin's layout.
+--  Gain-reduction trace: click a gain-reduction meter to open a trace of
+--  that plugin alone -- its output waveform, its input behind, its
+--  reduction from the top -- tempo-locked or in seconds, frozen when
+--  stopped. Needs TS_TrackProbe 1.5.0: reopen the project after updating.
+--  The wet slider's 100% button is gone.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -213,6 +218,7 @@ end
 
 local dock_id = tonumber(ext_get("dock", "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
+C.PLATE_TEXTURE = ext_get("plate_texture", C.PLATE_TEXTURE and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
 -- into the view you were not in is a small daily annoyance.
 C.MIXER_VIEW  = ext_get("mixer_view", "0") == "1"
@@ -384,6 +390,120 @@ end
 -- menus
 -- ---------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------
+-- hardware styles: the Faceplate and Style menus
+-- ---------------------------------------------------------------------
+-- Both stay open while you click through them, so you can try a few
+-- faceplates or cap colours and see each on the panel behind the menu.
+-- The flag was renamed in ReaImGui 0.10; either name, or none.
+local KEEP_OPEN = 0
+do
+  for _, n in ipairs({ "SelectableFlags_NoAutoClosePopups", "SelectableFlags_DontClosePopups" }) do
+    local ok, v = pcall(function() return ImGui[n] end)
+    if ok and type(v) == "number" then KEEP_OPEN = v break end
+  end
+end
+
+local SWATCH_W, SWATCH_H = 18, 13
+
+local function plate_menu(fx, key, layout)
+  local cur = layout.plate or "theme"
+  local dl = ImGui.GetWindowDrawList(ctx)
+  for _, pl in ipairs(C.PLATES) do
+    local x, y = ImGui.GetCursorScreenPos(ctx)
+    if ImGui.Selectable(ctx, "      " .. pl.label .. "##plate_" .. pl.key,
+        pl.key == cur, KEEP_OPEN, 150, 0) then
+      local l = materialise(fx)
+      l.plate = (pl.key ~= "theme") and pl.key or nil
+      M.set(key, l); M.save()
+    end
+    if pl.key == "theme" and ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "The theme's own panel colour, following Hue/Tint.")
+    end
+    local _, th = ImGui.CalcTextSize(ctx, "Ag")
+    local sy = y + (th - SWATCH_H) * 0.5
+    ImGui.DrawList_AddRectFilled(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H,
+      pl.bg or C.COL.panel_bg, 2.0)
+    ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H,
+      pl.border or C.COL.panel_border, 2.0, 0, 1.0)
+  end
+end
+
+-- The knobs and faders a style can be copied between: a stepped knob is a
+-- knob as far as looks go.
+local function style_family(t)
+  if t == "knob" or t == "stepped" then return "knob" end
+  if t == "fader" then return "fader" end
+  return nil
+end
+
+local function style_menu(fx, key, idx, c)
+  local fam = style_family(c.type)
+  local list = (fam == "fader") and C.FADER_STYLES or C.KNOB_STYLES
+  local cur = c.style or list[1].key
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local _, th = ImGui.CalcTextSize(ctx, "Ag")
+  local row_h = (fam == "knob") and math.max(th, 26) or 0
+
+  local function set(fields)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then for k, v in pairs(fields) do lc[k] = v or nil end end
+    M.set(key, l); M.save()
+  end
+
+  ImGui.TextDisabled(ctx, "Style")
+  for _, st in ipairs(list) do
+    local x, y = ImGui.GetCursorScreenPos(ctx)
+    local text = (fam == "knob") and ("        " .. st.label) or st.label
+    if ImGui.Selectable(ctx, text .. "##style_" .. st.key, st.key == cur,
+        KEEP_OPEN, 150, row_h) then
+      set({ style = (st.key ~= list[1].key) and st.key or false })
+    end
+    if fam == "knob" then
+      local r = row_h * 0.5 - 4     -- the scale ticks sit outside this
+      W.knob_face(dl, x + 4 + r, y + row_h * 0.5, r, 0.62,
+        { style = st.key, cap = W.cap_col(c.cap) })
+    end
+  end
+
+  ImGui.Spacing(ctx)
+  ImGui.TextDisabled(ctx, "Colour")
+  local style_def = (fam == "fader") and C.FADER_STYLE[cur] or C.KNOB_STYLE[cur]
+  local cap_now = c.cap or (style_def and style_def.cap)
+  for i, cp in ipairs(C.CAPS) do
+    if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+    local col = cp.col or C.COL.knob_fill
+    if ImGui.ColorButton(ctx, cp.label .. "##cap_" .. cp.key, col,
+        ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+      set({ cap = cp.key })
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, cp.label) end
+    if cp.key == cap_now then
+      local x0, y0 = ImGui.GetItemRectMin(ctx)
+      local x1, y1 = ImGui.GetItemRectMax(ctx)
+      ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+    end
+  end
+
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, fam == "fader" and "Apply to every fader on this panel"
+                                        or "Apply to every knob on this panel") then
+    local l = materialise(fx)
+    local src = l.controls[idx]
+    if src then
+      for _, o in ipairs(l.controls) do
+        if style_family(o.type) == fam then o.style, o.cap = src.style, src.cap end
+      end
+    end
+    M.set(key, l); M.save()
+  end
+  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil) then
+    set({ style = false, cap = false })
+  end
+end
+
 local function panel_menu()
   if not ImGui.BeginPopup(ctx, "panelmenu") then return end
   local fx = app.chain[app.menu_fx or -1]
@@ -459,6 +579,10 @@ local function panel_menu()
         "change in level between them -- every instance between a\n" ..
         "TS_TrackProbe pair.")
     end
+  end
+  if ImGui.BeginMenu(ctx, "Faceplate") then
+    plate_menu(fx, key, layout)
+    ImGui.EndMenu(ctx)
   end
   if fx.is_top_level then
     local n_top = reaper.TrackFX_GetCount(app.track)
@@ -555,6 +679,11 @@ local function control_menu()
     local l = commit()
     l.controls[cm.ctl].bipolar = not l.controls[cm.ctl].bipolar
     M.set(key, l); M.save()
+  end
+
+  if style_family(c.type) and ImGui.BeginMenu(ctx, "Style") then
+    style_menu(fx, key, cm.ctl, c)
+    ImGui.EndMenu(ctx)
   end
 
   ImGui.Separator(ctx)
@@ -810,6 +939,14 @@ local function menu_bar()
     if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
       C.SHOW_VALUES = not C.SHOW_VALUES
       ext_set("show_values", C.SHOW_VALUES and "1" or "0")
+    end
+
+    if ImGui.MenuItem(ctx, "Faceplate texture", nil, C.PLATE_TEXTURE) then
+      C.PLATE_TEXTURE = not C.PLATE_TEXTURE
+      ext_set("plate_texture", C.PLATE_TEXTURE and "1" or "0")
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "A light gradient on coloured faceplates,\nand brushed grain on aluminium.")
     end
 
     if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
@@ -1132,7 +1269,8 @@ local function panel_row(row_h, row_w)
                             and T.reports_gr(app.track, fx.addr, fx.guid)
           total = total + P.width(lay.controls or {}, inner_h,
                                   St.is_collapsed(fx.guid), has_meter, k,
-                                  P.has_io(app.track, fx, lay))
+                                  P.has_io(app.track, fx, lay),
+                                  St.is_gr_open(fx.guid))
           if i > 1 then total = total + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)
@@ -1178,6 +1316,11 @@ local function panel_row(row_h, row_w)
         end
         if req.open_editor then
           E.open(app.track, fx, key, layout)
+        end
+        if req.grv_window then
+          local l = materialise(fx)
+          if l.meter then l.meter.win = (req.grv_window ~= C.GRV_DEFAULT) and req.grv_window or nil end
+          M.set(key, l); M.save()
         end
         if req.ctx_control then
           app.ctl_menu = { fx = i, ctl = req.ctx_control }
