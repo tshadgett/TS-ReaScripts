@@ -406,24 +406,25 @@ end
 
 -- WET. REAPER's own per-plugin wet/dry mix, the one in the FX window's
 -- top corner -- every plugin has it, whether or not the plugin has a mix
--- control of its own. Its parameter index is asked for by name (":wet")
--- once per instance.
-local wet_idx = {}
+-- control of its own. Its parameter index is asked for by name (":wet").
+-- REAPER puts it after the plugin's own parameters, so its index moves
+-- whenever the plugin's parameter count does (ReaEQ adding or removing a
+-- band): the cached index is kept only while that count stays the same.
+local wet_idx, wet_n = {}, {}
 local function wet_param(track, fx)
+  local n = reaper.TrackFX_GetNumParams(track, fx.addr)
   local p = wet_idx[fx.guid]
-  if p == nil then
+  if p == nil or wet_n[fx.guid] ~= n then
     p = false
     if reaper.TrackFX_GetParamFromIdent then
       local i = reaper.TrackFX_GetParamFromIdent(track, fx.addr, ":wet")
       if i and i >= 0 then p = i end
     end
-    wet_idx[fx.guid] = p
+    wet_idx[fx.guid], wet_n[fx.guid] = p, n
   end
   return p or nil
 end
 
--- Input and output meters, from the probe's tap on this plugin. Returns
--- the width used, 0 when there is nothing to show.
 -- A plugin's input and output meters, from the probe's tap on it: input
 -- hard left of the panel, output hard right, so the panel reads the way
 -- the audio flows. `lx` and `rx` are the two columns' left edges. Returns

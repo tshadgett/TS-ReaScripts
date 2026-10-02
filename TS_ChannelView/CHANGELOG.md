@@ -1,5 +1,14 @@
 # ChannelView — changelog
 
+## 1.5.2 — wet % on ReaEQ
+
+- **Fixed: ReaEQ's wet % could show (and set) the wrong value** after a band
+  was added or removed: it read whichever ReaEQ parameter had moved into
+  the wet control's old place, often a band's gain or frequency. The wet
+  control is now looked up again whenever a plugin's parameter count
+  changes.
+
+
 ## 1.5.1 — I/O meters on ReaEQ
 
 - **The ReaEQ panel gets input/output meters too.** Ticking *Input/output

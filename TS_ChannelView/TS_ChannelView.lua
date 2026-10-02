@@ -1,11 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.5.1
+-- @version 1.5.2
 -- @changelog
---  The ReaEQ panel gets input/output meters too: tick "Input/output
---  meters" on ReaEQ and it gets the input meter hard left and the output
---  hard right, with the EQ canvas between them at its usual width. 1.5.0
---  left them off that panel.
+--  Fixed: ReaEQ's wet % could show (and set) the wrong value after a band
+--  was added or removed -- it read whichever ReaEQ parameter had moved into
+--  the wet control's old place. The wet control is now looked up again
+--  whenever a plugin's parameter count changes.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

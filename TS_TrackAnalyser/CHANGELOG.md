@@ -1,5 +1,11 @@
 # Track Analyser — changelog
 
+## 1.5.2 — in step with ChannelView
+
+No changes. The version moves to 1.5.2 to match ChannelView, so the two
+tools carry the same number.
+
+
 ## 1.5.1 — in step with ChannelView
 
 No changes. The version moves to 1.5.1 to match ChannelView, so the two
