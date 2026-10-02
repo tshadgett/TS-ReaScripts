@@ -1087,6 +1087,20 @@ at 50% mix reads about half, and after a make-up gain change it's out until
 the next stop. **Measure the zero while stopped** in Setup turns the
 stop-time measurement off, for instrument tracks you play while stopped.
 
+### Input/output meters
+
+**Input/output meters** (right-click a plugin, or Setup) puts two slim meters
+on its panel: what goes into the plugin and what comes out, from the same
+probe copies. Under them is the change in level, output RMS minus input RMS.
+It works for any plugin between the probes, including ones that report their
+own reduction; those are tapped for their levels alone. Gain reduction and
+levels together share the limit of four plugins per track.
+
+### Wet
+
+Every panel header shows the plugin's wet %, REAPER's own wet/dry mix. It's
+dim at 100% and highlighted otherwise. Click it for a slider.
+
 ## Where this came from
 
 The parameter-mapping idea, the per-plugin layout library and its file

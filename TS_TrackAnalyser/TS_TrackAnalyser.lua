@@ -2,19 +2,12 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 1.4.1
+-- @version 1.5.0
 -- @changelog
---  1.4.1 keeps Track Analyser in step with ChannelView; nothing in it
---  changed. 1.4.0 never reached ReaPack, so this is the first public
---  release. A docked two-panel display of what your
---  processing does to the selected track, measured from the audio by a
---  TS_TrackProbe at each end of the FX chain: the measured EQ response over
---  the spectrum, a before/after waveform with gain reduction over it, and
---  a masking (Collisions) view against another track. The waveform window
---  can be set in beats at the project tempo and locked to the beat, like a
---  triggered scope. New in this release:
---  gain reduction for plugins ChannelView measures, one 500-a-second trace
---  per compressor, and traces lined up with the waveform.
+--  In step with ChannelView 1.5.0. TS_TrackProbe 1.4.0 also measures each
+--  tapped plugin's input and output levels (ChannelView's new I/O meters);
+--  a plugin tapped for its levels alone is no longer shown here as a
+--  gain-reduction source.
 -- @about
 --  # Track Analyser
 --

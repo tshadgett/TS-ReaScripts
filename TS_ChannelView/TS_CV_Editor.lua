@@ -563,6 +563,36 @@ function E.draw(ctx, track)
       end
     end
 
+    -- Input and output meters: any plugin, reporting or not, measured by
+    -- the track's probes from the same copies the reduction is.
+    do
+      local lch, lv = ImGui.Checkbox(ctx, "Input/output meters", st.scratch.levels == true)
+      if lch then st.scratch.levels = lv or nil end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx,
+          "Two slim meters on the panel -- what goes into the plugin and what\n" ..
+          "comes out -- and under them how much it changes the level (output\n" ..
+          "RMS minus input RMS). Measured by the track's TS_TrackProbe pair,\n" ..
+          "for every instance between the probes, up to four per track\n" ..
+          "together with plugins measured for gain reduction.")
+      end
+      if st.scratch.levels and st.track and st.fx then
+        local status = TP.status(st.track, st.fx.guid)
+        if status == "no_probes" then
+          ImGui.SameLine(ctx)
+          ImGui.TextDisabled(ctx, "needs a TS_TrackProbe pair:")
+          ImGui.SameLine(ctx)
+          if ImGui.SmallButton(ctx, "Add probes##lv") then
+            local ok, why = TP.insert_probes(st.track)
+            if not ok then reaper.MB(why, "ChannelView", 0) end
+          end
+        elseif status == "outside" then
+          ImGui.SameLine(ctx)
+          ImGui.TextDisabled(ctx, "not between this track's probes")
+        end
+      end
+    end
+
     -- Also panel-level: for plugins that rename their own parameters.
     local lvch, lvv = ImGui.Checkbox(ctx, "Live parameter names", st.scratch.live and true or false)
     if lvch then st.scratch.live = lvv or nil end

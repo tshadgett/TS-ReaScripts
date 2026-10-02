@@ -1,18 +1,14 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.4.1
+-- @version 1.5.0
 -- @changelog
---  MIDI sends and receives: a third mode beside Direct and Sidechain --
---  MIDI only, all channels, no audio. In the add menu, the right-click
---  menu, and on each send's mode button, which cycles DIR, SC and MIDI
---  (a MIDI socket on blue).
---
---  1.4.0 (never reached ReaPack -- the index build stopped on three dev
---  files; it arrives together with this one): gain reduction for plugins
---  that don't report it, measured by a TS_TrackProbe pair (the new Probes
---  button adds one), with its zero measured whenever playback stops;
---  measured reduction pink, reported amber; a whole-track GR bar; 18 dB
---  meter scale; "New track with FX chain"; TCP follows the selection.
+--  Input/output meters per plugin: tick "Input/output meters" on any
+--  plugin and its panel gets a meter for what goes in, one for what comes
+--  out, and the change in level between them (output RMS minus input RMS).
+--  Measured by the track's TS_TrackProbe pair, like measured gain
+--  reduction. Every panel header also shows the plugin's wet % (REAPER's
+--  own wet/dry mix): dim at 100%, highlighted when it's anything else;
+--  click it for a slider.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -439,6 +435,30 @@ local function panel_menu()
         "This plugin doesn't report gain reduction to REAPER. Measure it\n" ..
         "instead, from the audio going in and coming out -- every instance\n" ..
         "between a TS_TrackProbe pair. An estimate: see the meter's tooltip.")
+    end
+  end
+  -- Input and output meters: any plugin, measured by the same probe pair.
+  do
+    local on = layout.levels == true
+    if ImGui.MenuItem(ctx, "Input/output meters", nil, on) then
+      local l = materialise(fx)
+      l.levels = (not on) or nil
+      M.set(key, l); M.save()
+      TP.invalidate()
+      if not on and TP.status(app.track, fx.guid) == "no_probes" then
+        if reaper.MB("Input and output levels are measured by a TS_TrackProbe pair:\n" ..
+                     "one at the start of the chain, one at the end. This track\n" ..
+                     "doesn't have them.\n\nAdd them now?", "ChannelView", 4) == 6 then
+          local ok, why = TP.insert_probes(app.track)
+          if not ok then reaper.MB(why, "ChannelView", 0) end
+        end
+      end
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Meters for what goes into this plugin and what comes out, and the\n" ..
+        "change in level between them -- every instance between a\n" ..
+        "TS_TrackProbe pair.")
     end
   end
   if fx.is_top_level then
@@ -1112,7 +1132,8 @@ local function panel_row(row_h, row_w)
           local has_meter = M.meter_of(lay) ~= nil
                             and T.reports_gr(app.track, fx.addr, fx.guid)
           total = total + P.width(lay.controls or {}, inner_h,
-                                  St.is_collapsed(fx.guid), has_meter, k)
+                                  St.is_collapsed(fx.guid), has_meter, k,
+                                  P.has_io(app.track, fx, lay))
           if i > 1 then total = total + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)

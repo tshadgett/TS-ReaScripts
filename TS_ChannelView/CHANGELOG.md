@@ -1,5 +1,33 @@
 # ChannelView — changelog
 
+## 1.5.0 — input/output meters, and wet
+
+- **Input/output meters per plugin.** Tick **Input/output meters** in a
+  plugin's right-click menu or in Setup Edit Parameters, and its panel gets
+  two slim meters, one at each edge of the panel so it reads the way the
+  audio flows: input hard left, output hard right, with the gain reduction
+  meter now on the right too, just before the output. Under the input is its
+  held peak. Under the output is the change in level, output RMS minus input
+  RMS, which answers "what is this plugin doing to my gain staging". The
+  tooltip gives peak and RMS for both. A bypassed plugin reads "byp".
+
+  They're measured by the track's TS_TrackProbe pair from the same copies
+  of the audio as measured gain reduction, so they work for any plugin
+  between the probes. Peak falls at 20 dB/s, and RMS is true RMS over
+  300 ms. A plugin that reports its own reduction is tapped for its levels
+  alone, which costs the probe almost nothing. The limit is still four
+  measured plugins per track, gain reduction and levels together.
+
+- **Wet % in every panel header.** REAPER's own wet/dry mix for the plugin,
+  the one in the corner of its FX window. It's centred in the header, dim
+  at 100% and highlighted when it's anything else, so a
+  plugin mixed back stands out. Click it for a slider, with a 100% button
+  to put it back. It's hidden on panels too narrow to spare the room.
+
+- **TS_TrackProbe 1.4.0**, with the levels. Reinsert or reload the probes
+  (or reopen the project) to pick it up.
+
+
 ## 1.4.1 — MIDI sends
 
 - **MIDI sends and receives.** A third mode beside Direct and Sidechain:

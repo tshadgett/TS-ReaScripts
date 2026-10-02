@@ -211,6 +211,21 @@ do
   M.remove(lkey); M.save(); M.reload()
 end
 
+-- Input/output meters (Levels=1) survive the ini, beside Measure=1, and
+-- either one marks the library as having something to measure.
+do
+  local k = "LevelsPlug"
+  M.set(k, { levels = true, measure = true, controls = {} })
+  M.save(); M.reload()
+  check("round-trip levels",             M.get(k).levels, true)
+  check("  measure beside it",           M.get(k).measure, true)
+  check("copy keeps levels",             M.copy(M.get(k)).levels, true)
+  M.set(k, { levels = true, controls = {} })
+  M.save(); M.reload()
+  check("levels alone counts as measuring", M.any_measure(), true)
+  M.remove(k); M.save(); M.reload()
+end
+
 -- Type names may contain underscores (e.g. half_gap); the ini line
 -- parser must accept those, not just plain letters. This has to
 -- round-trip through an actual save+reload, since M.set/M.get never
@@ -2899,6 +2914,18 @@ do
     check("toolbar label kept", items[1].label, "Add")
     check("toolbar round-trip", TB.serialize(items), "40001|a.png|Add;-;_;40005||")
   end
+end
+
+-- A plugin's input/output meters: under the output bar, output RMS minus
+-- input RMS; "byp" for a bypassed plugin; a dash with nothing coming in.
+-- Under the input bar, its held peak.
+do
+  local function out(lv, byp) local _, o = W.io_readouts(lv, byp, lv.in_pk); return o end
+  check("io: the change in level",  out({ in_pk = -10, out_pk = -4, in_rms = -18, out_rms = -12.5 }), "+5.5")
+  check("io: a cut reads negative", out({ in_pk = -10, out_pk = -14, in_rms = -18, out_rms = -21 }), "-3.0")
+  check("io: bypassed",             out({ in_pk = -10, out_pk = -150, in_rms = -18, out_rms = -150 }, true), "byp")
+  check("io: nothing coming in",    out({ in_pk = -150, out_pk = -150, in_rms = -150, out_rms = -150 }), "\u{2013}")
+  check("io: input readout",        (W.io_readouts({ in_rms = -18, out_rms = -12 }, false, -6.04)), "-6.0")
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

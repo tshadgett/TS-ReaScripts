@@ -1,5 +1,14 @@
 # Track Analyser — changelog
 
+## 1.5.0 — in step with ChannelView
+
+- **TS_TrackProbe 1.4.0** measures each tapped plugin's input and output
+  levels as well as its gain reduction, for ChannelView's new input/output
+  meters. A plugin can now be tapped for its levels alone; such a tap does
+  no gain-reduction work in the probe, and Track Analyser doesn't list it as
+  a reduction source.
+
+
 ## 1.4.1 — in step with ChannelView
 
 No changes. The version moves to 1.4.1 to match ChannelView, so the two

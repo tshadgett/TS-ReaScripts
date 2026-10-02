@@ -1184,6 +1184,38 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
   if pushed then ImGui.PopFont(ctx) end
 end
 
+-- One of a plugin's level meters: its input (left of the panel) or its
+-- output (right of it), so the panel reads in the direction the audio goes.
+-- A slim bar with the held peak, and a readout under it: `readout` is the
+-- text, `rcol` its colour. `pk`, `rms` in dBFS; `key` holds the peak.
+function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol)
+  local now = reaper.time_precise()
+  local pushed = false
+  if meter_font then ImGui.PushFont(ctx, meter_font, C.METER_FONT); pushed = true end
+  local _, line_h = ImGui.CalcTextSize(ctx, "0")
+  local bar_h = h - (line_h + 2)
+  local bw = math.min(C.IO_BAR_W, w)
+  W.level_meter(ctx, dl, x + (w - bw) * 0.5, y, bw, bar_h, { pk },
+    W.level_peak(key, pk, now), nil, rms)
+  local tw = ImGui.CalcTextSize(ctx, readout)
+  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + bar_h + 1, rcol or C.COL.header_dim, readout)
+  if pushed then ImGui.PopFont(ctx) end
+end
+
+-- What goes under the two bars. Input: its held peak. Output: the change
+-- the plugin makes, output RMS minus input RMS -- "what is this doing to
+-- my gain staging" -- or "byp" when bypassed, a dash with nothing coming in.
+function W.io_readouts(lv, bypassed, in_hold)
+  local itxt = (in_hold and in_hold > -149) and ("%.1f"):format(in_hold) or "\u{2013}"
+  local otxt, ocol = "\u{2013}", C.COL.header_dim
+  if bypassed then
+    otxt = "byp"
+  elseif lv.in_rms > -70 and lv.out_rms > -120 then
+    otxt, ocol = ("%+.1f"):format(lv.out_rms - lv.in_rms), C.COL.value
+  end
+  return itxt, otxt, ocol
+end
+
 -- The slim total-reduction bar beside a strip's level meter: falls from
 -- the top, same scale ladder and hold as a panel's meter. `est_db` is how
 -- much of the total is MEASURED rather than reported (true means all of

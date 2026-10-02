@@ -11,8 +11,8 @@
   can be wrong).
 
   This module does the plumbing. For every plugin type ticked "Measure
-  gain reduction" in Setup Edit Parameters, on every track with a probe
-  pair around it:
+  gain reduction" or "Input/output meters" in Setup Edit Parameters, on
+  every track with a probe pair around it:
 
     * two spare stereo pairs are found, from 5/6 upward, that no plugin at
       that level reads or writes, no send or receive uses, and (at the top
@@ -31,7 +31,11 @@
   none.
 
   The readings come out on the probe's tap_grN sliders, read with
-  TrackFX_GetParam -- any track, no arming. The probe only measures while
+  TrackFX_GetParam -- any track, no arming. The same two copies are the
+  plugin's input and output, so their levels come out too (tap_inpkN and
+  the rest). A plugin wanted for its levels alone -- one that reports its
+  own reduction -- gets a tap marked "levels only" (tap_nogr), which costs
+  the probe a few operations a sample instead of a filterbank. The probe only measures while
   something keeps gmem[73] moving, which TP.update does every frame.
 
   THE ZERO. Each time playback stops, the pre probe plays a second of
@@ -63,6 +67,11 @@ TP.P_GR    = 14     -- 14..17
 TP.P_CAL   = 18     -- 18..21  0 none, 1 measured, 2 level-dependent, 3 touched since
 TP.P_GEN   = 22     -- bumped on every new routing
 TP.P_ARM   = 23     -- pre probe: measure the zero while stopped
+TP.P_NOGR  = 24     -- taps measuring levels only, a bit per tap
+TP.P_INPK  = 25     -- 25..28  input peak, dBFS
+TP.P_OUTPK = 29     -- 29..32  output peak
+TP.P_INRMS = 33     -- 33..36  input RMS
+TP.P_OUTRMS = 37    -- 37..40  output RMS
 
 TP.ZERO_KEY = "tap_zero"   -- ExtState, "0" turns the stop-time zero off
 
@@ -143,14 +152,17 @@ end
 
 -- The record on the track: what was routed, so it can be removed exactly.
 --   v1|<level guid or TOP>|<post probe guid>|t1|t2...
---   t = <target guid>,<writers>,<before ch>,<after ch>,<latency>
+--   t = <target guid>,<writers>,<before ch>,<after ch>,<latency>,<what>
+-- <what> is what the tap is for: "g" gain reduction, "l" levels, or both.
+-- A record from before levels existed has no <what>, and means "g".
 -- <writers> is every plugin that writes the "before" copy, GUIDs joined
 -- with "+" (see WHO WRITES THE BEFORE COPY, below).
 function TP.format_record(r)
   if not r or not r.taps or #r.taps == 0 then return "" end
   local parts = { "v1", r.level or "TOP", r.probe or "" }
   for _, t in ipairs(r.taps) do
-    parts[#parts + 1] = ("%s,%s,%d,%d,%d"):format(t.guid, t.prev, t.pre, t.post, t.lag or 0)
+    parts[#parts + 1] = ("%s,%s,%d,%d,%d,%s"):format(t.guid, t.prev, t.pre, t.post,
+                                                    t.lag or 0, t.what or "g")
   end
   return table.concat(parts, "|")
 end
@@ -162,11 +174,12 @@ function TP.parse_record(s)
   if f[1] ~= "v1" or #f < 4 then return nil end
   local r = { level = f[2], probe = f[3], taps = {} }
   for i = 4, #f do
-    local g, pv, a, b, l = f[i]:match("^([^,]+),([^,]+),(%d+),(%d+),(%-?%d+)$")
+    local g, pv, a, b, l, w = f[i]:match("^([^,]+),([^,]+),(%d+),(%d+),(%-?%d+),?([gl]*)$")
     -- pv is the "+"-joined list of writers
     if g then
       r.taps[#r.taps + 1] = { guid = g, prev = pv, pre = tonumber(a),
-                              post = tonumber(b), lag = tonumber(l) }
+                              post = tonumber(b), lag = tonumber(l),
+                              what = (w ~= "") and w or "g" }
     end
   end
   if #r.taps == 0 then return nil end
@@ -181,7 +194,9 @@ function TP.same_shape(a, b)
   if a.level ~= b.level or a.probe ~= b.probe or #a.taps ~= #b.taps then return false end
   for i, t in ipairs(a.taps) do
     local u = b.taps[i]
-    if t.guid ~= u.guid or t.prev ~= u.prev then return false end
+    if t.guid ~= u.guid or t.prev ~= u.prev or (t.what or "g") ~= (u.what or "g") then
+      return false
+    end
   end
   return true
 end
@@ -278,9 +293,43 @@ local function wants_measure(tr, addr)
   return not TP.native_gr(tr, addr, fx_guid(tr, addr))
 end
 
+-- Whether a plugin's input and output levels are wanted (Levels=1).
+local function wants_levels(tr, addr)
+  local layout = M.get(U.plugin_key(fx_name(tr, addr)))
+  return layout ~= nil and layout.levels == true
+end
+
+-- Whether a probe is new enough to measure levels (TS_TrackProbe 1.4.0+).
+-- A project keeps running the JSFX it compiled when it was opened, so after
+-- an update the old probe is still there until the project is reopened --
+-- and its parameter 24 onward are REAPER's own (bypass, wet), not levels.
+-- Asked by NAME, so it can't be fooled by a count. Cached per instance.
+local levels_ok = {}
+function TP.probe_has_levels(tr, probe)
+  if not tr or not probe then return false end
+  local key = tostring(tr) .. ":" .. (reaper.TrackFX_GetFXGUID(tr, probe) or tostring(probe))
+  local v = levels_ok[key]
+  if v == nil then
+    local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_INPK, "")
+    v = (ok and nm and nm:lower():find("input peak", 1, true)) ~= nil
+    levels_ok[key] = v
+  end
+  return v
+end
+
+-- The bits of tap_nogr: the taps that measure levels and not reduction.
+function TP.nogr_mask(taps)
+  local m = 0
+  for i, t in ipairs(taps or {}) do
+    if not (t.what or "g"):find("g", 1, true) then m = m | (1 << (i - 1)) end
+  end
+  return m
+end
+
 -- What SHOULD be tapped on a track right now: the level, and up to four
--- plugins strictly between its probes that want measuring. nil when
--- nothing does (or there are no probes).
+-- plugins strictly between its probes that want measuring -- their gain
+-- reduction, their levels, or both. nil when nothing does (or there are
+-- no probes).
 function TP.desired(tr)
   local lv = find_level(tr, nil)
   if not lv then return nil, nil end
@@ -300,8 +349,11 @@ function TP.desired(tr)
   --   is bypassed, and a bypass never needs re-routing.
   for i = lv.pre + 1, lv.post - 1 do
     local a = lv.items[i]
-    if #r.taps < TP.MAX_TAPS and (container_count(tr, a) or 0) == 0
-       and not is_probe(tr, a) and wants_measure(tr, a) then
+    local gr = #r.taps < TP.MAX_TAPS and (container_count(tr, a) or 0) == 0
+               and not is_probe(tr, a) and wants_measure(tr, a)
+    local lvl = #r.taps < TP.MAX_TAPS and (container_count(tr, a) or 0) == 0
+                and not is_probe(tr, a) and wants_levels(tr, a)
+    if gr or lvl then
       local ok, pdc = reaper.TrackFX_GetNamedConfigParm(tr, a, "pdc")
       local writers, gs = {}, {}
       for j = lv.pre, i - 1 do
@@ -312,6 +364,7 @@ function TP.desired(tr)
         guid = fx_guid(tr, a), prev = table.concat(gs, "+"),
         addr = a, writers = writers,
         lag = math.floor(tonumber(ok and pdc or 0) or 0),
+        what = (gr and "g" or "") .. (lvl and "l" or ""),
       }
     end
   end
@@ -429,6 +482,7 @@ local function lift(tr, rec)
   if probe then
     for p = 2, 2 + TP.MAX_TAPS * 4 - 1 do set_pin(tr, probe, false, p, 0, 0) end
     reaper.TrackFX_SetParam(tr, probe, TP.P_TAPN, 0)
+    if TP.probe_has_levels(tr, probe) then reaper.TrackFX_SetParam(tr, probe, TP.P_NOGR, 0) end
   end
   if lv then reaper.TrackFX_SetParam(tr, lv.items[lv.pre], TP.P_ARM, 0) end
   write_record(tr, nil)
@@ -474,6 +528,9 @@ local function lay(tr, want, lv)
     reaper.TrackFX_SetParam(tr, probe, TP.P_LAG + i - 1, t.lag or 0)
   end
   reaper.TrackFX_SetParam(tr, probe, TP.P_TAPN, #want.taps)
+  if TP.probe_has_levels(tr, probe) then
+    reaper.TrackFX_SetParam(tr, probe, TP.P_NOGR, TP.nogr_mask(want.taps))
+  end
   -- New routing: whatever zeros the probe measured belonged to the old one.
   reaper.TrackFX_SetParam(tr, probe, TP.P_GEN,
     (math.floor(reaper.TrackFX_GetParam(tr, probe, TP.P_GEN) or 0) + 1) % 1000000)
@@ -504,6 +561,11 @@ function TP.sync(tr)
       reaper.TrackFX_SetParam(tr, probe, TP.P_TAPN, #want.taps)
       changed = true
     end
+    local mask = TP.nogr_mask(want.taps)
+    if TP.probe_has_levels(tr, probe)
+       and math.floor((reaper.TrackFX_GetParam(tr, probe, TP.P_NOGR) or 0) + 0.5) ~= mask then
+      reaper.TrackFX_SetParam(tr, probe, TP.P_NOGR, mask)
+    end
     -- The pre probe armed for the zero, or not, as the setting says --
     -- also arms routing laid before the zero existed.
     local pre = lv.items[lv.pre]
@@ -520,8 +582,8 @@ function TP.sync(tr)
   local ok = true
   if want then ok = lay(tr, want, lv) end
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock(want and "ChannelView: route gain-reduction taps"
-                            or "ChannelView: remove gain-reduction taps", -1)
+  reaper.Undo_EndBlock(want and "ChannelView: route measurement taps"
+                            or "ChannelView: remove measurement taps", -1)
   -- Couldn't lay it (no free channels): say so, so the caller stops
   -- retrying -- and making an undo point -- every second.
   return ok, not ok
@@ -616,9 +678,9 @@ local function reader_for(tr)
   local now = reaper.time_precise()
   if rd and now - rd.t < 0.5 then return rd end
   local rec = read_record(tr)
-  rd = { t = now, map = {}, probe = nil }
+  rd = { t = now, map = {}, what = {}, probe = nil }
   if rec then
-    for i, t in ipairs(rec.taps) do rd.map[t.guid] = i end
+    for i, t in ipairs(rec.taps) do rd.map[t.guid] = i; rd.what[t.guid] = t.what or "g" end
     local lv = find_level(tr, nil)
     if lv then
       local a = lv.items[lv.post]
@@ -629,18 +691,42 @@ local function reader_for(tr)
   return rd
 end
 
--- Whether this plugin is being measured by a tap.
+-- The tap on this plugin, if there is one doing `what` ("g" reduction,
+-- "l" levels): its index, and the reader.
+local function tap_for(tr, guid, what)
+  if not tr or not guid then return nil end
+  local rd = reader_for(tr)
+  local i = rd.map[guid]
+  if not i or not (rd.what[guid] or "g"):find(what, 1, true) then return nil end
+  return i, rd
+end
+
+-- Whether this plugin's gain reduction is being measured by a tap.
 function TP.is_tapped(tr, guid)
-  if not tr or not guid then return false end
-  return reader_for(tr).map[guid] ~= nil
+  return tap_for(tr, guid, "g") ~= nil
+end
+
+-- Whether this plugin's input and output levels are being measured.
+function TP.is_metered(tr, guid)
+  return tap_for(tr, guid, "l") ~= nil
+end
+
+-- Its levels, dBFS: { in_pk, out_pk, in_rms, out_rms }, or nil when it
+-- isn't metered. -150 while the probe isn't running. { old = true } when the
+-- probe on the track predates levels (see TP.probe_has_levels).
+function TP.levels(tr, guid)
+  local i, rd = tap_for(tr, guid, "l")
+  if not i or not rd.probe then return nil end
+  if not TP.probe_has_levels(tr, rd.probe) then return { old = true } end
+  local function g(base) return reaper.TrackFX_GetParam(tr, rd.probe, base + i - 1) or -150 end
+  return { in_pk = g(TP.P_INPK), out_pk = g(TP.P_OUTPK),
+           in_rms = g(TP.P_INRMS), out_rms = g(TP.P_OUTRMS) }
 end
 
 -- The measured reduction, positive dB, or nil when this plugin isn't
 -- tapped. 0 while the probe isn't running.
 function TP.reading(tr, guid)
-  if not tr or not guid then return nil end
-  local rd = reader_for(tr)
-  local i = rd.map[guid]
+  local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return nil end
   local v = reaper.TrackFX_GetParam(tr, rd.probe, TP.P_GR + i - 1)
   return math.max(0, v or 0)
@@ -651,9 +737,7 @@ end
 -- but the plugin was level-dependent even at the test level, 3 measured
 -- but the plugin was touched since. nil when it isn't tapped.
 function TP.cal_status(tr, guid)
-  if not tr or not guid then return nil end
-  local rd = reader_for(tr)
-  local i = rd.map[guid]
+  local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return nil end
   return math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_CAL + i - 1) or 0) + 0.5)
 end
@@ -733,9 +817,7 @@ end
 -- probe drops what it learnt from the music, and marks a measured zero as
 -- touched-since (it's measured again at the next stop).
 function TP.touched(tr, guid)
-  if not tr or not guid then return end
-  local rd = reader_for(tr)
-  local i = rd.map[guid]
+  local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return end
   local p = TP.P_RST + i - 1
   reaper.TrackFX_SetParam(tr, rd.probe, p, ((reaper.TrackFX_GetParam(tr, rd.probe, p) or 0) + 1) % 1000000)
@@ -805,6 +887,7 @@ end
 -- Forget cached answers (a layout changed: re-check everything now).
 function TP.invalidate()
   next_at, readers, native, sources = {}, {}, {}, {}
+  levels_ok = {}
   has_cache = {}
   any_until = 0
 end

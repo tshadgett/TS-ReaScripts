@@ -183,8 +183,12 @@ C.COLLAPSED_W = 30
 -- and it's still well under a 58px cell.
 C.METER_W     = 14        -- the bar
 C.METER_COL_W = 40        -- bar plus the room its readout needs
+C.IO_COL_W    = 28        -- a plugin's input or output meter, with its readout
+C.IO_BAR_W    = 8         -- the bar itself
 C.METER_FONT  = 10        -- point size for the readout
-C.METER_SIDE = "left"     -- "left" or "right" edge of the panel body
+-- "left" or "right" edge of the panel body. Right, so a panel reads the way
+-- the audio flows: input meter, controls, gain reduction, output meter.
+C.METER_SIDE = "right"
 C.MAX_GR_DB  = 18         -- per-plugin MINIMUM full scale (it grows, below)
 C.GR_HOLD    = 1.2        -- seconds the peak line holds before falling
 C.GR_FALL    = 18         -- dB per second it falls once released

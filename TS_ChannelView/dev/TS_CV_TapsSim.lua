@@ -70,6 +70,11 @@ reaper = {
     return false, ""
   end,
   TrackFX_GetParam = function(tr, a, p) return F(a).params[p] or 0 end,
+  TrackFX_GetParamName = function(tr, a, p)
+    local f = F(a)
+    if f and f.name:find("TrackProbe") and p == 25 then return true, "Tap 1 input peak (dBFS)" end
+    return true, ""
+  end,
   TrackFX_SetParam = function(tr, a, p, v) F(a).params[p] = v; return true end,
   TrackFX_GetIOSize = function(tr, a) local f = F(a); return 0, f.nin, f.nout end,
   TrackFX_GetPinMappings = function(tr, a, out, pin)
@@ -204,6 +209,52 @@ TP.sync(track)
 check("only the one between the probes", F(6).params[TP.P_TAPN], 1)
 check("status inside",                TP.status(track, "{C1}"), "ok")
 check("status outside",               TP.status(track, "{OUT}"), "outside")
+
+-- ---------------------------------------------------------------- levels
+-- Pro-C 2 reports its own reduction, so it's only ever tapped for its
+-- levels: a "levels only" tap, which the probe runs without a filterbank.
+reset()
+measure = { ["LA-2A"] = true }
+local levels = { ["Pro-C 2"] = true, ["LA-2A"] = true }
+package.loaded["TS_CV_Mappings"].get = function(key)
+  return { measure = measure[key] or nil, levels = levels[key] or nil }
+end
+TP.invalidate()
+TP.sync(track)
+check("levels: two taps",              F(5).params[TP.P_TAPN], 2)
+check("LA-2A both, Pro-C 2 levels only", track.ext[TP.EXT_KEY]:match("{C1},[^|]*,(%a+)") ..
+      "/" .. track.ext[TP.EXT_KEY]:match("{C3},[^|]*,(%a+)"), "gl/l")
+check("levels-only tap flagged",       F(5).params[TP.P_NOGR], 2)
+check("Pro-C 2 is not 'tapped'",       TP.is_tapped(track, "{C3}"), false)
+check("but it is metered",             TP.is_metered(track, "{C3}"), true)
+check("LA-2A is both",                 TP.is_tapped(track, "{C1}") and TP.is_metered(track, "{C1}"), true)
+check("no reading for a levels tap",   TP.reading(track, "{C3}"), nil)
+F(5).params[TP.P_INPK + 1] = -12.5; F(5).params[TP.P_OUTRMS + 1] = -9
+local lv = TP.levels(track, "{C3}")
+check("levels read back",              lv and (lv.in_pk .. "/" .. lv.out_rms), "-12.5/-9")
+check("a second sync changes nothing", TP.sync(track), false)
+-- untick levels on the LA-2A: same plugins, but what the tap is for changed
+levels["LA-2A"] = nil
+TP.invalidate()
+check("what changed: re-routed",       TP.sync(track), true)
+check("LA-2A now reduction only",      track.ext[TP.EXT_KEY]:match("{C1},[^|]*,(%a+)"), "g")
+-- an older record, without the field, still reads as reduction
+local old = TP.parse_record("v1|TOP|{POST}|{X},{PRE},5,7,0")
+check("old record: reduction",         old.taps[1].what, "g")
+-- an older probe (no levels yet): nothing read from it as levels, and
+-- nothing written to the parameter that is levels-only on a new one
+local real = reaper.TrackFX_GetParamName
+reaper.TrackFX_GetParamName = function() return true, "Bypass" end
+TP.invalidate()
+check("old probe: levels say so",      TP.levels(track, "{C3}") and TP.levels(track, "{C3}").old, true)
+F(5).params[TP.P_NOGR] = 99
+TP.sync(track)
+check("old probe: param 24 untouched", F(5).params[TP.P_NOGR], 99)
+reaper.TrackFX_GetParamName = real
+TP.invalidate()
+check("record round trip",             TP.format_record(TP.parse_record("v1|TOP|{P}|{A},{B},5,7,3,l")),
+      "v1|TOP|{P}|{A},{B},5,7,3,l")
+check("nogr mask",                     TP.nogr_mask({ { what = "g" }, { what = "l" }, { what = "gl" }, { what = "l" } }), 10)
 
 print(fails == 0 and ("\nALL PASS (" .. checks .. ")") or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

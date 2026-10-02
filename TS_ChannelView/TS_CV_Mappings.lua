@@ -49,6 +49,9 @@
   of the plugin that sits between a TS_TrackProbe pair to the post probe,
   which measures it. See TS_CV_Taps.lua.
 
+  LEVELS (Levels=1) puts input and output meters on the plugin's panel,
+  from the same before-and-after copies: any plugin, reporting or not.
+
   LIVE names are for plugins that rename their own parameters as you use
   them -- Softube Console 1 and Flow name their macros after whatever is
   loaded into them. A saved label or alias would freeze whatever the name
@@ -143,13 +146,15 @@ local function parse_section(sect)
   end
   return { controls = controls, aliases = aliases, meter = meter,
            live = (U.trim(sect.Live or "") == "1") or nil,
-           measure = (U.trim(sect.Measure or "") == "1") or nil }
+           measure = (U.trim(sect.Measure or "") == "1") or nil,
+           levels = (U.trim(sect.Levels or "") == "1") or nil }
 end
 
 local function serialize(layout)
   local out = {}
   if layout.live then out.Live = "1" end
   if layout.measure then out.Measure = "1" end
+  if layout.levels then out.Levels = "1" end
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
                               layout.meter.range or C.MAX_GR_DB)
@@ -200,13 +205,14 @@ function M.has(key)
   return sections[key] ~= nil
 end
 
--- Whether any plugin in the library is set to have its gain reduction
--- measured (see TS_CV_Taps). Straight off the raw sections, so it costs a
--- walk of the library rather than a parse of every layout in it.
+-- Whether any plugin in the library is set to have its gain reduction or
+-- its levels measured (see TS_CV_Taps). Straight off the raw sections, so
+-- it costs a walk of the library rather than a parse of every layout in it.
 function M.any_measure()
   for _, s in pairs(sections) do
-    local v = U.trim(s.Measure or "")
-    if v == "1" then return true end
+    if U.trim(s.Measure or "") == "1" or U.trim(s.Levels or "") == "1" then
+      return true
+    end
   end
   return false
 end
@@ -353,7 +359,7 @@ end
 -- Deep copy, so the editor can work on a scratch layout and discard it.
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
-                measure = layout.measure }
+                measure = layout.measure, levels = layout.levels }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range }
   end

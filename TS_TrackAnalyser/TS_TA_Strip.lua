@@ -161,7 +161,14 @@ function M.tapIndex(tr, fx)
   local n = 0
   for field in (rec .. "|"):gmatch("([^|]*)|") do
     n = n + 1
-    if n >= 4 and field:sub(1, #guid) == guid then return n - 3 end
+    if n >= 4 and field:sub(1, #guid) == guid then
+      -- The tap's last field says what it's for: "g" reduction, "l" levels.
+      -- A levels-only tap has no reduction to read. (Older records have no
+      -- such field, and every tap in them measured reduction.)
+      local what = field:match(",(%a+)$")
+      if what and not what:find("g", 1, true) then return nil end
+      return n - 3
+    end
   end
   return nil
 end

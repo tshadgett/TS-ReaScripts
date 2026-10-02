@@ -211,7 +211,7 @@ end
 -- don't have to pass one) and only ever matters for one thing: a ReaEQ
 -- panel isn't a grid at all, so none of the layout below applies to it --
 -- it gets a fixed canvas width instead. See TS_CV_EQPanel.lua.
-function P.width(n_or_controls, avail_h, collapsed, has_meter, key)
+function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io)
   if collapsed then return C.COLLAPSED_W end
   if key and RQ.is_eq(key) then return C.EQ_PANEL_W end
   local controls = n_or_controls
@@ -226,7 +226,14 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key)
   -- The meter is a strip, not a column: it adds its own narrow width
   -- rather than pushing the panel out by a whole CELL_W.
   if has_meter then w = w + C.METER_COL_W + C.PANEL_PAD end
+  if has_io then w = w + (C.IO_COL_W + C.PANEL_PAD) * 2 end
   return w
+end
+
+-- Whether a panel shows input/output meters: the plugin is set to
+-- (Levels=1), and the probes are measuring this instance.
+function P.has_io(track, fx, layout)
+  return layout ~= nil and layout.levels == true and TP.is_metered(track, fx.guid)
 end
 
 -- ---------------------------------------------------------------------
@@ -395,6 +402,66 @@ local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter)
 end
 
 
+-- WET. REAPER's own per-plugin wet/dry mix, the one in the FX window's
+-- top corner -- every plugin has it, whether or not the plugin has a mix
+-- control of its own. Its parameter index is asked for by name (":wet")
+-- once per instance.
+local wet_idx = {}
+local function wet_param(track, fx)
+  local p = wet_idx[fx.guid]
+  if p == nil then
+    p = false
+    if reaper.TrackFX_GetParamFromIdent then
+      local i = reaper.TrackFX_GetParamFromIdent(track, fx.addr, ":wet")
+      if i and i >= 0 then p = i end
+    end
+    wet_idx[fx.guid] = p
+  end
+  return p or nil
+end
+
+-- Input and output meters, from the probe's tap on this plugin. Returns
+-- the width used, 0 when there is nothing to show.
+-- A plugin's input and output meters, from the probe's tap on it: input
+-- hard left of the panel, output hard right, so the panel reads the way
+-- the audio flows. `lx` and `rx` are the two columns' left edges. Returns
+-- true when it drew them.
+local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
+  local lv = TP.levels(track, fx.guid)
+  if not lv then return false end
+  local key = "io" .. fx.guid
+  local tip
+  if lv.old then
+    -- An older probe, still running from before the update: nothing to read.
+    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", -150, nil, "?")
+    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", -150, nil, "?")
+    tip = "This track's TS_TrackProbe is an older version that doesn't measure\n" ..
+          "levels. Reopen the project (or remove and re-add the probes) to\n" ..
+          "load the new one."
+  else
+    local byp = not enabled
+    local out_pk  = byp and -150 or lv.out_pk
+    local out_rms = byp and -150 or lv.out_rms
+    local in_hold = W.level_peak(key .. "i", lv.in_pk, reaper.time_precise())
+    local itxt, otxt, ocol = W.io_readouts(lv, byp, in_hold)
+    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", lv.in_pk, lv.in_rms, itxt, C.COL.header_dim)
+    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", out_pk, out_rms, otxt, ocol)
+    local function f(v) return (v and v > -149) and ("%.1f"):format(v) or "-inf" end
+    tip = ("Input   peak %s   RMS %s dBFS\nOutput  peak %s   RMS %s dBFS\n%s")
+      :format(f(lv.in_pk), f(lv.in_rms), f(not byp and lv.out_pk or nil), f(not byp and lv.out_rms or nil),
+              byp and "Bypassed"
+              or ((lv.in_rms > -70) and ("Change %+.1f dB (output RMS minus input RMS)")
+                  :format(lv.out_rms - lv.in_rms) or "No signal coming in"))
+      .. "\n\nMeasured by the track's TS_TrackProbe pair."
+  end
+  for _, c in ipairs({ { lx, "ioi##" }, { rx, "ioo##" } }) do
+    ImGui.SetCursorScreenPos(ctx, c[1], y)
+    ImGui.InvisibleButton(ctx, c[2] .. fx.guid, w, h, ImGui.ButtonFlags_MouseButtonRight)
+    W.tip(ctx, c[2] .. fx.guid, tip, ImGui.IsItemHovered(ctx), false)
+  end
+  return true
+end
+
 local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   local h = C.HEADER_H
   local dragging = req.is_drag_source
@@ -418,6 +485,18 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   local n_btn = 4
   local btn_x = x + w - (btn + gap) * n_btn - 2
 
+  -- The wet %, centred in the header: dim at 100%, in the accent colour
+  -- when it's anything else, so a plugin mixed back stands out. Only when
+  -- the name keeps a useful width to its left and it clears the buttons.
+  local wet_p, wet_v, wet_txt, wet_w, wet_x = wet_param(track, fx), 1, nil, 0, nil
+  if wet_p then
+    wet_v = reaper.TrackFX_GetParam(track, fx.addr, wet_p) or 1
+    wet_txt = ("%d%%"):format(math.floor(wet_v * 100 + 0.5))
+    local ww = ImGui.CalcTextSize(ctx, wet_txt) + 6
+    local wx = x + (w - ww) * 0.5
+    if wx - (x + 30) >= 40 and wx + ww <= btn_x - 4 then wet_w, wet_x = ww, wx end
+  end
+
   -- index chip
   local chip = tostring(index)
   local tw, th = ImGui.CalcTextSize(ctx, chip)
@@ -428,7 +507,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   -- something into or out of a REAPER container isn't addressable through
   -- the documented API, so those panels stay put.
   local name_x = x + 5 + tw + 6
-  local name_w = math.max(8, btn_x - name_x - 4)
+  local name_w = math.max(8, (wet_x or btn_x) - name_x - 4)
   ImGui.SetCursorScreenPos(ctx, name_x, y)
   ImGui.InvisibleButton(ctx, "hdr##" .. fx.guid, name_w, h,
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
@@ -482,6 +561,34 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   end
   ImGui.DrawList_AddText(dl, name_x, y + (h - nh) * 0.5,
     enabled and C.COL.header_text or C.COL.header_dim, name)
+
+  if wet_w > 0 then
+    local wx = wet_x
+    ImGui.SetCursorScreenPos(ctx, wx, y)
+    ImGui.InvisibleButton(ctx, "wet##" .. fx.guid, wet_w, h)
+    local hov = ImGui.IsItemHovered(ctx)
+    local full = wet_v >= 0.995
+    local _, th2 = ImGui.CalcTextSize(ctx, wet_txt)
+    ImGui.DrawList_AddText(dl, wx + 3, y + (h - th2) * 0.5,
+      full and (hov and C.COL.header_text or C.COL.header_dim) or C.COL.accent, wet_txt)
+    W.tip(ctx, "wet##" .. fx.guid,
+      ("Wet %s \u{2014} REAPER's own mix for this plugin\nClick for a slider"):format(wet_txt),
+      hov, false)
+    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+      ImGui.OpenPopup(ctx, "wetpop##" .. fx.guid)
+    end
+    if ImGui.BeginPopup(ctx, "wetpop##" .. fx.guid) then
+      ImGui.TextDisabled(ctx, "Wet")
+      ImGui.SetNextItemWidth(ctx, 160)
+      local ch, nv = ImGui.SliderDouble(ctx, "##wet", wet_v * 100, 0, 100, "%.0f%%")
+      if ch then reaper.TrackFX_SetParam(track, fx.addr, wet_p, nv / 100) end
+      ImGui.SameLine(ctx)
+      if ImGui.SmallButton(ctx, "100%") then
+        reaper.TrackFX_SetParam(track, fx.addr, wet_p, 1)
+      end
+      ImGui.EndPopup(ctx)
+    end
+  end
 
   local function at(i) ImGui.SetCursorScreenPos(ctx, btn_x + (btn + gap) * i, y + 3) end
 
@@ -580,17 +687,28 @@ end
 -- `panel_h` is the panel's FULL height, header included -- the same value
 -- P.width() was given, so the column count here can't disagree with the
 -- width the panel was allotted.
-local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter)
+local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter, io)
   local controls = layout.controls or {}
   local lay = P.layout(controls, panel_h)
   local h = panel_h - C.HEADER_H
 
   local grid_x0 = x + C.PANEL_PAD
   local grid_w  = w - C.PANEL_PAD * 2
+  -- Input and output meters take the two outside edges: in at the far
+  -- left, out at the far right. Everything else sits between them.
+  if io then
+    local ok = draw_io(ctx, dl, grid_x0, grid_x0 + grid_w - C.IO_COL_W,
+                       y + C.PANEL_PAD, C.IO_COL_W, h - C.PANEL_PAD * 2,
+                       track, fx, T.get_enabled(track, fx.addr))
+    if ok then
+      grid_x0 = grid_x0 + C.IO_COL_W + C.PANEL_PAD
+      grid_w  = grid_w - (C.IO_COL_W + C.PANEL_PAD) * 2
+    end
+  end
   if meter then
     local mx = (C.METER_SIDE == "right")
-      and (x + w - C.PANEL_PAD - C.METER_COL_W)
-      or  (x + C.PANEL_PAD)
+      and (grid_x0 + grid_w - C.METER_COL_W)
+      or  grid_x0
     local used = draw_meter(ctx, dl, mx, y + C.PANEL_PAD, C.METER_COL_W,
                             h - C.PANEL_PAD * 2, track, fx, meter)
     if used > 0 then
@@ -789,7 +907,8 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   -- for the one plugin type that's never going to answer yes.
   local meter = (not is_eq) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
-  local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key)
+  local io = (not is_eq) and P.has_io(track, fx, layout)
+  local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key, io)
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
@@ -817,7 +936,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
         EQP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H, track, fx, req)
       else
         draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
-                      key, req, meter)
+                      key, req, meter, io)
       end
     end
     -- ReaImGui: EndChild only when BeginChild returned true.
