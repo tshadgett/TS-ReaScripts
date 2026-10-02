@@ -1,5 +1,17 @@
 # ChannelView — changelog
 
+## 1.5.3 — no measured reduction on ReaEQ
+
+- **ReaEQ can no longer be set to measure gain reduction.** An EQ has no
+  reduction to measure: what the probe read for it was the curve's effect
+  on the programme, which swings with every note, and Track Analyser drew
+  it as a second measured trace bouncing several dB. ChannelView's ReaEQ
+  panel never showed that meter, so there was no sign of it there. The
+  option is gone from ReaEQ's menu and Edit Parameters, and a saved layout
+  that still has it is ignored: ReaEQ is tapped for its input and output
+  levels only.
+
+
 ## 1.5.2 — wet % on ReaEQ
 
 - **Fixed: ReaEQ's wet % could show (and set) the wrong value** after a band

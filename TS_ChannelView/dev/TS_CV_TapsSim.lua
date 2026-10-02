@@ -256,5 +256,22 @@ check("record round trip",             TP.format_record(TP.parse_record("v1|TOP|
       "v1|TOP|{P}|{A},{B},5,7,3,l")
 check("nogr mask",                     TP.nogr_mask({ { what = "g" }, { what = "l" }, { what = "gl" }, { what = "l" } }), 10)
 
+-- ---------------------------------------------------------------- ReaEQ
+-- An EQ has no reduction: Measure=1 on ReaEQ (an older layout could carry
+-- it) is ignored, so its tap is for levels only.
+reset()
+track.fx[2] = fx("VST: ReaEQ (Cockos)", "{EQ}", 2, 2)
+measure = { ["ReaEQ"] = true }
+levels = { ["ReaEQ"] = true }
+TP.invalidate()
+TP.sync(track)
+check("ReaEQ: one tap",                F(5).params[TP.P_TAPN], 1)
+check("ReaEQ: levels only",            track.ext[TP.EXT_KEY]:match("{EQ},[^|]*,(%a+)"), "l")
+check("ReaEQ: not 'tapped'",           TP.is_tapped(track, "{EQ}"), false)
+levels = {}
+TP.invalidate()
+TP.sync(track)
+check("ReaEQ: measure alone, no tap",  F(5).params[TP.P_TAPN], 0)
+
 print(fails == 0 and ("\nALL PASS (" .. checks .. ")") or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

@@ -1,5 +1,12 @@
 # Track Analyser — changelog
 
+## 1.5.3 — in step with ChannelView
+
+No changes here. ChannelView 1.5.3 stops ReaEQ being measured for gain
+reduction, which removes a bogus measured trace from this panel on tracks
+where that had been switched on.
+
+
 ## 1.5.2 — in step with ChannelView
 
 No changes. The version moves to 1.5.2 to match ChannelView, so the two

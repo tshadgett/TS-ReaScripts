@@ -25,6 +25,7 @@ local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
 local M = require("TS_CV_Mappings")
 local TP = require("TS_CV_Taps")
+local RQ = require("TS_CV_ReaEQ")
 
 local E = {}
 local ImGui
@@ -505,7 +506,8 @@ function E.draw(ctx, track)
             "small range; a limiter wants a large one.")
         end
       end
-    else
+    elseif not RQ.is_eq(st.key) then
+      -- Not offered for ReaEQ: an EQ has no reduction to measure.
       local on = st.scratch.measure == true
       local mch, mv = ImGui.Checkbox(ctx, "Measure gain reduction (estimated)", on)
       if mch then

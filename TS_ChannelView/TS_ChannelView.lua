@@ -1,11 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.5.2
+-- @version 1.5.3
 -- @changelog
---  Fixed: ReaEQ's wet % could show (and set) the wrong value after a band
---  was added or removed -- it read whichever ReaEQ parameter had moved into
---  the wet control's old place. The wet control is now looked up again
---  whenever a plugin's parameter count changes.
+--  ReaEQ can no longer be set to measure gain reduction. An EQ has none:
+--  the probe was reading the curve's effect on the programme, which Track
+--  Analyser drew as a second measured trace bouncing several dB. The option
+--  is gone from ReaEQ's menu and Edit Parameters, and a saved layout that
+--  still has it is ignored -- ReaEQ is tapped for its levels only.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -114,6 +115,7 @@ local FO = require("TS_CV_Focus")
 local IC = require("TS_CV_Icons")
 local CN = require("TS_CV_Chains")
 local TP = require("TS_CV_Taps")
+local RQ = require("TS_CV_ReaEQ")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
@@ -407,9 +409,9 @@ local function panel_menu()
       M.set_meter(l, not on)
       M.set(key, l); M.save()
     end
-  else
+  elseif not RQ.is_eq(key) then
     -- Doesn't report it: it can be MEASURED instead, by the track's probe
-    -- pair (TS_CV_Taps).
+    -- pair (TS_CV_Taps). Not ReaEQ, which has no reduction to measure.
     local on = layout.measure == true
     if ImGui.MenuItem(ctx, "Measure gain reduction (estimated)", nil, on) then
       local l = materialise(fx)

@@ -49,6 +49,7 @@
 
 local U = require("TS_CV_Util")
 local M = require("TS_CV_Mappings")
+local RQ = require("TS_CV_ReaEQ")
 
 local TP = {}
 
@@ -286,9 +287,14 @@ function TP.native_gr(tr, addr, guid)
 end
 
 -- Whether a plugin should be tapped: ticked for measuring, and it doesn't
--- report its own reduction (one that does never needs measuring).
+-- report its own reduction (one that does never needs measuring). Never
+-- ReaEQ: an EQ has no reduction, and what the probe would "measure" is its
+-- curve's effect on the programme, which swings with every note. (Older
+-- layouts can still carry Measure=1 for it; it is ignored.)
 local function wants_measure(tr, addr)
-  local layout = M.get(U.plugin_key(fx_name(tr, addr)))
+  local key = U.plugin_key(fx_name(tr, addr))
+  if RQ.is_eq(key) then return false end
+  local layout = M.get(key)
   if not (layout and layout.measure == true) then return false end
   return not TP.native_gr(tr, addr, fx_guid(tr, addr))
 end
