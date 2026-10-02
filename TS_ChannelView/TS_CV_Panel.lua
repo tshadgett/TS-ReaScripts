@@ -213,7 +213,9 @@ end
 -- it gets a fixed canvas width instead. See TS_CV_EQPanel.lua.
 function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io)
   if collapsed then return C.COLLAPSED_W end
-  if key and RQ.is_eq(key) then return C.EQ_PANEL_W end
+  if key and RQ.is_eq(key) then
+    return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
+  end
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -907,7 +909,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   -- for the one plugin type that's never going to answer yes.
   local meter = (not is_eq) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
-  local io = (not is_eq) and P.has_io(track, fx, layout)
+  local io = P.has_io(track, fx, layout)
   local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key, io)
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
@@ -933,7 +935,15 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
         -- The whole body becomes the draggable-node curve canvas rather
         -- than the ordinary parameter grid: a ReaEQ panel IS the EQ view,
         -- not a grid you can optionally switch away from.
-        EQP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H, track, fx, req)
+        -- With input/output meters, they take the two outside edges here
+        -- too, and the canvas keeps its own width between them.
+        local ex, ew = x, ww
+        if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
+                          y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W,
+                          wh - C.HEADER_H - C.PANEL_PAD * 2, track, fx, enabled) then
+          ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
+        end
+        EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H, track, fx, req)
       else
         draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
                       key, req, meter, io)

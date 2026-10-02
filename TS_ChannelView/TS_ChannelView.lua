@@ -1,14 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.5.0
+-- @version 1.5.1
 -- @changelog
---  Input/output meters per plugin: tick "Input/output meters" on any
---  plugin and its panel gets a meter for what goes in, one for what comes
---  out, and the change in level between them (output RMS minus input RMS).
---  Measured by the track's TS_TrackProbe pair, like measured gain
---  reduction. Every panel header also shows the plugin's wet % (REAPER's
---  own wet/dry mix): dim at 100%, highlighted when it's anything else;
---  click it for a slider.
+--  The ReaEQ panel gets input/output meters too: tick "Input/output
+--  meters" on ReaEQ and it gets the input meter hard left and the output
+--  hard right, with the EQ canvas between them at its usual width. 1.5.0
+--  left them off that panel.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

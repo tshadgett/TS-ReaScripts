@@ -1,5 +1,13 @@
 # ChannelView — changelog
 
+## 1.5.1 — I/O meters on ReaEQ
+
+- **The ReaEQ panel gets input/output meters too.** Ticking *Input/output
+  meters* on ReaEQ now does what it does on any other plugin: input meter
+  hard left, output hard right, with the EQ canvas between them at its usual
+  width. 1.5.0 left them off that panel.
+
+
 ## 1.5.0 — input/output meters, and wet
 
 - **Input/output meters per plugin.** Tick **Input/output meters** in a
