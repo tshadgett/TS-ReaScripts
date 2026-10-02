@@ -60,6 +60,9 @@ done
 # with or without Track Analyser installed). The same file, one source.
 copy_one "$REAPER_DIR/Effects/TS_TrackAnalyser/TS_TrackProbe.jsfx" \
          "$REPO/TS_ChannelView/TS_TrackProbe.jsfx"
+# The web companion's page lives in REAPER's web root, not in Scripts/.
+copy_one "$REAPER_DIR/reaper_www_root/TS_ChannelView.html" \
+         "$REPO/TS_ChannelView/TS_ChannelView.html"
 
 # ---- Track Analyser: scripts from Scripts/, the probe from Effects/.
 for f in "$REAPER_DIR/Scripts/TS_TrackAnalyser"/*.lua; do

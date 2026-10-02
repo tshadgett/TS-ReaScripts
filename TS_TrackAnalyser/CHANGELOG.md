@@ -1,5 +1,11 @@
 # Track Analyser — changelog
 
+## 1.7.0 — in step with ChannelView
+
+- No changes to Track Analyser. ChannelView's new web page draws Track
+  Analyser's spectrum behind its ReaEQ canvas while Track Analyser runs.
+
+
 ## 1.6.0 — in step with ChannelView
 
 - **TS_TrackProbe 1.5.0** publishes each tapped plugin's own waveform and

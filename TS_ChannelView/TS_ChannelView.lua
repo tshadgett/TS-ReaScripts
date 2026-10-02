@@ -1,21 +1,22 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.6.0
+-- @version 1.7.0
 -- @changelog
---  Hardware styles: right-click a knob or fader > Style for Skirted, Pointer
---  or Trim pot knobs and Console or Rail fader caps, in nine cap colours;
---  the panel menu's Faceplate puts a panel on Charcoal, Gunmetal, Aluminium,
---  Steel blue, Navy, Cream, Racing green or Oxblood, with a gentle texture
---  (View > Faceplate texture). Saved with the plugin's layout.
---  Gain-reduction trace: click a gain-reduction meter to open a trace of
---  that plugin alone -- its output waveform, its input behind, its
---  reduction from the top -- tempo-locked or in seconds, frozen when
---  stopped. Needs TS_TrackProbe 1.5.0: reopen the project after updating.
---  The wet slider's 100% button is gone.
+--  Web companion: ChannelView on a tablet. The selected track's panels, with
+--  your layouts, styles and faceplates, in a browser -- plus the transport,
+--  macro buttons, sends, the ReaEQ curve editor, gain-reduction traces, a
+--  half-height mixer and a session navigator. Served by REAPER's own web
+--  interface, with TS_ChannelView_Web.lua running alongside. Setup: see
+--  "On a tablet" in the README.
+--  The [+] add menu searches as you type, and plugin search is forgiving and
+--  ranked: "proq", "pq4" and "saturm" all find what you meant, best match
+--  first, recently used plugins nudged up.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
 --  [main]   TS_ChannelView_TCP.lua
+--  [main]   TS_ChannelView_Web.lua
+--  [webinterface] TS_ChannelView.html
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
 --  [nomain] TS_CV_Toolbar.lua
@@ -38,11 +39,13 @@
 --  [nomain] TS_CV_Panel.lua
 --  [nomain] TS_CV_ReaEQ.lua
 --  [nomain] TS_CV_Receives.lua
+--  [nomain] TS_CV_Search.lua
 --  [nomain] TS_CV_Sends.lua
 --  [nomain] TS_CV_Startup.lua
 --  [nomain] TS_CV_State.lua
 --  [nomain] TS_CV_Steps.lua
 --  [nomain] TS_CV_Taps.lua
+--  [nomain] TS_CV_Trace.lua
 --  [nomain] TS_CV_TrackMenu.lua
 --  [nomain] TS_CV_TrackOps.lua
 --  [nomain] TS_CV_TrackStrip.lua
@@ -55,6 +58,9 @@
 --  and buttons wired straight to that plugin's parameters -- what you
 --  assign to a panel is remembered per plugin, so the same plugin always
 --  comes up looking the same wherever it turns up.
+--
+--  On a tablet: TS_ChannelView_Web.lua and the TS_ChannelView.html page put
+--  the same panels in a browser, through REAPER's own web interface.
 --
 --  Panels are a fixed height and grow in COLUMNS: rows fall out of the
 --  window height, controls flow down a column and wrap into a new one, so

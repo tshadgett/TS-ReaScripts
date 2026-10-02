@@ -3044,6 +3044,36 @@ do
   check("cap colour: unknown is none", W.cap_col("mauve"), nil)
 end
 
+-- forgiving plugin search (TS_CV_Search)
+do
+  local SR = require("TS_CV_Search")
+  local names = { "VST3: Pro-Q 4 (FabFilter)", "VST3: Pro-C 2 (FabFilter)", "VST3: Pro-L 2 (FabFilter)",
+    "VST3: Saturn 2 (FabFilter)", "VST: ReaComp (Cockos)", "VST3: SSL EQ (Waves)", "VST3: Decapitator (Soundtoys)",
+    "VST3: Compressor (Steinberg)", "VST3: Valhalla VintageVerb (Valhalla DSP, LLC)" }
+  local list = {}
+  for _, n in ipairs(names) do
+    list[#list + 1] = { name = n, short = n:gsub("^%w+:%s*", ""):gsub("%s*%b()$", ""), ident = n }
+  end
+  table.sort(list, function(a, b) return a.short:lower() < b.short:lower() end)
+  local function top(q, bonus)
+    local r = SR.search(list, q, nil, bonus)
+    local o = {}
+    for _, e in ipairs(r) do o[#o + 1] = e.short end
+    return table.concat(o, "|")
+  end
+  check("search: word starts", top("fab sat"), "Saturn 2")
+  check("search: punctuation ignored", top("proq"), "Pro-Q 4")
+  check("search: in-order letters", top("pq4"), "Pro-Q 4")
+  check("search: a wrong letter", top("saturm"), "Saturn 2")
+  check("search: swapped letters", top("satrun"), "Saturn 2")
+  check("search: a missing letter", top("compresor"), "Compressor")
+  check("search: a short term gets no slack", top("proc"), "Pro-C 2")
+  check("search: run-together words", top("ssleq"), "SSL EQ")
+  check("search: nothing", top("zzzz"), "")
+  check("search: a name starting so comes first", top("pro"):match("^[^|]+"), "Pro-C 2")
+  check("search: recents nudge", top("pro", function(e) return e.short == "Pro-L 2" and 15 or 0 end):match("^[^|]+"), "Pro-L 2")
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

@@ -1,5 +1,38 @@
 # ChannelView — changelog
 
+## 1.7.0 — the web companion, and a forgiving search
+
+- **ChannelView on a tablet.** A web page, served by REAPER's own web
+  interface, showing the selected track the way ChannelView does: your
+  layouts, control styles and faceplates. Around it: the transport (drawn
+  like the default theme's, with the big round play), macro buttons you set
+  up on the page itself, the channel strip, sends and receives, the ReaEQ
+  curve editor with the track's spectrum behind it, and gain-reduction
+  traces. Add, remove and reorder plugins from the page.
+- **A mixer** slides up from the bottom — drag the divider to closed, half
+  or full — with pan, fader, meters, phase and monitoring, and a swipe along
+  M, S or R to set a run of tracks at once. Its strips line up with the
+  track buttons and scroll with them.
+- **A navigator** shows the whole session: a lane per track, regions,
+  markers with their names, the time selection and the playhead. Tap to move
+  the edit cursor, tap a region to go to it, drag the box to scroll the
+  arrange view.
+- `TS_ChannelView_Web.lua` bridges the page to REAPER, whether or not
+  ChannelView's window is open. Setup is in the README under *On a tablet*.
+- **Type to search in the [+] menu.** The add menu opens with a search box
+  that already has the keyboard: start typing and the menu becomes a list of
+  matches. Enter adds the top one.
+- **A forgiving plugin search** in the add dialog, the menu and the web
+  page. Punctuation and spaces don't matter ("proq", "ssleq"), initials work
+  ("pq4"), and one slip is forgiven in a longer word ("saturm",
+  "compresor"). Results are ranked, best first, with plugins you've used
+  recently nudged up.
+- Under the hood: the gain-reduction trace's data moved into
+  `TS_CV_Trace.lua` so the web page draws exactly the same picture, and
+  ChannelView and the web page now agree on which plugins are tapped rather
+  than undoing each other's routing.
+
+
 ## 1.6.0 — hardware styles, and a gain-reduction trace
 
 - **Knobs and faders can wear a hardware look.** Right-click one ▸ *Style*:

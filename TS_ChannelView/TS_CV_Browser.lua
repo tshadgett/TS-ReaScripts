@@ -28,6 +28,7 @@
 
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
+local SR = require("TS_CV_Search")
 local IX = require("TS_CV_FXIndex")
 
 local B = {}
@@ -169,14 +170,15 @@ local function remember(ident)
   reaper.SetExtState(C.EXT_SECT, RECENT_KEY, table.concat(out, "\n"), true)
 end
 
--- Every whitespace-separated term must appear somewhere in the full name
--- (which carries the format prefix and the vendor tag), so "fab sat" and
--- "sat fab" both land on FabFilter Saturn.
-local function matches(entry, terms)
-  for _, t in ipairs(terms) do
-    if not entry.lower:find(t, 1, true) then return false end
-  end
-  return true
+-- Searching is TS_CV_Search's: every term has to find a home in the full
+-- name (format, name and vendor), but forgivingly -- "proq", "pq4" and
+-- "saturm" all work -- and the best fit comes first. A recently used
+-- plugin gets a nudge up the list.
+local RECENT_BONUS = 15
+local function recent_bonus()
+  local set = {}
+  for _, id in ipairs(recents()) do set[id] = true end
+  return function(e) return set[e.ident] and RECENT_BONUS or 0 end
 end
 
 local function rebuild()
@@ -197,11 +199,14 @@ local function rebuild()
     for _, e in ipairs(list) do out[#out + 1] = e end
     st.results, st.n_recent = out, n_recent
   else
-    local terms = {}
-    for t in q:gmatch("%S+") do terms[#terms + 1] = t end
-    local out = {}
-    for _, e in ipairs(list) do
-      if in_filter(e) and matches(e, terms) then out[#out + 1] = e end
+    local out
+    if q == "" then
+      out = {}
+      for _, e in ipairs(list) do
+        if in_filter(e) then out[#out + 1] = e end
+      end
+    else
+      out = SR.search(list, q, in_filter, recent_bonus())
     end
     st.results, st.n_recent = out, 0
   end
@@ -255,7 +260,7 @@ end
 -- opens the search dialog from its first item.
 
 local MENU_ID = "addfxmenu"
-local menu = { request = false, insert_at = nil }
+local menu = { request = false, insert_at = nil, query = "", focus = false }
 
 -- Where the menu's items insert: set by B.draw_menu for the chain, or by
 -- B.menu_items when the same list is shown somewhere else (the input FX
@@ -395,11 +400,27 @@ function B.menu_items(ctx, track, opts)
   return inserted_now
 end
 
+-- TYPE TO SEARCH. The menu opens with a search box at the top that already
+-- has the keyboard, so typing searches straight away -- no "Search..." to
+-- click first. Once there is something in it the trees give way to a flat
+-- list of matches, best first (TS_CV_Search, as in the dialog); Enter takes
+-- the first. With the box empty the menu is the menu it always was. The box
+-- lives in the menu rather than handing over to the search dialog because
+-- a text box that takes focus with text already in it selects that text,
+-- and the next key typed would replace the first.
+local MENU_MAX = 40
+
+local function quick_search(q)
+  if #SR.terms(q) == 0 then return {} end
+  return SR.search(installed(), q, nil, recent_bonus(), MENU_MAX)
+end
+
 -- Returns true on the frame a plugin was inserted from the menu.
 function B.draw_menu(ctx, track)
   if menu.request then
     ImGui.OpenPopup(ctx, MENU_ID)
     menu.request = false
+    menu.query, menu.focus = "", true
     installed()                       -- index now, not mid-hover
   end
   inserted_now = false
@@ -409,10 +430,33 @@ function B.draw_menu(ctx, track)
     and ("Insert at position " .. (menu.insert_at + 1))
     or "Add to the end of the chain"
   ImGui.TextDisabled(ctx, where)
+
+  if menu.focus then
+    ImGui.SetKeyboardFocusHere(ctx)
+    menu.focus = false
+  end
+  ImGui.SetNextItemWidth(ctx, 240)
+  local ch, q = ImGui.InputTextWithHint(ctx, "##addfxq", "type to search\u{2026}", menu.query)
+  if ch then menu.query = q end
   ImGui.Separator(ctx)
 
   cur.insert_at, cur.track, cur.input = menu.insert_at, nil, false
-  items(ctx, track)
+  if U.trim(menu.query) ~= "" then
+    local found = quick_search(U.trim(menu.query))
+    if #found == 0 then
+      ImGui.TextDisabled(ctx, "No matches")
+    else
+      plugin_items(ctx, track, found)
+      if #found >= MENU_MAX then ImGui.TextDisabled(ctx, "\u{2026}keep typing to narrow it") end
+      if not inserted_now and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+                               or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
+        if insert(track, found[1], cur.insert_at, false) then inserted_now = true end
+        ImGui.CloseCurrentPopup(ctx)
+      end
+    end
+  else
+    items(ctx, track)
+  end
   ImGui.EndPopup(ctx)
   return inserted_now
 end

@@ -311,8 +311,25 @@ end
 -- (TS_CV_Panel): the trace needs the plugin's own audio, so a plugin that
 -- reports its reduction -- and so isn't otherwise tapped -- is tapped for
 -- its levels while it's open. Per instance, as the open state is.
+--
+-- The web companion opens traces of its own, per device: its bridge lists
+-- the instances in ExtState TS_CV_WEB/wave, so the window and the bridge --
+-- two scripts each re-checking the routing -- agree on what's tapped
+-- rather than undoing each other's taps.
+local web_wave = { at = -10, set = {} }
+local function web_open(guid)
+  local now = reaper.time_precise()
+  if now - web_wave.at > 0.5 then
+    web_wave.at, web_wave.set = now, {}
+    local s = reaper.GetExtState("TS_CV_WEB", "wave") or ""
+    for g in s:gmatch("[^,]+") do web_wave.set[g] = true end
+  end
+  return web_wave.set[guid] == true
+end
+
 local function wants_wave(tr, addr)
-  if not St.is_gr_open(fx_guid(tr, addr)) then return false end
+  local guid = fx_guid(tr, addr)
+  if not (St.is_gr_open(guid) or web_open(guid)) then return false end
   local layout = M.get(U.plugin_key(fx_name(tr, addr)))
   return layout ~= nil and M.meter_of(layout) ~= nil
 end
@@ -912,7 +929,10 @@ function TP.update(now)
     if wave_tr and now - wave_at < 0.5 and reaper.ValidatePtr(wave_tr, "MediaTrack*") then
       want = math.max(0, math.floor(reaper.GetMediaTrackInfo_Value(wave_tr, "IP_TRACKNUMBER")))
     end
-    if want ~= wave_written then
+    -- The window and the web bridge both run this: whichever is showing a
+    -- trace keeps its track named, so one letting go (writing 0) can't
+    -- leave the other's trace waiting.
+    if want ~= wave_written or (want > 0 and reaper.gmem_read(TP.WAVE_SLOT) ~= want) then
       reaper.gmem_write(TP.WAVE_SLOT, want)
       wave_written = want
     end

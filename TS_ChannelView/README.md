@@ -428,14 +428,18 @@ so every instance of that plugin wears it.
 | `TS_CV_Mixer.lua` | mixer view, and the shared track row (`MX.draw_row`) both views draw into |
 | `TS_CV_TrackStrip.lua` | asks the track row to scroll to the selection -- everything else moved into TS_CV_Mixer.lua |
 | `TS_CV_Browser.lua` | the add-a-plugin picker |
+| `TS_CV_Search.lua` | the forgiving, ranked plugin search (picker, [+] menu and web page) |
 | `TS_CV_FXIndex.lua` | REAPER's Developers / Categories / FX Folders metadata |
 | `TS_CV_Channel.lua` | the pinned Channel panel |
 | `TS_CV_Taps.lua` | routing for measured gain reduction, and reading it back |
+| `TS_CV_Trace.lua` | the gain-reduction trace's data, shared with the web page |
 | `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
 | `TS_CV_Startup.lua` | the Run-when-REAPER-starts option, and the `__startup.lua` surgery |
 | `TS_CV_State.lua` | per-instance view state (collapsed), saved in the project |
 | `TS_CV_Steps.lua` | cached choices for stepped parameters (derived, deletable) |
+| `TS_ChannelView_Web.lua` | the web companion's bridge — see *On a tablet* |
+| `TS_ChannelView.html` | the web companion's page. Goes in `reaper_www_root/` |
 | `dev/TS_CV_Test.lua` | offline tests — see below. Not installed |
 | `TS_CV_Diag.lua` | dumps what REAPER reports about the selected track's FX, and how much of your plugin collection the FX index resolves |
 | `dev/TS_CV_Audit.py` | checks every ImGui call against your installed ReaImGui. Not installed |
@@ -445,11 +449,78 @@ The layout library is plain text and safe to edit by hand; *Layouts ▸ Reload
 library from disk* picks up changes without restarting. Every save keeps one
 generation of backup as `TS_ChannelView_Mappings.bak.ini`.
 
+## On a tablet: the web companion
+
+`TS_ChannelView.html` puts ChannelView in a browser — built for an iPad in
+landscape beside the desk, and fine in any modern browser. It shows the
+selected track as ChannelView does (your layouts, styles and faceplates),
+with the transport, macro buttons, sends and receives, the ReaEQ curve
+editor, gain-reduction traces, a mixer and a session navigator.
+
+Two pieces, both installed by ReaPack with ChannelView:
+
+| | |
+|---|---|
+| `TS_ChannelView.html` | the page. Lives in `REAPER/reaper_www_root/`, where REAPER's web interface serves it |
+| `TS_ChannelView_Web.lua` | the bridge: a background script that publishes the selected track's chain and applies what the page sends back. Runs whether or not ChannelView's window is open |
+
+### Setting it up
+
+1. **Turn on REAPER's web interface.** *Options ▸ Preferences ▸
+   Control/OSC/web ▸ Add*, and choose **Web browser interface**. Pick a port
+   (8080 is usual) and set a username and password under access control:
+   anyone on your network who can reach that port can drive REAPER. The
+   dialog shows the address REAPER is listening on.
+2. **Start the bridge.** *Actions ▸ Show action list*, run
+   **Script: TS_ChannelView_Web.lua**. It keeps running in the background
+   (the action shows as on); run it again to stop it. To start it with
+   REAPER, add that action to your startup actions or `Scripts/__startup.lua`.
+3. **Open the page on the tablet**, on the same network:
+   `http://<your computer's address>:8080/TS_ChannelView.html`. If Windows
+   asks whether REAPER may accept connections on private networks, allow it.
+4. **On an iPad**, *Share ▸ Add to Home Screen* opens it full-screen, like
+   an app.
+
+Installing by hand instead of with ReaPack: copy `TS_ChannelView.html` into
+`REAPER/reaper_www_root/` and `TS_ChannelView_Web.lua` into
+`REAPER/Scripts/TS_ChannelView/` beside the other modules, then load the
+script into the action list.
+
+### What needs what
+
+- Gain-reduction meters and traces need **TS_TrackProbe** on the track, as
+  on the desktop.
+- The spectrum behind the ReaEQ canvas comes from **Track Analyser** while
+  it's running. Without it the canvas has no backdrop.
+- Choices made on the page — collapsed panels, open traces and their
+  windows, the mixer's height, whether the navigator and macro bar show —
+  are kept by the browser, so a tablet and a laptop can differ. Macro
+  buttons are stored in REAPER, so every device shares one set.
+
+### Using it
+
+- **Plugins:** knobs drag up and down; double-tap for the default. ⋯ on a
+  header inserts, moves, opens or removes a plugin. Press and hold a header,
+  then drag, to reorder. The dashed + adds to the end of the chain, and the
+  chevron collapses a panel on this device.
+- **ReaEQ:** drag a node for frequency and gain, double-tap empty space to
+  add a band, tap a node to select it and set its type and Q underneath.
+- **Gain reduction:** tap a meter to open its trace; tap the trace for its
+  window.
+- **Mixer:** drag the bar labelled MIXER up (closed, half or full), or tap
+  it. Press M, S or R and drag along the row to set a run of tracks at once.
+  Touching one of several selected tracks moves them all, as in REAPER.
+- **Navigator:** the button to the left of the macro button. Tap to move the
+  edit cursor, tap a region's name to go to it, drag the box to scroll
+  REAPER's arrange view.
+- **Macros:** the pencil turns on editing. + adds a button for any action
+  (searchable), tap a button to change it, × removes it.
+
 ## Installing
 
 Actions ▸ Show action list ▸ New action ▸ Load ReaScript… ▸ `TS_ChannelView.lua`.
 Needs the **ReaImGui** extension (ReaPack). SWS is optional — it only powers
-*Layouts ▸ Show the library file*.
+*Layouts ▸ Show the library file*. For the tablet page, see *On a tablet* above.
 
 ## Tests
 

@@ -5,7 +5,7 @@ either have no GUI worth using or hide what they are doing.
 
 | | |
 |---|---|
-| **[ChannelView](TS_ChannelView/)** | A docked channel strip: one editable control panel per plugin on the selected track. Pick the parameters you actually reach for, lay them out once, and every instance of that plugin comes up the same way. Gain reduction meters for every compressor, including ones that don't report it. |
+| **[ChannelView](TS_ChannelView/)** | A docked channel strip: one editable control panel per plugin on the selected track. Pick the parameters you actually reach for, lay them out once, and every instance of that plugin comes up the same way. Gain reduction meters for every compressor, including ones that don't report it. Also on a tablet, through REAPER's web interface. |
 | **[Track Analyser](TS_TrackAnalyser/)** | A docked two-panel display showing what your processing is *doing* — the measured magnitude response of whatever sits between two probes, drawn over the spectrum, plus a before/after waveform with gain reduction over it. Nothing is modelled; both panels read the audio. |
 
 ### The probes
@@ -43,6 +43,8 @@ Download the repo, then:
 - `TS_TrackAnalyser/*.lua` → `REAPER/Scripts/TS_TrackAnalyser/`
 - `TS_TrackAnalyser/TS_TrackProbe.jsfx` → `REAPER/Effects/TS_TrackAnalyser/`
   (ChannelView needs it too; one copy is enough)
+- `TS_ChannelView/TS_ChannelView.html` → `REAPER/reaper_www_root/` (the
+  tablet page; optional — see ChannelView's README)
 
 Then **Actions ▸ Show action list ▸ New action ▸ Load ReaScript…** and pick
 `TS_ChannelView.lua` and `TS_TrackAnalyser.lua`.
