@@ -1,5 +1,26 @@
 # ChannelView — changelog
 
+## 1.7.2 — long search results, light faceplates
+
+- **Search results no longer run off the screen.** Typing in the [+] menu
+  could list more matches than fit below it, with no way to scroll to the
+  rest — most noticeable with ChannelView docked at the bottom of the
+  screen. The matches now sit in a list that scrolls after 14, and a menu
+  opened in the lower half of the screen grows upward from the mouse. The
+  search dialog's folder / category / developer filter scrolls too.
+- **Auto-fill layout asks first.** It, *Clear layout* and *Forget saved
+  layout* each replaced a saved layout — for every instance of the plugin —
+  the moment they were clicked. Now, when there's a saved layout to lose,
+  they ask, and say where the previous library is kept
+  (`TS_ChannelView_Mappings.bak.ini`, until the next save).
+- **Combo boxes on light faceplates.** On Aluminium and Cream their text was
+  dark on the dark box; it now uses the same light lettering as the
+  buttons.
+- **Web page:** selecting the master track could stop the bridge script
+  (REAPER answers nothing, not zero, for the master's record arm and
+  phase). It now reads those safely.
+
+
 ## 1.7.1 — mixer alignment on the web page
 
 - **Web page:** in the mixer, each fader now sits directly under its pan

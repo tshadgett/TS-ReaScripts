@@ -1,5 +1,10 @@
 # Track Analyser — changelog
 
+## 1.7.2 — in step with ChannelView
+
+No changes. The version moves to 1.7.2 to match ChannelView.
+
+
 ## 1.7.1 — in step with ChannelView
 
 No changes. The version moves to 1.7.1 to match ChannelView.

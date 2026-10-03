@@ -409,6 +409,50 @@ end
 -- a text box that takes focus with text already in it selects that text,
 -- and the next key typed would replace the first.
 local MENU_MAX = 40
+local MENU_ROWS = 14     -- matches shown before the list scrolls
+
+-- Where the menu opens, and which way it grows. ImGui places a popup once,
+-- when it opens, sized for what it held then, and leaves it there however
+-- tall it gets after -- so a menu opened low on the screen (ChannelView
+-- docked at the bottom, say) had its matches pushed off the bottom as you
+-- typed. Opened in the lower half of the monitor, it's anchored by its
+-- bottom edge at the mouse and grows upward instead; and the matches scroll
+-- past MENU_ROWS rather than growing without end.
+local function menu_anchor(ctx)
+  local mx, my = ImGui.GetMousePos(ctx)
+  local ok, top, bot = pcall(function()
+    local conv = ImGui.PointConvertNative
+    local nx, ny = mx, my
+    if conv then nx, ny = conv(ctx, mx, my, true) end
+    local l, t, r, b = reaper.my_getViewport(0, 0, 0, 0, nx, ny, nx + 1, ny + 1, true)
+    local y0, y1 = t, b
+    if conv then
+      local _
+      _, y0 = conv(ctx, l, t, false)
+      _, y1 = conv(ctx, r, b, false)
+    end
+    return math.min(y0, y1), math.max(y0, y1)
+  end)
+  local up = ok and top and bot and bot > top and (my - top) > (bot - my) or false
+  return mx, my, up
+end
+
+-- The matches in a list of their own that scrolls, as wide as the longest.
+local function results_list(ctx, track, found)
+  local row_h = ImGui.GetTextLineHeightWithSpacing(ctx)
+  local pad = badge_pad(ctx)
+  local w = 240
+  for _, e in ipairs(found) do
+    local tw = ImGui.CalcTextSize(ctx, pad .. e.short) + 28
+    if tw > w then w = tw end
+  end
+  w = math.min(w, 520)
+  local h = math.min(#found, MENU_ROWS) * row_h + 4
+  if ImGui.BeginChild(ctx, "##addfxres", w, h, 0) then
+    plugin_items(ctx, track, found)
+    ImGui.EndChild(ctx)
+  end
+end
 
 local function quick_search(q)
   if #SR.terms(q) == 0 then return {} end
@@ -421,9 +465,15 @@ function B.draw_menu(ctx, track)
     ImGui.OpenPopup(ctx, MENU_ID)
     menu.request = false
     menu.query, menu.focus = "", true
+    menu.ax, menu.ay, menu.up = menu_anchor(ctx)
     installed()                       -- index now, not mid-hover
   end
   inserted_now = false
+  -- Only while it's open: a position set for a popup that then doesn't
+  -- begin would land on whatever window begins next.
+  if menu.ax and ImGui.IsPopupOpen(ctx, MENU_ID) then
+    ImGui.SetNextWindowPos(ctx, menu.ax, menu.ay, ImGui.Cond_Always, 0, menu.up and 1 or 0)
+  end
   if not ImGui.BeginPopup(ctx, MENU_ID) then return false end
 
   local where = menu.insert_at
@@ -446,7 +496,10 @@ function B.draw_menu(ctx, track)
     if #found == 0 then
       ImGui.TextDisabled(ctx, "No matches")
     else
-      plugin_items(ctx, track, found)
+      results_list(ctx, track, found)
+      -- a click inside the list's own window doesn't close the menu by
+      -- itself, as it would a row of the menu proper
+      if inserted_now then ImGui.CloseCurrentPopup(ctx) end
       if #found >= MENU_MAX then ImGui.TextDisabled(ctx, "\u{2026}keep typing to narrow it") end
       if not inserted_now and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
                                or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
@@ -561,7 +614,14 @@ function B.draw(ctx, track)
           ImGui.EndMenu(ctx)
         end
       else
-        -- search: flat matches, labelled by which kind they came from
+        -- search: flat matches, labelled by which kind they came from, in
+        -- a list that scrolls rather than running off the screen
+        local rows = 0
+        for _, f in ipairs(folds or {}) do if keep(f.name) then rows = rows + 1 end end
+        for _, c in ipairs(cats or {}) do if keep(c.name) then rows = rows + 1 end end
+        for _, d in ipairs(devs or {}) do if keep(d.name) then rows = rows + 1 end end
+        local lh = ImGui.GetTextLineHeightWithSpacing(ctx)
+        local open_list = ImGui.BeginChild(ctx, "##filtres", 260, math.min(rows + 3, 18) * lh + 4, 0)
         local shown = false
         for _, f in ipairs(folds or {}) do
           if keep(f.name) then
@@ -583,6 +643,7 @@ function B.draw(ctx, track)
             dev_item(d)
           end
         end
+        if open_list then ImGui.EndChild(ctx) end
       end
 
       ImGui.EndPopup(ctx)

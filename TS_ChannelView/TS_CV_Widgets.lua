@@ -631,13 +631,16 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
       if tw <= inner then txt = t break end
     end
   end
-  ImGui.DrawList_AddText(dl, cx - tw * 0.5, (by1 + by2) * 0.5 - th * 0.5, C.COL.value, txt)
+  -- The box is a knob-body fill on every faceplate, so its text and caret
+  -- take the toggle's ink, which is made for that fill -- not the panel's
+  -- value ink, which a light faceplate (aluminium, cream) turns dark.
+  ImGui.DrawList_AddText(dl, cx - tw * 0.5, (by1 + by2) * 0.5 - th * 0.5, C.COL.toggle_text, txt)
 
   -- a caret on anything that opens a list, including one not yet fetched
   if have or steps == nil then
     local ax, ay = bx2 - 5, (by1 + by2) * 0.5 + 1
     ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2,
-      hovered and C.COL.icon_hot or C.COL.header_dim)
+      hovered and C.COL.icon_hot or U.with_alpha(C.COL.toggle_text, 0xa0))
   end
 
   W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))

@@ -1,8 +1,14 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.7.1
+-- @version 1.7.2
 -- @changelog
---  Web page: in the mixer, each fader now sits directly under its pan knob.
+--  The [+] menu's search results scroll instead of running off the bottom of
+--  the screen, and a menu opened low on the screen grows upward. The search
+--  dialog's folder/category/developer filter scrolls too.
+--  Auto-fill layout, Clear layout and Forget saved layout ask before they
+--  replace a saved layout.
+--  Combo boxes are readable on light faceplates (Aluminium, Cream).
+--  Web page: selecting the master track no longer risks stopping the bridge.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -591,14 +597,31 @@ local function panel_menu()
       move_fx(fx.top_index, fx.top_index + 2)
     end
   end
-  if ImGui.MenuItem(ctx, "Auto-fill layout") then
-    M.set(key, M.build_default(app.track, fx.addr)); M.save()
+  -- These three replace a saved layout outright and save straight away --
+  -- one stray click and a layout you spent an hour on is gone, for every
+  -- instance of the plugin. So each asks first whenever there is a saved
+  -- layout to lose. (The Edit Parameters dialog's own Auto-fill needs no
+  -- such guard: nothing there is kept until you press Save.)
+  local function sure(what)
+    if is_default then return true end
+    return reaper.MB(what .. "\n\nThis replaces the saved layout for every " .. key ..
+      " on every track. The library as it was before is kept as\n" ..
+      "TS_ChannelView_Mappings.bak.ini, until the next save.", "ChannelView", 1) == 1
   end
-  if ImGui.MenuItem(ctx, "Clear layout", nil, false, not is_default) then
-    M.set(key, { controls = {} }); M.save()
+  if ImGui.MenuItem(ctx, "Auto-fill layout\u{2026}") then
+    if sure(("Replace this layout with the plugin's first %d parameters?"):format(C.AUTO_DEFAULT_N)) then
+      M.set(key, M.build_default(app.track, fx.addr)); M.save()
+    end
   end
-  if ImGui.MenuItem(ctx, "Forget saved layout", nil, false, not is_default) then
-    M.remove(key); M.save()
+  if ImGui.MenuItem(ctx, "Clear layout\u{2026}", nil, false, not is_default) then
+    if sure("Clear every control from this layout?") then
+      M.set(key, { controls = {} }); M.save()
+    end
+  end
+  if ImGui.MenuItem(ctx, "Forget saved layout\u{2026}", nil, false, not is_default) then
+    if sure("Forget this saved layout and go back to the automatic one?") then
+      M.remove(key); M.save()
+    end
   end
   if fx.is_top_level then
     ImGui.Separator(ctx)

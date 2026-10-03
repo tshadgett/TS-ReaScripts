@@ -432,7 +432,7 @@ local function build_layout()
       -- REAPER's own TCP spacer above this track: a gap, as the mixer draws it
       sp = (reaper.GetMediaTrackInfo_Value(tr, "I_SPACER") or 0) > 0.5 or nil,
       -- hidden from REAPER's mixer, so from this one too
-      hm = reaper.GetMediaTrackInfo_Value(tr, "B_SHOWINMIXER") < 0.5 or nil,
+      hm = (reaper.GetMediaTrackInfo_Value(tr, "B_SHOWINMIXER") or 0) < 0.5 or nil,
     }
   end
   local panels = arr()
@@ -565,7 +565,7 @@ local function mixer_vals()
   local out = arr({ strip_vals(reaper.GetMasterTrack(0), 0) })
   for i = 0, reaper.CountTracks(0) - 1 do
     local tr = reaper.GetTrack(0, i)
-    if reaper.GetMediaTrackInfo_Value(tr, "B_SHOWINMIXER") >= 0.5 then
+    if (reaper.GetMediaTrackInfo_Value(tr, "B_SHOWINMIXER") or 0) >= 0.5 then
       out[#out + 1] = strip_vals(tr, i + 1)
     end
   end
@@ -611,7 +611,7 @@ local function build_nav()
   local depth = 0
   for i = 0, reaper.CountTracks(0) - 1 do
     local tr = reaper.GetTrack(0, i)
-    local visible = hide_below == nil and reaper.GetMediaTrackInfo_Value(tr, "B_SHOWINTCP") >= 0.5
+    local visible = hide_below == nil and (reaper.GetMediaTrackInfo_Value(tr, "B_SHOWINTCP") or 0) >= 0.5
     local fd = math.floor(reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH"))
     if visible then
       local bins = {}
@@ -635,7 +635,7 @@ local function build_nav()
         end
       end
       lanes[#lanes + 1] = { i = i + 1, s = spans }
-      if fd > 0 and reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERCOMPACT") >= 2 then
+      if fd > 0 and (reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERCOMPACT") or 0) >= 2 then
         hide_below = depth + 1
       end
     end
@@ -728,11 +728,11 @@ local function build_vals(lseq, ack)
       f  = round(U.vol_to_fader(vol)),
       db = (db <= -150) and "-inf" or string.format("%+.1f", db),
       pan = round(reaper.GetMediaTrackInfo_Value(track, "D_PAN")),
-      m = reaper.GetMediaTrackInfo_Value(track, "B_MUTE") > 0.5 or nil,
-      s = reaper.GetMediaTrackInfo_Value(track, "I_SOLO") > 0 or nil,
-      r = reaper.GetMediaTrackInfo_Value(track, "I_RECARM") > 0.5 or nil,
+      m = (reaper.GetMediaTrackInfo_Value(track, "B_MUTE") or 0) > 0.5 or nil,
+      s = (reaper.GetMediaTrackInfo_Value(track, "I_SOLO") or 0) > 0 or nil,
+      r = (reaper.GetMediaTrackInfo_Value(track, "I_RECARM") or 0) > 0.5 or nil,
       pl = round(peak_db(track, 0), 1), pr = round(peak_db(track, 1), 1),
-      ph = reaper.GetMediaTrackInfo_Value(track, "B_PHASE") > 0.5 or nil,
+      ph = (reaper.GetMediaTrackInfo_Value(track, "B_PHASE") or 0) > 0.5 or nil,
       mo = math.floor(reaper.GetMediaTrackInfo_Value(track, "I_RECMON") or 0) % 3,
     }
   end
@@ -994,7 +994,7 @@ local function apply(verb, a)
     if v then reaper.SetMediaTrackInfo_Value(track, "D_PAN", math.max(-1, math.min(1, v))) end
   elseif track and (verb == "mute" or verb == "solo" or verb == "arm") then
     local k = ({ mute = "B_MUTE", solo = "I_SOLO", arm = "I_RECARM" })[verb]
-    local on = reaper.GetMediaTrackInfo_Value(track, k) > 0
+    local on = (reaper.GetMediaTrackInfo_Value(track, k) or 0) > 0
     reaper.SetMediaTrackInfo_Value(track, k, on and 0 or (verb == "solo" and 2 or 1))
   elseif track and (verb == "svol" or verb == "sv0" or verb == "smute" or verb == "spre"
                     or verb == "smode" or verb == "srem") then
