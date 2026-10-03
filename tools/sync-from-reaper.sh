@@ -97,6 +97,10 @@ copy_one "$REAPER_DIR/Effects/TS_Visualizer/TS_Visualizer/TS_Visualizer.jsfx" \
 copy_one "$REAPER_DIR/Scripts/TS_HideDockerTabs.lua" \
          "$REPO/TS_HideDockerTabs/TS_HideDockerTabs.lua"
 
+# ---- 360 Link Follow: one loose script in Scripts/, like Hide Docker Tabs.
+copy_one "$REAPER_DIR/Scripts/TS_360LinkFollow.lua" \
+         "$REPO/TS_360LinkFollow/TS_360LinkFollow.lua"
+
 echo
 if [ "$copied" -eq 0 ]; then
   echo "Nothing changed. The repo already matches your REAPER folder."
@@ -114,7 +118,8 @@ cd "$REPO" || exit 1
 echo "--- version check ---"
 stale=0
 for pkg in TS_ChannelView/TS_ChannelView.lua TS_TrackAnalyser/TS_TrackAnalyser.lua \
-           TS_Visualizer/TS_Visualizer.lua TS_HideDockerTabs/TS_HideDockerTabs.lua; do
+           TS_Visualizer/TS_Visualizer.lua TS_HideDockerTabs/TS_HideDockerTabs.lua \
+           TS_360LinkFollow/TS_360LinkFollow.lua; do
   dir="$(dirname "$pkg")"
   # nothing changed in this package (dev/ isn't installed, so it doesn't count)
   git diff --quiet -- "$dir" ":(exclude)$dir/dev" && continue
