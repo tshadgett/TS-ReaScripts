@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="f73f322a352f7790bce87670efb759d787c9b8b1" name="TS-ReaScripts">
+<index version="1" commit="eaf9d93284c59ab0d491e3d6f7d777916ea94af6" name="TS-ReaScripts">
+  <category name="TS_360LinkFollow">
+    <reapack name="TS_360LinkFollow.lua" type="script" desc="TS_360LinkFollow - SSL 360 Link follows track visibility (UF8 / UC1)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle action. While ON, any SSL 360 Link instance on a hidden track is set offline, which unloads it so the track drops out of the SSL 360 Plug-in Mixer and off the UF8. Show the track again and the instance comes back online. A track counts as hidden when it is hidden in the mixer or in the arrange view, including tracks inside a collapsed folder.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Only SSL 360 Link is touched -- matched by its VST3 ID, so the 360 Link Bus Compressor and every other plugin are left alone. Instances you set offline yourself stay offline. Run the action again to turn it OFF; everything it took offline is brought back.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="Tim Shadgett" time="2026-10-03T12:55:47Z">
+        <source main="main">https://github.com/tshadgett/TS-ReaScripts/raw/eaf9d93284c59ab0d491e3d6f7d777916ea94af6/TS_360LinkFollow/TS_360LinkFollow.lua</source>
+      </version>
+    </reapack>
+  </category>
   <category name="TS_ChannelView">
     <reapack name="TS_ChannelView.lua" type="script" desc="ChannelView -- docked channel strip: one editable control panel per plugin">
       <metadata>
