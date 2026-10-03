@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="1037d2e36c05a49eb614047392422933b3f25a92" name="TS-ReaScripts">
+<index version="1" commit="040ae427a88a79fc03ed949466fdc32f79134348" name="TS-ReaScripts">
   <category name="TS_ChannelView">
     <reapack name="TS_ChannelView.lua" type="script" desc="ChannelView -- docked channel strip: one editable control panel per plugin">
       <metadata>
@@ -726,6 +726,66 @@ Web page: selecting the master track no longer risks stopping the bridge.]]></ch
         <source file="TS_CV_Widgets.lua">https://github.com/tshadgett/TS-ReaScripts/raw/1037d2e36c05a49eb614047392422933b3f25a92/TS_ChannelView/TS_CV_Widgets.lua</source>
         <source type="effect" file="TS_TrackProbe.jsfx">https://github.com/tshadgett/TS-ReaScripts/raw/1037d2e36c05a49eb614047392422933b3f25a92/TS_ChannelView/TS_TrackProbe.jsfx</source>
       </version>
+      <version name="1.7.5" author="Tim Shadgett" time="2026-10-03T02:28:17Z">
+        <changelog><![CDATA[A preset bar along the foot of every panel, on the desktop and the web
+page: REAPER's presets in a dropdown with previous and next beside it,
+and a + to save a preset, save one as the plugin's default, rename or
+delete one (VST2, VST3 and JS). View > Preset bar turns it off.
+The track Colour... dialog has a palette dropdown: REAPER 7.81's
+built-in palettes, your user palettes and the project's colours, as
+well as the old custom colours, plus a button for REAPER's own picker.
+Dropdowns are readable on light faceplates, and a preset name too long
+for its box shows in full on hover.
+A tablet in the header shows when the web companion is running, filled
+in while a page is connected. View > Start web companion with REAPER, and
+the TS_ChannelView_Web_Startup action, start it with REAPER.
+A new knob style, Round nose: a grey body whose short nose is the
+pointer, with the cap colour in its centre.]]></changelog>
+        <source main="main">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_ChannelView.lua</source>
+        <source main="main" file="TS_CV_Diag.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Diag.lua</source>
+        <source main="main" file="TS_ChannelView_TCP.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_ChannelView_TCP.lua</source>
+        <source main="main" file="TS_ChannelView_Web.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_ChannelView_Web.lua</source>
+        <source main="main" file="TS_ChannelView_Web_Startup.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_ChannelView_Web_Startup.lua</source>
+        <source type="webinterface" file="TS_ChannelView.html">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_ChannelView.html</source>
+        <source file="TS_CV_Actions.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Actions.lua</source>
+        <source file="TS_CV_Arrange.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Arrange.lua</source>
+        <source file="TS_CV_Toolbar.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Toolbar.lua</source>
+        <source file="TS_CV_Browser.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Browser.lua</source>
+        <source file="TS_CV_Chains.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Chains.lua</source>
+        <source file="TS_CV_Channel.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Channel.lua</source>
+        <source file="TS_CV_Config.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Config.lua</source>
+        <source file="TS_CV_Editor.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Editor.lua</source>
+        <source file="TS_CV_Envelopes.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Envelopes.lua</source>
+        <source file="TS_CV_EQPanel.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_EQPanel.lua</source>
+        <source file="TS_CV_Focus.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Focus.lua</source>
+        <source file="TS_CV_FXIndex.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_FXIndex.lua</source>
+        <source file="TS_CV_FXTree.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_FXTree.lua</source>
+        <source file="TS_CV_Gang.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Gang.lua</source>
+        <source file="TS_CV_Icons.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Icons.lua</source>
+        <source file="TS_CV_Inputs.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Inputs.lua</source>
+        <source file="TS_CV_Lanes.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Lanes.lua</source>
+        <source file="TS_CV_Mappings.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Mappings.lua</source>
+        <source file="TS_CV_Mixer.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Mixer.lua</source>
+        <source file="TS_CV_Panel.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Panel.lua</source>
+        <source file="TS_CV_ReaEQ.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_ReaEQ.lua</source>
+        <source file="TS_CV_Presets.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Presets.lua</source>
+        <source file="TS_CV_PresetUI.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_PresetUI.lua</source>
+        <source file="TS_CV_Receives.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Receives.lua</source>
+        <source file="TS_CV_Search.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Search.lua</source>
+        <source file="TS_CV_Sends.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Sends.lua</source>
+        <source file="TS_CV_Startup.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Startup.lua</source>
+        <source file="TS_CV_State.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_State.lua</source>
+        <source file="TS_CV_Steps.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Steps.lua</source>
+        <source file="TS_CV_Taps.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Taps.lua</source>
+        <source file="TS_CV_Trace.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Trace.lua</source>
+        <source file="TS_CV_TrackMenu.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_TrackMenu.lua</source>
+        <source file="TS_CV_TrackOps.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_TrackOps.lua</source>
+        <source file="TS_CV_TrackStrip.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_TrackStrip.lua</source>
+        <source file="TS_CV_Util.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Util.lua</source>
+        <source file="TS_CV_Widgets.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_Widgets.lua</source>
+        <source file="TS_CV_WebLink.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_CV_WebLink.lua</source>
+        <source type="effect" file="TS_TrackProbe.jsfx">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_ChannelView/TS_TrackProbe.jsfx</source>
+      </version>
     </reapack>
   </category>
   <category name="TS_HideDockerTabs">
@@ -915,6 +975,17 @@ projects to load the updated probe.]]></changelog>
         <source file="TS_TA_Mask.lua">https://github.com/tshadgett/TS-ReaScripts/raw/1037d2e36c05a49eb614047392422933b3f25a92/TS_TrackAnalyser/TS_TA_Mask.lua</source>
         <source file="TS_TA_GR.lua">https://github.com/tshadgett/TS-ReaScripts/raw/1037d2e36c05a49eb614047392422933b3f25a92/TS_TrackAnalyser/TS_TA_GR.lua</source>
         <source type="effect" file="TS_TrackProbe.jsfx">https://github.com/tshadgett/TS-ReaScripts/raw/1037d2e36c05a49eb614047392422933b3f25a92/TS_TrackAnalyser/TS_TrackProbe.jsfx</source>
+      </version>
+      <version name="1.7.5" author="Tim Shadgett" time="2026-10-03T02:28:17Z">
+        <changelog><![CDATA[In step with ChannelView 1.7.5. Nothing changes in Track Analyser itself.]]></changelog>
+        <source main="main">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TrackAnalyser.lua</source>
+        <source main="main" file="TS_TA_InsertProbes.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TA_InsertProbes.lua</source>
+        <source main="main" file="TS_TA_QuietProbes.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TA_QuietProbes.lua</source>
+        <source file="TS_TA_Chain.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TA_Chain.lua</source>
+        <source file="TS_TA_Strip.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TA_Strip.lua</source>
+        <source file="TS_TA_Mask.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TA_Mask.lua</source>
+        <source file="TS_TA_GR.lua">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TA_GR.lua</source>
+        <source type="effect" file="TS_TrackProbe.jsfx">https://github.com/tshadgett/TS-ReaScripts/raw/040ae427a88a79fc03ed949466fdc32f79134348/TS_TrackAnalyser/TS_TrackProbe.jsfx</source>
       </version>
     </reapack>
   </category>
