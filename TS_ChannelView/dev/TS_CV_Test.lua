@@ -259,7 +259,15 @@ do
   M.remove(old_key); M.save(); M.reload()
 end
 
--- panel geometry: fixed height, grows in columns
+-- panel geometry: fixed height, grows in columns. Measured without the
+-- preset bar; the bar's own cost is checked just below.
+do
+  local CC = require("TS_CV_Config")
+  CC.PRESET_BAR = true
+  local with_bar = P.rows_for(300 + CC.FOOTER_H)
+  CC.PRESET_BAR = false
+  check("preset bar: its height comes off the body", with_bar, P.rows_for(300))
+end
 local function n_knobs(n)
   local out = {}
   for i = 1, n do out[i] = { type = "knob" } end
@@ -292,6 +300,9 @@ check("controls kept on alias write", #M.get(key).controls, 5)
 check("display: slot label wins", M.display_name(key, 2, "Rec", "Release"), "Rec")
 check("display: alias next",      M.display_name(key, 2, "",    "Release"), "Recovery")
 check("display: plugin name last",M.display_name(key, 7, "",    "Ratio"),   "Ratio")
+check("display: a label that's just the plugin's name lets the alias through",
+      M.display_name(key, 2, "Release", "Release"), "Recovery")
+check("display: ... trimmed",     M.display_name(key, 2, " Release ", "Release"), "Recovery")
 M.set_alias(key, 2, "")
 M.save(); M.reload()
 check("alias cleared", M.get_alias(key, 2), nil)
@@ -2517,6 +2528,34 @@ do
   check("no REAPER section, no custcolors",
         TO.custcolors_from_ini("[other]\ncustcolors=FFFFFF00\n"), nil)
 
+  -- REAPER 7.81's user palettes, as reaper-colors.ini holds them (CRLF,
+  -- sections in any order, a name= only if a palette has one).
+  local PALS = "[userpalette_1]\r\ncolors=71778A 6D8A7C 9C383F\r\n"
+            .. "[userpalette_0]\r\ncolors=1E48A8 B21B1B 12620C F36D34\r\n"
+            .. "[userpalette_2]\r\nname=Drums\r\ncolors=\r\n[other]\r\ncolors=FFFFFF\r\n"
+  local up = TO.parse_user_palettes(PALS)
+  check("three user palettes", #up, 3)
+  check("in palette order, named as the picker names them", up[1].name .. "|" .. up[2].name, "User 1|User 2")
+  check("a palette's own name wins", up[3].name, "Drums")
+  check("User 1's colours", #up[1].colours, 4)
+  check("User 2's first colour", ("%02X%02X%02X"):format(up[2].colours[1][1], up[2].colours[1][2], up[2].colours[1][3]), "71778A")
+  check("an empty palette is empty", #up[3].colours, 0)
+  check("no file, no palettes", #TO.parse_user_palettes(nil), 0)
+  local all = TO.build_palettes(7.81, PALS, {}, cc)
+  local order = {}
+  for _, p in ipairs(all) do order[#order + 1] = p.name end
+  check("palettes in the picker's order, custom colours last", table.concat(order, ","),
+        "Project,REAPER,Primary,Pride,Perceptual,Warm,Cool,Vice,Casablanca,Devon,Technoir,"
+        .. "User 1,User 2,Drums,User 4,Custom colours (SWS)")
+  check("every built-in has sixteen colours", (function()
+    for i = 2, 11 do if #all[i].colours ~= 16 then return all[i].name end end
+    return true end)(), true)
+  check("Pride's fifth colour", ("%02X%02X%02X"):format(all[4].colours[5][1], all[4].colours[5][2], all[4].colours[5][3]), "59A839")
+  check("before 7.81, only the project and custom colours",
+        #TO.build_palettes(7.80, PALS, {}, cc), 2)
+  check("the picker's palette read from reaper.ini",
+        TO.ini_value("[REAPER]\r\ncolorpick_palette=User 2\r\n", "colorpick_palette"), "User 2")
+
   -- A template's colour is its first track's PEAKCOL, flagged as set.
   local TPL = "<TRACK\n  NAME Acoust\n  PEAKCOL 23509357\n  BEAT -1\n"
            .. "  <TRACK\n  PEAKCOL 16777215\n"
@@ -2702,6 +2741,48 @@ do
     local less2 = SUm.fenced_remove(both)
     check("and the other way round",          SUm.classify(less2, "_RSaaa") .. "/" .. SUt.classify(less2, "_RSbbb"), "none/ours")
   end
+  do
+    -- the web companion's block beside ChannelView's own
+    local SUm = require "TS_CV_Startup"
+    local WEBs = SUm.make("ChannelView web companion", "ChannelView", "channelview_web_cmd")
+    local both = WEBs.fenced_add(SUm.fenced_add("-- start\n", "_RSaaa"), "_RSwww")
+    check("web and ChannelView blocks side by side", SUm.classify(both, "_RSaaa") .. "/" .. WEBs.classify(both, "_RSwww"), "ours/ours")
+    check("removing ChannelView's keeps the web one", WEBs.classify(SUm.fenced_remove(both), "_RSwww"), "ours")
+    check("removing the web one keeps ChannelView's", SUm.classify(WEBs.fenced_remove(both), "_RSaaa"), "ours")
+    check("the result compiles", load(both) ~= nil, true)
+    -- the web script's id out of reaper-kb.ini
+    local KB = 'ACT 0 0 "x" "Custom: thing" 40001\r\n'
+            .. 'SCR 4 32060 RS1111 "Custom: TS_ChannelView_Web.lua" "TS_ChannelView/TS_ChannelView_Web.lua"\r\n'
+            .. 'SCR 4 0 RS2222 "Custom: TS_ChannelView.lua" "TS_ChannelView/TS_ChannelView.lua"\r\n'
+            .. 'SCR 4 0 RS3333 "Custom: TS_ChannelView_Web.lua" "TS-ReaScripts\\TS_ChannelView\\TS_ChannelView_Web.lua"\r\n'
+    check("the web script's id, Main section only", SUm.kb_find(KB, "TS_ChannelView_Web.lua"), "_RS3333")
+    check("a name that only ends the same doesn't match",
+          SUm.kb_find('SCR 4 0 RS9 "Custom: x" "Foo/MyTS_ChannelView_Web.lua"\n', "TS_ChannelView_Web.lua"), nil)
+    check("no kb file, no id", SUm.kb_find(nil, "TS_ChannelView_Web.lua"), nil)
+  end
+  do
+    -- is a page connected?
+    local WL = require "TS_CV_WebLink"
+    local st = WL.new()
+    WL.update(st, 0, "41", "abc.7")              -- left over from before: proves nothing
+    local r, n = WL.state(st, 0.1)
+    check("leftover values: not running, no pages", tostring(r) .. "/" .. n, "false/0")
+    WL.update(st, 0.5, "42", "abc.7")
+    r, n = WL.state(st, 0.6)
+    check("the counter moves: running, still no page", tostring(r) .. "/" .. n, "true/0")
+    WL.update(st, 1.0, "50", "abc.8")
+    WL.update(st, 1.5, "60", "xyz.1")
+    r, n = WL.state(st, 1.6)
+    check("two pages beating", n, 2)
+    WL.update(st, 7.0, "70", "xyz.2")
+    r, n = WL.state(st, 7.1)
+    check("one goes quiet, one is left", n, 1)
+    r = WL.state(st, 7.0 + WL.BRIDGE_GONE + 0.1)
+    check("the bridge goes quiet: not running", r, false)
+    WL.update(st, 20, "", "xyz.2")
+    r = WL.state(st, 20)
+    check("the bridge cleared its counter: not running", r, false)
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -2844,7 +2925,7 @@ do
     "TS_CV_Startup", "TS_CV_Mixer", "TS_CV_TrackMenu", "TS_CV_TrackOps",
     "TS_CV_Receives", "TS_CV_Focus", "TS_CV_Icons", "TS_CV_Inputs",
     "TS_ChannelView_TCP", "TS_CV_Arrange", "TS_CV_Toolbar", "TS_CV_Envelopes", "TS_CV_Actions", "TS_CV_Lanes",
-    "TS_CV_Chains", "TS_CV_Taps",
+    "TS_CV_Chains", "TS_CV_Taps", "TS_CV_WebLink", "TS_ChannelView_Web_Startup",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.
@@ -3072,6 +3153,60 @@ do
   check("search: nothing", top("zzzz"), "")
   check("search: a name starting so comes first", top("pro"):match("^[^|]+"), "Pro-C 2")
   check("search: recents nudge", top("pro", function(e) return e.short == "Pro-L 2" and 15 or 0 end):match("^[^|]+"), "Pro-L 2")
+end
+
+-- presets (TS_CV_Presets): REAPER's own file format, and editing it
+do
+  local PR = require("TS_CV_Presets")
+  -- a 16384-byte piece and a check byte (its bytes summed, mod 256)
+  local lines = PR.data_lines(("\1"):rep(16385))
+  check("presets: state splits at 16384 bytes", #lines, 2)
+  check("presets: each piece ends in its check byte", lines[1]:sub(-2), "00")
+  check("presets: the second piece is Data_1", lines[2], "Data_1=0101")
+
+  local dir = "./tscv_preset_test"
+  os.execute((package.config:sub(1, 1) == "\\" and "mkdir " or "mkdir -p ") .. dir)
+  local file = dir .. "/vst-test.ini"
+  local f = io.open(file, "wb")
+  f:write("[General]\nLastDefImpTime=1\nNbPresets=1\n\n[Preset0]\nData=0102030609\nLen=4\nName=Old\n\n")
+  f:close()
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetUserPresetFilename", "TrackFX_GetNamedConfigParm", "TrackFX_GetFXGUID",
+                       "GetTrackStateChunk", "TrackFX_GetPresetIndex", "TrackFX_SetPreset", "GetResourcePath" }) do
+    saved[k] = reaper[k]
+  end
+  local n = 0
+  reaper.TrackFX_GetUserPresetFilename = function() return file end
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k)
+    if k == "fx_type" then return true, "VST" end
+    return true, "C:\\x\\test.dll<1"
+  end
+  reaper.TrackFX_GetFXGUID = function() return "{T}" end
+  reaper.GetTrackStateChunk = function()
+    return true, "<TRACK\n<FXCHAIN\n<VST \"VST: Test\" test.dll 0 \"\" 1\nAQID\n>\nFXID {T}\n>\n>"
+  end
+  reaper.TrackFX_GetPresetIndex = function() n = n + 1; return 0, n end
+  reaper.TrackFX_SetPreset = function() return true end
+  reaper.GetResourcePath = function() return dir end
+
+  check("presets: the format is one that saves", PR.kind(0, 0), "vst")
+  check("presets: default key", PR.default_key(0, 0), "vst-test")
+  check("presets: save", (PR.save(0, 0, "New")), true)
+  local doc = PR.parse(io.open(file, "rb"):read("a"))
+  check("presets: two now", #doc.presets, 2)
+  check("presets: the state as REAPER writes it", doc.presets[2].data[1], "Data=01020306")
+  check("presets: other [General] keys kept", doc.general[1], "LastDefImpTime=1")
+  check("presets: save as default", (PR.save_default(0, 0, "New")), true)
+  check("presets: still two (replaced)", #PR.parse(io.open(file, "rb"):read("a")).presets, 2)
+  check("presets: the default is recorded", PR.list(0, 0).default, "New")
+  check("presets: rename follows the default", (PR.rename(0, 0, "New", "Newer")), true)
+  check("presets: default renamed too", PR.list(0, 0).default, "Newer")
+  check("presets: no rename onto another", (PR.rename(0, 0, "Newer", "Old")), false)
+  check("presets: delete", (PR.delete(0, 0, "Newer")), true)
+  check("presets: the default goes with it", PR.list(0, 0).default, nil)
+  check("presets: one left", PR.list(0, 0).user[1], "Old")
+  for k, v in pairs(saved) do reaper[k] = v end
+  os.remove(file); os.remove(dir .. "/reaper-defpresets.ini"); os.remove(dir)
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

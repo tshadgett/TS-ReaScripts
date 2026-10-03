@@ -1,19 +1,27 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.7.2
+-- @version 1.7.5
 -- @changelog
---  The [+] menu's search results scroll instead of running off the bottom of
---  the screen, and a menu opened low on the screen grows upward. The search
---  dialog's folder/category/developer filter scrolls too.
---  Auto-fill layout, Clear layout and Forget saved layout ask before they
---  replace a saved layout.
---  Combo boxes are readable on light faceplates (Aluminium, Cream).
---  Web page: selecting the master track no longer risks stopping the bridge.
+--  A preset bar along the foot of every panel, on the desktop and the web
+--  page: REAPER's presets in a dropdown with previous and next beside it,
+--  and a + to save a preset, save one as the plugin's default, rename or
+--  delete one (VST2, VST3 and JS). View > Preset bar turns it off.
+--  The track Colour... dialog has a palette dropdown: REAPER 7.81's
+--  built-in palettes, your user palettes and the project's colours, as
+--  well as the old custom colours, plus a button for REAPER's own picker.
+--  Dropdowns are readable on light faceplates, and a preset name too long
+--  for its box shows in full on hover.
+--  A tablet in the header shows when the web companion is running, filled
+--  in while a page is connected. View > Start web companion with REAPER, and
+--  the TS_ChannelView_Web_Startup action, start it with REAPER.
+--  A new knob style, Round nose: a grey body whose short nose is the
+--  pointer, with the cap colour in its centre.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
 --  [main]   TS_ChannelView_TCP.lua
 --  [main]   TS_ChannelView_Web.lua
+--  [main]   TS_ChannelView_Web_Startup.lua
 --  [webinterface] TS_ChannelView.html
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
@@ -36,6 +44,8 @@
 --  [nomain] TS_CV_Mixer.lua
 --  [nomain] TS_CV_Panel.lua
 --  [nomain] TS_CV_ReaEQ.lua
+--  [nomain] TS_CV_Presets.lua
+--  [nomain] TS_CV_PresetUI.lua
 --  [nomain] TS_CV_Receives.lua
 --  [nomain] TS_CV_Search.lua
 --  [nomain] TS_CV_Sends.lua
@@ -49,6 +59,7 @@
 --  [nomain] TS_CV_TrackStrip.lua
 --  [nomain] TS_CV_Util.lua
 --  [nomain] TS_CV_Widgets.lua
+--  [nomain] TS_CV_WebLink.lua
 --  [effect] TS_TrackProbe.jsfx
 -- @about
 --  A dockable window showing one panel per plugin on the selected track.
@@ -113,12 +124,14 @@ local E  = require("TS_CV_Editor")
 local S  = require("TS_CV_TrackStrip")
 local St = require("TS_CV_State")
 local B  = require("TS_CV_Browser")
+local PU = require("TS_CV_PresetUI")
 local SC = require("TS_CV_Steps")
 local CH = require("TS_CV_Channel")
 local SD = require("TS_CV_Sends")
 local RV = require("TS_CV_Receives")
 local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
+local WL = require("TS_CV_WebLink")
 local TM = require("TS_CV_TrackMenu")
 local FO = require("TS_CV_Focus")
 local IC = require("TS_CV_Icons")
@@ -223,6 +236,7 @@ end
 local dock_id = tonumber(ext_get("dock", "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 C.PLATE_TEXTURE = ext_get("plate_texture", C.PLATE_TEXTURE and "1" or "0") == "1"
+C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
 -- into the view you were not in is a small daily annoyance.
 C.MIXER_VIEW  = ext_get("mixer_view", "0") == "1"
@@ -444,7 +458,7 @@ end
 local function style_menu(fx, key, idx, c)
   local fam = style_family(c.type)
   local list = (fam == "fader") and C.FADER_STYLES or C.KNOB_STYLES
-  local cur = c.style or list[1].key
+  local cur = C.KNOB_STYLE_ALIAS[c.style] or c.style or list[1].key
   local dl = ImGui.GetWindowDrawList(ctx)
   local _, th = ImGui.CalcTextSize(ctx, "Ag")
   local row_h = (fam == "knob") and math.max(th, 26) or 0
@@ -711,14 +725,18 @@ local function control_menu()
   -- Renaming here sets the parameter's ALIAS: the name sticks to the
   -- parameter for this plugin everywhere, panels and editor lists alike,
   -- rather than to this one slot. A slot-only caption is still available
-  -- in the full editor for cramped layouts.
+  -- in the full editor for cramped layouts -- but this slot's own label,
+  -- if it has one, is cleared, or it would go on hiding the new name on
+  -- the very control you renamed.
   ImGui.TextDisabled(ctx, "Alias (this plugin, everywhere)")
   ImGui.SetNextItemWidth(ctx, 170)
   local ch, v = ImGui.InputTextWithHint(ctx, "##alias", "name\u{2026}", app.rename_buf)
   if ch then app.rename_buf = v end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Set") then
-    materialise(fx)
+    local l = materialise(fx)
+    local lc = l.controls[cm.ctl]
+    if lc and lc.label and lc.label ~= "" then lc.label = ""; M.set(key, l) end
     M.set_alias(key, c.param, app.rename_buf)
     M.save()
     ImGui.CloseCurrentPopup(ctx)
@@ -953,6 +971,42 @@ local function confirm_probes()
   return true
 end
 
+-- The web companion's tablet, in the header while there's anything to
+-- say: dim while the bridge runs with no page open, lit and filled in
+-- while a page is connected, amber when a page is open but the bridge isn't running (a
+-- click starts it). Hidden otherwise. See TS_CV_WebLink.
+local weblink = WL.new()
+local weblink_at = 0
+local function web_indicator(ctx, x, mid_y)
+  local now = reaper.time_precise()
+  if now - weblink_at > 0.25 then
+    weblink_at = now
+    WL.update(weblink, now, reaper.GetExtState("TS_CV_WEB", "alive"),
+                            reaper.GetExtState("TS_CV_WEB", "seen"))
+  end
+  local running, pages = WL.state(weblink, now)
+  if not running and pages == 0 then return false end
+  local ink, tip
+  if not running then
+    ink, tip = C.COL.warn, "A web page is open, but the web companion isn't running.\nClick to start it."
+  elseif pages > 0 then
+    ink = C.COL.accent
+    tip = pages == 1 and "Web companion: a page is connected"
+                      or ("Web companion: %d pages connected"):format(pages)
+  else
+    tip = "Web companion running \u{2014} no page connected"
+  end
+  ImGui.SetCursorScreenPos(ctx, x, mid_y - C.ICON_SIZE * 0.5)
+  if W.icon_button(ctx, "weblink", (running and pages > 0) and "tablet_on" or "tablet",
+                   C.ICON_SIZE, false, tip, nil, ink)
+     and not running then
+    if not SU.web(script_dir).start() then
+      reaper.MB("Couldn't find TS_ChannelView_Web.lua in the Action List.", "ChannelView", 0)
+    end
+  end
+  return true
+end
+
 local function menu_bar()
   if not ImGui.BeginMenuBar(ctx) then return end
 
@@ -960,6 +1014,14 @@ local function menu_bar()
     if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
       C.SHOW_VALUES = not C.SHOW_VALUES
       ext_set("show_values", C.SHOW_VALUES and "1" or "0")
+    end
+
+    if ImGui.MenuItem(ctx, "Preset bar", nil, C.PRESET_BAR) then
+      C.PRESET_BAR = not C.PRESET_BAR
+      ext_set("preset_bar", C.PRESET_BAR and "1" or "0")
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "The plugin's presets along each panel's foot:\nload, save, save as default, rename, delete.")
     end
 
     if ImGui.MenuItem(ctx, "Faceplate texture", nil, C.PLATE_TEXTURE) then
@@ -1019,6 +1081,35 @@ local function menu_bar()
       -- A note only when there is something the tick can't say: the
       -- command id isn't available yet, or the line is in __startup.lua
       -- but somebody else wrote it. "It worked" needs no caption.
+      if note then
+        ImGui.TextColored(ctx, C.COL.warn, "   " .. U.wrap_note(note, 52))
+      end
+    end
+    -- The web companion at startup too: the same fenced block the
+    -- TS_ChannelView_Web_Startup action writes.
+    do
+      local WEB = SU.web(script_dir)
+      if not WEB.checked() then WEB.resolve(); WEB.scan() end
+      local st, note = WEB.state()
+      if ImGui.MenuItem(ctx, "Start web companion with REAPER", nil, WEB.on(),
+          st ~= "nocmd" and st ~= "manual") then
+        local ok, why
+        if WEB.on() then ok, why = WEB.remove() else ok, why = WEB.add() end
+        if not ok then
+          reaper.MB("__startup.lua was NOT changed.\n\n" .. tostring(why), "ChannelView", 0)
+        elseif WEB.on() and not WEB.running() and
+               reaper.MB("The web companion will start with REAPER from now on.\n\n" ..
+                         "Start it now as well?", "ChannelView", 4) == 6 then
+          WEB.start()
+        end
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Runs TS_ChannelView_Web.lua when REAPER starts, so the\n" ..
+                              "tablet page works without starting it by hand.")
+      end
+      if st == "nocmd" then
+        note = "TS_ChannelView_Web.lua isn't in the Action List."
+      end
       if note then
         ImGui.TextColored(ctx, C.COL.warn, "   " .. U.wrap_note(note, 52))
       end
@@ -1103,6 +1194,7 @@ local function menu_bar()
     -- Closed: forget what we read, so the next opening reflects any edit
     -- made to __startup.lua in the meantime.
     SU.forget()
+    SU.web(script_dir).forget()
   end
 
   if ImGui.BeginMenu(ctx, "Layouts") then
@@ -1154,6 +1246,15 @@ local function menu_bar()
       ImGui.SetCursorScreenPos(ctx, menus_right + 6, mid_y - C.ICON_SIZE * 0.5)
       view_toggle(ctx, mid_y)
       menus_right = menus_right + tw
+    end
+  end
+
+  -- The web companion's tablet, straight after the view toggle.
+  do
+    local tw = C.ICON_SIZE + 4
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      if web_indicator(ctx, menus_right + 2, mid_y) then menus_right = menus_right + tw end
     end
   end
 
@@ -1350,7 +1451,9 @@ local function panel_row(row_h, row_w)
           if c and c.param then
             _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param, "")
           end
-          app.rename_buf = (c and M.get_alias(key, c.param)) or pn or ""
+          -- starts as the name the control shows now
+          app.rename_buf = c and c.param
+            and M.display_name(key, c.param, c.label, pn, false) or pn or ""
           app.open_ctl_menu = true
         end
       end
@@ -1725,6 +1828,7 @@ local function frame()
     if RV.draw_ctx(ctx, app.track) then rescan(true) end
     if B.draw_menu(ctx, app.track) then rescan(true) end
     if B.draw(ctx, app.track) then rescan(true) end
+    PU.draw(ctx)
     if TM.draw(ctx) then rescan(true) end
     if CN.draw(ctx) then rescan(true) end
 

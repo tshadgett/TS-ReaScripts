@@ -156,7 +156,7 @@ local function parse_section(sect)
         no_rule = (f & 4) ~= 0,
         live    = (f & 8) ~= 0,
         label   = U.trim(label),
-        style   = (sty and sty ~= "") and sty or nil,
+        style   = (sty and sty ~= "") and (C.KNOB_STYLE_ALIAS[sty] or sty) or nil,
         cap     = (cap and cap ~= "") and cap or nil,
       }
     end
@@ -277,7 +277,7 @@ function M.build_default(track, addr)
       param   = p,
       type    = U.guess_control_type(track, addr, p),
       bipolar = U.guess_bipolar(nm, track, addr, p),
-      label   = U.trim(nm),
+      label   = "",      -- the plugin's own name shows by itself; a label would hide an alias
     }
   end
   -- A compressor that reports gain reduction gets its meter by default.
@@ -341,7 +341,11 @@ function M.display_name(key, param, slot_label, plugin_name, live)
     local n = plugin_name and U.trim(plugin_name) or ""
     return (n ~= "") and n or ("P" .. tostring(param))
   end
-  if slot_label and slot_label ~= "" then return slot_label end
+  -- A label that's only the plugin's own name for the parameter says
+  -- nothing of its own -- layouts before 1.7.5 filled every slot with one
+  -- -- so it doesn't hide the alias.
+  local own = plugin_name and U.trim(plugin_name) or ""
+  if slot_label and slot_label ~= "" and U.trim(slot_label) ~= own then return slot_label end
   local a = M.get_alias(key, param)
   if a then return a end
   return plugin_name or ("P" .. tostring(param))

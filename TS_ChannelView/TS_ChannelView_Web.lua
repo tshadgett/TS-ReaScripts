@@ -25,6 +25,9 @@
     macros   (persistent) the page's macro buttons; the page reads and
              writes it itself, this script never touches it.
     alive    a counter, bumped every cycle: the page says so when it stops.
+    seen     written by each open page about once a second ("<id>.<n>"),
+             for ChannelView's header to show a page is connected. Not read
+             here.
 
   It needs nothing from ChannelView's window and runs whether that is open
   or not. Run it once, or from REAPER's startup (__startup.lua).
@@ -45,6 +48,7 @@ local IX = require("TS_CV_FXIndex")
 local Tr = require("TS_CV_Trace")
 local G  = require("TS_CV_Gang")
 local SR = require("TS_CV_Search")
+local PR = require("TS_CV_Presets")
 
 local NS = "TS_CV_WEB"
 
@@ -233,6 +237,14 @@ local function plate_json(key)
            sheen = pl.sheen or 1 }
 end
 
+-- The plugin's presets for the page's preset bar (TS_CV_Presets: the
+-- desktop's own list, read from REAPER's preset files).
+local function presets_json(fx)
+  local info = PR.list(track, fx.addr)
+  return { u = arr({ table.unpack(info.user) }), f = arr({ table.unpack(info.factory) }),
+           d = info.default, s = info.can_save or nil, df = (info.can_save and info.can_default) or nil }
+end
+
 local function panel_of(fx, i)
   local key = U.plugin_key(fx.name)
   local layout, is_default = M.get_or_default(key, track, fx.addr, fx.guid)
@@ -266,6 +278,7 @@ local function panel_of(fx, i)
     gr = has_gr and (meter.range or C.MAX_GR_DB) or nil,
     gw = has_gr and (meter.win or C.GRV_DEFAULT) or nil,
     eq = (key == "ReaEQ") or nil,
+    ps = presets_json(fx),
   }
 end
 
@@ -455,6 +468,7 @@ local function build_layout()
     eqr = { lo = C.EQ_FREQ_LO, hi = C.EQ_FREQ_HI, g = C.EQ_GAIN_RANGE },
     grw = arr({ table.unpack(C.GRV_WINDOWS) }),
     vals = C.SHOW_VALUES,
+    pbar = C.PRESET_BAR,
   }
 end
 
@@ -690,6 +704,13 @@ local function spectrum_vals()
            d = table.concat(d) }
 end
 
+-- A message for the page to show once (a preset that couldn't be saved,
+-- say): numbered, so the page shows each one once.
+local last_msg = nil
+local function tell(text)
+  last_msg = { s = ((last_msg and last_msg.s) or 0) + 1, m = text }
+end
+
 local function build_vals(lseq, ack)
   local fxv = {}
   local any_eq = false
@@ -714,7 +735,9 @@ local function build_vals(lseq, ack)
       gr = round(T.gain_reduction(track, fx.addr) or 0, 2)
     end
     local est = (gr and T.gr_estimated(track, fx.addr, fx.guid)) or nil
+    local pname, psame = PR.current(track, fx.addr)
     fxv[fx.guid] = { e = T.get_enabled(track, fx.addr), v = v, x = x, gr = gr,
+                     pn = pname, pm = (pname ~= "" and not psame) or nil,
                      est = est,
                      tw = (gr and web_tr.set[fx.guid]) and trace_of(fx, meter, est, gr) or nil,
                      eq = RQ.is_eq(key) and eq_vals(fx) or nil }
@@ -737,7 +760,7 @@ local function build_vals(lseq, ack)
     }
   end
   local mx = (reaper.time_precise() - mix_at < MIX_TTL) and mixer_vals() or nil
-  return { L = lseq, A = ack, fx = fxv, tr = tr, s = sends_vals(0), r = sends_vals(-1), mx = mx,
+  return { L = lseq, A = ack, fx = fxv, msg = last_msg, tr = tr, s = sends_vals(0), r = sends_vals(-1), mx = mx,
            nv = nav_open() and nav_vals() or nil,
            sp = any_eq and spectrum_vals() or nil }
 end
@@ -886,7 +909,24 @@ end
 local layout_dirty = false
 
 local function apply(verb, a)
-  if verb == "nav" then
+  if verb == "pld" or verb == "pdl" or verb == "pst" or verb == "psv" or verb == "psd"
+     or verb == "prn" or verb == "pdel" then
+    -- presets (TS_CV_Presets); names come escaped, so a "|" or "~" in one
+    -- can't split the command
+    local fx = fx_by_guid(a[1])
+    if not fx then return end
+    local function dec(v) return ((v or ""):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)) end
+    local ok, e = true, nil
+    if verb == "pld" then PR.load(track, fx.addr, dec(a[2]))
+    elseif verb == "pdl" then PR.load_default(track, fx.addr)
+    elseif verb == "pst" then PR.step(track, fx.addr, tonumber(a[2]) or 1)
+    elseif verb == "psv" then ok, e = PR.save(track, fx.addr, dec(a[2]))
+    elseif verb == "psd" then ok, e = PR.save_default(track, fx.addr, dec(a[2]))
+    elseif verb == "prn" then ok, e = PR.rename(track, fx.addr, dec(a[2]), dec(a[3]))
+    elseif verb == "pdel" then ok, e = PR.delete(track, fx.addr, dec(a[2])) end
+    if not ok and e then tell("Preset: " .. e) end
+    layout_dirty = true
+  elseif verb == "nav" then
     nav_at = (a[1] == "1") and reaper.time_precise() or -100
     if a[1] == "1" then next_nav = 0 end
   elseif verb == "navgo" then
@@ -1201,6 +1241,7 @@ local function cycle()
     local h, t = pal_get()
     if C.apply_colour(h or C.BASE_HUE, t or C.TINT) then layout_dirty = true end
     C.PLATE_TEXTURE = reaper.GetExtState("TS_ChannelView", "plate_texture") ~= "0"
+    C.PRESET_BAR = reaper.GetExtState("TS_ChannelView", "preset_bar") ~= "0"
     local sv = reaper.GetExtState("TS_ChannelView", "show_values")
     C.SHOW_VALUES = (sv == "") or (sv == "1")
   end

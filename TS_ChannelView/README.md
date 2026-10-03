@@ -382,8 +382,9 @@ panel everywhere, which the dialog says at the top.
 Right-click a knob or fader ▸ **Style** to give it a hardware face, and the
 panel's **=** menu ▸ **Faceplate** to change the panel behind it.
 
-- **Knobs:** *Arc* (the theme's own, and the default), *Skirted*, *Pointer*
-  and *Trim pot*. **Faders:** *Flat* (the default), *Console* and *Rail*.
+- **Knobs:** *Arc* (the theme's own, and the default), *Skirted*, *Pointer*,
+  *Trim pot* and *Round nose* (a round cap whose short, blunt nose is the
+  pointer). **Faders:** *Flat* (the default), *Console* and *Rail*.
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream and
   Black. *Apply to every knob on this panel* copies one control's look to
   the rest.
@@ -412,6 +413,31 @@ so every instance of that plugin wears it.
 | hover | the current value, in a tooltip that stays put |
 | right-click | control menu |
 | click a stepped value | its list of choices |
+
+## Presets
+
+The bar along the foot of each panel is the plugin's preset box: the
+current preset in the middle (a `*` after it means the plugin has changed
+since it was loaded), previous and next beside it, and **+** for *Save
+preset…*, *Save as default…*, *Rename* and *Delete*. The default is the
+preset REAPER loads whenever the plugin is added; ★ marks it in the list.
+
+These are REAPER's presets, not ChannelView's: the same `presets/*.ini`
+files, written exactly as REAPER writes them, so whatever you save shows up
+in the plugin window's own preset box and the other way round. Saving
+works for VST2, VST3 and JS; CLAP and AU presets load but can't be saved
+from here yet. **View ▸ Preset bar** hides the bar.
+
+## Track colours
+
+Right-click a track ▸ *Colour…*. The palette dropdown has what REAPER
+7.81's colour picker has — the project's colours, the built-in palettes and
+User 1 to 4 (from `reaper-colors.ini`) — and the old 16 custom colours
+(`custcolors` in reaper.ini, the list SWS palettes load into). A click on a
+swatch colours the track and closes; *REAPER's colour picker…* opens
+REAPER's own, which works on the selected tracks. The built-in palettes
+aren't saved anywhere REAPER can be asked for them, so ChannelView carries
+a copy of 7.81's.
 
 ## Files
 
@@ -474,7 +500,9 @@ Two pieces, both installed by ReaPack with ChannelView:
 2. **Start the bridge.** *Actions ▸ Show action list*, run
    **Script: TS_ChannelView_Web.lua**. It keeps running in the background
    (the action shows as on); run it again to stop it. To start it with
-   REAPER, add that action to your startup actions or `Scripts/__startup.lua`.
+   REAPER, tick ChannelView's *View ▸ Start web companion with REAPER*, or
+   run the **TS_ChannelView_Web_Startup** action. While it runs, a small
+   tablet shows in ChannelView's header, filled in once a page connects.
 3. **Open the page on the tablet**, on the same network:
    `http://<your computer's address>:8080/TS_ChannelView.html`. If Windows
    asks whether REAPER may accept connections on private networks, allow it.
@@ -513,6 +541,8 @@ script into the action list.
 - **Navigator:** the button to the left of the macro button. Tap to move the
   edit cursor, tap a region's name to go to it, drag the box to scroll
   REAPER's arrange view.
+- **Presets:** the bar along the foot of a panel — tap the name for the
+  list, ‹ › to step, + to save, save as default, rename or delete.
 - **Macros:** the pencil turns on editing. + adds a button for any action
   (searchable), tap a button to change it, × removes it.
 

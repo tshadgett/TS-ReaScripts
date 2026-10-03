@@ -236,10 +236,11 @@ function TO.parse_custcolors(s)
   return out
 end
 
--- The custcolors value out of a reaper.ini's text: the [REAPER] section
--- only, key matched case-insensitively.
-function TO.custcolors_from_ini(text)
+-- One key's value in a reaper.ini's [REAPER] section, key matched
+-- case-insensitively; nil when it isn't there.
+function TO.ini_value(text, key)
   if not text then return nil end
+  key = key:lower()
   local section = nil
   for line in (text .. "\n"):gmatch("([^\r\n]*)\r?\n") do
     local sec = line:match("^%s*%[(.-)%]%s*$")
@@ -247,11 +248,159 @@ function TO.custcolors_from_ini(text)
       section = sec:upper()
     elseif section == "REAPER" then
       local k, v = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
-      if k and k:lower() == "custcolors" then return v end
+      if k and k:lower() == key then return v end
     end
   end
   return nil
 end
+
+-- The custcolors value out of a reaper.ini's text.
+function TO.custcolors_from_ini(text) return TO.ini_value(text, "custcolors") end
+
+--[[ Palettes.
+
+  REAPER 7.81's colour picker keeps its user palettes in
+  reaper-colors.ini, one section each:
+
+      [userpalette_0]
+      colors=1E48A8 B21B1B 12620C ...      (RRGGBB, space-separated)
+
+  shown in the picker as "User 1", "User 2" ... (a name= key, should a
+  palette carry one, is used instead). The old 16 custom colours
+  (custcolors in reaper.ini, what SWS palettes load into) were copied
+  into User 1 on the first run of 7.81 and are separate from it since;
+  they're still offered, for SWS's sake. The picker's "project palette"
+  is the colours the project uses, worked out rather than saved, so it's
+  worked out here the same way. Its built-in palettes are compiled into
+  REAPER and saved nowhere, so they're copied below, as 7.81 has them.
+--]]
+
+-- REAPER 7.81's built-in palettes, in its picker's order: 16 colours
+-- each, read out of reaper.exe (a table of R G B 0 entries in .data).
+TO.BUILTIN_PALETTES = {
+  { "REAPER",     "B96752 BB9C94 865E52 BF9A5F 996811 B8841F 408C0B 65C32F 13BD99 339887 848C8C 6B8C8C 2295CE 1F69A8 58628C 8C5886" },
+  { "Primary",    "FF0000 FF6F00 FFDD00 B3FF00 00FF7B 00D5FF 0066FF 5D00FF CC00FF FF0099 000000 333333 666666 999999 CCCCCC FFFFFF" },
+  { "Pride",      "A83939 804040 A89839 807640 59A839 528040 39A877 408063 397BA8 406580 5639A8 504080 A83998 804076 8A8A8A 545454" },
+  { "Perceptual", "C25273 DB685C EE8848 FFBE54 FFE769 DFFC87 A3FBA2 5EF3C1 22F3EB 00D9FB 30B4F8 578FE8 827DE1 A573D3 C26EBD D66A9C" },
+  { "Warm",       "9C383F 804340 B8522E D6A083 EF8216 EFA951 61574A E6CC8F B38E28 F0D667 909156 B0B1A1 6D8A7C 71778A 80737C 614A54" },
+  { "Cool",       "594537 5F5C55 78745E 838761 4B6320 518056 2B7D44 37765E 234B54 166B80 5B7D86 436880 5C6670 516780 3A4F80 5F5880" },
+  { "Vice",       "FF006F FF5993 FF4D4D FE9875 FFCAC1 F9FFA8 ADFF8A 57FFFF 8CF2BC 5B9AB3 3392FF 2B47FF 634DC4 A875FF 8D2CA3 FB45FF" },
+  { "Casablanca", "A62A00 FC4100 FC721C 822A2A 7D4B4B 9C5132 9C863E FFC55A 94866C 6F7A82 205791 415B80 525D69 3B5359 004563 00215C" },
+  { "Devon",      "571B39 94486A FC6C6C E594A6 FAA466 A17655 CE7A28 E8C65D CAD59E 86C578 1DBF8C 395D61 74BFC9 3091AC 1864AC B8B8B8" },
+  { "Technoir",   "73003B EB00B8 A3001C FF3B3B FF7A4A FFD54A 537599 005EFF 2937FF 00167A 6B00FF 380047 B3B3B3 8C8C8C 666666 404040" },
+}
+TO.USER_PALETTES = 4      -- the picker always lists User 1 to User 4
+
+-- "1E48A8 B21B1B ..." -> a list of { r, g, b }.
+function TO.parse_hex_list(s)
+  local out = {}
+  for h in (s or ""):gmatch("%x%x%x%x%x%x") do
+    out[#out + 1] = { tonumber(h:sub(1, 2), 16), tonumber(h:sub(3, 4), 16),
+                      tonumber(h:sub(5, 6), 16) }
+  end
+  return out
+end
+
+-- reaper-colors.ini's text -> { { name, colours }, ... } in palette order.
+function TO.parse_user_palettes(text)
+  local by, section = {}, nil
+  for line in ((text or "") .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    local n = line:match("^%s*%[userpalette_(%d+)%]%s*$")
+    if n then
+      section = { idx = tonumber(n), name = "User " .. (tonumber(n) + 1), colours = {} }
+      by[#by + 1] = section
+    elseif line:match("^%s*%[") then
+      section = nil
+    elseif section then
+      local k, v = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
+      k = k and k:lower()
+      if k == "colors" then section.colours = TO.parse_hex_list(v)
+      elseif k == "name" and v ~= "" then section.name = v end
+    end
+  end
+  table.sort(by, function(a, b) return a.idx < b.idx end)
+  local out = {}
+  for _, p in ipairs(by) do out[#out + 1] = { name = p.name, colours = p.colours, slot = p.idx } end
+  return out
+end
+
+local function read_file(path)
+  local fh = path and io.open(path, "r")
+  if not fh then return nil end
+  local s = fh:read("a")
+  fh:close()
+  return s
+end
+
+-- A reaper.ini key: the live value where REAPER hands it out, the file
+-- otherwise.
+local function config_value(key)
+  if reaper.get_config_var_string then
+    local ok, v = reaper.get_config_var_string(key)
+    if ok and v and v ~= "" then return v end
+  end
+  return reaper.get_ini_file and TO.ini_value(read_file(reaper.get_ini_file()), key) or nil
+end
+
+-- The colours the project's tracks and items use, each once, in the
+-- order they first appear.
+function TO.project_colours()
+  local out, seen = {}, {}
+  local function add(v)
+    v = v and math.floor(v) or 0
+    if (v & 0x1000000) == 0 then return end
+    local r, g, b = reaper.ColorFromNative(v & 0xffffff)
+    local k = (r << 16) | (g << 8) | b
+    if not seen[k] then seen[k] = true; out[#out + 1] = { r, g, b } end
+  end
+  for i = 0, reaper.CountTracks(0) - 1 do
+    add(reaper.GetMediaTrackInfo_Value(reaper.GetTrack(0, i), "I_CUSTOMCOLOR"))
+  end
+  for i = 0, reaper.CountMediaItems(0) - 1 do
+    local it = reaper.GetMediaItem(0, i)
+    add(reaper.GetMediaItemInfo_Value(it, "I_CUSTOMCOLOR"))
+    local tk = reaper.GetActiveTake(it)
+    if tk then add(reaper.GetMediaItemTakeInfo_Value(tk, "I_CUSTOMCOLOR")) end
+  end
+  return out
+end
+
+-- Every palette ChannelView can show, in the order REAPER's picker lists
+-- them -- the project's colours, the built-ins, User 1 to 4 -- and then
+-- the old custom colours. Before 7.81 there are no palettes to list but
+-- the project's and the custom colours. `user_text` is reaper-colors.ini,
+-- `version` REAPER's (both looked up when not given); `project` and
+-- `custom` the colour lists for those two.
+TO.PROJECT_PALETTE = "Project"
+TO.CUSTOM_PALETTE  = "Custom colours (SWS)"
+function TO.build_palettes(version, user_text, project, custom)
+  local out = { { name = TO.PROJECT_PALETTE, colours = project or {} } }
+  if (version or 0) >= 7.81 then
+    for _, b in ipairs(TO.BUILTIN_PALETTES) do
+      out[#out + 1] = { name = b[1], colours = TO.parse_hex_list(b[2]) }
+    end
+    local user = TO.parse_user_palettes(user_text)
+    local have = {}
+    for _, p in ipairs(user) do have[p.slot] = true end
+    for i = 0, TO.USER_PALETTES - 1 do  -- the empty ones too, as the picker shows them
+      if not have[i] then user[#user + 1] = { name = "User " .. (i + 1), colours = {}, slot = i } end
+    end
+    table.sort(user, function(a, b) return a.slot < b.slot end)
+    for _, p in ipairs(user) do out[#out + 1] = p end
+  end
+  out[#out + 1] = { name = TO.CUSTOM_PALETTE, colours = custom or {} }
+  return out
+end
+
+function TO.palettes()
+  local version = tonumber((reaper.GetAppVersion() or ""):match("^(%d+%.%d+)")) or 0
+  return TO.build_palettes(version,
+    read_file(reaper.GetResourcePath() .. "/reaper-colors.ini"),
+    TO.project_colours(), TO.custom_colours())
+end
+
+-- The palette REAPER's picker last showed ("User 1", "Pride" ...), or nil.
+function TO.picker_palette() return config_value("colorpick_palette") end
 
 -- The first track's colour in a track template, as a native colour
 -- (0xRRGGBB or 0xBBGGRR depending on platform -- hand it to
@@ -428,19 +577,8 @@ end
 -- value is preferred where REAPER exposes it; otherwise reaper.ini, which
 -- is where REAPER keeps them between sessions.
 function TO.custom_colours()
-  local s = nil
-  if reaper.get_config_var_string then
-    local ok, v = reaper.get_config_var_string("custcolors")
-    if ok and v and v:match("^%s*%x+") then s = v end
-  end
-  if not s and reaper.get_ini_file then
-    local fh = io.open(reaper.get_ini_file(), "r")
-    if fh then
-      s = TO.custcolors_from_ini(fh:read("a"))
-      fh:close()
-    end
-  end
-  return TO.parse_custcolors(s)
+  local s = config_value("custcolors")
+  return TO.parse_custcolors(s and s:match("^%s*%x+") and s or nil)
 end
 
 -- Drags a track to just before 0-based position `before` (the track

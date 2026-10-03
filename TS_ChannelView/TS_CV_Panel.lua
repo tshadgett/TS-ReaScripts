@@ -21,12 +21,18 @@ local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
 local TP  = require("TS_CV_Taps")
+local PU  = require("TS_CV_PresetUI")
 local Tr  = require("TS_CV_Trace")
 
 local P   = {}
 local ImGui
 
-function P.attach(imgui) ImGui = imgui; EQP.attach(imgui) end
+function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); PU.attach(imgui) end
+
+-- The preset bar along an expanded panel's foot (TS_CV_PresetUI): View >
+-- Preset bar. Its height comes off the body, so everything that sizes the
+-- body -- the row count, the grid, the meters, the EQ canvas -- asks here.
+function P.footer_h() return C.PRESET_BAR and C.FOOTER_H or 0 end
 
 -- ---------------------------------------------------------------------
 -- geometry
@@ -41,7 +47,7 @@ function P.rows_for(panel_h)
   -- Top and bottom are no longer the same: the grid starts tight under
   -- the header so a cell's name line isn't pushed down, and keeps the
   -- full pad at the bottom.
-  local body_h = panel_h - C.HEADER_H - C.GRID_TOP_PAD - C.PANEL_PAD
+  local body_h = panel_h - C.HEADER_H - P.footer_h() - C.GRID_TOP_PAD - C.PANEL_PAD
   return math.max(C.MIN_ROWS, math.floor(body_h / C.CELL_H))
 end
 
@@ -840,7 +846,7 @@ end
 local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter, io)
   local controls = layout.controls or {}
   local lay = P.layout(controls, panel_h)
-  local h = panel_h - C.HEADER_H
+  local h = panel_h - C.HEADER_H - P.footer_h()
 
   local grid_x0 = x + C.PANEL_PAD
   local grid_w  = w - C.PANEL_PAD * 2
@@ -1174,6 +1180,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
       draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
     else
       draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
+      local fh = P.footer_h()
       if is_eq then
         -- The whole body becomes the draggable-node curve canvas rather
         -- than the ordinary parameter grid: a ReaEQ panel IS the EQ view,
@@ -1183,14 +1190,15 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
         local ex, ew = x, ww
         if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
                           y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W,
-                          wh - C.HEADER_H - C.PANEL_PAD * 2, track, fx, enabled) then
+                          wh - C.HEADER_H - fh - C.PANEL_PAD * 2, track, fx, enabled) then
           ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
         end
-        EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H, track, fx, req)
+        EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H - fh, track, fx, req)
       else
         draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
                       key, req, meter, io)
       end
+      if fh > 0 then PU.footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx) end
     end
     if saved then pop_plate(saved) end
     -- ReaImGui: EndChild only when BeginChild returned true.

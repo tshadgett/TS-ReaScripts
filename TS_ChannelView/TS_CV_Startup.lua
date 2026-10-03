@@ -92,6 +92,11 @@ end
 -- action list and write a dead line into __startup.lua anywhere else.
 local my_cmd = nil
 
+-- For a block that starts some OTHER script (the web companion), whose id
+-- is looked up rather than asked of the action context.
+function SU.use(cmd) my_cmd = cmd; return my_cmd end
+function SU.cmd() return my_cmd end
+
 function SU.init()
   local _, _, _, num = reaper.get_action_context()
   if num and reaper.ReverseNamedCommandLookup then
@@ -191,4 +196,68 @@ end   -- make
 
 local SU = make("ChannelView", "TS_ChannelView.lua", "channelview_cmd")
 SU.make = make
+
+-- ---------------------------------------------------------------------
+-- the web companion (TS_ChannelView_Web.lua)
+-- ---------------------------------------------------------------------
+
+SU.WEB_FILE = "TS_ChannelView_Web.lua"
+
+-- The "_RS..." name REAPER gave `file` in the Main section, out of
+-- reaper-kb.ini's text, or nil. A script's line there reads
+--   SCR <flags> 0 <RS...id> "Custom: <name>" "<path>"
+-- and the one whose path ends in `file` is the one wanted (pure).
+function SU.kb_find(text, file)
+  if not text then return nil end
+  local want = file:lower()
+  for line in (text .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    local sec, id, rest = line:match('^SCR%s+%d+%s+(%d+)%s+(%S+)%s+(.*)$')
+    if sec == "0" and id then
+      local path = (rest:match('^".-"%s+"(.-)"%s*$') or rest:match('^".-"%s+(%S+)%s*$') or "")
+        :gsub("\\", "/"):lower()
+      if path:sub(-#want - 1) == "/" .. want or path == want then
+        return (id:sub(1, 1) == "_") and id or ("_" .. id)
+      end
+    end
+  end
+  return nil
+end
+
+-- One instance for the web companion's startup block, shared by
+-- ChannelView's menu and the TS_ChannelView_Web_Startup action -- the same
+-- markers, so either can undo what the other did. `dir` is the folder the
+-- web script sits in, for registering it if REAPER doesn't know it yet.
+local web = nil
+function SU.web(dir)
+  if web then return web end
+  web = make("ChannelView web companion", "ChannelView", "channelview_web_cmd")
+  -- Looked up once a session, and only when wanted: reaper-kb.ini first
+  -- (read only), and only if the script isn't in the Action List at all
+  -- is it added there.
+  function web.resolve()
+    if web.cmd() then return web.cmd() end
+    local fh = io.open(reaper.GetResourcePath() .. SEP .. "reaper-kb.ini", "rb")
+    local id = fh and SU.kb_find(fh:read("*a"), SU.WEB_FILE)
+    if fh then fh:close() end
+    if id and reaper.NamedCommandLookup(id) == 0 then id = nil end
+    if not id and dir and reaper.AddRemoveReaScript then
+      local num = reaper.AddRemoveReaScript(true, 0, dir .. SU.WEB_FILE, true)
+      local nm = num and num > 0 and reaper.ReverseNamedCommandLookup(num)
+      if nm and nm ~= "" then id = (nm:sub(1, 1) == "_") and nm or ("_" .. nm) end
+    end
+    return id and web.use(id) or nil
+  end
+  -- Running now? The bridge clears its counter when it stops, and
+  -- non-persistent ExtState doesn't outlive REAPER.
+  function web.running() return reaper.GetExtState("TS_CV_WEB", "alive") ~= "" end
+  function web.start()
+    local id = web.resolve()
+    local num = id and reaper.NamedCommandLookup(id) or 0
+    if num == 0 then return false end
+    reaper.Main_OnCommand(num, 0)
+    return true
+  end
+  return web
+end
+
 return SU

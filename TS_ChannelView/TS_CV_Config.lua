@@ -36,6 +36,8 @@ C.PANEL_PAD   = 6         -- inner padding around a panel's control grid
 C.GRID_TOP_PAD = C.PANEL_PAD
 C.PANEL_GAP   = 6         -- gap between adjacent panels
 C.HEADER_H    = 20        -- panel header bar height
+C.FOOTER_H    = 20        -- the preset bar along a panel's foot
+C.PRESET_BAR  = true      -- View > Preset bar (persisted)
 C.PANEL_MIN_W = 132       -- a panel never narrower than this (header needs room)
 C.STRIP_H     = 30        -- bottom track-selector strip height (see C.set_icon_row)
 C.STRIP_BASE_H = C.STRIP_H  -- that height with no icon row
@@ -782,6 +784,7 @@ C.KNOB_STYLES = {
   { key = "skirted", label = "Skirted",  cap = "black" },
   { key = "pointer", label = "Pointer",  cap = "black" },
   { key = "trim",    label = "Trim pot", cap = "grey" },
+  { key = "nose",    label = "Round nose", cap = "black" },
 }
 C.FADER_STYLES = {
   { key = "flat",    label = "Flat" },
@@ -793,6 +796,7 @@ C.PLATE, C.CAP, C.KNOB_STYLE, C.FADER_STYLE = {}, {}, {}, {}
 for _, p in ipairs(C.PLATES)       do C.PLATE[p.key] = p end
 for _, p in ipairs(C.CAPS)         do C.CAP[p.key] = p end
 for _, p in ipairs(C.KNOB_STYLES)  do C.KNOB_STYLE[p.key] = p end
+C.KNOB_STYLE_ALIAS = { api = "nose" }   -- Round nose's name for a few days before 1.7.5
 for _, p in ipairs(C.FADER_STYLES) do C.FADER_STYLE[p.key] = p end
 
 -- A faceplate by key, or nil for the theme's own (or anything unknown).

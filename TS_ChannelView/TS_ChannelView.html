@@ -229,7 +229,29 @@ button { font: inherit; color: inherit; }
 .drop { position: absolute; top: 8px; bottom: 8px; width: 4px; margin-left: -2px; border-radius: 2px;
   background: var(--accent); display: none; z-index: 5; pointer-events: none; }
 #row { position: relative; }
-.ph { touch-action: none; }   /* hold-to-drag; iOS would otherwise take it as a scroll */
+.ph { touch-action: none; }
+/* the preset bar: the header's twin along the foot of a panel */
+.pf { height: 34px; flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 0 2px;
+  background: var(--head); border-top: 1px solid var(--border); }
+.pf .pspc { visibility: hidden; }
+.pf .pprev { margin-left: auto; }
+.pf .pnext { margin-right: auto; }
+.pf .pdd { flex: 0 1 240px; min-width: 0; height: 26px; border-radius: 5px;
+  border: 1px solid var(--ring); background: var(--toff); color: var(--ttext); font-size: 12px; padding: 0 18px 0 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; cursor: pointer; }
+.pf .pdd::after { content: ""; position: absolute; right: 7px; top: 11px; border: 4px solid transparent;
+  border-top-color: var(--ttext); opacity: .65; }
+.pf .pdd.mod { font-style: italic; }
+.pnl.shut .pf { display: none; }
+.sheet .note { color: var(--dim); font-size: 12px; margin: 0 0 8px; line-height: 1.4; }
+.sheet .lbl2 { color: var(--dim); font-size: 12px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.sheet .plist { max-height: 42vh; overflow-y: auto; }
+.sheet .opt .star { color: var(--solo); margin-left: 6px; }
+.sheet .opt[disabled] { opacity: 0.35; }
+#toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel);
+  border: 1px solid var(--clip); color: var(--text); padding: 10px 16px; border-radius: 8px; z-index: 40;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: none; max-width: 80vw; }
+#toast.show { display: block; }   /* hold-to-drag; iOS would otherwise take it as a scroll */
 .pk .flt { display: flex; gap: 8px; margin-bottom: 8px; }
 .pk select { flex: 1; height: 40px; border-radius: 6px; border: 1px solid var(--border); background: var(--win);
   color: var(--text); padding: 0 8px; font: inherit; font-size: 14px; }
@@ -329,6 +351,7 @@ button { font: inherit; color: inherit; }
   <div id="lower"><div id="mix"></div><div id="trk"></div></div>
 </div>
 <div id="banner"></div>
+<div id="toast"></div>
 <div class="scrim" id="scrim"><div class="sheet" id="sheet"></div></div>
 
 <script>
@@ -415,12 +438,22 @@ try { showMacros = localStorage.getItem("tscv.macros") !== "0"; } catch (e) {}
 // polling
 // ---------------------------------------------------------------------------
 let busy = false;
+// A heartbeat for ChannelView's header: about once a second this page writes
+// "<id>.<n>" to TS_CV_WEB/seen. Every page writes the same key, so the
+// random id is what tells them apart; ChannelView counts a page as
+// connected while its id keeps turning up.
+const PAGE_ID = Math.random().toString(36).slice(2, 8) || "p";
+let seenN = 0, seenAt = 0;
 async function poll() {
   if (busy) return;
   busy = true;
   try {
     let q = `GET/EXTSTATE/${NS}/vals;GET/EXTSTATE/${NS}/alive;TRANSPORT;BEATPOS;GET/40364;GET/1068`;
     for (const m of macros) q += ";GET/" + encodeURIComponent(m.a);
+    if (Date.now() - seenAt > 1000) {
+      seenAt = Date.now(); seenN = (seenN + 1) % 1000;
+      q = `SET/EXTSTATE/${NS}/seen/${PAGE_ID}.${seenN};` + q;
+    }
     if (outbox.length) q = `SET/EXTSTATE/${NS}/cmd/` + encodeURIComponent(outboxText()) + ";" + q;
     const r = await reaper(q);
     reachable = true;
@@ -513,8 +546,9 @@ function radial(n, r0, r1, a0, a1) {
 }
 const lum = hex => { const h = hex.replace("#", ""); const c = i => parseInt(h.substr(i, 2), 16) / 255;
   return 0.2126 * c(0) + 0.7152 * c(2) + 0.0722 * c(4); };
-const CAP_DEFAULT = { skirted: "#26282b", pointer: "#26282b", trim: "#8d9298" };
-const BODY = { skirted: 38, pointer: 43, trim: 47 };
+const CAP_DEFAULT = { skirted: "#26282b", pointer: "#26282b", trim: "#8d9298", nose: "#26282b" };
+const BODY = { skirted: 38, pointer: 43, trim: 47, nose: 40 };
+const STYLE_ALIAS = { api: "nose" };   // Round nose's name for a few days before 1.7.5
 let gradN = 0;
 
 function el(tag, attrs, parent) {
@@ -526,6 +560,7 @@ function el(tag, attrs, parent) {
 
 // Builds a knob face of `size` px; returns { svg, set(v) }.
 function makeKnob(size, style, cap, bipolar, tick) {
+  style = STYLE_ALIAS[style] || style;
   style = BODY[style] ? style : "arc";
   const svg = el("svg", { width: size, height: size, viewBox: "0 0 100 100" });
   tick = tick || "var(--ring)";
@@ -552,9 +587,9 @@ function makeKnob(size, style, cap, bipolar, tick) {
   const id = "sh" + (++gradN);
   const defs = el("defs", {}, svg);
   const rg = el("radialGradient", { id, cx: "0.36", cy: "0.3", r: "0.75" }, defs);
-  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": style === "skirted" ? 0.12 : 0.3 }, rg);
+  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": style === "skirted" ? 0.12 : style === "nose" ? 0.04 : 0.3 }, rg);
   el("stop", { offset: 0.6, "stop-color": "#fff", "stop-opacity": 0.02 }, rg);
-  el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": 0.25 }, rg);
+  el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": style === "nose" ? 0.1 : 0.25 }, rg);
   // the scale sits just outside the body
   const tk = el("path", { d: radial(11, 53, 60, A0, A1), fill: "none", stroke: tick,
     "stroke-width": 3, "stroke-linecap": "round" });
@@ -568,6 +603,14 @@ function makeKnob(size, style, cap, bipolar, tick) {
     rot = el("g", {}, g);
     el("line", { x1: 50, y1: 14, x2: 50, y2: 24, stroke: "#f3f3f1", "stroke-width": 4, "stroke-linecap": "round" }, rot);
     el("line", { x1: 50, y1: 28, x2: 50, y2: 42, stroke: ink, "stroke-width": 3.5, "stroke-linecap": "round" }, rot);
+  } else if (style === "nose") {
+    // a neutral grey body with a short, blunt nose (the pointer), and the
+    // colour only in the round cap set into its centre
+    rot = el("g", {}, g);
+    el("path", { d: "M47.80 8.50 L52.20 8.50 L58.54 18.12 A33 33 0 1 1 41.46 18.12 Z", fill: "#a0a0a0",
+      stroke: "rgba(0,0,0,0.35)", "stroke-width": 2.2, "stroke-linejoin": "round" }, rot);
+    el("circle", { cx: 50, cy: 50, r: 23.8, fill: cap, stroke: "rgba(0,0,0,0.63)", "stroke-width": 2.2 }, g);
+    el("circle", { cx: 50, cy: 50, r: 22.7, fill: `url(#${id})` }, g);
   } else if (style === "pointer") {
     rot = el("g", {}, g);
     el("path", { d: "M50 5 C57 5 64 27 66 45 C68 65 61 81 50 81 C39 81 32 65 34 45 C36 27 43 5 50 5 Z",
@@ -687,6 +730,8 @@ const ICON = {
   power: '<path d="M12 4v8M7.5 7a7 7 0 1 0 9 0"/>',
   float: '<rect x="4" y="8" width="12" height="12" rx="1"/><path d="M10 4h10v10"/>',
   collapse: '<path d="M15 6l-6 6 6 6"/>',
+  next: '<path d="M9 6l6 6-6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
   more: '<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>',
 };
 function iconBtn(cls, icon, onClick, title) {
@@ -1463,9 +1508,10 @@ function buildPanels() {
   const fx = layout.fx || [];
   if (!layout.track) { row.append(h("div", "empty", "No track selected")); return; }
   const rowH = row.clientHeight - 16;
-  const bodyH = rowH - HEAD - PAD * 2;
+  const bodyH = rowH - HEAD - (layout.pbar ? 34 : 0) - PAD * 2;
   for (const p of fx) {
     const el = buildPanel(p, bodyH);
+    if (layout.pbar) presetBar(el, p);
     el.dataset.g = p.g;
     if (p.ti != null) wirePanelDrag(el, p);
     row.append(el);
@@ -1645,6 +1691,141 @@ function panelMenu(p) {
     item("Remove plugin", () => send("fxdel", p.g), top, true);
     if (!top) sh.append(h("div", "lbl", "Inside an FX container: move or remove it in REAPER."));
   });
+}
+
+// ---------------------------------------------------------------------------
+// presets: the bar along a panel's foot, as the desktop's (TS_CV_PresetUI)
+// ---------------------------------------------------------------------------
+const enc = s => encodeURIComponent(s);
+function presetBar(pnl, p) {
+  const f = h("div", "pf");
+  if (p.plate) { f.style.background = p.plate.head; f.style.borderColor = p.plate.border; }
+  const btn = (icon, label, fn) => {
+    const b = h("button", "hb"); b.innerHTML = `<svg viewBox="0 0 24 24">${ICON[icon]}</svg>`;
+    b.setAttribute("aria-label", label); b.addEventListener("click", fn); return b;
+  };
+  const dd = h("button", "pdd", "No preset");
+  dd.addEventListener("click", () => presetList(p));
+  // previous, the dropdown and next together in the middle; a hidden twin
+  // of the + on the left keeps them centred on the panel
+  const spc = btn("plus", "", () => {}); spc.classList.add("pspc"); spc.tabIndex = -1;
+  const prev = btn("collapse", "Previous preset", () => send("pst", p.g, -1)); prev.classList.add("pprev");
+  const next = btn("next", "Next preset", () => send("pst", p.g, 1)); next.classList.add("pnext");
+  f.append(spc, prev, dd, next, btn("plus", "Save, rename or delete", () => presetMenu(p)));
+  pnl.append(f);
+  const P = ui.panels.get(p.g);
+  if (P) P.pf = dd;
+}
+const presetNow = g => { const fv = vals && vals.fx && vals.fx[g]; return fv ? (fv.pn || "") : ""; };
+function presetList(p) {
+  const ps = p.ps || { u: [], f: [] }, cur = presetNow(p.g);
+  openSheet(sh => {
+    sh.append(h("h3", null, p.n + " — presets"));
+    const list = (title, names, star) => {
+      if (!names || !names.length) return;
+      sh.append(h("div", "lbl2", title));
+      const box = h("div", "plist");
+      for (const n of names) {
+        const o = h("button", "opt" + (n === cur ? " cur" : ""), n);
+        if (star && n === ps.d) o.append(h("span", "star", "★"));
+        o.addEventListener("click", () => { closeSheet(); send("pld", p.g, enc(n)); });
+        box.append(o);
+      }
+      sh.append(box);
+    };
+    if (!(ps.u || []).length && !(ps.f || []).length) sh.append(h("div", "note", "No presets yet — + saves one."));
+    list("Your presets", ps.u, true);
+    list("Factory", ps.f, false);
+    if (ps.d) {
+      sh.append(h("div", "gap"));
+      const o = h("button", "opt", `Load default  (${ps.d})`);
+      o.addEventListener("click", () => { closeSheet(); send("pdl", p.g); });
+      sh.append(o);
+    }
+  });
+}
+function presetMenu(p) {
+  const ps = p.ps || { u: [] }, cur = presetNow(p.g), mine = cur !== "" && (ps.u || []).includes(cur);
+  openSheet(sh => {
+    sh.append(h("h3", null, p.n));
+    const item = (label, fn, ok, danger) => {
+      const o = h("button", "opt", label);
+      if (danger) o.style.color = "var(--clip)";
+      if (!ok) o.disabled = true; else o.addEventListener("click", fn);
+      sh.append(o);
+    };
+    item("Save preset…", () => presetName(p, "save", mine ? cur : ""), !!ps.s);
+    item("Save as default…", () => presetName(p, "default", ps.d || (mine ? cur : "Default")), !!ps.df);
+    sh.append(h("div", "gap"));
+    item(mine ? `Rename “${cur}”…` : "Rename…", () => presetName(p, "rename", cur), mine);
+    item(mine ? `Delete “${cur}”…` : "Delete…", () => presetDelete(p, cur), mine, true);
+    if (!ps.s) sh.append(h("div", "note", "Saving isn't supported for this plugin format yet."));
+  });
+}
+// Save, save as default, or rename: a name, and for saving the presets you
+// could replace instead. Typing an existing name turns Save into Replace.
+function presetName(p, mode, start) {
+  const ps = p.ps || { u: [] };
+  openSheet(sh => {
+    sh.append(h("h3", null, { save: "Save preset", default: "Save as default", rename: "Rename preset" }[mode]));
+    sh.append(h("div", "note", p.n + (mode === "default" ? " — saved as a preset, and loaded whenever this plugin is added." : "")));
+    const fld = h("input", "fld"); fld.value = start || ""; fld.placeholder = "preset name";
+    sh.append(fld);
+    const go = h("button", "pri");
+    const cancel = h("button", null, "Cancel");
+    const label = () => {
+      const n = fld.value.trim();
+      const clash = (ps.u || []).includes(n) && !(mode === "rename" && n === start);
+      go.textContent = mode === "rename" ? (clash ? "Name taken" : "Rename") : (clash ? `Replace “${n}”` : "Save");
+      go.disabled = !n || (mode === "rename" && clash);
+    };
+    fld.addEventListener("input", label);
+    if (mode !== "rename" && (ps.u || []).length) {
+      sh.append(h("div", "lbl2", "or replace one of yours"));
+      const box = h("div", "plist");
+      for (const n of ps.u) {
+        const o = h("button", "opt", n);
+        if (n === ps.d) o.append(h("span", "star", "★"));
+        o.addEventListener("click", () => { fld.value = n; label(); });
+        box.append(o);
+      }
+      sh.append(box);
+    }
+    const acts = h("div", "acts"); acts.append(cancel, go); sh.append(acts);
+    cancel.addEventListener("click", closeSheet);
+    go.addEventListener("click", () => {
+      const n = fld.value.trim(); if (!n) return;
+      closeSheet();
+      if (mode === "save") send("psv", p.g, enc(n));
+      else if (mode === "default") send("psd", p.g, enc(n));
+      else send("prn", p.g, enc(start), enc(n));
+    });
+    fld.addEventListener("keydown", e => { if (e.key === "Enter" && !go.disabled) go.click(); });
+    label();
+    setTimeout(() => { fld.focus(); fld.select(); }, 60);
+  });
+}
+function presetDelete(p, name) {
+  const ps = p.ps || {};
+  openSheet(sh => {
+    sh.append(h("h3", null, `Delete “${name}”?`));
+    sh.append(h("div", "note", ps.d === name ? "It's this plugin's default preset; it won't have one after this." : p.n));
+    const acts = h("div", "acts");
+    const cancel = h("button", null, "Cancel"), del = h("button", "pri", "Delete");
+    del.style.background = "var(--clip)"; del.style.borderColor = "var(--clip)";
+    cancel.addEventListener("click", closeSheet);
+    del.addEventListener("click", () => { closeSheet(); send("pdel", p.g, enc(name)); });
+    acts.append(cancel, del); sh.append(acts);
+  });
+}
+let toastSeen = null, toastTimer = null;
+function showMsg(m) {
+  if (!m) return;
+  if (toastSeen === null) { toastSeen = m.s; return; }   // an old one, from before this page loaded
+  if (m.s === toastSeen) return;
+  toastSeen = m.s;
+  const t = $("toast"); t.textContent = m.m; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 4500);
 }
 
 // The trace's window, as the desktop's right-click menu on it: per device
@@ -2167,9 +2348,18 @@ function render() {
   renderMacros();
   if (showNav) drawNav();
   if (!vals || !layout) return;
+  showMsg(vals.msg);
   for (const [g, P] of ui.panels) {
     const fv = vals.fx && vals.fx[g];
     if (!fv) continue;
+    if (P.pf) {
+      const t = fv.pn ? fv.pn + (fv.pm ? " *" : "") : "No preset";
+      if (P.pf.textContent !== t) P.pf.textContent = t;
+      P.pf.classList.toggle("mod", !!fv.pm);
+      // the full name on hover (a mouse or trackpad), for when it's cut short
+      const tip = fv.pn ? fv.pn + (fv.pm ? " — changed since it was loaded" : "") : "";
+      if (P.pf.title !== tip) P.pf.title = tip;
+    }
     const byp = fv.e === false;
     P.byp.classList.toggle("on", byp);
     P.head.style.background = byp ? "var(--head-byp)" : (P.pl ? P.pl.head : "");

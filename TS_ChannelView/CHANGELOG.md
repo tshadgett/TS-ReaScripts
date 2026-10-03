@@ -1,5 +1,58 @@
 # ChannelView — changelog
 
+## 1.7.5 — presets, and REAPER's palettes
+
+- **A preset bar on every panel.** Along the foot of each panel, the
+  header's twin: the plugin's current preset in a dropdown in the middle,
+  with previous and next either side and a **+** at the right. The
+  dropdown lists your presets (★ marks the default), the plugin's factory
+  presets and *Load default*. A `*` after the name means the plugin has
+  changed since the preset was loaded. The **+** menu:
+  - **Save preset…** — type a name, or pick one of yours to replace.
+  - **Save as default…** — saves it and makes it the preset REAPER loads
+    whenever the plugin is added.
+  - **Rename** and **Delete** your own presets (the default follows a
+    rename; deleting it asks first and says so).
+
+  The presets are REAPER's own — the same files, the same list as the
+  plugin window's preset box — written byte for byte as REAPER writes
+  them. Saving works for VST2, VST3 and JS plugins; CLAP and AU load but
+  don't save yet. A name too long for a narrow panel shows in full when
+  you hover over it. **View ▸ Preset bar** turns it off.
+- **Web page:** the same bar on every panel, with the same menu.
+- **Track colours: a palette dropdown.** The *Colour…* dialog used to show
+  only REAPER's 16 custom colours — the list SWS palettes load into, which
+  REAPER 7.81 copied into its *User 1* palette and no longer keeps in step
+  with it. It now has a dropdown with everything REAPER 7.81's picker
+  offers: the project's colours, the ten built-in palettes (REAPER,
+  Primary, Pride, Perceptual, Warm, Cool, Vice, Casablanca, Devon,
+  Technoir) and User 1 to 4 — plus the old custom colours, for SWS. It
+  opens on the palette you last chose, or else the one REAPER's picker
+  last showed. **REAPER's colour picker…** opens REAPER's own, for live
+  preview and editing palettes.
+- **Round nose knob.** A new knob style (right-click a knob ▸ *Style*): a
+  neutral grey body with a short, blunt nose that is the pointer, and the
+  cap colour only in the round cap set into its centre.
+- **Web companion in the header.** A small tablet appears in ChannelView's
+  header while the web companion is running: an outline while no page is
+  connected, filled in while one is (the tooltip says how many), amber
+  when a page is open but the companion isn't running — click it to start
+  it. Pages now report in about once a second for this.
+- **Start the web companion with REAPER.** *View ▸ Start web companion
+  with REAPER*, or the new **TS_ChannelView_Web_Startup** action (for the
+  Action List or a toolbar), adds it to `__startup.lua` — with the same
+  backup and checks as ChannelView's own *Run when REAPER starts*, and
+  either undoes the other.
+- **Renaming a control shows straight away.** Right-click ▸ *Alias* set the
+  name, but most controls carried a label holding the plugin's own name
+  for the parameter — every auto-filled or added control got one — and a
+  label outranks an alias, so nothing changed. Those labels no longer hide
+  an alias, new controls don't get one, and renaming clears the label on
+  the control you renamed.
+- **Dropdowns on light faceplates.** The track input box (and the new
+  preset box) used dark lettering on Aluminium and Cream; they now use the
+  light lettering the combo boxes got in 1.7.2.
+
 ## 1.7.2 — long search results, light faceplates
 
 - **Search results no longer run off the screen.** Typing in the [+] menu

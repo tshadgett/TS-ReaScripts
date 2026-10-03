@@ -226,7 +226,7 @@ end
 -- ---------------------------------------------------------------------
 -- What a knob looks like, apart from what it does: W.knob draws one in its
 -- cell, the Style menu draws small ones as previews. `o` is
---   style    "arc" (the theme's own), "skirted", "pointer" or "trim"
+--   style    "arc" (the theme's own), "skirted", "pointer", "trim" or "nose"
 --   cap      the cap colour, or nil for the style's usual one
 --   bipolar  fill from the centre (arc) / no difference (the others)
 --   dim      the plugin is bypassed: everything at reduced strength
@@ -241,7 +241,19 @@ end
 -- OUTSIDE the body, a fixed few pixels, in the air between the name and
 -- the knob; they use knob_ring, which a faceplate retints, so they read on
 -- cream as well as on charcoal.
-local FACE_BODY = { skirted = 38, pointer = 43, trim = 47 }  -- trim sits a size down
+local FACE_BODY = { skirted = 38, pointer = 43, trim = 47,   -- trim sits a size down
+                    nose = 40 }
+
+-- The round-nose knob: a neutral grey body with a short nose, the nose
+-- being the pointer -- no line on the cap -- and the colour only in the
+-- round cap set into its centre. The nose is a trapezium whose wide end
+-- sits on the circle and whose narrow end is the blunt tip; it's drawn as
+-- a circle and two triangles (no polygon call needed), and outlined the
+-- same way: round the back, then out along the nose and back.
+local NOSE_R, NOSE_TIP = 33, 41.5
+local NOSE_HALF  = math.rad(15)        -- the nose's base, either side of the pointer
+local NOSE_FLAT  = 2.2                 -- half the width of the blunt tip
+local NOSE_CAP   = 0.72                -- the coloured cap's radius, of the body's
 
 -- The pointer knob's outline, in the design space: u along the pointer,
 -- v across it. Convex, so it fills as one polygon.
@@ -292,7 +304,7 @@ end
 function W.knob_face(dl, cx, cy, r, value, o)
   o = o or {}
   local v = math.max(0, math.min(1, value or 0))
-  local style = o.style
+  local style = C.KNOB_STYLE_ALIAS[o.style] or o.style
   if not (style and C.KNOB_STYLE[style]) or style == "arc" then
     return face_arc(dl, cx, cy, r, v, o)
   end
@@ -357,6 +369,43 @@ function W.knob_face(dl, cx, cy, r, value, o)
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, 17 * k, cap, 24)
     ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 8 * k, o.hot and 0xffffff40 or 0xffffff2a, 16)
     ImGui.DrawList_AddCircle(dl, cx, cy, 17 * k, 0x00000080, 24, 1.0)
+
+  elseif style == "nose" then
+    -- A neutral grey body, nose and all, with the colour only in the round
+    -- cap set into its centre.
+    scale()
+    local R = NOSE_R * k
+    local tip_x, tip_y = at(NOSE_TIP)
+    local fx, fy = -sa * NOSE_FLAT * k, ca * NOSE_FLAT * k     -- across the pointer
+    local t1x, t1y = tip_x + fx, tip_y + fy
+    local t2x, t2y = tip_x - fx, tip_y - fy
+    local p1x, p1y = cx + math.cos(a + NOSE_HALF) * R, cy + math.sin(a + NOSE_HALF) * R
+    local p2x, p2y = cx + math.cos(a - NOSE_HALF) * R, cy + math.sin(a - NOSE_HALF) * R
+    local body = fade(o.hot and 0xadadadff or 0xa0a0a0ff)
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, body, 36)
+    ImGui.DrawList_AddTriangleFilled(dl, p1x, p1y, t1x, t1y, t2x, t2y, body)
+    ImGui.DrawList_AddTriangleFilled(dl, p1x, p1y, t2x, t2y, p2x, p2y, body)
+    -- the body's edge: round the back, then out along the nose and back
+    local edge = fade(0x00000059)
+    local w = math.max(1.0, 1.2 * k)
+    local n = 40
+    local a0, a1 = a + NOSE_HALF, a + TAU - NOSE_HALF
+    local px, py = p1x, p1y
+    for i = 1, n do
+      local t = a0 + (a1 - a0) * i / n
+      local qx, qy = cx + math.cos(t) * R, cy + math.sin(t) * R
+      ImGui.DrawList_AddLine(dl, px, py, qx, qy, edge, w)
+      px, py = qx, qy
+    end
+    ImGui.DrawList_AddLine(dl, p2x, p2y, t2x, t2y, edge, w)
+    ImGui.DrawList_AddLine(dl, t2x, t2y, t1x, t1y, edge, w)
+    ImGui.DrawList_AddLine(dl, t1x, t1y, p1x, p1y, edge, w)
+    -- the cap: the knob's colour, matte, with a dark seam round it
+    local cr = R * NOSE_CAP
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, cr, cap, 32)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 5 * k, cy - 6 * k, 11 * k,
+      o.hot and 0xffffff0b or 0xffffff06, 24)
+    ImGui.DrawList_AddCircle(dl, cx, cy, cr, fade(0x000000a0), 32, math.max(1.0, 1.2 * k))
 
   else -- trim
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, 40 * k, 0x232528ff, 32)
@@ -1547,7 +1596,9 @@ local function icon_float(dl, x, y, sz, col)
 end
 
 local function icon_chevron(dl, x, y, sz, col, dir)
-  -- dir: -1 points left (collapse), 1 points right (expand)
+  -- dir: -1 draws the point on the right (>), 1 on the left (<) --
+  -- collapse and expand use them for a strip's side, prev and next for
+  -- stepping through a list.
   local cx, cy = x + sz * 0.5, y + sz * 0.5
   local w, h = sz * 0.20, sz * 0.26
   ImGui.DrawList_AddLine(dl, cx + w * dir, cy - h, cx - w * dir, cy, col, 1.7)
@@ -1660,7 +1711,23 @@ local function icon_probe(dl, x, y, sz, col)
   ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.88 - r * 0.5, cy, r, col)
 end
 
+-- A tablet on its side, a dot for its button: the web companion.
+local function icon_tablet(dl, x, y, sz, col)
+  ImGui.DrawList_AddRect(dl, x + sz * 0.14, y + sz * 0.24,
+    x + sz * 0.86, y + sz * 0.76, col, sz * 0.08, 0, 1.3)
+  ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.75, y + sz * 0.5, math.max(1.0, sz * 0.05), col)
+end
+-- The same, filled in -- a page is connected. The button shows through as
+-- a dark dot.
+local function icon_tablet_on(dl, x, y, sz, col)
+  ImGui.DrawList_AddRectFilled(dl, x + sz * 0.14 - 0.65, y + sz * 0.24 - 0.65,
+    x + sz * 0.86 + 0.65, y + sz * 0.76 + 0.65, col, sz * 0.08)
+  ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.75, y + sz * 0.5, math.max(1.0, sz * 0.06), C.COL.header_bg)
+end
+
 W.ICONS = {
+  tablet   = icon_tablet,
+  tablet_on = icon_tablet_on,
   midi     = icon_midi,
   probe    = icon_probe,
   chain    = icon_chain,
@@ -1674,6 +1741,8 @@ W.ICONS = {
   menu     = icon_menu,
   collapse = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
   expand   = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
+  prev     = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
+  next     = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
   folder_full      = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 0)   end,
   folder_collapsed = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 0.5) end,
   folder_hidden    = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 1)   end,
@@ -1695,7 +1764,8 @@ function W.dropdown(ctx, id, text, x, y, w, h, tooltip)
   local inner = w - 16
   local txt = text or ""
   local tw, th = ImGui.CalcTextSize(ctx, txt)
-  if tw > inner then
+  local cut = tw > inner
+  if cut then
     local n = #txt
     while n > 1 do
       n = n - 1
@@ -1704,12 +1774,15 @@ function W.dropdown(ctx, id, text, x, y, w, h, tooltip)
       if tw <= inner then txt = t break end
     end
   end
-  ImGui.DrawList_AddText(dl, x + 4, y + (h - th) * 0.5, C.COL.value, txt)
+  -- A knob-body fill on every faceplate, so the toggle's ink, made for that
+  -- fill -- the panel's value ink goes dark on a light plate (aluminium).
+  ImGui.DrawList_AddText(dl, x + 4, y + (h - th) * 0.5, C.COL.toggle_text, txt)
   local ax, ay = x + w - 6, y + h * 0.5 + 1
   ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2,
-    hovered and C.COL.icon_hot or C.COL.header_dim)
+    hovered and C.COL.icon_hot or U.with_alpha(C.COL.toggle_text, 0xa0))
 
-  W.tip(ctx, id, tooltip, hovered, false)
+  -- a name cut short shows in full on hover, when nothing else is said
+  W.tip(ctx, id, tooltip or (cut and text) or nil, hovered, false)
   return pressed
 end
 
