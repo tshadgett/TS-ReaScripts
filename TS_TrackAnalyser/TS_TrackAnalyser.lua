@@ -2,9 +2,9 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 1.7.5
+-- @version 1.7.6
 -- @changelog
---  In step with ChannelView 1.7.5. Nothing changes in Track Analyser itself.
+--  In step with ChannelView 1.7.6. Nothing changes in Track Analyser itself.
 -- @about
 --  # Track Analyser
 --

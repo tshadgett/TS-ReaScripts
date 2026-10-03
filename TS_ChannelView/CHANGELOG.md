@@ -1,5 +1,56 @@
 # ChannelView — changelog
 
+## 1.7.6 — master outputs, collapsed strips, folders on the web page
+
+- **The master's outputs.** With the master selected, the Sends panel is
+  its hardware **Outputs**: one cell per output, named by your audio
+  device's channels, with the level, mute and pre/post of a send. The
+  middle button shows where it goes ("1/2", "5") — click it to move the
+  output, or remove it; the add tile lists the device's stereo pairs and,
+  under Mono, its single channels. The master has no Receives panel any
+  more, here or in the track panel's pop-out.
+- **Master Mono.** The master's strip has a Mono switch where other tracks
+  have record arm — an open circle on red when mono, two linked circles
+  when stereo — using REAPER's own *Master track: Toggle stereo/mono*.
+- **Strips that line up.** Every strip, the master's included, now has the
+  same three button rows, so faders and buttons sit on the same lines
+  across the mixer. A collapsed strip keeps to them too: its meter and
+  fader cover exactly the full strip's fader span, its level sits on the
+  same line, and mute, solo and record arm (mono on the master) are
+  stacked in the button rows. Its empty pan space has a **mini pan**: drag
+  sideways or up and down, Shift for fine, double-click for centre; the
+  value shows under it when *Values under controls* is on.
+- **The master strip collapses** (its collapse button did nothing), and a
+  collapsed strip's fader is plainly visible at rest rather than only on
+  hover.
+- **Arrows the right way round.** Collapse points left and expand points
+  right, on plugin panels, mixer strips, the channel strip and the
+  Sends/Receives panels.
+- **CLAP presets.** Saving, *Save as default*, rename and delete now work for
+  CLAP plugins as well as VST2, VST3 and JS (checked against REAPER's own
+  save of FabFilter Pro-DS). AU still loads but doesn't save.
+
+### Web page
+
+- **Mixer:** tap anywhere on a strip that isn't a control to select its
+  track. Double-tap a strip, or its name button, to collapse it to a narrow
+  strip (open button, mini pan, meter and fader, level, M S R) and again to
+  open it — per device. The pan readout sits centred over the meters.
+- **Folders:** a folder's name button carries the folder icon; tap it to
+  step the folder full → collapsed → hidden. This is REAPER's own folder
+  state, so the track panel and ChannelView follow. Collapsed children are
+  narrow strips; hidden ones are left out.
+- **Master:** Outputs instead of Sends, no Receives, and the Mono switch.
+- **Macro bar:** centred, and onto a second row when the buttons don't fit.
+  *Add spacer* (in the + sheet while editing) puts a gap between buttons;
+  press and drag a button or spacer to move it.
+- **Fader panel:** double-tap its empty space to collapse it to a narrow
+  strip, and again to open it. Plugin panels collapse with a double tap on
+  their header too.
+- A send's MIDI mode shows a MIDI socket; the master's colour bar no longer
+  shows a stale colour REAPER left behind.
+
+
 ## 1.7.5 — presets, and REAPER's palettes
 
 - **A preset bar on every panel.** Along the foot of each panel, the

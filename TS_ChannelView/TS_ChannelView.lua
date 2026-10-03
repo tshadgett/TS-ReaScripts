@@ -1,21 +1,21 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.7.5
+-- @version 1.7.6
 -- @changelog
---  A preset bar along the foot of every panel, on the desktop and the web
---  page: REAPER's presets in a dropdown with previous and next beside it,
---  and a + to save a preset, save one as the plugin's default, rename or
---  delete one (VST2, VST3 and JS). View > Preset bar turns it off.
---  The track Colour... dialog has a palette dropdown: REAPER 7.81's
---  built-in palettes, your user palettes and the project's colours, as
---  well as the old custom colours, plus a button for REAPER's own picker.
---  Dropdowns are readable on light faceplates, and a preset name too long
---  for its box shows in full on hover.
---  A tablet in the header shows when the web companion is running, filled
---  in while a page is connected. View > Start web companion with REAPER, and
---  the TS_ChannelView_Web_Startup action, start it with REAPER.
---  A new knob style, Round nose: a grey body whose short nose is the
---  pointer, with the cap colour in its centre.
+--  The master's Sends panel is its hardware Outputs (level, mute, pre/post,
+--  which device channels, add and remove), on the desktop and the web page,
+--  and the master has no Receives panel. Its strip has a Mono switch where
+--  other tracks have record arm, and its fader and buttons line up with
+--  theirs.
+--  Collapsed mixer strips line up with full ones: the meter and fader over
+--  the same span, M, S and R stacked in the button rows, and a mini pan.
+--  The master strip collapses too, and a collapsed fader shows at rest.
+--  Collapse arrows point left, expand arrows right.
+--  CLAP plugins save presets (save, save as default, rename, delete).
+--  Web page: tap a mixer strip to select its track; double-tap a strip or
+--  its name button to collapse it; folders collapse and hide as in REAPER;
+--  master Outputs; the macro bar centres, wraps, takes spacers and drags to
+--  reorder; double-tap the fader panel to collapse it.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -37,6 +37,7 @@
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
 --  [nomain] TS_CV_Gang.lua
+--  [nomain] TS_CV_HwOut.lua
 --  [nomain] TS_CV_Icons.lua
 --  [nomain] TS_CV_Inputs.lua
 --  [nomain] TS_CV_Lanes.lua
@@ -1735,9 +1736,13 @@ local function frame()
     -- the row in the middle knows what is left for it.
     local full_w = ImGui.GetContentRegionAvail(ctx)
     local ch_w   = CH.width(CH.is_collapsed())
-    local rv_w   = RV.width_for(app.track, row_h)
+    -- The master has no Receives panel: every track feeds it, and the
+    -- list would only ever be the odd real send to the master.
+    local on_master = app.track ~= nil and app.track == reaper.GetMasterTrack(0)
+    local rv_w   = on_master and 0 or RV.width_for(app.track, row_h)
     local sd_w   = SD.width_for(app.track, row_h)
-    local mid_w  = math.max(80, full_w - ch_w - rv_w - sd_w - C.PANEL_GAP * 3)
+    local mid_w  = math.max(80, full_w - ch_w - rv_w - sd_w
+                                - C.PANEL_GAP * (on_master and 2 or 3))
 
     -- A double-click on a NAME BUTTON opens that track in channel view,
     -- in either branch below -- the button means the same thing whether
@@ -1778,9 +1783,11 @@ local function frame()
       ImGui.SameLine(ctx, 0, C.PANEL_GAP)
       local _, sd_req = SD.draw(ctx, app.track, row_h)
       if sd_req and sd_req.changed then rescan(true) end
-      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
-      local _, rv_req = RV.draw(ctx, app.track, row_h)
-      if rv_req and rv_req.changed then rescan(true) end
+      if not on_master then
+        ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+        local _, rv_req = RV.draw(ctx, app.track, row_h)
+        if rv_req and rv_req.changed then rescan(true) end
+      end
 
       -- Double-clicking the Channel panel's background -- not the fader,
       -- which still means unity -- goes back to the mixer.

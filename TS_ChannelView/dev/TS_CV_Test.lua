@@ -2761,6 +2761,20 @@ do
     check("no kb file, no id", SUm.kb_find(nil, "TS_ChannelView_Web.lua"), nil)
   end
   do
+    -- a master's hardware outputs (the Sends panel's Outputs)
+    local HO = require "TS_CV_HwOut"
+    check("output 1/2",            HO.label(0), "1/2")
+    check("output 3/4",            HO.label(2), "3/4")
+    check("output 5 alone",        HO.label(4 | 1024), "5")
+    check("ReaRoute",              HO.label(512), "RR 1/2")
+    local f, n = HO.decode(6 | 1024)
+    check("decoded mono 7",        f .. "/" .. n, "6/1")
+    local ch = HO.choices(5, function(d) return "x" .. d end)
+    check("five outputs: two pairs, five singles", #ch.stereo .. "/" .. #ch.mono, "2/5")
+    check("the pairs go up in twos", ch.stereo[2].dst, 2)
+    check("the singles are flagged mono", ch.mono[5].dst, 4 | 1024)
+  end
+  do
     -- is a page connected?
     local WL = require "TS_CV_WebLink"
     local st = WL.new()
@@ -2925,7 +2939,7 @@ do
     "TS_CV_Startup", "TS_CV_Mixer", "TS_CV_TrackMenu", "TS_CV_TrackOps",
     "TS_CV_Receives", "TS_CV_Focus", "TS_CV_Icons", "TS_CV_Inputs",
     "TS_ChannelView_TCP", "TS_CV_Arrange", "TS_CV_Toolbar", "TS_CV_Envelopes", "TS_CV_Actions", "TS_CV_Lanes",
-    "TS_CV_Chains", "TS_CV_Taps", "TS_CV_WebLink", "TS_ChannelView_Web_Startup",
+    "TS_CV_Chains", "TS_CV_Taps", "TS_CV_WebLink", "TS_ChannelView_Web_Startup", "TS_CV_HwOut",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.
@@ -3205,6 +3219,23 @@ do
   check("presets: delete", (PR.delete(0, 0, "Newer")), true)
   check("presets: the default goes with it", PR.list(0, 0).default, nil)
   check("presets: one left", PR.list(0, 0).user[1], "Old")
+
+  -- CLAP: every line inside the block, each ended by a zero byte, with
+  -- CFG naming the preset -- as REAPER saved FabFilter Pro-DS
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k)
+    if k == "fx_type" then return true, "CLAP" end
+    return true, "com.FabFilter.preset-discovery.Pro-DS.1"
+  end
+  reaper.GetTrackStateChunk = function()
+    return true, "<TRACK\n<FXCHAIN\n<CLAP \"CLAP: Pro-DS (FabFilter)\" com.FabFilter.preset-discovery.Pro-DS.1 \"\"\n"
+      .. "  CFG 4 1280 840 \"\"\n  <IN_PINS\n  >\n  <STATE\n    RkZC\n    AwAA\n  >\n>\nFXID {T}\n>\n>"
+  end
+  check("presets: CLAP saves", PR.kind(0, 0), "clap")
+  check("presets: CLAP default key", PR.default_key(0, 0), "clap-com.FabFilter.preset-discovery.Pro-DS.1")
+  check("presets: CLAP state", PR.state(0, 0, "Mine"),
+        'CFG 4 1280 840 "Mine"\0<IN_PINS\0>\0<STATE\0RkZC\0AwAA\0>\0')
+  check("presets: CLAP name with a quote in it", PR.state(0, 0, 'My "Best"'):match("^[^%z]*"),
+        "CFG 4 1280 840 'My \"Best\"'")
   for k, v in pairs(saved) do reaper[k] = v end
   os.remove(file); os.remove(dir .. "/reaper-defpresets.ini"); os.remove(dir)
 end

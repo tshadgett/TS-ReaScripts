@@ -45,6 +45,7 @@ local P  = require("TS_CV_Panel")
 local TO = require("TS_CV_TrackOps")
 local TM = require("TS_CV_TrackMenu")
 local CN = require("TS_CV_Chains")
+local HO = require("TS_CV_HwOut")
 
 local ImGui
 
@@ -109,6 +110,17 @@ local function make(kind)
 
   function SD.attach(imgui) ImGui = imgui end
 
+  -- With the master selected the Sends panel is its hardware Outputs
+  -- instead (TS_CV_HwOut): category 1 rather than 0, a channel of the
+  -- audio device at the far end rather than a track.
+  local function is_outputs(track)
+    return (not RECV) and track ~= nil and track == reaper.GetMasterTrack(0)
+  end
+  local function cat_of(track) return is_outputs(track) and HO.CAT or CAT end
+  local function title_of(track) return is_outputs(track) and "Outputs" or K.title end
+  local function noun_of(track) return is_outputs(track) and "output" or K.noun end
+  SD.is_outputs = is_outputs
+
   function SD.is_collapsed() return St.is_collapsed(KEY, K.collapsed_default) end
   local function toggle() St.toggle_collapsed(KEY, K.collapsed_default) end
 
@@ -119,17 +131,29 @@ local function make(kind)
   local function send_get(track, i, key)
     -- nil, not 0, if the send went away between collecting and reading --
     -- and `nil > 0.5` is a hard error rather than a false
-    local v = reaper.GetTrackSendInfo_Value(track, CAT, i, key)
+    local v = reaper.GetTrackSendInfo_Value(track, cat_of(track), i, key)
     if v == nil then return 0 end
     return v
   end
   local function send_set(track, i, key, v)
-    reaper.SetTrackSendInfo_Value(track, CAT, i, key, v)
+    reaper.SetTrackSendInfo_Value(track, cat_of(track), i, key, v)
   end
 
   function SD.collect(track)
     local out = {}
     if not track then return out end
+    if is_outputs(track) then
+      for i = 0, (reaper.GetTrackNumSends(track, HO.CAT) or 0) - 1 do
+        local dst = math.floor(send_get(track, i, "I_DSTCHAN"))
+        out[#out + 1] = {
+          idx = i, hw = true, dst = dst, name = HO.name(dst), label = HO.label(dst), num = 0,
+          vol  = send_get(track, i, "D_VOL"),
+          mute = send_get(track, i, "B_MUTE") > 0.5,
+          mode = math.floor(send_get(track, i, "I_SENDMODE") or 0),
+        }
+      end
+      return out
+    end
     local n = reaper.GetTrackNumSends(track, CAT) or 0
     for i = 0, n - 1 do
       local dest = reaper.GetTrackSendInfo_Value(track, CAT, i, K.other)
@@ -161,7 +185,7 @@ local function make(kind)
   -- the scrolling row in the middle knows how much is left for it.
   function SD.width_for(track, panel_h)
     if SD.is_collapsed() then return C.COLLAPSED_W end
-    local n = track and (reaper.GetTrackNumSends(track, CAT) or 0) or 0
+    local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
     return SD.width(false, n, panel_h)
   end
 
@@ -185,6 +209,7 @@ local function make(kind)
 
   SD.is_separator = is_separator
 
+  local output_items                -- below, beside the menus that use it
   local pending_menu = false
   local templates    = nil     -- read when the add menu opens
   local chains       = nil     -- likewise, the FXChains folder
@@ -327,6 +352,28 @@ local function make(kind)
     return added
   end
 
+  -- The audio device's outputs as menu items -- the stereo pairs, then the
+  -- single channels in a submenu -- calling `pick(dst)` on a click. `cur`,
+  -- when given, is ticked. Returns true when one was picked.
+  function output_items(ctx, pick, cur)
+    local ch = HO.choices()
+    local hit = false
+    local function item(c)
+      if ImGui.MenuItem(ctx, ("%-6s %s##%s%d"):format(c.label, c.name, ID, c.dst), nil, c.dst == cur) then
+        pick(c.dst); hit = true
+      end
+    end
+    if #ch.stereo == 0 and #ch.mono == 0 then
+      ImGui.TextDisabled(ctx, "No audio device outputs")
+    end
+    for _, c in ipairs(ch.stereo) do item(c) end
+    if #ch.mono > 0 and ImGui.BeginMenu(ctx, "Mono##" .. ID .. "mono") then
+      for _, c in ipairs(ch.mono) do item(c) end
+      ImGui.EndMenu(ctx)
+    end
+    return hit
+  end
+
   -- The right-click menu on a send. Returns true if the chain changed.
   function SD.draw_ctx(ctx, track)
     local changed = false
@@ -336,7 +383,18 @@ local function make(kind)
     end
     if ImGui.BeginPopup(ctx, ID .. "ctx") then
       local i = ctx_send
-      if i and track then
+      if i and track and is_outputs(track) then
+        -- an output: where it goes, and removing it
+        local cur = math.floor(send_get(track, i, "I_DSTCHAN"))
+        if output_items(ctx, function(dst) HO.set_dst(track, i, dst) end, cur) then changed = true end
+        ImGui.Separator(ctx)
+        if ImGui.MenuItem(ctx, "Remove output") then
+          reaper.Undo_BeginBlock()
+          reaper.RemoveTrackSend(track, HO.CAT, i)
+          reaper.Undo_EndBlock("ChannelView: remove hardware output", -1)
+          changed = true
+        end
+      elseif i and track then
         local m = mode_of(math.floor(send_get(track, i, "I_SRCCHAN") or 0),
                           math.floor(send_get(track, i, "I_DSTCHAN") or 0),
                           math.floor(send_get(track, i, "I_MIDIFLAGS") or 0))
@@ -371,7 +429,12 @@ local function make(kind)
       chains = CN.list()
     end
     local added = false
-    if ImGui.BeginPopup(ctx, ID .. "menu") then
+    if is_outputs(track) and ImGui.BeginPopup(ctx, ID .. "menu") then
+      ImGui.TextDisabled(ctx, "Add a hardware output")
+      ImGui.Separator(ctx)
+      if output_items(ctx, function(dst) HO.add(track, dst) end) then added = true end
+      ImGui.EndPopup(ctx)
+    elseif ImGui.BeginPopup(ctx, ID .. "menu") then
       if ImGui.BeginMenu(ctx, "Direct") then
         ImGui.TextDisabled(ctx, "to channels 1/2")
         ImGui.Separator(ctx)
@@ -460,17 +523,18 @@ local function make(kind)
             "Expand the " .. K.title:lower()) then
           toggle()
         end
-        local n = track and (reaper.GetTrackNumSends(track, CAT) or 0) or 0
+        local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
         W.vertical_text(ctx, dl, x + ww * 0.5, y + 4 + btn + 6,
-          K.title:upper() .. " " .. n, C.COL.header_dim, wh - btn - 16)
+          title_of(track):upper() .. " " .. n, C.COL.header_dim, wh - btn - 16)
       else
         -- header
         ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + C.HEADER_H, C.COL.header_bg, 0)
         ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + ww, y + C.HEADER_H,
           C.COL.panel_border, 1.0)
-        local _, th = ImGui.CalcTextSize(ctx, K.title)
+        local title = title_of(track)
+        local _, th = ImGui.CalcTextSize(ctx, title)
         ImGui.DrawList_AddText(dl, x + 6, y + (C.HEADER_H - th) * 0.5,
-          C.COL.header_text, K.title)
+          C.COL.header_text, title)
         local btn = C.ICON_SIZE
 
         -- Routing, to the left of the collapse control, on Sends only --
@@ -514,6 +578,7 @@ local function make(kind)
   -- Returns true when a send was removed, so the caller can rescan.
   function SD.draw_sends(ctx, dl, x, y, w, h, track, sends)
     local remove_idx = nil
+    local noun = noun_of(track)
     local pad  = C.PANEL_PAD
     local rows = P.rows_for(h + C.HEADER_H)     -- same row count as a panel
     local gx, gy = x + pad, y + C.GRID_TOP_PAD
@@ -536,7 +601,7 @@ local function make(kind)
       local BAR = 4
       ImGui.DrawList_AddRectFilled(dl, cxp + 2, cyp,
         cxp + 2 + BAR, cyp + C.CELL_H - 4,
-        sd.colour or C.COL.panel_border, 1.5)
+        sd.colour or (sd.hw and C.COL.header_dim) or C.COL.panel_border, 1.5)
 
       local ix  = cxp + 2 + BAR + 3          -- inside the bar
       local iw  = C.SEND_W - (ix - cxp) - 3  -- and what's left of the cell
@@ -558,6 +623,7 @@ local function make(kind)
       local ch, nv, act = W.knob(ctx, ID .. "v" .. sd.idx, "",
         U.vol_to_fader(sd.vol), U.db_text(sd.vol),
         { tooltip = ("%s\n%s dB   %s"):format(sd.name, U.db_text(sd.vol),
+            (sd.hw and ("output " .. sd.label)) or
             (sd.route == MIDI and "MIDI") or (sd.route == SIDECHAIN and "sidechain 3/4")
             or "direct 1/2") })
       -- Double-click is unity here, the same as the channel fader: a send
@@ -583,15 +649,23 @@ local function make(kind)
       -- other is where it lands, and stacking them implied an order that
       -- isn't there.
       local hit, dbl = W.state_button(ctx, ID .. "m" .. sd.idx, "M", rx, by1, mw, bh,
-        sd.mute, C.COL.mute_on, "Bypass this " .. K.noun)
+        sd.mute, C.COL.mute_on, "Bypass this " .. noun)
       if hit or dbl then send_set(track, sd.idx, "B_MUTE", (dbl or sd.mute) and 0 or 1) end
 
       -- The mode: "DIR" for direct, "SC" lit for sidechain, a MIDI socket
       -- on blue for MIDI. A click steps DIR -> SC -> MIDI -> DIR; a
       -- double-click goes straight back to DIR.
-      local tip = MODE_TIP[sd.route] .. "\nClick for " .. NEXT_MODE[sd.route] ..
-                  ", double-click for direct"
-      if sd.route == MIDI then
+      local tip = (not sd.hw) and (MODE_TIP[sd.route] .. "\nClick for " .. NEXT_MODE[sd.route] ..
+                  ", double-click for direct") or nil
+      if sd.hw then
+        -- An output's second button is where it goes: the device channels,
+        -- and a click to move it.
+        hit, dbl = W.state_button(ctx, ID .. "c" .. sd.idx, sd.label,
+          rx + mw + bgap, by1, hw, bh, false, C.COL.accent,
+          sd.name .. "\nClick to move it to other outputs")
+        if hit or dbl then ctx_send, want_ctx = sd.idx, true end
+        hit, dbl = false, false
+      elseif sd.route == MIDI then
         hit, dbl = W.state_icon(ctx, ID .. "c" .. sd.idx, "midi", rx + mw + bgap, by1,
           hw, bh, true, C.COL.midi_on, tip)
       else
@@ -599,7 +673,8 @@ local function make(kind)
         hit, dbl = W.state_button(ctx, ID .. "c" .. sd.idx, sc and "SC" or "DIR",
           rx + mw + bgap, by1, hw, bh, sc, C.COL.knob_fill_bi, tip)
       end
-      if dbl then set_mode(track, sd.idx, DIRECT)
+      if sd.hw then -- nothing more: the click opened the menu
+      elseif dbl then set_mode(track, sd.idx, DIRECT)
       elseif hit then set_mode(track, sd.idx, NEXT_MODE[sd.route]) end
 
       local is_pre = (sd.mode ~= POST)
@@ -617,7 +692,7 @@ local function make(kind)
       -- Inset past the colour bar: the two share the left edge and the x
       -- was sitting on top of it.
       if W.remove_badge(ctx, ID .. sd.idx, cxp, cyp, C.SEND_W, C.CELL_H,
-                        "Remove this " .. K.noun, BAR + 4) then
+                        "Remove this " .. noun, BAR + 4) then
         remove_idx = sd.idx
       end
     end
@@ -651,7 +726,8 @@ local function make(kind)
     dashed_h(ay); dashed_h(ay + ah - 1); dashed_v(ax); dashed_v(ax + aw - 1)
     W.ICONS.plus(dl, ax + (aw - 18) * 0.5, ay + (ah - 18) * 0.5, 18,
       hovered and C.COL.icon_hot or C.COL.icon)
-    W.tip(ctx, ID .. "add", "Add a " .. K.noun, hovered, false)
+    W.tip(ctx, ID .. "add", (noun == "output") and "Add a hardware output" or ("Add a " .. noun),
+      hovered, false)
     if pressed then SD.open_menu() end
 
     -- Deleted at the END of the frame, never in the middle of the loop:
@@ -659,8 +735,8 @@ local function make(kind)
     -- have already been drawn with the old indices.
     if remove_idx then
       reaper.Undo_BeginBlock()
-      reaper.RemoveTrackSend(track, CAT, remove_idx)
-      reaper.Undo_EndBlock("ChannelView: remove " .. K.noun, -1)
+      reaper.RemoveTrackSend(track, cat_of(track), remove_idx)
+      reaper.Undo_EndBlock("ChannelView: remove " .. noun, -1)
       return true
     end
     return false

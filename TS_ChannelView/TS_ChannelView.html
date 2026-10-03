@@ -81,8 +81,10 @@ button { font: inherit; color: inherit; }
 #status.ok { background: var(--lo); } #status.bad { background: var(--rec); }
 
 /* macros */
-#mac { flex-shrink: 0; height: var(--mac-h); display: flex; align-items: center; gap: 6px; padding: 0 10px;
-  background: var(--head); border-bottom: 1px solid var(--border); overflow-x: auto; }
+/* centred, and onto a second row (or more) when they don't fit in one */
+#mac { flex-shrink: 0; min-height: var(--mac-h); box-sizing: border-box; display: flex; flex-wrap: wrap;
+  align-items: center; justify-content: center; gap: 6px; padding: 7px 10px;
+  background: var(--head); border-bottom: 1px solid var(--border); }
 #mac.hidden { display: none; }
 /* the navigator: the whole session in a strip, above the transport */
 #nav { height: 116px; flex-shrink: 0; position: relative; background: var(--strip);
@@ -101,6 +103,17 @@ button { font: inherit; color: inherit; }
 .madd { min-width: 46px; color: var(--dim); font-size: 22px; display: none; }
 #mac.edit .madd { display: block; }
 .mempty { color: var(--dim); font-size: 12px; }
+/* a spacer between macro buttons: empty air, outlined while editing */
+.mgap { width: 26px; height: 42px; flex-shrink: 0; position: relative; border-radius: 7px; }
+#mac.edit .mgap { border: 1px dashed var(--dim); cursor: pointer; animation: wob 0.25s infinite alternate; }
+.mgap .x { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--rec); color: #fff; font-size: 13px; line-height: 22px; text-align: center; display: none; }
+#mac.edit .mgap .x { display: block; }
+/* reordering while editing: grab a button or spacer and drag it */
+#mac { position: relative; }
+#mac.edit .mbtn:not(.madd), #mac.edit .mgap { touch-action: none; }
+#mac .drag { opacity: 0.35; animation: none !important; }
+#macmark { position: absolute; width: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
 
 /* body */
 #main { flex-grow: 1; display: flex; min-height: 0; }
@@ -122,6 +135,50 @@ button { font: inherit; color: inherit; }
 .trb { flex-shrink: 0; width: var(--sw); height: 42px; padding: 0 6px; border-radius: 6px;
   background: var(--panel); border: 1px solid var(--border); border-bottom: 4px solid var(--c, var(--border));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+/* folders: a parent's button carries its folder icon (tap it to step the
+   folder full -> collapsed -> hidden); a collapsed folder's children are
+   narrow columns in the track bar and the mixer alike */
+.trb .fic { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 30px;
+  margin: 0 2px 0 -5px; vertical-align: middle; color: var(--dim); }
+.trb.sel .fic { color: #fff; }
+.trb .fic svg { width: 18px; height: 18px; }
+.trb.fold { width: 40px; padding: 0; text-align: center; font-size: 11px; color: var(--dim); }
+.trb.fold.sel { color: #fff; }
+.mxs.fold { width: 40px; padding: 4px 3px; }
+/* on the full strip's lines: the open button where the pan row is, the
+   meter where the fader is, M S R where the two button rows are */
+:is(.mxs.fold, #strip.shut) .fexp { width: 100%; height: 16px; flex-shrink: 0; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--panel); padding: 0; display: flex; align-items: center; justify-content: center; }
+:is(.mxs.fold, #strip.shut) .fexp svg { width: 12px !important; height: 12px !important; }
+/* a mini pan under the open button: together they fill the pan row */
+:is(.mxs.fold, #strip.shut) .mp { width: 100%; height: 12px; flex-shrink: 0; position: relative; touch-action: none; cursor: ew-resize; }
+:is(.mxs.fold, #strip.shut) .mp::before { content: ""; position: absolute; left: 2px; right: 2px; top: 4px; height: 4px;
+  border-radius: 2px; background: var(--track); }
+:is(.mxs.fold, #strip.shut) .mp .mc { position: absolute; left: 50%; top: 2px; width: 1px; height: 8px; background: var(--ring); }
+:is(.mxs.fold, #strip.shut) .mp .mf { position: absolute; top: 4px; height: 4px; background: var(--fill-bi); border-radius: 2px; }
+:is(.mxs.fold, #strip.shut) .mp .md { position: absolute; top: 2px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%;
+  background: var(--pointer); }
+:is(.mxs.fold, #strip.shut) .fexp svg { width: 16px; height: 16px; fill: none; stroke: var(--dim); stroke-width: 2; }
+.mxs.fold .mrow { flex-direction: column; gap: 4px; }
+.mxs.fold .mrow button { width: 100%; flex: none; height: 16px; font-size: 10px; line-height: 14px; padding: 0; }
+/* the fader panel on the left, collapsed by a double tap: the folded strip's
+   layout, a little wider and with full-size buttons */
+#strip.shut { width: 54px; padding: 8px 5px; gap: 6px; }
+#strip.shut .sname { height: 8px; padding: 0; font-size: 0; }
+#strip.shut .mrow { flex-direction: column; gap: 4px; }
+#strip.shut .mrow button { width: 100%; flex: none; height: 30px; font-size: 12px; padding: 0; }
+#strip.shut .fexp { height: 30px !important; }
+#strip.shut .mp { height: 18px; }
+#strip.shut .mp::before { top: 7px; } #strip.shut .mp .mc { top: 5px; } #strip.shut .mp .mf { top: 7px; }
+#strip.shut .mp .md { top: 4px; width: 10px; height: 10px; margin-left: -5px; }
+#strip.shut .fm .mtr { width: 14px; }
+#strip.shut .vdb { font-size: 11px; }
+:is(.mxs.fold, #strip.shut) .fm { flex-grow: 1; min-height: 0; width: 100%; position: relative; display: flex; gap: 2px; justify-content: center; }
+:is(.mxs.fold, #strip.shut) .fm .mtr { width: 12px; }
+:is(.mxs.fold, #strip.shut) .fm .fdr { position: absolute !important; left: 0; right: 0; top: 0; bottom: 0; width: auto !important; }
+:is(.mxs.fold, #strip.shut) .fm .fdr > div:first-child { display: none; }        /* no slot: the meter is the track */
+:is(.mxs.fold, #strip.shut) .fm .fdr > div:last-child { opacity: 0.7; }          /* a see-through cap over the meter */
+.mxs.fold .vdb { font-size: 10px; }
 /* REAPER's track spacer: a gap with a hairline, as the desktop mixer draws it */
 .tsp { flex-shrink: 0; width: 14px; position: relative; }
 .tsp::after { content: ""; position: absolute; left: 50%; top: 4px; bottom: 4px; width: 1px; background: var(--border); }
@@ -188,6 +245,9 @@ button { font: inherit; color: inherit; }
   font-weight: 700; cursor: pointer; padding: 0; }
 .mrow .m.on { background: var(--mute); color: #fff; } .mrow .s.on { background: var(--solo); color: #111; }
 .mrow .r.on { background: var(--rec); color: #fff; }
+.mrow .mo svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; vertical-align: middle; }
+.mrow .mo.on { background: var(--rec); color: #fff; }
+.sbt .md svg { width: 20px; height: 20px; vertical-align: middle; }
 .vdb { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--value); }
 
 .mrow .p.on { background: var(--warn); color: #fff; }
@@ -213,7 +273,9 @@ button { font: inherit; color: inherit; }
 .mxs .pr { display: flex; align-items: center; gap: 4px; height: 32px; flex-shrink: 0; }
 /* The pan knob sits over the fader: both rows are [control | 24px side]
    with the same gap, centred, so the two controls share a centre line. */
-.mxs .pr .val { width: 24px; font-size: 10px; text-align: left; overflow: visible; }
+/* centred over the meter pair below it, whatever its length ("C", "100L") */
+.mxs .pr .val { width: 24px; font-size: 10px; text-align: center; overflow: visible; white-space: nowrap;
+  display: flex; justify-content: center; }
 .mxs .mm { width: 24px; display: flex; gap: 4px; justify-content: center; flex-shrink: 0; }
 .mxs .sfr { gap: 4px; }
 .mxs .mtr { width: 6px; }
@@ -376,6 +438,31 @@ async function reaper(cmds) {
   return out;
 }
 const run = id => reaper(encodeURIComponent(String(id))).catch(() => {});
+// The master's mono switch: REAPER's "Master track: Toggle stereo/mono
+// (L+R)", read back as that action's toggle state with every poll.
+const MONO_CMD = "40917";
+const monoOn = () => macroStates && macroStates[MONO_CMD] === 1;
+// An open circle on red while the master is mono, two linked circles on the
+// plain button while it's stereo.
+const MONO_SVG = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>';
+const STEREO_SVG = '<svg viewBox="0 0 24 24"><circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/></svg>';
+function paintMono(b, on) {
+  if (b.classList.contains("on") === on && b.innerHTML) return;
+  b.classList.toggle("on", on);
+  b.innerHTML = on ? MONO_SVG : STEREO_SVG;
+  b.setAttribute("aria-label", on ? "Master in mono" : "Master in stereo");
+}
+function monoButton() {
+  const b = h("button", "mo");
+  paintMono(b, monoOn());
+  b.addEventListener("click", () => { run(MONO_CMD); paintMono(b, !b.classList.contains("on")); });
+  return b;
+}
+// The MIDI mode on a send: a MIDI socket, as on the desktop.
+const MIDI_SVG = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/>' +
+  '<circle cx="7.6" cy="12" r="1.3" fill="currentColor"/><circle cx="16.4" cy="12" r="1.3" fill="currentColor"/>' +
+  '<circle cx="8.9" cy="8.9" r="1.3" fill="currentColor"/><circle cx="15.1" cy="8.9" r="1.3" fill="currentColor"/>' +
+  '<circle cx="12" cy="7.6" r="1.3" fill="currentColor"/><rect x="10.6" y="18.2" width="2.8" height="2.2" fill="currentColor"/></svg>';
 
 // Commands for the bridge, resent until acknowledged. A run of moves on the
 // same control collapses to its latest value.
@@ -448,8 +535,8 @@ async function poll() {
   if (busy) return;
   busy = true;
   try {
-    let q = `GET/EXTSTATE/${NS}/vals;GET/EXTSTATE/${NS}/alive;TRANSPORT;BEATPOS;GET/40364;GET/1068`;
-    for (const m of macros) q += ";GET/" + encodeURIComponent(m.a);
+    let q = `GET/EXTSTATE/${NS}/vals;GET/EXTSTATE/${NS}/alive;TRANSPORT;BEATPOS;GET/40364;GET/1068;GET/${MONO_CMD}`;
+    for (const m of macros) if (m.a) q += ";GET/" + encodeURIComponent(m.a);
     if (Date.now() - seenAt > 1000) {
       seenAt = Date.now(); seenN = (seenN + 1) % 1000;
       q = `SET/EXTSTATE/${NS}/seen/${PAGE_ID}.${seenN};` + q;
@@ -713,6 +800,15 @@ function placeControls(ctls, bodyH) {
 // ---------------------------------------------------------------------------
 const $ = id => document.getElementById(id);
 function h(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+// A folder, as on the desktop: an outline when its children are shown in
+// full, half filled when they're collapsed, filled when they're hidden.
+const folderIcon = m => `<svg viewBox="0 0 24 24"><rect x="2.4" y="4.8" width="8.6" height="3.4" fill="currentColor"/>` +
+  (m === 2 ? `<rect x="2.4" y="7.7" width="19.2" height="12" rx="1" fill="currentColor"/>`
+           : `<rect x="3" y="8.3" width="18" height="10.8" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>` +
+             (m === 1 ? `<rect x="2.4" y="13.7" width="19.2" height="6" fill="currentColor"/>` : "")) + `</svg>`;
+const FOLDER_TIP = ["Folder: children in full — tap to collapse them", "Folder: children collapsed — tap to hide them",
+  "Folder: children hidden — tap to show them in full"];
+
 const ICON = {
   start: '<path d="M6 5v14M19 5l-10 7 10 7z"/>',
   prevm: '<path d="M8 5v14M18 5l-7 7 7 7"/>',
@@ -835,18 +931,45 @@ function buildTransport() {
   $("nav").classList.toggle("hidden", !showNav);
 }
 
+// The bar grows a row when the buttons wrap (or loses one), and the panels
+// below are sized to the space left, so they're laid out again whenever
+// its height changes.
+if (window.ResizeObserver) {
+  let macH = -1;
+  new ResizeObserver(() => {
+    const hgt = $("mac").offsetHeight;
+    if (hgt !== macH) { const first = macH < 0; macH = hgt; if (!first) relayout(); }
+  }).observe($("mac"));
+}
+
 function buildMacros() {
   const bar = $("mac");
   bar.innerHTML = "";
   bar.classList.toggle("edit", macroEdit);
   if (!macros.length && !macroEdit) bar.append(h("div", "mempty", "No macros yet. Tap the pencil to add some."));
   macros.forEach((m, i) => {
+    if (m.sp) {
+      // a spacer: tap it while editing to move or remove it
+      const g = h("div", "mgap");
+      const x = h("span", "x", "×");
+      g.append(x);
+      wireMacroDrag(g, i);
+      g.addEventListener("click", e => {
+        if (!macroEdit || Date.now() - macroDragAt < 350) return;
+        if (e.target === x) { macros.splice(i, 1); saveMacros(); } else editSpacer(i);
+      });
+      m.el = null;
+      bar.append(g);
+      return;
+    }
     const b = h("button", "mbtn", m.l || m.a);
     b.style.borderBottomColor = m.c || "var(--border)";
     const x = h("span", "x", "×");
     b.append(x);
+    wireMacroDrag(b, i);
     b.addEventListener("click", e => {
       if (macroEdit) {
+        if (Date.now() - macroDragAt < 350) return;     // the end of a drag, not a tap
         if (e.target === x) { macros.splice(i, 1); saveMacros(); }
         else editMacro(i);
       } else run(m.a);
@@ -857,6 +980,78 @@ function buildMacros() {
   const add = h("button", "mbtn madd", "+");
   add.addEventListener("click", () => editMacro(-1));
   bar.append(add);
+}
+
+// Dragging a macro (or spacer) along the bar while editing. A press that
+// moves more than a few pixels is a drag; one that doesn't is a tap, and
+// opens the item as before. The bar wraps, so the drop point is found row
+// by row: the row under the finger, then the gap between the two items
+// either side of it, marked with an accent bar.
+let macroDragAt = 0;
+function macroDropAt(x, y) {
+  const bar = $("mac");
+  const items = [...bar.querySelectorAll(".mbtn:not(.madd), .mgap")];
+  if (!items.length) return null;
+  const rects = items.map(el => el.getBoundingClientRect());
+  // the row: the item whose top is nearest the finger's row
+  let best = 0, bd = Infinity;
+  rects.forEach((r, k) => {
+    const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+    if (d < bd) { bd = d; best = k; }
+  });
+  const top = rects[best].top;
+  const row = rects.map((r, k) => k).filter(k => Math.abs(rects[k].top - top) < 4);
+  for (const k of row) {
+    const r = rects[k];
+    if (x < r.left + r.width / 2) return { idx: k, x: r.left - 4, r };
+  }
+  const last = row[row.length - 1], r = rects[last];
+  return { idx: last + 1, x: r.right + 2, r };
+}
+function wireMacroDrag(el, i) {
+  el.addEventListener("pointerdown", e => {
+    if (!macroEdit || (e.target.classList && e.target.classList.contains("x"))) return;
+    const bar = $("mac");
+    const sx = e.clientX, sy = e.clientY;
+    let dragging = false, to = null, mark = null;
+    const move = ev => {
+      if (!dragging) {
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 8) return;
+        dragging = true;
+        el.classList.add("drag");
+        mark = h("div"); mark.id = "macmark"; bar.append(mark);
+      }
+      to = macroDropAt(ev.clientX, ev.clientY);
+      if (to) {
+        const br = bar.getBoundingClientRect();
+        mark.style.left = (to.x - br.left) + "px";
+        mark.style.top = (to.r.top - br.top) + "px";
+        mark.style.height = to.r.height + "px";
+      }
+    };
+    const end = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", end);
+      el.removeEventListener("pointercancel", end);
+      if (!dragging) return;
+      macroDragAt = Date.now();
+      el.classList.remove("drag");
+      if (mark) mark.remove();
+      if (to) {
+        let j = to.idx;
+        if (j > i) j--;                   // the item leaves its own place first
+        if (j !== i) {
+          const [it] = macros.splice(i, 1);
+          macros.splice(j, 0, it);
+          saveMacros();
+        }
+      }
+    };
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  });
 }
 
 const CAPS = ["#4aa3df", "#c8453c", "#d98a2f", "#d9be45", "#4f9c62", "#3f74b8", "#8d9298", "#e6e0d2", "#26282b"];
@@ -905,12 +1100,34 @@ function editMacro(i) {
       saveMacros(); closeSheet();
     });
     if (i >= 0) acts.append(left, right);
+    else {
+      // a gap between buttons instead of a button
+      const gap = h("button", null, "Add spacer");
+      gap.addEventListener("click", () => { macros.push({ sp: 1 }); saveMacros(); closeSheet(); });
+      acts.append(gap);
+    }
     acts.append(cancel, ok);
     sh.append(lab, act, res, h("div", "lbl", "Colour"), sw, acts);
     setTimeout(() => lab.focus(), 50);
   });
 }
 const shortName = n => n.replace(/^[^:]+:\s*/, "").slice(0, 18);
+
+// A spacer's own sheet: move it along the bar, or take it out.
+function editSpacer(i) {
+  openSheet(sh => {
+    sh.append(h("h3", null, "Spacer"));
+    const acts = h("div", "acts");
+    const left = h("button", null, "◀"), right = h("button", null, "▶");
+    const rm = h("button", null, "Remove"), ok = h("button", "pri", "Done");
+    left.addEventListener("click", () => { if (i > 0) { [macros[i - 1], macros[i]] = [macros[i], macros[i - 1]]; i--; saveMacros(); } });
+    right.addEventListener("click", () => { if (i < macros.length - 1) { [macros[i + 1], macros[i]] = [macros[i], macros[i + 1]]; i++; saveMacros(); } });
+    rm.addEventListener("click", () => { macros.splice(i, 1); saveMacros(); closeSheet(); });
+    ok.addEventListener("click", closeSheet);
+    acts.append(left, right, rm, ok);
+    sh.append(acts);
+  });
+}
 
 async function searchActions(q, res, pick) {
   if (q.trim().length < 2) { res.innerHTML = ""; return; }
@@ -968,16 +1185,21 @@ const MODE_LABEL = { direct: "DIR", sidechain: "SC", midi: "MIDI" };
 const MODE_NEXT = { direct: "sidechain", sidechain: "midi", midi: "direct" };
 const MODE_NAME = { direct: "Direct", sidechain: "Sidechain", midi: "MIDI" };
 const isSpacer = n => /^[-_=~.*\s]+$/.test((n || "").trim()) && (n || "").trim() !== "";
-let routeOpen = { 0: true, "-1": false };
+let routeOpen = { 0: true, "-1": false, 1: true };
 try { const r = JSON.parse(localStorage.getItem("tscv.route") || "null"); if (r) routeOpen = r; } catch (e) {}
 
 function buildRoute() {
   const col = $("route");
   col.innerHTML = "";
-  ui.sends = { 0: [], "-1": [] };
-  if (!layout.track || layout.track.m && !(layout.sends || []).length) { /* master: receives only */ }
+  ui.sends = { 0: [], "-1": [], 1: [] };
   if (!layout.track) return;
-  for (const [cat, list, title, noun] of [[0, layout.sends || [], "Sends", "send"], [-1, layout.recv || [], "Receives", "receive"]]) {
+  // With the master selected the first section is its hardware outputs
+  // (category 1): the master has nothing to send to.
+  const first = layout.outs ? [1, layout.sends || [], "Outputs", "output"] : [0, layout.sends || [], "Sends", "send"];
+  // The master has no Receives section: every track feeds it.
+  const secs = layout.track.m ? [first] : [first, [-1, layout.recv || [], "Receives", "receive"]];
+  for (const [cat, list, title, noun] of secs) {
+    if (routeOpen[cat] === undefined) routeOpen[cat] = true;
     const sec = h("div", "rsec" + (routeOpen[cat] ? "" : " shut"));
     const hd = h("div", "rhd", title);
     hd.append(h("span", "cnt", list.length ? String(list.length) : ""), h("span", "chev", "▾"));
@@ -1010,11 +1232,13 @@ function buildSend(cat, i, sd, noun) {
   const val = h("div", "val", "");
   kb.append(kn, val);
   const bt = h("div", "sbt");
-  const mu = h("button", "mu", "ON"), md = h("button", "md", "DIR"), pp = h("button", "pp", "POST");
+  const hw = cat === 1;
+  const mu = h("button", "mu", "ON"), md = h("button", "md", hw ? "" : "DIR"), pp = h("button", "pp", "POST");
   mu.addEventListener("click", () => send("smute", cat, i));
   pp.addEventListener("click", () => send("spre", cat, i));
   let mode = "direct";
-  md.addEventListener("click", () => send("smode", cat, i, MODE_NEXT[mode]));
+  // an output's middle button is where it goes; a tap moves it
+  md.addEventListener("click", () => hw ? sendMenu(cat, i, sd, noun) : send("smode", cat, i, MODE_NEXT[mode]));
   bt.append(mu, md, pp);
   bd.append(kb, bt);
   box.append(nm, bd);
@@ -1027,15 +1251,51 @@ function buildSend(cat, i, sd, noun) {
     cur = l ? l.v : sv.f; k.set(cur);
     val.textContent = sv.db + " dB";
     mu.classList.toggle("on", !!sv.m); mu.textContent = sv.m ? "OFF" : "ON";
-    mode = sv.md || "direct";
-    md.textContent = MODE_LABEL[mode];
-    md.className = "md" + (mode === "sidechain" ? " sc" : mode === "midi" ? " midi" : "");
+    if (hw) { md.textContent = sv.ch || ""; md.className = "md"; }
+    else {
+      mode = sv.md || "direct";
+      if (mode === "midi") { if (!md.querySelector("svg")) md.innerHTML = MIDI_SVG; }
+      else md.textContent = MODE_LABEL[mode];
+      md.className = "md" + (mode === "sidechain" ? " sc" : mode === "midi" ? " midi" : "");
+    }
     pp.classList.toggle("on", !!sv.pre); pp.textContent = sv.pre ? "PRE" : "POST";
   } };
   return box;
 }
 
+// The device's outputs as a list of options: the stereo pairs, then each
+// channel on its own. `cur` (a label) is marked.
+function outputOptions(sh, cur, pick) {
+  const oc = layout.oc || { st: [], mo: [] };
+  const list = (title, items) => {
+    if (!items.length) return;
+    sh.append(h("div", "lbl2", title));
+    const box = h("div", "plist");
+    for (const c of items) {
+      const o = h("button", "opt" + (c.l === cur ? " cur" : ""), c.l + "   " + c.nm);
+      o.addEventListener("click", () => { pick(c.d); closeSheet(); });
+      box.append(o);
+    }
+    sh.append(box);
+  };
+  if (!oc.st.length && !oc.mo.length) sh.append(h("div", "note", "The audio device has no outputs."));
+  list("Stereo", oc.st);
+  list("Mono", oc.mo);
+}
+
 function sendMenu(cat, i, sd, noun) {
+  if (cat === 1) {
+    openSheet(sh => {
+      sh.append(h("h3", null, "Output: " + sd.nm));
+      const cur = vals && vals.s && vals.s[i];
+      outputOptions(sh, cur && cur.ch, d => send("sdst", 1, i, d));
+      const rm = h("button", "opt", "Remove output");
+      rm.style.color = "var(--clip)";
+      rm.addEventListener("click", () => { send("srem", 1, i); closeSheet(); });
+      sh.append(h("div", "gap"), rm);
+    });
+    return;
+  }
   openSheet(sh => {
     sh.append(h("h3", null, (cat === 0 ? "Send to " : "Receive from ") + sd.nm));
     const cur = vals && (cat === 0 ? vals.s : vals.r) && (cat === 0 ? vals.s : vals.r)[i];
@@ -1053,6 +1313,13 @@ function sendMenu(cat, i, sd, noun) {
 }
 
 function addSend(cat, noun) {
+  if (cat === 1) {
+    openSheet(sh => {
+      sh.append(h("h3", null, "Add a hardware output"));
+      outputOptions(sh, null, d => send("oadd", d));
+    });
+    return;
+  }
   let mode = "direct";
   openSheet(sh => {
     sh.append(h("h3", null, cat === 0 ? "Add a send to…" : "Add a receive from…"));
@@ -1088,31 +1355,105 @@ function buildTracks() {
   const bar = $("trk");
   bar.innerHTML = "";
   const cur = layout.track ? layout.track.i : null;
-  const mk = (i, name, col, sel) => {
+  // A tap selects; with the mixer open, a double tap collapses or opens
+  // that track's strip, as on the strip itself (a folder-folded child's
+  // double tap opens its folder).
+  const mk = (i, name, col, sel, t) => {
     const b = h("button", "trb" + (sel ? " sel" : ""), name);
     if (col) b.style.setProperty("--c", col);
-    b.addEventListener("click", () => send("sel", i));
+    const key = t ? stripKey(t) : "master";
+    b.addEventListener("click", () => stripTap(key, i, () => {
+      if (mixState === "closed") return;
+      if (t && t.fo) { for (const p of t.fb || []) send("fold", p, 0); return; }
+      setMxShut(key, !mxShut.has(key));
+    }));
     bar.append(b);
     return b;
   };
-  mk(0, "MASTER", null, layout.track && layout.track.m);
+  const mixOn = mixState !== "closed";
+  const mb = mk(0, mixOn && mxShut.has("master") ? "M" : "MASTER", null, layout.track && layout.track.m);
+  if (mixOn && mxShut.has("master")) mb.classList.add("fold");
   let selEl = null;
   // The tracks REAPER shows in its mixer, as the desktop's track row: the
   // same columns as the mixer strips above them.
   for (const t of layout.tracks || []) {
-    if (t.hm) continue;
+    if (t.hm || t.fh) continue;
     if (t.sp) bar.append(h("div", "tsp"));
-    const b = mk(t.i, t.n, t.c, t.i === cur);
-    b.prepend(h("span", "tn", String(t.i)));
+    const narrow = t.fo || (mixOn && mxShut.has(stripKey(t)));
+    const b = mk(t.i, narrow ? String(t.i) : t.n, t.c, t.i === cur, t);
+    if (narrow) b.classList.add("fold");
+    else b.prepend(h("span", "tn", String(t.i)));
+    if (t.fm != null) {
+      const fi = h("span", "fic");
+      fi.innerHTML = folderIcon(t.fm);
+      fi.title = FOLDER_TIP[t.fm];
+      fi.addEventListener("click", e => { e.stopPropagation(); send("fold", t.i); });
+      b.prepend(fi);
+    }
     if (t.i === cur) selEl = b;
   }
   ui.selTrack = selEl;
 }
 
+// The fader panel collapses (per device) to a narrow strip with a double tap
+// on its background -- the folded mixer strip's layout: open button, mini
+// pan, meter with the fader over it, level, and the buttons stacked.
+let stripShut = false;
+try { stripShut = localStorage.getItem("tscv.stripshut") === "1"; } catch (e) {}
+function setStripShut(v) {
+  stripShut = v;
+  try { localStorage.setItem("tscv.stripshut", v ? "1" : "0"); } catch (e) {}
+  buildStrip(); render();
+}
+(function wireStripTap() {
+  const s = $("strip");
+  let last = 0;
+  s.addEventListener("click", e => {
+    const t = e.target;
+    if (t.closest && t.closest("button, .knob, .fdr, .mp")) return;
+    const now = Date.now();
+    if (now - last < 350) { last = 0; setStripShut(!stripShut); } else last = now;
+  });
+})();
+
+function buildStripShut(s) {
+  const tr = layout.track, master = !!tr.m;
+  const name = h("div", "sname", "");
+  if (tr.c) name.style.setProperty("--c", tr.c);
+  name.title = master ? "MASTER" : (tr.n || ("Track " + tr.i));
+  const ex = h("button", "fexp");
+  ex.innerHTML = `<svg viewBox="0 0 24 24">${ICON.next}</svg>`;
+  ex.setAttribute("aria-label", "Open the fader panel");
+  ex.addEventListener("click", () => setStripShut(false));
+  const mp = miniPan(v => { touch("pan", v); send("pan", (v * 2 - 1).toFixed(3)); }, () => send("pan", 0));
+  const fm = h("div", "fm");
+  const ml = h("div", "mtr"), mlv = h("div", "lv"); ml.append(mlv);
+  const mr = h("div", "mtr"), mrv = h("div", "lv"); mr.append(mrv);
+  const fdr = makeFader(30, "flat", null);
+  fm.append(ml, mr, fdr.node);
+  const vdb = h("div", "vdb", "");
+  const row = h("div", "mrow");
+  const bm = h("button", "m", "M"), bs = h("button", "s", "S");
+  bm.addEventListener("click", () => send("mute")); bs.addEventListener("click", () => send("solo"));
+  row.append(bm, bs);
+  let br = null, bmo = null;
+  if (master) { bmo = monoButton(); row.append(bmo); }
+  else { br = h("button", "r", "R"); br.addEventListener("click", () => send("arm")); row.append(br); }
+  s.append(name, ex, mp.node, fm, vdb, row);
+  let fv = 0.7;
+  dragger(fdr.node, () => fv, v => { fv = v; fdr.set(v); touch("vol", v); send("vol", v.toFixed(4)); },
+    { travel: () => fdr.node.clientHeight, reset: () => send("vol0") });
+  // br stays a real button so the shared update below can light it
+  ui.strip = { fdr, mlv, mrv, vdb, bm, bs, br: br || h("button"), bmo, mp, short: true,
+    setVol: v => { fv = v; } };
+}
+
 function buildStrip() {
   const s = $("strip");
   s.innerHTML = "";
+  s.classList.toggle("shut", stripShut);
   if (!layout.track) return;
+  if (stripShut) return buildStripShut(s);
   const name = h("div", "sname", layout.track.m ? "MASTER" : layout.track.n || ("Track " + layout.track.i));
   if (layout.track.c) name.style.setProperty("--c", layout.track.c);
   const pan = makeKnob(44, "arc", null, true);
@@ -1130,8 +1471,13 @@ function buildStrip() {
   br.addEventListener("click", () => send("arm"));
   row.append(bm, bs, br);
   s.append(name, panBox, panLbl, fr, vdb, row);
-  let bp = null, bi = null;
-  if (!layout.track.m) {
+  let bp = null, bi = null, bmo = null;
+  if (layout.track.m) {
+    // the master: mono in the second row, where a track has phase and monitoring
+    const row2 = h("div", "mrow");
+    bmo = monoButton(); row2.append(bmo);
+    s.append(row2);
+  } else {
     const row2 = h("div", "mrow");
     bp = h("button", "p", "ø"); bp.addEventListener("click", () => send("tset", layout.track.i, "phase"));
     bi = h("button", "i", "–"); bi.addEventListener("click", () => send("tmon", layout.track.i));
@@ -1143,7 +1489,7 @@ function buildStrip() {
     { travel: 260, reset: () => send("pan", 0) });
   dragger(fdr.node, () => fv, v => { fv = v; fdr.set(v); touch("vol", v); send("vol", v.toFixed(4)); },
     { travel: () => fdr.node.clientHeight, reset: () => send("vol0") });
-  ui.strip = { pan, panLbl, fdr, mlv, mrv, vdb, bm, bs, br, bp, bi,
+  ui.strip = { pan, panLbl, fdr, mlv, mrv, vdb, bm, bs, br, bp, bi, bmo,
     setPan: v => { pv = v; }, setVol: v => { fv = v; } };
 }
 
@@ -1319,7 +1665,7 @@ function applyMix(stateOrPx, rebuild = true) {
   mix.classList.toggle("open", px > 0);
   if (rebuild && typeof stateOrPx !== "number") {
     send("mix", mixState === "closed" ? 0 : 1);
-    if (layout) { buildPanels(); buildStrip(); buildMixer(); render(); }
+    if (layout) { buildPanels(); buildStrip(); buildMixer(); buildTracks(); render(); }
   }
 }
 setInterval(() => { if (mixState !== "closed") send("mix", 1); }, 3000);
@@ -1354,12 +1700,114 @@ const lvCol = db => db >= 0 ? "var(--over)" : db >= -6 ? "var(--clip)" : "var(--
 const panText = p => Math.abs(p) < 0.005 ? "C" : (Math.round(Math.abs(p) * 100) + (p < 0 ? "L" : "R"));
 const MON_TXT = ["–", "IN", "AU"];
 
+// A slim pan control for a collapsed strip: a bar, a centre mark, the fill
+// from centre and a dot at the position. Drag sideways (or up and down, as
+// a knob turns), double-tap for centre. `onSet(v)` gets 0..1.
+function miniPan(onSet, onReset) {
+  const node = h("div", "mp"), mf = h("div", "mf"), md = h("div", "md");
+  node.append(h("div", "mc"), mf, md);
+  let cur = 0.5;
+  const show = v => {
+    md.style.left = `calc(2px + (100% - 4px) * ${v})`;
+    mf.style.left = `calc(2px + (100% - 4px) * ${Math.min(v, 0.5)})`;
+    mf.style.width = `calc((100% - 4px) * ${Math.abs(v - 0.5)})`;
+  };
+  show(cur);
+  let sx = 0, sy = 0, sv = 0, last = 0, on = false;
+  node.addEventListener("pointerdown", e => {
+    e.preventDefault(); e.stopPropagation();
+    const now = Date.now();
+    if (now - last < 300) { last = 0; onReset(); return; }
+    last = now;
+    node.setPointerCapture(e.pointerId); on = true;
+    sx = e.clientX; sy = e.clientY; sv = cur;
+  });
+  node.addEventListener("pointermove", e => {
+    if (!on) return;
+    const v = Math.max(0, Math.min(1, sv + ((e.clientX - sx) - (e.clientY - sy)) / 160));
+    cur = v; show(v); onSet(v);
+  });
+  const end = () => { on = false; };
+  node.addEventListener("pointerup", end); node.addEventListener("pointercancel", end);
+  node.addEventListener("click", e => e.stopPropagation());
+  return { node, set(v) { if (!on) { cur = v; show(v); } } };
+}
+
+// Mixer strips collapse one by one, per device, with a double tap where a
+// single tap selects -- to the folded strip's narrow layout. Keyed by the
+// track's GUID (the master by "master") so a collapse survives reordering.
+let mxShut = new Set();
+try { mxShut = new Set(JSON.parse(localStorage.getItem("tscv.mxshut") || "[]")); } catch (e) {}
+const stripKey = t => t.m || t.i === 0 ? "master" : (t.g || ("n" + t.i));
+function setMxShut(key, v) {
+  if (v) mxShut.add(key); else mxShut.delete(key);
+  try { localStorage.setItem("tscv.mxshut", JSON.stringify([...mxShut])); } catch (e) {}
+  buildMixer(); buildTracks(); render();
+}
+// The tap that selects also starts the double tap. Remembered here, not on
+// the strip: selecting can rebuild the mixer between the two taps.
+let lastStripTap = null;
+function stripTap(key, i, onDouble) {
+  const now = Date.now();
+  if (lastStripTap && lastStripTap.key === key && now - lastStripTap.t < 400) {
+    lastStripTap = null; onDouble();
+  } else {
+    lastStripTap = { key, t: now };
+    send("sel", i);
+  }
+}
+
 function buildMixer() {
   const mix = $("mix");
   mix.innerHTML = "";
   ui.mix = new Map();
   if (mixState === "closed" || !layout) return;
-  const strip = (i, name, col) => {
+  // A collapsed folder's child: the desktop's collapsed strip -- open the
+  // folder, mute, solo, and the meter with the fader laid over it.
+  // `user`: collapsed by a double tap, not by its folder -- opening it
+  // undoes that rather than opening the folder.
+  const folded = (t, user) => {
+    const i = t.i, master = i === 0, key = stripKey(t);
+    const el = h("div", "mxs fold");
+    const nm = h("div", "mxc");
+    if (t.c) nm.style.setProperty("--c", t.c);
+    const ex = h("button", "fexp");
+    ex.innerHTML = `<svg viewBox="0 0 24 24">${ICON.next}</svg>`;
+    ex.setAttribute("aria-label", user ? "Open this strip" : "Open the folder");
+    const open = () => {
+      if (user) setMxShut(key, false);
+      else for (const p of t.fb || []) send("fold", p, 0);
+    };
+    ex.addEventListener("click", open);
+    const mp = miniPan(v => { touch("mp" + i, v); send("tpan", i, (v * 2 - 1).toFixed(3)); },
+                       () => send("tpan0", i));
+    const r1 = h("div", "mrow");
+    const bm = h("button", "m", "M"), bs = h("button", "s", "S");
+    bm.dataset.sw = "mute"; bm.dataset.i = i; bs.dataset.sw = "solo"; bs.dataset.i = i;
+    r1.append(bm, bs);
+    let br = null, bmo = null;
+    if (master) { bmo = monoButton(); r1.append(bmo); }
+    else { br = h("button", "r", "R"); br.dataset.sw = "arm"; br.dataset.i = i; r1.append(br); }
+    const fm = h("div", "fm");
+    const ml = h("div", "mtr"), mlv = h("div", "lv"); ml.append(mlv);
+    const mr = h("div", "mtr"), mrv = h("div", "lv"); mr.append(mrv);
+    const fdr = makeFader(30, "flat", null);
+    fm.append(ml, mr, fdr.node);
+    const vdb = h("div", "vdb", "");
+    el.append(nm, ex, mp.node, fm, vdb, r1);
+    let fvv = 0.7;
+    dragger(fdr.node, () => fvv, v => { fvv = v; fdr.set(v); touch("mv" + i, v); send("tvol", i, v.toFixed(4)); },
+      { travel: () => fdr.node.clientHeight, reset: () => send("tvol0", i) });
+    el.addEventListener("click", e => {
+      const tg = e.target;
+      if (fdr.node.contains(tg) || (tg.closest && tg.closest("button, .mp"))) return;
+      stripTap(key, i, open);
+    });
+    mix.append(el);
+    ui.mix.set(i, { el, fdr, mlv, mrv, vdb, bm, bs, br, bmo, setVol: v => { fvv = v; },
+      mp });
+  };
+  const strip = (i, name, col, key) => {
     const master = i === 0;
     const el = h("div", "mxs");
     const nm = h("div", "mxc");
@@ -1380,8 +1828,13 @@ function buildMixer() {
     const sw = (b, key) => { b.dataset.sw = key; b.dataset.i = i; };
     sw(bm, "mute"); sw(bs, "solo");
     r1.append(bm, bs);
-    let br = null, bp = null, bi = null, r2 = null;
-    if (!master) {
+    let br = null, bp = null, bi = null, r2 = null, bmo = null;
+    if (master) {
+      // mono in the second row, so the master's fader and buttons sit on
+      // the same lines as every other strip's
+      r2 = h("div", "mrow");
+      bmo = monoButton(); r2.append(bmo);
+    } else {
       br = h("button", "r", "R"); sw(br, "arm");
       r1.append(br);
       r2 = h("div", "mrow");
@@ -1396,15 +1849,27 @@ function buildMixer() {
       { travel: 200, reset: () => send("tpan0", i) });
     dragger(fdr.node, () => fvv, v => { fvv = v; fdr.set(v); touch("mv" + i, v); send("tvol", i, v.toFixed(4)); },
       { travel: () => fdr.node.clientHeight, reset: () => send("tvol0", i) });
+    // A tap anywhere on the strip but a control selects its track, as the
+    // track's button underneath does. (A swipe that scrolls the mixer
+    // doesn't count as a tap: the browser sends no click for it.)
+    // ...and a double tap there collapses the strip.
+    el.addEventListener("click", e => {
+      const t = e.target;
+      if (pb.contains(t) || fdr.node.contains(t) || (t.closest && t.closest("button"))) return;
+      stripTap(key, i, () => setMxShut(key, true));
+    });
     mix.append(el);
-    ui.mix.set(i, { el, pan, pv, fdr, mlv, mrv, vdb, bm, bs, br, bp, bi,
+    ui.mix.set(i, { el, pan, pv, fdr, mlv, mrv, vdb, bm, bs, br, bp, bi, bmo,
       setPan: v => { pvv = v; }, setVol: v => { fvv = v; } });
   };
-  strip(0, "MASTER", layout.mc);
+  if (mxShut.has("master")) folded({ i: 0, c: layout.mc, m: true }, true);
+  else strip(0, "MASTER", layout.mc, "master");
   for (const t of layout.tracks || []) {
-    if (t.hm) continue;
+    if (t.hm || t.fh) continue;
     if (t.sp) mix.append(h("div", "tsp"));
-    strip(t.i, t.i + " " + t.n, t.c);
+    if (t.fo) folded(t, false);
+    else if (mxShut.has(stripKey(t))) folded(t, true);
+    else strip(t.i, t.i + " " + t.n, t.c, stripKey(t));
   }
 }
 
@@ -1453,7 +1918,8 @@ function renderMixer() {
     if (!S) continue;
     const pl = held("mp" + t.i), vl = held("mv" + t.i);
     const pan = pl ? pl.v : (t.pan + 1) / 2;
-    S.pan.set(pan); S.setPan(pan); S.pv.textContent = panText(t.pan);
+    if (S.pan) { S.pan.set(pan); S.setPan(pan); S.pv.textContent = panText(t.pan); }
+    if (S.mp) S.mp.set(pan);
     const f = vl ? vl.v : t.f;
     S.fdr.set(f); S.setVol(f);
     S.vdb.textContent = t.db;
@@ -1467,6 +1933,7 @@ function renderMixer() {
       S.bi.textContent = MON_TXT[t.mo || 0];
       S.bi.classList.toggle("on", t.mo === 1); S.bi.classList.toggle("au", t.mo === 2);
     }
+    if (S.bmo) paintMono(S.bmo, monoOn());
     S.el.classList.toggle("sel", !!t.sel);
   }
 }
@@ -1541,6 +2008,17 @@ function rebuildKeeping(g) {
   if (over > 0) row.scrollLeft += Math.max(0, Math.min(over, pr.left - rr.left - 8));
 }
 
+// A double tap on a panel's header (not on one of its buttons) collapses
+// it, or opens it again -- the desktop's double-click on the name.
+function doubleTap(node, fn) {
+  let last = 0;
+  node.addEventListener("click", e => {
+    if (e.target.closest && e.target.closest("button")) return;
+    const now = Date.now();
+    if (now - last < 350) { last = 0; fn(); } else last = now;
+  });
+}
+
 function buildPanel(p, bodyH) {
   if (p.eq) return buildEq(p, bodyH);
   const lay = placeControls(p.c || [], bodyH);
@@ -1563,11 +2041,13 @@ function buildPanel(p, bodyH) {
   flt.addEventListener("click", () => send("float", p.g));
   const col = h("button", "hb col"); col.innerHTML = `<svg viewBox="0 0 24 24">${ICON.collapse}</svg>`;
   col.setAttribute("aria-label", "Collapse");
-  col.addEventListener("click", () => {
+  const fold = () => {
     if (shut.has(p.g)) shut.delete(p.g); else shut.add(p.g);
     saveShut();
     pnl.classList.toggle("shut", shut.has(p.g));
-  });
+  };
+  col.addEventListener("click", fold);
+  doubleTap(head, fold);
   if (shut.has(p.g)) pnl.classList.add("shut");
   head.append(h("span", "ix", p.i), h("span", "nm", p.n), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
@@ -2121,10 +2601,12 @@ function buildEq(p, bodyH) {
   const flt = h("button", "hb fl"); flt.innerHTML = `<svg viewBox="0 0 24 24">${ICON.float}</svg>`;
   flt.addEventListener("click", () => send("float", p.g));
   const col = h("button", "hb col"); col.innerHTML = `<svg viewBox="0 0 24 24">${ICON.collapse}</svg>`;
-  col.addEventListener("click", () => {
+  const fold = () => {
     if (shut.has(p.g)) shut.delete(p.g); else shut.add(p.g);
     saveShut(); pnl.classList.toggle("shut", shut.has(p.g));
-  });
+  };
+  col.addEventListener("click", fold);
+  doubleTap(head, fold);
   if (shut.has(p.g)) pnl.classList.add("shut");
   head.append(h("span", "ix", p.i), h("span", "nm", p.n), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
@@ -2380,7 +2862,8 @@ function render() {
     }
   }
   if (ui.sends) {
-    (vals.s || []).forEach((sv, i) => ui.sends[0][i] && ui.sends[0][i].set(sv));
+    const sc = layout && layout.outs ? 1 : 0;
+    (vals.s || []).forEach((sv, i) => ui.sends[sc][i] && ui.sends[sc][i].set(sv));
     (vals.r || []).forEach((sv, i) => ui.sends[-1][i] && ui.sends[-1][i].set(sv));
   }
   renderMixer();
@@ -2388,11 +2871,13 @@ function render() {
   if (t && S) {
     const pl = held("pan"), vl = held("vol");
     const pan = pl ? pl.v : (t.pan + 1) / 2;
-    S.pan.set(pan); S.setPan(pan);
-    S.panLbl.textContent = Math.abs(t.pan) < 0.005 ? "C" : (Math.round(Math.abs(t.pan) * 100) + (t.pan < 0 ? "L" : "R"));
+    if (S.pan) {
+      S.pan.set(pan); S.setPan(pan);
+      S.panLbl.textContent = Math.abs(t.pan) < 0.005 ? "C" : (Math.round(Math.abs(t.pan) * 100) + (t.pan < 0 ? "L" : "R"));
+    }
     const f = vl ? vl.v : t.f;
     S.fdr.set(f); S.setVol(f);
-    S.vdb.textContent = t.db + " dB";
+    S.vdb.textContent = S.short ? t.db : t.db + " dB";
     const lv = db => Math.max(0, Math.min(100, (db + 60) / 60 * 100));
     S.mlv.style.height = lv(t.pl) + "%"; S.mrv.style.height = lv(t.pr) + "%";
     const col = db => db >= 0 ? "var(--over)" : db >= -6 ? "var(--clip)" : "var(--lo)";
@@ -2403,6 +2888,8 @@ function render() {
       S.bi.textContent = MON_TXT[t.mo || 0];
       S.bi.classList.toggle("on", t.mo === 1); S.bi.classList.toggle("au", t.mo === 2);
     }
+    if (S.bmo) paintMono(S.bmo, monoOn());
+    if (S.mp) S.mp.set(pan);
   }
 }
 

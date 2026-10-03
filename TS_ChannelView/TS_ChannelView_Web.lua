@@ -49,6 +49,8 @@ local Tr = require("TS_CV_Trace")
 local G  = require("TS_CV_Gang")
 local SR = require("TS_CV_Search")
 local PR = require("TS_CV_Presets")
+local HO = require("TS_CV_HwOut")
+local TO = require("TS_CV_TrackOps")
 
 local NS = "TS_CV_WEB"
 
@@ -147,10 +149,16 @@ local function fx_by_guid(guid)
   return nil
 end
 
+-- A track's colour, or nil when it has none. I_CUSTOMCOLOR's 0x1000000 bit
+-- says a colour is actually set; without it the low bits are left over
+-- from an old one (the master often carries some) and mean nothing -- as
+-- U.track_colour reads it on the desktop.
 local function track_colour(tr)
   local c = reaper.GetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR")
   if not c or c == 0 then return nil end
-  local r, g, b = reaper.ColorFromNative(math.floor(c) & 0xffffff)
+  c = math.floor(c)
+  if (c & 0x1000000) == 0 then return nil end
+  local r, g, b = reaper.ColorFromNative(c & 0xffffff)
   return string.format("#%02x%02x%02x", r, g, b)
 end
 
@@ -427,18 +435,57 @@ local function sends_vals(cat)
       db = (db <= -150) and "-inf" or string.format("%+.1f", db),
       m = sget(cat, i, "B_MUTE") > 0.5 or nil,
       pre = (math.floor(sget(cat, i, "I_SENDMODE")) ~= POST) or nil,
-      md = send_mode(cat, i),
+      md = (cat ~= HO.CAT) and send_mode(cat, i) or nil,
+      ch = (cat == HO.CAT) and HO.label(sget(cat, i, "I_DSTCHAN")) or nil,
     }
   end
   return out
 end
 
+-- With the master selected, the Sends column is its hardware outputs
+-- (TS_CV_HwOut): the master has nothing to send to.
+local function on_master() return track ~= nil and track == reaper.GetMasterTrack(0) end
+
+local function outputs_layout()
+  local out = arr()
+  for i = 0, (reaper.GetTrackNumSends(track, HO.CAT) or 0) - 1 do
+    out[#out + 1] = { n = 0, nm = HO.name(sget(HO.CAT, i, "I_DSTCHAN")) }
+  end
+  return out
+end
+
+-- What an output can go to: { st = [{d, l, nm}], mo = [...] }
+local function output_choices()
+  local ch = HO.choices()
+  local function conv(list)
+    local o = arr()
+    for _, c in ipairs(list) do o[#o + 1] = { d = c.dst, l = c.label, nm = c.name } end
+    return o
+  end
+  return { st = conv(ch.stereo), mo = conv(ch.mono) }
+end
+
 local function build_layout()
   local tracks = arr()
   local n = reaper.CountTracks(0)
+  -- Folders as REAPER's track panel has them (I_FOLDERCOMPACT), the same
+  -- reading the desktop mixer makes: a parent's state, and for each child
+  -- whether a collapsed folder folds it to a narrow strip or a hidden one
+  -- leaves it out.
+  local depths, compact = TO.folder_state()
+  local hidden, folded, by = TO.folder_view(depths, compact)
   for i = 0, n - 1 do
     local tr = reaper.GetTrack(0, i)
+    local fb = nil
+    if folded[i + 1] and by[i + 1] then fb = arr({ table.unpack(by[i + 1]) }) end
     tracks[#tracks + 1] = {
+      -- folder parent: 0 full, 1 children collapsed, 2 children hidden
+      fm = ((depths[i + 1] or 0) > 0) and (((compact[i + 1] or 0) >= 2) and 2
+           or (((compact[i + 1] or 0) >= 1) and 1 or 0)) or nil,
+      fh = hidden[i + 1] or nil,       -- left out: a folder above hides it
+      fo = folded[i + 1] or nil,       -- a narrow strip: a folder above collapses it
+      fb = fb,                         -- ...and these folder tracks are why
+      g = reaper.GetTrackGUID(tr),     -- the page keys per-device strip state by it
       i = i + 1, n = track_name(tr), c = track_colour(tr),
       s = reaper.IsTrackSelected(tr) or nil,
       f = math.floor(reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")),
@@ -458,7 +505,9 @@ local function build_layout()
                         m = (track == reaper.GetMasterTrack(0)) or nil } or nil,
     fx = panels,
     nfx = track and reaper.TrackFX_GetCount(track) or 0,
-    sends = sends_layout(0),
+    sends = on_master() and outputs_layout() or sends_layout(0),
+    outs = on_master() or nil,
+    oc = on_master() and output_choices() or nil,
     recv = sends_layout(-1),
     pal = palette(),
     fmt = format_cols(),
@@ -760,7 +809,7 @@ local function build_vals(lseq, ack)
     }
   end
   local mx = (reaper.time_precise() - mix_at < MIX_TTL) and mixer_vals() or nil
-  return { L = lseq, A = ack, fx = fxv, msg = last_msg, tr = tr, s = sends_vals(0), r = sends_vals(-1), mx = mx,
+  return { L = lseq, A = ack, fx = fxv, msg = last_msg, tr = tr, s = sends_vals(on_master() and HO.CAT or 0), r = sends_vals(-1), mx = mx,
            nv = nav_open() and nav_vals() or nil,
            sp = any_eq and spectrum_vals() or nil }
 end
@@ -1016,6 +1065,16 @@ local function apply(verb, a)
   elseif verb == "float" then
     local fx = fx_by_guid(a[1])
     if fx then T.toggle_float(track, fx.addr) end
+  elseif verb == "fold" then
+    -- fold|track number|mode (0 full, 1 collapsed, 2 hidden); no mode
+    -- steps it on, full -> collapsed -> hidden, as the track panel does
+    local tr = tonumber(a[1]) and reaper.GetTrack(0, tonumber(a[1]) - 1)
+    local mode = tonumber(a[2])
+    if tr then
+      if mode and mode >= 0 and mode <= 2 then TO.set_folder_mode({ tr }, math.floor(mode))
+      else TO.cycle_folder(tr) end
+      layout_dirty = true
+    end
   elseif verb == "sel" then
     local i = tonumber(a[1])
     local tr = (i == 0) and reaper.GetMasterTrack(0) or (i and reaper.GetTrack(0, i - 1))
@@ -1039,7 +1098,7 @@ local function apply(verb, a)
   elseif track and (verb == "svol" or verb == "sv0" or verb == "smute" or verb == "spre"
                     or verb == "smode" or verb == "srem") then
     local cat, i = tonumber(a[1]), tonumber(a[2])
-    if not (cat == 0 or cat == -1) or not i or i < 0
+    if not (cat == 0 or cat == -1 or cat == HO.CAT) or not i or i < 0
        or i >= (reaper.GetTrackNumSends(track, cat) or 0) then return end
     local function set(k, v) reaper.SetTrackSendInfo_Value(track, cat, i, k, v) end
     if verb == "svol" then
@@ -1051,7 +1110,7 @@ local function apply(verb, a)
       set("B_MUTE", sget(cat, i, "B_MUTE") > 0.5 and 0 or 1)
     elseif verb == "spre" then
       set("I_SENDMODE", math.floor(sget(cat, i, "I_SENDMODE")) == POST and PRE or POST)
-    elseif verb == "smode" then
+    elseif verb == "smode" and cat ~= HO.CAT then
       local mode = a[3]
       if mode == "direct" or mode == "sidechain" or mode == "midi" then
         local dst = (cat == -1) and track or reaper.GetTrackSendInfo_Value(track, cat, i, "P_DESTTRACK")
@@ -1062,9 +1121,22 @@ local function apply(verb, a)
     elseif verb == "srem" then
       reaper.Undo_BeginBlock()
       reaper.RemoveTrackSend(track, cat, i)
-      reaper.Undo_EndBlock(cat == 0 and "ChannelView: remove send" or "ChannelView: remove receive", -1)
+      reaper.Undo_EndBlock(cat == 0 and "ChannelView: remove send" or cat == HO.CAT
+        and "ChannelView: remove hardware output" or "ChannelView: remove receive", -1)
     end
     layout_dirty = true
+  elseif track and verb == "sdst" then
+    -- sdst|1|output index|I_DSTCHAN: move a hardware output
+    local i, dst = tonumber(a[2]), tonumber(a[3])
+    if tonumber(a[1]) == HO.CAT and i and dst and i >= 0
+       and i < (reaper.GetTrackNumSends(track, HO.CAT) or 0) then
+      HO.set_dst(track, i, math.floor(dst))
+      layout_dirty = true
+    end
+  elseif track and verb == "oadd" then
+    -- oadd|I_DSTCHAN: a new hardware output
+    local dst = tonumber(a[1])
+    if dst then HO.add(track, math.floor(dst)); layout_dirty = true end
   elseif track and verb == "sadd" then
     -- sadd|cat|track number (0 = a new track at the end)|mode
     local cat, num, mode = tonumber(a[1]), tonumber(a[2]), a[3]

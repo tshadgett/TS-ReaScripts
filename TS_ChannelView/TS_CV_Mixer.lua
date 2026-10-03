@@ -391,7 +391,7 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
   local room = (w - btn - aw - 14 > 8)
   -- Input FX at the left edge, where the signal enters the strip, when
   -- there's room for it as well; the name starts after it.
-  local iw = C.INFX_BTN_W
+  local iw = CH.infx_width(t.track)
   local show_in = room and (w - btn - aw - iw - 18 > 8)
   local name_x = x + 5
   if show_in then

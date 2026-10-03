@@ -137,7 +137,9 @@ end
 function G.collapse_keys(track, prefix)
   local out = {}
   G.each(track, function(tr)
-    local g = reaper.GetTrackGUID(tr)
+    -- The mixer keys the master as "master", not by its GUID (see
+    -- MX.tracks), so it collapses like any other strip.
+    local g = (tr == reaper.GetMasterTrack(0)) and "master" or reaper.GetTrackGUID(tr)
     if g then out[#out + 1] = prefix .. g end
   end)
   return out

@@ -874,7 +874,10 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   local face
   if look and look.cap then face = lit and U.lighten(look.cap, 0.18) or look.cap
   else face = lit and C.COL.knob_pointer or C.COL.fader_cap end
-  local a    = ghost and (lit and 0xcc or 0x70) or 0xff
+  -- A ghost cap is see-through enough to read the meter behind it, but
+  -- plainly there at rest: a fader that only shows itself on hover reads
+  -- as disabled.
+  local a    = ghost and (lit and 0xf0 or 0xc8) or 0xff
   ImGui.DrawList_AddRectFilled(dl, x, cy, x + w, cy + cap_h,
     U.with_alpha(face, a), 2.5)
   ImGui.DrawList_AddRect(dl, x, cy, x + w, cy + cap_h,
@@ -1597,7 +1600,7 @@ end
 
 local function icon_chevron(dl, x, y, sz, col, dir)
   -- dir: -1 draws the point on the right (>), 1 on the left (<) --
-  -- collapse and expand use them for a strip's side, prev and next for
+  -- expand and collapse use them for a panel's side, next and prev for
   -- stepping through a list.
   local cx, cy = x + sz * 0.5, y + sz * 0.5
   local w, h = sz * 0.20, sz * 0.26
@@ -1725,7 +1728,20 @@ local function icon_tablet_on(dl, x, y, sz, col)
   ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.75, y + sz * 0.5, math.max(1.0, sz * 0.06), C.COL.header_bg)
 end
 
+-- Mono and stereo, for the master's mono switch: one open circle, and two
+-- linked ones.
+local function icon_mono(dl, x, y, sz, col)
+  ImGui.DrawList_AddCircle(dl, x + sz * 0.5, y + sz * 0.5, sz * 0.26, col, 20, 1.5)
+end
+local function icon_stereo(dl, x, y, sz, col)
+  local r = sz * 0.22
+  ImGui.DrawList_AddCircle(dl, x + sz * 0.5 - r * 0.6, y + sz * 0.5, r, col, 18, 1.4)
+  ImGui.DrawList_AddCircle(dl, x + sz * 0.5 + r * 0.6, y + sz * 0.5, r, col, 18, 1.4)
+end
+
 W.ICONS = {
+  mono     = icon_mono,
+  stereo   = icon_stereo,
   tablet   = icon_tablet,
   tablet_on = icon_tablet_on,
   midi     = icon_midi,
@@ -1739,8 +1755,10 @@ W.ICONS = {
   power    = icon_power,
   float    = icon_float,
   menu     = icon_menu,
-  collapse = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
-  expand   = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
+  -- A panel folds away to the left and opens out to the right: collapse
+  -- points left, expand points right.
+  collapse = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
+  expand   = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
   prev     = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
   next     = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
   folder_full      = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 0)   end,

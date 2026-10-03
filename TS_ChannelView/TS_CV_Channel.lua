@@ -22,6 +22,7 @@ local TM = require("TS_CV_TrackMenu")
 local IN = require("TS_CV_Inputs")
 local TP = require("TS_CV_Taps")
 local B  = require("TS_CV_Browser")
+local AC = require("TS_CV_Actions")
 
 local CH = {}
 local ImGui
@@ -146,6 +147,12 @@ end
 -- The input FX button: lit when the track has input FX (the bypass
 -- colour when every one of them is bypassed), and opening that chain.
 -- On the master it's the monitoring FX chain instead.
+-- The input FX button's width: "IN" fits the usual one; the master's
+-- "MON" (its monitoring FX) needs a few pixels more.
+function CH.infx_width(track)
+  return C.INFX_BTN_W + (CH.is_master(track) and 8 or 0)
+end
+
 function CH.infx_button(ctx, x, y, w, h, track, idp)
   if not track then return end
   local master = CH.is_master(track)
@@ -245,7 +252,7 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
     CH.auto_button(ctx, x + w - btn - aw - 8, y + 3, aw, C.HEADER_H - 6,
                    track, idp)
     left_of_buttons = x + w - btn - aw - 8
-    local iw = C.INFX_BTN_W
+    local iw = CH.infx_width(track)
     if w - aw - iw - btn - 16 > 20 then
       CH.infx_button(ctx, x + 3, y + 3, iw, C.HEADER_H - 6, track, idp)
       title_x = x + 3 + iw + 5
@@ -271,6 +278,83 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
     W.tip(ctx, idp .. "title", opts.title,
       ImGui.IsWindowHovered(ctx) and ImGui.IsMouseHoveringRect(ctx, title_x, y, left_of_buttons, y + C.HEADER_H), false)
   end
+end
+
+-- The master's mono switch, in record arm's place: REAPER's own action,
+-- so its state is the action's toggle state. (The master has no record
+-- arm, and summing to mono is the check you reach for there.)
+local MONO_ACTION = "Master track: Toggle stereo/mono (L+R)"
+function CH.master_mono()
+  local id = AC.find(MONO_ACTION, 40917)
+  return id and reaper.GetToggleCommandState(id) == 1 or false
+end
+function CH.toggle_master_mono()
+  local id = AC.find(MONO_ACTION, 40917)
+  if id then reaper.Main_OnCommand(id, 0) end
+end
+-- An open circle on red while the master is mono, two linked circles on
+-- the plain button while it's stereo.
+local function mono_button(ctx, id, label, x, y, w, h)
+  local on = CH.master_mono()
+  local hit, dbl = W.state_icon(ctx, id, on and "mono" or "stereo", x, y, w, h, on, C.COL.rec_on,
+    on and "Master in mono \u{2014} click for stereo" or "Master in stereo \u{2014} click for mono")
+  if hit or dbl then CH.toggle_master_mono() end
+end
+
+-- Pan on a collapsed strip: a slim bar with a mark at the pan position and
+-- the fill from centre to it, and the value under it when values under
+-- controls are on -- the pair centred in the space between the strip's cap
+-- and its meter (`y0` to `y1`), all of which takes the drag. Drag sideways
+-- (or up and down, like the knob), Shift for fine, wheel, double-click for
+-- centre. Ganged like the knob.
+local function mini_pan(ctx, dl, idp, x, y0, y1, w, track)
+  local pan = get(track, "D_PAN")
+  W.push_small(ctx)
+  local _, th = ImGui.CalcTextSize(ctx, "0")
+  W.pop_small(ctx)
+  local text_h = C.SHOW_VALUES and (th + 2) or 0
+  local fy  = (y0 + y1) * 0.5 - text_h * 0.5
+  local x0, x1 = x + 4, x + w - 4
+  local mid = (x0 + x1) * 0.5
+
+  ImGui.SetCursorScreenPos(ctx, x + 1, y0)
+  ImGui.InvisibleButton(ctx, idp .. "mpan", w - 2, math.max(8, y1 - y0))
+  local hovered, active = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+  local nv = nil
+  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+    local dx, dy = ImGui.GetMouseDelta(ctx)
+    if dx ~= 0 or dy ~= 0 then
+      local sens = 0.012
+      if (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0 then sens = sens * C.FINE_MULT end
+      nv = pan + (dx - dy) * sens
+    end
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
+  elseif hovered then
+    local wheel = ImGui.GetMouseWheel(ctx)
+    if wheel ~= 0 then nv = pan + wheel * 0.02; W.take_wheel() end
+  end
+  local txt = (math.abs(pan) < 0.005) and "C"
+    or string.format("%d%s", math.floor(math.abs(pan) * 100 + 0.5), pan < 0 and "L" or "R")
+  if hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
+    set(track, "D_PAN", 0)
+  elseif nv then
+    G.pan(track, math.max(-1, math.min(1, nv)))
+  end
+
+  local px = mid + (x1 - mid) * pan
+  ImGui.DrawList_AddRectFilled(dl, x0, fy - 2, x1, fy + 2, C.COL.knob_track, 2.0)
+  ImGui.DrawList_AddRectFilled(dl, math.min(mid, px), fy - 2, math.max(mid, px), fy + 2,
+    C.COL.knob_fill_bi, 2.0)
+  ImGui.DrawList_AddLine(dl, mid, fy - 4, mid, fy + 4, C.COL.knob_ring, 1.0)
+  ImGui.DrawList_AddCircleFilled(dl, px, fy, (hovered or active) and 4 or 3.5,
+    C.COL.knob_pointer, 12)
+  if C.SHOW_VALUES then
+    W.push_small(ctx)
+    local tw = ImGui.CalcTextSize(ctx, txt)
+    ImGui.DrawList_AddText(dl, mid - tw * 0.5, fy + 6, C.COL.value, txt)
+    W.pop_small(ctx)
+  end
+  W.tip(ctx, idp .. "mpan", "Pan " .. txt, hovered, active)
 end
 
 -- The collapsed bar, for the pinned Channel panel AND for a collapsed
@@ -299,28 +383,47 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey, expand, expand
     if expand then expand() else CH.set_collapse(ckey, track, false) end
   end
 
+  -- Laid out on the full strip's own lines (CH.geometry): the meter and
+  -- fader over exactly the span the full strip's fader covers, the level
+  -- where the full strip prints it, and the buttons in the full strip's
+  -- button rows -- mute, solo and record arm stacked, one to a row -- so a
+  -- row of mixed strips has one line of faders and one of buttons.
+  local master = CH.is_master(track)
+  local g = CH.geometry(y + C.HEADER_H, h - C.HEADER_H, master)
+  -- pan, in the space between the cap and the meter
+  mini_pan(ctx, dl, idp, x, y + C.HEADER_H + 2, g.top - 4, w, track)
   local muted = get(track, "B_MUTE") > 0.5
   local solo  = get(track, "I_SOLO") > 0.5
-  local bw = w - 8
+  local rec   = get(track, "I_RECARM") > 0.5
+  local bw, bh = w - 8, g.bh
+  local function row(k) return g.btm + k * (bh + g.bgap) end
   -- Swipeable here too: a row of collapsed strips is exactly where you
   -- want to drag mute across six tracks at once.
   local hit, _, want = W.state_button(ctx, idp .. "cM", "M",
-    x + 4, y + 4 + btn + 4, bw, 14, muted, C.COL.mute_on, "Mute", "mute")
+    x + 4, row(0), bw, bh, muted, C.COL.mute_on, "Mute", "mute")
   if want ~= nil then set(track, "B_MUTE", want and 1 or 0)
   elseif hit then set(track, "B_MUTE", muted and 0 or 1) end
 
   hit, _, want = W.state_button(ctx, idp .. "cS", "S",
-    x + 4, y + 4 + btn + 22, bw, 14, solo, C.COL.solo_on, "Solo", "solo")
+    x + 4, row(1), bw, bh, solo, C.COL.solo_on, "Solo", "solo")
   if want ~= nil then set(track, "I_SOLO", want and 1 or 0)
   elseif hit then set(track, "I_SOLO", solo and 0 or 1) end
+
+  if not master then
+    hit, _, want = W.state_icon(ctx, idp .. "cR", "record", x + 4, row(2), bw, bh,
+      rec, C.COL.rec_on, rec and "Record armed" or "Record arm", "rec")
+    if want ~= nil then set(track, "I_RECARM", want and 1 or 0)
+    elseif hit then set(track, "I_RECARM", rec and 0 or 1) end
+  else
+    mono_button(ctx, idp .. "cMo", "MO", x + 4, row(2), bw, bh)
+  end
 
   -- Read out here, not inside: the readout below prints it whether or
   -- not there was room for a meter.
   local vol = get(track, "D_VOL", 1)
 
   -- the meter is what makes a collapsed strip worth keeping visible
-  local top = y + 4 + btn + 42
-  local mh  = h - (top - y) - 24
+  local top, mh = g.top, g.fh
   if mh > 30 then
     local now = reaper.time_precise()
     -- One hold per channel: a single figure drawn across both bars is
@@ -353,13 +456,12 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey, expand, expand
     end
   end
 
-  -- Under the meter: the level, in dB, not the track's name -- the name
-  -- is already shown in the track list directly below, and at thirty
-  -- pixels wide there isn't room to run it down the bar legibly anyway.
-  -- The number is the thing you collapsed the strip to keep an eye on.
+  -- Under the meter, on the full strip's readout line: the level in dB.
+  -- Not the track's name -- that's in the track list directly below, and
+  -- at thirty pixels wide it wouldn't run down the bar legibly anyway.
   local vt = U.db_text(vol)
   local tw = ImGui.CalcTextSize(ctx, vt)
-  ImGui.DrawList_AddText(dl, cx - tw * 0.5, y + h - 16, C.COL.value, vt)
+  ImGui.DrawList_AddText(dl, cx - tw * 0.5, top + math.max(mh, 0) + 2, C.COL.value, vt)
 
   return bare
 end
@@ -371,6 +473,25 @@ end
 -- store, and they would all fight over both.
 -- Height of the record-input row across the top of the body.
 CH.INPUT_ROW_H = 18
+
+-- Where a strip's body puts things, from the body's top `y` and height
+-- `h`: the fader's top and height, and the first button row. The full
+-- body and the collapsed strip both lay out from this, so the two line up
+-- side by side in the mixer. Three button rows (mute|solo, phase|monitor,
+-- record arm), the master's too -- mute|solo, nothing, mono -- so its fader
+-- and buttons sit on the same lines as every other strip's.
+CH.BTN_H, CH.BTN_GAP, CH.BODY_PAD = 15, 3, 5
+function CH.geometry(y, h, master)
+  local pad, bh, bgap = CH.BODY_PAD, CH.BTN_H, CH.BTN_GAP
+  local rows = 3
+  local btm  = y + h - pad - rows * bh - (rows - 1) * bgap
+  local top  = y + CH.INPUT_ROW_H + C.CELL_H + 2
+  -- Two lines of readout under the meter (peak, then RMS) and one under
+  -- the fader; the taller of the two sets how much the fader gives up.
+  -- The extra few pixels keep the RMS figure off the Solo button.
+  local fh   = btm - top - 32 - 4
+  return { top = top, fh = fh, btm = btm, bh = bh, bgap = bgap, rows = rows }
+end
 
 function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   idp = idp or "ch"
@@ -409,13 +530,14 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     if dblp then set(track, "D_PAN", np) else G.pan(track, np) end
   end
 
-  -- buttons along the bottom, two columns -- one row on the master, which
-  -- has only mute and solo, so the fader and meter get the rest
+  -- buttons along the bottom, two columns, three rows (see CH.geometry)
   local master = CH.is_master(track)
-  local bh, bgap = 15, 3
+  -- (y and h are below the input row now; the geometry counts from the
+  -- body's own top)
+  local geo = CH.geometry(y - CH.INPUT_ROW_H, h + CH.INPUT_ROW_H, master)
+  local bh, bgap = geo.bh, geo.bgap
   local bw = (w - pad * 2 - bgap) * 0.5
-  local rows = master and 1 or 3
-  local btm = y + h - pad - rows * bh - (rows - 1) * bgap
+  local btm = geo.btm
 
   local muted = get(track, "B_MUTE") > 0.5
   local solo  = get(track, "I_SOLO") > 0.5
@@ -468,6 +590,11 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
       rec, C.COL.rec_on, rec and "Record armed" or "Record arm", "rec")
     if dbl then set(track, "I_RECARM", 0)
     elseif want ~= nil then set(track, "I_RECARM", want and 1 or 0) end
+  else
+    -- The master: its middle row stays empty (it has no phase or input
+    -- monitoring), and mono takes record arm's row.
+    bx, by = cell(0, 2)
+    mono_button(ctx, idp .. "bMo", "MONO", bx, by, full, bh)
   end
 
   -- Fader and meter take half the inner width each, so the pair reads as
@@ -475,12 +602,8 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   local vol   = get(track, "D_VOL", 1)   -- unity if the track has none
   local inner = w - pad * 2
   local half  = inner * 0.5
-  local top   = y + C.CELL_H + 2
-  -- Two lines of readout under the meter (peak, then RMS) and one under
-  -- the fader; the taller of the two sets how much the fader gives up.
-  -- The extra few pixels keep the RMS figure off the Solo button.
-  local vh    = 32
-  local fh    = btm - top - vh - 4
+  local top   = geo.top
+  local fh    = geo.fh
 
   if fh > 40 then
     local fx = x + pad + (half - C.FADER_W) * 0.5

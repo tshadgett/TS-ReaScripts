@@ -15,9 +15,9 @@
                                 names (TrackFX_GetUserPresetFilename):
                                   [General]  NbPresets=N
                                   [PresetN]  Data=, Data_1= ... Len= Name=
-                                Data is the plugin's saved state -- exactly
-                                what the project keeps in its <VST>/<JS>
-                                block -- in pieces of 16384 bytes, each in
+                                Data is the plugin's saved state -- what the
+                                project keeps in its <VST>/<JS>/<CLAP>
+                                block (see PR.state) -- in pieces of 16384 bytes, each in
                                 hex with a check byte after it (the piece's
                                 bytes summed, mod 256). Len is the state's
                                 length without the check bytes.
@@ -25,9 +25,9 @@
                                 (factory) preset names.
     reaper-defpresets.ini       which user preset is each plugin's default:
                                   vst-reacomp=Name, vst-x.vst3=Name,
-                                  js-guitar/flanger=Name
+                                  js-guitar/flanger=Name, clap-<id>=Name
 
-  Saving is offered for VST2/VST3 and JS, the formats that were checked;
+  Saving is offered for VST2/VST3, JS and CLAP, the formats that were checked;
   other formats list and load presets but don't save. Rename and delete only
   touch names and sections, so they work for any plugin with a preset file.
 --]]
@@ -156,7 +156,8 @@ end
 
 -- "vst", "js", or nil for the formats saving isn't offered for. REAPER
 -- names the type itself (fx_type); the identifier is the fallback.
-local TYPES = { VST = "vst", VST3 = "vst", VSTi = "vst", VST3i = "vst", JS = "js" }
+local TYPES = { VST = "vst", VST3 = "vst", VSTi = "vst", VST3i = "vst", JS = "js",
+                CLAP = "clap", CLAPi = "clap" }
 function PR.kind(track, fx)
   local okt, ty = reaper.TrackFX_GetNamedConfigParm(track, fx, "fx_type")
   if okt and ty and ty ~= "" then return TYPES[ty] end
@@ -174,11 +175,13 @@ function PR.kind(track, fx)
 end
 
 -- The plugin's key in reaper-defpresets.ini: vst-reacomp,
--- vst-uaudio_api_2500.vst3, js-guitar/flanger.
+-- vst-uaudio_api_2500.vst3, js-guitar/flanger,
+-- clap-com.FabFilter.preset-discovery.Pro-DS.1.
 function PR.default_key(track, fx)
   local id = ident(track, fx)
   local kind = PR.kind(track, fx)
   if kind == "js" then return "js-" .. id end
+  if kind == "clap" and id ~= "" then return "clap-" .. id end
   if kind == "vst" then
     local file = (id:match("^(.-)<") or id):match("([^\\/]+)$") or ""
     if file:lower():match("%.vst3$") then return "vst-" .. file end
@@ -227,39 +230,66 @@ local FXTAG = { VST = true, JS = true, CLAP = true, AU = true, DX = true, LV2 = 
 local function fx_block(chunk, guid)
   local lines = {}
   for l in chunk:gmatch("[^\r\n]+") do lines[#lines + 1] = l:match("^%s*(.-)%s*$") end
-  local i, ph, pb = 1, nil, nil
+  local i, ph, pb, pa = 1, nil, nil, nil
   while i <= #lines do
     local t = lines[i]
     local tag = t:match("^<(%u+)%s") or t:match("^<(%u+)$")
     if tag and FXTAG[tag] then
-      local head, body, depth = t, {}, 1
+      local head, body, all, depth = t, {}, {}, 1
       i = i + 1
       while i <= #lines and depth > 0 do
         local u = lines[i]
         if u:sub(1, 1) == "<" then depth = depth + 1
         elseif u == ">" then depth = depth - 1
         elseif depth == 1 then body[#body + 1] = u end
+        if depth > 0 then all[#all + 1] = u end     -- the block's own ">" isn't kept
         i = i + 1
       end
-      ph, pb = head, body
+      ph, pb, pa = head, body, all
     else
       local g = t:match("^FXID%s+(%b{})")
       if g then
-        if g == guid and ph then return ph, pb end
-        ph, pb = nil, nil
+        if g == guid and ph then return ph, pb, pa end
+        ph, pb, pa = nil, nil, nil
       end
       i = i + 1
     end
   end
 end
 
+-- A preset name as a chunk field: quoted with whichever of " ' ` it
+-- doesn't contain, as REAPER does.
+local function quoted(name)
+  for _, q in ipairs({ '"', "'", "`" }) do
+    if not name:find(q, 1, true) then return q .. name .. q end
+  end
+  return '"' .. name:gsub('"', "") .. '"'
+end
+
 -- The plugin's saved state as a preset holds it, or nil and why.
-function PR.state(track, fx)
+--   VST: the block's base64 lines, decoded and joined.
+--   JS:  the block's first line (the slider values), as text.
+--   CLAP: every line inside the block -- CFG, the <IN_PINS> and <STATE>
+--        blocks with their markers, the base64 as text -- each ended by a
+--        zero byte. CFG's last field is the preset's name, so it's written
+--        as `name` (checked against REAPER's own save of FabFilter Pro-DS).
+function PR.state(track, fx, name)
   local guid = reaper.TrackFX_GetFXGUID(track, fx)
   local ok, chunk = reaper.GetTrackStateChunk(track, "", false)
   if not ok or not guid then return nil, "couldn't read the track" end
-  local head, body = fx_block(chunk, guid)
+  local head, body, all = fx_block(chunk, guid)
   if not head then return nil, "couldn't find the plugin in the track" end
+  if head:match("^<CLAP[%s]") then
+    local out = {}
+    for _, l in ipairs(all) do
+      if name and l:match("^CFG%s") then
+        local pre = l:match("^(CFG%s+%S+%s+%S+%s+%S+)")
+        if pre then l = pre .. " " .. quoted(name) end
+      end
+      out[#out + 1] = l .. "\0"
+    end
+    return table.concat(out)
+  end
   if head:match("^<JS[%s]") or head == "<JS" then
     return body[1] or ""
   elseif head:match("^<VST[%s]") then
@@ -351,7 +381,7 @@ function PR.save(track, fx, name)
   name = (name or ""):gsub("[\r\n]", " "):match("^%s*(.-)%s*$")
   if name == "" then return false, "the preset needs a name" end
   if not PR.kind(track, fx) then return false, "saving presets isn't supported for this plugin format yet" end
-  local blob, why = PR.state(track, fx)
+  local blob, why = PR.state(track, fx, name)
   if not blob then return false, why end
   local doc, file, err = load_doc(track, fx)
   if not doc then return false, err end

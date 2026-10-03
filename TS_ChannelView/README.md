@@ -425,8 +425,18 @@ preset REAPER loads whenever the plugin is added; ★ marks it in the list.
 These are REAPER's presets, not ChannelView's: the same `presets/*.ini`
 files, written exactly as REAPER writes them, so whatever you save shows up
 in the plugin window's own preset box and the other way round. Saving
-works for VST2, VST3 and JS; CLAP and AU presets load but can't be saved
-from here yet. **View ▸ Preset bar** hides the bar.
+works for VST2, VST3, JS and CLAP; AU presets load but can't be saved from
+here yet. **View ▸ Preset bar** hides the bar.
+
+## The master
+
+With the master selected, the Sends panel shows its hardware **Outputs**
+instead: level, mute and pre/post as on a send, and a button showing which
+of the audio device's channels it goes to ("1/2", "5") — click it to move
+the output or remove it. The add tile lists the stereo pairs and, under
+Mono, the single channels. The master has no Receives panel. Its strip has
+a **Mono** switch where other tracks have record arm (REAPER's *Master
+track: Toggle stereo/mono*).
 
 ## Track colours
 
@@ -537,14 +547,24 @@ script into the action list.
   window.
 - **Mixer:** drag the bar labelled MIXER up (closed, half or full), or tap
   it. Press M, S or R and drag along the row to set a run of tracks at once.
-  Touching one of several selected tracks moves them all, as in REAPER.
+  Touching one of several selected tracks moves them all, as in REAPER. Tap
+  a strip's empty space to select its track; double-tap it (or its name
+  button) to collapse it to a narrow strip, and again to open it.
+- **Folders:** tap the folder icon on a folder's name button to step it
+  full → collapsed → hidden — REAPER's own folder state, so the track panel
+  follows.
+- **Master:** its Sends column is its hardware Outputs; tap an output's
+  channel button to move it. The Mono switch sits under M and S.
+- **Fader panel:** double-tap its empty space to collapse it, and again to
+  open it.
 - **Navigator:** the button to the left of the macro button. Tap to move the
   edit cursor, tap a region's name to go to it, drag the box to scroll
   REAPER's arrange view.
 - **Presets:** the bar along the foot of a panel — tap the name for the
   list, ‹ › to step, + to save, save as default, rename or delete.
 - **Macros:** the pencil turns on editing. + adds a button for any action
-  (searchable), tap a button to change it, × removes it.
+  (searchable) or a spacer, tap a button to change it, press and drag to
+  move it, × removes it.
 
 ## Installing
 

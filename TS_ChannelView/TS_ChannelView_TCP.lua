@@ -700,8 +700,10 @@ local function draw_flyout()
   -- channel view -- the same panels, drawn by the same module.
   local CW   = C.CHANNEL_W
   local sd_w = SD.width_for(f.track, H)
-  local rv_w = RV.width_for(f.track, H)
-  local Wd   = CW + C.PANEL_GAP + sd_w + C.PANEL_GAP + rv_w
+  -- the master has no Receives panel here either (see ChannelView's channel view)
+  local no_rv = (f.track == reaper.GetMasterTrack(0))
+  local rv_w = no_rv and 0 or RV.width_for(f.track, H)
+  local Wd   = CW + C.PANEL_GAP + sd_w + (no_rv and 0 or (C.PANEL_GAP + rv_w))
   local y  = row and row.y or g.top
   y = math.max(g.top, math.min(y, g.bottom - H))
   local x  = win.x + win.w
@@ -757,8 +759,10 @@ local function draw_flyout()
     if app.fly then
       ImGui.SetCursorScreenPos(ctx, wx + CW + C.PANEL_GAP, wy)
       SD.draw(ctx, tr, H)
-      ImGui.SetCursorScreenPos(ctx, wx + CW + C.PANEL_GAP + sd_w + C.PANEL_GAP, wy)
-      RV.draw(ctx, tr, H)
+      if not no_rv then
+        ImGui.SetCursorScreenPos(ctx, wx + CW + C.PANEL_GAP + sd_w + C.PANEL_GAP, wy)
+        RV.draw(ctx, tr, H)
+      end
       SD.draw_menu(ctx, tr); SD.draw_ctx(ctx, tr)
       RV.draw_menu(ctx, tr); RV.draw_ctx(ctx, tr)
       -- The plugin search dialog, for the IN button's "Search..."
