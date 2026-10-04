@@ -755,8 +755,13 @@ function W.knob(ctx, id, label, value, formatted, opts)
     style = opts.style, cap = opts.cap, bipolar = opts.bipolar,
     dim = opts.dim, hot = hovered or active })
 
+  -- the value in small type, just under the dial, so it sits inside the
+  -- cell (and inside any background drawn round it) rather than hanging
+  -- off its bottom edge
   if C.SHOW_VALUES and not small then
-    centred_text(ctx, dl, cx, y + ch - 12, formatted or "", C.COL.value, cw - 2)
+    W.push_small(ctx)
+    centred_text(ctx, dl, cx, cy + r + 1, formatted or "", C.COL.value, cw - 2)
+    W.pop_small(ctx)
   end
 
   local tip = opts.tooltip
@@ -826,7 +831,9 @@ function W.toggle(ctx, id, label, value, formatted, opts)
        or C.COL.toggle_text, bx2 - bx1 - 4, true)
 
   if C.SHOW_VALUES and not opts.text and not small then
-    centred_text(ctx, dl, cx, y + ch - 12, formatted or "", C.COL.value, cw - 2)
+    W.push_small(ctx)
+    centred_text(ctx, dl, cx, by2 + 2, formatted or "", C.COL.value, cw - 2)
+    W.pop_small(ctx)
   end
   W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
 
@@ -1051,9 +1058,9 @@ end
 -- blank cell (deliberate gap in a layout)
 -- ---------------------------------------------------------------------
 
-function W.blank(ctx, id)
+function W.blank(ctx, id, w, h)
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, id, C.CELL_W, C.CELL_H,
+  ImGui.InvisibleButton(ctx, id, w or C.CELL_W, h or C.CELL_H,
     ImGui.ButtonFlags_MouseButtonRight)
   return false, 0, { right_click = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) }, false
 end

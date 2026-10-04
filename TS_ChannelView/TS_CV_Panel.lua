@@ -16,6 +16,7 @@ local U   = require("TS_CV_Util")
 local W   = require("TS_CV_Widgets")
 local T   = require("TS_CV_FXTree")
 local M   = require("TS_CV_Mappings")
+local TL  = require("TS_CV_Tiles")
 local SC  = require("TS_CV_Steps")
 local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
@@ -53,11 +54,15 @@ end
 
 -- Places every control, returning:
 --   rows     how many rows the grid has
---   items    { ctl, x, y, w, h } -- x, y offsets from the grid origin in
---            pixels; w, h the control's size in half-cells (see below)
+--   items    { ctl, x, y, w, h, sx, sw } -- x, y offsets from the grid
+--            origin in pixels; w, h the control's size in half-cells (see
+--            below); sx, sw the column it sits in, in pixels
 --   rules    x offsets of vertical dividers, in the same space
 --   width    total width of the grid, dividers included
 --   height   how far down the grid actually reaches, for the rules
+--   gaps     { x, w } for every divider's gap
+--   spacers  { ctl, x, y, w, h, sx, sw } for every half_gap in column flow:
+--            not controls, but they have a place, and can have a background
 --   sections { x, w, by } for every section a divider gave a style to
 --            (EXPERIMENTAL: an inset, or its own faceplate, behind it) --
 --            x and w in the grid's space, `by` the divider; the items
@@ -150,12 +155,22 @@ function P.section_style(div)
   return nil
 end
 
-local function place_column(sec, x0, half_rows, items)
+-- A control's own background (Back<n>): "inset", or a faceplate key.
+function P.back_style(back)
+  if back == "inset" then return "inset" end
+  local pl = back and C.plate_of(back)
+  if pl then return "plate", pl end
+  return nil
+end
+
+local function place_column(sec, x0, half_rows, items, spacers)
   local cx, cy, sw, deepest = 0, 0, 0, 0
   local strip = {}
   local function close_strip()
     for _, it in ipairs(strip) do
       if it.w < sw then it.x = it.x + hx(sw - it.w) / 2 end
+      -- the whole column it sits in, for its background (full width)
+      it.sx, it.sw = x0 + hx(cx), hx(sw)
     end
     strip = {}
     cx, cy, sw = cx + sw, 0, 0
@@ -168,6 +183,12 @@ local function place_column(sec, x0, half_rows, items)
       items[#items + 1] = it
       strip[#strip + 1] = it
       if cy + h > deepest then deepest = cy + h end
+    elseif spacers then
+      -- not a control, but it has a place (and maybe a background): kept
+      -- aside so the panel can give it one and a right-click
+      local sp = { ctl = ctl, x = x0 + hx(cx), y = hy(cy), w = w, h = h }
+      spacers[#spacers + 1] = sp
+      strip[#strip + 1] = sp
     end
     cy = cy + h
     if w > sw then sw = w end
@@ -204,7 +225,10 @@ local function place_row(sec, x0, half_rows, items)
     if deepest <= half_rows or lim >= total_w then break end
     lim = lim + 1
   end
-  for _, it in ipairs(placed) do items[#items + 1] = it end
+  for _, it in ipairs(placed) do
+    it.sx, it.sw = it.x, hx(it.w)
+    items[#items + 1] = it
+  end
   return hx(lim), deepest
 end
 
@@ -230,13 +254,13 @@ function P.layout(controls, panel_h)
   sections[#sections + 1] = cur
 
   local x, deepest = 0, 0
-  local styled = {}
+  local styled, gaps, spacers = {}, {}, {}
   for si, sec in ipairs(sections) do
     if si > 1 then
       local sp = splitters[si - 1]
       if sp.type == "fader" then
         -- full height always: a fader isn't capped by `deepest`, it sets it
-        items[#items + 1] = { ctl = sp, x = x, y = 0, w = 2, h = half_rows }
+        items[#items + 1] = { ctl = sp, x = x, y = 0, w = 2, h = half_rows, sx = x, sw = C.CELL_W }
         if half_rows > deepest then deepest = half_rows end
         x = x + C.CELL_W
       else
@@ -246,13 +270,14 @@ function P.layout(controls, panel_h)
         if not sp.no_rule then
           rules[#rules + 1] = x + C.DIVIDER_W * 0.5
         end
+        gaps[#gaps + 1] = { x = x, w = C.DIVIDER_W }
         x = x + C.DIVIDER_W
       end
     end
     local w, d
     local first = #items + 1
     if C.FLOW == "row" then w, d = place_row(sec, x, half_rows, items)
-    else w, d = place_column(sec, x, half_rows, items) end
+    else w, d = place_column(sec, x, half_rows, items, spacers) end
     -- a section styled by the divider in front of it
     local sp = splitters[si - 1]
     if sp and sp.type == "divider" and P.section_style(sp) and w > 0 then
@@ -263,7 +288,8 @@ function P.layout(controls, panel_h)
     if d > deepest then deepest = d end
   end
 
-  return { rows = rows, items = items, rules = rules, width = x, sections = styled,
+  return { rows = rows, items = items, rules = rules, width = x, sections = styled, gaps = gaps,
+           spacers = spacers,
            height = math.max(1, math.min(half_rows, deepest)) * HALF_H }
 end
 
@@ -451,6 +477,7 @@ end
 -- set up by the faceplate code further down (see bg_at there).
 local bg_at
 local push_plate, pop_plate, mix   -- the faceplate swap and colour mix, defined with the faceplates below
+local draw_backs                   -- controls' own backgrounds, defined above draw_controls
 
 function P.grv_label(win) return Tr.label(win) end
 
@@ -895,6 +922,85 @@ end
 -- body
 -- ---------------------------------------------------------------------
 
+-- A shape's outline as a path, its corners rounded (radius `r`, less where
+-- an edge is too short for it): each corner is an arc from the incoming
+-- edge's tangent point to the outgoing one's.
+local function sgn(v) return (v > 0 and 1) or (v < 0 and -1) or 0 end
+local function back_path(dl, ox, oy, pts, r)
+  local n = #pts // 2
+  for m = 1, n do
+    local pm = (m - 2) % n + 1
+    local nm = m % n + 1
+    local px, py = pts[2 * m - 1], pts[2 * m]
+    local qx, qy = pts[2 * pm - 1], pts[2 * pm]
+    local sx, sy = pts[2 * nm - 1], pts[2 * nm]
+    local ax, ay = sgn(px - qx), sgn(py - qy)
+    local bx, by = sgn(sx - px), sgn(sy - py)
+    local rr = math.min(r, (math.abs(px - qx) + math.abs(py - qy)) / 2,
+                           (math.abs(sx - px) + math.abs(sy - py)) / 2)
+    local cx, cy = px - ax * rr + bx * rr, py - ay * rr + by * rr
+    local a0 = math.atan(-by, -bx)
+    local d = math.atan(ay, ax) - a0
+    while d > math.pi do d = d - 2 * math.pi end
+    while d < -math.pi do d = d + 2 * math.pi end
+    ImGui.DrawList_PathArcTo(dl, ox + cx, oy + cy, rr, a0, a0 + d, 4)
+  end
+end
+
+-- What a shape sits on: its section's faceplate, if the control it starts
+-- from is in one, else the panel's own colour.
+local function back_base(lay, item)
+  if item and item.sec then
+    local kind, pl = P.section_style(lay.sections[item.sec].by)
+    if kind == "plate" then return pl.bg end
+  end
+  return C.COL.panel_bg
+end
+
+draw_backs = function(dl, gx0, gy0, lay)
+  local rects, owner = {}, {}
+  local function take(it)
+    if it.ctl.back and P.back_style(it.ctl.back) and it.sx then
+      rects[#rects + 1] = { it.sx, it.y, it.sx + it.sw, it.y + hy(it.h), it.ctl.back }
+      owner[#rects] = it
+    end
+  end
+  for _, it in ipairs(lay.items) do take(it) end
+  for _, sp in ipairs(lay.spacers or {}) do take(sp) end
+  if #rects == 0 then return end
+  local gaps = {}
+  for _, g in ipairs(lay.gaps or {}) do gaps[#gaps + 1] = { g.x, g.x + g.w } end
+  for _, sh in ipairs(TL.shapes(rects, gaps, 2)) do
+    -- the control it starts from: the first of its key whose middle is in it
+    local from
+    for k, r in ipairs(rects) do
+      if r[5] == sh.key and TL.inside(sh.outer, (r[1] + r[3]) / 2, (r[2] + r[4]) / 2) then from = owner[k] break end
+    end
+    local base = back_base(lay, from)
+    local kind, pl = P.back_style(sh.key)
+    local fill, edge
+    if kind == "plate" then
+      fill, edge = pl.bg, pl.border
+    else
+      fill = U.is_light(base) and mix(base, 0x000000ff, 0.10) or mix(base, 0xffffffff, 0.05)
+      edge = 0x00000040
+    end
+    back_path(dl, gx0, gy0, sh.outer, 4)
+    ImGui.DrawList_PathFillConcave(dl, fill)
+    -- a hole shows what's under the shape again
+    for _, h in ipairs(sh.holes) do
+      back_path(dl, gx0, gy0, h, 4)
+      ImGui.DrawList_PathFillConcave(dl, base)
+    end
+    back_path(dl, gx0, gy0, sh.outer, 4)
+    ImGui.DrawList_PathStroke(dl, edge, ImGui.DrawFlags_Closed, 1.0)
+    for _, h in ipairs(sh.holes) do
+      back_path(dl, gx0, gy0, h, 4)
+      ImGui.DrawList_PathStroke(dl, edge, ImGui.DrawFlags_Closed, 1.0)
+    end
+  end
+end
+
 -- `panel_h` is the panel's FULL height, header included -- the same value
 -- P.width() was given, so the column count here can't disagree with the
 -- width the panel was allotted.
@@ -988,6 +1094,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       gx0 + rx, gy0 + lay.height - 2, C.COL.knob_ring, 1.0)
   end
 
+  -- Controls' own backgrounds, over the sections and the rules: controls
+  -- side by side or stacked with the same background join into one shape
+  -- (TS_CV_Tiles), across a divider too. Recomputed every frame from
+  -- where the layout put them, so they follow every resize and reorder.
+  draw_backs(dl, gx0, gy0, lay)
+
   -- The layout pass placed everything; this only has to draw it. Note the
   -- index into `controls` is tracked separately, because dividers take a
   -- place in the list but not in the grid.
@@ -1000,9 +1112,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
     ImGui.SetCursorScreenPos(ctx, gx0 + item.x, gy0 + item.y)
 
-    -- a control on a section's own faceplate takes that plate's inks
+    -- a control on its own background's faceplate, or else its
+    -- section's, takes that plate's inks
     local sec_saved
-    if item.sec then
+    local bkind, bpl = P.back_style(ctl.back)
+    if bkind == "plate" then
+      sec_saved = push_plate(bpl)
+    elseif item.sec then
       local kind, pl = P.section_style(lay.sections[item.sec].by)
       if kind == "plate" then sec_saved = push_plate(pl) end
     end
@@ -1160,6 +1276,18 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     -- permanent x over every knob buys nothing for that -- unlike a send,
     -- which has nowhere else to be removed from.
     if sec_saved then pop_plate(sec_saved) end
+  end
+
+  -- half-gaps: nothing to draw, but a right-click on one opens its menu
+  -- (it can have a background)
+  for _, sp in ipairs(lay.spacers or {}) do
+    local si
+    for k, c in ipairs(controls) do if c == sp.ctl then si = k break end end
+    if si then
+      ImGui.SetCursorScreenPos(ctx, gx0 + sp.sx, gy0 + sp.y)
+      local _, _, act = W.blank(ctx, ("g%d##%s_%d"):format(si, fx.guid, si), sp.sw, hy(sp.h))
+      if act.right_click then req.ctx_control = si end
+    end
   end
 end
 

@@ -3485,6 +3485,56 @@ do
   reaper.TrackFX_GetFXName, reaper.TrackFX_GetNamedConfigParm = saved[1], saved[2]
 end
 
+-- Control backgrounds: the shapes neighbours with the same one make
+do
+  local TL = require("TS_CV_Tiles")
+  local function desc(sh)
+    local t = {}
+    for _, s in ipairs(sh) do t[#t + 1] = s.key .. ":" .. table.concat(s.outer, ",") .. (#s.holes > 0 and ("+" .. #s.holes .. "h") or "") end
+    table.sort(t)
+    return table.concat(t, " ")
+  end
+  check("backs: one control, padded", desc(TL.shapes({ { 0, 0, 50, 64, "a" } }, {}, 2)), "a:2,2,48,2,48,62,2,62")
+  check("backs: a row joins", desc(TL.shapes({ { 0, 0, 50, 64, "a" }, { 50, 0, 100, 64, "a" } }, {}, 0)), "a:0,0,100,0,100,64,0,64")
+  check("backs: a column joins", desc(TL.shapes({ { 0, 0, 50, 64, "a" }, { 0, 64, 50, 128, "a" } }, {}, 0)), "a:0,0,50,0,50,128,0,128")
+  check("backs: different ones don't", #TL.shapes({ { 0, 0, 50, 64, "a" }, { 50, 0, 100, 64, "b" } }, {}, 0), 2)
+  check("backs: an L is one shape", desc(TL.shapes({ { 0, 0, 50, 64, "a" }, { 0, 64, 50, 128, "a" }, { 50, 64, 100, 128, "a" } }, {}, 0)),
+        "a:0,0,50,0,50,64,100,64,100,128,0,128")
+  local L2 = TL.shapes({ { 0, 0, 50, 64, "a" }, { 0, 64, 50, 128, "a" }, { 50, 64, 100, 128, "a" } }, {}, 2)
+  check("backs: the L's inside corner moves in too", table.concat(L2[1].outer, ","), "2,2,48,2,48,66,98,66,98,126,2,126")
+  local ring = {}
+  for i = 0, 2 do for j = 0, 2 do ring[#ring + 1] = { i * 50, j * 64, i * 50 + 50, j * 64 + 64, (i == 1 and j == 1) and "b" or "a" } end end
+  check("backs: a ring has a hole", desc(TL.shapes(ring, {}, 0)), "a:0,0,150,0,150,192,0,192+1h b:50,64,100,64,100,128,50,128")
+  check("backs: corners touching stay apart", #TL.shapes({ { 0, 0, 50, 64, "a" }, { 50, 64, 100, 128, "a" } }, {}, 0), 2)
+  check("backs: across a divider", desc(TL.shapes({ { 0, 0, 50, 64, "a" }, { 59, 0, 109, 64, "a" } }, { { 50, 59 } }, 0)), "a:0,0,109,0,109,64,0,64")
+  check("backs: not across for different ones", #TL.shapes({ { 0, 0, 50, 64, "a" }, { 59, 0, 109, 64, "b" } }, { { 50, 59 } }, 0), 2)
+  check("backs: a divider with one side only", desc(TL.shapes({ { 0, 0, 50, 64, "a" }, { 59, 0, 109, 64, "a" } , { 0, 64, 50, 128, "a" } }, { { 50, 59 } }, 0)),
+        "a:0,0,109,0,109,64,50,64,50,128,0,128")
+  -- the layout gives each control its whole column and the dividers' gaps
+  local rows_for, cw0 = P.rows_for, C.CELL_W
+  P.rows_for = function(r) return r end
+  C.set_cell_w(58)
+  local lay = P.layout({ { type = "knob", size = "large" }, { type = "knob" }, { type = "divider" }, { type = "knob" } }, 3)
+  check("backs: a medium under a large spans the column", lay.items[2].sx .. "/" .. lay.items[2].sw, "0/87")
+  check("backs: the divider's gap", lay.gaps[1].x .. "/" .. lay.gaps[1].w, "87/9")
+  local lh = P.layout({ { type = "knob", back = "inset" }, { type = "half_gap", back = "inset" }, { type = "knob", back = "inset" } }, 3)
+  check("backs: a half-gap has a place", #lh.spacers .. ":" .. lh.spacers[1].sx .. "/" .. lh.spacers[1].y .. "/" .. lh.spacers[1].sw, "1:0/64/58")
+  check("backs: it isn't a control", #lh.items, 2)
+  P.rows_for, C.CELL_W = rows_for, cw0
+  -- the Back line
+  local MP = require("TS_CV_Mappings")
+  MP.set("BackPlug", { controls = { { param = 0, type = "knob", label = "A", back = "inset" },
+                                    { param = 1, type = "knob", label = "B", back = "cream" },
+                                    { param = 2, type = "knob", label = "C", back = "nope" } } })
+  MP.save(); MP.reload()
+  local bc = MP.get("BackPlug").controls
+  check("backs: inset round-trips", bc[1].back, "inset")
+  check("backs: a plate round-trips", bc[2].back, "cream")
+  check("backs: unknown dropped", bc[3].back, nil)
+  check("backs: copied", MP.copy(MP.get("BackPlug")).controls[2].back, "cream")
+  MP.remove("BackPlug"); MP.save(); MP.reload()
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

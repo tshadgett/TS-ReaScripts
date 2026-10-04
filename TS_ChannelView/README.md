@@ -363,6 +363,11 @@ default), shared with the TCP window and the web page.
   the next divider. Right-click any of them ▸ Section to put them on an
   **inset** or on a **faceplate of their own**. To style the first group,
   start the panel with a divider with *Line* off.
+- **Backgrounds.** Right-click a control ▸ Background for an inset or a
+  faceplate behind that one control, over its section's. Neighbours with
+  the same background — side by side, stacked, or facing each other across
+  a divider — join into one rounded shape, always the full width of their
+  column. Gaps and half-gaps (right-click the empty space) can have one too.
 
 ## Naming: alias vs label
 

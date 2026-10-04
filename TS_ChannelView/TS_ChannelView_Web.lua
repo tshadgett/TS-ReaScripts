@@ -294,6 +294,15 @@ local function panel_of(fx, i)
     elseif o.t ~= "blank" and o.t ~= "half_gap" then
       o.t = "missing"
     end
+    -- its own background: inset, or a faceplate (with that plate's inks)
+    if ctl.back and o.t ~= "divider" then
+      if ctl.back == "inset" then o.bk = "inset"
+      elseif C.plate_of(ctl.back) then
+        local pl = C.plate_of(ctl.back)
+        o.bk = ctl.back
+        o.bp = { bg = hex(pl.bg), border = hex(pl.border), text = hex(pl.text), dim = hex(pl.dim), tick = hex(pl.tick) }
+      end
+    end
     ctls[#ctls + 1] = o
   end
   local meter = M.meter_of(layout)

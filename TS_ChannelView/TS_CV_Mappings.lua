@@ -23,6 +23,7 @@
       Style<n> = <style>|<cap colour>
       Size<n>  = small | large
       Buttons<n> = across | down | <how many>
+      Back<n>  = inset | <faceplate>
       Plate    = <faceplate>
       Brush    = <1|0>
 
@@ -80,6 +81,8 @@
   line it is the ordinary size, and an older ChannelView ignores the line.
   Buttons<n> shows dropdown n as buttons -- across or down -- and keeps
   how many choices it had, which is how much room the buttons take.
+  Back<n> is control n's own background, an inset or a faceplate, drawn
+  over its section's; neighbours with the same one join into one shape.
 
   METER turns the gain-reduction strip on for this plugin and sets its
   full-scale range. It sits at the layout level rather than in the control
@@ -106,6 +109,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. ";   parameter (flags bit 8 does the same for one slot)\n"
                 .. "; Style<n>=<knob or fader style>|<cap colour>, for control n (a toggle: |<lit colour>)\n"
                 .. "; Size<n>=small|large: knob n's size (no line: medium)\n"
+                .. "; Back<n>=inset|<faceplate>: control n's own background\n"
                 .. "; Plate=<faceplate>\n"
                 .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own"
 
@@ -143,6 +147,13 @@ end
 local function nbtn_of(v)
   local n = tonumber(U.trim(v or ""):match("|%s*(%d+)"))
   return (n and n >= 2 and n <= C.BUTTONS_MAX) and n or nil
+end
+
+-- Back<n>=inset or a faceplate's key: a control's own background.
+local function back_of(v)
+  v = U.trim(v or "")
+  if v == "inset" or C.plate_of(v) then return v end
+  return nil
 end
 
 -- Brush=1 / Brush=0, or nil for none set (the faceplate's own grain).
@@ -213,6 +224,7 @@ local function parse_section(sect)
         cap     = (cap and cap ~= "") and cap or nil,
         size    = size_of(sect["Size" .. i]),
         buttons = buttons_of(sect["Buttons" .. i]),
+        back    = back_of(sect["Back" .. i]),
         nbtn    = nbtn_of(sect["Buttons" .. i]),
       }
     end
@@ -263,6 +275,7 @@ local function serialize(layout)
       out["Style" .. (i - 1)] = (c.style or "") .. "|" .. (c.cap or "")
     end
     if size_of(c.size) then out["Size" .. (i - 1)] = c.size end
+    if back_of(c.back) then out["Back" .. (i - 1)] = c.back end
     if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
@@ -511,7 +524,7 @@ function M.copy(layout)
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
-                        buttons = c.buttons, nbtn = c.nbtn }
+                        buttons = c.buttons, nbtn = c.nbtn, back = c.back }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.states = {}

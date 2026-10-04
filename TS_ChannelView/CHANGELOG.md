@@ -1,5 +1,24 @@
 # ChannelView — changelog
 
+## 1.8.1 — control backgrounds
+
+- **A background for any control.** Right-click a control ▸ **Background**
+  (or the Background column in the editor): an inset, or any faceplate
+  colour, drawn behind that one control over its section's.
+- **Neighbours join up.** Controls side by side or above each other with
+  the same background become one shape with rounded corners — an L, a
+  block, a ring round a different one — outlined once round the outside.
+  A background always fills the control's whole column, and two controls
+  facing each other across a divider join over it. A control with no
+  background shows its section's.
+- **Half-gaps and gaps** can have one too (right-click the empty space), so
+  they can join a shape or bridge two.
+- Controls on a faceplate-coloured background take that plate's label and
+  tick colours. The shapes follow every resize and reorder as it happens.
+- **Values under controls** are in the small type, just under the dial or
+  button, so they no longer hang off the bottom of the cell.
+- The web page draws the same shapes.
+
 ## 1.8.0 — hardware looks, sizes, button rows, sections
 
 Every existing layout looks and lays out exactly as before until you change

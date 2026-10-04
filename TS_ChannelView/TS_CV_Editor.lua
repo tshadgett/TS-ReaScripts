@@ -421,6 +421,29 @@ local function draw_entry_editor(ctx)
     end
   end
 
+  -- its own background (an inset or a faceplate), joined with neighbours'
+  if c.type ~= "divider" then
+    local names, keys = { "No background", "Inset" }, { "", "inset" }
+    local cur_b = (c.back == "inset") and 1 or 0
+    for _, pl in ipairs(C.PLATES) do
+      if pl.bg then
+        names[#names + 1] = "Back: " .. pl.label; keys[#keys + 1] = pl.key
+        if c.back == pl.key then cur_b = #keys - 1 end
+      end
+    end
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 130)
+    local bch, bi = ImGui.Combo(ctx, "Background", cur_b, table.concat(names, "\0") .. "\0")
+    if bch then
+      local k = keys[bi + 1]
+      c.back = (k ~= "") and k or nil
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "This control's own background. Neighbours with the same one\n" ..
+        "join into one shape, across a divider too.")
+    end
+  end
+
   if c.type == "toggle" then
     ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, 80)

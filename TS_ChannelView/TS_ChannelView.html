@@ -223,6 +223,8 @@ button { font: inherit; color: inherit; }
 .sect { position: absolute; border-radius: 6px; border: 1px solid rgba(0,0,0,0.25); pointer-events: none; }
 .sect.inset { background: rgba(0,0,0,0.12); box-shadow: inset 0 2px 3px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.08); }
 .sect.plate { box-shadow: inset 0 1px 0 rgba(255,255,255,0.12); }
+.bks { position: absolute; pointer-events: none; overflow: visible; }
+.sect.inset.dk { background: rgba(255,255,255,0.055); }
 /* a dropdown's choices as buttons */
 .brow { display: flex; gap: 2px; margin: 4px auto 0; }
 .brow.across { flex-direction: row; }
@@ -943,16 +945,19 @@ function placeControls(ctls, bodyH) {
   });
   let x = 0;
   const styled = [];   // sections a divider styled (experimental): { x, w, by }
+  const gaps = [];     // dividers' gaps, [x0, x1]
+  const spacers = [];  // half-gaps, placed but not controls
   sections.forEach((sec, si) => {
     const first = items.length;
     if (si > 0) {
       const sp = splitters[si - 1];
-      if (sp.t === "fader") { items.push({ c: sp, x, y: 0, h: rows * CELL_H, wu: 2, hu: halfRows }); x += CELL_W; }
-      else { if (!sp.nr) rules.push(x + DIV_W / 2); x += DIV_W; }
+      if (sp.t === "fader") { items.push({ c: sp, x, y: 0, h: rows * CELL_H, wu: 2, hu: halfRows, sx: x, sw: CELL_W }); x += CELL_W; }
+      else { if (!sp.nr) rules.push(x + DIV_W / 2); gaps.push([x, x + DIV_W]); x += DIV_W; }
     }
     let cx = 0, cy = 0, sw = 0, strip = [];
     const close = () => {
-      strip.forEach(it => { if (it.wu < sw) it.x += (sw - it.wu) * HW / 2; });
+      // narrower ones centred; each keeps its whole column, for its background
+      strip.forEach(it => { if (it.wu < sw) it.x += (sw - it.wu) * HW / 2; it.sx = x + cx * HW; it.sw = sw * HW; });
       strip = []; cx += sw; cy = 0; sw = 0;
     };
     for (const c of sec) {
@@ -961,6 +966,10 @@ function placeControls(ctls, bodyH) {
       if (c.t !== "half_gap") {
         const it = { c, x: x + cx * HW, y: cy * HH, wu: w, hu: hh, kind };
         items.push(it); strip.push(it);
+      } else {
+        // not a control, but it has a place, and maybe a background
+        const sp = { c, x: x + cx * HW, y: cy * HH, wu: w, hu: hh };
+        spacers.push(sp); strip.push(sp);
       }
       cy += hh;
       if (w > sw) sw = w;
@@ -974,7 +983,91 @@ function placeControls(ctls, bodyH) {
     }
     x += width * HW;
   });
-  return { items, rules, width: x, rows, sections: styled };
+  return { items, rules, width: x, rows, sections: styled, gaps, spacers };
+}
+
+// Controls' own backgrounds joined into shapes -- TS_CV_Tiles.shapes, the
+// same tracing: a lattice from every edge in play, each cell keyed by the
+// control covering it, a gap cell between two of the same filled (the
+// background trumps the divider), the boundary chained into loops with
+// the inside on the right, each edge moved in by `pad`. Outer loops come
+// out clockwise, holes the other way.
+function backShapes(rects, gaps, pad) {
+  if (!rects.length) return [];
+  const uniq = a => [...new Set(a.map(v => Math.round(v * 1000) / 1000))].sort((p, q) => p - q);
+  const xs = uniq(rects.flatMap(r => [r[0], r[2]]).concat(gaps.flat())), ys = uniq(rects.flatMap(r => [r[1], r[3]]));
+  const nx = xs.length - 1, ny = ys.length - 1, key = [];
+  for (let i = 0; i < nx; i++) {
+    key[i] = [];
+    const cx = (xs[i] + xs[i + 1]) / 2;
+    for (let j = 0; j < ny; j++) {
+      const cy = (ys[j] + ys[j + 1]) / 2;
+      const r = rects.find(r => cx > r[0] && cx < r[2] && cy > r[1] && cy < r[3]);
+      key[i][j] = r ? r[4] : null;
+    }
+  }
+  for (const g of gaps) {
+    const i = xs.indexOf(Math.round(g[0] * 1000) / 1000);
+    if (i > 0 && i < nx - 1 && Math.abs(xs[i + 1] - g[1]) < 1e-3)
+      for (let j = 0; j < ny; j++) {
+        const l = key[i - 1][j], r = key[i + 1][j];
+        if (key[i][j] == null && l != null && l === r) key[i][j] = l;
+      }
+  }
+  const k = (i, j) => (key[i] && key[i][j] !== undefined) ? key[i][j] : null;
+  const from = new Map(), edges = [];
+  const add = (x0, y0, x1, y1, kk) => { const e = { x0, y0, x1, y1, kk, used: false }; edges.push(e);
+    const s = x0 + "," + y0; if (!from.has(s)) from.set(s, []); from.get(s).push(e); };
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+    const kk = key[i][j]; if (kk == null) continue;
+    const x0 = xs[i], x1 = xs[i + 1], y0 = ys[j], y1 = ys[j + 1];
+    if (k(i, j - 1) !== kk) add(x0, y0, x1, y0, kk);
+    if (k(i + 1, j) !== kk) add(x1, y0, x1, y1, kk);
+    if (k(i, j + 1) !== kk) add(x1, y1, x0, y1, kk);
+    if (k(i - 1, j) !== kk) add(x0, y1, x0, y0, kk);
+  }
+  const sg = v => v > 0 ? 1 : v < 0 ? -1 : 0, loops = [];
+  for (const e0 of edges) {
+    if (e0.used) continue;
+    const pts = []; let e = e0, guard = 0;
+    while (e && guard++ < 10000) {
+      e.used = true;
+      pts.push([e.x0, e.y0, sg(e.x1 - e.x0), sg(e.y1 - e.y0)]);
+      const dx = e.x1 - e.x0, dy = e.y1 - e.y0;
+      let pick = null;
+      for (const c of from.get(e.x1 + "," + e.y1) || [])
+        if (!c.used && c.kk === e.kk) { const cr = dx * (c.y1 - c.y0) - dy * (c.x1 - c.x0); if (!pick || cr > 0) pick = c; }
+      e = pick;
+    }
+    const out = [];
+    for (let m = 0; m < pts.length; m++) {
+      const p = pts[(m - 1 + pts.length) % pts.length], c = pts[m];
+      if (p[2] !== c[2] || p[3] !== c[3]) out.push([c[0] + (-p[3] - c[3]) * pad, c[1] + (p[2] + c[2]) * pad]);
+    }
+    if (out.length >= 4) loops.push({ kk: e0.kk, pts: out });
+  }
+  const area = p => p.reduce((s, q, i) => { const n = p[(i + 1) % p.length]; return s + q[0] * n[1] - n[0] * q[1]; }, 0) / 2;
+  const inside = (p, x, y) => { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+    const [xi, yi] = p[i], [xj, yj] = p[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  const shapes = loops.filter(l => area(l.pts) > 0).map(l => ({ key: l.kk, outer: l.pts, holes: [] }));
+  for (const h of loops.filter(l => area(l.pts) <= 0)) {
+    const s = shapes.find(s => s.key === h.kk && inside(s.outer, h.pts[0][0], h.pts[0][1]));
+    if (s) s.holes.push(h.pts);
+  }
+  return shapes;
+}
+// a loop as an SVG path with rounded corners
+function roundedLoop(pts, r) {
+  const n = pts.length, sg = v => v > 0 ? 1 : v < 0 ? -1 : 0;
+  let d = "";
+  for (let m = 0; m < n; m++) {
+    const q = pts[(m - 1 + n) % n], p = pts[m], s = pts[(m + 1) % n];
+    const ax = sg(p[0] - q[0]), ay = sg(p[1] - q[1]), bx = sg(s[0] - p[0]), by = sg(s[1] - p[1]);
+    const rr = Math.min(r, (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1])) / 2, (Math.abs(s[0] - p[0]) + Math.abs(s[1] - p[1])) / 2);
+    const t1 = [p[0] - ax * rr, p[1] - ay * rr], t2 = [p[0] + bx * rr, p[1] + by * rr];
+    d += (m === 0 ? "M" : "L") + t1.map(f2).join(" ") + "Q" + p.map(f2).join(" ") + " " + t2.map(f2).join(" ");
+  }
+  return d + "Z";
 }
 
 // ---------------------------------------------------------------------------
@@ -2244,15 +2337,39 @@ function buildPanel(p, bodyH) {
   // styled sections (experimental), behind the controls
   for (const s of lay.sections || []) {
     const d = h("div", "sect " + s.by.sec);
+    if (s.by.sec === "inset" && lum((pl && pl.bg) || PAL.panel_bg || css("--panel") || "#202327") <= 0.45) d.classList.add("dk");
     d.style.left = (gridX + s.x - 4) + "px"; d.style.top = (PAD - 4) + "px";
     d.style.width = (s.w + 8) + "px"; d.style.height = (lay.rows * CELL_H - 2) + "px";
     if (s.by.sp) { d.style.background = s.by.sp.bg; d.style.borderColor = s.by.sp.border; }
     body.append(d);
   }
+  // controls' own backgrounds, joined with their neighbours', over the
+  // sections and rules
+  const bkRects = [], bkPlate = {};
+  for (const it of lay.items.concat(lay.spacers || [])) {
+    const c = it.c;
+    if (!c.bk || it.sx == null) continue;
+    bkRects.push([it.sx, it.y, it.sx + it.sw, it.y + (it.h || CELL_H * it.hu / 2), c.bk]);
+    if (c.bp) bkPlate[c.bk] = c.bp;
+  }
+  const bkShapes = backShapes(bkRects, lay.gaps || [], 3);
+  // an inset is a shade darker than what it's on, or lighter on a dark one
+  const under = (pl && pl.bg) || PAL.panel_bg || css("--panel") || "#202327";
+  const insetFill = lum(under) > 0.45 ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.055)";
+  const bkSvg = bkShapes.length ? el("svg", { width: lay.width + 8, height: lay.rows * CELL_H + 8 }) : null;
+  for (const s of bkShapes) {
+    const pl = bkPlate[s.key];
+    el("path", { d: [s.outer, ...s.holes].map(l => roundedLoop(l, 6)).join(" "), "fill-rule": "evenodd",
+      fill: pl ? pl.bg : insetFill, stroke: pl ? pl.border : "rgba(0,0,0,0.35)", "stroke-width": 1,
+      transform: "translate(4 4)" }, bkSvg);
+  }
+  if (bkSvg) { bkSvg.classList.add("bks"); bkSvg.style.left = (gridX - 4) + "px"; bkSvg.style.top = (PAD - 4) + "px"; }
+
   for (const rx of lay.rules) {
     const r = h("div", "rule"); r.style.left = (gridX + rx) + "px"; r.style.top = PAD + "px";
     r.style.height = (lay.rows * CELL_H - 8) + "px"; body.append(r);
   }
+  if (bkSvg) body.append(bkSvg);
   for (const it of lay.items) {
     const c = it.c, cell = h("div", "cell");
     // the size it was given room for: small and large knobs (a size too
@@ -2260,8 +2377,8 @@ function buildPanel(p, bodyH) {
     const size = it.wu === 2 && it.hu === 1 ? "small" : it.wu === 3 && it.hu === 3 ? "large" : "medium";
     const cw = CELL_W * it.wu / 2;
     cell.style.left = (gridX + it.x) + "px"; cell.style.top = (PAD + it.y) + "px"; cell.style.width = cw + "px";
-    // on a section's own plate, that plate's inks
-    const sp = it.sec != null && lay.sections[it.sec].by.sp;
+    // on its own background's plate, or else its section's, that plate's inks
+    const sp = c.bp || (it.sec != null && lay.sections[it.sec].by.sp);
     if (sp) for (const [k, v] of [["--label", sp.text], ["--value", sp.dim], ["--dim", sp.dim], ["--text", sp.text], ["--ring", sp.tick]]) cell.style.setProperty(k, v);
     body.append(cell);
     const id = p.g + ":" + c.idx;

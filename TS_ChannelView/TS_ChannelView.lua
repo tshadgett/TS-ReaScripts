@@ -1,18 +1,14 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.8.0
+-- @version 1.8.1
 -- @changelog
---  New knob styles: Bar, Fluted, Bezel, Reverse bezel and Hi-fi; Silver and
---  Stone cap colours; Stone, Cobalt and Amber faceplates, and a Brushed
---  finish for any faceplate.
---  Knob sizes (Small, Medium, Large) and small toggles; toggle buttons say
---  the state's name, with state names of your own and lit colours.
---  Dropdowns as a row or column of buttons. Sections (experimental): a
---  divider can put the controls after it on an inset or a faceplate.
---  View > Control spacing (default now 50 px, narrower panels).
---  Plugins renamed in REAPER's FX chain show that name and keep their
---  layout; rename from the panel menu. Enter commits every text box.
---  The web page follows all of it. Existing layouts are unchanged.
+--  A background for any control (right-click > Background): an inset or a
+--  faceplate colour behind it, over its section's. Neighbours with the same
+--  background, side by side or stacked, join into one rounded shape, across
+--  a divider too; it always fills the control's column. Gaps and half-gaps
+--  can have one as well.
+--  Values under controls are smaller and sit just under the control.
+--  The web page draws the same shapes.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -51,6 +47,7 @@
 --  [nomain] TS_CV_State.lua
 --  [nomain] TS_CV_Steps.lua
 --  [nomain] TS_CV_Taps.lua
+--  [nomain] TS_CV_Tiles.lua
 --  [nomain] TS_CV_Trace.lua
 --  [nomain] TS_CV_TrackMenu.lua
 --  [nomain] TS_CV_TrackOps.lua
@@ -529,6 +526,37 @@ local function toggle_colour_menu(fx, key, idx, c)
   end
 end
 
+-- A control's own background: nothing (its section's shows), an inset, or
+-- a faceplate. Controls next to each other with the same one join up.
+local function back_menu(fx, key, idx, c)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local now = c.back or "none"
+  local function set(v)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.back = v end
+    M.set(key, l); M.save()
+  end
+  ImGui.TextDisabled(ctx, "Behind this control")
+  if ImGui.Selectable(ctx, "None##back_none", now == "none", KEEP_OPEN, 170, 0) then set(nil) end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its section's background (or the panel's) shows.") end
+  if ImGui.Selectable(ctx, "Inset##back_inset", now == "inset", KEEP_OPEN, 170, 0) then set("inset") end
+  for _, pl in ipairs(C.PLATES) do
+    if pl.bg then
+      local x, y = ImGui.GetCursorScreenPos(ctx)
+      if ImGui.Selectable(ctx, "      " .. pl.label .. "##back_" .. pl.key, now == pl.key, KEEP_OPEN, 170, 0) then
+        set(pl.key)
+      end
+      local _, th = ImGui.CalcTextSize(ctx, "Ag")
+      local sy = y + (th - SWATCH_H) * 0.5
+      ImGui.DrawList_AddRectFilled(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.bg, 2.0)
+      ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.border, 2.0, 0, 1.0)
+    end
+  end
+  ImGui.Spacing(ctx)
+  ImGui.TextWrapped(ctx, "Controls side by side or above each other with the same background join into one shape, across a divider too.")
+end
+
 -- EXPERIMENTAL: what a divider does to the section after it (up to the
 -- next divider) -- nothing, an inset behind it, or a faceplate of its own.
 local function section_menu(fx, key, idx, c)
@@ -889,6 +917,13 @@ local function control_menu()
 
   if (style_family(c.type) or (c.type == "combo" and c.buttons)) and ImGui.BeginMenu(ctx, "Style") then
     style_menu(fx, key, cm.ctl, c)
+    ImGui.EndMenu(ctx)
+  end
+
+  -- its own background, over its section's; neighbours with the same one
+  -- join into one shape
+  if c.type ~= "divider" and ImGui.BeginMenu(ctx, "Background") then
+    back_menu(fx, key, cm.ctl, c)
     ImGui.EndMenu(ctx)
   end
 
