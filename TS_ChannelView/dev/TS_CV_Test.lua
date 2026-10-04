@@ -260,13 +260,16 @@ do
 end
 
 -- panel geometry: fixed height, grows in columns. Measured without the
--- preset bar; the bar's own cost is checked just below.
+-- panel's foot; the foot's own cost is checked just below.
 do
   local CC = require("TS_CV_Config")
   CC.PRESET_BAR = true
   local with_bar = P.rows_for(300 + CC.FOOTER_H)
   CC.PRESET_BAR = false
-  check("preset bar: its height comes off the body", with_bar, P.rows_for(300))
+  check("foot: there with the preset bar off too (the lock)", P.rows_for(300 + CC.FOOTER_H), with_bar)
+  check("foot: its height comes off the body", P.footer_h(), CC.FOOTER_H)
+  CC.FOOTER_H = 0        -- the rest of the geometry, without it
+  check("foot: none, for the checks below", P.rows_for(300), 4)
 end
 local function n_knobs(n)
   local out = {}
@@ -3533,6 +3536,78 @@ do
   check("backs: unknown dropped", bc[3].back, nil)
   check("backs: copied", MP.copy(MP.get("BackPlug")).controls[2].back, "cream")
   MP.remove("BackPlug"); MP.save(); MP.reload()
+
+  -- brushed backgrounds and sections (Brush<n>)
+  local alu, cream = C.plate_of("aluminium"), C.plate_of("cream")
+  check("brush: aluminium is brushed of itself", MP.part_brushed("plate", alu, nil), true)
+  check("brush: cream isn't", MP.part_brushed("plate", cream, nil), false)
+  check("brush: an inset isn't", MP.part_brushed("inset", nil, nil), false)
+  check("brush: asked for on an inset", MP.part_brushed("inset", nil, true), true)
+  check("brush: turned off on aluminium", MP.part_brushed("plate", alu, false), false)
+  check("brush: nothing to brush", MP.part_brushed(nil, nil, true), false)
+  MP.set("BrushPlug", { controls = {
+    { param = 0, type = "knob", label = "A", back = "cream", brush = true },
+    { param = 1, type = "knob", label = "B", back = "aluminium", brush = false },
+    { param = -1, type = "divider", style = "inset", brush = true },
+    { param = 2, type = "knob", label = "C", brush = true },          -- no background: not saved
+    { param = -1, type = "divider", brush = true } } })               -- no section: not saved
+  MP.save(); MP.reload()
+  local brc = MP.get("BrushPlug").controls
+  check("brush: on a background round-trips", brc[1].brush, true)
+  check("brush: off round-trips", brc[2].brush, false)
+  check("brush: a section's round-trips", brc[3].brush, true)
+  check("brush: not without a background", brc[4].brush, nil)
+  check("brush: not without a section", brc[5].brush, nil)
+  check("brush: copied", MP.copy(MP.get("BrushPlug")).controls[1].brush, true)
+  MP.remove("BrushPlug"); MP.save(); MP.reload()
+  -- a brushed and a plain one of the same colour are different backgrounds
+  check("brush: key, brushed", (P.back_key({ back = "cream", brush = true })), "cream/b")
+  check("brush: key, plain", (P.back_key({ back = "cream" })), "cream")
+  check("brush: key, aluminium's own", (P.back_key({ back = "aluminium" })), "aluminium/b")
+  check("brush: key, none", P.back_key({}), nil)
+  -- the grain keeps clear of the edges, round an L and its inside corner
+  local L = TL.shapes({ { 0, 0, 50, 64, "a" }, { 0, 64, 50, 128, "a" }, { 50, 64, 100, 128, "a" } }, {}, 0)
+  local loops = { L[1].outer }
+  check("grain: the upright of the L", table.concat(P._inner_spans(loops, 0, 0, 30, 2), ","), "2,48")
+  check("grain: near the inside corner", table.concat(P._inner_spans(loops, 0, 0, 63, 2), ","), "2,48")
+  check("grain: the foot", table.concat(P._inner_spans(loops, 0, 0, 100, 2), ","), "2,98")
+  check("grain: none at the very top", #P._inner_spans(loops, 0, 0, 1, 2), 0)
+  local rg = TL.shapes(ring, {}, 0)
+  local outer
+  for _, sh in ipairs(rg) do if sh.key == "a" then outer = sh end end
+  check("grain: round a hole", table.concat(P._inner_spans({ outer.outer, outer.holes[1] }, 0, 0, 96, 2), ","), "2,48,102,148")
+end
+
+-- Layout lock: Lock=<rows> keeps the arrangement, and a short panel scrolls
+do
+  local MP = require("TS_CV_Mappings")
+  MP.set("LockPlug", { lock = 3, controls = { { param = 0, type = "knob", label = "A" } } })
+  MP.set("LockBad", { lock = 0, controls = { { param = 0, type = "knob", label = "A" } } })
+  MP.save(); MP.reload()
+  check("lock: round-trips", MP.locked(MP.get("LockPlug")), 3)
+  check("lock: nonsense dropped", MP.locked(MP.get("LockBad")), nil)
+  check("lock: copied", MP.copy(MP.get("LockPlug")).lock, 3)
+  check("lock: none on a plain layout", MP.locked({ controls = {} }), nil)
+  MP.remove("LockPlug"); MP.remove("LockBad"); MP.save(); MP.reload()
+
+  local cw0 = C.CELL_W
+  C.set_cell_w(58)
+  local function knobs(n) local t = {} for i = 1, n do t[i] = { type = "knob" } end return t end
+  local tall = C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + 6 * C.CELL_H
+  local short = C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + 2 * C.CELL_H
+  local a = P.layout(knobs(8), tall, 4)
+  local b = P.layout(knobs(8), short, 4)
+  check("lock: same rows however tall", a.rows .. "/" .. b.rows, "4/4")
+  check("lock: same arrangement", a.width .. "/" .. a.items[5].x .. "," .. a.items[5].y,
+        b.width .. "/" .. b.items[5].x .. "," .. b.items[5].y)
+  check("lock: unlocked reflows", P.layout(knobs(8), short).rows, 2)
+  check("lock: a tall panel doesn't scroll", P.scrolls(a, tall, 4), false)
+  check("lock: a short one does", P.scrolls(b, short, 4), true)
+  check("lock: unlocked never does", P.scrolls(b, short, nil), false)
+  check("lock: its scrollbar widens the panel",
+        P.width(knobs(16), short, false, false, nil, false, false, 4) - P.width(knobs(16), tall, false, false, nil, false, false, 4),
+        C.SCROLL_W + 2)
+  C.CELL_W = cw0
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

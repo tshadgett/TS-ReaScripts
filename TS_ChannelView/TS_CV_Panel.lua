@@ -30,10 +30,12 @@ local ImGui
 
 function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); PU.attach(imgui) end
 
--- The preset bar along an expanded panel's foot (TS_CV_PresetUI): View >
--- Preset bar. Its height comes off the body, so everything that sizes the
--- body -- the row count, the grid, the meters, the EQ canvas -- asks here.
-function P.footer_h() return C.PRESET_BAR and C.FOOTER_H or 0 end
+-- An expanded panel's foot: the layout lock at its left, and the preset
+-- bar (TS_CV_PresetUI, View > Preset bar) when that's on. It's always
+-- there, for the lock. Its height comes off the body, so everything that
+-- sizes the body -- the row count, the grid, the meters, the EQ canvas --
+-- asks here.
+function P.footer_h() return C.FOOTER_H end
 
 -- ---------------------------------------------------------------------
 -- geometry
@@ -232,8 +234,10 @@ local function place_row(sec, x0, half_rows, items)
   return hx(lim), deepest
 end
 
-function P.layout(controls, panel_h)
-  local rows  = P.rows_for(panel_h)
+-- `lock` is a locked layout's row count (Lock=<rows>): the arrangement it
+-- had then, whatever the panel's height now.
+function P.layout(controls, panel_h, lock)
+  local rows  = lock or P.rows_for(panel_h)
   local half_rows = rows * 2
   local items, rules = {}, {}
 
@@ -297,7 +301,14 @@ end
 -- don't have to pass one) and only ever matters for one thing: a ReaEQ
 -- panel isn't a grid at all, so none of the layout below applies to it --
 -- it gets a fixed canvas width instead. See TS_CV_EQPanel.lua.
-function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace)
+-- Whether a locked panel's grid is taller than its body, and scrolls.
+function P.scrolls(lay, panel_h, lock)
+  if not lock then return false end
+  local body = panel_h - C.HEADER_H - P.footer_h()
+  return C.GRID_TOP_PAD + lay.height + C.PANEL_PAD > body
+end
+
+function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock)
   if collapsed then return C.COLLAPSED_W end
   if key and RQ.is_eq(key) then
     return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
@@ -309,8 +320,10 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
     controls = {}
     for i = 1, n do controls[i] = { type = "knob" } end
   end
-  local lay = P.layout(controls, avail_h)
-  local w = math.max(C.PANEL_MIN_W, lay.width + C.PANEL_PAD * 2)
+  local lay = P.layout(controls, avail_h, lock)
+  -- a locked grid too tall for the panel scrolls, its scrollbar beside it
+  local sb = P.scrolls(lay, avail_h, lock) and C.SCROLL_W + 2 or 0
+  local w = math.max(C.PANEL_MIN_W, lay.width + sb + C.PANEL_PAD * 2)
   -- The meter is a strip, not a column: it adds its own narrow width
   -- rather than pushing the panel out by a whole CELL_W.
   if has_meter then w = w + C.METER_COL_W + C.PANEL_PAD end
@@ -478,6 +491,7 @@ end
 local bg_at
 local push_plate, pop_plate, mix   -- the faceplate swap and colour mix, defined with the faceplates below
 local draw_backs                   -- controls' own backgrounds, defined above draw_controls
+local draw_footer                  -- the panel's foot: lock and preset bar, defined above P.draw
 
 function P.grv_label(win) return Tr.label(win) end
 
@@ -926,6 +940,75 @@ end
 -- an edge is too short for it): each corner is an arc from the incoming
 -- edge's tangent point to the outgoing one's.
 local function sgn(v) return (v > 0 and 1) or (v < 0 and -1) or 0 end
+
+-- Brushed grain, the faceplate's (see draw_plate): a faint light line
+-- every 3 px and a faint dark one every 7, lighter on a dark surface.
+-- The lines are counted from `y0`, so sections and backgrounds in one grid
+-- share one grain. `spans(y)` gives the x ranges a line at height y may
+-- cover, as a flat { a1, b1, a2, b2 ... } list.
+local function grain(dl, bg, y0, ya, yb, spans)
+  local light = U.is_light(bg)
+  local hi, lo = light and 0xffffff09 or 0xffffff04, light and 0x00000007 or 0x0000000b
+  local function lines(col, step, off)
+    local ly = y0 + off + math.ceil((ya - y0 - off) / step) * step
+    while ly <= yb do
+      local sp = spans(ly)
+      for k = 1, #sp, 2 do
+        ImGui.DrawList_AddLine(dl, sp[k], ly + 0.5, sp[k + 1], ly + 0.5, col, 1.0)
+      end
+      ly = ly + step
+    end
+  end
+  lines(hi, 3, 2); lines(lo, 7, 4)
+end
+
+-- Where a horizontal line at `y` is inside a shape's loops (outer and
+-- holes, flat point lists offset by ox): the even-odd rule along the line,
+-- against the vertical edges -- every edge of a traced shape is upright or
+-- level.
+local function loop_spans(loops, ox, y)
+  local xs = {}
+  for _, p in ipairs(loops) do
+    local n = #p
+    for i = 1, n, 2 do
+      local j = (i + 2 > n) and 1 or i + 2
+      local ya, yb = p[i + 1], p[j + 1]
+      if p[i] == p[j] and ((ya <= y and y < yb) or (yb <= y and y < ya)) then xs[#xs + 1] = ox + p[i] end
+    end
+  end
+  table.sort(xs)
+  return xs
+end
+
+-- The same, kept `m` px clear of every edge, so the grain stays inside the
+-- rounded corners: a line's spans at y, less what isn't inside at y - m
+-- and y + m too, each end then pulled in by m.
+local function inner_spans(loops, ox, oy, y, m)
+  local function at(yy) return loop_spans(loops, ox, yy - oy) end
+  local a, b, c = at(y), at(y - m), at(y + m)
+  local out = {}
+  for i = 1, #a, 2 do
+    local lo, hi = a[i], a[i + 1]
+    -- clip [lo, hi] against each of b's and c's spans in turn
+    local cur = { lo, hi }
+    for _, other in ipairs({ b, c }) do
+      local nxt = {}
+      for k = 1, #cur, 2 do
+        for q = 1, #other, 2 do
+          local l, h = math.max(cur[k], other[q]), math.min(cur[k + 1], other[q + 1])
+          if h > l then nxt[#nxt + 1] = l; nxt[#nxt + 1] = h end
+        end
+      end
+      cur = nxt
+    end
+    for k = 1, #cur, 2 do
+      if cur[k + 1] - cur[k] > 2 * m then out[#out + 1] = cur[k] + m; out[#out + 1] = cur[k + 1] - m end
+    end
+  end
+  return out
+end
+P._inner_spans = inner_spans    -- for the tests
+
 local function back_path(dl, ox, oy, pts, r)
   local n = #pts // 2
   for m = 1, n do
@@ -957,12 +1040,23 @@ local function back_base(lay, item)
   return C.COL.panel_bg
 end
 
+-- A background's key for joining: what it is and whether it's brushed,
+-- so a brushed aluminium and a plain one stay two shapes.
+function P.back_key(ctl)
+  local kind, pl = P.back_style(ctl.back)
+  if not kind then return nil end
+  local br = M.part_brushed(kind, pl, ctl.brush)
+  return ctl.back .. (br and "/b" or ""), br
+end
+
 draw_backs = function(dl, gx0, gy0, lay)
-  local rects, owner = {}, {}
+  local rects, owner, brushed = {}, {}, {}
   local function take(it)
-    if it.ctl.back and P.back_style(it.ctl.back) and it.sx then
-      rects[#rects + 1] = { it.sx, it.y, it.sx + it.sw, it.y + hy(it.h), it.ctl.back }
+    local k, br = P.back_key(it.ctl)
+    if k and it.sx then
+      rects[#rects + 1] = { it.sx, it.y, it.sx + it.sw, it.y + hy(it.h), k }
       owner[#rects] = it
+      brushed[k] = br
     end
   end
   for _, it in ipairs(lay.items) do take(it) end
@@ -977,7 +1071,7 @@ draw_backs = function(dl, gx0, gy0, lay)
       if r[5] == sh.key and TL.inside(sh.outer, (r[1] + r[3]) / 2, (r[2] + r[4]) / 2) then from = owner[k] break end
     end
     local base = back_base(lay, from)
-    local kind, pl = P.back_style(sh.key)
+    local kind, pl = P.back_style((sh.key:gsub("/b$", "")))
     local fill, edge
     if kind == "plate" then
       fill, edge = pl.bg, pl.border
@@ -991,6 +1085,13 @@ draw_backs = function(dl, gx0, gy0, lay)
     for _, h in ipairs(sh.holes) do
       back_path(dl, gx0, gy0, h, 4)
       ImGui.DrawList_PathFillConcave(dl, base)
+    end
+    if brushed[sh.key] and C.PLATE_TEXTURE then
+      local loops = { sh.outer }
+      for _, h in ipairs(sh.holes) do loops[#loops + 1] = h end
+      local ya, yb = math.huge, -math.huge
+      for k = 2, #sh.outer, 2 do ya = math.min(ya, sh.outer[k]); yb = math.max(yb, sh.outer[k]) end
+      grain(dl, fill, gy0, gy0 + ya, gy0 + yb, function(ly) return inner_spans(loops, gx0, gy0, ly, 2) end)
     end
     back_path(dl, gx0, gy0, sh.outer, 4)
     ImGui.DrawList_PathStroke(dl, edge, ImGui.DrawFlags_Closed, 1.0)
@@ -1006,8 +1107,10 @@ end
 -- width the panel was allotted.
 local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter, io)
   local controls = layout.controls or {}
-  local lay = P.layout(controls, panel_h)
+  local lock = M.locked(layout)
+  local lay = P.layout(controls, panel_h, lock)
   local h = panel_h - C.HEADER_H - P.footer_h()
+  local scroll = P.scrolls(lay, panel_h, lock)
 
   local grid_x0 = x + C.PANEL_PAD
   local grid_w  = w - C.PANEL_PAD * 2
@@ -1036,6 +1139,11 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       if C.METER_SIDE ~= "right" then grid_x0 = grid_x0 + used + C.PANEL_PAD end
     end
   end
+
+  -- a locked grid too tall to fit scrolls, its scrollbar at the right
+  local reg_x0 = grid_x0
+  if scroll then grid_w = grid_w - (C.SCROLL_W + 2) end
+  local reg_w = grid_w
 
   -- A grid narrower than the room it has is CENTRED in it. The panel has
   -- a minimum width, so a plugin with a single column of parameters would
@@ -1066,6 +1174,28 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   local gy0 = y + C.GRID_TOP_PAD
   local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
 
+  -- Locked, and taller than the panel: the grid goes in a child window of
+  -- its own that scrolls up and down -- the meters beside it stay put. It
+  -- reaches a few pixels past the grid each side, for the sections' and
+  -- backgrounds' edges. The wheel turns a control under the pointer and
+  -- scrolls anywhere else (see the end of this function).
+  if scroll then
+    local cx = reg_x0 - 4
+    ImGui.SetCursorScreenPos(ctx, cx, y)
+    ImGui.PushStyleColor(ctx, ImGui.Col_ChildBg, 0)
+    ImGui.PushStyleColor(ctx, ImGui.Col_ScrollbarBg, 0)
+    ImGui.PushStyleVar(ctx, ImGui.StyleVar_ScrollbarSize, C.SCROLL_W)
+    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + 2 + 4, h, 0,
+      ImGui.WindowFlags_NoScrollWithMouse)
+    ImGui.PopStyleVar(ctx)
+    ImGui.PopStyleColor(ctx, 2)
+    if not ok then return end
+    dl = ImGui.GetWindowDrawList(ctx)
+    -- the whole grid's height, so there's something to scroll
+    ImGui.Dummy(ctx, 1, C.GRID_TOP_PAD + lay.height + C.PANEL_PAD)
+    gy0 = gy0 - ImGui.GetScrollY(ctx)
+  end
+
   -- Styled sections first, behind everything (EXPERIMENTAL): an inset
   -- just darker than the plate it's on (lighter on a dark one), with a
   -- shadowed top edge and a lit bottom one, or a faceplate of its own.
@@ -1074,14 +1204,21 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     local kind, pl = P.section_style(s.by)
     local x1, y1 = gx0 + s.x - 3, gy0 - 3
     local x2, y2 = gx0 + s.x + s.w + 3, gy0 + lay.height + 2
+    local function grained(fill)
+      if C.PLATE_TEXTURE and M.part_brushed(kind, pl, s.by.brush) then
+        grain(dl, fill, gy0, y1 + 2, y2 - 3, function() return { x1 + 2, x2 - 2 } end)
+      end
+    end
     if kind == "plate" then
       ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, pl.bg, 4.0)
+      grained(pl.bg)
       ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, pl.border, 4.0, 0, 1.0)
       ImGui.DrawList_AddLine(dl, x1 + 4, y1 + 1, x2 - 4, y1 + 1, 0xffffff18, 1.0)
     else
       local base = C.COL.panel_bg
       local fill = U.is_light(base) and mix(base, 0x000000ff, 0.10) or mix(base, 0xffffffff, 0.05)
       ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, fill, 4.0)
+      grained(fill)
       ImGui.DrawList_AddLine(dl, x1 + 3, y1 + 0.5, x2 - 3, y1 + 0.5, 0x00000050, 1.0)
       ImGui.DrawList_AddLine(dl, x1 + 3, y2 - 0.5, x2 - 3, y2 - 0.5, 0xffffff18, 1.0)
       ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, 0x00000030, 4.0, 0, 1.0)
@@ -1289,6 +1426,18 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       if act.right_click then req.ctx_control = si end
     end
   end
+
+  if scroll then
+    -- the wheel, when no control under the pointer took it this frame
+    if ImGui.IsWindowHovered(ctx) and not W.wheel_taken() then
+      local wheel = ImGui.GetMouseWheel(ctx)
+      if wheel ~= 0 then
+        ImGui.SetScrollY(ctx, ImGui.GetScrollY(ctx) - wheel * C.CELL_H * 0.5)
+        W.take_wheel()
+      end
+    end
+    ImGui.EndChild(ctx)
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -1374,6 +1523,46 @@ local function draw_plate(dl, x, y, w, h, pl, brushed)
   end
 end
 
+-- The panel's foot: the layout lock at the hard left -- a padlock, lit
+-- while locked -- and the preset bar beside it when that's on. Clicking
+-- the lock asks the caller (req.toggle_lock) to lock the layout at the
+-- rows it has now, or unlock it. A ReaEQ panel is a canvas, not a grid,
+-- so it has nothing to lock.
+draw_footer = function(ctx, dl, x, y, w, h, track, fx, layout, avail_h, is_eq, req)
+  local btn = C.ICON_SIZE
+  local lw = is_eq and 0 or (btn + 3)
+  if C.PRESET_BAR then
+    PU.footer(ctx, dl, x, y, w, h, track, fx, lw)
+  else
+    ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h - 1, C.COL.header_bg, 2.5,
+      ImGui.DrawFlags_RoundCornersBottom)
+    ImGui.DrawList_AddLine(dl, x, y, x + w, y, C.COL.panel_border, 1.0)
+  end
+  if is_eq then return end
+  local rows = M.locked(layout)
+  local bx, by = x + 3, y + (h - btn) * 0.5
+  ImGui.SetCursorScreenPos(ctx, bx, by)
+  -- locked, it's lit: the padlock in the foot's own colour on a block of
+  -- the foot's text colour, which stands out on every faceplate (a fixed
+  -- accent colour vanishes on some)
+  if W.icon_button(ctx, "lock##" .. fx.guid, rows and "none" or "unlock", btn, false,
+      rows and ("Layout locked at %d rows: no edits, and it scrolls rather than\n" ..
+                "rearranging when the panel is too short. Click to unlock."):format(rows)
+           or "Lock this layout: no more edits, and the controls stay where\n" ..
+              "they are when the panel is resized (it scrolls if too short).\n" ..
+              "Meters can still be switched on and off.",
+      nil, nil) then
+    -- (false to unlock: `rows and false or ...` would never give false)
+    if rows then req.toggle_lock = false else req.toggle_lock = P.rows_for(avail_h) end
+  end
+  if rows then
+    local hot = ImGui.IsItemHovered(ctx)
+    ImGui.DrawList_AddRectFilled(dl, bx, by, bx + btn, by + btn,
+      hot and C.COL.header_dim or C.COL.header_text, 2.5)
+    W.draw_lock(dl, bx, by, btn, C.COL.header_bg, false, hot and C.COL.header_dim or C.COL.header_text)
+  end
+end
+
 -- ---------------------------------------------------------------------
 -- public
 -- ---------------------------------------------------------------------
@@ -1392,7 +1581,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
   local io = P.has_io(track, fx, layout)
   local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key, io,
-                    St.is_gr_open(fx.guid))
+                    St.is_gr_open(fx.guid), M.locked(layout))
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
@@ -1439,7 +1628,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
         draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
                       key, req, meter, io)
       end
-      if fh > 0 then PU.footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx) end
+      if fh > 0 then draw_footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx, layout, avail_h, is_eq, req) end
     end
     if saved then pop_plate(saved) end
     -- ReaImGui: EndChild only when BeginChild returned true.

@@ -24,8 +24,10 @@
       Size<n>  = small | large
       Buttons<n> = across | down | <how many>
       Back<n>  = inset | <faceplate>
+      Brush<n> = <1|0>
       Plate    = <faceplate>
       Brush    = <1|0>
+      Lock     = <rows>
 
   <type> is knob | toggle | combo | fader | blank | divider | half_gap.
   "blank" is a deliberate empty cell, so a layout can leave a gap where a
@@ -83,6 +85,14 @@
   how many choices it had, which is how much room the buttons take.
   Back<n> is control n's own background, an inset or a faceplate, drawn
   over its section's; neighbours with the same one join into one shape.
+  Brush<n> turns the brushed grain on (1) or off (0) for control n's
+  background -- on a divider, for the section it styles. With no line it
+  is the faceplate's own (on for aluminium), and off for an inset.
+
+  LOCK freezes the layout: no edits, and the controls keep the arrangement
+  they had at <rows> rows however tall the panel is -- a shorter panel
+  scrolls instead of reflowing. Meters are not part of it: they can still
+  be switched on and off, and the trace opened, while locked.
 
   METER turns the gain-reduction strip on for this plugin and sets its
   full-scale range. It sits at the layout level rather than in the control
@@ -110,8 +120,10 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Style<n>=<knob or fader style>|<cap colour>, for control n (a toggle: |<lit colour>)\n"
                 .. "; Size<n>=small|large: knob n's size (no line: medium)\n"
                 .. "; Back<n>=inset|<faceplate>: control n's own background\n"
+                .. "; Brush<n>=<1|0>: grain on control n's background (a divider: its section's)\n"
                 .. "; Plate=<faceplate>\n"
-                .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own"
+                .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own\n"
+                .. "; Lock=<rows>: layout locked, arranged at that many rows"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -172,6 +184,24 @@ function M.brushed(layout, plate)
   return plate.brushed or false
 end
 
+-- Lock=<rows>: a locked layout's frozen row count, or nil.
+local function lock_of(v)
+  local n = tonumber(U.trim(v or ""))
+  return (n and n >= 1 and n <= 64) and math.floor(n) or nil
+end
+
+-- The row count a locked layout keeps, or nil when it isn't locked.
+function M.locked(layout) return layout and layout.lock or nil end
+
+-- Whether a control's background, or a divider's section, is brushed:
+-- `kind` and `pl` as P.back_style / P.section_style give them, `brush` the
+-- control's own Brush<n> (nil: the faceplate's own; an inset has none).
+function M.part_brushed(kind, pl, brush)
+  if not kind then return false end
+  if brush ~= nil then return brush end
+  return (kind == "plate" and pl and pl.brushed) or false
+end
+
 local function parse_section(sect)
   local controls, aliases, states = {}, {}, {}
   local meter = nil
@@ -226,6 +256,7 @@ local function parse_section(sect)
         buttons = buttons_of(sect["Buttons" .. i]),
         back    = back_of(sect["Back" .. i]),
         nbtn    = nbtn_of(sect["Buttons" .. i]),
+        brush   = brush_of(sect["Brush" .. i]),
       }
     end
     i = i + 1
@@ -235,7 +266,8 @@ local function parse_section(sect)
            measure = (U.trim(sect.Measure or "") == "1") or nil,
            levels = (U.trim(sect.Levels or "") == "1") or nil,
            plate = C.plate_of(U.trim(sect.Plate or "")) and U.trim(sect.Plate) or nil,
-           brush = brush_of(sect.Brush) }
+           brush = brush_of(sect.Brush),
+           lock = lock_of(sect.Lock) }
 end
 
 local function serialize(layout)
@@ -245,6 +277,7 @@ local function serialize(layout)
   if layout.levels then out.Levels = "1" end
   if layout.plate then out.Plate = layout.plate end
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
+  if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
                               layout.meter.range or C.MAX_GR_DB)
@@ -276,6 +309,9 @@ local function serialize(layout)
     end
     if size_of(c.size) then out["Size" .. (i - 1)] = c.size end
     if back_of(c.back) then out["Back" .. (i - 1)] = c.back end
+    -- the grain of its background, or a divider's section, when it has one
+    local styled = back_of(c.back) or (c.type == "divider" and (c.style == "inset" or c.style == "plate"))
+    if styled and c.brush ~= nil then out["Brush" .. (i - 1)] = c.brush and "1" or "0" end
     if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
@@ -516,7 +552,7 @@ end
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
-                plate = layout.plate, brush = layout.brush }
+                plate = layout.plate, brush = layout.brush, lock = layout.lock }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end
@@ -524,7 +560,7 @@ function M.copy(layout)
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
-                        buttons = c.buttons, nbtn = c.nbtn, back = c.back }
+                        buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.states = {}

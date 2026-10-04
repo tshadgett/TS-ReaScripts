@@ -291,6 +291,7 @@ local function panel_of(fx, i)
         o.sec = "plate"
         o.sp = { bg = hex(pl.bg), border = hex(pl.border), text = hex(pl.text), dim = hex(pl.dim), tick = hex(pl.tick) }
       end
+      if o.sec then o.sb = M.part_brushed(o.sec, C.plate_of(ctl.cap), ctl.brush) or nil end
     elseif o.t ~= "blank" and o.t ~= "half_gap" then
       o.t = "missing"
     end
@@ -302,6 +303,9 @@ local function panel_of(fx, i)
         o.bk = ctl.back
         o.bp = { bg = hex(pl.bg), border = hex(pl.border), text = hex(pl.text), dim = hex(pl.dim), tick = hex(pl.tick) }
       end
+      if o.bk then
+        o.bb = M.part_brushed(o.bk == "inset" and "inset" or "plate", C.plate_of(ctl.back), ctl.brush) or nil
+      end
     end
     ctls[#ctls + 1] = o
   end
@@ -311,6 +315,7 @@ local function panel_of(fx, i)
     g = fx.guid, i = i, n = U.fx_label(fx), k = key, an = fx.alias and U.clean_fx_name(fx.name) or nil, d = is_default or nil,
     ti = fx.is_top_level and fx.top_index or nil,
     c = ctls, plate = plate_json(layout),
+    lk = M.locked(layout),
     gr = has_gr and (meter.range or C.MAX_GR_DB) or nil,
     gw = has_gr and (meter.win or C.GRV_DEFAULT) or nil,
     eq = (key == "ReaEQ") or nil,

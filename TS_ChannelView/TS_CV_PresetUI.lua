@@ -64,7 +64,8 @@ local function preset_list(ctx, id, names, current, default, pick, w)
 end
 
 -- The bar itself, `h` tall at x, y across `w`.
-function PU.footer(ctx, dl, x, y, w, h, track, fx)
+-- `inset` keeps clear of that much at the bar's left (the layout lock).
+function PU.footer(ctx, dl, x, y, w, h, track, fx, inset)
   local addr, guid = fx.addr, fx.guid
   ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h - 1, C.COL.header_bg, 2.5,
     ImGui.DrawFlags_RoundCornersBottom)
@@ -85,7 +86,7 @@ function PU.footer(ctx, dl, x, y, w, h, track, fx)
   end
 
   local gap = 2
-  local left, right = x + 3, x + w - btn - 3 - 4
+  local left, right = x + 3 + (inset or 0), x + w - btn - 3 - 4
   local dw = math.min(220, right - left - (btn + gap) * 2)
   if dw > 30 then
     local gw = dw + (btn + gap) * 2

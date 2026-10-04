@@ -1,14 +1,14 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.8.1
+-- @version 1.8.2
 -- @changelog
---  A background for any control (right-click > Background): an inset or a
---  faceplate colour behind it, over its section's. Neighbours with the same
---  background, side by side or stacked, join into one rounded shape, across
---  a divider too; it always fills the control's column. Gaps and half-gaps
---  can have one as well.
---  Values under controls are smaller and sit just under the control.
---  The web page draws the same shapes.
+--  Lock layout: a padlock at the left of each panel's foot. Locked, the
+--  plugin's layout takes no edits and keeps its arrangement however the
+--  panel is resized; too short, it scrolls up and down, the meters staying
+--  put. Meters can still be switched on and off while locked.
+--  The panel's foot is always shown now, for the padlock.
+--  Brushed finish for control backgrounds and sections.
+--  The web page follows both.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -526,6 +526,26 @@ local function toggle_colour_menu(fx, key, idx, c)
   end
 end
 
+-- "Brushed finish" for a control's background or a divider's section:
+-- a tick that saves Brush<n>, or clears it when the choice is the one the
+-- faceplate makes anyway (aluminium is brushed, an inset isn't).
+local function brush_tick(fx, key, idx, c, kind, pl, id)
+  local on = M.part_brushed(kind, pl, c.brush)
+  local ch, v = ImGui.Checkbox(ctx, "Brushed finish##" .. id, on)
+  if ch and kind then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then
+      if v == M.part_brushed(kind, pl, nil) then lc.brush = nil else lc.brush = v end
+    end
+    M.set(key, l); M.save()
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, kind and "A fine brushed grain across it\n(needs Faceplate texture on)."
+      or "Choose a background first.")
+  end
+end
+
 -- A control's own background: nothing (its section's shows), an inset, or
 -- a faceplate. Controls next to each other with the same one join up.
 local function back_menu(fx, key, idx, c)
@@ -534,7 +554,7 @@ local function back_menu(fx, key, idx, c)
   local function set(v)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.back = v end
+    if lc then lc.back = v; if not v then lc.brush = nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, "Behind this control")
@@ -553,6 +573,11 @@ local function back_menu(fx, key, idx, c)
       ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.border, 2.0, 0, 1.0)
     end
   end
+  ImGui.Separator(ctx)
+  local bkind, bpl = P.back_style(c.back)
+  ImGui.BeginDisabled(ctx, not bkind)
+  brush_tick(fx, key, idx, c, bkind, bpl, "back_brush")
+  ImGui.EndDisabled(ctx)
   ImGui.Spacing(ctx)
   ImGui.TextWrapped(ctx, "Controls side by side or above each other with the same background join into one shape, across a divider too.")
 end
@@ -565,7 +590,7 @@ local function section_menu(fx, key, idx, c)
   local function set(style, cap)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.style, lc.cap = style, cap end
+    if lc then lc.style, lc.cap = style, cap; if not style then lc.brush = nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, "The controls after this divider")
@@ -588,6 +613,11 @@ local function section_menu(fx, key, idx, c)
       ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.border, 2.0, 0, 1.0)
     end
   end
+  ImGui.Separator(ctx)
+  local skind, spl = P.section_style(c)
+  ImGui.BeginDisabled(ctx, not skind)
+  brush_tick(fx, key, idx, c, skind, spl, "sec_brush")
+  ImGui.EndDisabled(ctx)
 end
 
 local function style_menu(fx, key, idx, c)
@@ -706,9 +736,18 @@ local function panel_menu()
   end
   ImGui.Separator(ctx)
 
-  if ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then
+  -- a locked layout takes no edits (the padlock in the panel's foot);
+  -- its meters can still be switched on and off
+  local locked = M.locked(layout) ~= nil
+  local function locked_tip()
+    if locked and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, "The layout is locked: unlock it with the padlock\nat the left of the panel's foot.")
+    end
+  end
+  if ImGui.MenuItem(ctx, "Edit parameters\u{2026}", nil, false, not locked) then
     E.open(app.track, fx, key, layout)
   end
+  locked_tip()
   if ImGui.MenuItem(ctx, St.is_collapsed(fx.guid) and "Expand" or "Collapse to a bar") then
     St.toggle_collapsed(fx.guid)
   end
@@ -773,10 +812,11 @@ local function panel_menu()
         "TS_TrackProbe pair.")
     end
   end
-  if ImGui.BeginMenu(ctx, "Faceplate") then
+  if ImGui.BeginMenu(ctx, "Faceplate", not locked) then
     plate_menu(fx, key, layout)
     ImGui.EndMenu(ctx)
   end
+  locked_tip()
   if fx.is_top_level then
     local n_top = reaper.TrackFX_GetCount(app.track)
     if ImGui.MenuItem(ctx, "Move left", nil, false, fx.top_index > 0) then
@@ -797,21 +837,24 @@ local function panel_menu()
       " on every track. The library as it was before is kept as\n" ..
       "TS_ChannelView_Mappings.bak.ini, until the next save.", "ChannelView", 1) == 1
   end
-  if ImGui.MenuItem(ctx, "Auto-fill layout\u{2026}") then
+  if ImGui.MenuItem(ctx, "Auto-fill layout\u{2026}", nil, false, not locked) then
     if sure(("Replace this layout with the plugin's first %d parameters?"):format(C.AUTO_DEFAULT_N)) then
       M.set(key, M.build_default(app.track, fx.addr)); M.save()
     end
   end
-  if ImGui.MenuItem(ctx, "Clear layout\u{2026}", nil, false, not is_default) then
+  locked_tip()
+  if ImGui.MenuItem(ctx, "Clear layout\u{2026}", nil, false, not is_default and not locked) then
     if sure("Clear every control from this layout?") then
       M.set(key, { controls = {} }); M.save()
     end
   end
-  if ImGui.MenuItem(ctx, "Forget saved layout\u{2026}", nil, false, not is_default) then
+  locked_tip()
+  if ImGui.MenuItem(ctx, "Forget saved layout\u{2026}", nil, false, not is_default and not locked) then
     if sure("Forget this saved layout and go back to the automatic one?") then
       M.remove(key); M.save()
     end
   end
+  locked_tip()
   if fx.is_top_level then
     ImGui.Separator(ctx)
     if ImGui.MenuItem(ctx, "Insert plugin before\u{2026}") then
@@ -867,6 +910,18 @@ local function control_menu()
   local _, pname = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param or 0, "")
   ImGui.TextDisabled(ctx, U.truncate(pname or "", 28))
   ImGui.Separator(ctx)
+
+  -- a locked layout takes no edits: say so, and offer only what isn't one
+  if M.locked(layout) then
+    ImGui.TextDisabled(ctx, "Layout locked")
+    ImGui.TextDisabled(ctx, "(the padlock at the left of the panel's foot)")
+    if c.type == "combo" then
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Rescan choices") then P.rescan_choices(key, c.param) end
+    end
+    ImGui.EndPopup(ctx)
+    return
+  end
 
   local function commit()
     local l, k = materialise(fx)
@@ -1669,7 +1724,7 @@ local function panel_row(row_h, row_w)
           total = total + P.width(lay.controls or {}, inner_h,
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   P.has_io(app.track, fx, lay),
-                                  St.is_gr_open(fx.guid))
+                                  St.is_gr_open(fx.guid), M.locked(lay))
           if i > 1 then total = total + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)
@@ -1713,8 +1768,19 @@ local function panel_row(row_h, row_w)
           app.menu_fx = i
           app.open_panel_menu = true
         end
-        if req.open_editor then
+        if req.open_editor and not M.locked(layout) then
           E.open(app.track, fx, key, layout)
+        end
+        -- the padlock: lock at the rows the panel has now, or unlock
+        if req.toggle_lock ~= nil then
+          if E.is_open() and E.key() == key then
+            reaper.MB("Close Edit parameters for " .. key .. " first: saving it would\n" ..
+                      "undo the lock.", "ChannelView", 0)
+          else
+            local l = materialise(fx)
+            l.lock = req.toggle_lock or nil
+            M.set(key, l); M.save()
+          end
         end
         if req.grv_window then
           local l = materialise(fx)

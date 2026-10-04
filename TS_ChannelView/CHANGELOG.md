@@ -1,5 +1,27 @@
 # ChannelView — changelog
 
+## 1.8.2 — lock layout, brushed backgrounds
+
+- **Lock layout.** A padlock at the left of every panel's foot locks that
+  plugin's layout, on every track. Locked, nothing about the layout can be
+  edited (the right-click menus say so, and Edit parameters stays shut), and
+  the controls keep the arrangement they had when you locked it, however the
+  panel is resized. A panel too short for it scrolls up and down, with a
+  thin scrollbar, while its meters stay put; the wheel turns a control under
+  the pointer and scrolls anywhere else. Meters aren't locked: they can
+  still be switched on and off, and the trace opened. The padlock lights up
+  while locked, readable on every faceplate.
+- The panel's foot is now always there, for the padlock — with
+  **View ▸ Preset bar** off it's an empty bar, so a panel has 20 px less
+  room for controls than before with the bar off.
+- **Brushed backgrounds and sections.** A control's background, or a
+  section, can have a brushed finish: a *Brushed finish* tick in its
+  right-click menu, or *Brushed* in the editor. Aluminium is brushed unless
+  you turn it off; other colours and insets are plain unless you turn it on.
+  A brushed and a plain background of the same colour stay separate shapes.
+- The web page follows both: locked panels scroll there too, with the
+  padlock shown, and the grain matches.
+
 ## 1.8.1 — control backgrounds
 
 - **A background for any control.** Right-click a control ▸ **Background**

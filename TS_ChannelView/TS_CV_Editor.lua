@@ -57,7 +57,24 @@ local st = {
 }
 
 function E.attach(imgui) ImGui = imgui end
+
+-- A "Brushed" tick beside a background or section combo: Brush<n> on the
+-- control, cleared when it matches what the faceplate does anyway.
+local function brush_box(ctx, c, kind, pl, id)
+  if not kind then return end
+  ImGui.SameLine(ctx)
+  local on = M.part_brushed(kind, pl, c.brush)
+  local ch, v = ImGui.Checkbox(ctx, "Brushed##" .. id, on)
+  if ch then
+    if v == M.part_brushed(kind, pl, nil) then c.brush = nil else c.brush = v end
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "A fine brushed grain across it (needs Faceplate texture on).")
+  end
+end
+
 function E.is_open() return st.open end
+function E.key() return st.key end
 
 -- ---------------------------------------------------------------------
 
@@ -77,6 +94,8 @@ local function load_params(track, fx)
 end
 
 function E.open(track, fx, key, layout)
+  -- a locked layout takes no edits (unlocked from the panel's padlock)
+  if M.locked(layout) then return end
   st.open      = true
   st.request   = true
   st.key       = key
@@ -402,7 +421,7 @@ local function draw_entry_editor(ctx)
     local sch, si = ImGui.Combo(ctx, "Section", cur_s, table.concat(names, "\0") .. "\0")
     if sch then
       local k = keys[si + 1]
-      if k == "" then c.style, c.cap = nil, nil
+      if k == "" then c.style, c.cap, c.brush = nil, nil, nil
       elseif k == "inset" then c.style, c.cap = "inset", nil
       else c.style, c.cap = "plate", k end
     end
@@ -410,6 +429,8 @@ local function draw_entry_editor(ctx)
       ImGui.SetTooltip(ctx, "Experimental: an inset, or a faceplate of their own, behind the\n" ..
         "controls after this divider, up to the next one.")
     end
+    local spl = (c.style == "plate") and C.plate_of(c.cap) or nil
+    brush_box(ctx, c, (c.style == "inset" and "inset") or (spl and "plate") or nil, spl, "sec_brush")
     ImGui.SameLine(ctx)
     local lch, lv = ImGui.Checkbox(ctx, "Line", not c.no_rule)
     if lch then c.no_rule = (not lv) or nil end
@@ -437,11 +458,14 @@ local function draw_entry_editor(ctx)
     if bch then
       local k = keys[bi + 1]
       c.back = (k ~= "") and k or nil
+      if not c.back then c.brush = nil end
     end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "This control's own background. Neighbours with the same one\n" ..
         "join into one shape, across a divider too.")
     end
+    local bpl = (c.back and c.back ~= "inset") and C.plate_of(c.back) or nil
+    brush_box(ctx, c, (c.back == "inset" and "inset") or (bpl and "plate") or nil, bpl, "back_brush")
   end
 
   if c.type == "toggle" then

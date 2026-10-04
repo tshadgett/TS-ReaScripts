@@ -368,6 +368,14 @@ default), shared with the TCP window and the web page.
   the same background — side by side, stacked, or facing each other across
   a divider — join into one rounded shape, always the full width of their
   column. Gaps and half-gaps (right-click the empty space) can have one too.
+  Backgrounds and sections can have a **Brushed finish** (a tick in the
+  same menus, or *Brushed* in the editor), like a faceplate's.
+- **Lock layout.** The padlock at the left of a panel's foot locks that
+  plugin's layout, on every track: no more edits, and the controls keep the
+  arrangement they had however the panel is resized — a panel too short
+  for it scrolls up and down instead (the wheel scrolls when it isn't on a
+  control). Meters aren't part of it: they can still be switched on and
+  off, and the trace opened. Click the padlock again to unlock.
 
 ## Naming: alias vs label
 
@@ -469,7 +477,8 @@ These are REAPER's presets, not ChannelView's: the same `presets/*.ini`
 files, written exactly as REAPER writes them, so whatever you save shows up
 in the plugin window's own preset box and the other way round. Saving
 works for VST2, VST3, JS and CLAP; AU presets load but can't be saved from
-here yet. **View ▸ Preset bar** hides the bar.
+here yet. **View ▸ Preset bar** hides the bar; the foot itself stays, for
+the layout lock at its left.
 
 ## The master
 

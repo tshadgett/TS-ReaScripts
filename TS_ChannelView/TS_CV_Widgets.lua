@@ -2097,7 +2097,26 @@ local function icon_stereo(dl, x, y, sz, col)
   ImGui.DrawList_AddCircle(dl, x + sz * 0.5 + r * 0.6, y + sz * 0.5, r, col, 18, 1.4)
 end
 
+-- A padlock, for a panel's layout lock: shut, or with its shackle lifted
+-- and one leg out of the body.
+local function icon_lock(dl, x, y, sz, col, open, hole)
+  local cx, r = x + sz * 0.5, sz * 0.19
+  local top = y + sz * 0.46
+  local ay = top - sz * 0.08 - (open and sz * 0.12 or 0)
+  ImGui.DrawList_PathClear(dl)
+  ImGui.DrawList_PathLineTo(dl, cx - r, open and (ay + sz * 0.08) or top)
+  ImGui.DrawList_PathArcTo(dl, cx, ay, r, math.pi, 2 * math.pi, 10)
+  ImGui.DrawList_PathLineTo(dl, cx + r, top)
+  ImGui.DrawList_PathStroke(dl, col, 0, 1.5)
+  ImGui.DrawList_AddRectFilled(dl, x + sz * 0.22, top, x + sz * 0.78, y + sz * 0.86, col, 1.5)
+  ImGui.DrawList_AddCircleFilled(dl, cx, top + (y + sz * 0.86 - top) * 0.45,
+    math.max(1.0, sz * 0.06), hole or C.COL.header_bg)
+end
+W.draw_lock = icon_lock      -- for a lit padlock in its own colours
+
 W.ICONS = {
+  lock     = function(dl, x, y, sz, col) icon_lock(dl, x, y, sz, col, false) end,
+  unlock   = function(dl, x, y, sz, col) icon_lock(dl, x, y, sz, col, true) end,
   mono     = icon_mono,
   stereo   = icon_stereo,
   tablet   = icon_tablet,

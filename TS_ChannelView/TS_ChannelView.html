@@ -324,6 +324,13 @@ button { font: inherit; color: inherit; }
   border-top-color: var(--ttext); opacity: .65; }
 .pf .pdd.mod { font-style: italic; }
 .pnl.shut .pf { display: none; }
+/* a locked layout: its grid scrolls when the panel is too short (the
+   meters beside it stay put), and a padlock says so */
+.pg { position: absolute; left: 0; top: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+.lk { width: 24px; height: 24px; margin: 0 2px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border-radius: 5px; background: var(--text); }
+.lk svg { width: 15px; height: 15px; fill: none; stroke: var(--head); stroke-width: 2.2; stroke-linecap: round; }
+.ph .lk { width: 20px; height: 20px; }
 .sheet .note { color: var(--dim); font-size: 12px; margin: 0 0 8px; line-height: 1.4; }
 .sheet .lbl2 { color: var(--dim); font-size: 12px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
 .sheet .plist { max-height: 42vh; overflow-y: auto; }
@@ -1085,6 +1092,7 @@ const FOLDER_TIP = ["Folder: children in full — tap to collapse them", "Folder
   "Folder: children hidden — tap to show them in full"];
 
 const ICON = {
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   start: '<path d="M6 5v14M19 5l-10 7 10 7z"/>',
   prevm: '<path d="M8 5v14M18 5l-7 7 7 7"/>',
   play: '<path d="M7 5l12 7-12 7z"/>',
@@ -1430,6 +1438,34 @@ async function searchActions(q, res, pick) {
   }
 }
 
+// Brushed grain on a surface of colour `bg`: a faint light line every 3
+// px and a faint dark one every 7, lighter on a dark surface, where white
+// lines show far more. As CSS background layers, or as an SVG pattern fill.
+function grainAlpha(bg) {
+  const light = lum(bg) > 0.55;
+  return { hi: light ? 0.035 : 0.015, lo: light ? 0.025 : 0.045 };
+}
+function grainCss(bg, dir) {
+  const { hi, lo } = grainAlpha(bg);
+  dir = dir || "0deg";
+  return `repeating-linear-gradient(${dir}, rgba(255,255,255,${hi}) 0 1px, transparent 1px 3px), repeating-linear-gradient(${dir}, rgba(0,0,0,${lo}) 0 1px, transparent 1px 7px)`;
+}
+// two patterns in `svg`'s defs, lined up with the grid's top (the lines
+// fall where the desktop draws them); returns their fills
+function grainFills(svg, bg) {
+  const { hi, lo } = grainAlpha(bg);
+  let defs = svg.querySelector("defs");
+  if (!defs) defs = el("defs", {}, svg);
+  const out = [];
+  for (const [col, a, step, off] of [["#fff", hi, 3, 2], ["#000", lo, 7, 4]]) {
+    const id = "grain" + (++gradN);
+    const pat = el("pattern", { id, patternUnits: "userSpaceOnUse", width: 8, height: step }, defs);
+    el("rect", { x: 0, y: off % step, width: 8, height: 1, fill: col, "fill-opacity": a }, pat);
+    out.push(`url(#${id})`);
+  }
+  return out;
+}
+
 // A panel's background: the plate, gradient and grain included.
 function plateFill(pl) {
   if (!pl) return "";
@@ -1439,12 +1475,7 @@ function plateFill(pl) {
     const A = p(a), B = p(b), out = [16, 8, 0].map(s => Math.round(((A >> s) & 255) + (((B >> s) & 255) - ((A >> s) & 255)) * t));
     return "#" + out.map(v => v.toString(16).padStart(2, "0")).join(""); };
   const g = `linear-gradient(180deg, ${mix(pl.bg, "#ffffff", 0.08 * sh)} 0%, ${pl.bg} 40%, ${mix(pl.bg, "#000000", 0.12 * sh)} 100%)`;
-  // the grain is lighter on a dark plate, where white lines show far more
-  const light = lum(pl.bg) > 0.55;
-  const hi = light ? 0.035 : 0.015, lo = light ? 0.025 : 0.045;
-  return pl.brushed
-    ? `repeating-linear-gradient(0deg, rgba(255,255,255,${hi}) 0 1px, transparent 1px 3px), repeating-linear-gradient(0deg, rgba(0,0,0,${lo}) 0 1px, transparent 1px 7px), ${g}`
-    : g;
+  return pl.brushed ? `${grainCss(pl.bg)}, ${g}` : g;
 }
 
 function build() {
@@ -2301,10 +2332,14 @@ function doubleTap(node, fn) {
 
 function buildPanel(p, bodyH) {
   if (p.eq) return buildEq(p, bodyH);
-  const lay = placeControls(p.c || [], bodyH);
+  // locked: arranged at its saved rows whatever the height, and scrolled
+  // when that's taller than the panel
+  const lay = placeControls(p.c || [], p.lk ? p.lk * CELL_H : bodyH);
+  const scr = !!p.lk && lay.rows * CELL_H > bodyH;
+  const SB = scr ? 10 : 0;
   const trOpen = !!p.gr && grv.has(p.g);
   const gr = p.gr ? GR_W + PAD + (trOpen ? TRACE_W + PAD : 0) : 0;
-  const w = Math.max(MIN_W, lay.width + PAD * 2 + gr);
+  const w = Math.max(MIN_W, lay.width + PAD * 2 + gr + SB);
   const pnl = h("div", "pnl");
   pnl.style.width = w + "px";
   const pl = p.plate;
@@ -2329,11 +2364,24 @@ function buildPanel(p, bodyH) {
   col.addEventListener("click", fold);
   doubleTap(head, fold);
   if (shut.has(p.g)) pnl.classList.add("shut");
-  head.append(h("span", "ix", p.i), h("span", "nm", p.n), moreBtn(p), col, flt, byp);
+  head.append(h("span", "ix", p.i));
+  // the padlock goes in the foot with the preset bar; without one, here
+  if (p.lk && !layout.pbar) head.append(lockMark(p));
+  head.append(h("span", "nm", p.n), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
   pnl.append(head, body);
-  const gridX = PAD + Math.max(0, (w - PAD * 2 - gr - lay.width) / 2);
+  const gridX = PAD + Math.max(0, (w - PAD * 2 - gr - SB - lay.width) / 2);
+  // what the grid goes in: the body, or a scrolling box in it that stops
+  // short of the meters, holding the grid's whole height
+  let gb = body;
+  if (scr) {
+    gb = h("div", "pg"); gb.style.right = gr + "px";
+    const tall = h("div"); tall.style.height = (PAD * 2 + lay.rows * CELL_H) + "px"; tall.style.width = "1px";
+    gb.append(tall); body.append(gb);
+  }
   const ctl = [];
+  // what sections and backgrounds sit on
+  const under = (pl && pl.bg) || PAL.panel_bg || css("--panel") || "#202327";
   // styled sections (experimental), behind the controls
   for (const s of lay.sections || []) {
     const d = h("div", "sect " + s.by.sec);
@@ -2341,35 +2389,48 @@ function buildPanel(p, bodyH) {
     d.style.left = (gridX + s.x - 4) + "px"; d.style.top = (PAD - 4) + "px";
     d.style.width = (s.w + 8) + "px"; d.style.height = (lay.rows * CELL_H - 2) + "px";
     if (s.by.sp) { d.style.background = s.by.sp.bg; d.style.borderColor = s.by.sp.border; }
-    body.append(d);
+    if (s.by.sb && layout.tex) {
+      // counted down from the grid's top, as the backgrounds' grain is: the
+      // box's inside starts 3 px above it (4 up, less the 1 px border)
+      d.style.backgroundImage = grainCss(s.by.sp ? s.by.sp.bg : under, "180deg");
+      d.style.backgroundPosition = "0 2px, 0 0";
+    }
+    gb.append(d);
   }
   // controls' own backgrounds, joined with their neighbours', over the
   // sections and rules
-  const bkRects = [], bkPlate = {};
+  // (a brushed one and a plain one of the same colour stay apart)
+  const bkRects = [], bkPlate = {}, bkGrain = {};
   for (const it of lay.items.concat(lay.spacers || [])) {
     const c = it.c;
     if (!c.bk || it.sx == null) continue;
-    bkRects.push([it.sx, it.y, it.sx + it.sw, it.y + (it.h || CELL_H * it.hu / 2), c.bk]);
-    if (c.bp) bkPlate[c.bk] = c.bp;
+    const key = c.bk + (c.bb ? "/b" : "");
+    bkRects.push([it.sx, it.y, it.sx + it.sw, it.y + (it.h || CELL_H * it.hu / 2), key]);
+    if (c.bp) bkPlate[key] = c.bp;
+    if (c.bb) bkGrain[key] = true;
   }
   const bkShapes = backShapes(bkRects, lay.gaps || [], 3);
   // an inset is a shade darker than what it's on, or lighter on a dark one
-  const under = (pl && pl.bg) || PAL.panel_bg || css("--panel") || "#202327";
   const insetFill = lum(under) > 0.45 ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.055)";
   const bkSvg = bkShapes.length ? el("svg", { width: lay.width + 8, height: lay.rows * CELL_H + 8 }) : null;
   for (const s of bkShapes) {
     const pl = bkPlate[s.key];
-    el("path", { d: [s.outer, ...s.holes].map(l => roundedLoop(l, 6)).join(" "), "fill-rule": "evenodd",
+    const d = [s.outer, ...s.holes].map(l => roundedLoop(l, 6)).join(" ");
+    el("path", { d, "fill-rule": "evenodd",
       fill: pl ? pl.bg : insetFill, stroke: pl ? pl.border : "rgba(0,0,0,0.35)", "stroke-width": 1,
       transform: "translate(4 4)" }, bkSvg);
+    if (bkGrain[s.key] && layout.tex) {
+      for (const f of grainFills(bkSvg, pl ? pl.bg : under))
+        el("path", { d, "fill-rule": "evenodd", fill: f, transform: "translate(4 4)" }, bkSvg);
+    }
   }
   if (bkSvg) { bkSvg.classList.add("bks"); bkSvg.style.left = (gridX - 4) + "px"; bkSvg.style.top = (PAD - 4) + "px"; }
 
   for (const rx of lay.rules) {
     const r = h("div", "rule"); r.style.left = (gridX + rx) + "px"; r.style.top = PAD + "px";
-    r.style.height = (lay.rows * CELL_H - 8) + "px"; body.append(r);
+    r.style.height = (lay.rows * CELL_H - 8) + "px"; gb.append(r);
   }
-  if (bkSvg) body.append(bkSvg);
+  if (bkSvg) gb.append(bkSvg);
   for (const it of lay.items) {
     const c = it.c, cell = h("div", "cell");
     // the size it was given room for: small and large knobs (a size too
@@ -2380,7 +2441,7 @@ function buildPanel(p, bodyH) {
     // on its own background's plate, or else its section's, that plate's inks
     const sp = c.bp || (it.sec != null && lay.sections[it.sec].by.sp);
     if (sp) for (const [k, v] of [["--label", sp.text], ["--value", sp.dim], ["--dim", sp.dim], ["--text", sp.text], ["--ring", sp.tick]]) cell.style.setProperty(k, v);
-    body.append(cell);
+    gb.append(cell);
     const id = p.g + ":" + c.idx;
     if (c.t === "blank") continue;
     if (c.t === "missing") { cell.append(h("div", "miss", "!")); continue; }
@@ -2536,6 +2597,16 @@ function panelMenu(p) {
 // presets: the bar along a panel's foot, as the desktop's (TS_CV_PresetUI)
 // ---------------------------------------------------------------------------
 const enc = s => encodeURIComponent(s);
+// A locked layout's padlock: shown, not a switch -- the lock is set from
+// the desktop, at the rows its panels have.
+function lockMark(p) {
+  // lit like the desktop's: the bar's own colour on a block of its text
+  // colour, which reads on every faceplate
+  const m = h("span", "lk"); m.innerHTML = `<svg viewBox="0 0 24 24">${ICON.lock}</svg>`;
+  if (p.plate) m.querySelector("svg").style.stroke = p.plate.head;
+  m.title = `Layout locked at ${p.lk} rows (set in ChannelView)`;
+  return m;
+}
 function presetBar(pnl, p) {
   const f = h("div", "pf");
   if (p.plate) { f.style.background = p.plate.head; f.style.borderColor = p.plate.border; }
@@ -2550,7 +2621,7 @@ function presetBar(pnl, p) {
   const spc = btn("plus", "", () => {}); spc.classList.add("pspc"); spc.tabIndex = -1;
   const prev = btn("collapse", "Previous preset", () => send("pst", p.g, -1)); prev.classList.add("pprev");
   const next = btn("next", "Next preset", () => send("pst", p.g, 1)); next.classList.add("pnext");
-  f.append(spc, prev, dd, next, btn("plus", "Save, rename or delete", () => presetMenu(p)));
+  f.append(p.lk ? lockMark(p) : spc, prev, dd, next, btn("plus", "Save, rename or delete", () => presetMenu(p)));
   pnl.append(f);
   const P = ui.panels.get(p.g);
   if (P) P.pf = dd;
