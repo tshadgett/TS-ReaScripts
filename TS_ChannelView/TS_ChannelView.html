@@ -214,8 +214,25 @@ button { font: inherit; color: inherit; }
 .knob { touch-action: none; cursor: ns-resize; }
 .knob svg { display: block; overflow: visible; }
 .tog { margin-top: 10px; height: 38px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
-  color: var(--ttext); font-size: 12px; padding: 0 4px; white-space: nowrap; overflow: hidden; cursor: pointer; }
-.tog.on { background: var(--ton); border-color: var(--ton); color: #fff; }
+  color: var(--ttext); font-size: 12px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.tog.on { background: var(--ton); color: var(--ton-ink, #fff); }
+/* buttons read as buttons on any faceplate: a darker edge, a lit top */
+.tog, .cmb { border-color: rgba(0,0,0,0.55); box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 2px rgba(0,0,0,0.35); }
+.lbl.sm { font-size: 10px; height: 13px; line-height: 13px; }
+/* experimental: a section an inset, or on a plate of its own */
+.sect { position: absolute; border-radius: 6px; border: 1px solid rgba(0,0,0,0.25); pointer-events: none; }
+.sect.inset { background: rgba(0,0,0,0.12); box-shadow: inset 0 2px 3px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.08); }
+.sect.plate { box-shadow: inset 0 1px 0 rgba(255,255,255,0.12); }
+/* a dropdown's choices as buttons */
+.brow { display: flex; gap: 2px; margin: 4px auto 0; }
+.brow.across { flex-direction: row; }
+.brow.down { flex-direction: column; gap: 3px; }
+.brow .bb { flex: 1 1 0; min-width: 0; border-radius: 4px; border: 1px solid rgba(0,0,0,0.55); background: var(--toff);
+  color: var(--ttext); font-size: 10px; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 2px rgba(0,0,0,0.35); cursor: pointer; }
+.brow.across .bb { height: 34px; }
+.brow.down .bb { height: 22px; flex: 0 0 22px; }
+.brow .bb.on { background: var(--ton); color: var(--ton-ink, #fff); }
 .cmb { margin-top: 10px; height: 38px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); font-size: 12px; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .rule { position: absolute; width: 1px; background: var(--ring); }
@@ -568,6 +585,7 @@ async function fetchLayout() {
   if (!r.ext.layout) return;
   try {
     layout = JSON.parse(r.ext.layout);
+    CELL_W = cellW(layout.cw);
     layoutSeq = vals ? vals.L : -1;
     applyPalette(layout.pal || {});
     build();
@@ -633,8 +651,45 @@ function radial(n, r0, r1, a0, a1) {
 }
 const lum = hex => { const h = hex.replace("#", ""); const c = i => parseInt(h.substr(i, 2), 16) / 255;
   return 0.2126 * c(0) + 0.7152 * c(2) + 0.0722 * c(4); };
-const CAP_DEFAULT = { skirted: "#26282b", pointer: "#26282b", trim: "#8d9298", nose: "#26282b" };
-const BODY = { skirted: 38, pointer: 43, trim: 47, nose: 40 };
+const CAP_DEFAULT = { skirted: "#26282b", pointer: "#26282b", trim: "#8d9298", nose: "#26282b", bar: "#c9ccd0",
+  fluted: "#26282b", bezel: "#26282b", rbezel: "#c9ccd0", hifi: "#c9ccd0" };
+const BODY = { skirted: 38, pointer: 43, trim: 47, nose: 40, bar: 37, fluted: 38, bezel: 38, rbezel: 38, hifi: 38 };
+// Light falls from the top left on every hardware face (SVG degrees: 0 is
+// up, clockwise), and how much of it a surface facing `d` catches
+const LIGHT_D = -36.87;
+const litD = d => (Math.cos((d - LIGHT_D) * Math.PI / 180) + 1) / 2;
+const mixHex = (a, b, t) => { const p = x => parseInt(x.replace("#", "").slice(0, 6), 16);
+  const A = p(a), B = p(b);
+  return "#" + [16, 8, 0].map(s => Math.round(((A >> s) & 255) + (((B >> s) & 255) - ((A >> s) & 255)) * t)
+    .toString(16).padStart(2, "0")).join(""); };
+// a lit ring between radii ri and R: lo facing away from the light to hi
+// facing it (sharpened by pw), a weaker glint opposite -- a polished cone
+function litRing(g, R, ri, lo, hi, pw, glintAmt) {
+  for (let i = 0; i < 48; i++) {
+    const d0 = i * 7.5, d1 = d0 + 7.5, dm = d0 + 3.75;
+    const glint = Math.pow(Math.max(0, Math.cos((dm - LIGHT_D - 180) * Math.PI / 180)), 6) * glintAmt;
+    const fill = mixHex(lo, hi, Math.max(Math.pow(litD(dm), pw), glint));
+    const a = pt(R, d0), b = pt(R, d1 + 0.4), c = pt(ri, d1 + 0.4), e = pt(ri, d0);
+    el("path", { d: `M${a.map(f2).join(" ")}L${b.map(f2).join(" ")}L${c.map(f2).join(" ")}L${e.map(f2).join(" ")}Z`, fill }, g);
+  }
+}
+// a turned metal cap: lit top left, the bow-tie sheen of brushed metal
+// across it (fixed to the light), a few machining rings
+function metalCap(g, defs, r, cap, id) {
+  el("circle", { cx: 50, cy: 50, r, fill: mixHex(cap, "#000000", 0.28) }, g);
+  el("circle", { cx: 50 - r * 0.06, cy: 50 - r * 0.08, r: r * 0.9, fill: cap }, g);
+  const s = LIGHT_D + 90, w = 14, rr = r * 0.9, P = d => pt(rr, d).map(f2).join(" ");
+  const op = lum(cap) > 0.55 ? 0.33 : 0.15;
+  el("path", { d: `M50 50L${P(s - w)}L${P(s + w)}ZM50 50L${P(s + 180 - w)}L${P(s + 180 + w)}Z`,
+    fill: `rgba(255,255,255,${op})` }, g);
+  for (const k of [0.35, 0.57, 0.79]) el("circle", { cx: 50, cy: 50, r: f2(r * k), fill: "none",
+    stroke: "rgba(0,0,0,0.06)", "stroke-width": 1 }, g);
+  el("circle", { cx: 50, cy: 50, r, fill: "none", stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
+}
+// a colour pulled toward white by `t` (0..1)
+const lighten = (hex, t) => { const h = hex.replace("#", "").slice(0, 6);
+  return "#" + [0, 2, 4].map(i => { const c = parseInt(h.substr(i, 2), 16);
+    return Math.round(c + (255 - c) * t).toString(16).padStart(2, "0"); }).join(""); };
 const STYLE_ALIAS = { api: "nose" };   // Round nose's name for a few days before 1.7.5
 let gradN = 0;
 
@@ -674,9 +729,9 @@ function makeKnob(size, style, cap, bipolar, tick) {
   const id = "sh" + (++gradN);
   const defs = el("defs", {}, svg);
   const rg = el("radialGradient", { id, cx: "0.36", cy: "0.3", r: "0.75" }, defs);
-  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": style === "skirted" ? 0.12 : style === "nose" ? 0.04 : 0.3 }, rg);
+  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": style === "skirted" ? 0.12 : style === "nose" ? 0.04 : style === "bar" ? 0.1 : 0.3 }, rg);
   el("stop", { offset: 0.6, "stop-color": "#fff", "stop-opacity": 0.02 }, rg);
-  el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": style === "nose" ? 0.1 : 0.25 }, rg);
+  el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": style === "nose" ? 0.1 : style === "bar" ? 0.35 : 0.25 }, rg);
   // the scale sits just outside the body
   const tk = el("path", { d: radial(11, 53, 60, A0, A1), fill: "none", stroke: tick,
     "stroke-width": 3, "stroke-linecap": "round" });
@@ -698,6 +753,99 @@ function makeKnob(size, style, cap, bipolar, tick) {
       stroke: "rgba(0,0,0,0.35)", "stroke-width": 2.2, "stroke-linejoin": "round" }, rot);
     el("circle", { cx: 50, cy: 50, r: 23.8, fill: cap, stroke: "rgba(0,0,0,0.63)", "stroke-width": 2.2 }, g);
     el("circle", { cx: 50, cy: 50, r: 22.7, fill: `url(#${id})` }, g);
+  } else if (style === "fluted") {
+    // one round, domed body (the cap colour) with finger flutes pressed in
+    // near the edge, turning with it; a soft light top left; a white
+    // pointer from near the centre out between two flutes
+    el("circle", { cx: 50.8, cy: 51.6, r: 36.6, fill: "rgba(0,0,0,0.25)" }, g);
+    el("circle", { cx: 50, cy: 50, r: 36, fill: mixHex(cap, "#000000", 0.45) }, g);
+    el("circle", { cx: 49, cy: 48.6, r: 34.2, fill: cap }, g);
+    rot = el("g", {}, g);
+    const fl = mixHex(cap, "#000000", 0.6);
+    for (let i = 0; i < 8; i++) {
+      const d = (i + 0.5) * 45, m = pt(28.5, d), r = d * Math.PI / 180;
+      const tx = Math.cos(r) * 4.5, ty = Math.sin(r) * 4.5;
+      el("line", { x1: f2(m[0] - tx), y1: f2(m[1] - ty), x2: f2(m[0] + tx), y2: f2(m[1] + ty),
+        stroke: fl, "stroke-width": 7.5, "stroke-linecap": "round" }, rot);
+    }
+    el("line", { x1: 50, y1: 41, x2: 50, y2: 16, stroke: lum(cap) > 0.55 ? "#1d1e20" : "#f3f3f1", "stroke-width": 3.5, "stroke-linecap": "round" }, rot);
+    el("circle", { cx: 44, cy: 42, r: 15, fill: "rgba(255,255,255,0.04)" }, g);
+    el("circle", { cx: 43, cy: 40, r: 6, fill: "rgba(255,255,255,0.085)" }, g);
+    el("circle", { cx: 50, cy: 50, r: 36, fill: "none", stroke: "rgba(0,0,0,0.45)", "stroke-width": 1.2 }, g);
+  } else if (style === "hifi") {
+    // a solid turned-aluminium cylinder: a spun face, bright along the
+    // light's axis and darker across it (fixed to the light), inside a
+    // narrow bevel; a short dark pointer cut near the face's edge
+    el("circle", { cx: 50.8, cy: 51.6, r: 37.6, fill: "rgba(0,0,0,0.25)" }, g);
+    const ri = 37 * 0.86;
+    litRing(g, 37, ri, mixHex(cap, "#000000", 0.55), mixHex(cap, "#ffffff", 0.3), 1.2, 0.3);
+    const dark = mixHex(cap, "#000000", 0.3), light = mixHex(cap, "#ffffff", 0.45);
+    for (let i = 0; i < 48; i++) {
+      const d0 = i * 7.5, dm = d0 + 3.75, t = (dm - LIGHT_D) * Math.PI / 180;
+      const f = 0.5 + 0.4 * Math.cos(2 * t) + 0.1 * Math.cos(t);
+      const a = pt(ri, d0), b = pt(ri, d0 + 7.5), fill = mixHex(dark, light, f);
+      // stroked in its own colour, so the wedges meet without seams
+      el("path", { d: `M50 50L${a.map(f2).join(" ")}L${b.map(f2).join(" ")}Z`, fill, stroke: fill, "stroke-width": 0.8,
+        "stroke-linejoin": "round" }, g);
+    }
+    el("circle", { cx: 50, cy: 50, r: f2(ri), fill: "none", stroke: "rgba(0,0,0,0.25)", "stroke-width": 1 }, g);
+    rot = el("g", {}, g);
+    el("line", { x1: 50, y1: f2(50 - 37 * 0.52), x2: 50, y2: f2(50 - ri + 2.5), stroke: lum(cap) > 0.55 ? "#26272a" : "#f3f3f1",
+      "stroke-width": 3.2, "stroke-linecap": "round" }, rot);
+    el("circle", { cx: 50, cy: 50, r: 37, fill: "none", stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
+  } else if (style === "bezel" || style === "rbezel") {
+    // bezel: a black centre (the cap colour) in a polished chrome ring;
+    // reverse bezel: a glossy black ring round a turned-metal centre. The
+    // ring's light is fixed; the notch or pointer on it turns.
+    const rev = style === "rbezel";
+    el("circle", { cx: 50.8, cy: 51.6, r: 37.6, fill: "rgba(0,0,0,0.25)" }, g);
+    if (rev) litRing(g, 37, 22.5, "#0d0e0f", "#4c4f53", 3, 0.25);
+    else litRing(g, 37, 22.5, "#4f5257", "#f2f3f5", 1.6, 0.45);
+    el("circle", { cx: 50, cy: 50, r: 37, fill: "none", stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
+    rot = el("g", {}, g);
+    el("line", { x1: 50, y1: 26, x2: 50, y2: rev ? 15 : 14.5, stroke: rev ? "#f3f3f1" : "#1a1b1d",
+      "stroke-width": rev ? 3.2 : 3.5, "stroke-linecap": "round" }, rot);
+    if (rev) {
+      el("circle", { cx: 50, cy: 50, r: 23.3, fill: "none", stroke: "rgba(0,0,0,0.75)", "stroke-width": 1.6 }, g);
+      metalCap(g, defs, 22.5, cap, id);
+    } else {
+      el("circle", { cx: 50, cy: 50, r: 22.5, fill: cap, stroke: "rgba(0,0,0,0.7)", "stroke-width": 1.4 }, g);
+      el("circle", { cx: 47, cy: 46, r: 18, fill: "rgba(255,255,255,0.025)" }, g);
+    }
+  } else if (style === "bar") {
+    // a round dome with a raised bar right across it; one end of the bar is
+    // the pointer, marked by a short dark line. Lit from the top left: the
+    // gradient over the lot stays put as the knob turns, and of the bar's
+    // long edges the one facing the light is bright, the other dark.
+    el("circle", { cx: 50.8, cy: 51.6, r: 36.6, fill: "rgba(0,0,0,0.25)" }, g);
+    el("circle", { cx: 50, cy: 50, r: 36, fill: cap }, g);
+    // the bar turns with the knob, clipped to the dome so every band's
+    // ends follow its curve: a flat top, and either side a slope down to
+    // the dome -- shadowed away from the light, lit toward it -- with a
+    // soft fall-off beyond the shadowed one
+    const cid = "bc" + gradN;
+    el("circle", { cx: 50, cy: 50, r: 36 }, el("clipPath", { id: cid }, defs));
+    rot = el("g", {}, g);
+    const bars = el("g", { "clip-path": `url(#${cid})` }, rot);
+    const band = (x, w) => el("rect", { x, y: 14, width: w, height: 72 }, bars);
+    const lO = band(35, 2.5), lI = band(37.5, 3.5), rI = band(59, 3.5), rO = band(62.5, 2.5);
+    el("rect", { x: 41, y: 14, width: 18, height: 72, fill: lighten(cap, 0.45) }, bars);
+    const eL = el("line", { x1: 41, y1: 14, x2: 41, y2: 86, "stroke-width": 1.2 }, bars);
+    const eR = el("line", { x1: 59, y1: 14, x2: 59, y2: 86, "stroke-width": 1.2 }, bars);
+    el("line", { x1: 50, y1: 17.3, x2: 50, y2: 32.7, stroke: lum(cap) > 0.55 ? "#1d1e20" : "#f3f3f1",
+      "stroke-width": 3, "stroke-linecap": "round" }, rot);
+    el("circle", { cx: 50, cy: 50, r: 36, fill: `url(#${id})`, stroke: "rgba(0,0,0,0.45)", "stroke-width": 1.2 }, g);
+    const LIT = "rgba(255,255,255,0.31)", SHADE = "rgba(0,0,0,0.44)", FALL = "rgba(0,0,0,0.19)";
+    return { svg, set(v) {
+      const a = A0 + (A1 - A0) * v, t = a * Math.PI / 180;
+      rot.setAttribute("transform", `rotate(${f2(a)} 50 50)`);
+      // the left side's outward normal, turned, against the light's direction
+      const litL = 0.6 * Math.cos(t) + 0.8 * Math.sin(t) > 0;
+      lI.setAttribute("fill", litL ? LIT : SHADE);  lO.setAttribute("fill", litL ? "none" : FALL);
+      rI.setAttribute("fill", litL ? SHADE : LIT);  rO.setAttribute("fill", litL ? FALL : "none");
+      eL.setAttribute("stroke", litL ? "rgba(255,255,255,0.63)" : "rgba(0,0,0,0.4)");
+      eR.setAttribute("stroke", litL ? "rgba(0,0,0,0.4)" : "rgba(255,255,255,0.63)");
+    } };
   } else if (style === "pointer") {
     rot = el("g", {}, g);
     el("path", { d: "M50 5 C57 5 64 27 66 45 C68 65 61 81 50 81 C39 81 32 65 34 45 C36 27 43 5 50 5 Z",
@@ -758,11 +906,34 @@ function dragger(node, get, set, opts) {
 // ---------------------------------------------------------------------------
 // panel layout -- TS_CV_Panel.layout, at touch size
 // ---------------------------------------------------------------------------
-const CELL_W = 84, CELL_H = 100, KNOB = 52, PAD = 8, HEAD = 34, DIV_W = 12, GR_W = 34, MIN_W = 190, TRACE_W = 200;
+const CELL_H = 100, KNOB = 52, PAD = 8, HEAD = 34, DIV_W = 12, GR_W = 34, MIN_W = 190, TRACE_W = 200;
+// a column's width: 84 at the desktop's starting 58 px, and following its
+// View > Control spacing in proportion (the bridge sends it as cw)
+let CELL_W = 84;
+const cellW = cw => Math.round(84 * (cw || 50) / 58);
 
+// The half-cell grid, as on the desktop (TS_CV_Panel.layout, column flow):
+// a control is a block of half-cells -- 2 x 2 ordinarily, a half_gap 2 x 1,
+// a size from SIZES otherwise, and ordinary again when too tall for the
+// panel. A cursor runs down a strip; what doesn't fit starts a new strip
+// to the right, as wide as its widest control, with narrower ones centred.
+// Every item carries wu, hu: its size in half-cells.
+const SIZES = { small: [2, 1], medium: [2, 2], large: [3, 3] };
+const KNOB_D = { small: 30, medium: KNOB, large: 78 };
+function cellSize(c, halfRows) {
+  // a dropdown shown as buttons: one half-cell column each across, or a
+  // column two to a half-row down -- ordinary when it won't fit
+  if (c.t === "combo" && c.btn && c.nb >= 2 && c.nb <= 8) {
+    const span = c.btn === "across" ? [Math.max(2, c.nb), 2] : [2, Math.ceil((c.nb + 1) / 2)];
+    if (span[1] <= halfRows) return [span[0], span[1], "buttons"];
+  }
+  if (c.t === "half_gap") return [2, 1];
+  const sz = (c.t === "knob" || c.t === "stepped" || (c.t === "toggle" && c.sz === "small")) && c.sz && SIZES[c.sz];
+  return sz && sz[1] <= halfRows ? sz : [2, 2];
+}
 function placeControls(ctls, bodyH) {
   const rows = Math.max(1, Math.floor(bodyH / CELL_H));
-  const halfRows = rows * 2, halfH = CELL_H / 2;
+  const halfRows = rows * 2, HW = CELL_W / 2, HH = CELL_H / 2;
   const items = [], rules = [];
   const sections = [[]], splitters = [];
   ctls.forEach((c, i) => {
@@ -771,28 +942,39 @@ function placeControls(ctls, bodyH) {
     else sections[sections.length - 1].push(o);
   });
   let x = 0;
+  const styled = [];   // sections a divider styled (experimental): { x, w, by }
   sections.forEach((sec, si) => {
+    const first = items.length;
     if (si > 0) {
       const sp = splitters[si - 1];
-      if (sp.t === "fader") { items.push({ c: sp, x, y: 0, h: rows * CELL_H }); x += CELL_W; }
+      if (sp.t === "fader") { items.push({ c: sp, x, y: 0, h: rows * CELL_H, wu: 2, hu: halfRows }); x += CELL_W; }
       else { if (!sp.nr) rules.push(x + DIV_W / 2); x += DIV_W; }
     }
-    if (!sec.some(c => c.t === "half_gap")) {
-      const cols = Math.ceil(sec.length / rows);
-      sec.forEach((c, i) => items.push({ c, x: x + Math.floor(i / rows) * CELL_W, y: (i % rows) * CELL_H }));
-      x += cols * CELL_W;
-    } else {
-      let col = 0, cur = 0;
-      for (const c of sec) {
-        const cost = c.t === "half_gap" ? 1 : 2;
-        if (cur + cost > halfRows) { col++; cur = 0; }
-        if (c.t !== "half_gap") items.push({ c, x: x + col * CELL_W, y: cur * halfH });
-        cur += cost;
+    let cx = 0, cy = 0, sw = 0, strip = [];
+    const close = () => {
+      strip.forEach(it => { if (it.wu < sw) it.x += (sw - it.wu) * HW / 2; });
+      strip = []; cx += sw; cy = 0; sw = 0;
+    };
+    for (const c of sec) {
+      const [w, hh, kind] = cellSize(c, halfRows);
+      if (cy + hh > halfRows) close();
+      if (c.t !== "half_gap") {
+        const it = { c, x: x + cx * HW, y: cy * HH, wu: w, hu: hh, kind };
+        items.push(it); strip.push(it);
       }
-      x += (col + 1) * CELL_W;
+      cy += hh;
+      if (w > sw) sw = w;
     }
+    const width = cx + sw;
+    close();
+    const opener = splitters[si - 1];
+    if (opener && opener.t === "divider" && opener.sec && width > 0) {
+      styled.push({ x, w: width * HW, by: opener });
+      for (let k = first; k < items.length; k++) if (items[k].c !== opener) items[k].sec = styled.length - 1;
+    }
+    x += width * HW;
   });
-  return { items, rules, width: x, rows };
+  return { items, rules, width: x, rows, sections: styled };
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1289,8 @@ function editMacro(i) {
       acts.append(gap);
     }
     acts.append(cancel, ok);
+    // Enter in either box saves, as the button does
+    for (const f of [lab, act]) f.addEventListener("keydown", e => { if (e.key === "Enter") ok.click(); });
     sh.append(lab, act, res, h("div", "lbl", "Colour"), sw, acts);
     setTimeout(() => lab.focus(), 50);
   });
@@ -1162,8 +1346,11 @@ function plateFill(pl) {
     const A = p(a), B = p(b), out = [16, 8, 0].map(s => Math.round(((A >> s) & 255) + (((B >> s) & 255) - ((A >> s) & 255)) * t));
     return "#" + out.map(v => v.toString(16).padStart(2, "0")).join(""); };
   const g = `linear-gradient(180deg, ${mix(pl.bg, "#ffffff", 0.08 * sh)} 0%, ${pl.bg} 40%, ${mix(pl.bg, "#000000", 0.12 * sh)} 100%)`;
+  // the grain is lighter on a dark plate, where white lines show far more
+  const light = lum(pl.bg) > 0.55;
+  const hi = light ? 0.035 : 0.015, lo = light ? 0.025 : 0.045;
   return pl.brushed
-    ? `repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 3px), repeating-linear-gradient(0deg, rgba(0,0,0,0.045) 0 1px, transparent 1px 7px), ${g}`
+    ? `repeating-linear-gradient(0deg, rgba(255,255,255,${hi}) 0 1px, transparent 1px 3px), repeating-linear-gradient(0deg, rgba(0,0,0,${lo}) 0 1px, transparent 1px 7px), ${g}`
     : g;
 }
 
@@ -2054,25 +2241,53 @@ function buildPanel(p, bodyH) {
   pnl.append(head, body);
   const gridX = PAD + Math.max(0, (w - PAD * 2 - gr - lay.width) / 2);
   const ctl = [];
+  // styled sections (experimental), behind the controls
+  for (const s of lay.sections || []) {
+    const d = h("div", "sect " + s.by.sec);
+    d.style.left = (gridX + s.x - 4) + "px"; d.style.top = (PAD - 4) + "px";
+    d.style.width = (s.w + 8) + "px"; d.style.height = (lay.rows * CELL_H - 2) + "px";
+    if (s.by.sp) { d.style.background = s.by.sp.bg; d.style.borderColor = s.by.sp.border; }
+    body.append(d);
+  }
   for (const rx of lay.rules) {
     const r = h("div", "rule"); r.style.left = (gridX + rx) + "px"; r.style.top = PAD + "px";
     r.style.height = (lay.rows * CELL_H - 8) + "px"; body.append(r);
   }
   for (const it of lay.items) {
     const c = it.c, cell = h("div", "cell");
-    cell.style.left = (gridX + it.x) + "px"; cell.style.top = (PAD + it.y) + "px"; cell.style.width = CELL_W + "px";
+    // the size it was given room for: small and large knobs (a size too
+    // tall for the panel came back ordinary)
+    const size = it.wu === 2 && it.hu === 1 ? "small" : it.wu === 3 && it.hu === 3 ? "large" : "medium";
+    const cw = CELL_W * it.wu / 2;
+    cell.style.left = (gridX + it.x) + "px"; cell.style.top = (PAD + it.y) + "px"; cell.style.width = cw + "px";
+    // on a section's own plate, that plate's inks
+    const sp = it.sec != null && lay.sections[it.sec].by.sp;
+    if (sp) for (const [k, v] of [["--label", sp.text], ["--value", sp.dim], ["--dim", sp.dim], ["--text", sp.text], ["--ring", sp.tick]]) cell.style.setProperty(k, v);
     body.append(cell);
     const id = p.g + ":" + c.idx;
     if (c.t === "blank") continue;
     if (c.t === "missing") { cell.append(h("div", "miss", "!")); continue; }
-    const lbl = h("div", "lbl", c.l || ""); lbl.style.width = (CELL_W - 4) + "px";
-    const val = h("div", "val", ""); val.style.width = (CELL_W - 4) + "px";
+    const lbl = h("div", "lbl", c.l || ""); lbl.style.width = (cw - 4) + "px";
+    const val = h("div", "val", ""); val.style.width = (cw - 4) + "px";
     const entry = { c, id, val };
     const sendV = v => { touch(id, v); send("p", p.g, c.p, v.toFixed(4)); };
     if (c.t === "knob" || c.t === "stepped") {
-      const k = makeKnob(KNOB, c.st, c.cap, c.bi);
-      const box = h("div", "knob"); box.style.margin = "6px 0 4px"; box.append(k.svg);
-      cell.append(lbl, box, val);
+      const k = makeKnob(KNOB_D[size], c.st, c.cap, c.bi);
+      const box = h("div", "knob"); box.append(k.svg);
+      if (size === "small") {
+        // a small name over a smaller dial: there's no hovering on a touch
+        // screen, so the name has to be on the panel; no room for the value
+        lbl.classList.add("sm");
+        box.style.margin = "1px 0 0";
+        box.title = c.l || "";
+        cell.append(lbl, box);
+        entry.val = null;
+      } else {
+        // the dial centred in what the bigger cell adds round it
+        const m = Math.max(0, (CELL_H * it.hu / 2 - CELL_H - (KNOB_D[size] - KNOB)) / 2);
+        box.style.margin = size === "medium" ? "6px 0 4px" : `${6 + m}px 0 ${4 + m}px`;
+        cell.append(lbl, box, val);
+      }
       let cur = 0;
       const snap = c.t === "stepped" && c.ch && c.ch.length > 1;
       dragger(box, () => cur, v => {
@@ -2083,10 +2298,36 @@ function buildPanel(p, bodyH) {
       entry.set = v => { cur = v; k.set(v); };
     } else if (c.t === "toggle") {
       const b = h("button", "tog"); b.style.width = (CELL_W - 12) + "px";
-      cell.append(lbl, b);
+      // small: a half-height lit push-button, its name on it when the
+      // state has none of its own
+      const small = size === "small";
+      if (small) { b.style.marginTop = ((CELL_H / 2 - 34) / 2) + "px"; b.style.height = "34px"; b.title = c.l || ""; }
+      // its own lit colour, when it has one, with ink that reads on it
+      if (c.lit) { b.style.setProperty("--ton", c.lit); b.style.setProperty("--ton-ink", lum(c.lit) > 0.55 ? "#0d1116" : "#f4f4f2"); }
+      if (small) cell.append(b); else cell.append(lbl, b);
       let cur = 0;
       b.addEventListener("click", () => { cur = cur >= 0.5 ? 0 : 1; b.classList.toggle("on", cur >= 0.5); sendV(cur); });
-      entry.set = (v, x) => { cur = v; b.classList.toggle("on", v >= 0.5); b.textContent = x || (v >= 0.5 ? "ON" : "OFF"); };
+      entry.set = (v, x) => { cur = v; b.classList.toggle("on", v >= 0.5);
+        b.textContent = x || (small ? (c.l || "") : (v >= 0.5 ? "ON" : "OFF")); };
+      entry.val = null;
+    } else if (c.t === "combo" && it.kind === "buttons") {
+      // one button per choice, the current one lit
+      const row = h("div", "brow " + c.btn);
+      if (c.lit) { row.style.setProperty("--ton", c.lit); row.style.setProperty("--ton-ink", lum(c.lit) > 0.55 ? "#0d1116" : "#f4f4f2"); }
+      row.style.width = (cw - 6) + "px";
+      const names = (c.ch && c.ch.length ? c.ch : Array.from({ length: c.nb }, (_, i) => String(i + 1))).slice(0, c.nb);
+      const btns = names.map((nm, i) => {
+        const b = h("button", "bb", nm); b.title = nm;
+        b.addEventListener("click", () => { const v = choiceNorm(c.ch && c.ch.length ? c : { ch: names }, i); sendV(v); entry.set(v); });
+        row.append(b);
+        return b;
+      });
+      cell.append(lbl, row);
+      entry.set = v => {
+        const ref = c.ch && c.ch.length ? c : { ch: names };
+        const k = nearestChoice(ref, v);
+        btns.forEach((b, i) => b.classList.toggle("on", i === k));
+      };
       entry.val = null;
     } else if (c.t === "combo") {
       const b = h("button", "cmb"); b.style.width = (CELL_W - 8) + "px";
@@ -2167,6 +2408,7 @@ function panelMenu(p) {
     item("Move left", () => send("fxmove", p.g, p.ti - 1), top && p.ti > 0);
     item("Move right", () => send("fxmove", p.g, p.ti + 2), top && p.ti < topCount() - 1);
     item("Open the plugin's window", () => send("float", p.g));
+    item("Rename…", () => renameFx(p));
     sh.append(h("div", "gap"));
     item("Remove plugin", () => send("fxdel", p.g), top, true);
     if (!top) sh.append(h("div", "lbl", "Inside an FX container: move or remove it in REAPER."));
@@ -2282,6 +2524,21 @@ function presetName(p, mode, start) {
     });
     fld.addEventListener("keydown", e => { if (e.key === "Enter" && !go.disabled) go.click(); });
     label();
+    setTimeout(() => { fld.focus(); fld.select(); }, 60);
+  });
+}
+// REAPER's own name for a plugin instance, as its FX chain's Rename
+function renameFx(p) {
+  openSheet(sh => {
+    sh.append(h("h3", null, "Rename plugin"));
+    sh.append(h("div", "note", (p.an || p.n) + " — REAPER's name for this instance. Leave it empty to go back to the plugin's own."));
+    const fld = h("input", "fld"); fld.value = p.an ? p.n : ""; fld.placeholder = p.an || p.n;
+    sh.append(fld);
+    const go = h("button", "pri", "Rename"), cancel = h("button", null, "Cancel");
+    const acts = h("div", "acts"); acts.append(cancel, go); sh.append(acts);
+    cancel.addEventListener("click", closeSheet);
+    go.addEventListener("click", () => { closeSheet(); send("fxren", p.g, enc(fld.value.trim())); });
+    fld.addEventListener("keydown", e => { if (e.key === "Enter") go.click(); });
     setTimeout(() => { fld.focus(); fld.select(); }, 60);
   });
 }
@@ -2504,10 +2761,12 @@ function pickPlugin(at) {
       group("Categories", tree.cats, "cat");
       group("Developers", tree.devs, "dev");
     };
+    let searched = null;   // the query the list on screen is for
     const go = async () => {
       const mine = ++fxSeq;
       const clean = t => String(t).replace(/[|~]/g, " ");
       send("fxfind", mine, clean(q.value), kind, clean(val));
+      const asked = q.value;
       for (let k = 0; k < 30 && mine === fxSeq; k++) {
         await new Promise(r => setTimeout(r, 120));
         try {
@@ -2515,6 +2774,7 @@ function pickPlugin(at) {
           const f = r.ext.fxfound ? JSON.parse(r.ext.fxfound) : null;
           if (!f || f.s !== mine) continue;
           fillTree(f.tree);
+          searched = asked;
           res.innerHTML = "";
           let recentHdr = false, allHdr = false;
           if (!f.r.length) res.append(h("div", "lbl", "Nothing found"));
@@ -2536,6 +2796,14 @@ function pickPlugin(at) {
       }
     };
     q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(go, 200); });
+    // Enter adds the first plugin found (searching first if it hasn't yet)
+    q.addEventListener("keydown", async e => {
+      if (e.key !== "Enter") return;
+      clearTimeout(timer);
+      if (searched !== q.value) await go();
+      const first = res.querySelector("button.opt");
+      if (first) first.click();
+    });
     sel.addEventListener("change", () => {
       const [k, v] = sel.value.split("\t");
       kind = sel.value ? k : ""; val = sel.value ? v : "";

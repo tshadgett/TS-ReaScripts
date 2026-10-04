@@ -19,7 +19,16 @@ C.WIN_TITLE = "ChannelView"
 -- A control occupies one CELL. Panels are a fixed HEIGHT (they fill the
 -- window) and grow in COLUMNS: controls flow top-to-bottom down a column,
 -- then wrap into a new column to the right, which widens the panel.
-C.CELL_W      = 58        -- width of one control cell
+C.CELL_W      = 50        -- width of one control cell (View > Control spacing)
+-- View > Control spacing moves the cell width between these (one setting
+-- for ChannelView, its TCP window and the web page); the cell's height,
+-- the knobs and the type stay as they are, only the air between columns
+-- changes. Below the minimum a knob's scale ticks would touch.
+C.CELL_W_DEFAULT, C.CELL_W_MIN, C.CELL_W_MAX = 50, 46, 64
+function C.set_cell_w(v)
+  v = math.floor(tonumber(v) or C.CELL_W_DEFAULT)
+  C.CELL_W = math.max(C.CELL_W_MIN, math.min(C.CELL_W_MAX, v))
+end
 C.CELL_H      = 64        -- height of one control cell (name + knob + value)
 C.KNOB_D      = 34        -- knob diameter within the cell
 C.LABEL_GAP   = 5         -- air between the name and the control under
@@ -86,6 +95,24 @@ C.CHILD_PAD_Y_FALLBACK = 6
 --              Reads like the Fender layout, but every control moves
 --              when the dock is resized.
 C.FLOW = "column"
+
+-- Knob sizes, in half-cells across and down (TS_CV_Panel.layout), and the
+-- knob's diameter at each. Medium is the one cell every control has always
+-- been. A small knob has its name in small type over a smaller dial and no
+-- room for its value, which goes in its tooltip; a large one keeps both
+-- and grows its dial about half again.
+C.SIZES = {
+  small  = { w = 2, h = 1, d = 18,       label = "Small" },
+  medium = { w = 2, h = 2, d = C.KNOB_D, label = "Medium" },
+  large  = { w = 3, h = 3, d = 52,       label = "Large" },
+}
+C.SIZE_LIST = { "small", "medium", "large" }
+
+-- A dropdown can show its choices as buttons instead (a control's
+-- right-click menu, Show as): across, one half-cell column per choice,
+-- under its name; or down, a column of buttons two to a half-row. Past
+-- this many choices it stays a dropdown.
+C.BUTTONS_MAX = 8
 
 -- ---------------------------------------------------------------------
 -- Behaviour
@@ -262,7 +289,7 @@ C.LEVEL_METER_W = 52      -- the level meter's own width within its half.
 -- A send is a DOUBLE-WIDTH cell on the same grid the plugin panels use,
 -- so sends line up row-for-row with parameters: knob in the left half,
 -- its buttons in the right. The add tile is simply the next cell.
-C.SEND_W      = 2 * C.CELL_W
+C.SEND_W      = 116       -- a send's double-width cell, whatever the control spacing
 -- Air between columns of sends. The parameter grid doesn't need any --
 -- its cells are a knob and a name and read as a grid on their own -- but
 -- a send is a name, a knob and three buttons, so two columns hard against
@@ -754,6 +781,15 @@ C.PLATES = {
   { key = "cream",     label = "Cream",
     bg = 0xd9d1bfff, head = 0xc8bfaaff, text = 0x2b2722ff, dim = 0x5c554bff,
     tick = 0x4a443bff, border = 0xbcb29bff },
+  { key = "cobalt",    label = "Cobalt",
+    bg = 0x2456a3ff, head = 0x1b4382ff, text = 0xf2f5faff, dim = 0xc5d3eaff,
+    tick = 0xd2deefff, border = 0x3366b5ff },
+  { key = "amber",     label = "Amber",
+    bg = 0xd9921fff, head = 0xc07d12ff, text = 0x22190aff, dim = 0x4d3916ff,
+    tick = 0x3b2b0fff, border = 0xb57411ff },
+  { key = "stone",     label = "Stone",
+    bg = 0xafa493ff, head = 0x9d9281ff, text = 0x1d1b18ff, dim = 0x47413aff,
+    tick = 0x38332dff, border = 0x978c7bff },
   { key = "green",     label = "Racing green",
     bg = 0x2e4639ff, head = 0x24382dff, text = 0xe6ebe4ff, dim = 0xadbbb0ff,
     tick = 0xa6b6a9ff, border = 0x3c5748ff },
@@ -773,8 +809,26 @@ C.CAPS = {
   { key = "blue",   label = "Blue",   col = 0x3f74b8ff },
   { key = "grey",   label = "Grey",   col = 0x8d9298ff },
   { key = "cream",  label = "Cream",  col = 0xe6e0d2ff },
+  { key = "silver", label = "Silver", col = 0xc9ccd0ff },
+  { key = "stone",  label = "Stone",  col = 0xb3a896ff },
   { key = "black",  label = "Black",  col = 0x26282bff },
 }
+
+-- What a toggle lights up in when it's on, chosen from its right-click
+-- Colour menu and saved in its Style line's colour field. "theme" is the
+-- theme's own toggle colour (no colour saved); the rest are fixed, like a
+-- lamp behind the button.
+C.TOGGLE_COLS = {
+  { key = "theme",  label = "Theme" },
+  { key = "amber",  label = "Amber",  col = 0xe8a23aff },
+  { key = "green",  label = "Green",  col = 0x4caf5eff },
+  { key = "red",    label = "Red",    col = 0xd8463cff },
+  { key = "blue",   label = "Blue",   col = 0x3f7fd0ff },
+  { key = "yellow", label = "Yellow", col = 0xe0c84aff },
+  { key = "white",  label = "White",  col = 0xe9e7e1ff },
+}
+C.TOGGLE_COL = {}
+for _, t in ipairs(C.TOGGLE_COLS) do C.TOGGLE_COL[t.key] = t end
 
 -- The styles, each with the cap colour it wears until one is chosen. The
 -- first of each list is the default, and is what a control with no style
@@ -785,6 +839,11 @@ C.KNOB_STYLES = {
   { key = "pointer", label = "Pointer",  cap = "black" },
   { key = "trim",    label = "Trim pot", cap = "grey" },
   { key = "nose",    label = "Round nose", cap = "black" },
+  { key = "bar",     label = "Bar",      cap = "silver" },
+  { key = "fluted",  label = "Fluted",   cap = "black" },
+  { key = "bezel",   label = "Bezel",    cap = "black" },
+  { key = "rbezel",  label = "Reverse bezel", cap = "silver" },
+  { key = "hifi",    label = "Hi-fi",    cap = "silver" },
 }
 C.FADER_STYLES = {
   { key = "flat",    label = "Flat" },

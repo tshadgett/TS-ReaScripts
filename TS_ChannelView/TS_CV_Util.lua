@@ -199,6 +199,13 @@ function U.clean_fx_name(raw)
   return U.trim(s)
 end
 
+-- What to call an FX instance on screen: its REAPER instance name if it
+-- was renamed in the chain (TS_CV_FXTree's `alias`), else the plugin's.
+function U.fx_label(fx)
+  if fx and fx.alias and fx.alias ~= "" then return fx.alias end
+  return U.clean_fx_name(fx and fx.name)
+end
+
 -- "VST3: Saturn 2 (FabFilter)" -> "VST3". REAPER prefixes every FX name
 -- with its format, and instruments carry an "i" (VSTi, VST3i, CLAPi),
 -- which is worth keeping -- it's the difference between the effect and

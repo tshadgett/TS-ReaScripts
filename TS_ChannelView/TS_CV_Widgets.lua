@@ -226,7 +226,8 @@ end
 -- ---------------------------------------------------------------------
 -- What a knob looks like, apart from what it does: W.knob draws one in its
 -- cell, the Style menu draws small ones as previews. `o` is
---   style    "arc" (the theme's own), "skirted", "pointer", "trim" or "nose"
+--   style    "arc" (the theme's own), "skirted", "pointer", "trim", "nose",
+--            "bar", "fluted", "bezel", "rbezel" or "hifi"
 --   cap      the cap colour, or nil for the style's usual one
 --   bipolar  fill from the centre (arc) / no difference (the others)
 --   dim      the plugin is bypassed: everything at reduced strength
@@ -242,7 +243,99 @@ end
 -- the knob; they use knob_ring, which a faceplate retints, so they read on
 -- cream as well as on charcoal.
 local FACE_BODY = { skirted = 38, pointer = 43, trim = 47,   -- trim sits a size down
-                    nose = 40 }
+                    nose = 40, bar = 37, fluted = 38, bezel = 38,
+                    rbezel = 38, hifi = 38 }
+
+-- Light falls from the top left on every hardware face, as on the
+-- faceplate texture: the angle it comes from, in screen terms.
+local LIGHT_A = math.atan(-0.8, -0.6)
+
+-- One colour `t` (0..1) of the way from `a` to `b`, alpha from `a`.
+local function lerp_col(a, b, t)
+  t = math.max(0, math.min(1, t))
+  local out = 0
+  for _, sh in ipairs({ 24, 16, 8 }) do
+    local x, y = (a >> sh) & 0xff, (b >> sh) & 0xff
+    out = out | (math.floor(x + (y - x) * t + 0.5) << sh)
+  end
+  return out | (a & 0xff)
+end
+
+-- How much light a surface facing angle `t` catches: 0 away, 1 toward.
+local function lit(t) return (math.cos(t - LIGHT_A) + 1) * 0.5 end
+
+-- A turned metal cap of radius `cr` at (cx, cy) in colour `cap`: lit from
+-- the top left and darker bottom right, with the bow-tie sheen of
+-- brushed metal running across it and a few machining rings. The sheen
+-- belongs to the light, so it stays put as the knob turns.
+local function metal_cap(dl, cx, cy, cr, cap, k, hot, fd)
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, cr, fd(lerp_col(cap, 0x000000ff, 0.28)), 32)
+  ImGui.DrawList_AddCircleFilled(dl, cx - cr * 0.06, cy - cr * 0.08, cr * 0.9,
+    fd(hot and U.lighten(cap, 0.08) or cap), 32)
+  -- the sheen: two narrow wedges either side of the centre, across the light
+  local d = LIGHT_A + math.pi * 0.5
+  local w = math.rad(14)
+  for _, s in ipairs({ d, d + math.pi }) do
+    ImGui.DrawList_AddTriangleFilled(dl, cx, cy,
+      cx + math.cos(s - w) * cr * 0.9, cy + math.sin(s - w) * cr * 0.9,
+      cx + math.cos(s + w) * cr * 0.9, cy + math.sin(s + w) * cr * 0.9,
+      fd(U.is_light(cap) and 0xffffff55 or 0xffffff26))
+  end
+  if cr >= 7 then
+    for ring = 0.35, 0.8, 0.22 do
+      ImGui.DrawList_AddCircle(dl, cx, cy, cr * ring, fd(0x0000000e), 24, 1.0)
+    end
+  end
+  ImGui.DrawList_AddCircle(dl, cx, cy, cr, fd(0x00000080), 32, math.max(1.0, 1.1 * k))
+end
+
+-- The fluted knob: one round, domed body in the cap colour (black unless
+-- one is chosen) with finger flutes pressed into it near the edge -- dark
+-- ovals that turn with it -- a soft light on its top left, and a white
+-- pointer running from near the centre out between two flutes.
+local FLUTE_R, FLUTE_N, FLUTE_AT = 36, 8, 28.5     -- the body, its flutes, where they sit
+local FLUTE_LEN, FLUTE_W         = 4.5, 7.5        -- half a flute's length (around), its width
+
+-- The bezel knob: a black centre (the cap colour) in a wide polished
+-- chrome ring, the ring's light fixed while a dark notch in it turns. The
+-- reverse bezel swaps them: a glossy black ring round a turned-metal
+-- centre (the cap colour, silver unless chosen), with a white pointer on
+-- the ring.
+local BEZEL_R, BEZEL_IN, BEZEL_SEG = 37, 22.5, 48
+
+-- The hi-fi knob: a solid turned-aluminium cylinder (the cap colour,
+-- silver unless chosen). Its face is spun metal -- the light catches it
+-- along one axis and falls off across the other, the way a conic brushed
+-- finish does, and stays put as the knob turns -- inside a narrow bevel
+-- that catches the light on top. The pointer is a short dark line cut in
+-- the face near its edge.
+local HIFI_R, HIFI_FACE = 37, 0.86
+
+-- A lit ring between radii `ri` and `R`, drawn segment by segment: `lo`
+-- facing away from the light to `hi` facing it (sharpened by `pw`), with
+-- a weaker glint opposite, the way a polished cone reflects.
+local function lit_ring(dl, cx, cy, R, ri, lo, hi, pw, glint_amt, fd)
+  local n = BEZEL_SEG
+  for i = 0, n - 1 do
+    local t0, t1 = i * TAU / n, (i + 1) * TAU / n
+    local tm = (t0 + t1) * 0.5
+    local glint = math.max(0, math.cos(tm - LIGHT_A - math.pi)) ^ 6 * glint_amt
+    local col = lerp_col(lo, hi, math.max(lit(tm) ^ pw, glint))
+    local c0, s0, c1, s1 = math.cos(t0), math.sin(t0), math.cos(t1), math.sin(t1)
+    ImGui.DrawList_AddQuadFilled(dl, cx + c0 * R, cy + s0 * R, cx + c1 * R, cy + s1 * R,
+      cx + c1 * ri, cy + s1 * ri, cx + c0 * ri, cy + s0 * ri, fd(col))
+  end
+end
+
+-- The bar knob: a round dome with a raised bar right across it, the bar
+-- being the grip and one end of it the pointer, marked by a short dark
+-- line. The cap colour is the whole knob's, dome and bar (silver unless
+-- one is chosen). The light comes from the top left, as on the faceplate
+-- texture: the dome is darker toward the bottom right, and of the bar's
+-- two long edges the one facing the light is bright and the other dark,
+-- whichever way the knob is turned.
+local BAR_R, BAR_HALF = 36, 9.0        -- the dome's radius, half the bar's width
+local BAR_SLOPE, BAR_FALL = 3.5, 2.5   -- the bar's sloping sides, and the shadow beyond one
 
 -- The round-nose knob: a neutral grey body with a short nose, the nose
 -- being the pointer -- no line on the cap -- and the colour only in the
@@ -407,6 +500,137 @@ function W.knob_face(dl, cx, cy, r, value, o)
       o.hot and 0xffffff0b or 0xffffff06, 24)
     ImGui.DrawList_AddCircle(dl, cx, cy, cr, fade(0x000000a0), 32, math.max(1.0, 1.2 * k))
 
+  elseif style == "bar" then
+    scale()
+    local R, h = BAR_R * k, BAR_HALF * k
+    local base = o.cap or C.CAP[C.KNOB_STYLE[style].cap].col
+    if o.hot then base = U.lighten(base, 0.1) end
+    -- a soft shadow, then the dome: dark all over, with the body colour
+    -- set up and to the left so a darker crescent is left bottom right
+    ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.6 * k, R + 0.6 * k, fade(0x00000040), 36)
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, fade(0x000000ff), 36)
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, fade(U.with_alpha(base, 0xb0)), 36)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 1.6 * k, cy - 2.2 * k, R * 0.92, fade(base), 36)
+    -- the bar: a flat top, and either side of it a slope running down to
+    -- the dome -- in shadow on the side away from the light, catching it on
+    -- the other, with a soft fall-off beyond the shadowed one. Each band
+    -- ends where its own lines meet the dome's edge, so the ends follow
+    -- the curve.
+    local ux, uy, vx, vy = ca, sa, -sa, ca            -- along the bar, across it
+    local function len(w) w = math.min(math.abs(w), R - 0.01); return math.sqrt(R * R - w * w) end
+    local function band(w0, w1, col)                  -- between offsets w0 and w1 across
+      local l0, l1 = len(w0), len(w1)
+      ImGui.DrawList_AddQuadFilled(dl,
+        cx + ux * l0 + vx * w0, cy + uy * l0 + vy * w0,
+        cx + ux * l1 + vx * w1, cy + uy * l1 + vy * w1,
+        cx - ux * l1 + vx * w1, cy - uy * l1 + vy * w1,
+        cx - ux * l0 + vx * w0, cy - uy * l0 + vy * w0, col)
+    end
+    local lit = ((vx * -0.6 + vy * -0.8) > 0) and 1 or -1   -- +v or -v: the side facing the light
+    local s1, s2 = BAR_SLOPE * k, BAR_FALL * k
+    band(-lit * (h + s1), -lit * (h + s1 + s2), fade(0x00000030))
+    band(-lit * h, -lit * (h + s1), fade(0x00000070))
+    band(lit * h, lit * (h + s1), fade(0xffffff50))
+    band(-h, h, fade(U.lighten(base, 0.45)))
+    -- the crests, where the top turns down into the slopes
+    local L, lw = len(h), math.max(1.0, 1.2 * k)
+    local function crest(w, col)
+      ImGui.DrawList_AddLine(dl, cx + ux * L + vx * w, cy + uy * L + vy * w,
+        cx - ux * L + vx * w, cy - uy * L + vy * w, col, lw)
+    end
+    crest(lit * h, fade(0xffffffa0))
+    crest(-lit * h, fade(0x00000066))
+    -- the pointer: a short dark line in the bar's far end
+    local px1, py1 = at(BAR_R * 0.48); local px2, py2 = at(BAR_R - 3.5)
+    ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, fade(cap_ink(base)), math.max(1.5, 3 * k))
+    -- the dome's highlight, over the bar too, and its rim
+    ImGui.DrawList_AddCircleFilled(dl, cx - 9 * k, cy - 11 * k, 14 * k,
+      o.hot and 0xffffff12 or 0xffffff0a, 24)
+    ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x00000073), 36, math.max(1.0, 1.1 * k))
+
+  elseif style == "fluted" then
+    scale()
+    local body = o.cap or C.CAP[C.KNOB_STYLE[style].cap].col
+    if o.hot then body = U.lighten(body, 0.06) end
+    local R = FLUTE_R * k
+    ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.6 * k, R + 0.6 * k, fade(0x00000040), 36)
+    -- the side, darker, showing as a crescent bottom right below the top
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, fade(lerp_col(body, 0x000000ff, 0.45)), 36)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 1.0 * k, cy - 1.4 * k, R * 0.95, fade(body), 36)
+    -- the flutes: rounded slots running round the edge, set half a flute
+    -- off the pointer so it runs between two
+    local fcol = fade(lerp_col(body, 0x000000ff, 0.6))
+    local h, w = FLUTE_LEN * k, FLUTE_W * k
+    for i = 0, FLUTE_N - 1 do
+      local t = a + (i + 0.5) * TAU / FLUTE_N
+      local mx, my = cx + math.cos(t) * FLUTE_AT * k, cy + math.sin(t) * FLUTE_AT * k
+      local tx, ty = -math.sin(t) * h, math.cos(t) * h
+      ImGui.DrawList_AddLine(dl, mx - tx, my - ty, mx + tx, my + ty, fcol, w)
+      ImGui.DrawList_AddCircleFilled(dl, mx - tx, my - ty, w * 0.5, fcol, 12)
+      ImGui.DrawList_AddCircleFilled(dl, mx + tx, my + ty, w * 0.5, fcol, 12)
+    end
+    -- a soft light on the dome, top left
+    ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 8 * k, 15 * k, 0xffffff0a, 24)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 7 * k, cy - 10 * k, 6 * k, o.hot and 0xffffff20 or 0xffffff16, 16)
+    local x1, y1 = at(9); local x2, y2 = at(FLUTE_R - 2)
+    -- white on a dark body, black on a light one
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(U.is_light(body) and 0x1d1e20ff or 0xf3f3f1ff), math.max(1.5, 3.5 * k))
+    ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x00000073), 36, math.max(1.0, 1.1 * k))
+
+  elseif style == "bezel" then
+    scale()
+    local R, ri = BEZEL_R * k, BEZEL_IN * k
+    ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.6 * k, R + 0.6 * k, fade(0x00000040), 36)
+    lit_ring(dl, cx, cy, R, ri, 0x4f5257ff, o.hot and 0xffffffff or 0xf2f3f5ff, 1.6, 0.45, fade)
+    ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x00000080), 36, math.max(1.0, 1.1 * k))
+    -- the notch
+    local x1, y1 = at(BEZEL_IN + 1.5); local x2, y2 = at(BEZEL_R - 1.5)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0x1a1b1dff), math.max(2.0, 3.5 * k))
+    -- the centre: matte, with barely a lift toward the light
+    local cap = o.cap or C.CAP[C.KNOB_STYLE[style].cap].col
+    if o.hot then cap = U.lighten(cap, 0.08) end
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, ri, fade(cap), 32)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 3 * k, cy - 4 * k, ri * 0.8, 0xffffff06, 24)
+    ImGui.DrawList_AddCircle(dl, cx, cy, ri, fade(0x000000b0), 32, math.max(1.0, 1.3 * k))
+
+  elseif style == "rbezel" then
+    scale()
+    local R, ri = BEZEL_R * k, BEZEL_IN * k
+    ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.6 * k, R + 0.6 * k, fade(0x00000040), 36)
+    -- glossy black: nearly black all round, catching a highlight up top left
+    lit_ring(dl, cx, cy, R, ri, 0x0d0e0fff, o.hot and 0x5d6066ff or 0x4c4f53ff, 3.0, 0.25, fade)
+    ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x00000099), 36, math.max(1.0, 1.1 * k))
+    local x1, y1 = at(BEZEL_IN + 1.5); local x2, y2 = at(BEZEL_R - 2)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0xf3f3f1ff), math.max(1.5, 3.2 * k))
+    -- the seam, then the turned-metal centre
+    ImGui.DrawList_AddCircle(dl, cx, cy, ri + 0.8 * k, fade(0x000000c0), 32, math.max(1.0, 1.6 * k))
+    metal_cap(dl, cx, cy, ri, o.cap or C.CAP[C.KNOB_STYLE[style].cap].col, k, o.hot, fade)
+
+  elseif style == "hifi" then
+    scale()
+    local metal = o.cap or C.CAP[C.KNOB_STYLE[style].cap].col
+    if o.hot then metal = U.lighten(metal, 0.08) end
+    local R = HIFI_R * k
+    local ri = R * HIFI_FACE
+    ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.6 * k, R + 0.6 * k, fade(0x00000040), 36)
+    lit_ring(dl, cx, cy, R, ri, lerp_col(metal, 0x000000ff, 0.55), lerp_col(metal, 0xffffffff, 0.3), 1.2, 0.3, fade)
+    -- the spun face: wedges from the centre, bright along the light's
+    -- axis and darker across it
+    local dark, light = lerp_col(metal, 0x000000ff, 0.3), lerp_col(metal, 0xffffffff, 0.45)
+    local n = BEZEL_SEG
+    for i = 0, n - 1 do
+      local t0, t1 = i * TAU / n, (i + 1) * TAU / n
+      local tm = (t0 + t1) * 0.5
+      local f = 0.5 + 0.4 * math.cos(2 * (tm - LIGHT_A)) + 0.1 * math.cos(tm - LIGHT_A)
+      ImGui.DrawList_AddTriangleFilled(dl, cx, cy,
+        cx + math.cos(t0) * ri, cy + math.sin(t0) * ri,
+        cx + math.cos(t1 + 0.01) * ri, cy + math.sin(t1 + 0.01) * ri, fade(lerp_col(dark, light, f)))
+    end
+    ImGui.DrawList_AddCircle(dl, cx, cy, ri, fade(0x00000040), 36, 1.0)
+    local x1, y1 = at(HIFI_R * 0.52); local x2, y2 = at(HIFI_R * HIFI_FACE - 2.5)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(U.is_light(metal) and 0x26272aff or 0xf3f3f1ff), math.max(1.5, 3.2 * k))
+    ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x00000080), 36, math.max(1.0, 1.1 * k))
+
   else -- trim
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, 40 * k, 0x232528ff, 32)
     ImGui.DrawList_AddCircle(dl, cx, cy, 40 * k, 0x0e0f10ff, 32, 1.0)
@@ -434,8 +658,12 @@ end
 -- label     : short name drawn above the knob
 -- value     : 0..1
 -- formatted : the plugin's own value string, drawn below
--- opts      : { bipolar, tooltip, dim, step_norm, style, cap }
+-- opts      : { bipolar, tooltip, dim, step_norm, style, cap, size }
 --             style/cap: the face (see W.knob_face); nil is the theme's arc
+--             size: "small" or "large" (C.SIZES), nil for the ordinary
+--             cell. A small knob is its name in small type over a small
+--             dial, its value in the tooltip; a large one is the same cell
+--             grown.
 -- returns   : changed, value, act   (act = {right_click, double_click})
 --
 -- opts.step_norm -- one step in normalised units (see TS_CV_Panel.step_norm,
@@ -449,8 +677,11 @@ function W.knob(ctx, id, label, value, formatted, opts)
   opts = opts or {}
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
-  local cw, ch = C.CELL_W, C.CELL_H
-  local r = C.KNOB_D * 0.5
+  local sz = C.SIZES[opts.size or "medium"] or C.SIZES.medium
+  local small = opts.size == "small"
+  local cw = math.tointeger(C.CELL_W * sz.w / 2) or C.CELL_W * sz.w / 2
+  local ch = math.tointeger(C.CELL_H * sz.h / 2) or C.CELL_H * sz.h / 2
+  local r = sz.d * 0.5
 
   W.allow_overlap(ctx)
   local pressed = ImGui.InvisibleButton(ctx, id, cw, ch,
@@ -498,24 +729,41 @@ function W.knob(ctx, id, label, value, formatted, opts)
     end
   end
 
-  -- geometry
+  -- geometry: the dial centred in the room between the name and the
+  -- value line (for the ordinary cell, exactly where it always sat), or
+  -- in the whole cell when it's small and has neither
   local label_h = W.LABEL_H
   local cx = x + cw * 0.5
-  local cy = y + label_h + C.LABEL_GAP + r
+  local cy
+  if small then
+    -- under the name, its scale ticks just clearing it
+    cy = y + ch - r - 2
+  else
+    local room = ch - label_h - C.LABEL_GAP - 14
+    cy = y + label_h + C.LABEL_GAP + room * 0.5
+  end
 
-  -- name
-  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  if small then
+    W.push_small(ctx)
+    centred_text(ctx, dl, cx, y - 1, label or "", C.COL.label, cw - 2, true)
+    W.pop_small(ctx)
+  else
+    centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  end
 
   W.knob_face(dl, cx, cy, r, value, {
     style = opts.style, cap = opts.cap, bipolar = opts.bipolar,
     dim = opts.dim, hot = hovered or active })
 
-  -- value
-  if C.SHOW_VALUES then
+  if C.SHOW_VALUES and not small then
     centred_text(ctx, dl, cx, y + ch - 12, formatted or "", C.COL.value, cw - 2)
   end
 
-  W.tip(ctx, id, opts.tooltip, hovered, active)
+  local tip = opts.tooltip
+  if small then
+    tip = ((label and label ~= "") and (label .. ": ") or "") .. (formatted or "")
+  end
+  W.tip(ctx, id, tip, hovered, active)
 
   return changed, value, act, pressed
 end
@@ -524,11 +772,20 @@ end
 -- toggle
 -- ---------------------------------------------------------------------
 
+-- opts.text: what the button says, in place of ON / OFF -- the state's
+-- name (TS_CV_Mappings.button_text). Shown on the button, it isn't
+-- repeated in the value line under it.
+-- opts.on_col: the colour it lights when on (C.TOGGLE_COLS), in place of
+-- the theme's; its text goes dark or light to read on it.
+-- opts.size: "small" makes it a half-height cell that is all button, like
+-- a lit push-button on hardware -- no name above or value below, so the
+-- caller puts the name on the button when the state has no name of its own.
 function W.toggle(ctx, id, label, value, formatted, opts)
   opts = opts or {}
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
-  local cw, ch = C.CELL_W, C.CELL_H
+  local small = opts.size == "small"
+  local cw, ch = C.CELL_W, small and (C.CELL_H // 2) or C.CELL_H
 
   W.allow_overlap(ctx)
   local pressed = ImGui.InvisibleButton(ctx, id, cw, ch,
@@ -550,25 +807,119 @@ function W.toggle(ctx, id, label, value, formatted, opts)
   local label_h = W.LABEL_H
   local bx1, by1 = x + 6, y + label_h + C.LABEL_GAP + 1
   local bx2, by2 = x + cw - 6, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
+  if small then by1, by2 = y + 5, y + ch - 5 end
   local cx = x + cw * 0.5
 
-  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  if not small then
+    centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  end
 
-  local bg = on and C.COL.toggle_on or C.COL.toggle_off
+  local bg = on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off
   if hovered then bg = U.with_alpha(bg, 0xdd) end
   ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2, bg, 3.0)
   ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
 
-  local txt = on and "ON" or "OFF"
-  local tw, th = ImGui.CalcTextSize(ctx, txt)
-  ImGui.DrawList_AddText(dl, cx - tw * 0.5, (by1 + by2) * 0.5 - th * 0.5,
-    on and 0x0d1116ff or C.COL.toggle_text, txt)
+  local txt = opts.text or (on and "ON" or "OFF")
+  local _, th = ImGui.CalcTextSize(ctx, txt)
+  centred_text(ctx, dl, cx, (by1 + by2) * 0.5 - th * 0.5, txt,
+    on and ((opts.on_col and not U.is_light(opts.on_col)) and 0xf4f4f2ff or 0x0d1116ff)
+       or C.COL.toggle_text, bx2 - bx1 - 4, true)
 
-  if C.SHOW_VALUES then
+  if C.SHOW_VALUES and not opts.text and not small then
     centred_text(ctx, dl, cx, y + ch - 12, formatted or "", C.COL.value, cw - 2)
   end
   W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
 
+  return changed, value, act, pressed
+end
+
+-- ---------------------------------------------------------------------
+-- button row (a stepped parameter's choices as buttons)
+-- ---------------------------------------------------------------------
+
+-- A dropdown shown as buttons: one per choice, the current one lit, like
+-- the VCA / FET / OPT row on a hardware compressor. `choices` is the
+-- panel's list, { norm, text } each; `opts`:
+--   dir      "across" (a row under the name) or "down" (a column)
+--   n        how many buttons the cell was given room for
+--   w, h     the cell, in pixels
+--   on_col   the lit colour (C.TOGGLE_COLS), nil for the theme's
+--   tooltip
+-- returns changed, value, act -- the value being the clicked choice's.
+-- Labels are in the small type, shortened to fit; the full one is in the
+-- tooltip of whichever button is under the pointer.
+function W.button_row(ctx, id, label, value, choices, opts)
+  opts = opts or {}
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local cw, ch = opts.w or C.CELL_W, opts.h or C.CELL_H
+
+  W.allow_overlap(ctx)
+  local pressed = ImGui.InvisibleButton(ctx, id, cw, ch,
+    ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  local hovered = ImGui.IsItemHovered(ctx)
+  local act = { right_click = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right), double_click = false }
+
+  local cx = x + cw * 0.5
+  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+
+  local n = math.min(#choices, opts.n or #choices)
+  if n < 1 then return false, value, act, pressed end
+
+  -- the current choice: the one nearest the value
+  local cur, best = 1, math.huge
+  for i = 1, n do
+    local d = math.abs((choices[i].norm or 0) - value)
+    if d < best then cur, best = i, d end
+  end
+
+  -- each button's rect
+  local top = y + W.LABEL_H + C.LABEL_GAP
+  local rects = {}
+  if opts.dir == "down" then
+    local bh = 14
+    for i = 1, n do
+      local by = top + (i - 1) * (bh + 2)
+      rects[i] = { x + 4, by, x + cw - 4, by + bh }
+    end
+  else
+    local bx0, bx1 = x + 2, x + cw - 2
+    local bw = (bx1 - bx0 - (n - 1)) / n
+    local by1 = top + 2
+    for i = 1, n do
+      local l = bx0 + (i - 1) * (bw + 1)
+      rects[i] = { l, by1, l + bw, by1 + 20 }
+    end
+  end
+
+  local mx, my = ImGui.GetMousePos(ctx)
+  local under
+  for i, r in ipairs(rects) do
+    if hovered and mx >= r[1] and mx <= r[3] and my >= r[2] and my <= r[4] then under = i end
+  end
+
+  local changed = false
+  if under and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) and under ~= cur then
+    cur, value, changed = under, choices[under].norm, true
+  end
+
+  local on_col = opts.on_col or C.COL.toggle_on
+  local on_ink = U.is_light(on_col) and 0x0d1116ff or 0xf4f4f2ff
+  W.push_small(ctx)
+  for i, r in ipairs(rects) do
+    local lit = (i == cur)
+    local bg = lit and on_col or C.COL.toggle_off
+    if i == under and not lit then bg = U.with_alpha(bg, 0xdd) end
+    ImGui.DrawList_AddRectFilled(dl, r[1], r[2], r[3], r[4], bg, 2.0)
+    ImGui.DrawList_AddRect(dl, r[1], r[2], r[3], r[4], C.COL.knob_ring, 2.0, 0, 1.0)
+    local t = choices[i].text or ""
+    local _, th = ImGui.CalcTextSize(ctx, t)
+    centred_text(ctx, dl, (r[1] + r[3]) * 0.5, (r[2] + r[4]) * 0.5 - th * 0.5, t,
+      lit and on_ink or C.COL.toggle_text, r[3] - r[1] - 2, true)
+  end
+  W.pop_small(ctx)
+
+  W.tip(ctx, id, under and choices[under].text or opts.tooltip, hovered, false)
   return changed, value, act, pressed
 end
 

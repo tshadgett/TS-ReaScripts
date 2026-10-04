@@ -1,5 +1,56 @@
 # ChannelView — changelog
 
+## 1.8.0 — hardware looks, sizes, button rows, sections
+
+Every existing layout looks and lays out exactly as before until you change
+something: the new layout code was checked against where every control sat
+in 1.7.6, in 444 desktop and 222 web snapshots.
+
+- **New knob styles.** *Bar* (a round dome with a raised bar across it),
+  *Fluted* (one domed body with finger flutes), *Bezel* (a black centre in a
+  polished chrome ring), *Reverse bezel* (a glossy black ring round a
+  turned-metal centre) and *Hi-fi* (a solid spun-aluminium knob in a narrow
+  bevel). Pointers turn black or white to read on whatever colour the knob
+  is. New cap colours **Silver** and **Stone**.
+- **New faceplates.** **Stone**, **Cobalt** and **Amber**, and a
+  **Brushed finish** tick in the Faceplate menu that puts a fine grain on
+  any faceplate (aluminium keeps it unless you turn it off).
+- **Knob sizes.** Right-click ▸ Style ▸ Size, or the editor's Size column:
+  *Small* (half height — a small dial under its name in small type, the
+  value in the tooltip; two stack in one cell), *Medium* (as before) and
+  *Large* (half again as big). A large knob in a panel only one row tall
+  draws at medium.
+- **Toggle buttons.** A button now says what the state is called — your
+  name for it, else the plugin's own word for it ("Thrust", "Link"), and
+  ON/OFF only when the plugin just reports a number. Right-click ▸ **State
+  names** to give the two states names of your own. Right-click ▸ Style
+  for a **lit colour** (Amber, Green, Red, Blue, Yellow, White, or the
+  theme's) and a **Small** size: a half-height lit push-button with its
+  name on it.
+- **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
+  *Buttons down*: one button per choice, the current one lit, like a VCA /
+  FET / OPT row on hardware. For parameters with 2 to 8 choices; the lit
+  colour comes from Style.
+- **Sections (experimental).** A divider can put the controls after it, up
+  to the next divider, on an **inset** or on a **faceplate of their own**:
+  right-click any control ▸ Section, or the Section column on a divider in
+  the editor.
+- **Control spacing.** View ▸ Control spacing sets how wide each control's
+  column is, 46 to 64 px. The default is now 50 px (it was 58), so panels
+  are narrower; the setting is shared with the TCP window and the web page.
+- **REAPER's own instance names.** A plugin renamed in REAPER's FX chain
+  shows that name on its panel — and keeps its layout, which is still the
+  plugin's. Rename from the panel menu's name box (or the web page's panel
+  menu); it's REAPER's name, so the FX chain shows it too.
+- **Enter commits.** Every text box takes Enter: the name boxes do what
+  their button does, and the filter boxes take the first match.
+- **Web page.** All of the above, plus small knobs show their name (there's
+  no hovering on a touch screen) and buttons have an edge so they read as
+  buttons on any faceplate.
+- **Layout.** Controls are placed on a half-cell grid, which is what lets
+  sizes and button rows sit beside ordinary controls. Narrower controls in
+  a column with a wider one are centred in it.
+
 ## 1.7.6 — master outputs, collapsed strips, folders on the web page
 
 - **The master's outputs.** With the master selected, the Sends panel is

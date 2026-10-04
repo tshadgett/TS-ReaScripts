@@ -208,8 +208,15 @@ end
 -- REAPER side: finding things
 -- ---------------------------------------------------------------------
 
+-- The plugin's own name, even for an instance renamed in REAPER's chain
+-- (layouts and probes are found by the plugin, not by your name for it).
 local function fx_name(tr, addr)
   local ok, n = reaper.TrackFX_GetFXName(tr, addr, "")
+  local rok, ren = reaper.TrackFX_GetNamedConfigParm(tr, addr, "renamed_name")
+  if rok and ren and ren ~= "" then
+    local fok, orig = reaper.TrackFX_GetNamedConfigParm(tr, addr, "fx_name")
+    if fok and orig and orig ~= "" then return orig end
+  end
   return ok and n or ""
 end
 
@@ -835,7 +842,7 @@ function TP.track_total(tr)
       local nat = T.reports_gr_natively(tr, fx.addr, fx.guid)
       if nat or TP.is_tapped(tr, fx.guid) then
         src.list[#src.list + 1] = { addr = fx.addr, guid = fx.guid,
-          name = U.clean_fx_name(fx.name), est = not nat }
+          name = U.fx_label(fx), est = not nat }
       end
     end
     sources[key] = src

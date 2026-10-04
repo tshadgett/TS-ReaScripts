@@ -21,7 +21,10 @@
       Meter    = <1|0>|<full-scale dB>[|<trace window: 4b, 2s ...>]
       Live     = 1
       Style<n> = <style>|<cap colour>
+      Size<n>  = small | large
+      Buttons<n> = across | down | <how many>
       Plate    = <faceplate>
+      Brush    = <1|0>
 
   <type> is knob | toggle | combo | fader | blank | divider | half_gap.
   "blank" is a deliberate empty cell, so a layout can leave a gap where a
@@ -70,7 +73,13 @@
   that line and takes everything after it -- an older ChannelView reading
   a fifth field would have shown it as part of the name. Plate is the
   panel's faceplate. Both are names, not colours, so the palette they
-  name can be retuned without touching anyone's layouts.
+  name can be retuned without touching anyone's layouts. Brush turns the
+  brushed grain on (1) or off (0) for that faceplate; with no Brush line
+  it is the faceplate's own (on for aluminium, off for the rest). Size<n>
+  makes knob n small or large (C.SIZES in TS_CV_Config.lua); with no Size
+  line it is the ordinary size, and an older ChannelView ignores the line.
+  Buttons<n> shows dropdown n as buttons -- across or down -- and keeps
+  how many choices it had, which is how much room the buttons take.
 
   METER turns the gain-reduction strip on for this plugin and sets its
   full-scale range. It sits at the layout level rather than in the control
@@ -95,8 +104,10 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>\n"
                 .. "; Live=1: every control shows the plugin's current name for its\n"
                 .. ";   parameter (flags bit 8 does the same for one slot)\n"
-                .. "; Style<n>=<knob or fader style>|<cap colour>, for control n\n"
-                .. "; Plate=<faceplate>"
+                .. "; Style<n>=<knob or fader style>|<cap colour>, for control n (a toggle: |<lit colour>)\n"
+                .. "; Size<n>=small|large: knob n's size (no line: medium)\n"
+                .. "; Plate=<faceplate>\n"
+                .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -113,8 +124,45 @@ local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
 local function path()      return dir .. FILE_NAME end
 local function bak_path()  return dir .. BAK_NAME  end
 
+-- A knob size worth keeping: small or large. Medium, nothing or anything
+-- unknown is the ordinary size, which is no size at all.
+local function size_of(v)
+  v = U.trim(v or "")
+  if v ~= "medium" and C.SIZES[v] then return v end
+  return nil
+end
+
+-- Buttons<n>=across|4: a dropdown shown as a row (or column) of buttons,
+-- and how many choices it had when that was chosen -- the count sets how
+-- much room the row takes, and the layout has to know that without
+-- asking the plugin. Anything else is the ordinary dropdown.
+local function buttons_of(v)
+  local d = U.trim(v or ""):match("^(%a+)")
+  return (d == "across" or d == "down") and d or nil
+end
+local function nbtn_of(v)
+  local n = tonumber(U.trim(v or ""):match("|%s*(%d+)"))
+  return (n and n >= 2 and n <= C.BUTTONS_MAX) and n or nil
+end
+
+-- Brush=1 / Brush=0, or nil for none set (the faceplate's own grain).
+local function brush_of(v)
+  v = U.trim(v or "")
+  if v == "1" then return true end
+  if v == "0" then return false end
+  return nil
+end
+
+-- Whether a layout's faceplate is drawn brushed: its own choice if it made
+-- one, else the faceplate's.
+function M.brushed(layout, plate)
+  if not plate then return false end
+  if layout and layout.brush ~= nil then return layout.brush end
+  return plate.brushed or false
+end
+
 local function parse_section(sect)
-  local controls, aliases = {}, {}
+  local controls, aliases, states = {}, {}, {}
   local meter = nil
   if sect.Meter then
     local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
@@ -126,6 +174,11 @@ local function parse_section(sect)
   for k, v in pairs(sect) do
     local p = k:match("^Alias(%d+)$")
     if p then aliases[tonumber(p)] = U.trim(v) end
+    local sp = k:match("^States(%d+)$")
+    if sp then
+      local off, on = v:match("^([^|]*)|(.*)$")
+      if off then states[tonumber(sp)] = { U.trim(off), U.trim(on) } end
+    end
   end
   local i = 0
   while true do
@@ -158,15 +211,19 @@ local function parse_section(sect)
         label   = U.trim(label),
         style   = (sty and sty ~= "") and (C.KNOB_STYLE_ALIAS[sty] or sty) or nil,
         cap     = (cap and cap ~= "") and cap or nil,
+        size    = size_of(sect["Size" .. i]),
+        buttons = buttons_of(sect["Buttons" .. i]),
+        nbtn    = nbtn_of(sect["Buttons" .. i]),
       }
     end
     i = i + 1
   end
-  return { controls = controls, aliases = aliases, meter = meter,
+  return { controls = controls, aliases = aliases, states = states, meter = meter,
            live = (U.trim(sect.Live or "") == "1") or nil,
            measure = (U.trim(sect.Measure or "") == "1") or nil,
            levels = (U.trim(sect.Levels or "") == "1") or nil,
-           plate = C.plate_of(U.trim(sect.Plate or "")) and U.trim(sect.Plate) or nil }
+           plate = C.plate_of(U.trim(sect.Plate or "")) and U.trim(sect.Plate) or nil,
+           brush = brush_of(sect.Brush) }
 end
 
 local function serialize(layout)
@@ -175,6 +232,7 @@ local function serialize(layout)
   if layout.measure then out.Measure = "1" end
   if layout.levels then out.Levels = "1" end
   if layout.plate then out.Plate = layout.plate end
+  if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
                               layout.meter.range or C.MAX_GR_DB)
@@ -183,6 +241,12 @@ local function serialize(layout)
   for p, name in pairs(layout.aliases or {}) do
     if U.trim(name) ~= "" then
       out["Alias" .. p] = (name:gsub("[\r\n]", " "))
+    end
+  end
+  for p, st in pairs(layout.states or {}) do
+    local off, on = U.trim(st[1] or ""), U.trim(st[2] or "")
+    if off ~= "" or on ~= "" then
+      out["States" .. p] = off:gsub("[|\r\n]", " ") .. "|" .. on:gsub("[|\r\n]", " ")
     end
   end
   for i, c in ipairs(layout.controls or {}) do
@@ -197,6 +261,10 @@ local function serialize(layout)
       (c.label or ""):gsub("[|\r\n]", " "))
     if c.style or c.cap then
       out["Style" .. (i - 1)] = (c.style or "") .. "|" .. (c.cap or "")
+    end
+    if size_of(c.size) then out["Size" .. (i - 1)] = c.size end
+    if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
+      out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
   end
   return out
@@ -332,6 +400,52 @@ function M.set_alias(key, param, name)
   M.set(key, l)
 end
 
+-- State names: your own words for a toggle's two states ("Off"/"Auto"
+-- instead of the plugin's "0.0"/"1.0"), per plugin, per parameter, like an
+-- alias. Stored as States<param>=<off name>|<on name>; either may be empty,
+-- and an empty one leaves the plugin's own text.
+function M.get_states(key, param)
+  local l = M.get(key)
+  local st = l and l.states and l.states[param]
+  if st and ((st[1] or "") ~= "" or (st[2] or "") ~= "") then return st end
+  return nil
+end
+
+function M.set_states(key, param, off, on)
+  local l = M.get(key) or { controls = {}, aliases = {} }
+  l.states = l.states or {}
+  off, on = U.trim(off or ""), U.trim(on or "")
+  l.states[param] = (off ~= "" or on ~= "") and { off, on } or nil
+  M.set(key, l)
+end
+
+-- What a toggle shows for the plugin's own value `raw` (0..1, before any
+-- reverse): the state's name if one is set, else the plugin's text `shown`.
+function M.state_text(key, param, raw, shown)
+  local st = M.get_states(key, param)
+  if not st then return shown end
+  local name = ((raw or 0) >= 0.5) and st[2] or st[1]
+  return (name and name ~= "") and name or shown
+end
+
+-- What a toggle's button should SAY, or nil for plain ON / OFF: your name
+-- for the state it's in if you've given one, else the plugin's own word
+-- for it ("Thrust", "Normal", "Link") -- but not when the plugin only has
+-- a number for it ("0.0", "1.00", "100 %", "-inf dB"), which says less
+-- than ON / OFF does.
+function M.button_text(key, param, raw, shown)
+  local st = M.get_states(key, param)
+  if st then
+    local name = ((raw or 0) >= 0.5) and st[2] or st[1]
+    if name and name ~= "" then return name end
+  end
+  local s = U.trim(shown or "")
+  if s == "" then return nil end
+  local low = s:lower()
+  if low:match("^[%-%+]?%d*%.?%d") or low:match("^[%-%+]?inf") then return nil end
+  return s
+end
+
 -- What a parameter should be called, most specific first: a slot's own
 -- label, then the plugin-wide alias, then the plugin's own name for it --
 -- or, when `live` (the slot's or the whole layout's), the plugin's own
@@ -389,16 +503,19 @@ end
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
-                plate = layout.plate }
+                plate = layout.plate, brush = layout.brush }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
-                        label = c.label, style = c.style, cap = c.cap }
+                        label = c.label, style = c.style, cap = c.cap, size = c.size,
+                        buttons = c.buttons, nbtn = c.nbtn }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
+  out.states = {}
+  for p, st in pairs(layout.states or {}) do out.states[p] = { st[1], st[2] } end
   return out
 end
 

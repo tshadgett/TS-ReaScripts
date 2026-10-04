@@ -237,11 +237,11 @@ local function cap_hex(key)
   return hex(cp.col or C.COL.knob_fill)
 end
 
-local function plate_json(key)
-  local pl = C.plate_of(key)
+local function plate_json(layout)
+  local pl = C.plate_of(layout.plate)
   if not pl then return nil end
   return { bg = hex(pl.bg), head = hex(pl.head), text = hex(pl.text), dim = hex(pl.dim),
-           tick = hex(pl.tick), border = hex(pl.border), brushed = pl.brushed or nil,
+           tick = hex(pl.tick), border = hex(pl.border), brushed = M.brushed(layout, pl) or nil,
            sheen = pl.sheen or 1 }
 end
 
@@ -269,9 +269,28 @@ local function panel_of(fx, i)
       o.inv = (ctl.invert and (o.t == "knob" or o.t == "toggle" or o.t == "stepped")) or nil
       o.st  = ctl.style
       o.cap = cap_hex(ctl.cap)
+      if o.t == "knob" or o.t == "stepped" then o.sz = ctl.size end
+      if o.t == "toggle" and ctl.size == "small" then o.sz = "small" end
+      if o.t == "toggle" then
+        o.cap = nil
+        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
+        o.lit = lit and hex(lit.col) or nil
+      end
       if o.t == "combo" or o.t == "stepped" then o.ch, o.cn = choices(fx, key, ctl.param) end
+      if o.t == "combo" and ctl.buttons and ctl.nbtn then
+        o.btn, o.nb = ctl.buttons, ctl.nbtn
+        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
+        o.lit, o.cap = lit and hex(lit.col) or nil, nil
+      end
     elseif o.t == "divider" then
       o.nr = ctl.no_rule or nil
+      -- EXPERIMENTAL: the section after it, inset or on its own plate
+      if ctl.style == "inset" then o.sec = "inset"
+      elseif ctl.style == "plate" and C.plate_of(ctl.cap) then
+        local pl = C.plate_of(ctl.cap)
+        o.sec = "plate"
+        o.sp = { bg = hex(pl.bg), border = hex(pl.border), text = hex(pl.text), dim = hex(pl.dim), tick = hex(pl.tick) }
+      end
     elseif o.t ~= "blank" and o.t ~= "half_gap" then
       o.t = "missing"
     end
@@ -280,9 +299,9 @@ local function panel_of(fx, i)
   local meter = M.meter_of(layout)
   local has_gr = meter and T.reports_gr(track, fx.addr, fx.guid) or false
   return {
-    g = fx.guid, i = i, n = U.clean_fx_name(fx.name), k = key, d = is_default or nil,
+    g = fx.guid, i = i, n = U.fx_label(fx), k = key, an = fx.alias and U.clean_fx_name(fx.name) or nil, d = is_default or nil,
     ti = fx.is_top_level and fx.top_index or nil,
-    c = ctls, plate = plate_json(layout.plate),
+    c = ctls, plate = plate_json(layout),
     gr = has_gr and (meter.range or C.MAX_GR_DB) or nil,
     gw = has_gr and (meter.win or C.GRV_DEFAULT) or nil,
     eq = (key == "ReaEQ") or nil,
@@ -518,6 +537,7 @@ local function build_layout()
     grw = arr({ table.unpack(C.GRV_WINDOWS) }),
     vals = C.SHOW_VALUES,
     pbar = C.PRESET_BAR,
+    cw = C.CELL_W,
   }
 end
 
@@ -774,6 +794,9 @@ local function build_vals(lseq, ack)
         local inv = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle" or ctl.type == "stepped")
         v[ci] = round(inv and (1 - raw) or raw)
         x[ci] = U.fmt_value(track, fx.addr, ctl.param)
+        -- a toggle's text is what its button says: the state's name, or
+        -- nothing (the page then says ON / OFF) when there's only a number
+        if ctl.type == "toggle" then x[ci] = M.button_text(key, ctl.param, raw, x[ci]) or "" end
       else
         v[ci] = 0; x[ci] = ""
       end
@@ -1235,7 +1258,16 @@ local function apply(verb, a)
     if fx and fx.is_top_level then
       reaper.Undo_BeginBlock()
       reaper.TrackFX_Delete(track, fx.top_index)
-      reaper.Undo_EndBlock("ChannelView: remove " .. U.clean_fx_name(fx.name), -1)
+      reaper.Undo_EndBlock("ChannelView: remove " .. U.fx_label(fx), -1)
+      layout_dirty = true
+    end
+  elseif track and verb == "fxren" then
+    -- REAPER's own name for the instance (escaped, like preset names);
+    -- empty goes back to the plugin's
+    local fx = fx_by_guid(a[1])
+    if fx then
+      local nm = ((a[2] or ""):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+      T.rename(track, fx.addr, fx.guid, U.trim(nm))
       layout_dirty = true
     end
   elseif verb == "find" then
@@ -1316,6 +1348,8 @@ local function cycle()
     C.PRESET_BAR = reaper.GetExtState("TS_ChannelView", "preset_bar") ~= "0"
     local sv = reaper.GetExtState("TS_ChannelView", "show_values")
     C.SHOW_VALUES = (sv == "") or (sv == "1")
+    local cw = reaper.GetExtState("TS_ChannelView", "cell_w")
+    C.set_cell_w(cw ~= "" and cw or C.CELL_W_DEFAULT)
   end
 
   -- The layout is rebuilt twice a second regardless, which also catches

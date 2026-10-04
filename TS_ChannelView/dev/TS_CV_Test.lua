@@ -274,7 +274,7 @@ local function n_knobs(n)
   return out
 end
 local function cols_for(n, h)
-  return P.layout(n_knobs(n), h).width / 58   -- CELL_W
+  return P.layout(n_knobs(n), h).width / C.CELL_W
 end
 
 local H = 300   -- panel height incl. header
@@ -283,7 +283,7 @@ check("cols for 8 @4 rows", cols_for(8, H), 2)
 -- 2 columns is 116px of cells, but a header needs PANEL_MIN_W, so the
 -- panel is padded out to that.
 check("width for 8", P.width(8, H), 132)
-check("width for 12", P.width(12, H), 3*58 + 12)
+check("width for 12", P.width(12, H), 3 * C.CELL_W + 12)
 check("cols for 9 @4 rows", cols_for(9, H), 3)
 check("min width honoured", P.width(1, H), 132)
 check("rows at h=120", P.rows_for(120), 1)
@@ -302,6 +302,18 @@ check("display: alias next",      M.display_name(key, 2, "",    "Release"), "Rec
 check("display: plugin name last",M.display_name(key, 7, "",    "Ratio"),   "Ratio")
 check("display: a label that's just the plugin's name lets the alias through",
       M.display_name(key, 2, "Release", "Release"), "Recovery")
+do
+  -- a toggle's state names
+  M.set_states(key, 5, "Off", "Auto")
+  check("state names: off",         M.state_text(key, 5, 0, "0.0"), "Off")
+  check("state names: on",          M.state_text(key, 5, 1, "1.0"), "Auto")
+  M.set_states(key, 5, "", "Auto")
+  check("state names: one left empty keeps the plugin's", M.state_text(key, 5, 0, "0.0"), "0.0")
+  local txt = M.serialise_for_test and M.serialise_for_test(key) or nil
+  M.set_states(key, 5, "", "")
+  check("state names: cleared",     M.get_states(key, 5), nil)
+  check("state names: none set",    M.state_text(key, 9, 1, "1.0"), "1.0")
+end
 check("display: ... trimmed",     M.display_name(key, 2, " Release ", "Release"), "Recovery")
 M.set_alias(key, 2, "")
 M.save(); M.reload()
@@ -3048,6 +3060,48 @@ do
   local f = io.open(MP.file_path(), "rb"); local txt = f and f:read("a") or ""; if f then f:close() end
   check("style: Style2 not written",       txt:find("Style2=", 1, true) == nil, true)
   check("style: Style0 written",           txt:find("Style0=skirted|red", 1, true) ~= nil, true)
+  -- state names round-trip through the file
+  MP.set_states(k, 4, "Off", "Auto"); MP.save(); MP.reload()
+  local st = MP.get_states(k, 4)
+  check("state names: round-trip",         st and (st[1] .. "/" .. st[2]), "Off/Auto")
+  check("state names: copied",             MP.copy(MP.get(k)).states[4][2], "Auto")
+  -- a toggle's lit colour rides in its Style line's colour field
+  MP.set("LitPlug", { controls = { { param = 0, type = "toggle", label = "T", cap = "amber" } } })
+  MP.save(); MP.reload()
+  check("toggle colour: round-trips",      MP.get("LitPlug").controls[1].cap, "amber")
+  check("toggle colour: known",            C.TOGGLE_COL.amber ~= nil and C.TOGGLE_COL.theme.col == nil, true)
+  MP.remove("LitPlug"); MP.save(); MP.reload()
+  -- what the button says
+  check("button: your name, on",            MP.button_text(k, 4, 1, "1.0"), "Auto")
+  check("button: your name, off",           MP.button_text(k, 4, 0, "0.0"), "Off")
+  check("button: the plugin's word",        MP.button_text(k, 9, 1, "Thrust"), "Thrust")
+  check("button: a number says ON/OFF",     MP.button_text(k, 9, 1, "1.00"), nil)
+  check("button: a level says ON/OFF",      MP.button_text(k, 9, 0, "-inf dB"), nil)
+  check("button: a percentage too",         MP.button_text(k, 9, 1, "100 %"), nil)
+  check("button: nothing says ON/OFF",      MP.button_text(k, 9, 1, "  "), nil)
+  -- the brushed finish: the faceplate's own unless the layout says
+  local CC = require("TS_CV_Config")
+  check("brush: aluminium brushed by default", MP.brushed(MP.get(k), CC.plate_of("aluminium")), true)
+  check("brush: cobalt plain by default",      MP.brushed({}, CC.plate_of("cobalt")), false)
+  check("brush: theme never",                  MP.brushed({ brush = true }, nil), false)
+  MP.set(k, { plate = "cobalt", brush = true, controls = {} }); MP.save(); MP.reload()
+  check("brush: on round-trips",               MP.get(k).brush, true)
+  check("brush: drawn brushed",                MP.brushed(MP.get(k), CC.plate_of("cobalt")), true)
+  check("brush: copied",                       MP.copy(MP.get(k)).brush, true)
+  MP.set(k, { plate = "aluminium", brush = false, controls = {} }); MP.save(); MP.reload()
+  check("brush: off round-trips",              MP.get(k).brush, false)
+  check("brush: aluminium made plain",         MP.brushed(MP.get(k), CC.plate_of("aluminium")), false)
+  MP.set(k, { plate = "stone", controls = {} }); MP.save(); MP.reload()
+  check("brush: none set reads nil",           MP.get(k).brush, nil)
+  local f2 = io.open(MP.file_path(), "rb"); local t2 = f2 and f2:read("a") or ""; if f2 then f2:close() end
+  check("brush: no Brush line when unset",     t2:find("\nBrush=", 1, true) == nil, true)
+  -- every knob style has a face size and a cap colour that exists
+  for _, ks in ipairs(CC.KNOB_STYLES) do
+    if ks.key ~= "arc" then check("knob style " .. ks.key .. ": cap known", CC.CAP[ks.cap] ~= nil, true) end
+  end
+  for _, pl in ipairs(CC.PLATES) do
+    if pl.bg then check("plate " .. pl.key .. ": all inks", (pl.head and pl.text and pl.dim and pl.tick and pl.border) ~= nil, true) end
+  end
   MP.set(k, { plate = "nonsense", controls = {} })
   MP.save(); MP.reload()
   check("style: unknown plate dropped",    MP.get(k).plate, nil)
@@ -3238,6 +3292,197 @@ do
         "CFG 4 1280 840 'My \"Best\"'")
   for k, v in pairs(saved) do reaper[k] = v end
   os.remove(file); os.remove(dir .. "/reaper-defpresets.ini"); os.remove(dir)
+end
+
+-- The layout baseline (TS_CV_LayoutFixture.lua, recorded by
+-- TS_CV_LayoutSnap.lua before the half-cell grid): every layout in it, in
+-- both flows at one to six rows, must still put every control, rule and
+-- edge exactly where it was. One check per layout; a failure names the
+-- first flow and row count that moved.
+do
+  local ok_fx, FX = pcall(dofile, HERE .. "TS_CV_LayoutFixture.lua")
+  check("layout baseline: fixture loads", ok_fx and type(FX) == "table", true)
+  if ok_fx then
+    local TYPE = { k = "knob", t = "toggle", c = "combo", s = "stepped", f = "fader",
+                   b = "blank", d = "divider", h = "half_gap" }
+    local function parse(str)
+      local ctl, i = {}, 1
+      while i <= #str do
+        local c = { type = TYPE[str:sub(i, i)] }
+        if str:sub(i + 1, i + 1) == "!" then c.no_rule = true; i = i + 1 end
+        ctl[#ctl + 1] = c; i = i + 1
+      end
+      return ctl
+    end
+    -- the baseline was recorded at the original 58 px column
+    local rows_for, flow, cw0 = P.rows_for, C.FLOW, C.CELL_W
+    P.rows_for = function(r) return r end
+    C.set_cell_w(58)
+    for ci, case in ipairs(FX.cases) do
+      local bad
+      for _, fl in ipairs({ "column", "row" }) do
+        for rows = 1, 6 do
+          C.FLOW = fl
+          local ctl = parse(case.ctl)
+          local idx = {}
+          for i, c in ipairs(ctl) do idx[c] = i end
+          local lay = P.layout(ctl, rows)
+          local items, rules = {}, {}
+          for _, it in ipairs(lay.items) do items[#items + 1] = string.format("%d,%g,%g", idx[it.ctl], it.x, it.y) end
+          for _, r in ipairs(lay.rules) do rules[#rules + 1] = string.format("%g", r) end
+          local want = FX.expect[ci .. "|" .. fl .. "|" .. rows]
+          local got = { i = table.concat(items, " "), r = table.concat(rules, " "), w = lay.width, h = lay.height }
+          if not bad and (got.i ~= want.i or got.r ~= want.r or got.w ~= want.w or got.h ~= want.h) then
+            bad = fl .. " " .. rows .. " rows: " .. got.i .. " | w " .. got.w .. " h " .. got.h
+          end
+        end
+      end
+      check("layout baseline: " .. case.name:sub(1, 22), bad or "same", "same")
+    end
+    P.rows_for, C.FLOW, C.CELL_W = rows_for, flow, cw0
+  end
+end
+
+-- The half-cell grid with sizes in it (nothing in the baseline has one).
+do
+  local rows_for, flow, cw0 = P.rows_for, C.FLOW, C.CELL_W
+  P.rows_for = function(r) return r end
+  C.FLOW = "column"
+  C.set_cell_w(58)
+  local function pos(ctl, rows)
+    local lay = P.layout(ctl, rows)
+    local t = {}
+    for _, it in ipairs(lay.items) do t[#t + 1] = string.format("%g,%g/%dx%d", it.x, it.y, it.w, it.h) end
+    return table.concat(t, " ") .. " w" .. lay.width, lay
+  end
+  local S = function(sz) return { type = "knob", size = sz } end
+  check("sizes: two smalls share a cell", (pos({ S"small", S"small", S"medium" }, 2)), "0,0/2x1 0,32/2x1 0,64/2x2 w58")
+  check("sizes: a large makes a wide strip, a medium in it centred",
+        (pos({ S"large", S"medium", S"medium" }, 3)), "0,0/3x3 14.5,96/2x2 87,0/2x2 w145")
+  check("sizes: a large in a one-row panel is medium", (pos({ S"large", S"medium" }, 1)), "0,0/2x2 58,0/2x2 w116")
+  check("sizes: a large that won't fit below wraps", (pos({ S"medium", S"large" }, 2)), "0,0/2x2 58,0/3x3 w145")
+  check("sizes: small, gap, small", (pos({ S"small", { type = "half_gap" }, S"small" }, 2)), "0,0/2x1 0,64/2x1 w58")
+  check("sizes: unknown size is medium", (pos({ S"huge" }, 2)), "0,0/2x2 w58")
+  C.FLOW = "row"
+  check("sizes: row flow fits a large", (pos({ S"large", S"medium", S"medium" }, 3)), "0,0/3x3 0,96/2x2 58,96/2x2 w116")
+  local _, lay = pos({ S"large", S"large", S"large" }, 2)
+  check("sizes: row flow widens until everything fits", lay.width, 261)
+  local _, lay1 = pos({ S"large", S"large" }, 1)
+  check("sizes: row flow, larges in one row are medium", lay1.width, 116)
+  C.FLOW = "column"
+  check("sizes: a toggle has no large", (pos({ { type = "toggle", size = "large" } }, 3)), "0,0/2x2 w58")
+  check("sizes: small toggles share a cell", (pos({ { type = "toggle", size = "small" }, { type = "toggle", size = "small" } }, 3)), "0,0/2x1 0,32/2x1 w58")
+  check("sizes: a stepped knob does", (pos({ { type = "stepped", size = "small" } }, 3)), "0,0/2x1 w58")
+  -- View > Control spacing narrows every column
+  C.set_cell_w(50)
+  check("spacing: narrower columns", (pos({ S"medium", S"medium", S"medium" }, 2)), "0,0/2x2 0,64/2x2 50,0/2x2 w100")
+  check("spacing: a large is 1.5 columns", (pos({ S"large" }, 3)), "0,0/3x3 w75")
+  C.set_cell_w(20);  check("spacing: clamped low", C.CELL_W, C.CELL_W_MIN)
+  C.set_cell_w(999); check("spacing: clamped high", C.CELL_W, C.CELL_W_MAX)
+  C.set_cell_w("x"); check("spacing: nonsense is the default", C.CELL_W, C.CELL_W_DEFAULT)
+  C.set_cell_w(58)
+  -- a dropdown as buttons: across takes a column per choice, down a
+  -- half-row per two; one too tall for the panel is a dropdown again
+  local function B(dir, n) return { type = "combo", buttons = dir, nbtn = n } end
+  check("buttons: four across", (pos({ B("across", 4), S"medium" }, 2)), "0,0/4x2 29,64/2x2 w116")
+  check("buttons: four down", (pos({ B("down", 4) }, 2)), "0,0/2x3 w58")
+  check("buttons: down too tall", (pos({ B("down", 8) }, 2)), "0,0/2x2 w58")
+  local lay = P.layout({ B("across", 3) }, 2)
+  check("buttons: the layout says so", lay.items[1].kind, "buttons")
+  check("buttons: not on a knob", (pos({ { type = "knob", buttons = "across", nbtn = 4 } }, 2)), "0,0/2x2 w58")
+  -- sections a divider styles (experimental)
+  local K = { type = "knob" }
+  local ctl = { { type = "knob" }, { type = "divider", style = "inset" }, { type = "knob" }, { type = "knob" },
+                { type = "divider" }, { type = "knob" }, { type = "divider", style = "plate", cap = "cream" }, { type = "knob" } }
+  local ls = P.layout(ctl, 2)
+  check("sections: two styled", #ls.sections, 2)
+  check("sections: inset covers its two knobs", (ls.items[2].sec or 0) .. (ls.items[3].sec or 0) .. tostring(ls.items[1].sec), "11nil")
+  check("sections: the plain one isn't", ls.items[4].sec, nil)
+  check("sections: the plate one", ls.items[5].sec, 2)
+  check("sections: inset x and width", ls.sections[1].x .. "/" .. ls.sections[1].w, (58 + 9) .. "/58")
+  check("sections: unknown plate is no style", P.section_style({ type = "divider", style = "plate", cap = "nope" }), nil)
+  local lf = P.layout({ { type = "divider", style = "inset" }, { type = "fader" }, K }, 2)
+  check("sections: a fader's section isn't the divider's", lf.items[2].sec, nil)
+  check("sections: an empty one isn't drawn", #lf.sections, 0)
+  check("sizes: item_size small", P.item_size({ w = 2, h = 1 }), "small")
+  check("sizes: item_size large", P.item_size({ w = 3, h = 3 }), "large")
+  check("sizes: item_size ordinary", P.item_size({ w = 2, h = 2 }), nil)
+  P.rows_for, C.FLOW, C.CELL_W = rows_for, flow, cw0
+  -- the Size line in the layout file
+  local MP = require("TS_CV_Mappings")
+  local k = "SizedPlug"
+  MP.set(k, { controls = { { param = 0, type = "knob", label = "A", size = "large" },
+                           { param = 1, type = "knob", label = "B", size = "medium" },
+                           { param = 2, type = "stepped", label = "C", size = "small" },
+                           { param = 3, type = "knob", label = "D", size = "huge" } } })
+  MP.save(); MP.reload()
+  local g = MP.get(k).controls
+  check("size: large round-trips", g[1].size, "large")
+  check("size: medium saves as nothing", g[2].size, nil)
+  check("size: small round-trips", g[3].size, "small")
+  check("size: unknown dropped", g[4].size, nil)
+  check("size: copied", MP.copy(MP.get(k)).controls[1].size, "large")
+  local f = io.open(MP.file_path(), "rb"); local txt = f and f:read("a") or ""; if f then f:close() end
+  check("size: Size0 written", txt:find("Size0=large", 1, true) ~= nil, true)
+  check("size: no Size1 line", txt:find("Size1=", 1, true) == nil, true)
+  MP.set(k, { controls = { { param = 0, type = "combo", label = "Mode", buttons = "down", nbtn = 3 },
+                           { param = 1, type = "combo", label = "X", buttons = "sideways", nbtn = 3 } } })
+  MP.save(); MP.reload()
+  local gb = MP.get(k).controls
+  check("buttons: round-trip", gb[1].buttons .. "|" .. gb[1].nbtn, "down|3")
+  check("buttons: nonsense dropped", gb[2].buttons, nil)
+  check("buttons: copied", MP.copy(MP.get(k)).controls[1].nbtn, 3)
+  MP.remove(k); MP.save(); MP.reload()
+end
+
+-- REAPER's own instance names: the layout stays the plugin's, the screen
+-- shows yours
+do
+  local FT = require("TS_CV_FXTree")
+  local saved = { reaper.TrackFX_GetFXName, reaper.TrackFX_GetNamedConfigParm }
+  local renamed = true
+  reaper.TrackFX_GetFXName = function() return true, renamed and "Lead Comp" or "VST3: Pro-C 3 (FabFilter)" end
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k)
+    if k == "renamed_name" then return true, renamed and "Lead Comp" or "" end
+    if k == "fx_name" then return true, "VST3: Pro-C 3 (FabFilter)" end
+    return false, ""
+  end
+  local n, al = FT.names_of(0, 0)
+  check("instance name: the plugin's name kept", n, "VST3: Pro-C 3 (FabFilter)")
+  check("instance name: yours beside it", al, "Lead Comp")
+  check("instance name: the layout key is the plugin's", U.plugin_key(n), U.plugin_key("VST3: Pro-C 3 (FabFilter)"))
+  check("instance name: shown", U.fx_label({ name = n, alias = al }), "Lead Comp")
+  renamed = false
+  n, al = FT.names_of(0, 0)
+  check("instance name: not renamed", tostring(al) .. "|" .. U.fx_label({ name = n, alias = al }), "nil|Pro-C 3")
+  -- writing it: REAPER's own way, and the chunk when that doesn't take
+  local CH = '<TRACK\nNAME x\n<FXCHAIN\nBYPASS 0 0 0\n<VST "VST3: Pro-C 3 (FabFilter)" "Pro-C 3.vst3" 0 "" 1{ABC} ""\nAAAA\n>\nFXID {G1}\n' ..
+             '<JS loser/3BandEQ ""\n0 0\n>\nFXID {G2}\n<AU "AU: X" "Y: X" "" 1\n>\nFXID {G3}\n>\n>'
+  local written
+  local s2 = { reaper.TrackFX_SetNamedConfigParm, reaper.GetTrackStateChunk, reaper.SetTrackStateChunk,
+               reaper.Undo_BeginBlock, reaper.Undo_EndBlock }
+  reaper.TrackFX_SetNamedConfigParm = function() return false end
+  reaper.TrackFX_GetNamedConfigParm = function() return true, "" end
+  reaper.GetTrackStateChunk = function() return true, CH end
+  reaper.SetTrackStateChunk = function(_, c) written = c; return true end
+  reaper.Undo_BeginBlock = function() end
+  reaper.Undo_EndBlock = function() end
+  check("rename: falls back to the chunk", FT.rename(0, 0, "{G1}", "Lead Comp"), true)
+  check("rename: VST's fourth field", written and written:match('<VST[^\n]*'), '<VST "VST3: Pro-C 3 (FabFilter)" "Pro-C 3.vst3" 0 "Lead Comp" 1{ABC} ""')
+  written = nil
+  FT.rename(0, 1, "{G2}", 'Say "hi"')
+  check("rename: JS's second, quoted around a quote", written and written:match('<JS[^\n]*'), "<JS loser/3BandEQ 'Say \"hi\"'")
+  written = nil
+  check("rename: an AU isn't touched", FT.rename(0, 2, "{G3}", "Z"), false)
+  check("rename: nothing written for it", written, nil)
+  reaper.TrackFX_SetNamedConfigParm = function() return true end
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k) return true, k == "renamed_name" and "Lead Comp" or "" end
+  written = nil
+  check("rename: REAPER's own way, when it takes", FT.rename(0, 0, "{G1}", "Lead Comp"), true)
+  check("rename: no chunk needed then", written, nil)
+  reaper.TrackFX_SetNamedConfigParm, reaper.GetTrackStateChunk, reaper.SetTrackStateChunk,
+    reaper.Undo_BeginBlock, reaper.Undo_EndBlock = table.unpack(s2)
+  reaper.TrackFX_GetFXName, reaper.TrackFX_GetNamedConfigParm = saved[1], saved[2]
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

@@ -160,6 +160,7 @@ C.build_palette()
 -- ChannelView's own keys: one setting, both windows follow it.
 C.TCP_ICONS       = cv_get("track_icons", "0") == "1"
 C.SHOW_VALUES     = cv_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
+C.set_cell_w(cv_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.TCP_INDENT_FOLDERS = ext_get("indent", C.TCP_INDENT_FOLDERS and "1" or "0") == "1"
 C.TCP_LANES       = ext_get("lanes", C.TCP_LANES and "1" or "0") == "1"
 C.TCP_STATE_CHIPS = ext_get("chips", C.TCP_STATE_CHIPS and "1" or "0") == "1"
@@ -209,6 +210,7 @@ local function poll_shared(now)
   C.FOCUS_BACK = cv_get("focus_back", "1") == "1"
   C.TCP_ICONS   = cv_get("track_icons", "0") == "1"
   C.SHOW_VALUES = cv_get("show_values", "1") == "1"
+  C.set_cell_w(cv_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 end
 
 -- The channel panel follows the selection once it's open: select a

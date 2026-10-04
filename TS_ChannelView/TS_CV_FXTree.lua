@@ -29,6 +29,102 @@ local function safe_fx_name(track, addr)
   return nil
 end
 
+-- A named config value, or nil when it's empty or REAPER doesn't know it.
+local function safe_named(track, addr, k)
+  local pok, ok, v = pcall(reaper.TrackFX_GetNamedConfigParm, track, addr, k)
+  if pok and ok and v and v ~= "" then return v end
+  return nil
+end
+
+-- REAPER lets you rename an FX instance in its chain ("Rename FX
+-- instance"), and TrackFX_GetFXName then answers with your name. The
+-- layout is filed under the PLUGIN, so `name` stays the plugin's own
+-- (renamed_name tells whether it was renamed, fx_name what it was) and
+-- your name for the instance is kept beside it as `alias`.
+local function names_of(track, addr)
+  local alias = safe_named(track, addr, "renamed_name")
+  local name = safe_fx_name(track, addr)
+  if alias then name = safe_named(track, addr, "fx_name") or name end
+  return name, alias
+end
+T.names_of = names_of
+
+-- Renames an instance the way REAPER's FX chain does. The named config
+-- value is the proper way; where it doesn't take (the read-back differs),
+-- the name is written into the instance's header line in the track chunk
+-- instead -- the field REAPER keeps it in: a VST's fourth, a CLAP's third,
+-- a JS's second. Empty goes back to the plugin's own name.
+local CHUNK_RENAME_FIELD = { VST = 4, CLAP = 3, JS = 2 }
+local CHUNK_FX_TAG = { VST = true, CLAP = true, JS = true, AU = true, DX = true, LV2 = true,
+                       VIDEO_EFFECT = true, CONTAINER = true }
+
+-- the tokens of a chunk line, each kept as written (quotes and all)
+local function chunk_tokens(s)
+  local out, i = {}, 1
+  while i <= #s do
+    local c = s:sub(i, i)
+    if c:match("%s") then i = i + 1
+    elseif c == '"' or c == "'" or c == "`" then
+      local j = s:find(c, i + 1, true) or #s
+      out[#out + 1] = s:sub(i, j); i = j + 1
+    else
+      local j = s:find("%s", i) or (#s + 1)
+      out[#out + 1] = s:sub(i, j - 1); i = j
+    end
+  end
+  return out
+end
+
+local function chunk_quote(s)
+  for _, q in ipairs({ '"', "'", "`" }) do
+    if not s:find(q, 1, true) then return q .. s .. q end
+  end
+  return '"' .. s:gsub('"', "'") .. '"'
+end
+
+local function rename_in_chunk(track, guid, name)
+  if not guid or guid == "" then return false end
+  local ok, chunk = reaper.GetTrackStateChunk(track, "", false)
+  if not ok then return false end
+  local lines, header = {}, nil
+  for l in (chunk .. "\n"):gmatch("(.-)\r?\n") do lines[#lines + 1] = l end
+  local done = false
+  for i, l in ipairs(lines) do
+    local tag = l:match("^%s*<([%u_]+)%s")
+    if tag and CHUNK_FX_TAG[tag] then header = { i = i, tag = tag }
+    elseif l:match("^%s*FXID%s") then
+      if header and l:find(guid, 1, true) then
+        if not CHUNK_RENAME_FIELD[header.tag] then break end
+        local h = lines[header.i]
+        local ind, rest = h:match("^(%s*<%u+)%s+(.*)$")
+        local tok = chunk_tokens(rest or "")
+        local k = CHUNK_RENAME_FIELD[header.tag]
+        if #tok >= k then
+          tok[k] = chunk_quote(name)
+          lines[header.i] = ind .. " " .. table.concat(tok, " ")
+          done = true
+        end
+        break
+      end
+      header = nil
+    end
+  end
+  if not done then return false end
+  reaper.Undo_BeginBlock()
+  local set = reaper.SetTrackStateChunk(track, table.concat(lines, "\n"), false)
+  reaper.Undo_EndBlock("ChannelView: rename plugin", -1)
+  return set
+end
+T.chunk_tokens = chunk_tokens   -- for TS_CV_Test.lua
+
+function T.rename(track, addr, guid, name)
+  name = name or ""
+  reaper.TrackFX_SetNamedConfigParm(track, addr, "renamed_name", name)
+  local ok, now = reaper.TrackFX_GetNamedConfigParm(track, addr, "renamed_name")
+  if ok and (now or "") == name then return true end
+  return rename_in_chunk(track, guid, name)
+end
+
 local function safe_fx_guid(track, addr)
   local pok, guid = pcall(reaper.TrackFX_GetFXGUID, track, addr)
   if pok and guid and guid ~= "" then return guid end
@@ -69,9 +165,11 @@ local function walk_level(track, path, count, depth, out)
       if cc and cc > 0 then
         walk_level(track, this, cc, depth + 1, out)
       else
+        local name, alias = names_of(track, addr)
         out[#out + 1] = {
           addr         = addr,
-          name         = safe_fx_name(track, addr) or ("FX " .. tostring(addr)),
+          name         = name or ("FX " .. tostring(addr)),
+          alias        = alias,      -- REAPER's own instance name, if renamed
           path         = table.concat(this, "."),
           depth        = #this - 1,
           guid         = safe_fx_guid(track, addr),

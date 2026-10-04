@@ -268,8 +268,8 @@ local function rename_popup(ctx)
     st.ren_focus = false
   end
   ImGui.SetNextItemWidth(ctx, 240)
-  local enter, buf = ImGui.InputText(ctx, "##tmname", st.ren_buf,
-    ImGui.InputTextFlags_EnterReturnsTrue | ImGui.InputTextFlags_AutoSelectAll)
+  local _, buf = ImGui.InputText(ctx, "##tmname", st.ren_buf, ImGui.InputTextFlags_AutoSelectAll)
+  local enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
   st.ren_buf = buf
   ImGui.SameLine(ctx)
   local ok = ImGui.Button(ctx, "OK")
@@ -602,8 +602,11 @@ local function icon_picker(ctx)
 
   ImGui.TextDisabled(ctx, #tracks == 1 and label_of(tracks[1]) or (#tracks .. " tracks"))
   ImGui.SetNextItemWidth(ctx, 200)
-  local ch, v = ImGui.InputTextWithHint(ctx, "##icoflt", "filter\u{2026}", ico.filter)
-  if ch then ico.filter = v end
+  -- Enter takes the first icon the filter shows
+  local _, v = ImGui.InputTextWithHint(ctx, "##icoflt", "filter\u{2026}", ico.filter)
+  local ico_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  ico.filter = v
+  local first_ico
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "No icon") then
     set_icon(tracks, nil)
@@ -622,6 +625,7 @@ local function icon_picker(ctx)
       local n = 0
       for _, f in ipairs(list) do
         if flt == "" or f.name:lower():find(flt, 1, true) then
+          first_ico = first_ico or f
           if n % cols ~= 0 then ImGui.SameLine(ctx, 0, 4) end
           n = n + 1
           local x, y = ImGui.GetCursorScreenPos(ctx)
@@ -644,6 +648,11 @@ local function icon_picker(ctx)
       end
       if n == 0 then ImGui.TextDisabled(ctx, "Nothing matches.") end
       ImGui.EndChild(ctx)
+    end
+    if ico_enter and first_ico then
+      set_icon(tracks, first_ico.path)
+      changed = true
+      ImGui.CloseCurrentPopup(ctx)
     end
   end
   ImGui.EndPopup(ctx)

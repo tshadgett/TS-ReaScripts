@@ -526,7 +526,7 @@ local st = { req = nil, track = nil, fx = nil, filter = "", focus = false,
 function EN.open_menu(track) st.req = track end
 
 local function fx_label(f)
-  local n = U.clean_fx_name(f.name)
+  local n = U.fx_label(f)
   if f.depth and f.depth > 0 then n = ("  "):rep(f.depth) .. n end
   return n
 end
@@ -566,8 +566,11 @@ function EN.draw_menu(ctx)
   ImGui.TextDisabled(ctx, "Automation lanes")
   if st.focus then ImGui.SetKeyboardFocusHere(ctx); st.focus = false end
   ImGui.SetNextItemWidth(ctx, 220)
-  local ch, v = ImGui.InputTextWithHint(ctx, "##autoflt", "filter parameters\u{2026}", st.filter)
-  if ch then st.filter = v end
+  -- Enter toggles the first match, as a click on it would
+  local _, v = ImGui.InputTextWithHint(ctx, "##autoflt", "filter parameters\u{2026}", st.filter)
+  local flt_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  st.filter = v
+  local first_hit
   ImGui.Separator(ctx)
 
   local flt = U.trim(st.filter):lower()
@@ -615,13 +618,14 @@ function EN.draw_menu(ctx)
       local env = EN.track_env(tr, def)
       if def.name:lower():find(flt, 1, true) then
         shown_n = shown_n + 1
+        first_hit = first_hit or function() toggle_track(tr, def) end
         if ImGui.MenuItem(ctx, "Track \u{203A} " .. def.name, nil, shown(env)) then
           toggle_track(tr, def)
         end
       end
     end
     for i, f in ipairs(st.fx) do
-      local fl = U.clean_fx_name(f.name)
+      local fl = U.fx_label(f)
       local fx_hit = fl:lower():find(flt, 1, true)
       local n = reaper.TrackFX_GetNumParams(tr, f.addr) or 0
       for p = 0, n - 1 do
@@ -629,6 +633,7 @@ function EN.draw_menu(ctx)
         local pn = param_name(tr, f.addr, p)
         if fx_hit or pn:lower():find(flt, 1, true) then
           shown_n = shown_n + 1
+          first_hit = first_hit or function() toggle_fx(tr, f.addr, p) end
           local env = reaper.GetFXEnvelope(tr, f.addr, p, false)
           if ImGui.MenuItem(ctx, ("%s \u{203A} %s##af%d_%d"):format(fl, pn, i, p), nil, shown(env)) then
             toggle_fx(tr, f.addr, p)
@@ -638,6 +643,7 @@ function EN.draw_menu(ctx)
     end
     if shown_n == 0 then ImGui.TextDisabled(ctx, "Nothing matches.") end
     if shown_n >= MAX_MATCHES then ImGui.TextDisabled(ctx, "\u{2026}more: narrow the filter.") end
+    if flt_enter and first_hit then first_hit(); ImGui.CloseCurrentPopup(ctx) end
   end
   ImGui.EndPopup(ctx)
 end

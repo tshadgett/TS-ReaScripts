@@ -45,7 +45,7 @@ end
 
 local function open_dialog(mode, track, fx, name, old)
   dlg = { mode = mode, track = track, addr = fx.addr, guid = fx.guid,
-          plugin = U.clean_fx_name(fx.name), name = name or "", old = old,
+          plugin = U.fx_label(fx), name = name or "", old = old,
           open = true, focus = true }
 end
 

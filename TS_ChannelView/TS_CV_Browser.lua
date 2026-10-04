@@ -560,9 +560,11 @@ function B.draw(ctx, track)
     -- all three kinds at once, so browsing and searching each stay fast.
     if ImGui.BeginPopup(ctx, "filterpop") then
       ImGui.SetNextItemWidth(ctx, 220)
-      local fch, fv = ImGui.InputTextWithHint(ctx, "##ffilt",
+      -- Enter takes the first match
+      local _, fv = ImGui.InputTextWithHint(ctx, "##ffilt",
         "filter folders, categories, developers\u{2026}", st.devfilt)
-      if fch then st.devfilt = fv end
+      local f_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+      st.devfilt = fv
       local needle = U.trim(st.devfilt):lower()
       local function keep(name)
         return needle == "" or name:lower():find(needle, 1, true) ~= nil
@@ -644,6 +646,13 @@ function B.draw(ctx, track)
           end
         end
         if open_list then ImGui.EndChild(ctx) end
+        if f_enter then
+          local hit
+          for _, f in ipairs(folds or {}) do if not hit and keep(f.name) then hit = { "folder", f.id } end end
+          for _, c in ipairs(cats or {}) do if not hit and keep(c.name) then hit = { "cat", c.name } end end
+          for _, d in ipairs(devs or {}) do if not hit and keep(d.name) then hit = { "dev", d.name } end end
+          if hit then set_filter(hit[1], hit[2]); ImGui.CloseCurrentPopup(ctx) end
+        end
       end
 
       ImGui.EndPopup(ctx)

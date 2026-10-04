@@ -469,10 +469,11 @@ local function item_menu(ctx)
     ImGui.Separator(ctx)
     ImGui.TextDisabled(ctx, "Label (blank: the action's name)")
     ImGui.SetNextItemWidth(ctx, 150)
-    local ch, v = ImGui.InputText(ctx, "##" .. ID .. "label", st.label_buf)
-    if ch then st.label_buf = v end
+    local _, v = ImGui.InputText(ctx, "##" .. ID .. "label", st.label_buf)
+    local enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+    st.label_buf = v
     ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Set") then
+    if ImGui.Button(ctx, "Set") or enter then
       it.label = clean(st.label_buf); TB.save()
       ImGui.CloseCurrentPopup(ctx)
     end
@@ -539,8 +540,11 @@ local function icon_picker(ctx)
 
   loads_left = 24
   ImGui.SetNextItemWidth(ctx, 200)
-  local ch, v = ImGui.InputTextWithHint(ctx, "##" .. ID .. "iconflt", "filter\u{2026}", st.icon_filter)
-  if ch then st.icon_filter = v end
+  -- Enter takes the first icon the filter shows
+  local _, v = ImGui.InputTextWithHint(ctx, "##" .. ID .. "iconflt", "filter\u{2026}", st.icon_filter)
+  local icon_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  st.icon_filter = v
+  local first_icon
   ImGui.SameLine(ctx)
   ImGui.TextDisabled(ctx, U.truncate(TB.icon_dir(), 40))
 
@@ -558,6 +562,7 @@ local function icon_picker(ctx)
     local n = 0
     for _, f in ipairs(list) do
       if flt == "" or f:lower():find(flt, 1, true) then
+        first_icon = first_icon or f
         if n % cols ~= 0 then ImGui.SameLine(ctx, 0, 4) end
         n = n + 1
         local x, y = ImGui.GetCursorScreenPos(ctx)
@@ -584,6 +589,10 @@ local function icon_picker(ctx)
     end
     if n == 0 then ImGui.TextDisabled(ctx, "Nothing matches.") end
     ImGui.EndChild(ctx)
+  end
+  if icon_enter and first_icon then
+    it.icon = first_icon; TB.save()
+    ImGui.CloseCurrentPopup(ctx)
   end
   ImGui.EndPopup(ctx)
 end

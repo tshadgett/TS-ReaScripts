@@ -345,6 +345,25 @@ make it shorter and they spread out. *View ▸ Control flow* switches
 between filling down-then-across (stable when you resize) and
 across-then-down (reads like a hardware strip).
 
+## Panel layout: sizes, button rows and sections
+
+Controls sit on a grid of half-cells. An ordinary control is one cell;
+**View ▸ Control spacing** sets how wide a column is (46–64 px, 50 by
+default), shared with the TCP window and the web page.
+
+- **Sizes.** Right-click a knob ▸ Style ▸ Size: *Small* is half height — a
+  small dial under its name in small type, the value in the tooltip — so two
+  stack in one cell; *Large* is half again as big. A toggle can be *Small*
+  too: a half-height lit push-button with its name on it. A large knob in a
+  panel one row tall draws at medium.
+- **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
+  *Buttons down*: one button per choice, the current one lit. For 2 to 8
+  choices; a column too tall for the panel shows as a dropdown.
+- **Sections (experimental).** A divider owns the controls after it, up to
+  the next divider. Right-click any of them ▸ Section to put them on an
+  **inset** or on a **faceplate of their own**. To style the first group,
+  start the panel with a divider with *Line* off.
+
 ## Naming: alias vs label
 
 Two different things, kept apart on purpose:
@@ -358,6 +377,17 @@ Two different things, kept apart on purpose:
 
 Right-clicking a control and setting a name sets the **alias**, since that's
 almost always what's wanted. The per-slot label lives in the full editor.
+
+A **toggle** says what its state is called: your **state names** if you've
+set them (right-click ▸ State names), else the plugin's own word for the
+state, and ON/OFF only when the plugin just reports a number.
+
+A **plugin instance** renamed in REAPER's FX chain shows that name on its
+panel and keeps its layout, which belongs to the plugin. The panel menu's
+name box renames it the same way (empty goes back to the plugin's name).
+
+Every text box takes **Enter**: a name box does what its button does, and a
+filter box takes the first match.
 
 ## Setting a plugin up
 
@@ -383,14 +413,22 @@ Right-click a knob or fader ▸ **Style** to give it a hardware face, and the
 panel's **=** menu ▸ **Faceplate** to change the panel behind it.
 
 - **Knobs:** *Arc* (the theme's own, and the default), *Skirted*, *Pointer*,
-  *Trim pot* and *Round nose* (a round cap whose short, blunt nose is the
-  pointer). **Faders:** *Flat* (the default), *Console* and *Rail*.
-- **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream and
-  Black. *Apply to every knob on this panel* copies one control's look to
-  the rest.
+  *Trim pot*, *Round nose* (a round cap whose short, blunt nose is the
+  pointer), *Bar* (a dome with a raised bar across it), *Fluted* (a domed
+  body with finger flutes), *Bezel* (a black centre in a chrome ring),
+  *Reverse bezel* (a glossy black ring round a metal centre) and *Hi-fi* (a
+  spun-aluminium knob). **Faders:** *Flat* (the default), *Console* and
+  *Rail*.
+- **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,
+  Silver, Stone and Black. *Apply to every knob on this panel* copies one
+  control's look to the rest. A toggle's Style is the colour it lights
+  when on (Amber, Green, Red, Blue, Yellow, White or the theme's), and so
+  is a button row's.
 - **Faceplates:** Theme, Charcoal, Gunmetal, Aluminium, Steel blue, Navy,
-  Cream, Racing green and Oxblood. Labels, values and scale ticks switch
-  ink to stay readable on each.
+  Cream, Cobalt, Amber, Stone, Racing green and Oxblood. Labels, values and
+  scale ticks switch ink to stay readable on each. **Brushed finish** in
+  the Faceplate menu gives any of them a fine grain (aluminium has it
+  unless you turn it off).
 
 Only *Theme* and the *Accent* cap follow Hue/Tint; every other faceplate and
 cap colour is fixed, the way hardware is. The menus stay open while you
@@ -575,7 +613,7 @@ Needs the **ReaImGui** extension (ReaPack). SWS is optional — it only powers
 ## Tests
 
 `dev/TS_CV_Test.lua` fakes enough of the REAPER API to exercise the parts
-that don't need a GUI — 442 assertions covering plugin-name cleaning, the
+that don't need a GUI — about a thousand assertions covering plugin-name cleaning, the
 layout file round-trip, control type guessing, the panel and sends
 geometry, the gain maths and fader taper, the GR meter's peak hold and
 scale, the tooltips' place-once-then-freeze behaviour, and the
@@ -590,6 +628,14 @@ produces. That file is personal and not in the repo, so point the harness at
 your own and it runs 392 assertions instead of 386:
 
     TS_CV_TEST_FXTAGS=~/path/to/reaper-fxtags.ini lua5.4 dev/TS_CV_Test.lua
+
+The layout has a baseline of its own. `dev/TS_CV_LayoutFixture.lua` holds
+where every control landed in a set of real and made-up layouts, in both
+flows at one to six rows, recorded before the half-cell grid; the test
+checks every one is still where it was. `dev/TS_CV_WebLayoutTest.js` does
+the same for the web page (`node dev/TS_CV_WebLayoutTest.js`).
+`dev/TS_CV_LayoutSnap.lua` records a new baseline — only ever before a
+layout change, never after it.
 
 `TS_CV_Audit.py` catches the class of mistake Lua only reports mid-frame — a
 call with the wrong number of arguments, a missing `ctx`, a function that

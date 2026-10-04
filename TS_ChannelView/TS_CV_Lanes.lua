@@ -330,8 +330,8 @@ local function rename_popup(ctx)
   ImGui.TextDisabled(ctx, "Rename " .. lane_label(r.track, r.lane))
   if st.focus then ImGui.SetKeyboardFocusHere(ctx); st.focus = false end
   ImGui.SetNextItemWidth(ctx, 200)
-  local enter, v = ImGui.InputText(ctx, "##lanename", st.buf,
-    ImGui.InputTextFlags_EnterReturnsTrue | ImGui.InputTextFlags_AutoSelectAll)
+  local _, v = ImGui.InputText(ctx, "##lanename", st.buf, ImGui.InputTextFlags_AutoSelectAll)
+  local enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
   st.buf = v
   ImGui.SameLine(ctx)
   if enter or ImGui.Button(ctx, "OK") then

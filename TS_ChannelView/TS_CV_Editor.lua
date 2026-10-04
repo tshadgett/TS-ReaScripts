@@ -34,6 +34,9 @@ local TITLE = "Setup Edit Parameters"
 
 local TYPES       = { "knob", "toggle", "combo", "stepped", "fader", "blank", "half_gap", "divider" }
 local TYPES_COMBO = "knob\0toggle\0combo\0stepped\0fader\0blank\0half_gap\0divider\0"
+local SIZES_COMBO = ""
+for _, k in ipairs(C.SIZE_LIST) do SIZES_COMBO = SIZES_COMBO .. C.SIZES[k].label .. "\0" end
+local TOGGLE_SIZES_COMBO = C.SIZES.small.label .. "\0" .. C.SIZES.medium.label .. "\0"
 
 local st = {
   open      = false,
@@ -277,8 +280,13 @@ end
 local function draw_available(ctx, track, list_w, list_h)
   ImGui.Text(ctx, "Plugin parameters")
   ImGui.SetNextItemWidth(ctx, list_w)
-  local ch, f = ImGui.InputTextWithHint(ctx, "##filter", "filter\u{2026}", st.filter)
-  if ch then st.filter = f end
+  -- Enter adds the selected parameter if the filter still shows it, else
+  -- the first one it shows, and leaves the box ready for the next
+  if st.filter_refocus then ImGui.SetKeyboardFocusHere(ctx); st.filter_refocus = false end
+  local _, f = ImGui.InputTextWithHint(ctx, "##filter", "filter\u{2026}", st.filter)
+  local filter_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  st.filter = f
+  local first_shown, sel_shown
 
   local needle = st.filter:lower()
   if ImGui.BeginListBox(ctx, "##available", list_w, list_h) then
@@ -288,6 +296,8 @@ local function draw_available(ctx, track, list_w, list_h)
         or p.name:lower():find(needle, 1, true)
         or (alias_l ~= "" and alias_l:find(needle, 1, true))
       if show then
+        first_shown = first_shown or p.index
+        if p.index == st.sel_avail then sel_shown = true end
         local used = assigned_has(p.index)
         local alias = st.scratch.aliases[p.index]
         local shown = (alias and alias ~= "") and (alias .. "   \u{2190} " .. p.name)
@@ -303,6 +313,12 @@ local function draw_available(ctx, track, list_w, list_h)
       end
     end
     ImGui.EndListBox(ctx)
+  end
+  if filter_enter and first_shown then
+    local p = sel_shown and st.sel_avail or first_shown
+    st.sel_avail = p
+    add_param(track, p)
+    st.filter_refocus = true
   end
 
   if ImGui.Button(ctx, "<< Add", 90) then
@@ -371,6 +387,29 @@ local function draw_entry_editor(ctx)
   if tch then c.type = TYPES[ti + 1] or "knob" end
 
   if c.type == "divider" then
+    -- EXPERIMENTAL: what this divider does to the section after it
+    local names, keys = { "No section style", "Inset" }, { "", "inset" }
+    local cur_s = 0
+    if c.style == "inset" then cur_s = 1 end
+    for _, pl in ipairs(C.PLATES) do
+      if pl.bg then
+        names[#names + 1] = "Plate: " .. pl.label; keys[#keys + 1] = pl.key
+        if c.style == "plate" and c.cap == pl.key then cur_s = #keys - 1 end
+      end
+    end
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 150)
+    local sch, si = ImGui.Combo(ctx, "Section", cur_s, table.concat(names, "\0") .. "\0")
+    if sch then
+      local k = keys[si + 1]
+      if k == "" then c.style, c.cap = nil, nil
+      elseif k == "inset" then c.style, c.cap = "inset", nil
+      else c.style, c.cap = "plate", k end
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Experimental: an inset, or a faceplate of their own, behind the\n" ..
+        "controls after this divider, up to the next one.")
+    end
     ImGui.SameLine(ctx)
     local lch, lv = ImGui.Checkbox(ctx, "Line", not c.no_rule)
     if lch then c.no_rule = (not lv) or nil end
@@ -379,6 +418,63 @@ local function draw_entry_editor(ctx)
         "On: the usual rule between the two groups. Off: still ends\n" ..
         "the column and opens the same gap, just without the line --\n" ..
         "pure spacing, for groups that don't need a line between them.")
+    end
+  end
+
+  if c.type == "toggle" then
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 80)
+    local sch, si = ImGui.Combo(ctx, "Size", (c.size == "small") and 0 or 1, TOGGLE_SIZES_COMBO)
+    if sch then c.size = (si == 0) and "small" or nil end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Small: half height and all button, with its name on it when the\n" ..
+        "state has no name of its own. Two stack in one cell.")
+    end
+  end
+
+  -- a dropdown can show its choices as buttons instead (2 to C.BUTTONS_MAX)
+  if c.type == "combo" and c.param and st.track and st.fx then
+    local P = require("TS_CV_Panel")
+    local n
+    local list = P.combo_steps(st.track, st.fx.addr, c.param, st.key)
+    if type(list) == "table" then n = #list
+    else
+      local sn = P.step_norm(st.track, st.fx.addr, c.param, st.key)
+      n = sn and (math.floor(1 / sn + 0.5) + 1) or nil
+    end
+    local ok = n and n >= 2 and n <= C.BUTTONS_MAX
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 110)
+    if not ok then ImGui.BeginDisabled(ctx, true) end
+    local cur_b = (c.buttons == "across") and 1 or (c.buttons == "down") and 2 or 0
+    local bch, bi = ImGui.Combo(ctx, "Show", cur_b, "Dropdown\0Buttons across\0Buttons down\0")
+    if bch then
+      c.buttons = (bi == 1) and "across" or (bi == 2) and "down" or nil
+      c.nbtn = c.buttons and n or nil
+    end
+    if not ok then ImGui.EndDisabled(ctx) end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, ok and "Show the choices as a row, or a column, of buttons, the current one lit."
+        or ("Buttons are only for a parameter with 2 to %d choices."):format(C.BUTTONS_MAX))
+    end
+  end
+
+  if c.type == "knob" or c.type == "stepped" then
+    ImGui.SameLine(ctx)
+    local now = 1
+    for i, k in ipairs(C.SIZE_LIST) do if k == (c.size or "medium") then now = i - 1 end end
+    ImGui.SetNextItemWidth(ctx, 80)
+    local sch, si = ImGui.Combo(ctx, "Size", now, SIZES_COMBO)
+    if sch then
+      local k = C.SIZE_LIST[si + 1]
+      c.size = (k ~= "medium") and k or nil
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Small: half height, a small dial under its name in small type --\n" ..
+        "its value moves to the tooltip, and two stack in one ordinary cell.\n" ..
+        "Large: half again as big, name and value kept.")
     end
   end
 
@@ -480,7 +576,7 @@ function E.draw(ctx, track)
     poll_learn(track)
     refresh_names(track)
 
-    ImGui.Text(ctx, U.clean_fx_name(st.fx.name))
+    ImGui.Text(ctx, U.clean_fx_name(st.fx.name) .. (st.fx.alias and ("  (" .. st.fx.alias .. ")") or ""))
     ImGui.SameLine(ctx)
     ImGui.TextDisabled(ctx, ("\u{2014}  saved as \"%s\", used by every instance of this plugin")
       :format(st.key))

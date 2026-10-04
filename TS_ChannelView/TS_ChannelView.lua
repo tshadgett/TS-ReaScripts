@@ -1,21 +1,18 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.7.6
+-- @version 1.8.0
 -- @changelog
---  The master's Sends panel is its hardware Outputs (level, mute, pre/post,
---  which device channels, add and remove), on the desktop and the web page,
---  and the master has no Receives panel. Its strip has a Mono switch where
---  other tracks have record arm, and its fader and buttons line up with
---  theirs.
---  Collapsed mixer strips line up with full ones: the meter and fader over
---  the same span, M, S and R stacked in the button rows, and a mini pan.
---  The master strip collapses too, and a collapsed fader shows at rest.
---  Collapse arrows point left, expand arrows right.
---  CLAP plugins save presets (save, save as default, rename, delete).
---  Web page: tap a mixer strip to select its track; double-tap a strip or
---  its name button to collapse it; folders collapse and hide as in REAPER;
---  master Outputs; the macro bar centres, wraps, takes spacers and drags to
---  reorder; double-tap the fader panel to collapse it.
+--  New knob styles: Bar, Fluted, Bezel, Reverse bezel and Hi-fi; Silver and
+--  Stone cap colours; Stone, Cobalt and Amber faceplates, and a Brushed
+--  finish for any faceplate.
+--  Knob sizes (Small, Medium, Large) and small toggles; toggle buttons say
+--  the state's name, with state names of your own and lit colours.
+--  Dropdowns as a row or column of buttons. Sections (experimental): a
+--  divider can put the controls after it on an inset or a faceplate.
+--  View > Control spacing (default now 50 px, narrower panels).
+--  Plugins renamed in REAPER's FX chain show that name and keep their
+--  layout; rename from the panel menu. Enter commits every text box.
+--  The web page follows all of it. Existing layouts are unchanged.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -174,6 +171,7 @@ W.set_meter_font(small_font)
 
 local app = {
   track        = nil,
+  state_buf    = { "", "" },   -- a toggle's state names, being edited
   chain        = {},
   chain_hash   = "",
   last_scan    = 0,
@@ -236,6 +234,7 @@ end
 
 local dock_id = tonumber(ext_get("dock", "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
+C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.PLATE_TEXTURE = ext_get("plate_texture", C.PLATE_TEXTURE and "1" or "0") == "1"
 C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
@@ -385,7 +384,7 @@ local function remove_fx(fx)
   if not app.track or not fx or not fx.is_top_level then return end
   reaper.Undo_BeginBlock()
   reaper.TrackFX_Delete(app.track, fx.top_index)
-  reaper.Undo_EndBlock("ChannelView: remove " .. U.clean_fx_name(fx.name), -1)
+  reaper.Undo_EndBlock("ChannelView: remove " .. U.fx_label(fx), -1)
   app.menu_fx, app.ctl_menu = nil, nil
   rescan(true)
 end
@@ -446,6 +445,21 @@ local function plate_menu(fx, key, layout)
     ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H,
       pl.border or C.COL.panel_border, 2.0, 0, 1.0)
   end
+  -- the grain, on whichever faceplate is chosen (the theme's has none)
+  ImGui.Separator(ctx)
+  local plate = C.plate_of(layout.plate)
+  local on = M.brushed(layout, plate)
+  if ImGui.MenuItem(ctx, "Brushed finish##plate_brush", nil, on, plate ~= nil) then
+    local l = materialise(fx)
+    local want = not on
+    -- the faceplate's own choice is no choice at all, so it isn't saved
+    if want == (plate.brushed or false) then l.brush = nil else l.brush = want end
+    M.set(key, l); M.save()
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, plate and "A fine brushed grain across this faceplate\n(needs Faceplate texture on)."
+      or "Choose a faceplate first: the theme's panel has no grain.")
+  end
 end
 
 -- The knobs and faders a style can be copied between: a stepped knob is a
@@ -453,11 +467,104 @@ end
 local function style_family(t)
   if t == "knob" or t == "stepped" then return "knob" end
   if t == "fader" then return "fader" end
+  if t == "toggle" then return "toggle" end
   return nil
+end
+
+-- A toggle has no style, only the colour it lights when on (C.TOGGLE_COLS);
+-- "Theme" is the theme's own toggle colour, following Hue/Tint.
+local function toggle_colour_menu(fx, key, idx, c)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local now = c.cap or "theme"
+  local function set(v)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.cap = v end
+    M.set(key, l); M.save()
+  end
+  ImGui.TextDisabled(ctx, "Lit colour")
+  for i, cp in ipairs(C.TOGGLE_COLS) do
+    if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+    local col = cp.col or C.COL.toggle_on
+    if ImGui.ColorButton(ctx, cp.label .. "##tcol_" .. cp.key, col,
+        ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+      set((cp.key ~= "theme") and cp.key or nil)
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, cp.label) end
+    if cp.key == now then
+      local x0, y0 = ImGui.GetItemRectMin(ctx)
+      local x1, y1 = ImGui.GetItemRectMax(ctx)
+      ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+    end
+  end
+  -- small: a half-height lit push-button with its name on it (buttons
+  -- for a dropdown's choices have no sizes: their count sets their room)
+  if c.type == "toggle" then
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Size")
+    local sz_now = (c.size == "small") and "small" or "medium"
+    for i, k in ipairs({ "small", "medium" }) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, C.SIZES[k].label .. "##tsize_" .. k, k == sz_now, KEEP_OPEN, 56, 0) then
+        local l = materialise(fx)
+        local lc = l.controls[idx]
+        if lc then lc.size = (k == "small") and "small" or nil end
+        M.set(key, l); M.save()
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, (k == "small") and "Half height: all button, its name on it when the\nstate has no name of its own. Two stack in one cell."
+          or "The ordinary size.")
+      end
+    end
+  end
+
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Apply to every button on this panel") then
+    local l = materialise(fx)
+    for _, o in ipairs(l.controls) do
+      if o.type == "toggle" or (o.type == "combo" and o.buttons) then o.cap = c.cap end
+    end
+    M.set(key, l); M.save()
+  end
+end
+
+-- EXPERIMENTAL: what a divider does to the section after it (up to the
+-- next divider) -- nothing, an inset behind it, or a faceplate of its own.
+local function section_menu(fx, key, idx, c)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local now = (c.style == "inset" and "inset") or (c.style == "plate" and C.plate_of(c.cap) and c.cap) or "none"
+  local function set(style, cap)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.style, lc.cap = style, cap end
+    M.set(key, l); M.save()
+  end
+  ImGui.TextDisabled(ctx, "The controls after this divider")
+  if ImGui.Selectable(ctx, "None##sec_none", now == "none", KEEP_OPEN, 170, 0) then set(nil, nil) end
+  if ImGui.Selectable(ctx, "Inset##sec_inset", now == "inset", KEEP_OPEN, 170, 0) then set("inset", nil) end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "A recessed panel behind them, up to the next divider.")
+  end
+  ImGui.Spacing(ctx)
+  ImGui.TextDisabled(ctx, "On a faceplate of their own")
+  for _, pl in ipairs(C.PLATES) do
+    if pl.bg then
+      local x, y = ImGui.GetCursorScreenPos(ctx)
+      if ImGui.Selectable(ctx, "      " .. pl.label .. "##sec_" .. pl.key, now == pl.key, KEEP_OPEN, 170, 0) then
+        set("plate", pl.key)
+      end
+      local _, th = ImGui.CalcTextSize(ctx, "Ag")
+      local sy = y + (th - SWATCH_H) * 0.5
+      ImGui.DrawList_AddRectFilled(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.bg, 2.0)
+      ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.border, 2.0, 0, 1.0)
+    end
+  end
 end
 
 local function style_menu(fx, key, idx, c)
   local fam = style_family(c.type)
+  if fam == "toggle" or c.type == "combo" then return toggle_colour_menu(fx, key, idx, c) end
   local list = (fam == "fader") and C.FADER_STYLES or C.KNOB_STYLES
   local cur = C.KNOB_STYLE_ALIAS[c.style] or c.style or list[1].key
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -505,6 +612,24 @@ local function style_menu(fx, key, idx, c)
     end
   end
 
+  -- knobs come in three sizes (C.SIZES); the panel reflows round them
+  if fam == "knob" then
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Size")
+    local now = c.size or "medium"
+    for i, k in ipairs(C.SIZE_LIST) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, C.SIZES[k].label .. "##size_" .. k, k == now, KEEP_OPEN, 56, 0) then
+        set({ size = (k ~= "medium") and k or false })
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, (k == "small") and "Half height: a small dial under its name in small type, its value\nin the tooltip. Two stack in the space of one ordinary knob."
+          or (k == "large") and "Half again as big, name and value kept.\nDrawn ordinary size in a panel only one row tall."
+          or "The ordinary size.")
+      end
+    end
+  end
+
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, fam == "fader" and "Apply to every fader on this panel"
@@ -529,7 +654,28 @@ local function panel_menu()
   if not fx then ImGui.EndPopup(ctx) return end
 
   local layout, key, is_default = layout_for(fx)
-  ImGui.TextDisabled(ctx, U.clean_fx_name(fx.name))
+  ImGui.TextDisabled(ctx, U.fx_label(fx) .. (fx.alias and ("  \u{00B7}  " .. U.clean_fx_name(fx.name)) or ""))
+
+  -- REAPER's own name for this instance (its FX chain's Rename): shown on
+  -- the panel, in the FX chain and everywhere else REAPER lists it. The
+  -- layout stays the plugin's. Empty goes back to the plugin's name.
+  if app.fxren_for ~= fx.guid then app.fxren_for, app.fxren_buf = fx.guid, fx.alias or "" end
+  ImGui.SetNextItemWidth(ctx, 150)
+  local _, ren_v = ImGui.InputTextWithHint(ctx, "##fxren", U.clean_fx_name(fx.name),
+    app.fxren_buf)
+  local ren_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  app.fxren_buf = ren_v
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Rename this instance -- REAPER's own name for it, as its FX\n" ..
+      "chain shows. The layout is still the plugin's. Clear it to go back.")
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Rename##fxren") or ren_enter then
+    T.rename(app.track, fx.addr, fx.guid, U.trim(app.fxren_buf))
+    app.fxren_for = nil
+    rescan(true)
+    ImGui.CloseCurrentPopup(ctx)
+  end
   ImGui.Separator(ctx)
 
   if ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then
@@ -702,10 +848,34 @@ local function control_menu()
 
   if ImGui.BeginMenu(ctx, "Show as") then
     for _, t in ipairs(TYPE_ORDER) do
-      if ImGui.MenuItem(ctx, TYPE_LABELS[t], nil, c.type == t) then
+      if ImGui.MenuItem(ctx, TYPE_LABELS[t], nil, c.type == t and not (t == "combo" and c.buttons)) then
         local l = commit()
         l.controls[cm.ctl].type = t
+        l.controls[cm.ctl].buttons, l.controls[cm.ctl].nbtn = nil, nil
         M.set(key, l); M.save()
+      end
+      -- right after Dropdown: its choices as a row, or a column, of buttons
+      if t == "combo" then
+        local n
+        local list = c.param and P.combo_steps(app.track, fx.addr, c.param, key)
+        if type(list) == "table" then n = #list
+        else
+          local st = c.param and P.step_norm(app.track, fx.addr, c.param, key)
+          n = st and (math.floor(1 / st + 0.5) + 1) or nil
+        end
+        local ok = n and n >= 2 and n <= C.BUTTONS_MAX
+        for _, d in ipairs({ { "across", "Buttons across" }, { "down", "Buttons down" } }) do
+          if ImGui.MenuItem(ctx, d[2], nil, c.type == "combo" and c.buttons == d[1], ok and true or false) then
+            local l = commit()
+            local lc = l.controls[cm.ctl]
+            lc.type, lc.buttons, lc.nbtn = "combo", d[1], n
+            M.set(key, l); M.save()
+          end
+          if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+            ImGui.SetTooltip(ctx, ok and ("One button per choice (%d), the current one lit."):format(n)
+              or ("Only for a parameter with 2 to %d choices."):format(C.BUTTONS_MAX))
+          end
+        end
       end
     end
     ImGui.EndMenu(ctx)
@@ -717,9 +887,26 @@ local function control_menu()
     M.set(key, l); M.save()
   end
 
-  if style_family(c.type) and ImGui.BeginMenu(ctx, "Style") then
+  if (style_family(c.type) or (c.type == "combo" and c.buttons)) and ImGui.BeginMenu(ctx, "Style") then
     style_menu(fx, key, cm.ctl, c)
     ImGui.EndMenu(ctx)
+  end
+
+  -- the section this control is in belongs to the divider in front of it
+  -- (dividers aren't on the panel to right-click, so it's offered here)
+  local div_idx
+  for k = cm.ctl - 1, 1, -1 do
+    local o = layout.controls[k]
+    if o.type == "divider" then div_idx = k break end
+    if o.type == "fader" then break end
+  end
+  if ImGui.BeginMenu(ctx, "Section (experimental)", div_idx ~= nil) then
+    section_menu(fx, key, div_idx, layout.controls[div_idx])
+    ImGui.EndMenu(ctx)
+  end
+  if not div_idx and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, "A section starts at a divider. To style the first group,\n" ..
+      "put a divider (Line off) at the very start in Edit parameters.")
   end
 
   ImGui.Separator(ctx)
@@ -731,16 +918,51 @@ local function control_menu()
   -- the very control you renamed.
   ImGui.TextDisabled(ctx, "Alias (this plugin, everywhere)")
   ImGui.SetNextItemWidth(ctx, 170)
-  local ch, v = ImGui.InputTextWithHint(ctx, "##alias", "name\u{2026}", app.rename_buf)
-  if ch then app.rename_buf = v end
+  local _, v = ImGui.InputTextWithHint(ctx, "##alias", "name\u{2026}", app.rename_buf)
+  local alias_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  app.rename_buf = v
   ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Set") then
+  if ImGui.Button(ctx, "Set") or alias_enter then
     local l = materialise(fx)
     local lc = l.controls[cm.ctl]
     if lc and lc.label and lc.label ~= "" then lc.label = ""; M.set(key, l) end
     M.set_alias(key, c.param, app.rename_buf)
     M.save()
     ImGui.CloseCurrentPopup(ctx)
+  end
+
+  -- A toggle's two states can have names of their own, for plugins whose
+  -- switches read "0.0"/"1.0" or worse. Hints are what the plugin says.
+  if c.type == "toggle" then
+    ImGui.Separator(ctx)
+    ImGui.TextDisabled(ctx, "State names (this plugin, everywhere)")
+    local function hint(v)
+      if reaper.TrackFX_FormatParamValueNormalized then
+        local ok, t = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, c.param, v, "")
+        if ok and t and t ~= "" then return t end
+      end
+      return v < 0.5 and "off" or "on"
+    end
+    ImGui.SetNextItemWidth(ctx, 82)
+    local _, v1 = ImGui.InputTextWithHint(ctx, "##stoff", hint(0), app.state_buf[1])
+    local e1 = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+    app.state_buf[1] = v1
+    ImGui.SameLine(ctx, 0, 6)
+    ImGui.SetNextItemWidth(ctx, 82)
+    local _, v2 = ImGui.InputTextWithHint(ctx, "##ston", hint(1), app.state_buf[2])
+    local e2 = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+    app.state_buf[2] = v2
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Set##states") or e1 or e2 then
+      materialise(fx)
+      M.set_states(key, c.param, app.state_buf[1], app.state_buf[2])
+      M.save()
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Off, then on. Leave one empty to keep the plugin's own text;\n" ..
+                            "clear both to go back to it entirely.")
+    end
   end
 
   ImGui.Separator(ctx)
@@ -1017,6 +1239,25 @@ local function menu_bar()
       ext_set("show_values", C.SHOW_VALUES and "1" or "0")
     end
 
+    -- the width of a control's column, for every panel
+    if ImGui.BeginMenu(ctx, "Control spacing") then
+      ImGui.SetNextItemWidth(ctx, 140)
+      local cwch, cwv = ImGui.SliderInt(ctx, "##cell_w", C.CELL_W, C.CELL_W_MIN, C.CELL_W_MAX, "%d px")
+      if cwch then
+        C.set_cell_w(cwv)
+        ext_set("cell_w", tostring(C.CELL_W))
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "How wide each control's column is: narrower packs panels tighter.\n" ..
+          "Names that no longer fit are shortened. Ctrl+click to type a number.")
+      end
+      if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CELL_W_DEFAULT), nil, false, C.CELL_W ~= C.CELL_W_DEFAULT) then
+        C.set_cell_w(C.CELL_W_DEFAULT)
+        ext_set("cell_w", tostring(C.CELL_W))
+      end
+      ImGui.EndMenu(ctx)
+    end
+
     if ImGui.MenuItem(ctx, "Preset bar", nil, C.PRESET_BAR) then
       C.PRESET_BAR = not C.PRESET_BAR
       ext_set("preset_bar", C.PRESET_BAR and "1" or "0")
@@ -1030,7 +1271,7 @@ local function menu_bar()
       ext_set("plate_texture", C.PLATE_TEXTURE and "1" or "0")
     end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "A light gradient on coloured faceplates,\nand brushed grain on aluminium.")
+      ImGui.SetTooltip(ctx, "A light gradient on coloured faceplates,\nand brushed grain where one is chosen.")
     end
 
     if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
@@ -1455,6 +1696,8 @@ local function panel_row(row_h, row_w)
           -- starts as the name the control shows now
           app.rename_buf = c and c.param
             and M.display_name(key, c.param, c.label, pn, false) or pn or ""
+          local st = c and c.param and M.get_states(key, c.param)
+          app.state_buf = { st and st[1] or "", st and st[2] or "" }
           app.open_ctl_menu = true
         end
       end
@@ -1535,6 +1778,7 @@ local function frame()
       C.TRACK_ICONS = ext_get("track_icons", "0") == "1"
       C.SHOW_VALUES = ext_get("show_values", "1") == "1"
       C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
+      C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
     end
   end
   -- The name row's height for this whole frame: taller while any track

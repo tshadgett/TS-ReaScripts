@@ -53,70 +53,170 @@ end
 
 -- Places every control, returning:
 --   rows     how many rows the grid has
---   items    { ctl, x, y } offsets from the grid origin
+--   items    { ctl, x, y, w, h } -- x, y offsets from the grid origin in
+--            pixels; w, h the control's size in half-cells (see below)
 --   rules    x offsets of vertical dividers, in the same space
 --   width    total width of the grid, dividers included
 --   height   how far down the grid actually reaches, for the rules
+--   sections { x, w, by } for every section a divider gave a style to
+--            (EXPERIMENTAL: an inset, or its own faceplate, behind it) --
+--            x and w in the grid's space, `by` the divider; the items
+--            in it carry `sec`, the index into this list
+--
+-- THE HALF-CELL GRID. Everything is placed in half-cells, half a CELL_W
+-- across and half a CELL_H down. A control is a block of them: an
+-- ordinary one 2 x 2 (exactly the one cell every control has always
+-- been), a half_gap 2 x 1, and the sizes in C.SIZES whatever they say. A
+-- control too tall for the panel is drawn at the ordinary size instead.
+-- With every control 2 x 2 this places each exactly where the old
+-- one-cell layout did -- dev/TS_CV_LayoutFixture.lua holds the positions
+-- every layout had before, and TS_CV_Test.lua checks them all.
 --
 -- A DIVIDER SPLITS THE PANEL INTO SECTIONS. Each section is laid out
 -- independently in its own block of columns, so whatever follows a divider
 -- always begins a new column -- no matter how the previous section ended,
 -- whether it filled its last column or left gaps in it. That's the whole
 -- point of a divider: "this group is finished, a new one starts here."
---
 -- The rule is vertical in either flow, because it separates groups, and
 -- that reads as a vertical break whichever way the controls run.
 --
--- A "half_gap" control staggers what comes after it: instead of landing
--- on the next whole row, the control following a half_gap lands half a
--- row down, the way some hardware panels stagger their knobs. Only
--- meaningful in "column" flow -- a "row" layout would need a HORIZONTAL
--- half-step instead, a different feature nobody asked for -- so a
--- section with no half_gap in it, or a "row"-flow panel, takes the
--- exact same path this always has: idx/rows arithmetic, one slot per
--- control, nothing new to verify for any layout that doesn't use one.
+-- A "fader" SPLITS THE PANEL THE SAME WAY, but claims the column between
+-- the two sections for itself, at the panel's full height, rather than
+-- leaving a rule-only gap.
 --
--- A section WITH a half_gap, in column flow, is laid out by simulating
--- the fill instead: a running cursor in HALF-cell units (half_rows =
--- rows*2), where a real control costs 2 units (one full CELL_H, same
--- spacing as always) and a half_gap costs 1 (half a CELL_H, drawn as
--- nothing) and only advances the cursor. `cols = ceil(n/rows)`, which
--- this file has always used, assumes every item costs the same -- true
--- with no gaps, false the moment one is in the mix, because a gap that
--- lands near a column's bottom edge can wrap the rest of that column's
--- controls into a fresh one early. Predicting the resulting column
--- count with a formula means predicting exactly where every gap will
--- land -- simulating the fill sidesteps that by never needing to
--- predict it: it discovers the count the same way it discovers each
--- control's own position, one item at a time, wrapping to a new column
--- only when the next item genuinely doesn't fit in the one it's in.
+-- COLUMN FLOW (down, then across) runs a cursor down a strip of columns.
+-- A control goes where the cursor is if it fits in the half-rows left,
+-- otherwise the strip is finished and a new one starts to its right. A
+-- strip is as wide as its widest control, and narrower controls in it are
+-- centred. A half_gap only moves the cursor down half a row -- the way
+-- some hardware staggers its knobs -- and one that doesn't fit what's
+-- left of a strip starts the next strip, spent for nothing there.
 --
--- A "fader" SPLITS THE PANEL THE SAME WAY A DIVIDER DOES -- it never
--- shares a column with anything else -- but unlike a divider it isn't a
--- rule-only gap: it's a real, drawn control that claims that whole
--- column for itself, at the panel's full height (half_rows worth,
--- always -- the same height every OTHER column is merely capped at),
--- rather than one CELL_H cell among others. So a fader control is
--- handled at exactly the point a divider already is -- the section
--- split -- rather than inside either per-section layout path above:
--- both of those place items ONE CELL AT A TIME within a column a fader
--- has no business sharing. `splitters` keeps whichever control (divider
--- or fader) opened each split, so the loop below can ask it which kind
--- it is.
+-- ROW FLOW (across, then down) fills rows of a fixed width, chosen as the
+-- narrowest that gets everything into the panel's height: with ordinary
+-- controls that is ceil(n / rows) cells, as it always was. A half_gap is
+-- an ordinary empty slot here; its half-step is a down-the-column idea.
+local HALF_H = C.CELL_H * 0.5
+
+-- `n` half-cells across, or down, in pixels: a whole number whenever it
+-- is one, so an ordinary layout's positions are exactly what they were.
+local function hx(n) local v = n * C.CELL_W / 2; return math.tointeger(v) or v end
+local function hy(n) local v = n * C.CELL_H / 2; return math.tointeger(v) or v end
+
+-- How many half-cells a control takes, across and down, in a panel of
+-- `half_rows` half-rows. Faders and dividers aren't placed in a section
+-- and never ask. Knobs and stepped knobs come in every size, toggles in
+-- small and ordinary. A dropdown shown as buttons (P.button_span) also
+-- answers "buttons" third, so the panel knows to draw it that way; one
+-- whose buttons won't fit the panel's height is an ordinary dropdown.
+function P.button_span(ctl)
+  if ctl.type ~= "combo" or not ctl.buttons or not ctl.nbtn then return nil end
+  local n = ctl.nbtn
+  if ctl.buttons == "across" then return math.max(2, n), 2 end
+  return 2, math.ceil((n + 1) / 2)
+end
+
+function P.cell_size(ctl, half_rows)
+  local bw, bh = P.button_span(ctl)
+  if bw and bh <= half_rows then return bw, bh, "buttons" end
+  if ctl.type == "half_gap" then
+    if C.FLOW == "row" then return 2, 2 end
+    return 2, 1
+  end
+  local sizable = ctl.type == nil or ctl.type == "knob" or ctl.type == "stepped"
+    or (ctl.type == "toggle" and ctl.size == "small")
+  local sz = sizable and ctl.size and C.SIZES[ctl.size]
+  if sz and sz.h <= half_rows then return sz.w, sz.h end
+  return 2, 2
+end
+
+-- The size a placed item is drawn at, from the half-cells it was given:
+-- "small", "large", or nil for the ordinary one (which is also what a
+-- size too tall for the panel was given instead).
+function P.item_size(item)
+  for _, k in ipairs(C.SIZE_LIST) do
+    local sz = C.SIZES[k]
+    if k ~= "medium" and item.w == sz.w and item.h == sz.h then return k end
+  end
+  return nil
+end
+
+-- A divider's section style (EXPERIMENTAL): "inset" for a recessed panel
+-- behind the section after it, "plate" for that section on a faceplate of
+-- its own (the plate's key in its colour field), or nil.
+function P.section_style(div)
+  if div.style == "inset" then return "inset" end
+  if div.style == "plate" and C.plate_of(div.cap) then return "plate", C.plate_of(div.cap) end
+  return nil
+end
+
+local function place_column(sec, x0, half_rows, items)
+  local cx, cy, sw, deepest = 0, 0, 0, 0
+  local strip = {}
+  local function close_strip()
+    for _, it in ipairs(strip) do
+      if it.w < sw then it.x = it.x + hx(sw - it.w) / 2 end
+    end
+    strip = {}
+    cx, cy, sw = cx + sw, 0, 0
+  end
+  for _, ctl in ipairs(sec) do
+    local w, h, kind = P.cell_size(ctl, half_rows)
+    if cy + h > half_rows then close_strip() end
+    if ctl.type ~= "half_gap" then
+      local it = { ctl = ctl, x = x0 + hx(cx), y = hy(cy), w = w, h = h, kind = kind }
+      items[#items + 1] = it
+      strip[#strip + 1] = it
+      if cy + h > deepest then deepest = cy + h end
+    end
+    cy = cy + h
+    if w > sw then sw = w end
+  end
+  local width = cx + sw
+  close_strip()
+  return hx(width), deepest
+end
+
+local function place_row(sec, x0, half_rows, items)
+  local area, widest, total_w = 0, 0, 0
+  local sizes = {}
+  for i, ctl in ipairs(sec) do
+    local w, h, kind = P.cell_size(ctl, half_rows)
+    sizes[i] = { w, h, kind }
+    area = area + w * h
+    total_w = total_w + w
+    if w > widest then widest = w end
+  end
+  local rows = half_rows // 2
+  local lim = math.max(widest, 2 * math.ceil(area / 4 / rows))
+  local placed, deepest
+  while true do
+    placed, deepest = {}, 0
+    local cx, cy, lh = 0, 0, 0
+    for i, ctl in ipairs(sec) do
+      local w, h = sizes[i][1], sizes[i][2]
+      if cx + w > lim then cy, cx, lh = cy + lh, 0, 0 end
+      placed[#placed + 1] = { ctl = ctl, x = x0 + hx(cx), y = hy(cy), w = w, h = h, kind = sizes[i][3] }
+      if cy + h > deepest then deepest = cy + h end
+      cx = cx + w
+      if h > lh then lh = h end
+    end
+    if deepest <= half_rows or lim >= total_w then break end
+    lim = lim + 1
+  end
+  for _, it in ipairs(placed) do items[#items + 1] = it end
+  return hx(lim), deepest
+end
+
 function P.layout(controls, panel_h)
   local rows  = P.rows_for(panel_h)
   local half_rows = rows * 2
-  local half_h    = C.CELL_H * 0.5
   local items, rules = {}, {}
 
   -- split the control list at dividers and faders; a leading, trailing
   -- or doubled one simply yields an empty section in between, which
   -- costs that splitter's own space and no columns of section content.
-  --
-  -- `splitters` keeps the actual divider/fader control alongside each
-  -- split, in step with `sections` (splitters[n] is the one that opened
-  -- sections[n+1]) -- so the loop below can ask THAT control which kind
-  -- it is, and a divider whether it wants its rule drawn.
+  -- `splitters[n]` is the control that opened sections[n+1].
   local sections, splitters, cur = {}, {}, {}
   for _, ctl in ipairs(controls) do
     if ctl.type == "divider" or ctl.type == "fader" then
@@ -130,88 +230,41 @@ function P.layout(controls, panel_h)
   sections[#sections + 1] = cur
 
   local x, deepest = 0, 0
+  local styled = {}
   for si, sec in ipairs(sections) do
     if si > 1 then
       local sp = splitters[si - 1]
       if sp.type == "fader" then
-        -- Placed here, at the split, rather than inside either
-        -- per-section path below -- see the comment above P.layout.
-        -- Full height always: a fader is the one item in this file
-        -- that isn't capped by `deepest`, it SETS it, the same way it
-        -- would set panel_h if it were the only thing on the panel.
-        items[#items + 1] = { ctl = sp, x = x, y = 0 }
+        -- full height always: a fader isn't capped by `deepest`, it sets it
+        items[#items + 1] = { ctl = sp, x = x, y = 0, w = 2, h = half_rows }
         if half_rows > deepest then deepest = half_rows end
         x = x + C.CELL_W
       else
         -- The gap is unconditional -- a no-rule divider still ends the
-        -- column and opens the same C.DIVIDER_W space, it just never adds
-        -- an entry to `rules`, so the draw side (which only walks `rules`)
-        -- has nothing left to draw for this one.
+        -- column and opens the same C.DIVIDER_W space, it just adds no
+        -- entry to `rules`, so the draw side has nothing to draw for it.
         if not sp.no_rule then
           rules[#rules + 1] = x + C.DIVIDER_W * 0.5
         end
         x = x + C.DIVIDER_W
       end
     end
-
-    local has_gap = false
-    if C.FLOW == "column" then
-      for _, ctl in ipairs(sec) do
-        if ctl.type == "half_gap" then has_gap = true; break end
-      end
+    local w, d
+    local first = #items + 1
+    if C.FLOW == "row" then w, d = place_row(sec, x, half_rows, items)
+    else w, d = place_column(sec, x, half_rows, items) end
+    -- a section styled by the divider in front of it
+    local sp = splitters[si - 1]
+    if sp and sp.type == "divider" and P.section_style(sp) and w > 0 then
+      styled[#styled + 1] = { x = x, w = w, by = sp }
+      for k = first, #items do items[k].sec = #styled end
     end
-
-    if not has_gap then
-      -- The plain arithmetic path -- see the comment above P.layout. Used
-      -- for every section that has no half_gap in it, since every item
-      -- costs the same slot and the column count can be computed directly.
-      local n    = #sec
-      local cols = math.ceil(n / rows)
-      for i, ctl in ipairs(sec) do
-        local idx = i - 1
-        local col, row
-        if C.FLOW == "row" then
-          col = idx % cols
-          row = math.floor(idx / cols)
-        else
-          col = math.floor(idx / rows)
-          row = idx % rows
-        end
-        items[#items + 1] = { ctl = ctl, x = x + col * C.CELL_W, y = row * C.CELL_H }
-        if (row + 1) * 2 > deepest then deepest = (row + 1) * 2 end
-      end
-      x = x + cols * C.CELL_W
-    else
-      -- The fill simulation -- see the comment above P.layout. col_i
-      -- counts columns from 0 within this section; half_cursor is how
-      -- far down the CURRENT column the next item would start, in
-      -- half-cell units.
-      local col_i, half_cursor = 0, 0
-      for _, ctl in ipairs(sec) do
-        local cost = (ctl.type == "half_gap") and 1 or 2
-        if half_cursor + cost > half_rows then
-          -- Doesn't fit what's left in this column -- a fresh one
-          -- starts at 0, whether it was a control or a half_gap that
-          -- triggered the wrap. A half_gap that opens a new column has
-          -- nothing left to offset, so it's spent for nothing rather
-          -- than carried across the wrap -- the same way a divider
-          -- doesn't carry anything across ITS column break either.
-          col_i = col_i + 1
-          half_cursor = 0
-        end
-        if ctl.type ~= "half_gap" then
-          items[#items + 1] = { ctl = ctl, x = x + col_i * C.CELL_W, y = half_cursor * half_h }
-          if half_cursor + cost > deepest then deepest = half_cursor + cost end
-        end
-        half_cursor = half_cursor + cost
-      end
-      -- +1: col_i is the index of the last column touched, 0-based.
-      x = x + (col_i + 1) * C.CELL_W
-    end
+    x = x + w
+    if d > deepest then deepest = d end
   end
 
-  return { rows = rows, items = items, rules = rules, width = x,
-           height = math.max(1, math.min(half_rows, deepest)) * half_h }
+  return { rows = rows, items = items, rules = rules, width = x, sections = styled,
+           height = math.max(1, math.min(half_rows, deepest)) * HALF_H }
 end
 
 -- `key` is optional (existing callers that only ever draw a plain grid
@@ -397,6 +450,7 @@ end
 -- The panel's background colour at a height, for fading the trace into it:
 -- set up by the faceplate code further down (see bg_at there).
 local bg_at
+local push_plate, pop_plate, mix   -- the faceplate swap and colour mix, defined with the faceplates below
 
 function P.grv_label(win) return Tr.label(win) end
 
@@ -690,6 +744,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   -- rather than instead.
   if hdr_hovered then
     local full = U.clean_fx_name(fx.name)
+    if fx.alias then full = fx.alias .. "\n" .. full end
     local fmt  = U.fx_format(fx.name)
     local ven  = U.fx_vendor(fx.name)
     if ven and ven ~= "" then full = full .. "\n" .. ven end
@@ -707,7 +762,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     req.toggle_collapse = true
   end
 
-  local name = U.clean_fx_name(fx.name)
+  local name = U.fx_label(fx)
   if fx.depth and fx.depth > 0 then name = "\u{00BB} " .. name end
   local nw, nh = ImGui.CalcTextSize(ctx, name)
   if nw > name_w then
@@ -803,7 +858,7 @@ local function draw_collapsed(ctx, dl, x, y, w, h, track, fx, enabled, req, mete
 
   local text_y = y + 4 + (btn + 3) * 3 + 4
   local avail = h - (text_y - y) - 4
-  local name = U.clean_fx_name(fx.name)
+  local name = U.fx_label(fx)
 
   -- Collapsed, the meter is the whole point: a folded-down chain still
   -- shows which compressor is working. It takes the lower half and the
@@ -905,6 +960,28 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   local gy0 = y + C.GRID_TOP_PAD
   local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
 
+  -- Styled sections first, behind everything (EXPERIMENTAL): an inset
+  -- just darker than the plate it's on (lighter on a dark one), with a
+  -- shadowed top edge and a lit bottom one, or a faceplate of its own.
+  -- They reach a few pixels into the divider gaps on either side.
+  for _, s in ipairs(lay.sections or {}) do
+    local kind, pl = P.section_style(s.by)
+    local x1, y1 = gx0 + s.x - 3, gy0 - 3
+    local x2, y2 = gx0 + s.x + s.w + 3, gy0 + lay.height + 2
+    if kind == "plate" then
+      ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, pl.bg, 4.0)
+      ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, pl.border, 4.0, 0, 1.0)
+      ImGui.DrawList_AddLine(dl, x1 + 4, y1 + 1, x2 - 4, y1 + 1, 0xffffff18, 1.0)
+    else
+      local base = C.COL.panel_bg
+      local fill = U.is_light(base) and mix(base, 0x000000ff, 0.10) or mix(base, 0xffffffff, 0.05)
+      ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, fill, 4.0)
+      ImGui.DrawList_AddLine(dl, x1 + 3, y1 + 0.5, x2 - 3, y1 + 0.5, 0x00000050, 1.0)
+      ImGui.DrawList_AddLine(dl, x1 + 3, y2 - 0.5, x2 - 3, y2 - 0.5, 0xffffff18, 1.0)
+      ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, 0x00000030, 4.0, 0, 1.0)
+    end
+  end
+
   -- Dividers first, so a control's hit area is never shadowed by a rule.
   for _, rx in ipairs(lay.rules) do
     ImGui.DrawList_AddLine(dl, gx0 + rx, gy0 + 2,
@@ -922,6 +999,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     local i = ci
 
     ImGui.SetCursorScreenPos(ctx, gx0 + item.x, gy0 + item.y)
+
+    -- a control on a section's own faceplate takes that plate's inks
+    local sec_saved
+    if item.sec then
+      local kind, pl = P.section_style(lay.sections[item.sec].by)
+      if kind == "plate" then sec_saved = push_plate(pl) end
+    end
 
     local id = ("c%d##%s_%d"):format(i, fx.guid, i)
 
@@ -982,7 +1066,31 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
       local changed, nv, act
       if ctl.type == "toggle" then
-        changed, nv, act = W.toggle(ctx, id, label, value, shown, { tooltip = tip })
+        -- your names for its two states, when you've given them
+        local st = M.state_text(key, p, raw, shown)
+        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
+        local size = P.item_size(item)
+        local said = M.button_text(key, p, raw, shown)
+        changed, nv, act = W.toggle(ctx, id, label, value, st,
+          { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
+            text = said or ((size == "small") and label or nil),
+            on_col = lit and lit.col, size = size })
+      elseif ctl.type == "combo" and item.kind == "buttons" then
+        -- its choices as buttons: the plugin's own names once they've
+        -- been read (TS_CV_Steps keeps them between runs), evenly spaced
+        -- numbers until then
+        local list = combo_steps(track, fx.addr, p, key)
+        if type(list) ~= "table" then
+          local st = step_norm(track, fx.addr, p, key)
+          list = {}
+          if st then
+            for k = 0, math.floor(1 / st + 0.5) do list[#list + 1] = { norm = math.min(1, k * st), text = tostring(k + 1) } end
+          end
+        end
+        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
+        changed, nv, act = W.button_row(ctx, id, label, value, list,
+          { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
+            tooltip = tip, on_col = lit and lit.col })
       elseif ctl.type == "combo" then
         changed, nv, act = W.combo(ctx, id, label, value, shown,
           step_norm(track, fx.addr, p, key),
@@ -1017,6 +1125,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           value, label .. "   " .. shown, ctl.bipolar and 0.5 or nil, false,
           (ctl.style or ctl.cap) and { style = ctl.style, cap = W.cap_col(ctl.cap) } or nil)
       elseif ctl.type == "stepped" then
+        local size = P.item_size(item)
         -- Same dial as a plain knob, just quantised to the parameter's own
         -- step grid -- see W.knob's own header for why this needs nothing
         -- from the (separate, sweep-and-cache) combo_steps machinery: the
@@ -1026,11 +1135,11 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = step_norm(track, fx.addr, p, key),
-            style = ctl.style, cap = W.cap_col(ctl.cap) })
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size })
       else
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            style = ctl.style, cap = W.cap_col(ctl.cap) })
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = P.item_size(item) })
       end
 
       if act and act.double_click then
@@ -1050,6 +1159,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     -- from the setup dialog or the cell's own right-click menu, and a
     -- permanent x over every knob buys nothing for that -- unlike a send,
     -- which has nowhere else to be removed from.
+    if sec_saved then pop_plate(sec_saved) end
   end
 end
 
@@ -1073,7 +1183,7 @@ local PLATE_INKS = {
 -- behind its icon on every faceplate, so the hot icon stays the theme's
 -- light one.)
 
-local function push_plate(pl)
+push_plate = function(pl)
   local saved = {}
   for k, f in pairs(PLATE_INKS) do
     saved[k] = C.COL[k]
@@ -1082,11 +1192,11 @@ local function push_plate(pl)
   return saved
 end
 
-local function pop_plate(saved)
+pop_plate = function(saved)
   for k, v in pairs(saved) do C.COL[k] = v end
 end
 
-local function mix(col, to, t)
+mix = function(col, to, t)
   local out = 0
   for _, sh in ipairs({ 24, 16, 8 }) do
     local a, b = (col >> sh) & 0xff, (to >> sh) & 0xff
@@ -1097,8 +1207,9 @@ end
 
 -- The plate itself: flat, or with C.PLATE_TEXTURE a gentle top-lit
 -- gradient -- real faceplates catch the light from above, and a flat fill
--- reads as a colour rather than a surface -- plus a fine brushed grain on
--- aluminium. The border is drawn over it afterwards and tidies the corners.
+-- reads as a colour rather than a surface -- plus a fine brushed grain
+-- where the layout asks for one (or, asking nothing, on aluminium). The
+-- grain is lighter on a dark plate, where white lines show far more. The border is drawn over it afterwards and tidies the corners.
 -- The background at height `yy` of the panel being drawn: what draw_plate
 -- painted there (gradient included), or the flat panel colour. The trace's
 -- fade blends into this.
@@ -1116,19 +1227,21 @@ bg_at = function(yy)
   return mix(pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh), t)
 end
 
-local function draw_plate(dl, x, y, w, h, pl)
+local function draw_plate(dl, x, y, w, h, pl, brushed)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, 3.0)
   if not C.PLATE_TEXTURE then return end
   local split = y + h * 0.4
   local sh = pl.sheen or 1
   W.vgrad(dl, x + 1, y + 1, x + w - 1, split, mix(pl.bg, 0xffffffff, 0.08 * sh), pl.bg)
   W.vgrad(dl, x + 1, split, x + w - 1, y + h - 1, pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh))
-  if pl.brushed then
+  if brushed then
+    local light = U.is_light(pl.bg)
+    local hi, lo = light and 0xffffff09 or 0xffffff04, light and 0x00000007 or 0x0000000b
     for ly = y + 2, y + h - 2, 3 do
-      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, 0xffffff12, 1.0)
+      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, hi, 1.0)
     end
     for ly = y + 4, y + h - 2, 7 do
-      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, 0x0000000c, 1.0)
+      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, lo, 1.0)
     end
   end
 end
@@ -1168,7 +1281,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
     if is_drag_source then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, 3.0)
     elseif plate then
-      draw_plate(dl, x, y, ww, wh, plate)
+      draw_plate(dl, x, y, ww, wh, plate, M.brushed(layout, plate))
     else
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
     end
