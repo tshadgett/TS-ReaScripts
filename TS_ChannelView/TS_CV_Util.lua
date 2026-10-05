@@ -555,4 +555,72 @@ function U.sel_colour(mode, track_col, accent)
   return accent
 end
 
+-- ---------------------------------------------------------------------
+-- numbered knob scales (Scale<n>)
+-- ---------------------------------------------------------------------
+
+-- Where a knob's scale is numbered, 0..1 along its sweep. A large knob
+-- has room for seven of the plugin's values (eleven for 0-10, or every
+-- step of a stepped control with up to eleven); a medium one, in its
+-- narrow cell, for three -- the ends and the middle -- (six for 0-10, every
+-- step up to five). Evenly spread, so a centred control gets its middle.
+function U.scale_marks(kind, size, n_steps)
+  local large = size == "large"
+  local n
+  if kind == "ten" then n = large and 11 or 6
+  elseif n_steps and n_steps >= 2 and n_steps <= (large and 11 or 5) then n = n_steps
+  else n = large and 7 or 3 end
+  local out = {}
+  for i = 0, n - 1 do out[#out + 1] = i / (n - 1) end
+  return out
+end
+
+-- A plugin's value text cut down to fit round a knob: no unit, thousands
+-- as k ("12000 Hz" -> 12k, "1.5 kHz" -> 1.5k), trailing zeros off
+-- ("3.00" -> 3), infinity as inf.
+function U.short_value(s)
+  s = U.trim(tostring(s or ""))
+  if s == "" then return "" end
+  local low = s:lower()
+  if low:find("inf") then return (low:find("^%-") and "-inf" or "inf") end
+  local num, rest = s:match("^([%+%-]?%d*%.?%d+)%s*(.-)$")
+  if not num then return (#s <= 5) and s or s:sub(1, 5) end
+  local v = tonumber(num)
+  local unit = rest:lower()
+  if unit:match("^k") then v = v * 1000 end
+  local function trim0(x)
+    local t = string.format("%.2f", x):gsub("0+$", ""):gsub("%.$", "")
+    if t == "-0" then t = "0" end
+    return t
+  end
+  local out
+  if math.abs(v) >= 1000 and (unit:find("hz") or unit:match("^k") or unit == "" or unit == "ms") then
+    local kv = v / 1000
+    out = (math.abs(kv) >= 10) and string.format("%d", math.floor(kv + 0.5)) or trim0(kv)
+    out = out .. "k"
+  else
+    out = (math.abs(v) >= 100) and string.format("%d", math.floor(v + 0.5)) or trim0(v)
+  end
+  if num:sub(1, 1) == "+" and v > 0 then out = "+" .. out end
+  return out
+end
+
+-- The numbers for a knob's scale at `marks`: 0-10, or what the plugin
+-- calls each mark's value (without moving it -- REAPER formats a value
+-- it isn't set to). When the plugin can't say, it falls back to 0-10.
+function U.scale_labels(track, addr, param, kind, marks)
+  local out = {}
+  if kind == "values" and reaper.TrackFX_FormatParamValueNormalized then
+    for i, m in ipairs(marks) do
+      local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, m, "")
+      if not ok or not t or t == "" then out = nil break end
+      out[i] = U.short_value(t)
+    end
+    if out then return out end
+    out = {}
+  end
+  for i, m in ipairs(marks) do out[i] = tostring(math.floor(m * 10 + 0.5)) end
+  return out
+end
+
 return U

@@ -1,5 +1,94 @@
 # ChannelView — changelog
 
+## 1.8.5 — colours of your own, lit buttons, scales, LED ring, metallic finish
+
+**Colour**
+
+- **Any colour, anywhere.** Faceplates, control backgrounds, sections, knob
+  and fader caps, and the colour a toggle or button row lights up in can
+  all be any colour now: **[+] Custom colour…** after the swatches opens
+  the colour picker. The panel shows the colour as you pick it; *Apply*
+  keeps it, *Cancel* puts back what was there. Labels and scales on a
+  custom faceplate pick their own readable ink.
+- **The colour picker** (the same one the track colour dialog uses) has the
+  palettes, *REAPER's colour picker…*, and an **eyedropper** that takes the
+  colour of anything on screen, inside REAPER or out: switch it on, point,
+  and click — or press Enter, so the click doesn't land in another program.
+  Esc puts it away. Every colour dialog has it, track colours included, in
+  ChannelView and the TCP window. Needs the js_ReaScriptAPI extension.
+- **Recent colours.** The colours of your own you've used since ChannelView
+  started are a click away: a *Recent colours* flyout in the Faceplate,
+  Background and Section menus, and a row under the cap and lit-colour
+  swatches.
+- **Gold** faceplate; **White**, **Brown** and **Gold** cap colours.
+- **Metallic finish** on any faceplate, background or section — a fine
+  metallic flake and sheen, like metallic paint — on its own or with the
+  brushed finish.
+
+**Buttons and knobs**
+
+- **Button faces.** A toggle's or button row's Style menu now has a Style:
+  *Flat* (as before), *Lit lens* (dark tinted glass that glows when on),
+  *LED window* (a lamp strip across the top that lights) or *Backlit* (a
+  dark cap whose edge and lettering light up), each previewed lit in the
+  button's colour. *Apply to every button on this panel* copies the face
+  with the colour.
+- **Numbered scales.** Knobs print their values round the dial — units
+  left off, thousands as k, so 12000 Hz reads 12k. That's every knob's
+  default now, layouts from before included; a knob's Style ▸ **Scale**
+  switches it to **0–10** or **None**, and *Numbers in cap colour* prints
+  them in the knob's colour. The knob keeps its size: a number with no room
+  in the cell is left out (its tick stays). A medium knob's value moves to
+  its tooltip; small knobs have no numbers.
+- **LED ring** knob style: a ring of lamps close round an encoder, lit up
+  to the value — or out from the middle on a centred control — in its cap
+  colour.
+
+**View**
+
+- **View ▸ 3D effect** (on by default; it replaces *Faceplate texture*):
+  light from the top left — a gentle gradient on faceplates, panel edges
+  that catch it, and soft shadows under knobs, buttons and fader caps (not
+  the Arc knob, which is a printed scale).
+- **View ▸ Use mouse wheel on controls.** Off, the wheel never turns a knob
+  or moves a fader, pan or dropdown; it only scrolls. Shared with the TCP
+  window.
+- **Toggle mixer view** action (*TS_ChannelView_ToggleMixer*) for a
+  keyboard shortcut or toolbar button — ChannelView's window never gets the
+  keyboard, so the shortcut has to be REAPER's. A toolbar button for it
+  lights while the mixer is showing.
+
+**Layouts**
+
+- **Sharing layouts.** *Layouts ▸ Export layouts to file…* writes the
+  layouts you pick to a file; *Import layouts from file…* reads one,
+  showing which layouts are new, which would replace yours (it asks first)
+  and which are the same. Locked layouts are never replaced.
+- **Sections** are no longer experimental, and neighbouring sections styled
+  the same way now join into one shape across the divider between them.
+
+**TCP window**
+
+- **Plugin delay (PDC) under meters**, in the settings menu (off by
+  default): each track's plugin delay compensation, in samples and
+  milliseconds, under its meter — on tracks with any, when the row is tall
+  enough.
+
+**Fixes**
+
+- ChannelView no longer stops with "InvisibleButton: Assertion failed" when
+  its window is docked so short that the mixer has no room for its strips
+  (the same goes for the TCP window).
+
+**Web page**
+
+- Follows all of the above: custom colours, button faces, scales, the LED
+  ring, metallic finishes, the 3D effect.
+- **Full screen, and installable as an app on Android:** a full-screen
+  button at the right of the transport bar, and an app manifest and icons
+  so Chrome can install the page (see *As an app on Android* in the
+  README). Restart the web companion script to pick up this version.
+
 ## 1.8.2 — lock layout, brushed backgrounds
 
 - **Lock layout.** A padlock at the left of every panel's foot locks that

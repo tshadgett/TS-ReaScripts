@@ -3393,7 +3393,7 @@ do
   local lay = P.layout({ B("across", 3) }, 2)
   check("buttons: the layout says so", lay.items[1].kind, "buttons")
   check("buttons: not on a knob", (pos({ { type = "knob", buttons = "across", nbtn = 4 } }, 2)), "0,0/2x2 w58")
-  -- sections a divider styles (experimental)
+  -- sections a divider styles
   local K = { type = "knob" }
   local ctl = { { type = "knob" }, { type = "divider", style = "inset" }, { type = "knob" }, { type = "knob" },
                 { type = "divider" }, { type = "knob" }, { type = "divider", style = "plate", cap = "cream" }, { type = "knob" } }
@@ -3578,6 +3578,141 @@ do
   check("grain: round a hole", table.concat(P._inner_spans({ outer.outer, outer.holes[1] }, 0, 0, 96, 2), ","), "2,48,102,148")
 end
 
+-- Sharing layouts: export some to a file, import from one
+do
+  local MP = require("TS_CV_Mappings")
+  MP.set("ShareA", { plate = "cream", controls = { { param = 0, type = "knob", label = "A" },
+                                                   { param = 1, type = "knob", label = "B" } } })
+  MP.set("ShareB", { controls = { { param = 0, type = "toggle", label = "On" } } })
+  MP.save()
+  local file = "./share_test.ini"
+  check("share: export", (MP.export(file, { "ShareA", "ShareB" })), true)
+  check("share: nothing chosen", (MP.export(file .. "x", {})), false)
+  -- in the same state: both "same as yours"
+  local l = MP.read_shared(file)
+  check("share: reads both", #l .. ":" .. l[1].key .. "," .. l[2].key, "2:ShareA,ShareB")
+  check("share: identical ones say so", l[1].status .. "," .. l[2].status, "same,same")
+  check("share: control counts", l[1].controls .. "," .. l[2].controls, "2,1")
+  -- someone else's file: one of ours changed, one new, a future field, a non-layout section
+  local f = io.open(file, "a")
+  f:write("[ShareC]\nCtl0=3|knob|0|New one\nFutureThing=42\n\n[NotALayout]\nfoo=bar\n")
+  f:close()
+  MP.set("ShareB", { controls = { { param = 0, type = "knob", label = "Changed" } } })
+  MP.save()
+  l = MP.read_shared(file)
+  local st = {}
+  for _, e in ipairs(l) do st[#st + 1] = e.key .. "=" .. e.status end
+  check("share: new, differs, same; non-layouts left out", table.concat(st, " "), "ShareA=same ShareB=differs ShareC=new")
+  local pick = {}
+  for _, e in ipairs(l) do if e.status ~= "same" then pick[#pick + 1] = e end end
+  check("share: import", MP.import(pick), 2)
+  MP.save(); MP.reload()
+  check("share: replaced", MP.get("ShareB").controls[1].type .. "/" .. MP.get("ShareB").controls[1].label, "toggle/On")
+  check("share: new one in", MP.get("ShareC").controls[1].label, "New one")
+  local raw = io.open("./TS_ChannelView_Mappings.ini"):read("a")
+  check("share: fields it doesn't know are kept", raw:find("FutureThing=42", 1, true) ~= nil, true)
+  check("share: the old library is the .bak", io.open("./TS_ChannelView_Mappings.bak.ini"):read("a"):find("Changed", 1, true) ~= nil, true)
+  check("share: keys lists them", table.concat(MP.keys(), ","):find("ShareA,ShareB,ShareC", 1, true) ~= nil, true)
+  check("share: missing file", select(2, MP.read_shared("./nope.ini")) ~= nil, true)
+  -- a locked layout here isn't replaced
+  MP.set("ShareB", { lock = 2, controls = { { param = 0, type = "knob", label = "Mine, locked" } } })
+  MP.save()
+  local lk = MP.read_shared(file)
+  local lst
+  for _, e in ipairs(lk) do if e.key == "ShareB" then lst = e end end
+  check("share: a locked one says so", lst.status, "locked")
+  check("share: and isn't imported", MP.import({ lst }), 0)
+  check("share: still yours", MP.get("ShareB").controls[1].label, "Mine, locked")
+  os.remove(file)
+  for _, k in ipairs({ "ShareA", "ShareB", "ShareC" }) do MP.remove(k) end
+  MP.save(); MP.reload()
+end
+
+-- Faceplates no longer in the list leave a layout on the theme's; a
+-- colour of your own (#rrggbb) works anywhere a faceplate does
+do
+  local MP = require("TS_CV_Mappings")
+  check("plates: a removed one is nothing", C.plate_key("indigo"), nil)
+  check("plates: unknown is nothing", C.plate_key("nope"), nil)
+  check("custom: key normalised", C.plate_key("#A9B99C"), "#a9b99c")
+  check("custom: without the #", C.custom_key("a9b99c"), "#a9b99c")
+  check("custom: not a colour", C.custom_key("#a9b99"), nil)
+  check("custom: rgb", C.custom_rgb("#a9b99c"), 0xa9b99c)
+  local lp = C.plate_of("#a9b99c")
+  check("custom: light colour, dark inks", string.format("%08x/%08x/%08x", lp.text, lp.dim, lp.head),
+        "181a16ff/40463bff/9aa88eff")
+  local dp = C.plate_of("#8a5a59")
+  check("custom: dark colour, light inks", string.format("%08x/%08x", dp.text, dp.head), "f6f2f2ff/714a49ff")
+  check("custom: label", lp.label, "#A9B99C")
+  check("custom: near-black gets less sheen", C.plate_of("#141414").sheen, 0.3)
+  MP.set("AliasPlug", { plate = "#A9B99C", controls = {
+    { param = 0, type = "knob", label = "A", back = "#112233" },
+    { param = -1, type = "divider", style = "plate", cap = "#445566" },
+    { param = 1, type = "knob", label = "B" } } })
+  MP.save(); MP.reload()
+  local l = MP.get("AliasPlug")
+  check("custom: Plate round-trips", l.plate, "#a9b99c")
+  check("custom: Back round-trips", l.controls[1].back, "#112233")
+  check("custom: section round-trips", tostring(l.controls[2].style) .. "|" .. tostring(l.controls[2].cap), "plate|#445566")
+  -- written by hand with faceplates since taken out, then read back
+  local f = io.open(MP.file_path(), "rb"); local txt = f:read("a"); f:close()
+  txt = txt:gsub("Plate=#a9b99c", "Plate=indigo"):gsub("Back0=#112233", "Back0=sage")
+           :gsub("Style1=plate|#445566", "Style1=plate|lilac")
+  f = io.open(MP.file_path(), "wb"); f:write(txt); f:close()
+  MP.reload()
+  l = MP.get("AliasPlug")
+  check("removed: Plate=indigo is the theme's", l.plate, nil)
+  check("removed: Back0=sage is none", l.controls[1].back, nil)
+  check("removed: a lilac section is unstyled", l.controls[2].style, nil)
+  MP.remove("AliasPlug"); MP.save(); MP.reload()
+end
+
+-- Metallic finish: Metal=1 on a faceplate, Metal<n>=1 on a background or section
+do
+  local MP = require("TS_CV_Mappings")
+  MP.set("MetalPlug", { plate = "stone", metal = true, controls = {
+    { param = 0, type = "knob", label = "A", back = "cream", metal = true, brush = true },
+    { param = -1, type = "divider", style = "inset", metal = true },
+    { param = 1, type = "knob", label = "B", metal = true } } })              -- no background: not saved
+  MP.save(); MP.reload()
+  local l = MP.get("MetalPlug")
+  check("metal: faceplate round-trips", MP.metal(l, C.plate_of("stone")), true)
+  check("metal: not on the theme's panel", MP.metal(l, nil), false)
+  check("metal: background, with brushed too", tostring(l.controls[1].metal) .. "/" .. tostring(l.controls[1].brush), "true/true")
+  check("metal: section round-trips", l.controls[2].metal, true)
+  check("metal: not without a background", l.controls[3].metal, nil)
+  check("metal: copied", tostring(MP.copy(l).metal) .. "/" .. tostring(MP.copy(l).controls[1].metal), "true/true")
+  MP.remove("MetalPlug"); MP.save(); MP.reload()
+  check("metal: key keeps metallic apart", (P.back_key({ back = "cream", metal = true })), "cream/m")
+  check("metal: key, brushed and metallic", (P.back_key({ back = "cream", metal = true, brush = true })), "cream/b/m")
+  check("metal: sections with and without don't match",
+        P.section_key({ type = "divider", style = "inset", metal = true }) ~= P.section_key({ type = "divider", style = "inset" }), true)
+end
+
+-- Neighbouring sections with the same style join into one, across the divider
+do
+  local cw0 = C.CELL_W
+  C.set_cell_w(58)
+  local rows_for = P.rows_for
+  P.rows_for = function(r) return r end
+  local function lay(...) local t = {} for _, c in ipairs({ ... }) do t[#t + 1] = c end return P.layout(t, 2) end
+  local K = { type = "knob" }
+  local function div(style, cap, brush) return { type = "divider", style = style, cap = cap, brush = brush } end
+  local l = lay(div("inset"), K, div("inset"), K, K)
+  check("sections: two insets in a row join", #l.sections .. ":" .. l.sections[1].x .. "+" .. l.sections[1].w,
+        "1:" .. C.DIVIDER_W .. "+" .. (2 * C.CELL_W + C.DIVIDER_W))
+  check("sections: their controls share it", l.items[1].sec .. "," .. l.items[2].sec, "1,1")
+  check("sections: the rule between stays", #l.rules, 2)
+  check("sections: different plates don't join", #lay(div("plate", "cream"), K, div("plate", "cobalt"), K).sections, 2)
+  check("sections: same plate does", #lay(div("plate", "cream"), K, div("plate", "cream"), K).sections, 1)
+  check("sections: brushed and plain don't", #lay(div("plate", "cream", true), K, div("plate", "cream"), K).sections, 2)
+  check("sections: not across an unstyled one", #lay(div("inset"), K, div(), K, div("inset"), K).sections, 2)
+  check("sections: not across a fader", #lay(div("inset"), K, { type = "fader" }, div("inset"), K).sections, 2)
+  check("sections: three in a row", #lay(div("inset"), K, div("inset"), K, div("inset"), K).sections, 1)
+  P.rows_for = rows_for
+  C.CELL_W = cw0
+end
+
 -- Layout lock: Lock=<rows> keeps the arrangement, and a short panel scrolls
 do
   local MP = require("TS_CV_Mappings")
@@ -3608,6 +3743,76 @@ do
         P.width(knobs(16), short, false, false, nil, false, false, 4) - P.width(knobs(16), tall, false, false, nil, false, false, 4),
         C.SCROLL_W + 2)
   C.CELL_W = cw0
+end
+
+-- Numbered knob scales (Scale<n>), the LED ring, and the new plates and caps
+do
+  local MP = require("TS_CV_Mappings")
+  MP.set("ScalePlug", { controls = {
+    { param = 0, type = "knob", label = "A", scale = "values", scale_ink = "cap", cap = "gold" },
+    { param = 1, type = "stepped", label = "B", scale = "ten", style = "led" },
+    { param = 2, type = "knob", label = "C", scale = "bogus", scale_ink = "cap" },
+    { param = 3, type = "knob", label = "D" } } })
+  MP.save(); MP.reload()
+  local l = MP.get("ScalePlug")
+  check("scale: values round-trips", l.controls[1].scale .. "/" .. tostring(l.controls[1].scale_ink), "values/cap")
+  check("scale: ten round-trips", l.controls[2].scale, "ten")
+  check("scale: led style kept", l.controls[2].style, "led")
+  check("scale: nonsense is the default", tostring(MP.scale_kind(l.controls[3])) .. "/" .. tostring(l.controls[3].scale_ink), "values/cap")
+  check("scale: no line saved", l.controls[4].scale, nil)
+  check("scale: no line is values", MP.scale_kind(l.controls[4]), "values")
+  check("scale: ten is ten", MP.scale_kind(l.controls[2]), "ten")
+  check("scale: not on a toggle", MP.scale_kind({ type = "toggle" }), nil)
+  local cp = MP.copy(l)
+  check("scale: copied", cp.controls[1].scale .. "/" .. cp.controls[1].scale_ink, "values/cap")
+  MP.set("ScalePlug", { controls = {
+    { param = 0, type = "knob", label = "A", scale = "none", scale_ink = "cap" },
+    { param = 1, type = "knob", label = "B", scale = "values" },
+    { param = 2, type = "knob", label = "C", scale_ink = "cap", cap = "#C9A24A" },
+    { param = 3, type = "toggle", label = "D", cap = "#112233", style = "lens" },
+    { param = 4, type = "combo", label = "E", buttons = "across", nbtn = 3, style = "window", cap = "amber" } } })
+  MP.save()
+  local f = io.open(MP.file_path(), "rb"); local txt = f:read("a"); f:close()
+  check("scale: none written", txt:find("Scale0=none\n", 1, true) ~= nil, true)
+  check("scale: values (the default) not written", txt:find("Scale1=", 1, true), nil)
+  check("scale: default with |cap written", txt:find("Scale2=values|cap", 1, true) ~= nil, true)
+  MP.reload()
+  l = MP.get("ScalePlug")
+  check("scale: none round-trips", tostring(l.controls[1].scale) .. "/" .. tostring(MP.scale_kind(l.controls[1])), "none/nil")
+  check("scale: none drops |cap", l.controls[1].scale_ink, nil)
+  check("cap: custom colour round-trips", l.controls[3].cap, "#c9a24a")
+  check("cap: custom lit colour round-trips", l.controls[4].cap, "#112233")
+  check("cap: custom colour drawn", string.format("%08x", W.cap_col("#c9a24a")), "c9a24aff")
+  check("lit: custom colour", string.format("%08x", W.lit_col("#112233")), "112233ff")
+  check("lit: by name", W.lit_col("amber"), C.TOGGLE_COL.amber.col)
+  check("lit: theme's", W.lit_col(nil), nil)
+  check("button style: toggle round-trips", l.controls[4].style, "lens")
+  check("button style: button row round-trips", l.controls[5].style .. "|" .. l.controls[5].cap, "window|amber")
+  for _, bs in ipairs(C.BUTTON_STYLES) do
+    check("button style " .. bs.key .. ": known", C.BUTTON_STYLE[bs.key] ~= nil, true)
+  end
+  MP.remove("ScalePlug"); MP.save(); MP.reload()
+
+  check("marks: medium values", table.concat(U.scale_marks("values", "medium"), ","), "0.0,0.5,1.0")
+  check("marks: medium ten", #U.scale_marks("ten", "medium"), 6)
+  check("marks: large values", #U.scale_marks("values", "large"), 7)
+  check("marks: large ten", #U.scale_marks("ten", "large"), 11)
+  check("marks: every step when few", #U.scale_marks("values", "medium", 4), 4)
+  check("marks: too many steps", #U.scale_marks("values", "medium", 9), 3)
+  check("marks: large every step", #U.scale_marks("values", "large", 11), 11)
+  check("short: Hz", U.short_value("12000 Hz"), "12k")
+  check("short: kHz", U.short_value("1.5 kHz"), "1.5k")
+  check("short: dB", U.short_value("+6.0 dB"), "+6")
+  check("short: negative zero", U.short_value("-0.00"), "0")
+  check("short: ms", U.short_value("1000 ms"), "1k")
+  check("short: inf", U.short_value("-inf dB"), "-inf")
+  check("short: a name", U.short_value("Bell"), "Bell")
+  check("labels: 0-10", table.concat(U.scale_labels(nil, 0, 0, "ten", { 0, 0.5, 1 }), ","), "0,5,10")
+
+  check("plates: red is gone", C.plate_of("red"), nil)
+  check("plates: gold", C.plate_of("gold") and C.plate_of("gold").label, "Gold")
+  check("caps: white/brown/gold", (C.CAP.white and C.CAP.brown and C.CAP.gold) and true or false, true)
+  check("knob style: led", C.KNOB_STYLE.led and C.KNOB_STYLE.led.label, "LED ring")
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

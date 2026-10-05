@@ -66,7 +66,7 @@ end
 --   spacers  { ctl, x, y, w, h, sx, sw } for every half_gap in column flow:
 --            not controls, but they have a place, and can have a background
 --   sections { x, w, by } for every section a divider gave a style to
---            (EXPERIMENTAL: an inset, or its own faceplate, behind it) --
+--            (an inset, or its own faceplate, behind it) --
 --            x and w in the grid's space, `by` the divider; the items
 --            in it carry `sec`, the index into this list
 --
@@ -148,13 +148,23 @@ function P.item_size(item)
   return nil
 end
 
--- A divider's section style (EXPERIMENTAL): "inset" for a recessed panel
+-- A divider's section style: "inset" for a recessed panel
 -- behind the section after it, "plate" for that section on a faceplate of
 -- its own (the plate's key in its colour field), or nil.
 function P.section_style(div)
   if div.style == "inset" then return "inset" end
   if div.style == "plate" and C.plate_of(div.cap) then return "plate", C.plate_of(div.cap) end
   return nil
+end
+
+-- What makes two sections look the same: the style, the faceplate, and
+-- whether it's brushed. Neighbouring sections that match join into one.
+function P.section_key(div)
+  local kind, pl = P.section_style(div)
+  if not kind then return nil end
+  return kind .. "|" .. (kind == "plate" and div.cap or "") .. "|"
+         .. (M.part_brushed(kind, pl, div.brush) and "b" or "")
+         .. (M.part_metal(kind, div.metal) and "m" or "")
 end
 
 -- A control's own background (Back<n>): "inset", or a faceplate key.
@@ -285,7 +295,15 @@ function P.layout(controls, panel_h, lock)
     -- a section styled by the divider in front of it
     local sp = splitters[si - 1]
     if sp and sp.type == "divider" and P.section_style(sp) and w > 0 then
-      styled[#styled + 1] = { x = x, w = w, by = sp }
+      -- the same style as the section just before, only a divider apart:
+      -- one section, across the divider
+      local prev = styled[#styled]
+      if prev and math.abs(prev.x + prev.w + C.DIVIDER_W - x) < 0.5
+         and P.section_key(prev.by) == P.section_key(sp) then
+        prev.w = x + w - prev.x
+      else
+        styled[#styled + 1] = { x = x, w = w, by = sp }
+      end
       for k = first, #items do items[k].sec = #styled end
     end
     x = x + w
@@ -366,6 +384,42 @@ local function step_norm(track, addr, param, key)
   return out
 end
 P.step_norm = step_norm      -- exposed for TS_CV_Test.lua
+
+-- A knob's numbered scale (Scale<n>): where its numbers go and what they
+-- say, for W.knob's opts.scale. The plugin is asked what each mark's value
+-- reads as (U.scale_labels), which is a round trip per number, so the
+-- answer is kept a few seconds -- long enough not to ask every frame,
+-- short enough to follow a plugin whose readout depends on another
+-- control (a range switch). A reversed control's marks are read from the
+-- other end. A small knob has no room for one.
+-- Values are every knob's scale unless it says otherwise (M.scale_kind),
+-- so each answer is kept on its own clock, staggered, rather than the
+-- whole lot being asked for again in one frame.
+local scale_cache = {}
+function P.knob_scale(track, fx, p, key, ctl, size, rev, st)
+  local kind = M.scale_kind(ctl)
+  if not kind or size == "small" then return nil end
+  local now = reaper.time_precise()
+  local ck = table.concat({ fx.guid or key or "", p, kind, size or "medium",
+                            rev and "r" or "", st and "s" or "" }, "|")
+  local sc = scale_cache[ck]
+  if not sc or now > sc.until_t then
+    local n = st and (math.floor(1 / st + 0.5) + 1) or nil
+    local marks = U.scale_marks(kind, size, n)
+    local at = {}
+    for i, m in ipairs(marks) do at[i] = rev and (1 - m) or m end
+    sc = { marks = marks, labels = U.scale_labels(track, fx.addr, p, kind, at),
+           until_t = now + 2.5 + math.random() }
+    scale_cache[ck] = sc
+  end
+  local ink
+  if ctl.scale_ink == "cap" then
+    local style = C.KNOB_STYLE_ALIAS[ctl.style] or ctl.style
+    local def = C.KNOB_STYLE[style or "arc"] or C.KNOB_STYLE.arc
+    ink = W.cap_col(ctl.cap) or W.cap_col(def.cap)
+  end
+  return { marks = sc.marks, labels = sc.labels, ink = ink }
+end
 
 -- ---------------------------------------------------------------------
 -- stepped-parameter choices
@@ -1046,17 +1100,36 @@ function P.back_key(ctl)
   local kind, pl = P.back_style(ctl.back)
   if not kind then return nil end
   local br = M.part_brushed(kind, pl, ctl.brush)
-  return ctl.back .. (br and "/b" or ""), br
+  local mt = M.part_metal(kind, ctl.metal)
+  return ctl.back .. (br and "/b" or "") .. (mt and "/m" or ""), br, mt
 end
 
-draw_backs = function(dl, gx0, gy0, lay)
-  local rects, owner, brushed = {}, {}, {}
+-- The metallic flake inside a traced shape: the shape cut into bands at
+-- every corner's height, each band's insides (by the even-odd rule) filled
+-- with the flake, tiled from the grid's origin so joined shapes line up.
+local function flake_shape(ctx, dl, gx0, gy0, loops, light)
+  local ys = {}
+  for _, p in ipairs(loops) do for i = 2, #p, 2 do ys[#ys + 1] = p[i] end end
+  table.sort(ys)
+  for i = 1, #ys - 1 do
+    local ya, yb = ys[i], ys[i + 1]
+    if yb - ya > 0.5 then
+      local xs = loop_spans(loops, gx0, (ya + yb) / 2)
+      for k = 1, #xs - 1, 2 do
+        W.flake_rect(ctx, dl, xs[k] + 1, gy0 + ya, xs[k + 1] - 1, gy0 + yb, light, gx0, gy0)
+      end
+    end
+  end
+end
+
+draw_backs = function(ctx, dl, gx0, gy0, lay)
+  local rects, owner, brushed, metal = {}, {}, {}, {}
   local function take(it)
-    local k, br = P.back_key(it.ctl)
+    local k, br, mt = P.back_key(it.ctl)
     if k and it.sx then
       rects[#rects + 1] = { it.sx, it.y, it.sx + it.sw, it.y + hy(it.h), k }
       owner[#rects] = it
-      brushed[k] = br
+      brushed[k], metal[k] = br, mt
     end
   end
   for _, it in ipairs(lay.items) do take(it) end
@@ -1071,7 +1144,7 @@ draw_backs = function(dl, gx0, gy0, lay)
       if r[5] == sh.key and TL.inside(sh.outer, (r[1] + r[3]) / 2, (r[2] + r[4]) / 2) then from = owner[k] break end
     end
     local base = back_base(lay, from)
-    local kind, pl = P.back_style((sh.key:gsub("/b$", "")))
+    local kind, pl = P.back_style((sh.key:gsub("/[bm]", "")))
     local fill, edge
     if kind == "plate" then
       fill, edge = pl.bg, pl.border
@@ -1086,9 +1159,10 @@ draw_backs = function(dl, gx0, gy0, lay)
       back_path(dl, gx0, gy0, h, 4)
       ImGui.DrawList_PathFillConcave(dl, base)
     end
-    if brushed[sh.key] and C.PLATE_TEXTURE then
-      local loops = { sh.outer }
-      for _, h in ipairs(sh.holes) do loops[#loops + 1] = h end
+    local loops = { sh.outer }
+    for _, h in ipairs(sh.holes) do loops[#loops + 1] = h end
+    if metal[sh.key] then flake_shape(ctx, dl, gx0, gy0, loops, U.is_light(fill)) end
+    if brushed[sh.key] then
       local ya, yb = math.huge, -math.huge
       for k = 2, #sh.outer, 2 do ya = math.min(ya, sh.outer[k]); yb = math.max(yb, sh.outer[k]) end
       grain(dl, fill, gy0, gy0 + ya, gy0 + yb, function(ly) return inner_spans(loops, gx0, gy0, ly, 2) end)
@@ -1196,7 +1270,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     gy0 = gy0 - ImGui.GetScrollY(ctx)
   end
 
-  -- Styled sections first, behind everything (EXPERIMENTAL): an inset
+  -- Styled sections first, behind everything: an inset
   -- just darker than the plate it's on (lighter on a dark one), with a
   -- shadowed top edge and a lit bottom one, or a faceplate of its own.
   -- They reach a few pixels into the divider gaps on either side.
@@ -1205,7 +1279,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     local x1, y1 = gx0 + s.x - 3, gy0 - 3
     local x2, y2 = gx0 + s.x + s.w + 3, gy0 + lay.height + 2
     local function grained(fill)
-      if C.PLATE_TEXTURE and M.part_brushed(kind, pl, s.by.brush) then
+      if M.part_metal(kind, s.by.metal) then
+        W.flake_rect(ctx, dl, x1 + 1, y1 + 1, x2 - 1, y2 - 1, U.is_light(fill), gx0, gy0)
+      end
+      if M.part_brushed(kind, pl, s.by.brush) then
         grain(dl, fill, gy0, y1 + 2, y2 - 3, function() return { x1 + 2, x2 - 2 } end)
       end
     end
@@ -1235,7 +1312,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   -- side by side or stacked with the same background join into one shape
   -- (TS_CV_Tiles), across a divider too. Recomputed every frame from
   -- where the layout put them, so they follow every resize and reorder.
-  draw_backs(dl, gx0, gy0, lay)
+  draw_backs(ctx, dl, gx0, gy0, lay)
 
   -- The layout pass placed everything; this only has to draw it. Note the
   -- index into `controls` is tracked separately, because dividers take a
@@ -1321,13 +1398,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       if ctl.type == "toggle" then
         -- your names for its two states, when you've given them
         local st = M.state_text(key, p, raw, shown)
-        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
+        local lit = W.lit_col(ctl.cap)
         local size = P.item_size(item)
         local said = M.button_text(key, p, raw, shown)
         changed, nv, act = W.toggle(ctx, id, label, value, st,
           { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
             text = said or ((size == "small") and label or nil),
-            on_col = lit and lit.col, size = size })
+            on_col = lit, size = size, style = ctl.style })
       elseif ctl.type == "combo" and item.kind == "buttons" then
         -- its choices as buttons: the plugin's own names once they've
         -- been read (TS_CV_Steps keeps them between runs), evenly spaced
@@ -1340,10 +1417,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             for k = 0, math.floor(1 / st + 0.5) do list[#list + 1] = { norm = math.min(1, k * st), text = tostring(k + 1) } end
           end
         end
-        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
+        local lit = W.lit_col(ctl.cap)
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
-            tooltip = tip, on_col = lit and lit.col })
+            tooltip = tip, on_col = lit, style = ctl.style })
       elseif ctl.type == "combo" then
         changed, nv, act = W.combo(ctx, id, label, value, shown,
           step_norm(track, fx.addr, p, key),
@@ -1379,6 +1456,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           (ctl.style or ctl.cap) and { style = ctl.style, cap = W.cap_col(ctl.cap) } or nil)
       elseif ctl.type == "stepped" then
         local size = P.item_size(item)
+        local st = step_norm(track, fx.addr, p, key)
         -- Same dial as a plain knob, just quantised to the parameter's own
         -- step grid -- see W.knob's own header for why this needs nothing
         -- from the (separate, sweep-and-cache) combo_steps machinery: the
@@ -1387,12 +1465,15 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- control type, choice name included.
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            step_norm = step_norm(track, fx.addr, p, key),
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = size })
+            step_norm = st,
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size,
+            scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
+        local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = P.item_size(item) })
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size,
+            scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
       if act and act.double_click then
@@ -1482,18 +1563,20 @@ mix = function(col, to, t)
   return out | (col & 0xff)
 end
 
--- The plate itself: flat, or with C.PLATE_TEXTURE a gentle top-lit
--- gradient -- real faceplates catch the light from above, and a flat fill
--- reads as a colour rather than a surface -- plus a fine brushed grain
--- where the layout asks for one (or, asking nothing, on aluminium). The
--- grain is lighter on a dark plate, where white lines show far more. The border is drawn over it afterwards and tidies the corners.
+-- The plate itself: flat, or with the 3D effect a gentle top-lit gradient
+-- -- real faceplates catch the light from above, and a flat fill reads as
+-- a colour rather than a surface -- and its finish: a metallic flake and
+-- sheen, a fine brushed grain (the layout's choice, or aluminium's own),
+-- both or neither. The grain is lighter on a dark plate, where white lines
+-- show far more. The border is drawn over it afterwards and tidies the
+-- corners.
 -- The background at height `yy` of the panel being drawn: what draw_plate
 -- painted there (gradient included), or the flat panel colour. The trace's
 -- fade blends into this.
 local cur_bg = { plate = nil, y = 0, h = 1 }
 bg_at = function(yy)
   local pl = cur_bg.plate
-  if not (pl and C.PLATE_TEXTURE) then return C.COL.panel_bg end
+  if not (pl and C.EFFECT_3D) then return C.COL.panel_bg end
   local sh = pl.sheen or 1
   local split = cur_bg.y + cur_bg.h * 0.4
   if yy <= split then
@@ -1504,13 +1587,20 @@ bg_at = function(yy)
   return mix(pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh), t)
 end
 
-local function draw_plate(dl, x, y, w, h, pl, brushed)
+local function draw_plate(ctx, dl, x, y, w, h, pl, brushed, metal)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, 3.0)
-  if not C.PLATE_TEXTURE then return end
-  local split = y + h * 0.4
-  local sh = pl.sheen or 1
-  W.vgrad(dl, x + 1, y + 1, x + w - 1, split, mix(pl.bg, 0xffffffff, 0.08 * sh), pl.bg)
-  W.vgrad(dl, x + 1, split, x + w - 1, y + h - 1, pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh))
+  -- the light falling on it (3D effect)
+  if C.EFFECT_3D then
+    local split = y + h * 0.4
+    local sh = pl.sheen or 1
+    W.vgrad(dl, x + 1, y + 1, x + w - 1, split, mix(pl.bg, 0xffffffff, 0.08 * sh), pl.bg)
+    W.vgrad(dl, x + 1, split, x + w - 1, y + h - 1, pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh))
+  end
+  -- its surface: metallic, brushed, both or neither
+  if metal then
+    W.flake_rect(ctx, dl, x + 1, y + 1, x + w - 1, y + h - 1, U.is_light(pl.bg), x, y)
+    W.metal_sheen(dl, x, y, w, h)
+  end
   if brushed then
     local light = U.is_light(pl.bg)
     local hi, lo = light and 0xffffff09 or 0xffffff04, light and 0x00000007 or 0x0000000b
@@ -1598,13 +1688,16 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
     if is_drag_source then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, 3.0)
     elseif plate then
-      draw_plate(dl, x, y, ww, wh, plate, M.brushed(layout, plate))
+      draw_plate(ctx, dl, x, y, ww, wh, plate, M.brushed(layout, plate), M.metal(layout, plate))
     else
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
     end
     ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh,
       is_drag_source and C.COL.drop_marker or C.COL.panel_border, 3.0, 0,
       is_drag_source and 2.0 or 1.0)
+
+    -- the 3D effect: knobs and buttons cast shadows, the edges catch the light
+    W.hw = (not is_drag_source and C.EFFECT_3D) and C.METAL_K or 0
 
     if collapsed then
       draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
@@ -1630,6 +1723,8 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
       end
       if fh > 0 then draw_footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx, layout, avail_h, is_eq, req) end
     end
+    if W.hw > 0 then W.metal_edges(dl, x, y, ww, wh, W.hw) end
+    W.hw = 0
     if saved then pop_plate(saved) end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)

@@ -19,7 +19,10 @@ the selected track.
 
 A toggle in the header swaps the upper area between them, as does a
 double-click on the header itself — anywhere nothing else lives, which
-`IsAnyItemHovered` sorts out for us. The track list
+`IsAnyItemHovered` sorts out for us — and the **TS_ChannelView_ToggleMixer**
+action, for a keyboard shortcut or a toolbar button (ChannelView's window
+never gets the keyboard, so the shortcut has to be REAPER's; a toolbar
+button for it lights while the mixer is showing). The track list
 along the bottom belongs to both.
 
 **Channel view** is one track in depth: its plugins, its channel strip,
@@ -359,7 +362,7 @@ default), shared with the TCP window and the web page.
 - **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
   *Buttons down*: one button per choice, the current one lit. For 2 to 8
   choices; a column too tall for the panel shows as a dropdown.
-- **Sections (experimental).** A divider owns the controls after it, up to
+- **Sections.** A divider owns the controls after it, up to
   the next divider. Right-click any of them ▸ Section to put them on an
   **inset** or on a **faceplate of their own**. To style the first group,
   start the panel with a divider with *Line* off.
@@ -368,8 +371,10 @@ default), shared with the TCP window and the web page.
   the same background — side by side, stacked, or facing each other across
   a divider — join into one rounded shape, always the full width of their
   column. Gaps and half-gaps (right-click the empty space) can have one too.
-  Backgrounds and sections can have a **Brushed finish** (a tick in the
-  same menus, or *Brushed* in the editor), like a faceplate's.
+  Backgrounds and sections can have a **Brushed finish** and/or a
+  **Metallic finish** (ticks in the same menus, or *Brushed* and *Metallic*
+  in the editor), like a faceplate's. Sections in a row with the same
+  style, faceplate and finish join into one.
 - **Lock layout.** The padlock at the left of a panel's foot locks that
   plugin's layout, on every track: no more edits, and the controls keep the
   arrangement they had however the panel is resized — a panel too short
@@ -429,25 +434,49 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Trim pot*, *Round nose* (a round cap whose short, blunt nose is the
   pointer), *Bar* (a dome with a raised bar across it), *Fluted* (a domed
   body with finger flutes), *Bezel* (a black centre in a chrome ring),
-  *Reverse bezel* (a glossy black ring round a metal centre) and *Hi-fi* (a
-  spun-aluminium knob). **Faders:** *Flat* (the default), *Console* and
+  *Reverse bezel* (a glossy black ring round a metal centre), *Hi-fi* (a
+  spun-aluminium knob) and *LED ring* (a ring of lamps close round an
+  encoder, lit up to the value, or out from the middle on a centred
+  control, in its cap colour). **Faders:** *Flat* (the default), *Console* and
   *Rail*.
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,
-  Silver, Stone and Black. *Apply to every knob on this panel* copies one
+  Silver, Stone, Black, White, Brown and Gold. *Apply to every knob on this panel* copies one
   control's look to the rest. A toggle's Style is the colour it lights
   when on (Amber, Green, Red, Blue, Yellow, White or the theme's), and so
-  is a button row's.
+  is a button row's, along with its face: *Flat*, *Lit lens* (dark tinted
+  glass that glows when on), *LED window* (a lamp strip across its top) or
+  *Backlit* (a dark cap whose edge and lettering light up). Under either row of swatches, **[+]** opens the colour
+  picker for any colour at all, with your recent colours beside it.
 - **Faceplates:** Theme, Charcoal, Gunmetal, Aluminium, Steel blue, Navy,
-  Cream, Cobalt, Amber, Stone, Racing green and Oxblood. Labels, values and
-  scale ticks switch ink to stay readable on each. **Brushed finish** in
-  the Faceplate menu gives any of them a fine grain (aluminium has it
-  unless you turn it off).
+  Cream, Cobalt, Amber, Stone, Racing green, Oxblood and Gold — or any
+  colour at all: **[+] Custom colour…** after the list opens the colour
+  picker (palettes, a picker and an eyedropper, below), and **Recent
+  colours** keeps the colours of your own you've used since ChannelView
+  started, for going back and forth between a few. The same goes for
+  backgrounds and sections. Labels, values and scale ticks switch ink to
+  stay readable on each, a custom colour's worked out from the colour
+  itself. In the Faceplate menu, **Brushed finish** gives
+  any of them a fine grain (aluminium has it unless you turn it off), and
+  **Metallic finish** a fine metallic flake and sheen, like metallic paint
+  — either, both or neither.
+- **Numbered scales:** knobs print numbers round their dial — **Values**
+  (the plugin's own, units left off and thousands as k, so 12000 Hz reads
+  12k) unless a knob's Style ▸ **Scale** says **0–10** or **None**. A large knob has room for seven
+  values (eleven for 0–10, or every step of a stepped knob with up to
+  eleven); a medium one for three, its ends and middle (six for 0–10, or
+  every step up to five). The knob keeps its size, so a number with no
+  room for it in the cell is left out (its tick stays); a medium knob's
+  value moves to its tooltip, and a small knob has no room for numbers.
+  **Numbers in cap colour** prints them in the knob's colour instead of
+  the faceplate's.
 
 Only *Theme* and the *Accent* cap follow Hue/Tint; every other faceplate and
 cap colour is fixed, the way hardware is. The menus stay open while you
 click through them, so you can try a few and watch the panel change.
-**View ▸ Faceplate texture** (on by default) gives the faceplates a gentle
-top-lit gradient and aluminium a brushed grain; Theme stays flat either way.
+**View ▸ 3D effect** (on by default) lights the panels from the top left:
+a gentle gradient on the faceplates (Theme stays flat), panel edges that
+catch the light, and soft shadows under knobs, buttons and fader caps (not
+the Arc knob, which is a printed scale).
 
 Like everything else on a panel, the look is saved with the plugin's layout,
 so every instance of that plugin wears it.
@@ -459,7 +488,7 @@ so every instance of that plugin wears it.
 | drag up/down | change value |
 | wheel over empty space | scroll the row of panels sideways |
 | hold Shift | fine |
-| mouse wheel | step |
+| mouse wheel | step (unless *View ▸ Use mouse wheel on controls* is off: then it only ever scrolls) |
 | double-click | back to the parameter's centre/detent |
 | hover | the current value, in a tooltip that stays put |
 | right-click | control menu |
@@ -501,6 +530,17 @@ REAPER's own, which works on the selected tracks. The built-in palettes
 aren't saved anywhere REAPER can be asked for them, so ChannelView carries
 a copy of 7.81's.
 
+Under *Any colour*, the **eyedropper** beside the picker takes the colour
+of anything on screen, in REAPER or out of it: switch it on, point, and
+click — or press Enter, so the click doesn't land on another program —
+and Esc puts it away. It needs the js_ReaScriptAPI extension (from
+ReaPack). Every colour picker in ChannelView and the TCP window has it.
+
+In the TCP window, the settings menu's **Plugin delay (PDC) under
+meters** shows each track's plugin delay compensation under its meter,
+in samples and milliseconds — on tracks with any, when the row is tall
+enough.
+
 ## Files
 
 | | |
@@ -523,11 +563,15 @@ a copy of 7.81's.
 | `TS_CV_Trace.lua` | the gain-reduction trace's data, shared with the web page |
 | `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
+| `TS_CV_Share.lua` | importing and exporting layouts (*Layouts ▸ Import / Export*) |
+| `TS_CV_ColourPick.lua` | the colour picker every colour dialog shares: palettes, eyedropper, recent colours |
+| `TS_ChannelView_ToggleMixer.lua` | the *Toggle mixer view* action, for a shortcut or toolbar |
 | `TS_CV_Startup.lua` | the Run-when-REAPER-starts option, and the `__startup.lua` surgery |
 | `TS_CV_State.lua` | per-instance view state (collapsed), saved in the project |
 | `TS_CV_Steps.lua` | cached choices for stepped parameters (derived, deletable) |
 | `TS_ChannelView_Web.lua` | the web companion's bridge — see *On a tablet* |
 | `TS_ChannelView.html` | the web companion's page. Goes in `reaper_www_root/` |
+| `TS_ChannelView.webapp.json`, `TS_ChannelView-*.png` | what lets a tablet install the page as an app, and its icons. Go in `reaper_www_root/` |
 | `dev/TS_CV_Test.lua` | offline tests — see below. Not installed |
 | `TS_CV_Diag.lua` | dumps what REAPER reports about the selected track's FX, and how much of your plugin collection the FX index resolves |
 | `dev/TS_CV_Audit.py` | checks every ImGui call against your installed ReaImGui. Not installed |
@@ -536,6 +580,19 @@ a copy of 7.81's.
 The layout library is plain text and safe to edit by hand; *Layouts ▸ Reload
 library from disk* picks up changes without restarting. Every save keeps one
 generation of backup as `TS_ChannelView_Mappings.bak.ini`.
+
+### Sharing layouts
+
+*Layouts ▸ Export layouts to file…* lists your saved layouts — the ones for
+the selected track's plugins already ticked — and writes the ones you tick
+to a file you name. Send it to someone, and they use *Layouts ▸ Import
+layouts from file…*: it lists what's in the file, marked *new*, *replaces
+yours* or *same as yours*, and brings in the ones they tick. New ones start
+ticked; ones that would replace a layout you already have start unticked,
+and importing them asks first. A layout you've locked here isn't replaced
+(it shows as *yours is locked*) until you unlock it. The library as it was
+is kept as the `.bak`. The file is an ordinary layout library, so a whole
+`TS_ChannelView_Mappings.ini` imports too.
 
 ## On a tablet: the web companion
 
@@ -549,7 +606,7 @@ Two pieces, both installed by ReaPack with ChannelView:
 
 | | |
 |---|---|
-| `TS_ChannelView.html` | the page. Lives in `REAPER/reaper_www_root/`, where REAPER's web interface serves it |
+| `TS_ChannelView.html` | the page. Lives in `REAPER/reaper_www_root/`, where REAPER's web interface serves it (with `TS_ChannelView.webapp.json` and its icons, for installing it as an app) |
 | `TS_ChannelView_Web.lua` | the bridge: a background script that publishes the selected track's chain and applies what the page sends back. Runs whether or not ChannelView's window is open |
 
 ### Setting it up
@@ -570,8 +627,30 @@ Two pieces, both installed by ReaPack with ChannelView:
    asks whether REAPER may accept connections on private networks, allow it.
 4. **On an iPad**, *Share ▸ Add to Home Screen* opens it full-screen, like
    an app.
+5. **On Android** (a Galaxy Tab, say), the full-screen button (four corner
+   marks) at the right of the transport bar makes the page full screen — no
+   address bar, no status bar. It remembers: a page left full screen goes
+   full screen again at the first tap after it's opened (browsers only
+   allow it from a tap).
 
-Installing by hand instead of with ReaPack: copy `TS_ChannelView.html` into
+### As an app on Android
+
+Chrome can install the page as an app that always opens full screen, with
+its own icon. It only installs from secure addresses, and REAPER's web
+interface is plain `http`, so Chrome has to be told to trust this one
+address, once:
+
+1. In Chrome on the tablet, open `chrome://flags`, find **Insecure origins
+   treated as secure**, enable it, and enter the page's address without the
+   page name — e.g. `http://192.168.1.20:8080`.
+2. Relaunch Chrome, open the page, and choose **⋮ ▸ Install app** (or *Add
+   to home screen ▸ Install*).
+
+The app is tied to that address, so give the computer a fixed address on
+your network (a DHCP reservation in your router), or the app will lose it.
+
+Installing by hand instead of with ReaPack: copy `TS_ChannelView.html`,
+`TS_ChannelView.webapp.json` and the three `TS_ChannelView-*.png` icons into
 `REAPER/reaper_www_root/` and `TS_ChannelView_Web.lua` into
 `REAPER/Scripts/TS_ChannelView/` beside the other modules, then load the
 script into the action list.

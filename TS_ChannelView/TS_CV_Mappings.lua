@@ -25,8 +25,11 @@
       Buttons<n> = across | down | <how many>
       Back<n>  = inset | <faceplate>
       Brush<n> = <1|0>
+      Metal<n> = 1
+      Scale<n> = values | ten [|cap]
       Plate    = <faceplate>
       Brush    = <1|0>
+      Metal    = 1
       Lock     = <rows>
 
   <type> is knob | toggle | combo | fader | blank | divider | half_gap.
@@ -76,7 +79,9 @@
   that line and takes everything after it -- an older ChannelView reading
   a fifth field would have shown it as part of the name. Plate is the
   panel's faceplate. Both are names, not colours, so the palette they
-  name can be retuned without touching anyone's layouts. Brush turns the
+  name can be retuned without touching anyone's layouts -- except a
+  custom faceplate, which is its colour, #rrggbb (wherever a faceplate
+  goes: Plate, Back<n>, a section's Style<n>=plate|#rrggbb). Brush turns the
   brushed grain on (1) or off (0) for that faceplate; with no Brush line
   it is the faceplate's own (on for aluminium, off for the rest). Size<n>
   makes knob n small or large (C.SIZES in TS_CV_Config.lua); with no Size
@@ -88,6 +93,11 @@
   Brush<n> turns the brushed grain on (1) or off (0) for control n's
   background -- on a divider, for the section it styles. With no line it
   is the faceplate's own (on for aluminium), and off for an inset.
+  Metal<n>=1 gives that background (or section) a metallic flake, and
+  Metal=1 the faceplate; either can go with the brushed grain, or alone.
+  Scale<n> numbers knob n's scale: "values" prints the plugin's own values
+  at its marks, "ten" 0 to 10; "|cap" prints them in the cap's colour.
+  Medium and large knobs only (a small one has no room).
 
   LOCK freezes the layout: no edits, and the controls keep the arrangement
   they had at <rows> rows however tall the panel is -- a shorter panel
@@ -121,8 +131,11 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Size<n>=small|large: knob n's size (no line: medium)\n"
                 .. "; Back<n>=inset|<faceplate>: control n's own background\n"
                 .. "; Brush<n>=<1|0>: grain on control n's background (a divider: its section's)\n"
-                .. "; Plate=<faceplate>\n"
+                .. "; Metal<n>=1: metallic flake on control n's background (a divider: its section's)\n"
+                .. "; Scale<n>=values|ten[|cap]: numbers round knob n (its own values, or 0-10)\n"
+                .. "; Plate=<faceplate, or #rrggbb for a colour of your own>\n"
                 .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own\n"
+                .. "; Metal=1: a metallic flake on the faceplate\n"
                 .. "; Lock=<rows>: layout locked, arranged at that many rows"
 
 local dir         = nil
@@ -164,8 +177,29 @@ end
 -- Back<n>=inset or a faceplate's key: a control's own background.
 local function back_of(v)
   v = U.trim(v or "")
-  if v == "inset" or C.plate_of(v) then return v end
-  return nil
+  if v == "inset" then return v end
+  return C.plate_key(v)
+end
+
+-- Scale<n>=values|ten|none[|cap]: what knob n's scale is numbered with,
+-- and whether in the cap's colour. With no line a knob shows its values
+-- (the default since 1.8.5, layouts saved before it included); "none"
+-- is the only way to have no numbers.
+local function scale_of(v)
+  local k = U.trim(v or ""):match("^(%a+)")
+  return (k == "values" or k == "ten" or k == "none") and k or nil
+end
+local function scale_ink_of(v)
+  local k = scale_of(v)
+  return (k and k ~= "none" and U.trim(v or ""):match("|%s*cap%s*$")) and "cap" or nil
+end
+
+-- What control c's scale is numbered with: "values" (the default), "ten",
+-- or nil for none. Knobs and stepped knobs only.
+function M.scale_kind(c)
+  if not c or (c.type ~= "knob" and c.type ~= "stepped" and c.type ~= nil) then return nil end
+  if c.scale == "none" then return nil end
+  return (c.scale == "ten") and "ten" or "values"
 end
 
 -- Brush=1 / Brush=0, or nil for none set (the faceplate's own grain).
@@ -192,6 +226,15 @@ end
 
 -- The row count a locked layout keeps, or nil when it isn't locked.
 function M.locked(layout) return layout and layout.lock or nil end
+
+-- Whether a layout's faceplate has the metallic flake (Metal=1).
+function M.metal(layout, plate)
+  return (plate ~= nil and layout ~= nil and layout.metal == true) or false
+end
+-- ... and a control's background, or a divider's section (Metal<n>=1).
+function M.part_metal(kind, metal)
+  return (kind ~= nil and metal == true) or false
+end
 
 -- Whether a control's background, or a divider's section, is brushed:
 -- `kind` and `pl` as P.back_style / P.section_style give them, `brush` the
@@ -241,7 +284,10 @@ local function parse_section(sect)
       -- field four, present but allowed to be empty, so it never gets
       -- confused with the flags field regardless of which bits are set.
       local f = tonumber(bi) or 0
-      local sty, cap = (sect["Style" .. i] or ""):match("^%s*([%w_]*)%s*|?%s*([%w_]*)")
+      local sty, cap = (sect["Style" .. i] or ""):match("^%s*([%w_]*)%s*|?%s*([#%w_]*)")
+      -- a section's faceplate as saved (a custom colour in lower case); one
+      -- no longer in the list leaves the section unstyled
+      if sty == "plate" then cap = C.plate_key(cap); if not cap then sty = nil end end
       controls[#controls + 1] = {
         param   = tonumber(p),
         type    = t,
@@ -251,12 +297,16 @@ local function parse_section(sect)
         live    = (f & 8) ~= 0,
         label   = U.trim(label),
         style   = (sty and sty ~= "") and (C.KNOB_STYLE_ALIAS[sty] or sty) or nil,
-        cap     = (cap and cap ~= "") and cap or nil,
+        -- a cap or lit colour by name, or one of your own (#rrggbb)
+        cap     = (cap and cap ~= "") and ((cap:sub(1, 1) == "#" and C.custom_key(cap)) or cap) or nil,
         size    = size_of(sect["Size" .. i]),
         buttons = buttons_of(sect["Buttons" .. i]),
         back    = back_of(sect["Back" .. i]),
         nbtn    = nbtn_of(sect["Buttons" .. i]),
         brush   = brush_of(sect["Brush" .. i]),
+        metal   = (U.trim(sect["Metal" .. i] or "") == "1") or nil,
+        scale   = scale_of(sect["Scale" .. i]),
+        scale_ink = scale_ink_of(sect["Scale" .. i]),
       }
     end
     i = i + 1
@@ -265,8 +315,9 @@ local function parse_section(sect)
            live = (U.trim(sect.Live or "") == "1") or nil,
            measure = (U.trim(sect.Measure or "") == "1") or nil,
            levels = (U.trim(sect.Levels or "") == "1") or nil,
-           plate = C.plate_of(U.trim(sect.Plate or "")) and U.trim(sect.Plate) or nil,
+           plate = C.plate_key(U.trim(sect.Plate or "")),
            brush = brush_of(sect.Brush),
+           metal = (U.trim(sect.Metal or "") == "1") or nil,
            lock = lock_of(sect.Lock) }
 end
 
@@ -275,8 +326,9 @@ local function serialize(layout)
   if layout.live then out.Live = "1" end
   if layout.measure then out.Measure = "1" end
   if layout.levels then out.Levels = "1" end
-  if layout.plate then out.Plate = layout.plate end
+  if C.plate_key(layout.plate) then out.Plate = C.plate_key(layout.plate) end
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
+  if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
@@ -308,10 +360,17 @@ local function serialize(layout)
       out["Style" .. (i - 1)] = (c.style or "") .. "|" .. (c.cap or "")
     end
     if size_of(c.size) then out["Size" .. (i - 1)] = c.size end
-    if back_of(c.back) then out["Back" .. (i - 1)] = c.back end
+    if back_of(c.back) then out["Back" .. (i - 1)] = back_of(c.back) end
     -- the grain of its background, or a divider's section, when it has one
     local styled = back_of(c.back) or (c.type == "divider" and (c.style == "inset" or c.style == "plate"))
     if styled and c.brush ~= nil then out["Brush" .. (i - 1)] = c.brush and "1" or "0" end
+    if styled and c.metal then out["Metal" .. (i - 1)] = "1" end
+    -- values is the default, so it's only written to carry |cap
+    local sk = scale_of(c.scale)
+    if sk == "none" then out["Scale" .. (i - 1)] = "none"
+    elseif sk == "ten" or c.scale_ink then
+      out["Scale" .. (i - 1)] = (sk or "values") .. (c.scale_ink and "|cap" or "")
+    end
     if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
@@ -548,11 +607,121 @@ function M.save()
   return ok, err
 end
 
+-- ---------------------------------------------------------------------
+-- sharing layouts: export some of the library to a file, import from one
+-- ---------------------------------------------------------------------
+-- A shared file is a layout library like this one, in the same format, so
+-- a whole TS_ChannelView_Mappings.ini from someone else imports just as
+-- well. Layouts travel as their raw lines, every field kept as written --
+-- including ones this version doesn't know, from a newer ChannelView.
+
+local EXPORT_HEADER = "; ChannelView layouts, exported to share -- import them with\n"
+                   .. "; ChannelView's Layouts > Import layouts from file.\n"
+                   .. "; Same format as TS_ChannelView_Mappings.ini (see its header)."
+
+local function raw_copy(t)
+  local out = {}
+  for k, v in pairs(t) do out[k] = v end
+  return out
+end
+
+-- One line per field, sorted: two layouts are the same if this is.
+local function raw_text(t)
+  local lines = {}
+  for k, v in pairs(t or {}) do lines[#lines + 1] = k .. "=" .. U.trim(tostring(v)) end
+  table.sort(lines)
+  return table.concat(lines, "\n")
+end
+
+-- A section is a layout if it has controls, or at least aliases, state
+-- names or a faceplate -- anything else (a stray [section] in some other
+-- ini) isn't offered.
+local function is_layout(t)
+  for k in pairs(t) do
+    if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k == "Plate" then
+      return true
+    end
+  end
+  return false
+end
+
+-- Every saved layout's name (its plugin key), sorted.
+function M.keys()
+  local out = {}
+  for k, t in pairs(sections) do if is_layout(t) then out[#out + 1] = k end end
+  table.sort(out, function(a, b) return a:lower() < b:lower() end)
+  return out
+end
+
+-- How many controls a raw layout has (for the lists).
+local function n_controls(t)
+  local n = 0
+  for k in pairs(t) do if k:match("^Ctl%d+$") then n = n + 1 end end
+  return n
+end
+function M.count_controls(key) return sections[key] and n_controls(sections[key]) or 0 end
+
+-- Writes the chosen layouts to `file`. Returns ok, err.
+function M.export(file, keys)
+  local data, order = {}, {}
+  for _, k in ipairs(keys) do
+    if sections[k] then data[k] = raw_copy(sections[k]); order[#order + 1] = k end
+  end
+  if #order == 0 then return false, "No layouts chosen." end
+  return U.write_ini(file, data, order, EXPORT_HEADER)
+end
+
+-- Reads a shared file. Returns a list of { key, controls, status, raw }
+-- in the file's order -- status "new" (not in the library), "same" (the
+-- library's is identical), "differs" (importing replaces yours) or
+-- "locked" (yours differs but is locked, so it isn't replaced) -- or nil,
+-- err when there's nothing to import.
+function M.read_shared(file)
+  local f = io.open(file, "rb")
+  if not f then return nil, "Can't open " .. tostring(file) end
+  f:close()
+  local data, order = U.read_ini(file)
+  local out = {}
+  for _, k in ipairs(order) do
+    local t = data[k]
+    if t and is_layout(t) then
+      local status = "new"
+      if sections[k] then
+        status = (raw_text(sections[k]) == raw_text(t)) and "same"
+                 or (lock_of(sections[k].Lock) and "locked") or "differs"
+      end
+      out[#out + 1] = { key = k, controls = n_controls(t), status = status, raw = t }
+    end
+  end
+  if #out == 0 then return nil, "There are no ChannelView layouts in that file." end
+  return out
+end
+
+-- Brings the chosen entries (from M.read_shared) into the library,
+-- replacing any of the same name. The caller saves; the save keeps the
+-- library as it was as the .bak.
+function M.import(entries)
+  local n = 0
+  for _, e in ipairs(entries) do
+    -- a locked layout takes no edits, and an import is one
+    if sections[e.key] and lock_of(sections[e.key].Lock) and raw_text(sections[e.key]) ~= raw_text(e.raw) then
+      goto continue
+    end
+    if not sections[e.key] then order[#order + 1] = e.key end
+    sections[e.key] = raw_copy(e.raw)
+    cache[e.key] = nil
+    n = n + 1
+    ::continue::
+  end
+  if n > 0 then def_cache = {}; dirty = true end
+  return n
+end
+
 -- Deep copy, so the editor can work on a scratch layout and discard it.
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
-                plate = layout.plate, brush = layout.brush, lock = layout.lock }
+                plate = layout.plate, brush = layout.brush, metal = layout.metal, lock = layout.lock }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end
@@ -560,7 +729,8 @@ function M.copy(layout)
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
-                        buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush }
+                        buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
+                        metal = c.metal, scale = c.scale, scale_ink = c.scale_ink }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.states = {}

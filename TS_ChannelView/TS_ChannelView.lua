@@ -1,26 +1,43 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.8.2
+-- @version 1.8.5
 -- @changelog
---  Lock layout: a padlock at the left of each panel's foot. Locked, the
---  plugin's layout takes no edits and keeps its arrangement however the
---  panel is resized; too short, it scrolls up and down, the meters staying
---  put. Meters can still be switched on and off while locked.
---  The panel's foot is always shown now, for the padlock.
---  Brushed finish for control backgrounds and sections.
---  The web page follows both.
+--  Any colour for faceplates, backgrounds, sections, knob caps and button
+--  lights: [+] Custom colour opens the colour picker, with recent colours.
+--  The colour picker has an eyedropper that reads anywhere on screen
+--  (needs js_ReaScriptAPI), in every colour dialog, track colours included.
+--  Button faces for toggles and button rows: Lit lens, LED window, Backlit.
+--  Knobs print their values round the dial by default (Style > Scale:
+--  Values, 0-10 or None). LED ring knob style. Gold faceplate; White,
+--  Brown and Gold caps. Metallic finish for faceplates, backgrounds and
+--  sections.
+--  View > 3D effect (replaces Faceplate texture). View > Use mouse wheel
+--  on controls. Toggle mixer view action for a shortcut or toolbar.
+--  Layouts > Import / Export layouts to file. Sections are no longer
+--  experimental, and same-style neighbours join.
+--  TCP window: plugin delay (PDC) under meters, in its settings menu.
+--  Web page: all of the above, plus full screen and install as an app on
+--  Android. Restart the web companion script after updating.
+--  Fix: no more "InvisibleButton: Assertion failed" stop when the window
+--  is docked very short (mixer view).
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
 --  [main]   TS_ChannelView_TCP.lua
+--  [main]   TS_ChannelView_ToggleMixer.lua
 --  [main]   TS_ChannelView_Web.lua
 --  [main]   TS_ChannelView_Web_Startup.lua
 --  [webinterface] TS_ChannelView.html
+--  [webinterface] TS_ChannelView.webapp.json
+--  [webinterface] TS_ChannelView-192.png
+--  [webinterface] TS_ChannelView-512.png
+--  [webinterface] TS_ChannelView-maskable.png
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
 --  [nomain] TS_CV_Toolbar.lua
 --  [nomain] TS_CV_Browser.lua
 --  [nomain] TS_CV_Chains.lua
+--  [nomain] TS_CV_ColourPick.lua
 --  [nomain] TS_CV_Channel.lua
 --  [nomain] TS_CV_Config.lua
 --  [nomain] TS_CV_Editor.lua
@@ -43,6 +60,7 @@
 --  [nomain] TS_CV_Receives.lua
 --  [nomain] TS_CV_Search.lua
 --  [nomain] TS_CV_Sends.lua
+--  [nomain] TS_CV_Share.lua
 --  [nomain] TS_CV_Startup.lua
 --  [nomain] TS_CV_State.lua
 --  [nomain] TS_CV_Steps.lua
@@ -109,6 +127,20 @@ if not ok_imgui then
   return
 end
 
+-- ImGui asserts on an invisible button of zero width or height, and
+-- stops the script. A window docked very short (or very narrow) leaves
+-- some of them -- a mixer strip's background, a row's -- with no room at
+-- all, so a zero is made the smallest size there is instead: that one
+-- pixel can't be seen or clicked, but nothing stops.
+do
+  local invisible = ImGui.InvisibleButton
+  ImGui.InvisibleButton = function(ctx, id, w, h, ...)
+    if w == 0 then w = 1 end
+    if h == 0 then h = 1 end
+    return invisible(ctx, id, w, h, ...)
+  end
+end
+
 local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
 local T = require("TS_CV_FXTree")
@@ -120,6 +152,7 @@ local S  = require("TS_CV_TrackStrip")
 local St = require("TS_CV_State")
 local B  = require("TS_CV_Browser")
 local PU = require("TS_CV_PresetUI")
+local LS = require("TS_CV_Share")
 local SC = require("TS_CV_Steps")
 local CH = require("TS_CV_Channel")
 local SD = require("TS_CV_Sends")
@@ -128,6 +161,7 @@ local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
 local WL = require("TS_CV_WebLink")
 local TM = require("TS_CV_TrackMenu")
+local CP = require("TS_CV_ColourPick")
 local FO = require("TS_CV_Focus")
 local IC = require("TS_CV_Icons")
 local CN = require("TS_CV_Chains")
@@ -136,7 +170,7 @@ local RQ = require("TS_CV_ReaEQ")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
-CN.attach(ImGui)
+CN.attach(ImGui); LS.attach(ImGui)
 
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
@@ -231,8 +265,10 @@ end
 
 local dock_id = tonumber(ext_get("dock", "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
+C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
 C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
-C.PLATE_TEXTURE = ext_get("plate_texture", C.PLATE_TEXTURE and "1" or "0") == "1"
+-- (saved under its old name, Faceplate texture, so the choice carries over)
+C.EFFECT_3D = ext_get("plate_texture", C.EFFECT_3D and "1" or "0") == "1"
 C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
 -- into the view you were not in is a small daily annoyance.
@@ -421,6 +457,121 @@ end
 
 local SWATCH_W, SWATCH_H = 18, 13
 
+-- A menu row with a faceplate's swatch at its front.
+local function swatch_row(label, id, selected, width, bg, border, flags)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local hit = ImGui.Selectable(ctx, "      " .. label .. "##" .. id, selected, flags or KEEP_OPEN, width, 0)
+  local _, th = ImGui.CalcTextSize(ctx, "Ag")
+  local sy = y + (th - SWATCH_H) * 0.5
+  ImGui.DrawList_AddRectFilled(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, bg, 2.0)
+  ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, border, 2.0, 0, 1.0)
+  return hit
+end
+
+local function hex_key(rgb) return ("#%06x"):format(rgb & 0xffffff) end
+
+-- After a menu's faceplate swatches: the colour of your own it has now
+-- (when it has one), the Recent colours flyout -- every custom colour
+-- given to a faceplate, background or section since ChannelView started --
+-- and the [+] that opens the colour picker (TS_CV_ColourPick), with its
+-- palettes and eyedropper. While the picker is open the panel shows the
+-- colour being chosen; Cancel puts back what was there.
+--   now:   the key chosen now
+--   pick_key(k, save): makes key k the choice (nil = none), saving if `save`
+--   from:  the colour the picker starts on when there's no custom one
+local function custom_rows(id, now, width, pick_key, title, from)
+  local ck = C.custom_key(now)
+  if ck then
+    local pl = C.plate_of(ck)
+    swatch_row("Custom  " .. pl.label, id .. "_now", true, width, pl.bg, pl.border)
+  end
+  if ImGui.BeginMenu(ctx, "Recent colours##" .. id, #CP.recent > 0) then
+    for i, rgb in ipairs(CP.recent) do
+      local pl = C.plate_of(hex_key(rgb))
+      if swatch_row(pl.label, id .. "_rc" .. i, pl.key == ck, 130, pl.bg, pl.border) then
+        pick_key(pl.key, true)
+        CP.remember(rgb)
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) and #CP.recent == 0 then
+    ImGui.SetTooltip(ctx, "The colours of your own you give faceplates, backgrounds\nand sections are kept here until ChannelView closes.")
+  end
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  if ImGui.Selectable(ctx, "      Custom colour\u{2026}##" .. id .. "_add", false, 0, width, 0) then
+    local before = now
+    CP.open({
+      title   = title,
+      rgb     = C.custom_rgb(now) or from or 0x808080,
+      preview = function(rgb) pick_key(hex_key(rgb), false) end,
+      apply   = function(rgb) pick_key(hex_key(rgb), true) end,
+      cancel  = function() pick_key(before, false) end,
+    })
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Any colour: from a palette, the picker, or anywhere\non screen with the eyedropper.")
+  end
+  -- the [+], where the swatch would be
+  local _, th = ImGui.CalcTextSize(ctx, "Ag")
+  local sy = y + (th - SWATCH_H) * 0.5
+  ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, C.COL.panel_border, 2.0, 0, 1.0)
+  local ps = SWATCH_H - 2
+  W.ICONS.plus(dl, x + 1 + (SWATCH_W - ps) * 0.5, sy + 1, ps, C.COL.icon)
+end
+
+-- Under a row of cap or lit-colour swatches: a [+] that opens the colour
+-- picker, the colour of your own the control has now (when it has one),
+-- and the recent colours (TS_CV_ColourPick), one click each.
+--   now:    the key chosen now (a name, or #rrggbb)
+--   from:   0xRRGGBB the picker starts on when there's no custom one
+--   pick_key(k, save): makes key k the choice, saving if `save`
+local function swatch_extras(id, now, from, title, pick_key)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local ck = C.custom_key(now)
+  local function outline()
+    local x0, y0 = ImGui.GetItemRectMin(ctx)
+    local x1, y1 = ImGui.GetItemRectMax(ctx)
+    ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+  end
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  if ImGui.Button(ctx, "##" .. id .. "_add", 18, 18) then
+    local before = now
+    CP.open({
+      title   = title,
+      rgb     = C.custom_rgb(now) or from or 0x808080,
+      preview = function(rgb) pick_key(hex_key(rgb), false) end,
+      apply   = function(rgb) pick_key(hex_key(rgb), true) end,
+      cancel  = function() pick_key(before, false) end,
+    })
+  end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Custom colour\u{2026}") end
+  W.ICONS.plus(dl, x + 3, y + 3, 12, C.COL.icon)
+  local shown = {}
+  if ck then
+    ImGui.SameLine(ctx, 0, 4)
+    ImGui.ColorButton(ctx, ck:upper() .. "##" .. id .. "_now", (C.custom_rgb(ck) << 8) | 0xff,
+      ImGui.ColorEditFlags_NoTooltip, 18, 18)
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, ck:upper()) end
+    outline()
+    shown[ck] = true
+  end
+  for i, rgb in ipairs(CP.recent) do
+    local k = hex_key(rgb)
+    if not shown[k] then
+      ImGui.SameLine(ctx, 0, 4)
+      if ImGui.ColorButton(ctx, k:upper() .. "##" .. id .. "_rc" .. i, (rgb << 8) | 0xff,
+          ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+        pick_key(k, true)
+        CP.remember(rgb)
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Recent  " .. k:upper()) end
+    end
+  end
+end
+
 local function plate_menu(fx, key, layout)
   local cur = layout.plate or "theme"
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -442,6 +593,16 @@ local function plate_menu(fx, key, layout)
     ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H,
       pl.border or C.COL.panel_border, 2.0, 0, 1.0)
   end
+  do
+    local function set(k, save)
+      local l, pk = materialise(fx)
+      l.plate = k
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    local now_pl = C.plate_of(layout.plate)
+    custom_rows("plate", layout.plate, 150, set, "Faceplate colour", now_pl and (now_pl.bg >> 8))
+  end
   -- the grain, on whichever faceplate is chosen (the theme's has none)
   ImGui.Separator(ctx)
   local plate = C.plate_of(layout.plate)
@@ -454,8 +615,19 @@ local function plate_menu(fx, key, layout)
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, plate and "A fine brushed grain across this faceplate\n(needs Faceplate texture on)."
+    ImGui.SetTooltip(ctx, plate and "A fine brushed grain across this faceplate."
       or "Choose a faceplate first: the theme's panel has no grain.")
+  end
+  -- and/or a metallic flake, like metallic paint
+  local mt = M.metal(layout, plate)
+  if ImGui.MenuItem(ctx, "Metallic finish##plate_metal", nil, mt, plate ~= nil) then
+    local l = materialise(fx)
+    l.metal = (not mt) or nil
+    M.set(key, l); M.save()
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, plate and "A fine metallic flake and sheen across this faceplate,\nlike metallic paint. Goes with the brushed finish or on its own."
+      or "Choose a faceplate first.")
   end
 end
 
@@ -479,6 +651,31 @@ local function toggle_colour_menu(fx, key, idx, c)
     if lc then lc.cap = v end
     M.set(key, l); M.save()
   end
+  -- the face: flat, or one of the lit ones (W.button_face), each shown lit
+  -- in this button's colour
+  ImGui.TextDisabled(ctx, "Style")
+  do
+    local cur = (c.style and C.BUTTON_STYLE[c.style]) and c.style or "flat"
+    local lit = W.lit_col(c.cap) or C.COL.toggle_on
+    local _, th = ImGui.CalcTextSize(ctx, "Ag")
+    local rh = math.max(th, 20)
+    for _, bs in ipairs(C.BUTTON_STYLES) do
+      local x, y = ImGui.GetCursorScreenPos(ctx)
+      if ImGui.Selectable(ctx, "         " .. bs.label .. "##bstyle_" .. bs.key, bs.key == cur,
+          KEEP_OPEN, 150, rh) then
+        local l = materialise(fx)
+        local lc = l.controls[idx]
+        if lc then lc.style = (bs.key ~= "flat") and bs.key or nil end
+        M.set(key, l); M.save()
+      end
+      local bx1, by1, bx2, by2 = x + 3, y + 3, x + 33, y + rh - 3
+      if not W.button_face(dl, bx1, by1, bx2, by2, 2.5, true, lit, bs.key, false) then
+        ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2, lit, 2.5)
+        ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 2.5, 0, 1.0)
+      end
+    end
+  end
+  ImGui.Spacing(ctx)
   ImGui.TextDisabled(ctx, "Lit colour")
   for i, cp in ipairs(C.TOGGLE_COLS) do
     if i > 1 then ImGui.SameLine(ctx, 0, 4) end
@@ -493,6 +690,18 @@ local function toggle_colour_menu(fx, key, idx, c)
       local x1, y1 = ImGui.GetItemRectMax(ctx)
       ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
     end
+  end
+  -- any colour: the picker, and the recent ones
+  do
+    local function choose(k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then lc.cap = k end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    local lit = W.lit_col(c.cap) or C.COL.toggle_on
+    swatch_extras("lit", c.cap, lit >> 8, "Lit colour", choose)
   end
   -- small: a half-height lit push-button with its name on it (buttons
   -- for a dropdown's choices have no sizes: their count sets their room)
@@ -520,7 +729,7 @@ local function toggle_colour_menu(fx, key, idx, c)
   if ImGui.MenuItem(ctx, "Apply to every button on this panel") then
     local l = materialise(fx)
     for _, o in ipairs(l.controls) do
-      if o.type == "toggle" or (o.type == "combo" and o.buttons) then o.cap = c.cap end
+      if o.type == "toggle" or (o.type == "combo" and o.buttons) then o.cap, o.style = c.cap, c.style end
     end
     M.set(key, l); M.save()
   end
@@ -541,7 +750,20 @@ local function brush_tick(fx, key, idx, c, kind, pl, id)
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, kind and "A fine brushed grain across it\n(needs Faceplate texture on)."
+    ImGui.SetTooltip(ctx, kind and "A fine brushed grain across it."
+      or "Choose a background first.")
+  end
+  -- and/or a metallic flake (Metal<n>)
+  local mt = M.part_metal(kind, c.metal)
+  local mch, mv = ImGui.Checkbox(ctx, "Metallic finish##" .. id .. "_m", mt)
+  if mch and kind then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.metal = mv or nil end
+    M.set(key, l); M.save()
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, kind and "A fine metallic flake across it, like metallic paint."
       or "Choose a background first.")
   end
 end
@@ -554,7 +776,7 @@ local function back_menu(fx, key, idx, c)
   local function set(v)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.back = v; if not v then lc.brush = nil end end
+    if lc then lc.back = v; if not v then lc.brush, lc.metal = nil, nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, "Behind this control")
@@ -573,6 +795,17 @@ local function back_menu(fx, key, idx, c)
       ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.border, 2.0, 0, 1.0)
     end
   end
+  do
+    local function cset(k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then lc.back = k; if not k then lc.brush, lc.metal = nil, nil end end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    local now_pl = C.plate_of(c.back)
+    custom_rows("back", c.back, 170, cset, "Background colour", now_pl and (now_pl.bg >> 8))
+  end
   ImGui.Separator(ctx)
   local bkind, bpl = P.back_style(c.back)
   ImGui.BeginDisabled(ctx, not bkind)
@@ -582,7 +815,7 @@ local function back_menu(fx, key, idx, c)
   ImGui.TextWrapped(ctx, "Controls side by side or above each other with the same background join into one shape, across a divider too.")
 end
 
--- EXPERIMENTAL: what a divider does to the section after it (up to the
+-- What a divider does to the section after it (up to the
 -- next divider) -- nothing, an inset behind it, or a faceplate of its own.
 local function section_menu(fx, key, idx, c)
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -590,7 +823,7 @@ local function section_menu(fx, key, idx, c)
   local function set(style, cap)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.style, lc.cap = style, cap; if not style then lc.brush = nil end end
+    if lc then lc.style, lc.cap = style, cap; if not style then lc.brush, lc.metal = nil, nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, "The controls after this divider")
@@ -612,6 +845,23 @@ local function section_menu(fx, key, idx, c)
       ImGui.DrawList_AddRectFilled(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.bg, 2.0)
       ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, pl.border, 2.0, 0, 1.0)
     end
+  end
+  do
+    local before_style = c.style
+    local function sset(k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then
+        if k then lc.style, lc.cap = "plate", k
+        elseif before_style == "inset" then lc.style, lc.cap = "inset", nil
+        else lc.style, lc.cap, lc.brush, lc.metal = nil, nil, nil, nil end
+      end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    local cur = (c.style == "plate") and c.cap or nil
+    local now_pl = C.plate_of(cur)
+    custom_rows("sec", cur, 170, sset, "Section colour", now_pl and (now_pl.bg >> 8))
   end
   ImGui.Separator(ctx)
   local skind, spl = P.section_style(c)
@@ -669,6 +919,19 @@ local function style_menu(fx, key, idx, c)
       ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
     end
   end
+  -- any colour: the picker, and the recent ones
+  do
+    local function choose(k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then lc.cap = k end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    local now_col = W.cap_col(cap_now)
+    swatch_extras("cap", c.cap, now_col and (now_col >> 8),
+      (fam == "fader") and "Fader cap colour" or "Knob colour", choose)
+  end
 
   -- knobs come in three sizes (C.SIZES); the panel reflows round them
   if fam == "knob" then
@@ -686,6 +949,32 @@ local function style_menu(fx, key, idx, c)
           or "The ordinary size.")
       end
     end
+
+    -- numbers round the dial, like a hardware knob's printed scale
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Scale")
+    -- (values unless the knob says otherwise: no Scale line is values)
+    local sc_now = M.scale_kind(c) or "none"
+    for i, o in ipairs({ { "none", "None" }, { "values", "Values" }, { "ten", "0\u{2013}10" } }) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, o[2] .. "##scale_" .. o[1], o[1] == sc_now, KEEP_OPEN, 56, 0) then
+        set({ scale = (o[1] ~= "values") and o[1] or false,
+              scale_ink = (o[1] == "none") and false or nil })
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, (o[1] == "values") and "Numbers round the dial in the plugin's own values\n(units left off; thousands as k)."
+          or (o[1] == "ten") and "Numbers round the dial from 0 to 10."
+          or "No numbers.")
+      end
+    end
+    ImGui.BeginDisabled(ctx, sc_now == "none")
+    local rv, on = ImGui.Checkbox(ctx, "Numbers in cap colour##scale_ink", c.scale_ink == "cap")
+    if rv then set({ scale_ink = on and "cap" or false }) end
+    ImGui.EndDisabled(ctx)
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, "The numbers in the knob's colour rather than the faceplate's.\n" ..
+        "A medium knob with numbers shows its value in the tooltip; a small\none has no room for them.")
+    end
   end
 
   ImGui.Spacing(ctx)
@@ -696,13 +985,16 @@ local function style_menu(fx, key, idx, c)
     local src = l.controls[idx]
     if src then
       for _, o in ipairs(l.controls) do
-        if style_family(o.type) == fam then o.style, o.cap = src.style, src.cap end
+        if style_family(o.type) == fam then
+          o.style, o.cap = src.style, src.cap
+          if fam == "knob" then o.scale, o.scale_ink = src.scale, src.scale_ink end
+        end
       end
     end
     M.set(key, l); M.save()
   end
-  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil) then
-    set({ style = false, cap = false })
+  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale ~= nil) then
+    set({ style = false, cap = false, scale = false, scale_ink = false })
   end
 end
 
@@ -990,7 +1282,7 @@ local function control_menu()
     if o.type == "divider" then div_idx = k break end
     if o.type == "fader" then break end
   end
-  if ImGui.BeginMenu(ctx, "Section (experimental)", div_idx ~= nil) then
+  if ImGui.BeginMenu(ctx, "Section", div_idx ~= nil) then
     section_menu(fx, key, div_idx, layout.controls[div_idx])
     ImGui.EndMenu(ctx)
   end
@@ -1111,9 +1403,24 @@ local set_view
 -- that are about to disappear would otherwise hold their last reading
 -- until you came back and found a meter frozen at a level from minutes
 -- ago.
+-- The "Toggle mixer view" action (TS_ChannelView_ToggleMixer.lua) can't
+-- reach this window's keyboard -- nothing can, from inside it -- so it
+-- leaves a request in the ExtState that each frame looks for, and says
+-- which command it is so a toolbar button for it can light while the
+-- mixer is showing. The heartbeat tells it whether this window is open.
+local TOGGLE_REQ, TOGGLE_CMD, ALIVE = "toggle_mixer", "toggle_mixer_cmd", "cv_alive"
+local function show_toggle_state(on)
+  local sec, cmd = reaper.GetExtState(C.EXT_SECT, TOGGLE_CMD):match("^(%-?%d+):(%d+)$")
+  if sec and tonumber(cmd) > 0 then
+    reaper.SetToggleCommandState(tonumber(sec), tonumber(cmd), on and 1 or 0)
+    reaper.RefreshToolbar2(tonumber(sec), tonumber(cmd))
+  end
+end
+
 function set_view(mixer)
   C.MIXER_VIEW = mixer and true or false
   ext_set("mixer_view", C.MIXER_VIEW and "1" or "0")
+  show_toggle_state(C.MIXER_VIEW)
   W.clear_levels()
   W.clear_rms()
   W.clear_peaks()
@@ -1328,6 +1635,15 @@ local function menu_bar()
       C.SHOW_VALUES = not C.SHOW_VALUES
       ext_set("show_values", C.SHOW_VALUES and "1" or "0")
     end
+    -- off: the wheel never moves a control, it only scrolls (shared with
+    -- the TCP window)
+    if ImGui.MenuItem(ctx, "Use mouse wheel on controls", nil, C.WHEEL_CONTROLS) then
+      C.WHEEL_CONTROLS = not C.WHEEL_CONTROLS
+      ext_set("wheel_controls", C.WHEEL_CONTROLS and "1" or "0")
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Off: the wheel scrolls, and never turns a knob or\nmoves a fader. Shared with the TCP window.")
+    end
 
     -- the width of a control's column, for every panel
     if ImGui.BeginMenu(ctx, "Control spacing") then
@@ -1356,12 +1672,14 @@ local function menu_bar()
       ImGui.SetTooltip(ctx, "The plugin's presets along each panel's foot:\nload, save, save as default, rename, delete.")
     end
 
-    if ImGui.MenuItem(ctx, "Faceplate texture", nil, C.PLATE_TEXTURE) then
-      C.PLATE_TEXTURE = not C.PLATE_TEXTURE
-      ext_set("plate_texture", C.PLATE_TEXTURE and "1" or "0")
+    if ImGui.MenuItem(ctx, "3D effect", nil, C.EFFECT_3D) then
+      C.EFFECT_3D = not C.EFFECT_3D
+      ext_set("plate_texture", C.EFFECT_3D and "1" or "0")
     end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "A light gradient on coloured faceplates,\nand brushed grain where one is chosen.")
+      ImGui.SetTooltip(ctx, "Light from the top left: a gentle gradient on coloured faceplates,\n" ..
+        "panel edges that catch it, and soft shadows under knobs and buttons.\n" ..
+        "Brushed and metallic finishes are chosen for each faceplate.")
     end
 
     if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
@@ -1532,6 +1850,14 @@ local function menu_bar()
   if ImGui.BeginMenu(ctx, "Layouts") then
     if ImGui.MenuItem(ctx, "Reload library from disk") then M.reload() end
     if ImGui.MenuItem(ctx, "Save library now") then M.save() end
+    ImGui.Separator(ctx)
+    -- sharing: some of your layouts to a file, or someone else's into yours
+    if ImGui.MenuItem(ctx, "Import layouts from file\u{2026}") then LS.start_import() end
+    if ImGui.MenuItem(ctx, "Export layouts to file\u{2026}") then
+      local cur = {}
+      for _, fx in ipairs(app.chain or {}) do cur[#cur + 1] = U.plugin_key(fx.name) end
+      LS.start_export(cur)
+    end
     ImGui.Separator(ctx)
     if ImGui.MenuItem(ctx, "Show the library file") then
       -- Opens the containing folder; the file itself is plain text and
@@ -1878,6 +2204,7 @@ local function frame()
       -- and the view options the two windows share
       C.TRACK_ICONS = ext_get("track_icons", "0") == "1"
       C.SHOW_VALUES = ext_get("show_values", "1") == "1"
+      C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
       C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
       C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
     end
@@ -1935,6 +2262,18 @@ local function frame()
   if app.header_dbl then
     app.header_dbl = false
     set_view(not C.MIXER_VIEW)
+  end
+  -- the Toggle mixer view action, from a shortcut or a toolbar
+  if reaper.GetExtState(C.EXT_SECT, TOGGLE_REQ) ~= "" then
+    reaper.DeleteExtState(C.EXT_SECT, TOGGLE_REQ, false)
+    set_view(not C.MIXER_VIEW)
+  end
+  do
+    local now = reaper.time_precise()
+    if not app.alive_t or now - app.alive_t > 0.5 then
+      app.alive_t = now
+      reaper.SetExtState(C.EXT_SECT, ALIVE, tostring(now), false)
+    end
   end
 
   if visible then
@@ -2181,7 +2520,9 @@ local function frame()
     if B.draw_menu(ctx, app.track) then rescan(true) end
     if B.draw(ctx, app.track) then rescan(true) end
     PU.draw(ctx)
+    if LS.draw(ctx, function(k) return E.is_open() and E.key() == k end) then rescan(true) end
     if TM.draw(ctx) then rescan(true) end
+    CP.draw(ctx)
     if CN.draw(ctx) then rescan(true) end
 
     -- Probe taps: the heartbeat that keeps them measuring, and one
@@ -2232,5 +2573,11 @@ function safe_frame()
   if fh then fh:write(os.date("%Y-%m-%d %H:%M:%S"), report); fh:close() end
 end
 
-reaper.atexit(function() M.save(); SC.save() end)
+reaper.atexit(function()
+  M.save(); SC.save()
+  reaper.DeleteExtState(C.EXT_SECT, ALIVE, false)
+  show_toggle_state(false)      -- no window, no mixer showing
+end)
+reaper.DeleteExtState(C.EXT_SECT, TOGGLE_REQ, false)   -- one left from a window since closed
+show_toggle_state(C.MIXER_VIEW)
 reaper.defer(safe_frame)

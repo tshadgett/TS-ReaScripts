@@ -24,6 +24,7 @@
 local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
 local M = require("TS_CV_Mappings")
+local CP = require("TS_CV_ColourPick")
 local TP = require("TS_CV_Taps")
 local RQ = require("TS_CV_ReaEQ")
 
@@ -60,6 +61,44 @@ function E.attach(imgui) ImGui = imgui end
 
 -- A "Brushed" tick beside a background or section combo: Brush<n> on the
 -- control, cleared when it matches what the faceplate does anyway.
+-- The colours of your own a Background or Section combo offers after the
+-- faceplates: the one it has now, the recent ones (TS_CV_ColourPick), and
+-- "Custom colour..." -- key "+" -- which opens the picker.
+local function custom_choices(names, keys, prefix, now)
+  local seen = {}
+  local function add(k)
+    if k and not seen[k] then
+      seen[k] = true
+      names[#names + 1] = prefix .. C.plate_of(k).label; keys[#keys + 1] = k
+    end
+  end
+  add(C.custom_key(now))
+  for _, rgb in ipairs(CP.recent) do add(("#%06x"):format(rgb)) end
+  names[#names + 1] = "Custom colour\u{2026}"; keys[#keys + 1] = "+"
+end
+
+-- Opens the picker for control c's background (field "back") or its
+-- section (a divider's style/cap), showing each colour on the panel as
+-- it's chosen and putting back what was there on Cancel.
+local function pick_custom(c, what)
+  local function hex(rgb) return ("#%06x"):format(rgb) end
+  if what == "back" then
+    local before = c.back
+    local pl = C.plate_of(before)
+    CP.open({ title = "Background colour", rgb = C.custom_rgb(before) or (pl and pl.bg >> 8),
+      preview = function(rgb) c.back = hex(rgb) end,
+      apply   = function(rgb) c.back = hex(rgb) end,
+      cancel  = function() c.back = before end })
+  else
+    local bs, bc = c.style, c.cap
+    local pl = (bs == "plate") and C.plate_of(bc) or nil
+    CP.open({ title = "Section colour", rgb = (pl and C.custom_rgb(bc)) or (pl and pl.bg >> 8),
+      preview = function(rgb) c.style, c.cap = "plate", hex(rgb) end,
+      apply   = function(rgb) c.style, c.cap = "plate", hex(rgb) end,
+      cancel  = function() c.style, c.cap = bs, bc end })
+  end
+end
+
 local function brush_box(ctx, c, kind, pl, id)
   if not kind then return end
   ImGui.SameLine(ctx)
@@ -69,7 +108,13 @@ local function brush_box(ctx, c, kind, pl, id)
     if v == M.part_brushed(kind, pl, nil) then c.brush = nil else c.brush = v end
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "A fine brushed grain across it (needs Faceplate texture on).")
+    ImGui.SetTooltip(ctx, "A fine brushed grain across it.")
+  end
+  ImGui.SameLine(ctx)
+  local mch, mv = ImGui.Checkbox(ctx, "Metallic##" .. id, M.part_metal(kind, c.metal))
+  if mch then c.metal = mv or nil end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "A fine metallic flake across it, like metallic paint.")
   end
 end
 
@@ -406,27 +451,28 @@ local function draw_entry_editor(ctx)
   if tch then c.type = TYPES[ti + 1] or "knob" end
 
   if c.type == "divider" then
-    -- EXPERIMENTAL: what this divider does to the section after it
+    -- what this divider does to the section after it
     local names, keys = { "No section style", "Inset" }, { "", "inset" }
-    local cur_s = 0
-    if c.style == "inset" then cur_s = 1 end
     for _, pl in ipairs(C.PLATES) do
-      if pl.bg then
-        names[#names + 1] = "Plate: " .. pl.label; keys[#keys + 1] = pl.key
-        if c.style == "plate" and c.cap == pl.key then cur_s = #keys - 1 end
-      end
+      if pl.bg then names[#names + 1] = "Plate: " .. pl.label; keys[#keys + 1] = pl.key end
+    end
+    custom_choices(names, keys, "Plate: ", (c.style == "plate") and c.cap or nil)
+    local cur_s = 0
+    for i, k in ipairs(keys) do
+      if (k == "inset" and c.style == "inset") or (c.style == "plate" and k == c.cap) then cur_s = i - 1 end
     end
     ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, 150)
     local sch, si = ImGui.Combo(ctx, "Section", cur_s, table.concat(names, "\0") .. "\0")
     if sch then
       local k = keys[si + 1]
-      if k == "" then c.style, c.cap, c.brush = nil, nil, nil
+      if k == "" then c.style, c.cap, c.brush, c.metal = nil, nil, nil, nil
       elseif k == "inset" then c.style, c.cap = "inset", nil
+      elseif k == "+" then pick_custom(c, "section")
       else c.style, c.cap = "plate", k end
     end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Experimental: an inset, or a faceplate of their own, behind the\n" ..
+      ImGui.SetTooltip(ctx, "An inset, or a faceplate of their own, behind the\n" ..
         "controls after this divider, up to the next one.")
     end
     local spl = (c.style == "plate") and C.plate_of(c.cap) or nil
@@ -445,20 +491,22 @@ local function draw_entry_editor(ctx)
   -- its own background (an inset or a faceplate), joined with neighbours'
   if c.type ~= "divider" then
     local names, keys = { "No background", "Inset" }, { "", "inset" }
-    local cur_b = (c.back == "inset") and 1 or 0
     for _, pl in ipairs(C.PLATES) do
-      if pl.bg then
-        names[#names + 1] = "Back: " .. pl.label; keys[#keys + 1] = pl.key
-        if c.back == pl.key then cur_b = #keys - 1 end
-      end
+      if pl.bg then names[#names + 1] = "Back: " .. pl.label; keys[#keys + 1] = pl.key end
     end
+    custom_choices(names, keys, "Back: ", c.back)
+    local cur_b = 0
+    for i, k in ipairs(keys) do if k ~= "" and k == c.back then cur_b = i - 1 end end
     ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, 130)
     local bch, bi = ImGui.Combo(ctx, "Background", cur_b, table.concat(names, "\0") .. "\0")
     if bch then
       local k = keys[bi + 1]
-      c.back = (k ~= "") and k or nil
-      if not c.back then c.brush = nil end
+      if k == "+" then pick_custom(c, "back")
+      else
+        c.back = (k ~= "") and k or nil
+        if not c.back then c.brush, c.metal = nil, nil end
+      end
     end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "This control's own background. Neighbours with the same one\n" ..
@@ -522,6 +570,27 @@ local function draw_entry_editor(ctx)
         "Small: half height, a small dial under its name in small type --\n" ..
         "its value moves to the tooltip, and two stack in one ordinary cell.\n" ..
         "Large: half again as big, name and value kept.")
+    end
+    -- numbers round the dial (Scale<n>)
+    ImGui.SameLine(ctx)
+    -- values unless the knob says otherwise (no Scale line is values)
+    local kind = M.scale_kind(c)
+    local snow = (kind == "values") and 1 or (kind == "ten") and 2 or 0
+    ImGui.SetNextItemWidth(ctx, 80)
+    local scch, sci = ImGui.Combo(ctx, "Scale", snow, "None\0Values\0" .. "0\u{2013}10\0")
+    if scch then
+      c.scale = (sci == 0) and "none" or (sci == 2) and "ten" or nil
+      if c.scale == "none" then c.scale_ink = nil end
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Numbers round the dial: the plugin's own values (units left\n" ..
+        "off, thousands as k), or 0 to 10. A medium knob with numbers\n" ..
+        "shows its value in the tooltip; a small one has no room for them.")
+    end
+    if M.scale_kind(c) then
+      ImGui.SameLine(ctx)
+      local ich, iv = ImGui.Checkbox(ctx, "In cap colour", c.scale_ink == "cap")
+      if ich then c.scale_ink = iv and "cap" or nil end
     end
   end
 

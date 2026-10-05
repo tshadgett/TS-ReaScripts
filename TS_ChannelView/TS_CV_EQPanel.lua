@@ -622,7 +622,7 @@ function EQP.draw(ctx, dl, x, y, w, h, track, fx, req)
         end
         ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeAll)
       elseif hovered then
-        local wheel = ImGui.GetMouseWheel(ctx)
+        local wheel = W.control_wheel(ctx)
         if wheel ~= 0 and b.q then
           local mods = ImGui.GetKeyMods(ctx)
           local mult = (mods & ImGui.Mod_Shift) ~= 0 and C.FINE_MULT or 1.0

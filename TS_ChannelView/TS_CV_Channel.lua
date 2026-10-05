@@ -330,7 +330,7 @@ local function mini_pan(ctx, dl, idp, x, y0, y1, w, track)
     end
     ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
   elseif hovered then
-    local wheel = ImGui.GetMouseWheel(ctx)
+    local wheel = W.control_wheel(ctx)
     if wheel ~= 0 then nv = pan + wheel * 0.02; W.take_wheel() end
   end
   local txt = (math.abs(pan) < 0.005) and "C"

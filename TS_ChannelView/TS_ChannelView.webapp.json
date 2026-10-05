@@ -1,0 +1,16 @@
+{
+  "name": "ChannelView",
+  "short_name": "ChannelView",
+  "description": "ChannelView for REAPER, on a tablet beside the desk",
+  "start_url": "TS_ChannelView.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "background_color": "#15171a",
+  "theme_color": "#15171a",
+  "icons": [
+    { "src": "TS_ChannelView-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "TS_ChannelView-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "TS_ChannelView-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

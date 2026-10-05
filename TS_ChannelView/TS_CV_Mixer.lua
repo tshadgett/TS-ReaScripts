@@ -514,9 +514,11 @@ local function column(ctx, t, avail_h, cur_track)
     -- or a fader under the pointer swallows the click and the selection
     -- stays as it was. Everything that is NOT a control -- the header,
     -- the meter, the space around things -- falls through to here.
+    -- (at least a pixel high: a window docked shorter than the name row
+    -- leaves the strip itself no height at all)
     ImGui.SetCursorScreenPos(ctx, x, y)
     W.allow_overlap(ctx)
-    ImGui.InvisibleButton(ctx, "mxbg" .. t.guid, ww, strip_h)
+    ImGui.InvisibleButton(ctx, "mxbg" .. t.guid, math.max(1, ww), math.max(1, strip_h))
     local mods = ImGui.GetKeyMods(ctx)
     if ImGui.IsItemHovered(ctx) then
       if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then

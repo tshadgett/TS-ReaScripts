@@ -27,27 +27,27 @@ local CN = require("TS_CV_Chains")
 local IC = require("TS_CV_Icons")
 local LN = require("TS_CV_Lanes")
 local AC = require("TS_CV_Actions")
+local CP = require("TS_CV_ColourPick")
 
 local TM = {}
 local ImGui
 
 -- The chains menu items are drawn from inside these menus, so Chains is
 -- attached along with them -- the TCP window uses these menus too.
-function TM.attach(imgui) ImGui = imgui; CN.attach(imgui) end
+function TM.attach(imgui) ImGui = imgui; CN.attach(imgui); CP.attach(imgui) end
 
 local CTX_ID    = "tm_ctx"
 local RENAME_ID = "tm_rename"
 local INSERT_ID = "tm_insert"
 local COLOUR_ID = "Track colour###tm_colour"
 
-local SWATCH    = 20     -- palette swatch size
 local SWATCH_W  = 12     -- template colour chip in the insert menu
 local CHIP_LEFT = 4
 
 local st = {
   ctx_req    = nil,  ctx_track  = nil, ctx_tree = nil, ctx_chains = nil,
   ren_req    = false, ren_track = nil, ren_buf = "", ren_focus = false,
-  col_req    = false, col_tracks = nil, col_rgb = 0x808080, col_pals = nil, col_pal = 1,
+  col_req    = false, col_tracks = nil, col_rgb = 0x808080, col = nil,
   ins_req    = false, ins_anchor = nil, ins_tree = nil,
 }
 
@@ -291,25 +291,6 @@ end
 
 local function rgba(r, g, b) return (r << 24) | (g << 16) | (b << 8) | 0xff end
 
-local PAL_KEY  = "colour_palette"      -- ExtState: the palette last chosen here
-local PAL_COLS = 8                      -- swatches to a row
-local PAL_ROWS = 6                      -- rows shown before the swatches scroll
-
--- Which palette to open on: the one last chosen here, else the one
--- REAPER's picker last showed, else the first with any colours in it.
-local function pick_palette(pals)
-  local function find(name)
-    if not name or name == "" then return nil end
-    for i, p in ipairs(pals) do
-      if p.name == name and #p.colours > 0 then return i end
-    end
-  end
-  local i = find(reaper.GetExtState("TS_ChannelView", PAL_KEY)) or find(TO.picker_palette())
-  if i then return i end
-  for k, p in ipairs(pals) do if #p.colours > 0 then return k end end
-  return 1
-end
-
 -- REAPER's own picker on these tracks, for its built-in palettes. It
 -- works on the selected tracks, so these become the selection.
 local function open_reaper_picker(tracks)
@@ -320,24 +301,31 @@ local function open_reaper_picker(tracks)
   return AC.run("Track: Set to custom color...", 40357)
 end
 
+-- The palettes, the picker and its eyedropper are TS_CV_ColourPick's,
+-- shared with the faceplate colour dialog.
 local function colour_dialog(ctx)
   if st.col_req then
     st.col_req = false
-    st.col_pals = TO.palettes()           -- re-read each time it opens
-    st.col_pal  = pick_palette(st.col_pals)
+    st.col = CP.new_state(st.col_rgb)
     ImGui.OpenPopup(ctx, COLOUR_ID)
   end
 
   local visible, open = ImGui.BeginPopupModal(ctx, COLOUR_ID, true,
     ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoCollapse)
-  if not visible then return false end
+  if not visible then
+    if st.col then CP.release(st.col); st.col = nil end
+    return false
+  end
+  st.col = st.col or CP.new_state(st.col_rgb)
+  local s = st.col
 
-  local changed = false
+  local changed, close = false, false
   local tracks = {}
   for _, tr in ipairs(st.col_tracks or {}) do
     if valid(tr) then tracks[#tracks + 1] = tr end
   end
   if #tracks == 0 then
+    CP.release(s)
     ImGui.CloseCurrentPopup(ctx)
     ImGui.EndPopup(ctx)
     return false
@@ -348,78 +336,53 @@ local function colour_dialog(ctx)
 
   -- A palette, any of REAPER's (built-in, user, the project's colours) or
   -- the old custom colours; one click on a swatch applies and closes.
-  local pals = st.col_pals or {}
-  local width = PAL_COLS * (SWATCH + 4) + 60
   ImGui.SeparatorText(ctx, "Palette")
-  local cur = pals[st.col_pal]
-  ImGui.SetNextItemWidth(ctx, width)
-  if ImGui.BeginCombo(ctx, "##tmpal", cur and cur.name or "") then
-    for i, p in ipairs(pals) do
-      local label = ("%s  (%d)##pal%d"):format(p.name, #p.colours, i)
-      if ImGui.Selectable(ctx, label, i == st.col_pal) then
-        st.col_pal = i
-        reaper.SetExtState("TS_ChannelView", PAL_KEY, p.name, true)
-      end
-    end
-    ImGui.EndCombo(ctx)
+  local p = CP.palette(ctx, s, "tm")
+  if p then
+    TO.set_colour(tracks, p)
+    changed, close = true, true
   end
-  cur = pals[st.col_pal]
-  local sw = cur and cur.colours or {}
-  if #sw == 0 then
-    ImGui.TextDisabled(ctx, (cur and cur.name == TO.PROJECT_PALETTE)
-      and "No colours used in this project yet." or "This palette is empty.")
-  else
-    local rows = math.ceil(#sw / PAL_COLS)
-    local h = math.min(rows, PAL_ROWS) * (SWATCH + 4)
-    if ImGui.BeginChild(ctx, "##tmsw", width, h, 0) then
-      for i, c in ipairs(sw) do
-        if (i - 1) % PAL_COLS ~= 0 then ImGui.SameLine(ctx, 0, 4) end
-        if ImGui.ColorButton(ctx, "Colour " .. i .. "##tmsw" .. i,
-            rgba(c[1], c[2], c[3]), ImGui.ColorEditFlags_NoTooltip, SWATCH, SWATCH) then
-          TO.set_colour(tracks, (c[1] << 16) | (c[2] << 8) | c[3])
-          changed = true
-          ImGui.CloseCurrentPopup(ctx)
-        end
-        tip_if_hovered(ctx, ("%s %d  #%02X%02X%02X"):format(cur.name, i, c[1], c[2], c[3]))
-      end
-      ImGui.EndChild(ctx)
-    end
-  end
-  if ImGui.Button(ctx, "REAPER's colour picker\u{2026}") then
+  if not close and ImGui.Button(ctx, "REAPER's colour picker\u{2026}") then
     open_reaper_picker(tracks)
-    changed = true
-    ImGui.CloseCurrentPopup(ctx)
+    changed, close = true, true
   end
   tip_if_hovered(ctx, "REAPER's own picker, with live preview and palette editing.\n" ..
                       "It colours the selected tracks, so these tracks become the selection.")
 
-  -- Anything else: pick, then Apply.
+  -- Anything else -- or anything on screen, with the eyedropper: pick,
+  -- then Apply.
   ImGui.SeparatorText(ctx, "Any colour")
-  ImGui.SetNextItemWidth(ctx, width)
-  local pch, rgb = ImGui.ColorPicker3(ctx, "##tmpick", st.col_rgb,
-    ImGui.ColorEditFlags_DisplayRGB | ImGui.ColorEditFlags_DisplayHex)
-  if pch then st.col_rgb = rgb end
+  CP.any_colour(ctx, s, "tm")
 
   ImGui.Spacing(ctx)
-  if ImGui.Button(ctx, "Apply") then
-    TO.set_colour(tracks, st.col_rgb)
-    changed = true
-    ImGui.CloseCurrentPopup(ctx)
-  end
-  ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Remove colour") then
-    TO.set_colour(tracks, nil)
-    changed = true
-    ImGui.CloseCurrentPopup(ctx)
-  end
-  tip_if_hovered(ctx, "Back to the theme's default track colour.")
-  ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Cancel") or ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
-    ImGui.CloseCurrentPopup(ctx)
+  if not close then
+    if ImGui.Button(ctx, "Apply") then
+      TO.set_colour(tracks, s.rgb)
+      changed, close = true, true
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Remove colour") then
+      TO.set_colour(tracks, nil)
+      changed, close = true, true
+    end
+    tip_if_hovered(ctx, "Back to the theme's default track colour.")
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Cancel")
+       or (not CP.dropping() and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape)) then
+      close = true
+    end
   end
 
+  if close then
+    CP.release(s)
+    st.col = nil
+    ImGui.CloseCurrentPopup(ctx)
+  end
   ImGui.EndPopup(ctx)
-  if not open then st.col_tracks = nil end
+  if not open then
+    CP.release(s)
+    st.col, st.col_tracks = nil, nil
+  end
   return changed
 end
 

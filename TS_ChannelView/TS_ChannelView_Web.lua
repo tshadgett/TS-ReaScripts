@@ -233,8 +233,19 @@ end
 
 local function cap_hex(key)
   local cp = key and C.CAP[key]
-  if not cp then return nil end
+  if not cp then
+    local rgb = C.custom_rgb(key)              -- a colour of your own
+    return rgb and hex((rgb << 8) | 0xff) or nil
+  end
   return hex(cp.col or C.COL.knob_fill)
+end
+
+-- a toggle's or button row's lit colour, by name or custom; nil = theme's
+local function lit_hex(key)
+  local t = key and C.TOGGLE_COL[key]
+  if t then return hex(t.col) end
+  local rgb = C.custom_rgb(key)
+  return rgb and hex((rgb << 8) | 0xff) or nil
 end
 
 local function plate_json(layout)
@@ -242,6 +253,7 @@ local function plate_json(layout)
   if not pl then return nil end
   return { bg = hex(pl.bg), head = hex(pl.head), text = hex(pl.text), dim = hex(pl.dim),
            tick = hex(pl.tick), border = hex(pl.border), brushed = M.brushed(layout, pl) or nil,
+           metal = M.metal(layout, pl) or nil,
            sheen = pl.sheen or 1 }
 end
 
@@ -252,6 +264,8 @@ local function presets_json(fx)
   return { u = arr({ table.unpack(info.user) }), f = arr({ table.unpack(info.factory) }),
            d = info.default, s = info.can_save or nil, df = (info.can_save and info.can_default) or nil }
 end
+
+local scale_labels_cache = {}
 
 local function panel_of(fx, i)
   local key = U.plugin_key(fx.name)
@@ -273,25 +287,55 @@ local function panel_of(fx, i)
       if o.t == "toggle" and ctl.size == "small" then o.sz = "small" end
       if o.t == "toggle" then
         o.cap = nil
-        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
-        o.lit = lit and hex(lit.col) or nil
+        o.lit = lit_hex(ctl.cap)
       end
       if o.t == "combo" or o.t == "stepped" then o.ch, o.cn = choices(fx, key, ctl.param) end
+      -- a numbered scale round the dial: where the numbers go, what they
+      -- say (read from the plugin, a reversed control from the other end)
+      -- and, when asked for, the knob's colour to print them in
+      local kind = M.scale_kind(ctl)
+      if (o.t == "knob" or o.t == "stepped") and kind and ctl.size ~= "small" then
+        local n = (o.t == "stepped" and type(o.cn) == "table") and #o.cn or nil
+        local marks = U.scale_marks(kind, ctl.size, n)
+        -- what the plugin calls each mark, kept a few seconds (the layout
+        -- is rebuilt twice a second, and every knob has a scale now)
+        local ck = table.concat({ fx.guid or "", ctl.param, kind, ctl.size or "", o.inv and "r" or "", n or "" }, "|")
+        local hit = scale_labels_cache[ck]
+        local labels
+        if hit and reaper.time_precise() < hit.until_t then labels = hit.labels
+        else
+          local at = {}
+          for k, m in ipairs(marks) do at[k] = o.inv and (1 - m) or m end
+          labels = U.scale_labels(track, fx.addr, ctl.param, kind, at)
+          scale_labels_cache[ck] = { labels = labels, until_t = reaper.time_precise() + 2.5 + math.random() }
+        end
+        local ink
+        if ctl.scale_ink == "cap" then
+          local style = C.KNOB_STYLE_ALIAS[ctl.style] or ctl.style
+          local def = C.KNOB_STYLE[style or "arc"] or C.KNOB_STYLE.arc
+          ink = cap_hex(ctl.cap) or cap_hex(def.cap)
+        end
+        local mr = arr()
+        for k, m in ipairs(marks) do mr[k] = round(m) end
+        o.sc = { m = mr, l = arr({ table.unpack(labels) }), ink = ink }
+      end
       if o.t == "combo" and ctl.buttons and ctl.nbtn then
         o.btn, o.nb = ctl.buttons, ctl.nbtn
-        local lit = ctl.cap and C.TOGGLE_COL[ctl.cap]
-        o.lit, o.cap = lit and hex(lit.col) or nil, nil
+        o.lit, o.cap = lit_hex(ctl.cap), nil
       end
     elseif o.t == "divider" then
       o.nr = ctl.no_rule or nil
-      -- EXPERIMENTAL: the section after it, inset or on its own plate
+      -- the section after it, inset or on its own plate
       if ctl.style == "inset" then o.sec = "inset"
       elseif ctl.style == "plate" and C.plate_of(ctl.cap) then
         local pl = C.plate_of(ctl.cap)
         o.sec = "plate"
         o.sp = { bg = hex(pl.bg), border = hex(pl.border), text = hex(pl.text), dim = hex(pl.dim), tick = hex(pl.tick) }
       end
-      if o.sec then o.sb = M.part_brushed(o.sec, C.plate_of(ctl.cap), ctl.brush) or nil end
+      if o.sec then
+        o.sb = M.part_brushed(o.sec, C.plate_of(ctl.cap), ctl.brush) or nil
+        o.sm = M.part_metal(o.sec, ctl.metal) or nil
+      end
     elseif o.t ~= "blank" and o.t ~= "half_gap" then
       o.t = "missing"
     end
@@ -305,6 +349,7 @@ local function panel_of(fx, i)
       end
       if o.bk then
         o.bb = M.part_brushed(o.bk == "inset" and "inset" or "plate", C.plate_of(ctl.back), ctl.brush) or nil
+        o.bm = M.part_metal(o.bk, ctl.metal) or nil
       end
     end
     ctls[#ctls + 1] = o
@@ -544,7 +589,7 @@ local function build_layout()
     recv = sends_layout(-1),
     pal = palette(),
     fmt = format_cols(),
-    tex = C.PLATE_TEXTURE,
+    tex = C.EFFECT_3D,          -- the 3D effect: the plates' light, edges and shadows
     sr = (function() local r = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
                      return (r and r > 0) and r or 48000 end)(),
     eqr = { lo = C.EQ_FREQ_LO, hi = C.EQ_FREQ_HI, g = C.EQ_GAIN_RANGE },
@@ -1358,7 +1403,7 @@ local function cycle()
     end
     local h, t = pal_get()
     if C.apply_colour(h or C.BASE_HUE, t or C.TINT) then layout_dirty = true end
-    C.PLATE_TEXTURE = reaper.GetExtState("TS_ChannelView", "plate_texture") ~= "0"
+    C.EFFECT_3D = reaper.GetExtState("TS_ChannelView", "plate_texture") ~= "0"
     C.PRESET_BAR = reaper.GetExtState("TS_ChannelView", "preset_bar") ~= "0"
     local sv = reaper.GetExtState("TS_ChannelView", "show_values")
     C.SHOW_VALUES = (sv == "") or (sv == "1")

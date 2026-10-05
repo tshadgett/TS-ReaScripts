@@ -123,6 +123,8 @@ C.DRAG_SENS       = 0.006 -- normalised units per pixel of vertical drag
 C.FINE_MULT       = 0.15  -- multiplier while Shift is held
 C.WHEEL_STEP      = 0.02  -- normalised units per mouse-wheel notch
 C.SHOW_VALUES     = true  -- value text under each knob (else hover only)
+C.WHEEL_CONTROLS  = true  -- the mouse wheel turns the control under it (View menu;
+                          -- off, it only ever scrolls)
 C.AUTO_DEFAULT_N  = 8     -- controls auto-shown for an unmapped plugin
 C.HIDE_BUILTIN    = true  -- hide REAPER's trailing Wet/Bypass/Delta params
                           -- from the auto-default (still assignable by hand)
@@ -496,6 +498,7 @@ C.TCP_INDENT_FOLDERS = true  -- indent at all (settings menu)
 C.TCP_PAD        = 4      -- inner padding of a row
 C.TCP_METER_H    = 12     -- the horizontal meter under the name
 C.TCP_METER_THIN = 4      -- ...and the line it shrinks to on short rows
+C.TCP_PDC        = false  -- the track's plugin delay under its meter (settings menu)
 C.TCP_ICON_MAX   = 40     -- the track icon's box is never bigger than this
 C.TCP_LANES      = true   -- fixed item lane controls (settings menu)
 C.TCP_LANE_W     = 18     -- their column (one button), reserved on every row while any
@@ -755,12 +758,20 @@ C.build_palette()
 -- faceplate carries its own inks (text, dim, tick) so the labels and
 -- scales on it stay readable, light on dark and dark on light.
 --
--- PLATE_TEXTURE gives the faceplates a gentle top-lit gradient, and
--- aluminium a fine brushed grain. A plate's `sheen` scales its gradient
--- (1 when absent): near-black shows a lift toward white far more than a
--- mid colour does, so Charcoal takes much less of one. Theme stays flat either way, so it still
--- matches the rest of REAPER.
-C.PLATE_TEXTURE = true
+-- EFFECT_3D (View > 3D effect) is the light falling on the panels from the
+-- top left: a gentle top-lit gradient on the faceplates, the panels' edges
+-- catching it, and knobs and buttons casting soft shadows. A plate's
+-- `sheen` scales its gradient (1 when absent): near-black shows a lift
+-- toward white far more than a mid colour does, so Charcoal takes much
+-- less of one. Theme stays flat either way, so it still matches the rest
+-- of REAPER.
+--
+-- The surface itself -- brushed, metallic, both or neither -- belongs to
+-- each faceplate, background and section (Brush / Metal in the layout),
+-- not to this. METAL_K is the metallic flake's strength (the one Tim
+-- settled on with the web page's version), and the shadows' too.
+C.EFFECT_3D = true
+C.METAL_K = 0.8
 
 C.PLATES = {
   { key = "theme",     label = "Theme" },
@@ -797,6 +808,10 @@ C.PLATES = {
   { key = "oxblood",   label = "Oxblood",
     bg = 0x4a2428ff, head = 0x3a1c1fff, text = 0xf2e7e5ff, dim = 0xc8adabff,
     tick = 0xbd9f9dff, border = 0x5b2f34ff },
+  -- a champagne gold (made for the metallic finish)
+  { key = "gold",      label = "Gold",
+    bg = 0xb8995eff, head = 0xa78b56ff, text = 0x1a150dff, dim = 0x423722ff,
+    tick = 0x372e1cff, border = 0xa08552ff },
 }
 
 -- Cap colours. "accent" has no colour of its own: it is the theme's accent,
@@ -813,6 +828,9 @@ C.CAPS = {
   { key = "silver", label = "Silver", col = 0xc9ccd0ff },
   { key = "stone",  label = "Stone",  col = 0xb3a896ff },
   { key = "black",  label = "Black",  col = 0x26282bff },
+  { key = "white",  label = "White",  col = 0xeeece6ff },
+  { key = "brown",  label = "Brown",  col = 0x6b4a32ff },
+  { key = "gold",   label = "Gold",   col = 0xc9a24aff },
 }
 
 -- What a toggle lights up in when it's on, chosen from its right-click
@@ -845,7 +863,21 @@ C.KNOB_STYLES = {
   { key = "bezel",   label = "Bezel",    cap = "black" },
   { key = "rbezel",  label = "Reverse bezel", cap = "silver" },
   { key = "hifi",    label = "Hi-fi",    cap = "silver" },
+  -- a ring of dots round a small knob, lit up to the value (from the
+  -- centre when the control is centred); the colour is the dots'
+  { key = "led",     label = "LED ring", cap = "accent" },
 }
+-- Toggles' and button rows' faces (TS_CV_Widgets.button_face); the first,
+-- flat, is the default and what a button with no style saved is drawn as.
+C.BUTTON_STYLES = {
+  { key = "flat",    label = "Flat" },
+  { key = "lens",    label = "Lit lens" },
+  { key = "window",  label = "LED window" },
+  { key = "backlit", label = "Backlit" },
+}
+C.BUTTON_STYLE = {}
+for _, b in ipairs(C.BUTTON_STYLES) do C.BUTTON_STYLE[b.key] = b end
+
 C.FADER_STYLES = {
   { key = "flat",    label = "Flat" },
   { key = "console", label = "Console",  cap = "cream" },
@@ -859,12 +891,74 @@ for _, p in ipairs(C.KNOB_STYLES)  do C.KNOB_STYLE[p.key] = p end
 C.KNOB_STYLE_ALIAS = { api = "nose" }   -- Round nose's name for a few days before 1.7.5
 for _, p in ipairs(C.FADER_STYLES) do C.FADER_STYLE[p.key] = p end
 
--- A faceplate by key, or nil for the theme's own (or anything unknown).
-function C.plate_of(key)
-  local p = key and C.PLATE[key]
-  if p and p.bg then return p end
-  return nil
+-- A faceplate by key, or nil for the theme's own (or anything unknown --
+-- including a faceplate that has since been taken out of the list, which
+-- leaves the layout on the theme's).
+--
+-- Besides the list, any colour at all: a key "#rrggbb" is a CUSTOM
+-- faceplate in that colour (chosen with the [+] after the swatches, see
+-- TS_CV_ColourPick), with inks worked out from it the same way the list's
+-- were tuned by hand -- dark on a light colour, light on a dark one, the
+-- header a shade darker and the edge a shade off the face.
+local custom = {}
+
+local function mix(c, to, t)
+  local out = 0
+  for _, sh in ipairs({ 24, 16, 8 }) do
+    local x, y = (c >> sh) & 0xff, (to >> sh) & 0xff
+    out = out | (math.floor(x + (y - x) * t + 0.5) << sh)
+  end
+  return out | 0xff
 end
 
+-- "#rrggbb" (any case, with or without the #) -> "#rrggbb", or nil.
+function C.custom_key(key)
+  if type(key) ~= "string" then return nil end
+  local h = key:match("^%s*#?(%x%x%x%x%x%x)%s*$")
+  return h and ("#" .. h:lower()) or nil
+end
+
+-- The 0xRRGGBB a custom key stands for, or nil.
+function C.custom_rgb(key)
+  local k = C.custom_key(key)
+  return k and tonumber(k:sub(2), 16) or nil
+end
+
+local function custom_plate(key)
+  local p = custom[key]
+  if p then return p end
+  local rgb = tonumber(key:sub(2), 16)
+  local bg = (rgb << 8) | 0xff
+  local r, g, b = (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff
+  local lum = 0.299 * r + 0.587 * g + 0.114 * b
+  local K, Wt = 0x000000ff, 0xffffffff
+  if lum > 140 then
+    p = { head = mix(bg, K, 0.09), border = mix(bg, K, 0.13), text = mix(bg, K, 0.86),
+          dim = mix(bg, K, 0.62), tick = mix(bg, K, 0.68) }
+  else
+    p = { head = mix(bg, K, 0.18), border = mix(bg, Wt, 0.10), text = mix(bg, Wt, 0.92),
+          dim = mix(bg, Wt, 0.75), tick = mix(bg, Wt, 0.70) }
+  end
+  p.key, p.bg, p.custom = key, bg, true
+  p.label = key:upper()
+  -- near-black shows the 3D effect's lift far more, as Charcoal does
+  if lum < 45 then p.sheen = 0.3 end
+  custom[key] = p
+  return p
+end
+
+function C.plate_of(key)
+  if not key then return nil end
+  local p = C.PLATE[key]
+  if p then return p.bg and p or nil end
+  local ck = C.custom_key(key)
+  return ck and custom_plate(ck) or nil
+end
+
+-- A faceplate's key as saved (a custom colour in lower case), or nil.
+function C.plate_key(key)
+  local p = C.plate_of(key)
+  return p and p.key or nil
+end
 
 return C

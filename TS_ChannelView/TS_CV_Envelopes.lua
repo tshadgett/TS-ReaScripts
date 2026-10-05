@@ -800,7 +800,7 @@ function EN.draw_lane(ctx, dl, track, L, x0, y, x1, h, base, id)
         val.set(v)
         st.bar_edit = true
       elseif bh_ then
-        local wh = ImGui.GetMouseWheel(ctx)
+        local wh = W.control_wheel(ctx)
         if wh ~= 0 then
           local mods = ImGui.GetKeyMods(ctx)
           local step = 0.01 * (((mods & ImGui.Mod_Shift) ~= 0) and C.FINE_MULT or 1)

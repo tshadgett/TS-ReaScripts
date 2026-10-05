@@ -81,6 +81,20 @@ if not ok_imgui then
   return
 end
 
+-- ImGui asserts on an invisible button of zero width or height, and
+-- stops the script. A window docked very short (or very narrow) leaves
+-- some of them -- a mixer strip's background, a row's -- with no room at
+-- all, so a zero is made the smallest size there is instead: that one
+-- pixel can't be seen or clicked, but nothing stops.
+do
+  local invisible = ImGui.InvisibleButton
+  ImGui.InvisibleButton = function(ctx, id, w, h, ...)
+    if w == 0 then w = 1 end
+    if h == 0 then h = 1 end
+    return invisible(ctx, id, w, h, ...)
+  end
+end
+
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
@@ -160,10 +174,12 @@ C.build_palette()
 -- ChannelView's own keys: one setting, both windows follow it.
 C.TCP_ICONS       = cv_get("track_icons", "0") == "1"
 C.SHOW_VALUES     = cv_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
+C.WHEEL_CONTROLS  = cv_get("wheel_controls", "1") == "1"
 C.set_cell_w(cv_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.TCP_INDENT_FOLDERS = ext_get("indent", C.TCP_INDENT_FOLDERS and "1" or "0") == "1"
 C.TCP_LANES       = ext_get("lanes", C.TCP_LANES and "1" or "0") == "1"
 C.TCP_STATE_CHIPS = ext_get("chips", C.TCP_STATE_CHIPS and "1" or "0") == "1"
+C.TCP_PDC         = ext_get("pdc", C.TCP_PDC and "1" or "0") == "1"
 C.TCP_PANEL_H     = tonumber(ext_get("panel_h", C.TCP_PANEL_H)) or C.TCP_PANEL_H
 local dock_id     = tonumber(ext_get("dock", "0")) or 0
 
@@ -210,6 +226,7 @@ local function poll_shared(now)
   C.FOCUS_BACK = cv_get("focus_back", "1") == "1"
   C.TCP_ICONS   = cv_get("track_icons", "0") == "1"
   C.SHOW_VALUES = cv_get("show_values", "1") == "1"
+  C.WHEEL_CONTROLS = cv_get("wheel_controls", "1") == "1"
   C.set_cell_w(cv_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 end
 
@@ -309,6 +326,37 @@ local function fit(ctx, text, w)
     if tw <= w then return t, tw end
   end
   return "", 0
+end
+
+-- A track's plugin delay compensation: what its FX chain delays it by, in
+-- samples, as REAPER last measured it (the latency it actually applies,
+-- else what the plugins report). Read a few times a second, not every
+-- frame. 0 for a track with no plugins.
+local pdc_cache = {}
+local function track_pdc(tr, guid, now)
+  local c = pdc_cache[guid]
+  if c and now - c.t < 0.4 then return c.v end
+  local v = 0
+  if reaper.TrackFX_GetCount(tr) > 0 then
+    for _, k in ipairs({ "chain_pdc_actual", "chain_pdc_reporting" }) do
+      local ok, s = reaper.TrackFX_GetNamedConfigParm(tr, 0, k)
+      local n = ok and tonumber(s)
+      if n then v = math.max(0, math.floor(n + 0.5)) break end
+    end
+  end
+  pdc_cache[guid] = { t = now, v = v }
+  return v
+end
+
+-- The sample rate samples are counted at: the project's own when it sets
+-- one, else the audio device's.
+local function srate()
+  if reaper.GetSetProjectInfo(0, "PROJECT_SRATE_USE", 0, false) > 0 then
+    local sr = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
+    if sr and sr > 0 then return sr end
+  end
+  local ok, s = reaper.GetAudioDeviceInfo("SRATE")
+  return (ok and tonumber(s)) or 48000
 end
 
 local function draw_row(dl, e, x, w, now)
@@ -528,6 +576,22 @@ local function draw_row(dl, e, x, w, now)
       tip[i] = ((nch > 1) and ((i == 1) and "L " or "R ") or "") .. U.db_str(pk[i])
     end
     W.tip(ctx, "tcpmeter" .. e.guid, table.concat(tip, "\n"), over, false)
+  end
+
+  -- Its plugin delay, under the meter, when there's any and room for it
+  -- (the settings menu turns it on).
+  if C.TCP_PDC and meter_h == C.TCP_METER_H and not e.master then
+    local spl = track_pdc(tr, e.guid, now)
+    if spl > 0 then
+      W.push_small(ctx)
+      local text = ("PDC %d spl  %.1f ms"):format(spl, spl * 1000 / srate())
+      local _, sh = ImGui.CalcTextSize(ctx, text)
+      local py = meter_y + meter_h + 2
+      if py + sh <= y1 - 2 then
+        ImGui.DrawList_AddText(dl, cl, py, C.COL.header_dim, (fit(ctx, text, cr - cl)))
+      end
+      W.pop_small(ctx)
+    end
   end
 
   ImGui.DrawList_PopClipRect(dl)
@@ -841,6 +905,13 @@ local function settings_menu()
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx, "Only while on")
+  end
+  if ImGui.MenuItem(ctx, "Plugin delay (PDC) under meters", nil, C.TCP_PDC) then
+    C.TCP_PDC = not C.TCP_PDC
+    ext_set("pdc", C.TCP_PDC and "1" or "0")
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Samples and ms, on tracks with latency,\nwhen the row is tall enough")
   end
   ImGui.SetNextItemWidth(ctx, 150)
   local pch, pv = ImGui.SliderInt(ctx, "Channel panel height", math.floor(C.TCP_PANEL_H), 180, 700)
