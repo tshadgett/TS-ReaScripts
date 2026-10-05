@@ -481,6 +481,19 @@ the Arc knob, which is a printed scale).
 Like everything else on a panel, the look is saved with the plugin's layout,
 so every instance of that plugin wears it.
 
+**Track faders** — the Channel panel's, a mixer strip's, the TCP window's —
+have looks too: right-click the fader for its **Style** (Flat, Console,
+Rail) and **Colour** (the cap colours, [+] for any colour, recent colours).
+It acts on the selection when the track is part of it, as REAPER's menus
+do, and is saved with the track in the project. **Group looks** in the same
+menu give every **folder parent**, **VCA leader** and **FX return** (a
+track with receives that's neither a folder parent nor in a folder) a look
+of its own, and **Default** covers every other track — and whatever a
+group leaves unset — all kept with ChannelView for every project. A
+track's own choice wins, then its group's, then the Default, part by part,
+and *Reset to default* takes it back to its group's (or the Default).
+A VCA leader that's also a folder parent counts as a VCA leader.
+
 ## Controls
 
 | | |

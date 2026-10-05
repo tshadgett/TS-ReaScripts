@@ -3815,6 +3815,75 @@ do
   check("knob style: led", C.KNOB_STYLE.led and C.KNOB_STYLE.led.label, "LED ring")
 end
 
+-- A track's fader look: its own over its group's (folder parents, VCA
+-- leaders, FX returns), part by part
+do
+  local TO = require("TS_CV_TrackOps")
+  local saved = {}
+  for _, k in ipairs({ "GetSetMediaTrackInfo_String", "GetExtState", "SetExtState", "GetSetTrackGroupMembership",
+      "GetSetTrackGroupMembershipHigh", "GetTrackNumSends", "GetParentTrack", "GetMediaTrackInfo_Value",
+      "GetMasterTrack", "Undo_BeginBlock", "Undo_EndBlock", "time_precise" }) do saved[k] = reaper[k] end
+  local ext, pext = {}, {}
+  local tracks = {
+    vca = { depth = 1, vca = 1, recv = 0 }, parent = { depth = 1, recv = 2 }, child = { depth = 0, parent = "parent", recv = 1 },
+    ret = { depth = 0, recv = 3 }, plain = { depth = 0, recv = 0 } }
+  local clock = 100
+  reaper.time_precise = function() return clock end
+  reaper.GetMasterTrack = function() return "master" end
+  reaper.GetSetMediaTrackInfo_String = function(tr, k, v, set)
+    if set then pext[tr .. k] = v; return true, v end
+    return true, pext[tr .. k] or ""
+  end
+  reaper.GetExtState = function(sec, k) return ext[sec .. k] or "" end
+  reaper.SetExtState = function(sec, k, v) ext[sec .. k] = v end
+  reaper.GetSetTrackGroupMembership = function(tr, g) return (tracks[tr] and g == "VOLUME_VCA_LEAD" and tracks[tr].vca) or 0 end
+  reaper.GetSetTrackGroupMembershipHigh = function() return 0 end
+  reaper.GetTrackNumSends = function(tr, cat) return cat == -1 and tracks[tr].recv or 0 end
+  reaper.GetParentTrack = function(tr) return tracks[tr].parent end
+  reaper.GetMediaTrackInfo_Value = function(tr, k) if k == "I_FOLDERDEPTH" then return tracks[tr].depth end return 0 end
+  reaper.Undo_BeginBlock = function() end; reaper.Undo_EndBlock = function() end
+  TO.reload_fader_defaults()
+  check("fader group: VCA leader (also a parent)", TO.fader_category("vca"), "vca")
+  check("fader group: folder parent", TO.fader_category("parent"), "parent")
+  check("fader group: a child with receives isn't a return", TO.fader_category("child"), nil)
+  check("fader group: FX return", TO.fader_category("ret"), "fxret")
+  check("fader group: plain", TO.fader_category("plain"), nil)
+  check("fader group: master", TO.fader_category("master"), nil)
+  check("fader look: none", TO.effective_fader_look("ret"), nil)
+  TO.set_fader_default("fxret", "style", "console", true)
+  TO.set_fader_default("fxret", "cap", "#C9A24A", true)
+  clock = clock + 2
+  local l = TO.effective_fader_look("ret")
+  check("fader look: the group's", l and (l.style .. "|" .. l.cap), "console|#c9a24a")
+  TO.set_fader_part({ "ret" }, "cap", "red", true)
+  clock = clock + 2
+  l = TO.effective_fader_look("ret")
+  check("fader look: own colour on the group's style", l and (l.style .. "|" .. l.cap), "console|red")
+  TO.set_fader_part({ "ret" }, "style", "flat", true)
+  clock = clock + 2
+  l = TO.effective_fader_look("ret")
+  check("fader look: own flat wins", l and (l.style .. "|" .. l.cap), "flat|red")
+  check("fader look: saved with the track", TO.fader_raw("ret"), "flat|red")
+  TO.clear_fader_look({ "ret" })
+  clock = clock + 2
+  l = TO.effective_fader_look("ret")
+  check("fader look: reset goes back to the group's", l and (l.style .. "|" .. l.cap), "console|#c9a24a")
+  check("fader look: defaults kept", ext["TS_ChannelViewfader_defaults"], "fxret=console|#c9a24a")
+  TO.set_fader_default("default", "style", "rail", true)
+  clock = clock + 2
+  l = TO.effective_fader_look("plain")
+  check("fader look: no group takes the Default", l and l.style, "rail")
+  check("fader look: the master too", (TO.effective_fader_look("master") or {}).style, "rail")
+  TO.set_fader_default("fxret", "style", nil, true)
+  clock = clock + 2
+  l = TO.effective_fader_look("ret")
+  check("fader look: a group's unset part falls to the Default", l and (l.style .. "|" .. l.cap), "rail|#c9a24a")
+  TO.set_fader_default("fxret", "cap", nil, true); TO.set_fader_default("default", "style", nil, true)
+  check("fader look: group cleared", ext["TS_ChannelViewfader_defaults"], "")
+  for k, f in pairs(saved) do reaper[k] = f end
+  TO.reload_fader_defaults()
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

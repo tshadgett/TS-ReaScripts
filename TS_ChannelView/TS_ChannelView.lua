@@ -1,25 +1,16 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.8.5
+-- @version 1.8.6
 -- @changelog
---  Any colour for faceplates, backgrounds, sections, knob caps and button
---  lights: [+] Custom colour opens the colour picker, with recent colours.
---  The colour picker has an eyedropper that reads anywhere on screen
---  (needs js_ReaScriptAPI), in every colour dialog, track colours included.
---  Button faces for toggles and button rows: Lit lens, LED window, Backlit.
---  Knobs print their values round the dial by default (Style > Scale:
---  Values, 0-10 or None). LED ring knob style. Gold faceplate; White,
---  Brown and Gold caps. Metallic finish for faceplates, backgrounds and
---  sections.
---  View > 3D effect (replaces Faceplate texture). View > Use mouse wheel
---  on controls. Toggle mixer view action for a shortcut or toolbar.
---  Layouts > Import / Export layouts to file. Sections are no longer
---  experimental, and same-style neighbours join.
---  TCP window: plugin delay (PDC) under meters, in its settings menu.
---  Web page: all of the above, plus full screen and install as an app on
---  Android. Restart the web companion script after updating.
---  Fix: no more "InvisibleButton: Assertion failed" stop when the window
---  is docked very short (mixer view).
+--  Right-click any track fader (Channel panel, mixer, TCP window) for its
+--  style (Flat, Console, Rail) and colour, with the colour picker,
+--  eyedropper and recent colours; saved with the track. Acts on the
+--  selection when the track is part of it.
+--  Group looks: folder parents, VCA leaders, FX returns and a Default for
+--  every other track; a track's own choice wins, then its group's, then
+--  the Default.
+--  The web page shows the same looks. Restart the web companion script
+--  after updating.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -134,10 +125,10 @@ end
 -- pixel can't be seen or clicked, but nothing stops.
 do
   local invisible = ImGui.InvisibleButton
-  ImGui.InvisibleButton = function(ctx, id, w, h, ...)
+  ImGui.InvisibleButton = function(c, id, w, h, ...)
     if w == 0 then w = 1 end
     if h == 0 then h = 1 end
-    return invisible(ctx, id, w, h, ...)
+    return invisible(c, id, w, h, ...)
   end
 end
 
@@ -161,6 +152,7 @@ local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
 local WL = require("TS_CV_WebLink")
 local TM = require("TS_CV_TrackMenu")
+local TO = require("TS_CV_TrackOps")
 local CP = require("TS_CV_ColourPick")
 local FO = require("TS_CV_Focus")
 local IC = require("TS_CV_Icons")
@@ -2206,6 +2198,7 @@ local function frame()
       C.SHOW_VALUES = ext_get("show_values", "1") == "1"
       C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
       C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
+      TO.reload_fader_defaults()      -- the TCP window may have changed them
       C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
     end
   end

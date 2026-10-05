@@ -248,6 +248,14 @@ local function lit_hex(key)
   return rgb and hex((rgb << 8) | 0xff) or nil
 end
 
+-- A track's fader look for the page's strips (TS_CV_TrackOps: its own
+-- over its group's), or nil for the plain fader.
+local function fader_json(tr)
+  local l = tr and TO.effective_fader_look(tr, nil)
+  if not l then return nil end
+  return { s = l.style, c = cap_hex(l.cap) }
+end
+
 local function plate_json(layout)
   local pl = C.plate_of(layout.plate)
   if not pl then return nil end
@@ -564,7 +572,7 @@ local function build_layout()
       fo = folded[i + 1] or nil,       -- a narrow strip: a folder above collapses it
       fb = fb,                         -- ...and these folder tracks are why
       g = reaper.GetTrackGUID(tr),     -- the page keys per-device strip state by it
-      i = i + 1, n = track_name(tr), c = track_colour(tr),
+      i = i + 1, n = track_name(tr), c = track_colour(tr), fl = fader_json(tr),
       s = reaper.IsTrackSelected(tr) or nil,
       f = math.floor(reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")),
       -- REAPER's own TCP spacer above this track: a gap, as the mixer draws it
@@ -579,8 +587,9 @@ local function build_layout()
   return {
     tracks = tracks,
     mc = track_colour(reaper.GetMasterTrack(0)),
+    mfl = fader_json(reaper.GetMasterTrack(0)),
     track = track and { i = tn, n = track_name(track), c = track_colour(track),
-                        m = (track == reaper.GetMasterTrack(0)) or nil } or nil,
+                        m = (track == reaper.GetMasterTrack(0)) or nil, fl = fader_json(track) } or nil,
     fx = panels,
     nfx = track and reaper.TrackFX_GetCount(track) or 0,
     sends = on_master() and outputs_layout() or sends_layout(0),
@@ -1405,6 +1414,7 @@ local function cycle()
     if C.apply_colour(h or C.BASE_HUE, t or C.TINT) then layout_dirty = true end
     C.EFFECT_3D = reaper.GetExtState("TS_ChannelView", "plate_texture") ~= "0"
     C.PRESET_BAR = reaper.GetExtState("TS_ChannelView", "preset_bar") ~= "0"
+    TO.reload_fader_defaults()      -- the group fader looks, as ChannelView last set them
     local sv = reaper.GetExtState("TS_ChannelView", "show_values")
     C.SHOW_VALUES = (sv == "") or (sv == "1")
     local cw = reaper.GetExtState("TS_ChannelView", "cell_w")

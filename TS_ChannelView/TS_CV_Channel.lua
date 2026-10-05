@@ -23,6 +23,8 @@ local IN = require("TS_CV_Inputs")
 local TP = require("TS_CV_Taps")
 local B  = require("TS_CV_Browser")
 local AC = require("TS_CV_Actions")
+local TO = require("TS_CV_TrackOps")
+local CP = require("TS_CV_ColourPick")
 
 local CH = {}
 local ImGui
@@ -32,6 +34,127 @@ local ImGui
 function CH.attach(imgui) ImGui = imgui; IN.attach(imgui) end
 
 local KEY = "##channel"        -- collapse state key, not an FX GUID
+
+-- ---------------------------------------------------------------------
+-- the fader's look, and its right-click menu
+-- ---------------------------------------------------------------------
+-- A track's fader can have a style and colour of its own, or take its
+-- group's -- folder parents, VCA leaders and FX returns each can have one
+-- (TS_CV_TrackOps). Right-click the fader, here, in a mixer strip or in the
+-- TCP window's panel: it acts on the selection when the track is part of
+-- it, on the one track otherwise, as REAPER's own menus do.
+
+-- How a track's fader is drawn: W.fader's `look`, or nil for the plain one.
+local function look_for(track, now)
+  local l = TO.effective_fader_look(track, now)
+  if not l then return nil end
+  return { style = l.style, cap = W.cap_col(l.cap) }
+end
+
+local function fader_targets(track)
+  if reaper.IsTrackSelected(track) then
+    local out = {}
+    for i = 0, reaper.CountSelectedTracks2(0, true) - 1 do
+      out[#out + 1] = reaper.GetSelectedTrack2(0, i, true)
+    end
+    if #out > 0 then return out end
+  end
+  return { track }
+end
+
+-- Style and colour choices: `now` = { style, cap } chosen now (either nil);
+-- `none` = the label for choosing nothing; choose_part(field, value, save)
+-- makes a choice; undo_pick() puts back what was there (the picker's
+-- Cancel); `from`
+-- the colour the picker starts on.
+local function look_choices(ctx, id, now, none, none_tip, choose_part, undo_pick, from, title)
+  now = now or {}
+  ImGui.TextDisabled(ctx, "Style")
+  if ImGui.Selectable(ctx, none .. "##" .. id .. "_sn", now.style == nil, CP.KEEP_OPEN, 160, 0) then
+    choose_part("style", nil, true)
+  end
+  if none_tip and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, none_tip) end
+  for _, fs in ipairs(C.FADER_STYLES) do
+    if ImGui.Selectable(ctx, fs.label .. "##" .. id .. "_s" .. fs.key, now.style == fs.key, CP.KEEP_OPEN, 160, 0) then
+      choose_part("style", fs.key, true)
+    end
+  end
+  ImGui.Spacing(ctx)
+  ImGui.TextDisabled(ctx, "Colour")
+  if ImGui.Selectable(ctx, none .. "##" .. id .. "_cn", now.cap == nil, CP.KEEP_OPEN, 160, 0) then
+    choose_part("cap", nil, true)
+  end
+  if none_tip and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, none_tip) end
+  CP.cap_swatches(ctx, id, now.cap, from, title,
+    function(k, save) choose_part("cap", k, save) end, undo_pick)
+end
+
+-- The menu itself; call every frame with the popup id the fader opened.
+local function fader_menu(ctx, track, pid)
+  if not ImGui.BeginPopup(ctx, pid) then return end
+  if not reaper.ValidatePtr2(0, track, "MediaTrack*") then
+    ImGui.EndPopup(ctx)
+    return
+  end
+  local tg = fader_targets(track)
+  local now = reaper.time_precise()
+  local own = TO.fader_look(track, now)
+  local cat = TO.fader_category(track, now)
+  local cat_label
+  for _, c in ipairs(TO.FADER_CATS) do if c.key == cat then cat_label = c.label end end
+  local _, name = reaper.GetTrackName(track)
+  ImGui.TextDisabled(ctx, (#tg > 1) and (#tg .. " tracks' faders") or ((name or "Track") .. "'s fader"))
+  ImGui.Separator(ctx)
+
+  -- this track's (or the selection's) own
+  local snap = {}
+  for i, tr in ipairs(tg) do snap[i] = TO.fader_raw(tr) end
+  local function revert()
+    for i, tr in ipairs(tg) do TO.set_fader_raw(tr, snap[i]) end
+  end
+  local eff = TO.effective_fader_look(track, now)
+  local col = W.cap_col(eff and eff.cap)
+  look_choices(ctx, "fown", own, cat_label and ("As " .. cat_label:lower()) or "Default",
+    cat_label and ("What every one of the " .. cat_label:lower() .. " has, else the Default\n(Group looks, below)")
+      or "The Default look (Group looks, below), else the plain fader",
+    function(field, value, save) TO.set_fader_part(tg, field, value, save) end,
+    revert, col and (col >> 8), "Fader colour")
+
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Reset to default", nil, false, own ~= nil) then TO.clear_fader_look(tg) end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, cat_label and ("Back to the " .. cat_label:lower() .. "' look") or "Back to the Default look")
+  end
+
+  -- each group's look, under its own flyout
+  if ImGui.BeginMenu(ctx, "Group looks") then
+    for _, c in ipairs(TO.FADER_CATS) do
+      local mine = (c.key == cat) or (c.key == "default" and not cat)
+      local label = ((c.key == "default") and "Default (every other track)" or c.label)
+                    .. (mine and "  (this track)" or "")
+      if ImGui.BeginMenu(ctx, label .. "##fcat_" .. c.key) then
+        local raw = reaper.GetExtState(C.EXT_SECT, "fader_defaults")
+        local function grevert()
+          reaper.SetExtState(C.EXT_SECT, "fader_defaults", raw, true)
+          TO.reload_fader_defaults()
+        end
+        local d = TO.fader_default(c.key)
+        local dc = W.cap_col(d and d.cap)
+        look_choices(ctx, "fcat" .. c.key, d, "None",
+          (c.key == "default") and "Plain, unless a track or its group has a look"
+            or "The Default look, unless a track has a look of its own",
+          function(field, value, save) TO.set_fader_default(c.key, field, value, save) end,
+          grevert, dc and (dc >> 8), c.label .. " fader colour")
+        ImGui.EndMenu(ctx)
+      end
+    end
+    ImGui.Separator(ctx)
+    ImGui.TextDisabled(ctx, "A track's own look wins, then its group's, then the Default.")
+    ImGui.EndMenu(ctx)
+  end
+  ImGui.EndPopup(ctx)
+end
 
 -- ---------------------------------------------------------------------
 
@@ -442,9 +565,13 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey, expand, expand
     -- There is no room for a fader beside a meter at this width, and
     -- collapsing the strip shouldn't mean going somewhere else to pull
     -- the level down -- which is usually exactly why you looked.
+    -- (its colour only: a see-through cap has no room for a style)
+    local lk = look_for(track, reaper.time_precise())
     local fch, fnv, fact = W.fader(ctx, idp .. "fmini", x + 4, top, w - 8, mh,
       U.vol_to_fader(vol), "Volume   " .. U.db_text(vol) .. " dB",
-      U.UNITY_POS, true)
+      U.UNITY_POS, true, lk and lk.cap and { cap = lk.cap } or nil)
+    if fact and fact.right_click then ImGui.OpenPopup(ctx, idp .. "fmenu") end
+    fader_menu(ctx, track, idp .. "fmenu")
     local dblv = fact and fact.double_click
     if fact and fact.click then bare = true end
     if dblv then fnv, fch = U.UNITY_POS, true end
@@ -609,7 +736,9 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     local fx = x + pad + (half - C.FADER_W) * 0.5
     local fch, fnv, fact = W.fader(ctx, idp .. "fader", fx, top, C.FADER_W, fh,
       U.vol_to_fader(vol), "Volume   " .. U.db_text(vol) .. " dB",
-      U.UNITY_POS)
+      U.UNITY_POS, false, look_for(track, now))
+    if fact and fact.right_click then ImGui.OpenPopup(ctx, idp .. "fmenu") end
+    fader_menu(ctx, track, idp .. "fmenu")
     local dblv = fact and fact.double_click
     if dblv then fnv, fch = U.UNITY_POS, true end
     if fch then

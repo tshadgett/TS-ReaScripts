@@ -1592,8 +1592,9 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
     ImGui.DrawList_AddLine(dl, cx + 3, uy, x + w, uy, C.COL.header_dim, 1.0)
   end
 
-  -- A styled fader gets a scale either side of its slot, like hardware.
-  if look then
+  -- A styled fader gets a scale either side of its slot, like hardware
+  -- (not a ghost one: it lies over a meter, which has its own).
+  if look and not ghost then
     for i = 0, 10 do
       local ty = math.floor(y + 4 + cap_h * 0.5 + trav * i / 10) + 0.5
       ImGui.DrawList_AddLine(dl, x, ty, x + 4, ty, C.COL.knob_ring, 1.0)

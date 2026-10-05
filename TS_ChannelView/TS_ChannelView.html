@@ -1952,7 +1952,7 @@ function buildStripShut(s) {
   const fm = h("div", "fm");
   const ml = h("div", "mtr"), mlv = h("div", "lv"); ml.append(mlv);
   const mr = h("div", "mtr"), mrv = h("div", "lv"); mr.append(mrv);
-  const fdr = makeFader(30, "flat", null);
+  const fdr = makeFader(30, ...faderLook(tr.fl));
   fm.append(ml, mr, fdr.node);
   const vdb = h("div", "vdb", "");
   const row = h("div", "mrow");
@@ -1983,7 +1983,7 @@ function buildStrip() {
   const panBox = h("div", "knob"); panBox.append(pan.svg);
   const panLbl = h("div", "val", "C");
   const fr = h("div", "sfr");
-  const fdr = makeFader(46, "flat", null);
+  const fdr = makeFader(46, ...faderLook(layout.track.fl));
   const ml = h("div", "mtr"); const mlv = h("div", "lv"); ml.append(mlv);
   const mr = h("div", "mtr"); const mrv = h("div", "lv"); mr.append(mrv);
   fr.append(fdr.node, ml, mr);
@@ -2314,7 +2314,7 @@ function buildMixer() {
     const fm = h("div", "fm");
     const ml = h("div", "mtr"), mlv = h("div", "lv"); ml.append(mlv);
     const mr = h("div", "mtr"), mrv = h("div", "lv"); mr.append(mrv);
-    const fdr = makeFader(30, "flat", null);
+    const fdr = makeFader(30, ...faderLook(t.fl));
     fm.append(ml, mr, fdr.node);
     const vdb = h("div", "vdb", "");
     el.append(nm, ex, mp.node, fm, vdb, r1);
@@ -2330,7 +2330,7 @@ function buildMixer() {
     ui.mix.set(i, { el, fdr, mlv, mrv, vdb, bm, bs, br, bmo, setVol: v => { fvv = v; },
       mp });
   };
-  const strip = (i, name, col, key) => {
+  const strip = (i, name, col, key, fl) => {
     const master = i === 0;
     const el = h("div", "mxs");
     const nm = h("div", "mxc");
@@ -2340,7 +2340,7 @@ function buildMixer() {
     const pv = h("div", "val", "C");
     const pr = h("div", "pr"); pr.append(pb, pv);
     const fr = h("div", "sfr");
-    const fdr = makeFader(30, "flat", null);
+    const fdr = makeFader(30, ...faderLook(fl));
     const ml = h("div", "mtr"), mlv = h("div", "lv"); ml.append(mlv);
     const mr = h("div", "mtr"), mrv = h("div", "lv"); mr.append(mrv);
     const mm = h("div", "mm"); mm.append(ml, mr);
@@ -2385,14 +2385,14 @@ function buildMixer() {
     ui.mix.set(i, { el, pan, pv, fdr, mlv, mrv, vdb, bm, bs, br, bp, bi, bmo,
       setPan: v => { pvv = v; }, setVol: v => { fvv = v; } });
   };
-  if (mxShut.has("master")) folded({ i: 0, c: layout.mc, m: true }, true);
-  else strip(0, "MASTER", layout.mc, "master");
+  if (mxShut.has("master")) folded({ i: 0, c: layout.mc, m: true, fl: layout.mfl }, true);
+  else strip(0, "MASTER", layout.mc, "master", layout.mfl);
   for (const t of layout.tracks || []) {
     if (t.hm || t.fh) continue;
     if (t.sp) mix.append(h("div", "tsp"));
     if (t.fo) folded(t, false);
     else if (mxShut.has(stripKey(t))) folded(t, true);
-    else strip(t.i, t.i + " " + t.n, t.c, stripKey(t));
+    else strip(t.i, t.i + " " + t.n, t.c, stripKey(t), t.fl);
   }
 }
 
@@ -2460,6 +2460,10 @@ function renderMixer() {
     S.el.classList.toggle("sel", !!t.sel);
   }
 }
+
+// A track's fader look from the bridge ({ s: style, c: colour }, or none)
+// as makeFader's style and cap.
+const faderLook = fl => [fl && fl.s || "flat", fl && fl.c || null];
 
 function makeFader(w, style, cap) {
   const node = h("div", "fdr");

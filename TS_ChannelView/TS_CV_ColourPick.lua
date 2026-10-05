@@ -40,7 +40,16 @@ local W  = require("TS_CV_Widgets")
 local CP = {}
 local ImGui
 
-function CP.attach(imgui) ImGui = imgui end
+-- Menus that stay open while you click through them (the flag was
+-- renamed in ReaImGui 0.10; either name, or none).
+CP.KEEP_OPEN = 0
+function CP.attach(imgui)
+  ImGui = imgui
+  for _, n in ipairs({ "SelectableFlags_NoAutoClosePopups", "SelectableFlags_DontClosePopups" }) do
+    local ok, v = pcall(function() return ImGui[n] end)
+    if ok and type(v) == "number" then CP.KEEP_OPEN = v break end
+  end
+end
 
 local NS = "TS_ChannelView"
 
@@ -327,6 +336,68 @@ function CP.any_colour(ctx, s, id)
     end
   end
   return changed
+end
+
+-- ---------------------------------------------------------------------
+-- a row of cap colours, for a menu
+-- ---------------------------------------------------------------------
+
+-- The cap colours (C.CAPS) as swatches, the one chosen now outlined; under
+-- them a [+] that opens the colour picker, the colour of your own chosen
+-- now (when there is one) and the recent colours. `now`: the key chosen
+-- (a name or #rrggbb), nil for none. `from`: 0xRRGGBB the picker starts on
+-- when there's no custom colour. `pick(key, save)`: makes a choice --
+-- `save` false while the picker is only showing it. `revert()`: puts back
+-- what was there when the picker's Cancel is pressed.
+function CP.cap_swatches(ctx, id, now, from, title, pick, revert)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local function outline()
+    local x0, y0 = ImGui.GetItemRectMin(ctx)
+    local x1, y1 = ImGui.GetItemRectMax(ctx)
+    ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+  end
+  for i, cp in ipairs(C.CAPS) do
+    if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+    if ImGui.ColorButton(ctx, cp.label .. "##" .. id .. "_c" .. cp.key, cp.col or C.COL.knob_fill,
+        ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+      pick(cp.key, true)
+    end
+    tip(ctx, cp.label)
+    if cp.key == now then outline() end
+  end
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  if ImGui.Button(ctx, "##" .. id .. "_add", 18, 18) then
+    CP.open({
+      title   = title,
+      rgb     = C.custom_rgb(now) or from or 0x808080,
+      preview = function(rgb) pick(("#%06x"):format(rgb), false) end,
+      apply   = function(rgb) pick(("#%06x"):format(rgb), true) end,
+      cancel  = revert,
+    })
+  end
+  tip(ctx, "Custom colour\u{2026}")
+  W.ICONS.plus(dl, x + 3, y + 3, 12, C.COL.icon)
+  local ck, shown = C.custom_key(now), {}
+  if ck then
+    ImGui.SameLine(ctx, 0, 4)
+    ImGui.ColorButton(ctx, ck:upper() .. "##" .. id .. "_now", rgba(C.custom_rgb(ck)),
+      ImGui.ColorEditFlags_NoTooltip, 18, 18)
+    tip(ctx, ck:upper())
+    outline()
+    shown[ck] = true
+  end
+  for i, rgb in ipairs(CP.recent) do
+    local k = ("#%06x"):format(rgb)
+    if not shown[k] then
+      ImGui.SameLine(ctx, 0, 4)
+      if ImGui.ColorButton(ctx, k:upper() .. "##" .. id .. "_rc" .. i, rgba(rgb),
+          ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+        pick(k, true)
+        CP.remember(rgb)
+      end
+      tip(ctx, "Recent  " .. k:upper())
+    end
+  end
 end
 
 -- A dialog closing puts its eyedropper away.

@@ -1,5 +1,25 @@
 # ChannelView — changelog
 
+## 1.8.6 — track fader looks
+
+- **Right-click any track fader** — the Channel panel's, a mixer strip's,
+  a collapsed strip's, the TCP window's — for its **Style** (Flat, Console,
+  Rail) and **Colour** (the cap colours, **[+]** for any colour with the
+  eyedropper, and your recent colours). The fader shows a colour as you
+  pick it. It acts on the selection when the track is part of it, as
+  REAPER's own menus do, and is saved with the track in the project.
+- **Group looks** in the same menu: **Folder parents**, **VCA leaders**
+  and **FX returns** (tracks with receives that are neither folder parents
+  nor in a folder) can each have a look, and **Default** covers every other
+  track and whatever a group leaves unset. Kept with ChannelView, so they
+  apply in every project. A track's own choice wins, then its group's, then
+  the Default, style and colour separately; *Reset to default* takes a
+  track back to its group's. A VCA leader that's also a folder parent
+  counts as a VCA leader.
+- A collapsed strip's see-through fader takes the colour only.
+- The web page's channel strip and mixer show the same looks. Restart the
+  web companion script to pick this up.
+
 ## 1.8.5 — colours of your own, lit buttons, scales, LED ring, metallic finish
 
 **Colour**

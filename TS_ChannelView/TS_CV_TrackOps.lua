@@ -48,6 +48,8 @@
   them, so they are read from the config.
 --]]
 
+local C  = require("TS_CV_Config")
+
 local TO = {}
 
 -- ---------------------------------------------------------------------
@@ -562,6 +564,167 @@ function TO.set_colour(tracks, rgb)
   reaper.Undo_EndBlock(rgb and "ChannelView: set track colour"
                             or "ChannelView: remove track colour", -1)
   reaper.UpdateArrange()
+end
+
+-- ---------------------------------------------------------------------
+-- a track's fader look
+-- ---------------------------------------------------------------------
+-- A track's own channel fader -- in the Channel panel, a mixer strip, the
+-- TCP window's panel -- can have a style and a cap colour, like a fader on
+-- a plugin's panel (C.FADER_STYLES / C.CAPS, or a colour of your own as
+-- #rrggbb): right-click the fader. Saved in the project with the track
+-- (P_EXT:TS_CV_FADER = "style|cap"; either part empty = not chosen).
+--
+-- Folder parents, VCA leaders and FX returns can each have a look of
+-- their own too (the same menu's Group looks), and every other track takes
+-- the Default look there; kept with ChannelView rather than the project,
+-- like a house style. A track's own choice wins, then its group's, then
+-- the Default, part by part -- its own colour on its group's style, say.
+local FADER_KEY = "P_EXT:TS_CV_FADER"
+local DEF_KEY   = "fader_defaults"         -- ExtState: "vca=style|cap;parent=...;fxret=..."
+local look_cache, cat_cache = {}, {}
+
+TO.FADER_CATS = {
+  { key = "vca",     label = "VCA leaders" },
+  { key = "parent",  label = "Folder parents" },
+  { key = "fxret",   label = "FX returns" },
+  -- every track no group above covers, and whatever part a group leaves
+  -- unset: the look a fader falls back to before the plain one
+  { key = "default", label = "Default" },
+}
+
+local function parse_look(s)
+  local st, cap = (s or ""):match("^%s*([%w_]*)%s*|?%s*([#%w_]*)")
+  local v = { style = (st and st ~= "" and C.FADER_STYLE[st]) and st or nil,
+              cap = (cap and cap ~= "") and ((cap:sub(1, 1) == "#" and C.custom_key(cap)) or cap) or nil }
+  if not v.style and not v.cap then return nil end
+  return v
+end
+local function norm(field, value)
+  if field == "cap" and type(value) == "string" and value:sub(1, 1) == "#" then
+    return C.custom_key(value)
+  end
+  return value
+end
+local function look_str(v)
+  if not v or (not v.style and not v.cap) then return "" end
+  return (v.style or "") .. "|" .. (v.cap or "")
+end
+
+-- The track's own choice: { style, cap } (either may be nil), or nil.
+function TO.fader_look(track, now)
+  if not track then return nil end
+  now = now or reaper.time_precise()
+  local c = look_cache[track]
+  if c and now - c.t < 0.5 then return c.v end
+  local _, s = reaper.GetSetMediaTrackInfo_String(track, FADER_KEY, "", false)
+  local v = parse_look(s)
+  look_cache[track] = { t = now, v = v }
+  return v
+end
+
+-- The raw saved string, and putting one back (a colour being previewed,
+-- then cancelled).
+function TO.fader_raw(track)
+  local _, s = reaper.GetSetMediaTrackInfo_String(track, FADER_KEY, "", false)
+  return s or ""
+end
+function TO.set_fader_raw(track, s)
+  reaper.GetSetMediaTrackInfo_String(track, FADER_KEY, s or "", true)
+  look_cache[track] = nil
+end
+
+-- Sets one part of `tracks`' own looks -- field "style" or "cap", value
+-- nil to go back to the group's (or the plain one) -- leaving the other
+-- part each track has as it was. `undo`: an undo point (not while a
+-- colour is being previewed).
+function TO.set_fader_part(tracks, field, value, undo)
+  if undo then reaper.Undo_BeginBlock() end
+  for _, tr in ipairs(tracks) do
+    local v = parse_look(TO.fader_raw(tr)) or {}
+    v[field] = norm(field, value)
+    TO.set_fader_raw(tr, look_str(v))
+  end
+  if undo then reaper.Undo_EndBlock("ChannelView: fader look", -1) end
+end
+
+-- Clears `tracks`' own looks: back to their group's, or the plain fader.
+function TO.clear_fader_look(tracks)
+  reaper.Undo_BeginBlock()
+  for _, tr in ipairs(tracks) do TO.set_fader_raw(tr, "") end
+  reaper.Undo_EndBlock("ChannelView: fader look", -1)
+end
+
+-- Which group a track's fader belongs to: "vca" (a VCA leader in any
+-- group), "parent" (a folder parent), "fxret" (an FX return: a track with
+-- receives that's neither a folder parent nor in a folder), or nil. A VCA
+-- leader that's also a parent counts as a VCA leader.
+local function is_vca_lead(track)
+  for _, f in ipairs({ reaper.GetSetTrackGroupMembership, reaper.GetSetTrackGroupMembershipHigh }) do
+    if f then
+      local ok, v = pcall(f, track, "VOLUME_VCA_LEAD", 0, 0)
+      if ok and v and v ~= 0 then return true end
+    end
+  end
+  return false
+end
+function TO.fader_category(track, now)
+  if not track or TO.is_master(track) then return nil end
+  now = now or reaper.time_precise()
+  local c = cat_cache[track]
+  if c and now - c.t < 1.0 then return c.v end
+  local v
+  if is_vca_lead(track) then v = "vca"
+  elseif TO.is_folder_parent(track) then v = "parent"
+  elseif (reaper.GetTrackNumSends(track, -1) or 0) > 0 and not reaper.GetParentTrack(track) then
+    v = "fxret"
+  end
+  cat_cache[track] = { t = now, v = v }
+  return v
+end
+
+local defaults
+local function read_defaults()
+  if defaults then return defaults end
+  defaults = {}
+  for k, v in (reaper.GetExtState(C.EXT_SECT, DEF_KEY) or ""):gmatch("(%w+)=([^;]*)") do
+    defaults[k] = parse_look(v)
+  end
+  return defaults
+end
+
+-- A group's look, { style, cap }, or nil for none.
+function TO.fader_default(cat) return cat and read_defaults()[cat] or nil end
+
+-- Sets a group's look (`field` "style" or "cap"; nil clears it). `persist`
+-- false while a colour is only being previewed.
+function TO.set_fader_default(cat, field, value, persist)
+  local d = read_defaults()
+  local v = d[cat] or {}
+  v[field] = norm(field, value)
+  d[cat] = (v.style or v.cap) and v or nil
+  local parts = {}
+  for _, c in ipairs(TO.FADER_CATS) do
+    if d[c.key] then parts[#parts + 1] = c.key .. "=" .. look_str(d[c.key]) end
+  end
+  reaper.SetExtState(C.EXT_SECT, DEF_KEY, table.concat(parts, ";"), persist ~= false)
+end
+
+-- Another window (the TCP's, or ChannelView's) may have changed the
+-- groups' looks: read them again next time.
+function TO.reload_fader_defaults() defaults = nil end
+
+-- What a track's fader looks like: its own choice, else its group's, else
+-- the Default look, part by part. { style, cap } or nil for the plain fader.
+function TO.effective_fader_look(track, now)
+  local own = TO.fader_look(track, now)
+  local grp = TO.fader_default(TO.fader_category(track, now))
+  local base = TO.fader_default("default")
+  if not own and not grp and not base then return nil end
+  local function part(f) return (own and own[f]) or (grp and grp[f]) or (base and base[f]) end
+  local v = { style = part("style"), cap = part("cap") }
+  if (not v.style or v.style == "flat") and not v.cap then return nil end
+  return v
 end
 
 -- A track's colour as 0xRRGGBB, or nil when it has none.

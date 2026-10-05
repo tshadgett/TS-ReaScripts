@@ -88,10 +88,10 @@ end
 -- pixel can't be seen or clicked, but nothing stops.
 do
   local invisible = ImGui.InvisibleButton
-  ImGui.InvisibleButton = function(ctx, id, w, h, ...)
+  ImGui.InvisibleButton = function(c, id, w, h, ...)
     if w == 0 then w = 1 end
     if h == 0 then h = 1 end
-    return invisible(ctx, id, w, h, ...)
+    return invisible(c, id, w, h, ...)
   end
 end
 
@@ -102,6 +102,7 @@ local CH = require("TS_CV_Channel")
 local G  = require("TS_CV_Gang")
 local TM = require("TS_CV_TrackMenu")
 local TO = require("TS_CV_TrackOps")
+local CP = require("TS_CV_ColourPick")
 local IC = require("TS_CV_Icons")
 local FO = require("TS_CV_Focus")
 local AR = require("TS_CV_Arrange")
@@ -227,6 +228,7 @@ local function poll_shared(now)
   C.TCP_ICONS   = cv_get("track_icons", "0") == "1"
   C.SHOW_VALUES = cv_get("show_values", "1") == "1"
   C.WHEEL_CONTROLS = cv_get("wheel_controls", "1") == "1"
+  TO.reload_fader_defaults()        -- ChannelView may have changed them
   C.set_cell_w(cv_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 end
 
@@ -1083,6 +1085,7 @@ local function frame()
     TB2.draw_menus(ctx)
     settings_menu()
     TM.draw(ctx)
+    CP.draw(ctx)        -- the colour picker, for a fader's colour
     EN.draw_menus(ctx)
     LN.draw_menus(ctx)
     FO.update(ctx, ImGui, C.FOCUS_BACK)
