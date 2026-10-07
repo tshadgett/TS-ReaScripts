@@ -31,6 +31,7 @@
   --ring: #454a50; --toff: #2c3035; --ton: #4aa3df; --ttext: #e4e6e9; --accent: #4aa3df;
   --strip: #181a1d; --sel: #4aa3df; --grm: #d2609b; --cap: #c9ccd0; --byp: #d9673a;
   --mute: #d9673a; --solo: #d9b23a; --rec: #d9433a; --warn: #d9673a; --mon: #4f9c62; --mauto: #4a8fd9; --spec: #5d6f80; --lo: #4f9c62; --clip: #d9493a; --over: #ff3a3a;
+  --brkp: #4aa3df; --brkc: #c58fd6;
   --sw: 100px; --tb-h: 64px; --mac-h: 58px; --trk-h: 54px;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -285,6 +286,20 @@ button { font: inherit; color: inherit; }
 .cmb { margin-top: 10px; height: 38px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); font-size: 12px; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .rule { position: absolute; width: 1px; background: var(--ring); }
+.xyp { position: relative; margin: 2px auto 0; border-radius: 5px; background-color: rgba(0,0,0,0.35);
+  border: 1px solid rgba(0,0,0,0.6); box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); touch-action: none; overflow: hidden;
+  background-image: linear-gradient(90deg, transparent calc(50% - 0.5px), rgba(255,255,255,0.13) calc(50% - 0.5px), rgba(255,255,255,0.13) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(0deg, transparent calc(50% - 0.5px), rgba(255,255,255,0.13) calc(50% - 0.5px), rgba(255,255,255,0.13) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(0deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 25% 25%, 25% 25%; background-position: 0 0, 0 0, -1px 0, 0 1px; }
+.xyp .xv, .xyp .xh { position: absolute; background: var(--xc); opacity: 0.45; pointer-events: none; }
+.xyp .xv { top: 0; bottom: 0; width: 1px; }
+.xyp .xh { left: 0; right: 0; height: 1px; }
+.xyp .xd { position: absolute; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%;
+  background: var(--xc); border: 1px solid rgba(0,0,0,0.6); pointer-events: none; }
+.xyp.act .xd { box-shadow: 0 0 0 5px color-mix(in srgb, var(--xc) 30%, transparent); }
+.val .hi { color: var(--accent, #e8a23a); }
+
 .miss { color: var(--clip); font-size: 20px; margin-top: 20px; }
 .fdr { touch-action: none; cursor: ns-resize; }
 .grm { position: absolute; top: 8px; bottom: 8px; width: 26px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
@@ -357,6 +372,16 @@ button { font: inherit; color: inherit; }
 .drop { position: absolute; top: 8px; bottom: 8px; width: 4px; margin-left: -2px; border-radius: 2px;
   background: var(--accent); display: none; z-index: 5; pointer-events: none; }
 #row { position: relative; }
+/* the bracket strip: FX containers and plugins running in parallel, over
+   the panels they hold -- only those panels give up the height */
+.brk { position: absolute; top: 8px; left: 0; pointer-events: none; overflow: visible; }
+.brk text { font-size: 11px; }
+.brk .hit { pointer-events: all; cursor: pointer; }
+/* parameter modulation: a corner on a button, dropdown or fader */
+.mdk { position: absolute; top: 2px; right: 2px; width: 0; height: 0; border-style: solid;
+  border-width: 0 6px 6px 0; border-color: transparent var(--mdc) transparent transparent;
+  pointer-events: none; z-index: 3; }
+.on > .mdk { border-right-color: var(--mdc-on, var(--mdc)); }
 .ph { touch-action: none; }
 /* the preset bar: the header's twin along the foot of a panel */
 .pf { height: 34px; flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 0 2px;
@@ -674,7 +699,8 @@ const PAL_VARS = { win_bg: "--win", panel_bg: "--panel", panel_border: "--border
   knob_pointer: "--pointer", knob_ring: "--ring", toggle_off: "--toff", toggle_on: "--ton",
   toggle_text: "--ttext", accent: "--accent", strip_bg: "--strip", strip_sel: "--sel",
   gr_measured: "--grm", fader_cap: "--cap", bypass_on: "--byp", mute_on: "--mute", solo_on: "--solo",
-  rec_on: "--rec", warn: "--warn", mon_on: "--mon", mon_auto: "--mauto", eq_spectrum: "--spec", level_lo: "--lo", level_clip: "--clip", level_over: "--over" };
+  rec_on: "--rec", warn: "--warn", mon_on: "--mon", mon_auto: "--mauto", eq_spectrum: "--spec", level_lo: "--lo", level_clip: "--clip", level_over: "--over",
+  brk_parallel: "--brkp", brk_container: "--brkc" };
 let PAL = {};
 function applyPalette(p) {
   PAL = p;
@@ -707,6 +733,22 @@ function radial(n, r0, r1, a0, a1) {
 }
 const lum = hex => { const h = hex.replace("#", ""); const c = i => parseInt(h.substr(i, 2), 16) / 255;
   return 0.2126 * c(0) + 0.7152 * c(2) + 0.0722 * c(4); };
+// The parameter-modulation mark, as the desktop's (W.mod_col): the accent,
+// unless it would vanish on what's under it -- then black or white.
+function modCol(under) {
+  const a = PAL.accent || "#4aa3df";
+  if (under && under[0] === "#" && Math.abs(lum(a) - lum(under)) < 0.235)
+    return lum(under) > 0.55 ? "#1d1e20" : "#f3f3f1";
+  return a;
+}
+// a corner, top right of a button, dropdown or fader; `underOn` for one
+// that lights up
+function modCorner(node, under, underOn) {
+  node.style.position = "relative";
+  node.style.setProperty("--mdc", modCol(under));
+  if (underOn) node.style.setProperty("--mdc-on", modCol(underOn));
+  node.append(h("i", "mdk"));
+}
 const CAP_DEFAULT = { skirted: "#26282b", pointer: "#26282b", trim: "#8d9298", nose: "#26282b", bar: "#c9ccd0",
   fluted: "#26282b", bezel: "#26282b", rbezel: "#c9ccd0", hifi: "#c9ccd0" };
 const BODY = { skirted: 38, pointer: 43, trim: 47, nose: 40, bar: 37, fluted: 38, bezel: 38, rbezel: 38, hifi: 38, led: 40 };
@@ -783,7 +825,7 @@ function makeKnob(size, style, cap, bipolar, tick, noTicks) {
     const rot = el("g", {}, g);
     el("path", { d: radial(18, 27.5, 30.5, 0, 340), fill: "none", stroke: "#0e0f10", "stroke-width": 1.4 }, rot);
     el("circle", { cx: 50, cy: 50, r: 25, fill: "#2c2f33" }, g);
-    el("circle", { cx: 45, cy: 44, r: 11, fill: "rgba(255,255,255,0.06)" }, g);
+    el("circle", { cx: 45, cy: 44, r: 11, fill: "rgba(255,255,255,0.025)" }, g);
     el("circle", { cx: 50, cy: 50, r: 31, fill: "none", stroke: "rgba(0,0,0,0.63)", "stroke-width": 1.2 }, g);
     el("line", { x1: 50, y1: 44, x2: 50, y2: 21.5, stroke: "#f3f3f1", "stroke-width": 3, "stroke-linecap": "round" }, rot);
     const e = 0.5 / (N - 1);
@@ -820,7 +862,8 @@ function makeKnob(size, style, cap, bipolar, tick, noTicks) {
   const id = "sh" + (++gradN);
   const defs = el("defs", {}, svg);
   const rg = el("radialGradient", { id, cx: "0.36", cy: "0.3", r: "0.75" }, defs);
-  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": style === "skirted" ? 0.12 : style === "nose" ? 0.04 : style === "bar" ? 0.1 : 0.3 }, rg);
+  // matte, every one like the skirted knob's skirt: barely a lift toward the light
+  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": 0.04 }, rg);
   el("stop", { offset: 0.6, "stop-color": "#fff", "stop-opacity": 0.02 }, rg);
   el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": style === "nose" ? 0.1 : style === "bar" ? 0.35 : 0.25 }, rg);
   // the scale sits just outside the body
@@ -860,8 +903,7 @@ function makeKnob(size, style, cap, bipolar, tick, noTicks) {
         stroke: fl, "stroke-width": 7.5, "stroke-linecap": "round" }, rot);
     }
     el("line", { x1: 50, y1: 41, x2: 50, y2: 16, stroke: lum(cap) > 0.55 ? "#1d1e20" : "#f3f3f1", "stroke-width": 3.5, "stroke-linecap": "round" }, rot);
-    el("circle", { cx: 44, cy: 42, r: 15, fill: "rgba(255,255,255,0.04)" }, g);
-    el("circle", { cx: 43, cy: 40, r: 6, fill: "rgba(255,255,255,0.085)" }, g);
+    el("circle", { cx: 44, cy: 42, r: 15, fill: "rgba(255,255,255,0.025)" }, g);
     el("circle", { cx: 50, cy: 50, r: 36, fill: "none", stroke: "rgba(0,0,0,0.45)", "stroke-width": 1.2 }, g);
   } else if (style === "hifi") {
     // a solid turned-aluminium cylinder: a spun face, bright along the
@@ -886,11 +928,11 @@ function makeKnob(size, style, cap, bipolar, tick, noTicks) {
     el("circle", { cx: 50, cy: 50, r: 37, fill: "none", stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
   } else if (style === "bezel" || style === "rbezel") {
     // bezel: a black centre (the cap colour) in a polished chrome ring;
-    // reverse bezel: a glossy black ring round a turned-metal centre. The
+    // reverse bezel: a satin black ring round a turned-metal centre. The
     // ring's light is fixed; the notch or pointer on it turns.
     const rev = style === "rbezel";
     el("circle", { cx: 50.8, cy: 51.6, r: 37.6, fill: "rgba(0,0,0,0.25)" }, g);
-    if (rev) litRing(g, 37, 22.5, "#0d0e0f", "#4c4f53", 3, 0.25);
+    if (rev) litRing(g, 37, 22.5, "#111214", "#2f3236", 1.3, 0.1);
     else litRing(g, 37, 22.5, "#4f5257", "#f2f3f5", 1.6, 0.45);
     el("circle", { cx: 50, cy: 50, r: 37, fill: "none", stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
     rot = el("g", {}, g);
@@ -950,7 +992,7 @@ function makeKnob(size, style, cap, bipolar, tick, noTicks) {
     const kn = el("g", {}, g);
     el("path", { d: radial(24, 31, 37, 0, 345), fill: "none", stroke: "#7b8087", "stroke-width": 3 }, kn);
     el("circle", { cx: 50, cy: 50, r: 30, fill: "#a1a6ac", stroke: "#3c3f44", "stroke-width": 1.5 }, g);
-    el("circle", { cx: 50, cy: 43, r: 21, fill: "rgba(255,255,255,0.14)" }, g);
+    el("circle", { cx: 50, cy: 43, r: 21, fill: "rgba(255,255,255,0.04)" }, g);
     rot = el("g", {}, g);
     el("line", { x1: 50, y1: 38, x2: 50, y2: 74, stroke: "#2b2d31", "stroke-width": 5, "stroke-linecap": "round" }, rot);
     el("circle", { cx: 50, cy: 29, r: 4.5, fill: cap }, rot);
@@ -1001,15 +1043,16 @@ function makeScale(W, H, D, sc) {
 // ---------------------------------------------------------------------------
 function dragger(node, get, set, opts) {
   opts = opts || {};
-  let startY = 0, startV = 0, lastTap = 0, moved = false;
+  let startY = 0, startX = 0, startV = 0, lastTap = 0, moved = false;
   node.addEventListener("pointerdown", e => {
     e.preventDefault();
     node.setPointerCapture(e.pointerId);
-    startY = e.clientY; startV = get(); moved = false;
+    startY = e.clientY; startX = e.clientX; startV = get(); moved = false;
   });
   node.addEventListener("pointermove", e => {
     if (!node.hasPointerCapture(e.pointerId)) return;
-    const dy = startY - e.clientY;
+    // up for most, across for a horizontal fader
+    const dy = opts.across ? e.clientX - startX : startY - e.clientY;
     if (Math.abs(dy) > 2) moved = true;
     if (!moved) return;
     const travel = typeof opts.travel === "function" ? opts.travel() : (opts.travel || 220);
@@ -1044,7 +1087,21 @@ const cellW = cw => Math.round(84 * (cw || 50) / 58);
 // Every item carries wu, hu: its size in half-cells.
 const SIZES = { small: [2, 1], medium: [2, 2], large: [3, 3] };
 const KNOB_D = { small: 30, medium: KNOB, large: 78 };
+// Where a fader goes, as TS_CV_Panel.fader_kind: "column" (up, full
+// height: splits the sections as faders always have), "band" (across,
+// full width: along the foot of its section), "block" (placed among the
+// controls). dr/ln/th from the bridge: direction, length, half-thick.
+function faderKind(c) {
+  if (c.t !== "fader") return null;
+  if (c.dr === "h") return c.ln ? "block" : "band";
+  return c.ln ? "block" : "column";
+}
+const faderThick = c => (c.th ? 1 : 2);
 function cellSize(c, halfRows) {
+  if (c.t === "fader") {
+    if (c.dr === "h") return [(c.ln || 2) * 2, faderThick(c), "hfader"];
+    return [faderThick(c), Math.min(halfRows, (c.ln || 2) * 2), "vfader"];
+  }
   // a dropdown shown as buttons: one half-cell column each across, or a
   // column two to a half-row down -- ordinary when it won't fit
   if (c.t === "combo" && c.btn && c.nb >= 2 && c.nb <= 8) {
@@ -1052,17 +1109,122 @@ function cellSize(c, halfRows) {
     if (span[1] <= halfRows) return [span[0], span[1], "buttons"];
   }
   if (c.t === "half_gap") return [2, 1];
-  const sz = (c.t === "knob" || c.t === "stepped" || (c.t === "toggle" && c.sz === "small")) && c.sz && SIZES[c.sz];
+  // an XY pad: 2 or 3 columns by 2 or 3 rows (sz "3x2"), no taller than the panel
+  if (c.t === "xy") {
+    const m = /^([23])x([23])$/.exec(c.sz || "");
+    const w = m ? +m[1] : 2, hh = m ? +m[2] : 2;
+    return [w * 2, Math.min(halfRows, hh * 2), "xy"];
+  }
+  const sz = (c.t === "knob" || c.t === "stepped" || c.t === "dual" || (c.t === "toggle" && c.sz === "small")) && c.sz && SIZES[c.sz];
   return sz && sz[1] <= halfRows ? sz : [2, 2];
+}
+// Merged-cell flow, as TS_CV_Panel.place_flow: list order, down then
+// across, a fader taking every cell it covers; across faders run over
+// dividers (the rule is cut there), a full-length one to the right edge.
+function placeFlow(ctls, halfRows, rows) {
+  const HW = CELL_W / 2, HH = CELL_H / 2;
+  const occ = [], fulls = [], bounds = [], placed = [], secs = [];
+  const free = (c, r, w, hh) => {
+    if (r < 0 || r + hh > halfRows) return false;
+    for (let i = c; i < c + w; i++) if (occ[i]) for (let j = r; j < r + hh; j++) if (occ[i][j]) return false;
+    for (const f of fulls) if (c + w > f.c && r < f.r + f.h && f.r < r + hh) return false;
+    return true;
+  };
+  const take = (c, r, w, hh) => { for (let i = c; i < c + w; i++) { occ[i] = occ[i] || []; for (let j = r; j < r + hh; j++) occ[i][j] = true; } };
+  let cs = 0, sw = 0, cy = 0, strip = [], prev = null;
+  const close = () => { strip.forEach(it => { it.sc = cs; it.ssw = sw; }); cs += sw; sw = 0; cy = 0; strip = []; prev = null; };
+  let sec = { c0: 0, first: 0 };
+  ctls.forEach((c, i) => {
+    if (c.t === "divider") {
+      if (strip.length) close();
+      sec.c1 = cs; sec.last = placed.length; secs.push(sec);
+      bounds.push({ b: cs, nr: !!c.nr });
+      sec = { c0: cs, first: placed.length, by: Object.assign({ idx: i }, c) };
+      return;
+    }
+    let [w, hh, kind] = cellSize(c, halfRows);
+    const k = faderKind(c);
+    if (k === "column") hh = halfRows;
+    const full = k === "band";
+    if (full) { w = 4; kind = "hfader"; }
+    hh = Math.min(hh, halfRows);
+    let pc = null, pr = null, pair = false;
+    if (w === 1 && prev && prev.w === 1 && prev.h === hh && prev.col === cs && !prev.pair && free(cs + 1, prev.r, 1, hh)) {
+      pc = cs + 1; pr = prev.r; pair = true; prev.pair = true;
+    }
+    let guard = 0;
+    while (pc === null) {
+      for (let r = cy; r <= halfRows - hh; r++) if (free(cs, r, w, hh)) { pc = cs; pr = r; break; }
+      if (pc === null) {
+        if (++guard > 400) { pc = cs; pr = 0; break; }
+        if (!strip.length) { cs += 2; cy = 0; } else close();
+      }
+    }
+    const span = kind === "hfader" || kind === "xy";
+    if (full) fulls.push({ c: pc, r: pr, h: hh }); else take(pc, pr, w, hh);
+    const it = { c: Object.assign({ idx: i }, c), col: pc, r: pr, w, h: hh, kind, span, full, pair, spacer: c.t === "half_gap" };
+    placed.push(it); strip.push(it);
+    const used = span ? 2 : pc - cs + w;
+    if (used > sw) sw = used;
+    if (pr + hh > cy) cy = pr + hh;
+    prev = it;
+  });
+  if (strip.length) close();
+  sec.c1 = cs; sec.last = placed.length; secs.push(sec);
+  let total = cs, deepest = 0;
+  for (const it of placed) {
+    total = Math.max(total, it.full ? it.col + 4 : it.col + it.w);
+    if (!it.spacer) deepest = Math.max(deepest, it.r + it.h);
+  }
+  for (const it of placed) if (it.full) it.w = total - it.col;
+  const left = c => c * HW + DIV_W * bounds.filter(g => g.b <= c).length;
+  const right = c => c * HW + DIV_W * bounds.filter(g => g.b < c).length;
+  const items = [], spacers = [], rules = [], cuts = [], gaps = [], styled = [];
+  for (const it of placed) {
+    const x = left(it.col);
+    const o = { c: it.c, x, y: it.r * HH, wu: it.w, hu: it.h, kind: it.kind };
+    if (faderKind(it.c) === "column") o.h = rows * CELL_H;
+    if (it.span) { o.pw = right(it.col + it.w) - x; o.sx = x; o.sw = o.pw; }
+    else {
+      const ssw = it.ssw || it.w;
+      if (!it.pair && it.w < ssw && it.col === it.sc) o.x = x + (ssw - it.w) * HW / 2;
+      o.sx = left(it.sc != null ? it.sc : it.col); o.sw = ssw * HW;
+    }
+    it.o = o;
+    (it.spacer ? spacers : items).push(o);
+  }
+  const per = {};
+  for (const g of bounds) {
+    per[g.b] = (per[g.b] || 0) + 1;
+    const gx = g.b * HW + DIV_W * (bounds.filter(o => o.b < g.b).length + per[g.b] - 1);
+    gaps.push([gx, gx + DIV_W]);
+    if (!g.nr) {
+      rules.push(gx + DIV_W / 2);
+      cuts.push(placed.filter(it => it.span && it.col < g.b && g.b < it.col + it.w).map(it => [it.r * HH - 3, (it.r + it.h) * HH + 3]));
+    }
+  }
+  const key = o => o.sec + "|" + (o.sp ? o.sp.bg : "") + "|" + (o.sb ? 1 : 0) + (o.sm ? "m" : "");
+  for (const s2 of secs) {
+    if (!(s2.by && s2.by.sec && s2.c1 > s2.c0)) continue;
+    const x = left(s2.c0), w = right(s2.c1) - x;
+    const pv = styled[styled.length - 1];
+    if (pv && Math.abs(pv.x + pv.w + DIV_W - x) < 0.5 && key(pv.by) === key(s2.by)) pv.w = x + w - pv.x;
+    else styled.push({ x, w, by: s2.by });
+    for (let k = s2.first; k < s2.last; k++) placed[k].o.sec = styled.length - 1;
+  }
+  return { items, rules, ruleCuts: cuts, width: left(total), rows, sections: styled, gaps, spacers,
+           height: Math.max(1, Math.min(halfRows, deepest)) * HH };
 }
 function placeControls(ctls, bodyH) {
   const rows = Math.max(1, Math.floor(bodyH / CELL_H));
   const halfRows = rows * 2, HW = CELL_W / 2, HH = CELL_H / 2;
+  // faders placed among the controls: the merged-cell flow
+  if (ctls.some(c => { const k = faderKind(c); return k === "block" || k === "band" || c.t === "xy"; })) return placeFlow(ctls, halfRows, rows);
   const items = [], rules = [];
   const sections = [[]], splitters = [];
   ctls.forEach((c, i) => {
     const o = Object.assign({ idx: i }, c);
-    if (c.t === "divider" || c.t === "fader") { splitters.push(o); sections.push([]); }
+    if (c.t === "divider" || faderKind(c) === "column") { splitters.push(o); sections.push([]); }
     else sections[sections.length - 1].push(o);
   });
   let x = 0;
@@ -1073,7 +1235,8 @@ function placeControls(ctls, bodyH) {
     const first = items.length;
     if (si > 0) {
       const sp = splitters[si - 1];
-      if (sp.t === "fader") { items.push({ c: sp, x, y: 0, h: rows * CELL_H, wu: 2, hu: halfRows, sx: x, sw: CELL_W }); x += CELL_W; }
+      if (sp.t === "fader") { const t = faderThick(sp);
+        items.push({ c: sp, x, y: 0, h: rows * CELL_H, wu: t, hu: halfRows, sx: x, sw: t * HW }); x += t * HW; }
       else { if (!sp.nr) rules.push(x + DIV_W / 2); gaps.push([x, x + DIV_W]); x += DIV_W; }
     }
     let cx = 0, cy = 0, sw = 0, strip = [];
@@ -2465,7 +2628,121 @@ function renderMixer() {
 // as makeFader's style and cap.
 const faderLook = fl => [fl && fl.s || "flat", fl && fl.c || null];
 
-function makeFader(w, style, cap) {
+// Slim: a thin groove filled up to a small cap (out from the middle when
+// centred) in the cap's colour -- TS_CV_Widgets.fader's slim, made for rows
+// of narrow faders
+function makeSlim(across, cap, bip) {
+  const node = h("div", "fdr");
+  Object.assign(node.style, { position: "relative", flexShrink: "0" });
+  const fillCol = cap || "var(--accent)", face = cap || "var(--cap)";
+  const groove = h("div"), fill = h("div"), c = h("div", "fcap"), line = h("div");
+  if (across) {
+    Object.assign(groove.style, { position: "absolute", top: "50%", left: "6px", right: "6px", height: "2px", marginTop: "-1px", background: "#0d0e0f" });
+    Object.assign(fill.style, { position: "absolute", top: "50%", height: "3px", marginTop: "-1.5px", background: fillCol });
+    Object.assign(c.style, { position: "absolute", top: "50%", width: "12px", height: "22px", marginTop: "-11px", borderRadius: "3px",
+      background: face, border: "1px solid rgba(0,0,0,0.6)" });
+    Object.assign(line.style, { position: "absolute", top: "3px", bottom: "3px", left: "50%", width: "1px",
+      background: lum(cap || "#c9ccd0") > 0.55 ? "#1d1e20" : "#f0f0ee" });
+  } else {
+    Object.assign(groove.style, { position: "absolute", left: "50%", top: "6px", bottom: "6px", width: "2px", marginLeft: "-1px", background: "#0d0e0f" });
+    Object.assign(fill.style, { position: "absolute", left: "50%", width: "3px", marginLeft: "-1.5px", background: fillCol });
+    Object.assign(c.style, { position: "absolute", left: "0", right: "0", height: "12px", borderRadius: "3px",
+      background: face, border: "1px solid rgba(0,0,0,0.6)" });
+    Object.assign(line.style, { position: "absolute", left: "3px", right: "3px", top: "50%", height: "1px",
+      background: lum(cap || "#c9ccd0") > 0.55 ? "#1d1e20" : "#f0f0ee" });
+  }
+  c.append(line);
+  node.append(groove, fill, c);
+  return { node, set(v) {
+    if (across) {
+      const W = node.clientWidth || 160, T = W - 12 - 12, at = u => 6 + 6 + u * T;
+      c.style.left = (6 + v * T) + "px";
+      const a = bip ? at(0.5) : 6, b = at(v);
+      fill.style.left = Math.min(a, b) + "px"; fill.style.width = Math.abs(b - a) + "px";
+    } else {
+      const H = node.clientHeight || 200, T = H - 12 - 12, at = u => 6 + 6 + (1 - u) * T;
+      c.style.top = (6 + (1 - v) * T) + "px";
+      const a = bip ? at(0.5) : H - 6, b = at(v);
+      fill.style.top = Math.min(a, b) + "px"; fill.style.height = Math.abs(b - a) + "px";
+    }
+  } };
+}
+
+// A fader lying across: the same caps on their side, left the bottom.
+// A concentric knob (TS_CV_Widgets.dual_face): a dark knurled ring with a
+// white pointer for the first parameter, a matte cap-coloured knob in its
+// middle for the second. Drawn where the ring's edge is 40 units, scaled so
+// it fills the dial's size the way the other knobs' bodies do.
+function makeDual(D, cap, md1, md2) {
+  const svg = el("svg", { width: D, height: D, viewBox: "0 0 100 100", class: "kn" });
+  svg.style.overflow = "visible";
+  const tk = el("path", { d: radial(11, 53, 60, -135, 135), fill: "none", stroke: "var(--ring)",
+    "stroke-width": 3, "stroke-linecap": "round" }, svg);
+  const g = el("g", { transform: "translate(50 50) scale(1.25) translate(-50 -50)" }, svg);
+  const ring = el("circle", { cx: 50, cy: 50, r: 40, fill: "#1b1c1f" }, g);
+  const kn = el("g", {}, g);
+  el("path", { d: radial(36, 36.5, 39.6, 0, 350), fill: "none", stroke: "#0c0d0e", "stroke-width": 1.4 }, kn);
+  el("circle", { cx: 44, cy: 43, r: 14, fill: "rgba(255,255,255,0.025)" }, g);
+  el("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "rgba(0,0,0,0.6)", "stroke-width": 1.2 }, g);
+  const r1 = el("g", {}, g);
+  el("line", { x1: 50, y1: 14, x2: 50, y2: 23, stroke: "#f3f3f1", "stroke-width": 4, "stroke-linecap": "round" }, r1);
+  el("circle", { cx: 50, cy: 50, r: 24.5, fill: "#0b0c0d" }, g);
+  const c = cap || PAL.knob_fill || "#4aa3df";
+  const inner = el("circle", { cx: 50, cy: 50, r: 22.5, fill: c, stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
+  el("circle", { cx: 46, cy: 45, r: 9, fill: "rgba(255,255,255,0.025)" }, g);
+  const r2 = el("g", {}, g);
+  el("line", { x1: 50, y1: 31, x2: 50, y2: 43, stroke: lum(c) > 0.55 ? "#1d1e20" : "#f3f3f1", "stroke-width": 3.5, "stroke-linecap": "round" }, r2);
+  if (md2) { const col = modCol(c); el("circle", { cx: 50, cy: 50, r: 6.5, fill: lum(col) > 0.55 ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)" }, g); el("circle", { cx: 50, cy: 50, r: 4.5, fill: col }, g); }
+  if (md1) { const col = modCol("#1b1c1f"); el("circle", { cx: 50, cy: 81, r: 3.6, fill: lum(col) > 0.55 ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)" }, g); el("circle", { cx: 50, cy: 81, r: 2.6, fill: col }, g); }
+  return { svg,
+    set(a, b) { const t1 = -135 + 270 * a, t2 = -135 + 270 * b;
+      kn.setAttribute("transform", `rotate(${f2(t1)} 50 50)`); r1.setAttribute("transform", `rotate(${f2(t1)} 50 50)`);
+      r2.setAttribute("transform", `rotate(${f2(t2)} 50 50)`); },
+    hot(z) { ring.setAttribute("fill", z === "outer" ? "#2a2c30" : "#1b1c1f");
+      inner.setAttribute("fill", z === "inner" ? mixHex(c, "#ffffff", 0.1) : c); } };
+}
+
+// An XY pad (TS_CV_Widgets.xypad): set into the panel, a faint grid with
+// the centre lines stronger, a crosshair and a dot in the cap colour.
+function makeXY(W, H, cap) {
+  const node = h("div", "xyp");
+  node.style.width = W + "px"; node.style.height = H + "px";
+  const col = cap || PAL.knob_fill || "#4aa3df";
+  node.style.setProperty("--xc", col);
+  const vx = h("div", "xv"), hz = h("div", "xh"), dot = h("div", "xd");
+  node.append(vx, hz, dot);
+  return { node, set(a, b) {
+    const d = 7, w = node.clientWidth || W, hh = node.clientHeight || H;
+    const x = d + a * (w - 2 * d), y = d + (1 - b) * (hh - 2 * d);
+    vx.style.left = x + "px"; hz.style.top = y + "px";
+    dot.style.left = x + "px"; dot.style.top = y + "px";
+  } };
+}
+
+function makeHFader(style, cap, bip) {
+  if (style === "slim") return makeSlim(true, cap, bip);
+  const node = h("div", "fdr");
+  Object.assign(node.style, { position: "relative", flexShrink: "0" });
+  const slot = h("div"); Object.assign(slot.style, { position: "absolute", top: "50%", left: "6px", right: "6px",
+    height: "4px", marginTop: "-2px", background: "#0d0e0f", borderRadius: "2px", border: "1px solid var(--ring)" });
+  const capW = style === "console" ? 36 : style === "rail" ? 44 : 20;
+  const c = h("div", "fcap"); Object.assign(c.style, { position: "absolute", top: "50%", transform: "translateY(-50%)",
+    height: style === "rail" ? "min(26px, calc(100% - 8px))" : "min(28px, 100%)", width: capW + "px", borderRadius: style === "rail" ? "5px" : "3px", border: "1px solid rgba(0,0,0,0.6)" });
+  if (style === "console") c.style.background = `linear-gradient(90deg,#4c5056,#2a2d31 50%,#1a1c1f)`;
+  else if (style === "rail") c.style.background = `linear-gradient(180deg, rgba(255,255,255,0.3), transparent 45%, rgba(0,0,0,0.3)), ${cap || "#8d9298"}`;
+  else c.style.background = cap || "var(--cap)";
+  const line = h("div"); Object.assign(line.style, { position: "absolute", top: "0", bottom: "0", left: "50%", width: style === "console" ? "3px" : "2px",
+    marginLeft: "-1px", background: style === "console" ? (cap || "#e6e0d2") : (lum(cap || "#c9ccd0") > 0.55 ? "#1d1e20" : "#f0f0ee") });
+  c.append(line);
+  node.append(slot, c);
+  return { node, set(v) {
+    const W = node.clientWidth || 160;
+    c.style.left = (6 + v * (W - 12 - capW)) + "px";
+  } };
+}
+
+function makeFader(w, style, cap, bip) {
+  if (style === "slim") { const s = makeSlim(false, cap, bip); s.node.style.width = w + "px"; return s; }
   const node = h("div", "fdr");
   node.style.width = w + "px";
   node.style.position = "relative";
@@ -2491,6 +2768,16 @@ function makeFader(w, style, cap) {
 function touch(id, v) { local.set(id, { v, t: Date.now() }); }
 function held(id) { const l = local.get(id); return l && Date.now() - l.t < LOCAL_HOLD ? l : null; }
 
+// a dot in the middle of a knob's face, ringed in black or white
+function modDot(svg, st, cap) {
+  st = STYLE_ALIAS[st] || st;
+  const under = !BODY[st] ? (PAL.knob_body || "#2a2d32") : st === "led" ? "#2c2f33"
+    : st === "trim" ? "#a1a6ac" : (cap || CAP_DEFAULT[st] || PAL.knob_fill || "#4aa3df");
+  const col = modCol(under);
+  el("circle", { cx: 50, cy: 50, r: 10, fill: lum(col) > 0.55 ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)" }, svg);
+  el("circle", { cx: 50, cy: 50, r: 7, fill: col }, svg);
+}
+
 function buildPanels() {
   const row = $("row");
   // A rebuild of the same track keeps the row where it was scrolled to;
@@ -2503,13 +2790,24 @@ function buildPanels() {
   if (!layout.track) { row.append(h("div", "empty", "No track selected")); return; }
   const rowH = row.clientHeight - 16;
   const bodyH = rowH - HEAD - (layout.pbar ? 34 : 0) - PAD * 2;
-  for (const p of fx) {
-    const el = buildPanel(p, bodyH);
+  // only the panels under a bracket drop, and only as far as their own
+  // brackets stack
+  const brs = layout.br || [];
+  const sink = [];
+  for (const b of brs) for (let i = b.a; i <= b.b; i++)
+    sink[i] = Math.max(sink[i] || 0, (b.r + 1) * BRK_ROW + 2);
+  const els = [];
+  fx.forEach((p, k) => {
+    const d = sink[k + 1] || 0;
+    const el = buildPanel(p, bodyH - d);
+    if (d) el.style.marginTop = d + "px";
     if (layout.pbar) presetBar(el, p);
     el.dataset.g = p.g;
-    if (p.ti != null) wirePanelDrag(el, p);
+    wirePanelDrag(el, p);
     row.append(el);
-  }
+    els.push(el);
+  });
+  if (brs.length) requestAnimationFrame(() => drawBrackets(row, els, brs, sink));
   // the trailing tile adds to the end of the chain, as on the desktop
   const add = h("button", "addt", "+");
   add.setAttribute("aria-label", "Add plugin");
@@ -2520,6 +2818,57 @@ function buildPanels() {
   row.append(drop);
   row.scrollLeft = keep;
   row.dataset.trk = trk;
+}
+
+// The bracket strip, measured off the panels once they're laid out: a
+// bracket per container (a square and its name) and per run of plugins in
+// parallel (two bars), row 0 nearest the panels.
+const BRK_ROW = 12;
+function drawBrackets(row, els, brs, drop) {
+  const old = row.querySelector(".brk");
+  if (old) old.remove();
+  const strip = Math.max(0, ...drop.filter(v => v));
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("class", "brk");
+  svg.setAttribute("width", row.scrollWidth);
+  svg.setAttribute("height", strip);
+  const add = (tag, at) => { const e = document.createElementNS(SVGNS, tag);
+    for (const k in at) e.setAttribute(k, at[k]); svg.append(e); return e; };
+  for (const b of brs) {
+    const ea = els[b.a - 1], eb = els[b.b - 1];
+    if (!ea || !eb) continue;
+    const box = b.k === "c";
+    const col = box ? "var(--brkc)" : "var(--brkp)";
+    const x1 = ea.offsetLeft + 3.5, x2 = eb.offsetLeft + eb.offsetWidth - 3.5;
+    // its line on its row from the top (the outermost first); each end
+    // comes down to its own panel, which drops only as far as it needs
+    const topA = drop[b.a] || 0, topB = drop[b.b] || 0;
+    const ly = Math.floor((b.r + 0.5) * BRK_ROW) + 0.5;
+    let label = box ? b.n : "";
+    let tw = label ? label.length * 6.2 : 0;
+    if (label && tw + 7 + 4 + 30 > x2 - x1) { label = ""; tw = 0; }
+    const mw = box ? 7 + (label ? 4 + tw : 0) : 6;
+    const mid = Math.round((x1 + x2) / 2), m1 = mid - mw / 2 - 3, m2 = mid + mw / 2 + 3;
+    const g = add("g", { stroke: col, fill: "none", "stroke-width": 1.5, opacity: b.off ? 0.5 : 1 });
+    const path = document.createElementNS(SVGNS, "path");
+    path.setAttribute("d", `M${x1} ${topA} V${ly} H${m1} M${m2} ${ly} H${x2} V${topB}`);
+    g.append(path);
+    if (box) {
+      const sx = mid - mw / 2;
+      add("rect", { x: sx, y: ly - 3.5, width: 7, height: 7, fill: b.off ? "none" : col, stroke: col,
+                    "stroke-width": b.off ? 1 : 0, opacity: b.off ? 0.5 : 1 });
+      if (label) { const t = add("text", { x: sx + 11, y: ly + 4, fill: col, opacity: b.off ? 0.5 : 1 });
+                   t.textContent = label; }
+      // the square (and its name) opens the container's sheet
+      const hit = add("rect", { class: "hit", x: m1, y: ly - BRK_ROW / 2, width: m2 - m1, height: BRK_ROW, fill: "transparent" });
+      hit.addEventListener("click", () => boxSheet(b));
+    } else {
+      const bars = document.createElementNS(SVGNS, "path");
+      bars.setAttribute("d", `M${mid - 2} ${ly - 4} V${ly + 4} M${mid + 2} ${ly - 4} V${ly + 4}`);
+      g.append(bars);
+    }
+  }
+  row.append(svg);
 }
 
 // Rebuild after a trace opens or closes. The row stays where it was; if the
@@ -2662,17 +3011,24 @@ function buildPanel(p, bodyH) {
   }
   if (bkSvg) { bkSvg.classList.add("bks"); bkSvg.style.left = (gridX - 4) + "px"; bkSvg.style.top = (PAD - 4) + "px"; }
 
-  for (const rx of lay.rules) {
-    const r = h("div", "rule"); r.style.left = (gridX + rx) + "px"; r.style.top = PAD + "px";
-    r.style.height = (lay.rows * CELL_H - 8) + "px"; gb.append(r);
-  }
+  lay.rules.forEach((rx, ri) => {
+    // an across fader running over it cuts it (lay.ruleCuts)
+    const cuts = ((lay.ruleCuts && lay.ruleCuts[ri]) || []).slice().sort((p, q) => p[0] - q[0]);
+    const end = lay.rows * CELL_H - 8;
+    let y = 0;
+    const seg = (y0, y1) => { if (y1 - y0 < 1) return;
+      const r = h("div", "rule"); r.style.left = (gridX + rx) + "px"; r.style.top = (PAD + y0) + "px";
+      r.style.height = (y1 - y0) + "px"; gb.append(r); };
+    for (const [c0, c1] of cuts) { if (c0 > y) seg(y, c0); if (c1 > y) y = c1; }
+    seg(y, end);
+  });
   if (bkSvg) gb.append(bkSvg);
   for (const it of lay.items) {
     const c = it.c, cell = h("div", "cell");
     // the size it was given room for: small and large knobs (a size too
     // tall for the panel came back ordinary)
     const size = it.wu === 2 && it.hu === 1 ? "small" : it.wu === 3 && it.hu === 3 ? "large" : "medium";
-    const cw = CELL_W * it.wu / 2;
+    const cw = it.pw || CELL_W * it.wu / 2;
     cell.style.left = (gridX + it.x) + "px"; cell.style.top = (PAD + it.y) + "px"; cell.style.width = cw + "px";
     // on its own background's plate, or else its section's, that plate's inks
     const sp = c.bp || (it.sec != null && lay.sections[it.sec].by.sp);
@@ -2685,7 +3041,84 @@ function buildPanel(p, bodyH) {
     const val = h("div", "val", ""); val.style.width = (cw - 4) + "px";
     const entry = { c, id, val };
     const sendV = v => { touch(id, v); send("p", p.g, c.p, v.toFixed(4)); };
-    if (c.t === "knob" || c.t === "stepped") {
+    if (c.t === "xy" || c.t === "dual") {
+      // two parameters: an XY pad's X and Y, a concentric knob's ring and
+      // inner knob (TS_CV_Widgets.xypad / dual_knob)
+      lbl.textContent = c.l || ((c.l1 || "") + " / " + (c.l2 || "?"));
+      val.textContent = "";
+      const va = h("span", "", ""), vb = h("span", "", "");
+      val.append(va, document.createTextNode(" / "), vb);
+      entry.val = null; entry.two = true;
+      const send2 = v => { if (c.p2 == null) return; touch(id + "/2", v); send("p", p.g, c.p2, v.toFixed(4)); };
+      let v1 = 0, v2 = 0, lit = 0, litT = 0;
+      const showLit = n => { lit = n; clearTimeout(litT); va.classList.toggle("hi", n === 1); vb.classList.toggle("hi", n === 2);
+        if (n) litT = setTimeout(() => showLit(0), 1200); };
+      if (c.t === "xy") {
+        const Hc = it.hu * CELL_H / 2, W = cw - 8;
+        const pad = makeXY(W, Math.max(30, Hc - 36), c.cap);
+        cell.append(lbl, pad.node, val);
+        if (c.md || c.md2) modCorner(pad.node, "#101112");
+        let fine = false, sx = 0, sy = 0, s1 = 0, s2 = 0, lastTap = 0, moved = false;
+        const at = e => { const r = pad.node.getBoundingClientRect(), d = 7;
+          return [Math.max(0, Math.min(1, (e.clientX - r.left - d) / Math.max(1, r.width - 2 * d))),
+                  Math.max(0, Math.min(1, 1 - (e.clientY - r.top - d) / Math.max(1, r.height - 2 * d)))]; };
+        const go = (a, b) => { if (a !== v1) { v1 = a; touch(id, a); send("p", p.g, c.p, a.toFixed(4)); }
+          if (b !== v2) { v2 = b; send2(b); } pad.set(v1, v2); };
+        pad.node.addEventListener("pointerdown", e => {
+          e.preventDefault(); pad.node.setPointerCapture(e.pointerId);
+          fine = e.shiftKey; sx = e.clientX; sy = e.clientY; s1 = v1; s2 = v2; moved = false;
+          pad.node.classList.add("act");
+          if (!fine) { const [a, b] = at(e); go(a, b); }
+        });
+        pad.node.addEventListener("pointermove", e => {
+          if (!pad.node.hasPointerCapture(e.pointerId)) return;
+          if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 3) moved = true;
+          if (fine) { const r = pad.node.getBoundingClientRect();
+            go(Math.max(0, Math.min(1, s1 + (e.clientX - sx) * 0.15 / r.width)),
+               Math.max(0, Math.min(1, s2 - (e.clientY - sy) * 0.15 / r.height))); }
+          else { const [a, b] = at(e); go(a, b); }
+        });
+        const up = () => { pad.node.classList.remove("act");
+          if (!moved) { const now = Date.now();
+            if (now - lastTap < 320) { lastTap = 0; send("def", p.g, c.p); if (c.p2 != null) send("def", p.g, c.p2); }
+            else lastTap = now; } };
+        pad.node.addEventListener("pointerup", up); pad.node.addEventListener("pointercancel", up);
+        entry.set = (a, xa, b, xb) => { v1 = a; v2 = b; pad.set(a, b); va.textContent = xa; vb.textContent = xb; };
+      } else {
+        const D = KNOB_D[size === "large" ? "large" : "medium"];
+        const mg = Math.max(0, (CELL_H * it.hu / 2 - CELL_H - (D - KNOB)) / 2);
+        const k = makeDual(D, c.cap, c.md, c.md2);
+        const box = h("div", "knob"); box.append(k.svg);
+        box.style.margin = (6 + mg) + "px 0 " + (4 + mg) + "px";
+        cell.append(lbl, box, val);
+        let zone = "outer", sy = 0, sv = 0, lastTap = 0, moved = false;
+        const which = e => { const r = k.svg.getBoundingClientRect();
+          const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+          // the inner knob is 22.5 of the ring's 40, a little generous
+          return Math.hypot(dx, dy) <= r.width / 2 * (22.5 / 40) * 1.2 ? "inner" : "outer"; };
+        box.addEventListener("pointerdown", e => {
+          e.preventDefault(); box.setPointerCapture(e.pointerId);
+          zone = which(e); sy = e.clientY; sv = zone === "inner" ? v2 : v1; moved = false;
+          k.hot(zone);
+        });
+        box.addEventListener("pointermove", e => {
+          if (!box.hasPointerCapture(e.pointerId)) return;
+          const dy = sy - e.clientY;
+          if (Math.abs(dy) > 2) moved = true;
+          if (!moved) return;
+          const v = Math.max(0, Math.min(1, sv + dy * (e.shiftKey ? 0.15 : 1) / 220));
+          if (zone === "inner") { v2 = v; send2(v); showLit(2); } else { v1 = v; touch(id, v); send("p", p.g, c.p, v.toFixed(4)); showLit(1); }
+          k.set(v1, v2);
+        });
+        const up = e => { k.hot(null);
+          if (!moved) { const now = Date.now();
+            if (now - lastTap < 320) { lastTap = 0;
+              if (zone === "inner") { if (c.p2 != null) send("def", p.g, c.p2); } else send("def", p.g, c.p); }
+            else lastTap = now; } };
+        box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up);
+        entry.set = (a, xa, b, xb) => { v1 = a; v2 = b; k.set(a, b); va.textContent = xa; vb.textContent = xb; };
+      }
+    } else if (c.t === "knob" || c.t === "stepped") {
       // a numbered scale: the box takes the room the dial and its margins
       // had (a medium one the value line's too -- its value shows in place
       // of the name while it's turned), and the dial is as big as fits in
@@ -2707,6 +3140,7 @@ function buildPanel(p, bodyH) {
       }
       // the arc is a printed scale, not a knob standing on the plate: no shadow
       if (!BODY[STYLE_ALIAS[c.st] || c.st]) box.classList.add("flat");
+      if (c.md) modDot(k.svg, c.st, c.cap);
       if (size === "small") {
         // a small name over a smaller dial: there's no hovering on a touch
         // screen, so the name has to be on the panel; no room for the value
@@ -2752,10 +3186,12 @@ function buildPanel(p, bodyH) {
       // its own lit colour, when it has one, with ink that reads on it
       if (c.lit) { b.style.setProperty("--ton", c.lit); b.style.setProperty("--ton-ink", lum(c.lit) > 0.55 ? "#0d1116" : "#f4f4f2"); }
       if (small) cell.append(b); else cell.append(lbl, b);
+      const tx = h("span"); b.append(tx);
+      if (c.md) modCorner(b, PAL.toggle_off, c.lit || PAL.toggle_on);
       let cur = 0;
       b.addEventListener("click", () => { cur = cur >= 0.5 ? 0 : 1; b.classList.toggle("on", cur >= 0.5); sendV(cur); });
       entry.set = (v, x) => { cur = v; b.classList.toggle("on", v >= 0.5);
-        b.textContent = x || (small ? (c.l || "") : (v >= 0.5 ? "ON" : "OFF")); };
+        tx.textContent = x || (small ? (c.l || "") : (v >= 0.5 ? "ON" : "OFF")); };
       entry.val = null;
     } else if (c.t === "combo" && it.kind === "buttons") {
       // one button per choice, the current one lit
@@ -2771,6 +3207,8 @@ function buildPanel(p, bodyH) {
         return b;
       });
       cell.append(lbl, row);
+      // on the top-right button: the last across, the first down
+      if (c.md && btns.length) modCorner(c.btn === "down" ? btns[0] : btns[btns.length - 1], PAL.toggle_off, c.lit || PAL.toggle_on);
       entry.set = v => {
         const ref = c.ch && c.ch.length ? c : { ch: names };
         const k = nearestChoice(ref, v);
@@ -2780,18 +3218,49 @@ function buildPanel(p, bodyH) {
     } else if (c.t === "combo") {
       const b = h("button", "cmb"); b.style.width = (CELL_W - 8) + "px";
       cell.append(lbl, b);
+      const tx = h("span"); b.append(tx);
+      if (c.md) modCorner(b, PAL.toggle_off);
       let cur = 0, curText = "";
       b.addEventListener("click", () => pickChoice(c, cur, v => { cur = v; sendV(v); }));
-      entry.set = (v, x) => { cur = v; curText = x; b.textContent = x; };
+      entry.set = (v, x) => { cur = v; curText = x; tx.textContent = x; };
       entry.val = null;
     } else if (c.t === "fader") {
-      const H = (it.h || CELL_H * 3) - 34;
-      const fd = makeFader(34, c.st || "flat", c.cap);
-      fd.node.style.height = H + "px";
-      fd.node.style.margin = "2px 0";
-      cell.append(lbl, fd.node, val);
+      // its shape (TS_CV_Panel.fader_kind): up a column, up among the
+      // controls, or across; a whole column (row) thick or half of one
+      const thin = !!c.th, under = (p.plate && p.plate.bg) || PAL.panel_bg;
+      let fd, travel;
+      if (c.dr === "h") {
+        const W = cw - 8, Hc = it.hu * CELL_H / 2;
+        fd = makeHFader(c.st || "flat", c.cap, c.bi);
+        fd.node.style.width = W + "px";
+        if (thin) {
+          // half a row: the name left and the value right, over the track
+          const row = h("div", "hrow");
+          Object.assign(row.style, { display: "flex", justifyContent: "space-between", width: W + "px", fontSize: "11px" });
+          lbl.style.width = "auto"; val.style.width = "auto";
+          lbl.classList.add("sm");
+          row.append(lbl, val);
+          fd.node.style.height = Math.max(16, Hc - 18) + "px";
+          cell.append(row, fd.node);
+        } else {
+          fd.node.style.height = Math.max(20, Hc - 34) + "px";
+          cell.append(lbl, fd.node, val);
+        }
+        travel = W;
+      } else {
+        const Hc = faderKind(c) === "column" ? (it.h || CELL_H * 3) : it.hu * CELL_H / 2;
+        const H = Hc - 34;
+        fd = makeFader(thin ? 20 : 34, c.st || "flat", c.cap, c.bi);
+        fd.node.style.height = H + "px";
+        fd.node.style.margin = "2px 0";
+        if (thin) { lbl.classList.add("sm"); lbl.style.width = (cw - 1) + "px"; val.style.width = (cw - 1) + "px"; val.style.fontSize = "10px"; }
+        cell.append(lbl, fd.node, val);
+        travel = H;
+      }
+      if (c.md) modCorner(fd.node, under);
       let cur = 0;
-      dragger(fd.node, () => cur, v => { cur = v; fd.set(v); sendV(v); }, { travel: H, reset: () => send("def", p.g, c.p) });
+      dragger(fd.node, () => cur, v => { cur = v; fd.set(v); sendV(v); },
+        { travel, across: c.dr === "h", reset: () => send("def", p.g, c.p) });
       entry.set = v => { cur = v; fd.set(v); };
     } else continue;
     ctl.push(entry);
@@ -2840,8 +3309,13 @@ function moreBtn(p) {
 
 function topCount() { return layout.nfx || 0; }
 
+// REAPER's three ways to run a plugin or container against the one before
+// it; the first slot of a level has nothing before it
+const RUNS = [[0, "Route in series"], [1, "Route in parallel with previous"], [2, "Route in parallel with previous, merge MIDI"]];
+
 function panelMenu(p) {
-  const top = p.ti != null;
+  const ix = p.ix != null ? p.ix : (p.ti || 0);
+  const box = p.bx && (layout.br || []).find(b => b.g === p.bx);
   openSheet(sh => {
     sh.append(h("h3", null, p.n));
     const item = (label, fn, enabled = true, danger = false) => {
@@ -2851,15 +3325,40 @@ function panelMenu(p) {
       else o.addEventListener("click", () => { closeSheet(); fn(); });
       sh.append(o);
     };
-    item("Insert plugin before…", () => pickPlugin(p.ti), top);
-    item("Insert plugin after…", () => pickPlugin(p.ti + 1), top);
-    item("Move left", () => send("fxmove", p.g, p.ti - 1), top && p.ti > 0);
-    item("Move right", () => send("fxmove", p.g, p.ti + 2), top && p.ti < topCount() - 1);
+    item("Insert plugin before…", () => pickPlugin(ix, p.pp || ""));
+    item("Insert plugin after…", () => pickPlugin(ix + 1, p.pp || ""));
+    item("Move left", () => send("fxmv", p.g, p.pp || "", ix - 1), ix > 0);
+    item("Move right", () => send("fxmv", p.g, p.pp || "", ix + 2), ix < (p.ns || topCount()) - 1);
     item("Open the plugin's window", () => send("float", p.g));
     item("Rename…", () => renameFx(p));
     sh.append(h("div", "gap"));
-    item("Remove plugin", () => send("fxdel", p.g), top, true);
-    if (!top) sh.append(h("div", "lbl", "Inside an FX container: move or remove it in REAPER."));
+    for (const [v, label] of RUNS)
+      item(((p.pl || 0) === v ? "✓ " : "") + label, () => send("fxpar", p.g, v), ix > 0 && (p.pl || 0) !== v);
+    item("Put in a new container", () => send("fxwrap", p.g));
+    if (box) item(`Container: ${box.n}…`, () => boxSheet(box));
+    sh.append(h("div", "gap"));
+    item("Remove plugin", () => send("fxdel", p.g), true, true);
+  });
+}
+
+// A container's sheet: from its square on the bracket, or a panel inside it.
+function boxSheet(b) {
+  openSheet(sh => {
+    sh.append(h("h3", null, "Container: " + b.n));
+    const item = (label, fn, enabled = true, danger = false) => {
+      const o = h("button", "opt", label);
+      if (danger) o.style.color = "var(--clip)";
+      if (!enabled) o.disabled = true, o.style.opacity = 0.35;
+      else o.addEventListener("click", () => { closeSheet(); fn(); });
+      sh.append(o);
+    };
+    item(b.off ? "Enable container" : "Bypass container", () => send("boxbyp", b.g));
+    for (const [v, label] of RUNS)
+      item(((b.pl || 0) === v ? "✓ " : "") + label, () => send("boxpar", b.g, v), b.ix > 0 && (b.pl || 0) !== v);
+    item("Add plugin into it…", () => pickPlugin(b.nn || 0, b.p));
+    sh.append(h("div", "gap"));
+    item("Unpack: take everything out", () => send("boxunp", b.g));
+    item("Remove container and everything in it", () => send("boxdel", b.g), true, true);
   });
 }
 
@@ -3133,18 +3632,24 @@ function wirePanelDrag(pnl, p) {
   const head = pnl.querySelector(".ph");
   let timer = null, dragging = false, sx = 0, sy = 0, gap = null, pid = null;
   const row = $("row");
-  const tops = () => [...row.querySelectorAll(".pnl")].map(el => ({ el, p: (layout.fx || []).find(f => f.g === el.dataset.g) }))
-    .filter(t => t.p && t.p.ti != null);
+  // the panel under the finger decides, as on the desktop: its left half
+  // drops before it, its right half after it, in whatever container it's
+  // in; past the last panel is the end of the chain
+  const all = () => [...row.querySelectorAll(".pnl")].map(el => ({ el, p: (layout.fx || []).find(f => f.g === el.dataset.g) }))
+    .filter(t => t.p && t.p.ix != null);
   const gapAt = x => {
-    const ts = tops();
+    const ts = all();
     for (const t of ts) {
       const r = t.el.getBoundingClientRect();
-      if (x < r.left + r.width / 2) return { gap: t.p.ti, x: r.left };
+      if (x < r.right + 8) {
+        const before = x < r.left + r.width / 2;
+        return { level: t.p.pp || "", gap: t.p.ix + (before ? 0 : 1), x: before ? r.left : r.right + 4, into: !!t.p.bx };
+      }
     }
     const last = ts[ts.length - 1];
     if (!last) return null;
     const r = last.el.getBoundingClientRect();
-    return { gap: last.p.ti + 1, x: r.right + 4 };
+    return { level: "", gap: topCount(), x: r.right + 4, into: false };
   };
   const cancel = () => { clearTimeout(timer); timer = null; };
   head.addEventListener("pointerdown", e => {
@@ -3167,9 +3672,10 @@ function wirePanelDrag(pnl, p) {
     const g = gapAt(e.clientX);
     const drop = $("drop");
     if (!g) return;
-    gap = g.gap;
+    gap = g;
     const rr = row.getBoundingClientRect();
     drop.style.left = (g.x - rr.left + row.scrollLeft - 4) + "px";
+    drop.style.background = g.into ? "var(--brkc)" : "";
     drop.style.display = "block";
     // keep the row scrolling under a finger near either edge
     if (e.clientX > rr.right - 40) row.scrollLeft += 12;
@@ -3181,7 +3687,8 @@ function wirePanelDrag(pnl, p) {
     dragging = false;
     pnl.classList.remove("lift");
     $("drop").style.display = "none";
-    if (gap != null && gap !== p.ti && gap !== p.ti + 1) send("fxmove", p.g, gap);
+    if (gap && !((gap.level === (p.pp || "")) && (gap.gap === p.ix || gap.gap === p.ix + 1)))
+      send("fxmv", p.g, gap.level, gap.gap);
     gap = null;
   };
   head.addEventListener("pointerup", end);
@@ -3192,11 +3699,11 @@ function wirePanelDrag(pnl, p) {
 // developers, as the desktop picker has. `at` is the top-level slot to
 // insert before, or -1 for the end.
 let fxSeq = 0;
-function pickPlugin(at) {
+function pickPlugin(at, level = "") {
   let kind = "", val = "", timer = null;
   openSheet(sh => {
     sh.classList.add("pk");
-    sh.append(h("h3", null, at < 0 ? "Add plugin" : "Insert plugin"));
+    sh.append(h("h3", null, level ? "Add into the container" : at < 0 ? "Add plugin" : "Insert plugin"));
     const q = h("input", "fld"); q.placeholder = "Search plugins (e.g. fab sat)";
     q.setAttribute("autocapitalize", "off"); q.setAttribute("autocorrect", "off");
     const flt = h("div", "flt");
@@ -3246,7 +3753,7 @@ function pickPlugin(at) {
               o.append(fm);
             }
             o.append(h("span", null, e.n), h("span", "vn", e.v || ""));
-            o.addEventListener("click", () => { send("fxadd", encodeURIComponent(e.id), at); closeSheet(); });
+            o.addEventListener("click", () => { send("fxadd", encodeURIComponent(e.id), at, level); closeSheet(); });
             res.append(o);
           }
           return;
@@ -3575,6 +4082,12 @@ function render() {
       const l = held(e.id);
       const v = l ? l.v : (fv.v[e.c.idx] || 0);
       const x = fv.x[e.c.idx] || "";
+      if (e.two) {
+        // an XY pad's Y, a concentric knob's inner knob
+        const l2 = held(e.id + "/2"), k = String(e.c.idx);
+        e.set(v, x, l2 ? l2.v : ((fv.v2 && fv.v2[k]) || 0), (fv.x2 && fv.x2[k]) || "");
+        continue;
+      }
       e.set(v, x);
       if (e.val) e.val.textContent = layout.vals === false ? "" : x;
     }

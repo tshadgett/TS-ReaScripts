@@ -46,6 +46,28 @@ function S.set_collapsed(guid, on, default)
   reaper.SetProjExtState(0, NS, "collapsed:" .. guid, val)
 end
 
+-- Whether this instance has a collapsed state of its own in the project
+-- (one written by set_collapsed), rather than just showing the default.
+function S.has_collapsed(guid)
+  if guid == nil or guid == "" then return false end
+  local _, str = reaper.GetProjExtState(0, NS, "collapsed:" .. guid)
+  return str == "1" or str == "0"
+end
+
+-- The way you last left a PLUGIN (by its layout key), for the next
+-- instance of it that's inserted: true collapsed, false expanded, nil
+-- never touched. Kept for every project, like the layouts.
+function S.last_fold(key)
+  local v = reaper.GetExtState(NS, "fold:" .. tostring(key))
+  if v == "1" then return true elseif v == "0" then return false end
+  return nil
+end
+
+function S.remember_fold(key, on)
+  if not key or key == "" then return end
+  reaper.SetExtState(NS, "fold:" .. key, on and "1" or "0", true)
+end
+
 function S.toggle_collapsed(guid, default)
   default = default or false
   S.set_collapsed(guid, not S.is_collapsed(guid, default), default)

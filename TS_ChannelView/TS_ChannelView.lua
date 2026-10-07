@@ -1,16 +1,21 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.8.6
+-- @version 1.9.0
 -- @changelog
---  Right-click any track fader (Channel panel, mixer, TCP window) for its
---  style (Flat, Console, Rail) and colour, with the colour picker,
---  eyedropper and recent colours; saved with the track. Acts on the
---  selection when the track is part of it.
---  Group looks: folder parents, VCA leaders, FX returns and a Default for
---  every other track; a track's own choice wins, then its group's, then
---  the Default.
---  The web page shows the same looks. Restart the web companion script
---  after updating.
+--  Parallel FX and FX containers: brackets over the panels, Route in
+--  series / parallel / parallel with MIDI merged, put in a new container,
+--  container menu (bypass, add into, unpack, remove, save as chain), drag
+--  into and out of containers.
+--  Parameter modulation from a control's menu, with marks on modulated
+--  controls. Save and delete FX chains. Edit REAPER's FX folders from the
+--  add-plugin menu. Collapsed plugins come in collapsed.
+--  Faders of any shape (up or across, length, half thickness) placed among
+--  the controls as merged cells; Slim fader style. XY pad and concentric
+--  knob. Copy and paste a control's style. Matte knob caps. Buttons show
+--  the plugin's own choice names. Edit parameters reorganised into a
+--  settings column.
+--  The web page has the same: restart the web companion script after
+--  updating.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -209,7 +214,11 @@ local app = {
   change_count = -1,    -- reaper.GetProjectStateChangeCount, for edits elsewhere
   drag         = nil,   -- {chain_i, guid} while a panel header is dragged
   drop_gap     = nil,   -- gap index the drop would land in
-  panel_rects  = {},    -- per-frame {chain_i, x, w, top_index, collapsed}
+  panel_rects  = {},    -- per-frame {chain_i, x, y, w}
+  brackets     = {},    -- T.groups: containers and parallel runs over the row
+  brk_rows     = 0,     -- ...and how many rows of strip they need
+  box_for      = nil,   -- the container node the container menu is for
+  open_box_menu = false,
 }
 
 local function ext_get(k, default)
@@ -304,13 +313,27 @@ local function rescan(force)
   -- peak hold and re-anchor the tooltip to the pointer sixty times a
   -- second.
   local moved = (h ~= app.chain_hash)
+  if moved and app.track and app.scan_track == app.track then
+    -- A plugin that has just turned up on the track being watched starts
+    -- the way you last left that plugin (St.last_fold). Not on a track
+    -- change or a project load: those are plugins that were already there.
+    local had = {}
+    for _, fx in ipairs(app.chain) do had[fx.guid] = true end
+    for _, fx in ipairs(list) do
+      if not had[fx.guid] and fx.guid ~= "" and not St.has_collapsed(fx.guid) then
+        if St.last_fold(U.plugin_key(fx.name)) then St.set_collapsed(fx.guid, true) end
+      end
+    end
+  end
+  app.scan_track = app.track
   if force or moved then
     app.chain, app.chain_hash = list, h
+    app.brackets, app.brk_rows = T.groups(list)
   end
   if moved then
     -- Menus hold an INDEX into the old chain, so they can't survive it
     -- changing shape.
-    app.menu_fx, app.ctl_menu, app.drag = nil, nil, nil
+    app.menu_fx, app.ctl_menu, app.drag, app.box_for = nil, nil, nil, nil
     P.clear_caches()
     M.clear_default_cache()
     T.clear_gr_cache()
@@ -348,6 +371,7 @@ local function follow_selection()
   -- to be dropped before anything reads FX off it.
   if not track_valid(app.track) and app.track ~= nil then
     app.track, app.chain, app.chain_hash = nil, {}, ""
+    app.brackets, app.brk_rows = {}, 0
   end
   if tr ~= app.track then
     app.track = tr
@@ -382,56 +406,98 @@ end
 -- reordering
 -- ---------------------------------------------------------------------
 
--- Only TOP-LEVEL plugins can be reordered from here. REAPER 7's container
--- addressing is a community reverse-engineering, and while it's reliable
--- enough to READ a chain, moving an FX into or out of a container isn't
--- something the documented API exposes -- so nested panels aren't drag
--- handles at all, and say why on hover.
-local function move_fx(src_top, gap)
-  if not app.track then return end
-  -- `gap` counts insertion points (0 = before the first plugin). Removing
-  -- the source first shifts everything after it down one, so a move to the
-  -- right needs the destination decremented to land where the marker was.
-  local dest = (gap > src_top) and (gap - 1) or gap
-  if dest == src_top then return end
+-- Moving a plugin, or a whole container, to insertion point `gap` of the
+-- level `parent` ({} = the chain itself; see T.move). Anywhere in the
+-- chain, into and out of containers too: REAPER 7 documents how a slot
+-- inside a container is addressed, and T.move works the address out from
+-- the chain as it is at that moment.
+local function move_to(src_path, parent, gap, what)
+  if not app.track or not src_path then return end
   reaper.Undo_BeginBlock()
-  reaper.TrackFX_CopyToTrack(app.track, src_top, app.track, dest, true)
-  reaper.Undo_EndBlock("ChannelView: reorder plugin", -1)
-  rescan(true)
+  reaper.PreventUIRefresh(1)
+  local done = T.move(app.track, src_path, parent, gap)
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock("ChannelView: move " .. (what or "plugin"), -1)
+  if done then rescan(true) end
 end
 
--- Removing a plugin. Top-level only, for the same reason reordering is:
--- addressing inside a REAPER container is reverse-engineered, and a wrong
--- address here deletes the wrong plugin rather than just failing. No
--- confirmation prompt -- it's a single undo step, same as deleting from
--- REAPER's own FX chain window.
+-- One slot left (-1) or right (+1) within its own level.
+local function nudge(path, dir, what)
+  local parent, i = T.parent_of(path)
+  move_to(path, parent, dir < 0 and i - 1 or i + 2, what)
+end
+
+-- Collapsing or expanding a panel: this instance, and how the next one
+-- of this plugin to be inserted starts.
+local function set_fold(fx, on)
+  St.set_collapsed(fx.guid, on)
+  St.remember_fold(U.plugin_key(fx.name), on)
+end
+local function toggle_fold(fx) set_fold(fx, not St.is_collapsed(fx.guid)) end
+
+-- Removing a plugin, wherever it sits. No confirmation prompt -- it's a
+-- single undo step, same as deleting from REAPER's own FX chain window.
 local function remove_fx(fx)
-  if not app.track or not fx or not fx.is_top_level then return end
+  if not app.track or not fx then return end
   reaper.Undo_BeginBlock()
-  reaper.TrackFX_Delete(app.track, fx.top_index)
+  reaper.TrackFX_Delete(app.track, fx.addr)
   reaper.Undo_EndBlock("ChannelView: remove " .. U.fx_label(fx), -1)
   app.menu_fx, app.ctl_menu = nil, nil
   rescan(true)
 end
 
--- Which insertion gap the pointer is over, from the panel rectangles
--- recorded while drawing. Only top-level panels define gaps.
-local function gap_under(mx)
-  local tops = {}
-  for _, r in ipairs(app.panel_rects) do
-    if r.top_index then tops[#tops + 1] = r end
+-- REAPER's parallel setting for a plugin or container: 0 in series, 1
+-- alongside the one before, 2 alongside it with its MIDI merged too.
+local function set_parallel(addr, v, what)
+  if not app.track then return end
+  reaper.Undo_BeginBlock()
+  T.set_parallel(app.track, addr, v)
+  reaper.Undo_EndBlock("ChannelView: " .. (v == 0 and "run " .. what .. " in series"
+                                       or "run " .. what .. " in parallel"), -1)
+  rescan(true)
+end
+
+-- Where a dragged panel would land, from the panel rectangles recorded
+-- while drawing. The panel under the pointer decides: its left half puts
+-- the dragged one just before it, its right half just after it -- in
+-- whatever container IT is in. So the same gap between two panels means
+-- "end of that container" from one side and "after the container" from
+-- the other, and the marker says which. Past the last panel is the end
+-- of the chain.
+-- Returns { parent, gap, x, into = container node or nil }, or nil.
+local function drop_under(mx)
+  local rects = app.panel_rects
+  if #rects == 0 then return nil end
+  for _, r in ipairs(rects) do
+    local fx = app.chain[r.chain_i]
+    if fx and mx < r.x + r.w + C.PANEL_GAP then
+      local into = fx.ancestors and fx.ancestors[#fx.ancestors] or nil
+      if mx < r.x + r.w * 0.5 then
+        return { parent = fx.parent_path or {}, gap = fx.index or 0,
+                 x = r.x - C.PANEL_GAP * 0.5, into = into }
+      end
+      return { parent = fx.parent_path or {}, gap = (fx.index or 0) + 1,
+               x = r.x + r.w + C.PANEL_GAP * 0.5, into = into }
+    end
   end
-  if #tops == 0 then return nil end
-  for _, r in ipairs(tops) do
-    if mx < r.x + r.w * 0.5 then return r.top_index, r.x - C.PANEL_GAP * 0.5 end
-  end
-  local last = tops[#tops]
-  return last.top_index + 1, last.x + last.w + C.PANEL_GAP * 0.5
+  local last = rects[#rects]
+  return { parent = {}, gap = reaper.TrackFX_GetCount(app.track),
+           x = last.x + last.w + C.PANEL_GAP * 0.5 }
+end
+
+-- Where "Insert plugin before/after" adds: a top-level slot as a number,
+-- the way the browser always took it, or a slot inside a container.
+local function insert_target(fx, after)
+  local gap = (fx.index or fx.top_index or 0) + (after and 1 or 0)
+  if fx.is_top_level then return gap end
+  return { parent = fx.parent_path, gap = gap }
 end
 
 -- ---------------------------------------------------------------------
 -- menus
 -- ---------------------------------------------------------------------
+
+local box_menu_items   -- the container menu, below; the panel menu nests it
 
 -- ---------------------------------------------------------------------
 -- hardware styles: the Faceplate and Style menus
@@ -862,7 +928,71 @@ local function section_menu(fx, key, idx, c)
   ImGui.EndDisabled(ctx)
 end
 
+-- An XY pad's or a concentric knob's look: the colour (the pad's dot, the
+-- inner knob) and the size. Neither takes the knob styles.
+local function pad_style_menu(fx, key, idx, c)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local function set(fields)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then for k, v in pairs(fields) do lc[k] = v or nil end end
+    M.set(key, l); M.save()
+  end
+  ImGui.TextDisabled(ctx, (c.type == "xy") and "Dot colour" or "Inner knob colour")
+  for i, cp in ipairs(C.CAPS) do
+    if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+    if ImGui.ColorButton(ctx, cp.label .. "##pcap_" .. cp.key, cp.col or C.COL.knob_fill,
+        ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+      set({ cap = (cp.key ~= "accent") and cp.key or false })
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, cp.label) end
+    if cp.key == (c.cap or "accent") then
+      local x0, y0 = ImGui.GetItemRectMin(ctx)
+      local x1, y1 = ImGui.GetItemRectMax(ctx)
+      ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+    end
+  end
+  do
+    local function choose(k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then lc.cap = k end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    local now_col = W.cap_col(c.cap)
+    swatch_extras("pcap", c.cap, now_col and (now_col >> 8), "Colour", choose)
+  end
+  ImGui.Spacing(ctx)
+  ImGui.TextDisabled(ctx, "Size")
+  if c.type == "xy" then
+    -- columns by rows
+    local now = c.size or "2x2"
+    for i, k in ipairs({ "2x2", "3x2", "2x3", "3x3" }) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, k:gsub("x", "\u{00d7}") .. "##psize_" .. k, k == now, KEEP_OPEN, 40, 0) then
+        set({ size = (k ~= "2x2") and k or false })
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Columns \u{00d7} rows.") end
+    end
+  else
+    local now = (c.size == "large") and "large" or "medium"
+    for i, k in ipairs({ "medium", "large" }) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, C.SIZES[k].label .. "##psize_" .. k, k == now, KEEP_OPEN, 56, 0) then
+        set({ size = (k == "large") and "large" or false })
+      end
+    end
+  end
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.cap ~= nil or c.size ~= nil) then
+    set({ cap = false, size = false })
+  end
+end
+
 local function style_menu(fx, key, idx, c)
+  if c.type == "xy" or c.type == "dual" then return pad_style_menu(fx, key, idx, c) end
   local fam = style_family(c.type)
   if fam == "toggle" or c.type == "combo" then return toggle_colour_menu(fx, key, idx, c) end
   local list = (fam == "fader") and C.FADER_STYLES or C.KNOB_STYLES
@@ -890,6 +1020,32 @@ local function style_menu(fx, key, idx, c)
       local r = row_h * 0.5 - 4     -- the scale ticks sit outside this
       W.knob_face(dl, x + 4 + r, y + row_h * 0.5, r, 0.62,
         { style = st.key, cap = W.cap_col(c.cap) })
+    end
+  end
+
+  -- a fader's shape: which way it runs, how long, how thick (Shape<n>).
+  -- Full length and a full column is the fader as it always was.
+  if fam == "fader" then
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Shape")
+    local function row(name, choices, now, apply)
+      ImGui.Text(ctx, name)
+      for i, ch in ipairs(choices) do
+        if i == 1 then ImGui.SameLine(ctx, 76) else ImGui.SameLine(ctx) end
+        if ImGui.Selectable(ctx, ch[2] .. "##shape_" .. name .. i, now == ch[1], KEEP_OPEN, 36, 0) then
+          apply(ch[1])
+        end
+      end
+    end
+    row("Direction", { { false, "Up" }, { "h", "Across" } }, c.dir or false,
+      function(v) set({ dir = v }) end)
+    row("Length", { { 2, "2" }, { 3, "3" }, { 4, "4" }, { false, "Full" } }, c.len or false,
+      function(v) set({ len = v }) end)
+    row("Thickness", { { false, "Full" }, { true, "Half" } }, c.thin or false,
+      function(v) set({ thin = v }) end)
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Half: half a column wide (or half a row high, across) --\n" ..
+        "for a row of faders side by side, a graphic EQ's bands say.")
     end
   end
 
@@ -980,6 +1136,7 @@ local function style_menu(fx, key, idx, c)
         if style_family(o.type) == fam then
           o.style, o.cap = src.style, src.cap
           if fam == "knob" then o.scale, o.scale_ink = src.scale, src.scale_ink end
+          if fam == "fader" then o.dir, o.len, o.thin = src.dir, src.len, src.thin end
         end
       end
     end
@@ -988,6 +1145,148 @@ local function style_menu(fx, key, idx, c)
   if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale ~= nil) then
     set({ style = false, cap = false, scale = false, scale_ink = false })
   end
+end
+
+-- ---------------------------------------------------------------------
+-- parallel FX and containers
+-- ---------------------------------------------------------------------
+
+-- A container's name as REAPER shows it: its own name when it's been
+-- renamed, else just "Container".
+local function box_label(node)
+  return node.alias or U.fx_label(node)
+end
+
+-- The three ways REAPER can run a plugin (or container) against the one
+-- before it. The first slot of a level has nothing before it, so the
+-- choice is offered there greyed out, with the reason.
+local PAR_CHOICES = {
+  { 0, "In series" },
+  { 1, "In parallel with previous" },
+  { 2, "In parallel with previous, merge MIDI" },
+}
+local function parallel_menu(addr, cur, index, what)
+  local first = (index or 0) == 0
+  if ImGui.BeginMenu(ctx, "Route", not first) then
+    for _, ch in ipairs(PAR_CHOICES) do
+      if ImGui.MenuItem(ctx, ch[2], nil, (cur or 0) == ch[1]) and (cur or 0) ~= ch[1] then
+        set_parallel(addr, ch[1], what)
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  if first and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, "First in its " .. ((addr or 0) >= T.CONTAINER_FLAG and "container" or "chain") ..
+      " \u{2014} there's nothing before it to route beside.")
+  end
+end
+
+-- Every panel inside a container, empty-container stand-ins included.
+local function panels_in(node)
+  local out = {}
+  for i = node.first, node.last do
+    if app.chain[i] then out[#out + 1] = app.chain[i] end
+  end
+  return out
+end
+
+-- The container menu's items: from its square on the bracket, and as a
+-- submenu of the panel menu of anything inside it.
+box_menu_items = function(node)
+  local tr = app.track
+  if not tr then return end
+  ImGui.TextDisabled(ctx, "Container: " .. U.truncate(box_label(node), 30))
+
+  -- REAPER's own name for it, as its FX chain shows
+  if app.boxren_for ~= node.guid then app.boxren_for, app.boxren_buf = node.guid, node.alias or "" end
+  ImGui.SetNextItemWidth(ctx, 150)
+  local _, v = ImGui.InputTextWithHint(ctx, "##boxren", "Container", app.boxren_buf)
+  local enter = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+                or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
+  app.boxren_buf = v
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Rename##boxren") or enter then
+    T.rename(tr, node.addr, node.guid, U.trim(app.boxren_buf))
+    app.boxren_for = nil
+    rescan(true)
+    ImGui.CloseCurrentPopup(ctx)
+  end
+  ImGui.Separator(ctx)
+
+  local on = T.get_enabled(tr, node.addr)
+  if ImGui.MenuItem(ctx, "Bypass container", nil, not on) then
+    reaper.Undo_BeginBlock()
+    T.set_enabled(tr, node.addr, not on)
+    reaper.Undo_EndBlock("ChannelView: " .. (on and "bypass" or "enable") .. " container", -1)
+  end
+  -- the container's own wet, as its FX chain window has it
+  local wet = reaper.TrackFX_GetParamFromIdent and reaper.TrackFX_GetParamFromIdent(tr, node.addr, ":wet")
+  if wet and wet >= 0 then
+    local wv = reaper.TrackFX_GetParam(tr, node.addr, wet) or 1
+    ImGui.SetNextItemWidth(ctx, 150)
+    local ch, nv = ImGui.SliderDouble(ctx, "Wet##boxwet", wv * 100, 0, 100, "%.0f%%")
+    if ch then reaper.TrackFX_SetParam(tr, node.addr, wet, nv / 100) end
+  end
+  parallel_menu(node.addr, node.parallel, node.index, "container")
+  ImGui.Separator(ctx)
+
+  local inside = panels_in(node)
+  if ImGui.MenuItem(ctx, "Collapse everything in it", nil, false, #inside > 0) then
+    for _, f in ipairs(inside) do set_fold(f, true) end
+  end
+  if ImGui.MenuItem(ctx, "Expand everything in it", nil, false, #inside > 0) then
+    for _, f in ipairs(inside) do set_fold(f, false) end
+  end
+  if ImGui.MenuItem(ctx, "Add plugin into it\u{2026}") then
+    B.open_menu({ parent = node.path, gap = #(node.children or {}) })
+  end
+  if ImGui.MenuItem(ctx, "Move left", nil, false, node.index > 0) then
+    nudge(node.path, -1, "container")
+  end
+  if ImGui.MenuItem(ctx, "Move right", nil, false, node.index < node.count - 1) then
+    nudge(node.path, 1, "container")
+  end
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Open the container's window") then
+    reaper.TrackFX_Show(tr, node.addr, 3)
+  end
+  if ImGui.MenuItem(ctx, "Show in the FX chain") then
+    reaper.TrackFX_Show(tr, node.addr, 1)
+  end
+  if ImGui.MenuItem(ctx, "Save as FX chain\u{2026}") then
+    CN.open_save(tr, node.path, box_label(node))
+  end
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Unpack: take everything out") then
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+    T.unpack(tr, node.path)
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock("ChannelView: unpack container", -1)
+    rescan(true)
+    ImGui.CloseCurrentPopup(ctx)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Puts what's inside back in the container's place, in order,\nand removes the empty container.")
+  end
+  if ImGui.MenuItem(ctx, "Remove container and everything in it") then
+    reaper.Undo_BeginBlock()
+    reaper.TrackFX_Delete(tr, node.addr)
+    reaper.Undo_EndBlock("ChannelView: remove container", -1)
+    rescan(true)
+    ImGui.CloseCurrentPopup(ctx)
+  end
+end
+
+local function box_menu()
+  if not ImGui.BeginPopup(ctx, "boxmenu") then return end
+  local node = app.box_for
+  -- the node is from the chain as it was: still the same container?
+  if not node or not app.track or T.guid_at(app.track, node.addr) ~= node.guid then
+    ImGui.EndPopup(ctx) return
+  end
+  box_menu_items(node)
+  ImGui.EndPopup(ctx)
 end
 
 local function panel_menu()
@@ -1033,7 +1332,7 @@ local function panel_menu()
   end
   locked_tip()
   if ImGui.MenuItem(ctx, St.is_collapsed(fx.guid) and "Expand" or "Collapse to a bar") then
-    St.toggle_collapsed(fx.guid)
+    toggle_fold(fx)
   end
 
   -- The meter is a property of the plugin, so it saves with the layout and
@@ -1101,13 +1400,26 @@ local function panel_menu()
     ImGui.EndMenu(ctx)
   end
   locked_tip()
-  if fx.is_top_level then
-    local n_top = reaper.TrackFX_GetCount(app.track)
-    if ImGui.MenuItem(ctx, "Move left", nil, false, fx.top_index > 0) then
-      move_fx(fx.top_index, fx.top_index - 1)
-    end
-    if ImGui.MenuItem(ctx, "Move right", nil, false, fx.top_index < n_top - 1) then
-      move_fx(fx.top_index, fx.top_index + 2)
+  if ImGui.MenuItem(ctx, "Move left", nil, false, fx.index > 0) then
+    nudge(fx.path_t, -1)
+  end
+  if ImGui.MenuItem(ctx, "Move right", nil, false, fx.index < fx.siblings - 1) then
+    nudge(fx.path_t, 1)
+  end
+  parallel_menu(fx.addr, fx.parallel, fx.index, "plugin")
+  if ImGui.MenuItem(ctx, "Put in a new container") then
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+    T.wrap(app.track, fx.path_t)
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock("ChannelView: put " .. U.fx_label(fx) .. " in a container", -1)
+    rescan(true)
+  end
+  do
+    local box = fx.ancestors and fx.ancestors[#fx.ancestors]
+    if box and ImGui.BeginMenu(ctx, "Container: " .. U.truncate(box_label(box), 24)) then
+      box_menu_items(box)
+      ImGui.EndMenu(ctx)
     end
   end
   -- These three replace a saved layout outright and save straight away --
@@ -1139,14 +1451,12 @@ local function panel_menu()
     end
   end
   locked_tip()
-  if fx.is_top_level then
-    ImGui.Separator(ctx)
-    if ImGui.MenuItem(ctx, "Insert plugin before\u{2026}") then
-      B.open_menu(fx.top_index)
-    end
-    if ImGui.MenuItem(ctx, "Insert plugin after\u{2026}") then
-      B.open_menu(fx.top_index + 1)
-    end
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Insert plugin before\u{2026}") then
+    B.open_menu(insert_target(fx, false))
+  end
+  if ImGui.MenuItem(ctx, "Insert plugin after\u{2026}") then
+    B.open_menu(insert_target(fx, true))
   end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Open the plugin's window") then
@@ -1156,18 +1466,10 @@ local function panel_menu()
     reaper.TrackFX_Show(app.track, fx.addr, 1)
   end
   ImGui.Separator(ctx)
-  if fx.is_top_level then
-    if ImGui.MenuItem(ctx, "Remove plugin from the chain") then
-      remove_fx(fx)
-      ImGui.EndPopup(ctx)
-      return
-    end
-  else
-    ImGui.MenuItem(ctx, "Remove plugin from the chain", nil, false, false)
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx,
-        "Inside an FX container \u{2014} remove it in REAPER's FX chain window.")
-    end
+  if ImGui.MenuItem(ctx, fx.is_container and "Remove container" or "Remove plugin from the chain") then
+    remove_fx(fx)
+    ImGui.EndPopup(ctx)
+    return
   end
 
   ImGui.Separator(ctx)
@@ -1176,10 +1478,161 @@ local function panel_menu()
   ImGui.EndPopup(ctx)
 end
 
+-- ---------------------------------------------------------------------
+-- copy and paste a control's look (TS_CV_Mappings.look_of / paste_look)
+-- ---------------------------------------------------------------------
+-- One copied look, for this session: from any control on any panel,
+-- pasted onto one control, or every one of its kind in a section or on
+-- the panel. app.style_clip = { look = M.look_of(control) }.
+
+local LOOK_NOUN = { knob = "knob", fader = "fader", button = "button" }
+
+-- "Knob: Skirted, Red, Large, Values scale, on Inset" -- what's on the
+-- clipboard, for the menu's tooltip
+local function look_text(s)
+  local parts = {}
+  local function label_of(list, key)
+    for _, t in ipairs(list) do if t.key == key then return t.label end end
+    return nil
+  end
+  if s.fam == "knob" then
+    parts[#parts + 1] = label_of(C.KNOB_STYLES, C.KNOB_STYLE_ALIAS[s.style] or s.style) or "Arc"
+  elseif s.fam == "fader" then
+    parts[#parts + 1] = label_of(C.FADER_STYLES, s.style) or "Flat"
+  elseif s.fam == "button" then
+    parts[#parts + 1] = label_of(C.BUTTON_STYLES, s.style) or "Flat"
+  end
+  if s.cap then
+    parts[#parts + 1] = label_of(s.fam == "button" and C.TOGGLE_COLS or C.CAPS, s.cap)
+                        or C.custom_key(s.cap) or s.cap
+  end
+  if s.size and C.SIZES[s.size] then parts[#parts + 1] = C.SIZES[s.size].label end
+  if s.fam == "xy" and s.size then parts[#parts + 1] = (s.size:gsub("x", "\u{00d7}")) end
+  if s.fam == "fader" then
+    parts[#parts + 1] = ((s.dir == "h") and "across " or "up ") .. (s.len and tostring(s.len) or "full")
+      .. (s.thin and ", half width" or "")
+  end
+  if s.fam == "knob" then
+    local sc = M.scale_kind(s)
+    if sc == "values" then parts[#parts + 1] = "values scale"
+    elseif sc == "ten" then parts[#parts + 1] = "0\u{2013}10 scale" end
+  end
+  if s.back then
+    local pl = C.plate_of(s.back)
+    parts[#parts + 1] = "on " .. ((s.back == "inset") and "Inset" or (pl and pl.label) or s.back)
+  end
+  local head = s.fam and (s.fam:sub(1, 1):upper() .. s.fam:sub(2)) or "Background"
+  return head .. ((#parts > 0) and (": " .. table.concat(parts, ", ")) or ": none")
+end
+
+-- the controls in the same section as control `idx`: between the dividers
+-- either side of it
+local function section_range(controls, idx)
+  local a, b = 1, #controls
+  for k = idx - 1, 1, -1 do if controls[k].type == "divider" then a = k + 1 break end end
+  for k = idx + 1, #controls do if controls[k].type == "divider" then b = k - 1 break end end
+  return a, b
+end
+
+local function look_items(fx, key, layout, idx, c, locked)
+  if ImGui.MenuItem(ctx, "Copy style") then
+    app.style_clip = { look = M.look_of(c) }
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Its style, colour, size (a fader's shape), scale, background\n" ..
+      "and finish, to paste onto other controls, on any panel.")
+  end
+  if locked then return end
+  local s = app.style_clip and app.style_clip.look
+  local have = s ~= nil
+  local function tip()
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, have and look_text(s) or "Copy a control's style first.")
+    end
+  end
+  local function paste(from, to)
+    local l = materialise(fx)
+    local n = 0
+    for k = from, to do
+      local o = l.controls[k]
+      local fits = o and o.type ~= "divider"
+        and (k == idx or s.fam == nil or M.look_family(o) == s.fam)
+      if fits and M.paste_look(o, s) then n = n + 1 end
+    end
+    if n > 0 then M.set(key, l); M.save() end
+  end
+  if ImGui.MenuItem(ctx, "Paste style", nil, false, have) then paste(idx, idx) end
+  tip()
+  local noun = have and (s.fam and LOOK_NOUN[s.fam] or "control") or "control"
+  if ImGui.MenuItem(ctx, "Paste to every " .. noun .. " in this section", nil, false, have) then
+    paste(section_range(layout.controls, idx))
+  end
+  tip()
+  if ImGui.MenuItem(ctx, "Paste to every " .. noun .. " on this panel", nil, false, have) then
+    paste(1, #layout.controls)
+  end
+  tip()
+end
+
+-- Choosing an XY pad's Y, or a concentric knob's inner knob: every
+-- parameter of the plugin, filtered as you type.
+local function second_param_menu(fx, key, idx, c)
+  ImGui.SetNextItemWidth(ctx, 240)
+  local _, f = ImGui.InputTextWithHint(ctx, "##p2filter", "filter\u{2026}", app.p2_filter or "")
+  app.p2_filter = f
+  local want = U.trim(f or ""):lower()
+  local n = reaper.TrackFX_GetNumParams(app.track, fx.addr)
+  if ImGui.BeginChild(ctx, "##p2list", 240, math.min(320, 20 + n * 19)) then
+    for p = 0, n - 1 do
+      local _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, p, "")
+      local shown = M.display_name(key, p, nil, pn, false)
+      if want == "" or shown:lower():find(want, 1, true) or tostring(p) == want then
+        if ImGui.Selectable(ctx, ("%d  %s##p2_%d"):format(p, shown, p), c.param2 == p) then
+          local l = materialise(fx)
+          local lc = l.controls[idx]
+          if lc then lc.param2 = p end
+          M.set(key, l); M.save()
+          ImGui.CloseCurrentPopup(ctx)
+        end
+      end
+    end
+    ImGui.EndChild(ctx)
+  end
+end
+
 local TYPE_LABELS = { knob = "Knob", toggle = "Button", combo = "Dropdown",
                       stepped = "Stepped knob", fader = "Fader",
+                      xy = "XY pad", dual = "Concentric knob",
                       blank = "Gap", half_gap = "Half gap", divider = "Divider" }
-local TYPE_ORDER  = { "knob", "toggle", "combo", "stepped", "fader", "blank", "half_gap", "divider" }
+local TYPE_ORDER  = { "knob", "toggle", "combo", "stepped", "fader", "xy", "dual", "blank", "half_gap", "divider" }
+
+-- REAPER's Parameter Modulation / Link window for this one parameter --
+-- LFO, audio control signal, MIDI link, parameter link -- straight from
+-- the control, rather than touching it and hunting for the last-touched
+-- action. Ticked while the parameter has modulation switched on. Not a
+-- layout edit, so a locked layout offers it too.
+local function param_mod_item(fx, c)
+  if not (app.track and c and c.param and c.param >= 0) then return end
+  -- two of them for a control with two parameters, named for which is which
+  local list = { { c.param, "Parameter modulation\u{2026}" } }
+  if M.has_second(c) and c.param2 and c.param2 >= 0 then
+    local a, b = (c.type == "xy") and "X" or "ring", (c.type == "xy") and "Y" or "inner knob"
+    list = { { c.param, "Parameter modulation (" .. a .. ")\u{2026}" },
+             { c.param2, "Parameter modulation (" .. b .. ")\u{2026}" } }
+  end
+  for _, e in ipairs(list) do
+    local pre = ("param.%d.mod."):format(e[1])
+    local ok, act = reaper.TrackFX_GetNamedConfigParm(app.track, fx.addr, pre .. "active")
+    if ImGui.MenuItem(ctx, e[2], nil, ok and tonumber(act) == 1) then
+      reaper.TrackFX_SetNamedConfigParm(app.track, fx.addr, pre .. "visible", "1")
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "REAPER's Parameter Modulation / Link window for this\n" ..
+        "parameter: LFO, audio control signal, MIDI or parameter link.\n" ..
+        "Ticked while its modulation is switched on.")
+    end
+  end
+end
 
 local function control_menu()
   if not ImGui.BeginPopup(ctx, "ctlmenu") then return end
@@ -1199,6 +1652,10 @@ local function control_menu()
   if M.locked(layout) then
     ImGui.TextDisabled(ctx, "Layout locked")
     ImGui.TextDisabled(ctx, "(the padlock at the left of the panel's foot)")
+    ImGui.Separator(ctx)
+    look_items(fx, key, layout, cm.ctl, c, true)
+    ImGui.Separator(ctx)
+    param_mod_item(fx, c)
     if c.type == "combo" then
       ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, "Rescan choices") then P.rescan_choices(key, c.param) end
@@ -1217,8 +1674,18 @@ local function control_menu()
     for _, t in ipairs(TYPE_ORDER) do
       if ImGui.MenuItem(ctx, TYPE_LABELS[t], nil, c.type == t and not (t == "combo" and c.buttons)) then
         local l = commit()
-        l.controls[cm.ctl].type = t
-        l.controls[cm.ctl].buttons, l.controls[cm.ctl].nbtn = nil, nil
+        local lc = l.controls[cm.ctl]
+        local was = lc.type
+        lc.type = t
+        lc.buttons, lc.nbtn = nil, nil
+        -- sizes don't carry between an XY pad and anything else, and a
+        -- concentric knob is never small
+        if (t == "xy") ~= (was == "xy") or (t == "dual" and lc.size == "small") then lc.size = nil end
+        -- two parameters: the second starts as the next one along
+        if (t == "xy" or t == "dual") and not lc.param2 and lc.param then
+          local n = reaper.TrackFX_GetNumParams(app.track, fx.addr)
+          lc.param2 = (lc.param + 1 < n) and (lc.param + 1) or lc.param
+        end
         M.set(key, l); M.save()
       end
       -- right after Dropdown: its choices as a row, or a column, of buttons
@@ -1248,13 +1715,20 @@ local function control_menu()
     ImGui.EndMenu(ctx)
   end
 
-  if ImGui.MenuItem(ctx, "Centred fill", nil, c.bipolar and true or false) then
+  if not M.has_second(c) and ImGui.MenuItem(ctx, "Centred fill", nil, c.bipolar and true or false) then
     local l = commit()
     l.controls[cm.ctl].bipolar = not l.controls[cm.ctl].bipolar
     M.set(key, l); M.save()
   end
 
-  if (style_family(c.type) or (c.type == "combo" and c.buttons)) and ImGui.BeginMenu(ctx, "Style") then
+  -- an XY pad's Y, a concentric knob's inner knob
+  if M.has_second(c) and ImGui.BeginMenu(ctx, (c.type == "xy") and "Y parameter" or "Inner knob parameter") then
+    second_param_menu(fx, key, cm.ctl, c)
+    ImGui.EndMenu(ctx)
+  end
+
+  local styled = style_family(c.type) or c.type == "xy" or c.type == "dual" or (c.type == "combo" and c.buttons)
+  if styled and ImGui.BeginMenu(ctx, "Style") then
     style_menu(fx, key, cm.ctl, c)
     ImGui.EndMenu(ctx)
   end
@@ -1272,7 +1746,7 @@ local function control_menu()
   for k = cm.ctl - 1, 1, -1 do
     local o = layout.controls[k]
     if o.type == "divider" then div_idx = k break end
-    if o.type == "fader" then break end
+    if P.fader_kind(o) == "column" then break end
   end
   if ImGui.BeginMenu(ctx, "Section", div_idx ~= nil) then
     section_menu(fx, key, div_idx, layout.controls[div_idx])
@@ -1282,6 +1756,9 @@ local function control_menu()
     ImGui.SetTooltip(ctx, "A section starts at a divider. To style the first group,\n" ..
       "put a divider (Line off) at the very start in Edit parameters.")
   end
+
+  ImGui.Separator(ctx)
+  look_items(fx, key, layout, cm.ctl, c, false)
 
   ImGui.Separator(ctx)
   -- Renaming here sets the parameter's ALIAS: the name sticks to the
@@ -1340,6 +1817,8 @@ local function control_menu()
   end
 
   ImGui.Separator(ctx)
+  param_mod_item(fx, c)
+  ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Remove from panel") then
     local l = commit()
     table.remove(l.controls, cm.ctl)
@@ -1368,16 +1847,13 @@ local function control_menu()
     E.open(app.track, fx, key, layout)
   end
   if ImGui.MenuItem(ctx, St.is_collapsed(fx.guid) and "Expand" or "Collapse to a bar") then
-    St.toggle_collapsed(fx.guid)
+    toggle_fold(fx)
   end
-  if fx.is_top_level then
-    local n_top = reaper.TrackFX_GetCount(app.track)
-    if ImGui.MenuItem(ctx, "Move left", nil, false, fx.top_index > 0) then
-      move_fx(fx.top_index, fx.top_index - 1)
-    end
-    if ImGui.MenuItem(ctx, "Move right", nil, false, fx.top_index < n_top - 1) then
-      move_fx(fx.top_index, fx.top_index + 2)
-    end
+  if ImGui.MenuItem(ctx, "Move left", nil, false, fx.index > 0) then
+    nudge(fx.path_t, -1)
+  end
+  if ImGui.MenuItem(ctx, "Move right", nil, false, fx.index < fx.siblings - 1) then
+    nudge(fx.path_t, 1)
   end
   ImGui.EndPopup(ctx)
 end
@@ -2002,6 +2478,94 @@ local function add_tile(h)
   return pressed
 end
 
+-- The bracket strip: one bracket per FX container and per run of plugins
+-- in parallel, over the panels they hold, drawn after the panels so the
+-- rectangles are known. A container's square opens its menu.
+local function bracket_tip(b)
+  if b.kind == "container" then
+    local n = b.node
+    local inside = #(n.children or {})
+    local t = ("Container: %s \u{2014} %d %s"):format(box_label(n), inside,
+      inside == 1 and "slot" or "slots")
+    if not T.get_enabled(app.track, n.addr) then t = t .. "\nBypassed" end
+    if n.parallel ~= 0 then t = t .. "\nRuns in parallel with the one before it" end
+    return t .. "\n\nClick for the container's menu"
+  end
+  local lines = { "Running in parallel:" }
+  for k, m in ipairs(b.members) do
+    local nm = m.kind == "container" and ("container " .. box_label(m)) or (m.alias or U.fx_label(m))
+    if k > 1 and m.parallel == 2 then nm = nm .. "  (MIDI merged)" end
+    lines[#lines + 1] = "  \u{2022} " .. nm
+  end
+  lines[#lines + 1] = "\nREAPER adds their outputs together. Right-click a\npanel \u{25B8} Route to change it."
+  return table.concat(lines, "\n")
+end
+
+-- Each bracket's line is on its row of the strip (the outermost at the
+-- top, T.groups), and its ends come down to its first and last panels.
+-- Panels only drop as far as the brackets over them need, so a group one
+-- row deep sits higher than one two rows deep -- inside one container too.
+local function draw_brackets()
+  if app.brk_rows == 0 or not app.track then return end
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local rect = {}
+  for _, r in ipairs(app.panel_rects) do rect[r.chain_i] = r end
+  for _, b in ipairs(app.brackets) do
+    local ra, rb = rect[b.first], rect[b.last]
+    if ra and rb then
+      local box = b.kind == "container"
+      local col = box and C.COL.brk_container or C.COL.brk_parallel
+      local off = box and not T.get_enabled(app.track, b.node.addr)
+      if off then col = U.with_alpha(col, 0x80) end
+      local x1, x2 = math.floor(ra.x + 3) + 0.5, math.floor(rb.x + rb.w - 3) + 0.5
+      -- its line on its row, counted from the top of the strip; each end
+      -- comes down to the top of its own panel, which drops only as far
+      -- as the brackets over that panel need
+      local ly = math.floor((app.brk_top or ra.y) + (b.row + 0.5) * C.BRK_ROW_H) + 0.5
+      local sq = 7
+      local label = box and box_label(b.node) or nil
+      local tw, th = 0, 0
+      if label then
+        tw, th = ImGui.CalcTextSize(ctx, label)
+        if tw + sq + 4 + 30 > x2 - x1 then label, tw = nil, 0 end
+      end
+      local mw = box and (sq + (label and (4 + tw) or 0)) or 6
+      local mid = math.floor((x1 + x2) * 0.5)
+      local m1, m2 = mid - mw * 0.5 - 3, mid + mw * 0.5 + 3
+      ImGui.DrawList_AddLine(dl, x1, ra.y - 1, x1, ly, col, 1.5)
+      ImGui.DrawList_AddLine(dl, x1, ly, m1, ly, col, 1.5)
+      ImGui.DrawList_AddLine(dl, m2, ly, x2, ly, col, 1.5)
+      ImGui.DrawList_AddLine(dl, x2, ly, x2, rb.y - 1, col, 1.5)
+      if box then
+        local sx = mid - mw * 0.5
+        if off then
+          ImGui.DrawList_AddRect(dl, sx + 0.5, ly - 3, sx + sq - 0.5, ly + 3, col, 0, 0, 1.0)
+        else
+          ImGui.DrawList_AddRectFilled(dl, sx, ly - 3.5, sx + sq, ly + 3.5, col)
+        end
+        if label then
+          ImGui.DrawList_AddText(dl, sx + sq + 4, ly - th * 0.5, col, label)
+        end
+      else
+        ImGui.DrawList_AddLine(dl, mid - 2, ly - 4, mid - 2, ly + 4, col, 1.5)
+        ImGui.DrawList_AddLine(dl, mid + 2, ly - 4, mid + 2, ly + 4, col, 1.5)
+      end
+      local id = ("brk%s%d_%d_%d"):format(b.kind:sub(1, 1), b.first, b.last, b.row)
+      ImGui.SetCursorScreenPos(ctx, m1, ly - C.BRK_ROW_H * 0.5)
+      ImGui.InvisibleButton(ctx, id, math.max(1, m2 - m1), C.BRK_ROW_H,
+        ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+      local hov = ImGui.IsItemHovered(ctx)
+      W.tip(ctx, id, bracket_tip(b), hov, false)
+      if box and (ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left)
+                  or ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)) then
+        app.box_for, app.open_box_menu = b.node, true
+      end
+    end
+  end
+  -- (no putting the cursor back: a SetCursorScreenPos with no item after
+  -- it would trip ImGui's check on the child's bounds at EndChild)
+end
+
 local function panel_row(row_h, row_w)
   local pr_x, pr_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "panelrow", row_w or 0, row_h, 0,
@@ -2033,13 +2597,22 @@ local function panel_row(row_h, row_w)
       -- Centring needs the row's full width up front, so measure first.
       -- Only worth it when everything fits; once the panels overflow they
       -- pack left and the row scrolls, which is the only sane behaviour.
+      -- Only the panels under a bracket give up height, and only as many
+      -- rows as their own brackets stack: the outermost one over them.
+      local drop = {}
+      for _, b in ipairs(app.brackets) do
+        local d = (b.row + 1) * C.BRK_ROW_H + C.BRK_PAD
+        for k = b.first, b.last do drop[k] = math.max(drop[k] or 0, d) end
+      end
+      local function panel_h(i) return inner_h - (drop[i] or 0) end
+
       if C.ROW_ALIGN == "centre" and #app.chain > 0 then
         local total = C.PANEL_GAP + C.ADD_TILE_W
         for i, fx in ipairs(app.chain) do
           local lay, k = layout_for(fx)
           local has_meter = M.meter_of(lay) ~= nil
                             and T.reports_gr(app.track, fx.addr, fx.guid)
-          total = total + P.width(lay.controls or {}, inner_h,
+          total = total + P.width(lay.controls or {}, panel_h(i),
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   P.has_io(app.track, fx, lay),
                                   St.is_gr_open(fx.guid), M.locked(lay))
@@ -2051,23 +2624,26 @@ local function panel_row(row_h, row_w)
         end
       end
 
+      local row_top = select(2, ImGui.GetCursorScreenPos(ctx))
+      app.brk_top = row_top
       if #app.chain == 0 then
         ImGui.TextDisabled(ctx, "No plugins on this track yet \u{2014}")
         ImGui.SameLine(ctx)
       end
       for i, fx in ipairs(app.chain) do
         if i > 1 then ImGui.SameLine(ctx, 0, C.PANEL_GAP) end
-        local px, py = ImGui.GetCursorScreenPos(ctx)
+        local px = ImGui.GetCursorScreenPos(ctx)
+        local py = row_top + (drop[i] or 0)
+        ImGui.SetCursorScreenPos(ctx, px, py)
         local layout, key = layout_for(fx)
         local is_src = app.drag ~= nil and app.drag.guid == fx.guid
-        local w, req = P.draw(ctx, app.track, fx, layout, key, inner_h, i, is_src)
+        local w, req = P.draw(ctx, app.track, fx, layout, key, panel_h(i), i, is_src)
 
         app.panel_rects[#app.panel_rects + 1] = {
           chain_i   = i,
           x         = px,
           y         = py,
           w         = w,
-          top_index = fx.is_top_level and fx.top_index or nil,
         }
 
         if req.toggle_bypass then
@@ -2077,10 +2653,11 @@ local function panel_row(row_h, row_w)
           T.toggle_float(app.track, fx.addr)
         end
         if req.toggle_collapse then
-          St.toggle_collapsed(fx.guid)
+          toggle_fold(fx)
         end
-        if req.begin_drag and not app.drag and fx.is_top_level then
-          app.drag = { chain_i = i, guid = fx.guid, top_index = fx.top_index }
+        if req.begin_drag and not app.drag then
+          app.drag = { chain_i = i, guid = fx.guid, path = fx.path_t,
+                       what = fx.is_container and "container" or "plugin" }
         end
         if req.open_menu then
           app.menu_fx = i
@@ -2124,8 +2701,12 @@ local function panel_row(row_h, row_w)
       -- Trailing tile: adds to the END of the chain. Inserting at a
       -- specific point is the panel menu's "Insert plugin before/after",
       -- which knows which slot it's next to.
-      if #app.chain > 0 then ImGui.SameLine(ctx, 0, C.PANEL_GAP) end
+      if #app.chain > 0 then
+        ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+        ImGui.SetCursorScreenPos(ctx, ImGui.GetCursorScreenPos(ctx), row_top)
+      end
       if add_tile(inner_h) then B.open_menu(nil) end
+      draw_brackets()
     end
 
     -- Wheel scrolls the row sideways -- but only when no control under the
@@ -2143,19 +2724,24 @@ local function panel_row(row_h, row_w)
     end
 
     -- Drop marker, drawn after the panels so it sits above them.
+    -- The marker takes the container's colour when the drop goes into
+    -- one, and says which.
     if app.drag then
       local mx = ImGui.GetMousePos(ctx)
-      local gap, line_x = gap_under(mx)
-      app.drop_gap = gap
-      if line_x then
+      local drop = app.track and drop_under(mx) or nil
+      app.drop_gap = drop
+      if drop then
         local dl = ImGui.GetWindowDrawList(ctx)
         local wy = select(2, ImGui.GetWindowPos(ctx))
         local wh = select(2, ImGui.GetWindowSize(ctx))
-        ImGui.DrawList_AddRectFilled(dl, line_x - 1.5, wy + 2,
-          line_x + 1.5, wy + wh - 2, C.COL.drop_marker, 1.0)
+        ImGui.DrawList_AddRectFilled(dl, drop.x - 1.5, wy + 2,
+          drop.x + 1.5, wy + wh - 2, drop.into and C.COL.brk_container or C.COL.drop_marker, 1.0)
+        if drop.into then
+          ImGui.SetTooltip(ctx, "Into " .. box_label(drop.into))
+        end
       end
       if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
-        if app.drop_gap then move_fx(app.drag.top_index, app.drop_gap) end
+        if drop then move_to(app.drag.path, drop.parent, drop.gap, app.drag.what) end
         app.drag, app.drop_gap = nil, nil
       end
     end
@@ -2502,8 +3088,10 @@ local function frame()
 
     if app.open_panel_menu then ImGui.OpenPopup(ctx, "panelmenu"); app.open_panel_menu = false end
     if app.open_ctl_menu   then ImGui.OpenPopup(ctx, "ctlmenu");   app.open_ctl_menu   = false end
+    if app.open_box_menu   then ImGui.OpenPopup(ctx, "boxmenu");   app.open_box_menu   = false end
     panel_menu()
     control_menu()
+    box_menu()
 
     E.draw(ctx, app.track)
     if SD.draw_menu(ctx, app.track) then rescan(true) end

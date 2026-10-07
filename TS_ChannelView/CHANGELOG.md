@@ -1,5 +1,70 @@
 # ChannelView — changelog
 
+## 1.9.0 — parallel FX and containers, new controls, FX chains and folders
+
+**The chain**
+
+- **Parallel FX and containers.** A bracket over the panels shows what
+  runs together: parallel groups (marked `||`) and FX containers (a small
+  square, in their own colour). A panel's menu ▸ **Route** sets how a plugin
+  runs against the one before it — in series, in parallel, or in parallel
+  with MIDI merged — and *Put in a new container* wraps it in one. Click a
+  container's square to bypass it, set its routing, add a plugin into it,
+  unpack it, remove it or save it as an FX chain.
+- **Drag panels into and out of containers.** Drop on the left half of a
+  panel to land before it, the right half after it, in its container.
+  *Move left / right* and *Remove* work anywhere in the chain.
+- **Parameter modulation.** Right-click a control ▸ *Parameter
+  modulation…* opens REAPER's Parameter Modulation / Link window for that
+  parameter. Modulated controls are marked: a dot on a knob, a corner on
+  a button, dropdown or fader.
+- **Save and delete FX chains** from the chain button in the header:
+  *Save this track's chain as…* (into a folder of your FXChains folder if
+  you like) and *Delete a chain*. A container saves on its own from its
+  menu.
+- **FX folders in the add-plugin menu.** REAPER's own folders: right-click
+  a plugin to add it to a folder (or a new one) or take it out of one;
+  right-click a folder to remove it; **[+]** at the foot of the folder list
+  makes a new one.
+- **Collapsed plugins stay collapsed.** A plugin you last left collapsed
+  comes in collapsed when you add it to the track.
+
+**Controls**
+
+- **Faders of any shape.** Up or across; 2, 3 or 4 rows (columns) long or
+  full length; a whole column (row) thick or half. Among the controls they
+  show their name over them and the plugin's value under them — a row of
+  half-width faders makes a graphic EQ's bands. New **Slim** fader style.
+- **Merged cells.** A fader among the controls takes every cell it covers
+  and the controls after it flow round it, in the list's order; a fader
+  across runs over a divider. Existing layouts don't move.
+- **XY pad**: two parameters on one pad, 2×2 to 3×3. Click or touch to put
+  the dot there, Shift-drag for fine, double-click for both defaults.
+- **Concentric knob**: two parameters on one knob — the ring and the inner
+  knob. Where the drag starts says which turns. Each half can be reversed.
+- **Copy and paste style.** Right-click a control ▸ *Copy style*, then
+  *Paste style* on another — on any panel — or paste to every knob, fader
+  or button in a section or on the panel. Style, colour, size (a fader's
+  shape), scale, background and finish.
+- **Matte knobs.** Every knob cap is matte now, like the skirted knob's
+  skirt; the reverse bezel's ring is satin.
+- **Buttons show the plugin's names.** A dropdown shown as buttons reads
+  the plugin's own choices straight away, instead of numbers until the
+  list had been opened.
+
+**Edit parameters**
+
+- The selected control's settings are a column beside the lists, one per
+  row, showing only what its type has — the window no longer runs off to
+  the right. The plugin's options sit on one line at the top.
+
+**On the web page**
+
+- Route in series or parallel, put in a new container, and drag into and
+  out of containers; tap a container's square for its options.
+- Shaped faders, XY pads and concentric knobs, all playable; modulation
+  marks. Restart the web companion script after updating.
+
 ## 1.8.6 — track fader looks
 
 - **Right-click any track fader** — the Channel panel's, a mixer strip's,

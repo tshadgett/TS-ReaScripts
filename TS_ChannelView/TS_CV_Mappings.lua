@@ -27,12 +27,16 @@
       Brush<n> = <1|0>
       Metal<n> = 1
       Scale<n> = values | ten [|cap]
+      Shape<n> = v | h  |  2 | 3 | 4 | full  |  full | half
+      Dual<n>  = <second param index>   (xy: its Y; dual: the inner knob)
       Plate    = <faceplate>
       Brush    = <1|0>
       Metal    = 1
       Lock     = <rows>
 
-  <type> is knob | toggle | combo | fader | blank | divider | half_gap.
+  <type> is knob | toggle | combo | stepped | fader | xy | dual | blank |
+  divider | half_gap. "xy" is an XY pad (Ctl is X, Dual<n> Y), "dual" a
+  concentric knob (Ctl the outer ring, Dual<n> the inner knob).
   "blank" is a deliberate empty cell, so a layout can leave a gap where a
   hardware strip would have one; "divider" ends the current column and,
   by default, draws a rule separating one group of controls from the
@@ -121,7 +125,7 @@ local FILE_NAME  = "TS_ChannelView_Mappings.ini"
 local BAK_NAME   = "TS_ChannelView_Mappings.bak.ini"
 local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Ctl<n>=<param index>|<type>|<bipolar 0|1>|<label>\n"
-                .. ";   type: knob | toggle | combo | blank\n"
+                .. ";   type: knob | toggle | combo | stepped | fader | xy | dual | blank | divider | half_gap\n"
                 .. ";   label overrides the alias for that one slot only\n"
                 .. "; Alias<param>=<your name for that parameter, used everywhere>\n"
                 .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>\n"
@@ -133,6 +137,11 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Brush<n>=<1|0>: grain on control n's background (a divider: its section's)\n"
                 .. "; Metal<n>=1: metallic flake on control n's background (a divider: its section's)\n"
                 .. "; Scale<n>=values|ten[|cap]: numbers round knob n (its own values, or 0-10)\n"
+                .. "; Shape<n>=v|h|<2|3|4|full>|<full|half>: fader n's direction, length and thickness\n"
+                .. "; Dual<n>=<param index>: the second parameter of an XY pad (its Y; Ctl is X)\n"
+                .. ";   or a concentric knob (the inner knob; Ctl is the outer ring)\n"
+                .. "; Size<n>=<2|3>x<2|3> on an XY pad: columns x rows (no line: 2x2)\n"
+                .. ";   (no line: vertical, full height, a column wide)\n"
                 .. "; Plate=<faceplate, or #rrggbb for a colour of your own>\n"
                 .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own\n"
                 .. "; Metal=1: a metallic flake on the faceplate\n"
@@ -146,7 +155,8 @@ local def_cache   = {}   -- fx guid -> generated default layout
 local dirty       = false
 
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
-                     fader = true, blank = true, divider = true, half_gap = true }
+                     fader = true, blank = true, divider = true, half_gap = true,
+                     xy = true, dual = true }
 
 -- ---------------------------------------------------------------------
 
@@ -160,6 +170,49 @@ local function size_of(v)
   if v ~= "medium" and C.SIZES[v] then return v end
   return nil
 end
+
+-- Size<n>=3x2 on an XY pad: columns by rows, 2 or 3 each; nil is 2x2.
+local function pad_size_of(v)
+  local w, h = U.trim(v or ""):match("^([23])%s*x%s*([23])$")
+  if not w or (w == "2" and h == "2") then return nil end
+  return w .. "x" .. h
+end
+M.pad_size_of = pad_size_of
+
+-- An XY pad's size in columns and rows.
+function M.pad_dims(c)
+  local w, h = tostring(c and c.size or ""):match("^([23])x([23])$")
+  return tonumber(w) or 2, tonumber(h) or 2
+end
+
+-- The control types with a second parameter (Dual<n>): an XY pad's Y, a
+-- concentric knob's inner knob.
+function M.has_second(c) return c ~= nil and (c.type == "xy" or c.type == "dual") end
+
+-- Shape<n>=h|3|half: a fader's direction (v or h), length in rows or
+-- columns (2, 3 or 4, or full) and thickness (a whole column or row, or
+-- half of one). Returns dir ("h" or nil), len (2..4 or nil) and thin
+-- (true or nil); nil throughout is the fader as it always was --
+-- vertical, full height, a column wide.
+local function shape_of(v)
+  local d, l, t = U.trim(v or ""):match("^(%a)%s*|%s*(%w+)%s*|%s*(%a+)")
+  if not d then return nil, nil, nil end
+  local dir = (d == "h") and "h" or nil
+  local len = tonumber(l)
+  if len and (len < 2 or len > 4) then len = nil end
+  if len then len = math.floor(len) end
+  local thin = (t == "half") or nil
+  return dir, len, thin
+end
+M.shape_of = shape_of
+
+-- The line for a control's shape, or nil when it's the default one.
+local function shape_line(c)
+  if c.type ~= "fader" or not (c.dir or c.len or c.thin) then return nil end
+  return (c.dir == "h" and "h" or "v") .. "|" .. (c.len and tostring(c.len) or "full")
+         .. "|" .. (c.thin and "half" or "full")
+end
+M.shape_line = shape_line
 
 -- Buttons<n>=across|4: a dropdown shown as a row (or column) of buttons,
 -- and how many choices it had when that was chosen -- the count sets how
@@ -295,6 +348,9 @@ local function parse_section(sect)
         invert  = (f & 2) ~= 0,
         no_rule = (f & 4) ~= 0,
         live    = (f & 8) ~= 0,
+        -- bit 4: the second parameter reversed (an XY pad's Y, a
+        -- concentric knob's inner knob); bit 1 reverses the first
+        invert2 = ((f & 16) ~= 0 and (t == "xy" or t == "dual")) or nil,
         label   = U.trim(label),
         style   = (sty and sty ~= "") and (C.KNOB_STYLE_ALIAS[sty] or sty) or nil,
         -- a cap or lit colour by name, or one of your own (#rrggbb)
@@ -308,6 +364,18 @@ local function parse_section(sect)
         scale   = scale_of(sect["Scale" .. i]),
         scale_ink = scale_ink_of(sect["Scale" .. i]),
       }
+      if t == "fader" then
+        local cc = controls[#controls]
+        cc.dir, cc.len, cc.thin = shape_of(sect["Shape" .. i])
+      end
+      -- a second parameter: an XY pad's Y, a concentric knob's inner one
+      if t == "xy" or t == "dual" then
+        local cc = controls[#controls]
+        local p2 = tonumber(U.trim(sect["Dual" .. i] or ""))
+        cc.param2 = p2 and math.floor(p2) or nil
+        if t == "xy" then cc.size = pad_size_of(sect["Size" .. i])
+        elseif cc.size == "small" then cc.size = nil end
+      end
     end
     i = i + 1
   end
@@ -348,9 +416,10 @@ local function serialize(layout)
   end
   for i, c in ipairs(layout.controls or {}) do
     -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
-    -- bit 3 live name.
+    -- bit 3 live name, bit 4 the second parameter reversed.
     local flags = (c.bipolar and 1 or 0) | (c.invert and 2 or 0)
                 | (c.no_rule and 4 or 0) | (c.live and 8 or 0)
+                | ((c.invert2 and (c.type == "xy" or c.type == "dual")) and 16 or 0)
     out["Ctl" .. (i - 1)] = string.format("%d|%s|%d|%s",
       c.param or -1,
       c.type or "knob",
@@ -359,7 +428,15 @@ local function serialize(layout)
     if c.style or c.cap then
       out["Style" .. (i - 1)] = (c.style or "") .. "|" .. (c.cap or "")
     end
-    if size_of(c.size) then out["Size" .. (i - 1)] = c.size end
+    if c.type == "xy" then
+      if pad_size_of(c.size) then out["Size" .. (i - 1)] = pad_size_of(c.size) end
+    elseif size_of(c.size) and not (c.type == "dual" and c.size == "small") then
+      out["Size" .. (i - 1)] = c.size
+    end
+    if (c.type == "xy" or c.type == "dual") and c.param2 then
+      out["Dual" .. (i - 1)] = tostring(math.floor(c.param2))
+    end
+    if shape_line(c) then out["Shape" .. (i - 1)] = shape_line(c) end
     if back_of(c.back) then out["Back" .. (i - 1)] = back_of(c.back) end
     -- the grain of its background, or a divider's section, when it has one
     local styled = back_of(c.back) or (c.type == "divider" and (c.style == "inset" or c.style == "plate"))
@@ -718,6 +795,91 @@ function M.import(entries)
 end
 
 -- Deep copy, so the editor can work on a scratch layout and discard it.
+-- ---------------------------------------------------------------------
+-- Copy and paste a control's look
+-- ---------------------------------------------------------------------
+-- What a control looks like, apart from what it is (its parameter, type,
+-- label) and a dropdown's buttons: its style, colour, size (a fader's
+-- shape), scale, background and finish. Pasting takes only
+-- what fits the control it lands on: a style within its own kind (knob,
+-- fader or button), the colour across kinds (as the nearest thing that
+-- kind offers), size within the kind (a fader's shape fader to fader), the scale on knobs, the background
+-- and finish on anything but a divider.
+
+-- "knob" (a stepped or concentric knob too), "fader", "xy", "button" (a
+-- toggle, or a dropdown shown as buttons), or nil for anything with no
+-- style of its own.
+function M.look_family(c)
+  if not c then return nil end
+  if c.type == "knob" or c.type == "stepped" or c.type == "dual" or c.type == nil then return "knob" end
+  if c.type == "xy" then return "xy" end
+  if c.type == "fader" then return "fader" end
+  if c.type == "toggle" or (c.type == "combo" and c.buttons) then return "button" end
+  return nil
+end
+
+function M.look_of(c)
+  return { fam = M.look_family(c), type = c.type, style = c.style, cap = c.cap, size = c.size,
+           scale = c.scale, scale_ink = c.scale_ink, back = c.back, brush = c.brush, metal = c.metal,
+           dir = c.dir, len = c.len, thin = c.thin }
+end
+
+-- the colour a look actually shows: its own, or its style's
+local function shown_cap(s)
+  if s.cap then return s.cap end
+  local st = (s.fam == "knob" and C.KNOB_STYLE[C.KNOB_STYLE_ALIAS[s.style] or s.style or "arc"])
+          or (s.fam == "fader" and C.FADER_STYLE[s.style or "flat"]) or nil
+  return st and st.cap or nil
+end
+
+-- A look's colour for a control of kind `fam`: the same key where the
+-- kinds share a palette (knobs and faders), else the same name in that
+-- kind's palette, or the same colour, or it as a custom one; the theme's
+-- own (nil) when it has none.
+local function cap_for(fam, s)
+  if fam == s.fam then return s.cap end
+  local key = shown_cap(s)
+  if key == nil then return nil end
+  local custom = C.custom_key(key)
+  if custom then return custom end
+  local to_button, from_button = fam == "button", s.fam == "button"
+  if to_button == from_button then return key end
+  local src = (from_button and C.TOGGLE_COL or C.CAP)[key]
+  if not (src and src.col) then return nil end
+  -- the same name first (a knob's red is a button's red), then the same colour
+  local dst = to_button and C.TOGGLE_COL or C.CAP
+  if dst[key] and dst[key].col then return key end
+  for _, t in ipairs(to_button and C.TOGGLE_COLS or C.CAPS) do
+    if t.col == src.col then return t.key end
+  end
+  return ("#%06x"):format(src.col >> 8)
+end
+
+-- Paste look `s` (M.look_of) onto control `o`, in place. True when there
+-- was anything it could take.
+function M.paste_look(o, s)
+  if not (o and s) or o.type == "divider" then return false end
+  local fam = M.look_family(o)
+  if fam then
+    if fam == s.fam then o.style = s.style end
+    o.cap = cap_for(fam, s)
+    if fam == "knob" and s.fam == "knob" then
+      o.scale, o.scale_ink = s.scale, s.scale_ink
+      -- a concentric knob comes medium or large
+      if not (o.type == "dual" and s.size == "small") then o.size = s.size end
+    elseif fam == "xy" and s.fam == "xy" then
+      o.size = s.size
+    elseif fam == "fader" and s.fam == "fader" then
+      -- a fader's shape goes to a fader: which way, how long, how thick
+      o.dir, o.len, o.thin = s.dir, s.len, s.thin
+    elseif o.type == "toggle" and s.type == "toggle" then
+      o.size = s.size
+    end
+  end
+  o.back, o.brush, o.metal = s.back, s.brush, s.metal
+  return true
+end
+
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
@@ -730,7 +892,9 @@ function M.copy(layout)
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
-                        metal = c.metal, scale = c.scale, scale_ink = c.scale_ink }
+                        metal = c.metal, scale = c.scale, scale_ink = c.scale_ink,
+                        dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
+                        invert2 = c.invert2 }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.states = {}

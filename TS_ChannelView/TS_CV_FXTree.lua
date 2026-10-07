@@ -7,9 +7,17 @@
   projects, so ChannelView stands on its own and can evolve independently
   of them. No third-party code is involved here.
 
-  The container-addressing math is a community reverse-engineering of
-  REAPER 7's FX Containers, not documented API, so every call into it is
-  wrapped defensively: a bad address is skipped, not raised.
+  Containers are addressed the way REAPER 7's API documents it: an FX
+  inside a container is 0x2000000 + (its container's slot + 1) + (the
+  slot count of the level above + 1) * (its own slot + 1), nesting on
+  from there. Every call is still wrapped defensively, so a bad address
+  is skipped, not raised.
+
+  Besides the flat list of panels, collect() also returns the chain's
+  SHAPE: which panels sit in which container, and which run in parallel
+  with the one before (REAPER 7's "Run selected FX in parallel with
+  previous FX"). T.groups turns that into the brackets drawn above the
+  panel row.
 --]]
 
 local T = {}
@@ -151,46 +159,185 @@ local function container_probe_addr(track, path)
   return container_addr(track, path)
 end
 
-local function walk_level(track, path, count, depth, out)
+-- REAPER's "parallel" setting for one FX: 0 runs after the one before it,
+-- 1 alongside it, 2 alongside it with the MIDI merged as well.
+local function parallel_of(track, addr)
+  local v = tonumber(safe_named(track, addr, "parallel") or "")
+  if v == 1 or v == 2 then return v end
+  return 0
+end
+T.parallel_of = parallel_of
+
+local function copy_path(path, extra)
+  local out = {}
+  for i, v in ipairs(path) do out[i] = v end
+  if extra ~= nil then out[#out + 1] = extra end
+  return out
+end
+
+-- One level of the chain. Leaves go into `out` (the panels, in order);
+-- every slot, leaf or container, becomes a node in `nodes`, so the shape
+-- of the chain -- containers and parallel runs -- is kept alongside the
+-- flat list. `ancestors` is the containers above this level, outermost
+-- first.
+local function walk_level(track, path, count, depth, out, nodes, ancestors)
   if depth > MAX_CONTAINER_DEPTH then return end
   for j = 0, count - 1 do
-    local this = {}
-    for _, v in ipairs(path) do this[#this + 1] = v end
-    this[#this + 1] = j
-
+    local this = copy_path(path, j)
     local addr = container_addr(track, this)
     if addr then
       local probe = container_probe_addr(track, this)
       local cc = probe and safe_container_count(track, probe)
+      local name, alias = names_of(track, addr)
+      local node = {
+        path      = this,
+        addr      = addr,
+        index     = j,              -- slot within its own level
+        count     = count,          -- how many slots that level has
+        parallel  = parallel_of(track, addr),
+        guid      = safe_fx_guid(track, addr),
+        name      = name or ("FX " .. tostring(addr)),
+        alias     = alias,
+        depth     = #this - 1,
+        first     = #out + 1,
+      }
       if cc and cc > 0 then
-        walk_level(track, this, cc, depth + 1, out)
+        node.kind, node.children = "container", {}
+        local inner = copy_path(ancestors, node)
+        walk_level(track, this, cc, depth + 1, out, node.children, inner)
       else
-        local name, alias = names_of(track, addr)
+        -- An empty container has no panels inside it, so it stands in for
+        -- itself: a panel of its own, still a container to the brackets.
+        node.kind = (cc == 0) and "container" or "fx"
+        if node.kind == "container" then node.children = {} end
         out[#out + 1] = {
           addr         = addr,
-          name         = name or ("FX " .. tostring(addr)),
+          name         = node.name,
           alias        = alias,      -- REAPER's own instance name, if renamed
           path         = table.concat(this, "."),
+          path_t       = this,
+          parent_path  = path,       -- the level it sits in ({} = the chain itself)
+          index        = j,          -- its slot in that level
+          siblings     = count,
           depth        = #this - 1,
-          guid         = safe_fx_guid(track, addr),
+          guid         = node.guid,
           top_index    = this[1],
           is_top_level = (#this == 1),
+          parallel     = node.parallel,
+          is_container = node.kind == "container",
+          ancestors    = ancestors,  -- container nodes above it, outermost first
         }
       end
+      node.last = #out
+      nodes[#nodes + 1] = node
     end
   end
 end
 
 -- Ordered list of every LEAF FX on `track`, recursing into containers.
 -- A container slot itself gets no entry -- only its contents -- except an
--- empty container, which stands in for itself.
+-- empty container, which stands in for itself. The list's `tree` field is
+-- the top level's nodes (see walk_level), for T.groups.
 function T.collect(track)
-  local out = {}
+  local out = { tree = {} }
   if not track then return out end
   local pok, count = pcall(reaper.TrackFX_GetCount, track)
   if not pok then return out end
-  walk_level(track, {}, count, 0, out)
+  walk_level(track, {}, count, 0, out, out.tree, {})
   return out
+end
+
+-- ---------------------------------------------------------------------
+-- brackets: containers and parallel runs, for the strip above the panels
+-- ---------------------------------------------------------------------
+
+-- How many bracket rows the strip draws at most. Deeper nesting than this
+-- folds into the top row; the tooltips still name every level.
+T.MAX_BRACKET_ROWS = 3
+
+-- The parallel runs in one level: consecutive nodes where every one after
+-- the first is flagged parallel. A flag on a level's first slot means
+-- nothing (there's nothing before it to run beside) and is ignored.
+local function runs_of(nodes)
+  local runs, i = {}, 1
+  while i <= #nodes do
+    local j = i
+    while j < #nodes and nodes[j + 1].parallel ~= 0 do j = j + 1 end
+    runs[#runs + 1] = { a = i, b = j }
+    i = j + 1
+  end
+  return runs
+end
+
+-- Every bracket for a chain collected by T.collect, each
+--   { kind = "container" | "parallel", first, last (panel indices),
+--     row (0 = nearest the panels), node (a container's), members (a
+--     parallel run's nodes), merge (any member merging MIDI) }
+-- and how many rows they need (0 when the chain has neither). A bracket
+-- sits one row above everything it contains.
+function T.groups(list)
+  local out = {}
+  local cap = T.MAX_BRACKET_ROWS
+  local level   -- forward
+  local function height(node)
+    if node.kind ~= "container" then return 0 end
+    local h = 1 + level(node.children)
+    out[#out + 1] = { kind = "container", first = node.first, last = node.last,
+                      row = math.min(h, cap) - 1, node = node, h = h }
+    return h
+  end
+  function level(nodes)
+    local top = 0
+    for _, r in ipairs(runs_of(nodes)) do
+      local h = 0
+      for k = r.a, r.b do h = math.max(h, height(nodes[k])) end
+      if r.b > r.a then
+        local members, merge = {}, false
+        for k = r.a, r.b do
+          members[#members + 1] = nodes[k]
+          if k > r.a and nodes[k].parallel == 2 then merge = true end
+        end
+        h = h + 1
+        out[#out + 1] = { kind = "parallel", first = nodes[r.a].first,
+                          last = nodes[r.b].last, row = math.min(h, cap) - 1,
+                          members = members, merge = merge, h = h }
+      end
+      top = math.max(top, h)
+    end
+    return top
+  end
+  local rows = level((list and list.tree) or {})
+  -- a bracket over no panels (an empty level) has nothing to draw over
+  local kept = {}
+  for _, b in ipairs(out) do
+    if b.last >= b.first then kept[#kept + 1] = b end
+  end
+  -- Rows count from the OUTSIDE in: the outermost brackets on row 0, at the
+  -- top of the strip, each one inside another a row lower. So a bracket's
+  -- line stays straight however deep the brackets under it go here and
+  -- there, and a panel only drops as far as the brackets actually over
+  -- it: the first plugin in a container sits higher than two in parallel
+  -- beside it. `out` is built inside-out (a bracket after everything in
+  -- it), so what encloses a bracket comes after it, over its whole span.
+  for i, b in ipairs(kept) do
+    local depth = 1
+    for j = i + 1, #kept do
+      local o = kept[j]
+      if o.first <= b.first and b.last <= o.last then depth = depth + 1 end
+    end
+    b.row = math.min(depth, cap) - 1
+  end
+  return kept, math.min(rows, cap)
+end
+
+-- The container node a panel sits in (nil at the top level), and a
+-- readable "A \u{25B8} B" for where it is.
+function T.where(fx)
+  local a = fx and fx.ancestors
+  if not a or #a == 0 then return nil, nil end
+  local names = {}
+  for i, n in ipairs(a) do names[i] = n.alias or require("TS_CV_Util").fx_label(n) end
+  return a[#a], table.concat(names, " \u{25B8} ")
 end
 
 -- A cheap fingerprint of a chain's shape, for deciding whether a rescan
@@ -198,9 +345,162 @@ end
 function T.hash(list)
   local parts = {}
   for i, e in ipairs(list) do
-    parts[i] = e.guid ~= "" and e.guid or (e.path .. ":" .. e.name)
+    parts[i] = (e.guid ~= "" and e.guid or (e.path .. ":" .. e.name))
+               .. "@" .. e.path .. "/" .. (e.parallel or 0)
   end
+  -- containers and their own parallel setting, which no panel carries
+  local function walk(nodes)
+    for _, n in ipairs(nodes or {}) do
+      if n.kind == "container" then
+        parts[#parts + 1] = "C" .. n.guid .. "/" .. n.parallel .. "/" .. (n.alias or "")
+        walk(n.children)
+      end
+    end
+  end
+  walk(list.tree)
   return table.concat(parts, "|")
+end
+
+-- ---------------------------------------------------------------------
+-- editing the chain's shape: moves, containers, parallel
+-- ---------------------------------------------------------------------
+-- Every edit here is addressed by PATH (slot numbers from the top level
+-- down, as collect() gives them) and turned into an address only at the
+-- moment it's used, from the chain as it stands then. REAPER reads a
+-- move's destination against the chain as it is BEFORE the move, and
+-- puts the FX at that slot of the destination level -- within one level
+-- that's its final slot, with the source already lifted out.
+
+T.CONTAINER_FLAG = CONTAINER_FLAG
+
+-- The address of the slot at `path`: a top-level slot is its index; one
+-- inside a container is the 0x2000000 form. A path one past a level's
+-- last slot addresses its end, which is where a move appends.
+function T.addr_of(track, path)
+  if #path == 0 then return nil end
+  return container_addr(track, path)
+end
+
+local function same_path(a, b)
+  if #a ~= #b then return false end
+  for i = 1, #a do if a[i] ~= b[i] then return false end end
+  return true
+end
+
+local function parent_of(path)
+  local out = {}
+  for i = 1, #path - 1 do out[i] = path[i] end
+  return out, path[#path]
+end
+T.parent_of = parent_of
+
+-- Whether `inner` is `outer` or somewhere inside it.
+local function within(inner, outer)
+  if #inner < #outer then return false end
+  for i = 1, #outer do if inner[i] ~= outer[i] then return false end end
+  return true
+end
+
+-- Where a move lands, without making it: the destination address and the
+-- slot the FX ends up in, or nil when it would go nowhere (back where it
+-- is) or somewhere it can't (a container into itself). `gap` counts the
+-- insertion points of the destination level as it is now: 0 = before its
+-- first slot, its count = after its last.
+function T.plan_move(track, src_path, dest_parent, gap)
+  if not src_path or #src_path == 0 or gap == nil or gap < 0 then return nil end
+  if within(dest_parent, src_path) then return nil end
+  local sp, si = parent_of(src_path)
+  local final = gap
+  if same_path(sp, dest_parent) then
+    if gap == si or gap == si + 1 then return nil end
+    if gap > si then final = gap - 1 end
+  end
+  local dest
+  if #dest_parent == 0 then dest = final
+  else dest = container_addr(track, copy_path(dest_parent, final)) end
+  if not dest then return nil end
+  return dest, final
+end
+
+-- Moves the FX (or container) at `src_path` to insertion point `gap` of
+-- the level `dest_parent`. No undo block of its own: callers group a
+-- whole edit into one. Returns the slot it ended up in, or nil.
+function T.move(track, src_path, dest_parent, gap)
+  local src = T.addr_of(track, src_path)
+  local dest, final = T.plan_move(track, src_path, dest_parent, gap)
+  if not (src and dest) then return nil end
+  local ok = pcall(reaper.TrackFX_CopyToTrack, track, src, track, dest, true)
+  if not ok then return nil end
+  return final
+end
+
+-- REAPER's "parallel" setting (see parallel_of): 0, 1 or 2.
+function T.set_parallel(track, addr, v)
+  pcall(reaper.TrackFX_SetNamedConfigParm, track, addr, "parallel", tostring(v or 0))
+end
+
+-- How many slots a container has (nil for something that isn't one).
+function T.count_in(track, path)
+  if #path == 0 then
+    local pok, n = pcall(reaper.TrackFX_GetCount, track)
+    return pok and n or nil
+  end
+  return safe_container_count(track, container_probe_addr(track, path))
+end
+
+-- A plugin added straight into a container, at insertion point `gap` of
+-- the level `parent` ({} = the chain itself). REAPER only adds at the top
+-- level, so it goes in at the end of the chain and is moved from there.
+-- Returns true when it's in place.
+function T.add_into(track, ident, parent, gap)
+  if #parent == 0 then
+    local idx = reaper.TrackFX_AddByName(track, ident, false, -1000 - gap)
+    return idx ~= nil and idx >= 0
+  end
+  local idx = reaper.TrackFX_AddByName(track, ident, false, -1)
+  if not idx or idx < 0 then return false end
+  if T.move(track, { idx }, parent, gap) then return true end
+  pcall(reaper.TrackFX_Delete, track, idx)     -- don't leave it stranded at the end
+  return false
+end
+
+-- Puts the FX at `path` into a new container of its own, in its place.
+-- The container takes over its parallel setting, so the chain still runs
+-- the way it did. Returns true on success.
+function T.wrap(track, path)
+  local parent, si = parent_of(path)
+  local src_par = parallel_of(track, T.addr_of(track, path))
+  local idx = reaper.TrackFX_AddByName(track, "Container", false, -1)
+  if not idx or idx < 0 then return false end
+  -- the new container, from the end of the chain to the FX's slot...
+  if not (idx == si and #parent == 0) then
+    if not T.move(track, { idx }, parent, si) then
+      pcall(reaper.TrackFX_Delete, track, idx)
+      return false
+    end
+  end
+  local cpath = copy_path(parent, si)
+  local spath = copy_path(parent, si + 1)
+  T.set_parallel(track, T.addr_of(track, cpath), src_par)
+  T.set_parallel(track, T.addr_of(track, spath), 0)
+  -- ...and the FX, now just after it, into it
+  return T.move(track, spath, cpath, 0) ~= nil
+end
+
+-- Lifts everything out of the container at `path` into its place, in
+-- order, and deletes the empty container. The first one out takes the
+-- container's parallel setting. Returns true on success.
+function T.unpack(track, path)
+  local parent, ci = parent_of(path)
+  local n = T.count_in(track, path) or 0
+  local cpar = parallel_of(track, T.addr_of(track, path))
+  for m = 0, n - 1 do
+    local slot = T.move(track, copy_path(path, 0), parent, ci + 1 + m)
+    if not slot then return false end
+    if m == 0 then T.set_parallel(track, T.addr_of(track, copy_path(parent, slot)), cpar) end
+  end
+  local ok = pcall(reaper.TrackFX_Delete, track, T.addr_of(track, path))
+  return ok
 end
 
 -- ---------------------------------------------------------------------

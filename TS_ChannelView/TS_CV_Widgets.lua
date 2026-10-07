@@ -326,6 +326,8 @@ local function centred_text(ctx, dl, cx, y, text, col, max_w, abbrev)
   return th
 end
 
+W.centred_text = centred_text
+
 local function arc(dl, cx, cy, r, a0, a1, col, thick)
   if math.abs(a1 - a0) < 1e-4 then return end
   ImGui.DrawList_PathArcTo(dl, cx, cy, r, a0, a1, ARC_SEGS)
@@ -440,7 +442,7 @@ local FLUTE_LEN, FLUTE_W         = 4.5, 7.5        -- half a flute's length (aro
 
 -- The bezel knob: a black centre (the cap colour) in a wide polished
 -- chrome ring, the ring's light fixed while a dark notch in it turns. The
--- reverse bezel swaps them: a glossy black ring round a turned-metal
+-- reverse bezel swaps them: a satin black ring round a turned-metal
 -- centre (the cap colour, silver unless chosen), with a white pointer on
 -- the ring.
 local BEZEL_R, BEZEL_IN, BEZEL_SEG = 37, 22.5, 48
@@ -593,6 +595,52 @@ function W.lit_col(key)
   return rgb and ((rgb << 8) | 0xff) or nil
 end
 
+-- ---------------------------------------------------------------------
+-- the modulation mark
+-- ---------------------------------------------------------------------
+-- A parameter under REAPER's parameter modulation (LFO, audio control
+-- signal, MIDI or parameter link) gets a mark: a dot in the middle of a
+-- knob, a corner on a button, dropdown or fader. The accent says what it
+-- means -- unless the accent would vanish on whatever is under it, where
+-- it turns black or white instead. Colour aware, the way the knob inks
+-- and button text already are.
+local function lum(col)
+  return 0.299 * ((col >> 24) & 0xff) + 0.587 * ((col >> 16) & 0xff) + 0.114 * ((col >> 8) & 0xff)
+end
+function W.mod_col(surface)
+  local a = C.COL.accent
+  if surface and math.abs(lum(a) - lum(surface)) < 60 then
+    return U.is_light(surface) and 0x1d1e20ff or 0xf3f3f1ff
+  end
+  return a
+end
+
+-- a dot, ringed in whichever of black or white stands off it best
+function W.mod_dot(dl, cx, cy, r, surface)
+  local col = W.mod_col(surface)
+  local ring = U.is_light(col) and 0x000000b0 or 0xffffffb0
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, r + 1.2, ring, 12)
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, r, col, 12)
+end
+
+-- a corner, top right of the rectangle ending at (x2, y1)
+function W.mod_corner(dl, x2, y1, s, surface)
+  local col = W.mod_col(surface)
+  local x, y = x2 - 2, y1 + 2
+  ImGui.DrawList_AddTriangleFilled(dl, x - s, y, x, y, x, y + s, col)
+end
+
+-- What's in the middle of a knob of this style: the dot sits on it.
+local function knob_centre_col(style, cap)
+  style = C.KNOB_STYLE_ALIAS[style] or style
+  if not (style and C.KNOB_STYLE[style]) or style == "arc" then return C.COL.knob_body end
+  if style == "led" then return 0x2c2f33ff end
+  if style == "trim" then return 0xa1a6acff end
+  local def = C.CAP[C.KNOB_STYLE[style].cap]
+  return cap or (def and def.col) or C.COL.knob_fill
+end
+W.knob_centre_col = knob_centre_col
+
 function W.knob_face(dl, cx, cy, r, value, o)
   o = o or {}
   local v = math.max(0, math.min(1, value or 0))
@@ -661,7 +709,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
         cx + c * (R - 0.5), cy + s * (R - 0.5), fade(0x0e0f10ff), 1.0)
     end
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, R * 0.8, fade(o.hot and 0x3c3f44ff or 0x2c2f33ff), 32)
-    ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 9 * k, 0xffffff10, 16)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 9 * k, 0xffffff06, 16)
     ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x000000a0), 32, math.max(1.0, 1.1 * k))
     local x1, y1 = at(6); local x2, y2 = at(LED_KNOB - 2.5)
     ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0xf3f3f1ff), math.max(1.5, 3 * k))
@@ -671,7 +719,8 @@ function W.knob_face(dl, cx, cy, r, value, o)
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, 37 * k, o.hot and 0x2a2c30ff or 0x18191bff, 32)
     ImGui.DrawList_AddCircle(dl, cx, cy, 37 * k - 0.5, 0xffffff10, 32, 1.0)
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, 26 * k, cap, 32)
-    ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 7 * k, 11 * k, 0xffffff12, 24)
+    -- matte, like its skirt: barely a lift toward the light
+    ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 7 * k, 11 * k, o.hot and 0xffffff0b or 0xffffff06, 24)
     ImGui.DrawList_AddCircle(dl, cx, cy, 26 * k, 0x00000073, 32, 1.0)
     local x1, y1 = at(26); local x2, y2 = at(36)
     ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0xf3f3f1ff), math.max(1.5, 4 * k))
@@ -705,7 +754,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
     local x1, y1 = at(17); local x2, y2 = at(40)
     ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, ink, math.max(1.5, 3.5 * k))
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, 17 * k, cap, 24)
-    ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 8 * k, o.hot and 0xffffff40 or 0xffffff2a, 16)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 8 * k, o.hot and 0xffffff0b or 0xffffff06, 16)
     ImGui.DrawList_AddCircle(dl, cx, cy, 17 * k, 0x00000080, 24, 1.0)
 
   elseif style == "nose" then
@@ -790,7 +839,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
     ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, fade(cap_ink(base)), math.max(1.5, 3 * k))
     -- the dome's highlight, over the bar too, and its rim
     ImGui.DrawList_AddCircleFilled(dl, cx - 9 * k, cy - 11 * k, 14 * k,
-      o.hot and 0xffffff12 or 0xffffff0a, 24)
+      o.hot and 0xffffff0b or 0xffffff06, 24)
     ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x00000073), 36, math.max(1.0, 1.1 * k))
 
   elseif style == "fluted" then
@@ -814,9 +863,8 @@ function W.knob_face(dl, cx, cy, r, value, o)
       ImGui.DrawList_AddCircleFilled(dl, mx - tx, my - ty, w * 0.5, fcol, 12)
       ImGui.DrawList_AddCircleFilled(dl, mx + tx, my + ty, w * 0.5, fcol, 12)
     end
-    -- a soft light on the dome, top left
-    ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 8 * k, 15 * k, 0xffffff0a, 24)
-    ImGui.DrawList_AddCircleFilled(dl, cx - 7 * k, cy - 10 * k, 6 * k, o.hot and 0xffffff20 or 0xffffff16, 16)
+    -- matte: barely a lift on the dome, top left
+    ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 8 * k, 15 * k, o.hot and 0xffffff0b or 0xffffff06, 24)
     local x1, y1 = at(9); local x2, y2 = at(FLUTE_R - 2)
     -- white on a dark body, black on a light one
     ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(U.is_light(body) and 0x1d1e20ff or 0xf3f3f1ff), math.max(1.5, 3.5 * k))
@@ -842,8 +890,8 @@ function W.knob_face(dl, cx, cy, r, value, o)
     scale()
     local R, ri = BEZEL_R * k, BEZEL_IN * k
     ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.6 * k, R + 0.6 * k, fade(0x00000040), 36)
-    -- glossy black: nearly black all round, catching a highlight up top left
-    lit_ring(dl, cx, cy, R, ri, 0x0d0e0fff, o.hot and 0x5d6066ff or 0x4c4f53ff, 3.0, 0.25, fade)
+    -- satin black: nearly black all round, a soft broad lift up top left
+    lit_ring(dl, cx, cy, R, ri, 0x111214ff, o.hot and 0x3d4045ff or 0x2f3236ff, 1.3, 0.1, fade)
     ImGui.DrawList_AddCircle(dl, cx, cy, R, fade(0x00000099), 36, math.max(1.0, 1.1 * k))
     local x1, y1 = at(BEZEL_IN + 1.5); local x2, y2 = at(BEZEL_R - 2)
     ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0xf3f3f1ff), math.max(1.5, 3.2 * k))
@@ -886,7 +934,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
         cx + c * 37 * k, cy + s * 37 * k, 0x7b8087ff, 1.0)
     end
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, 30 * k, fade(o.hot and 0xb3b8beff or 0xa1a6acff), 32)
-    ImGui.DrawList_AddCircleFilled(dl, cx, cy - 7 * k, 21 * k, 0xffffff24, 32)
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy - 7 * k, 21 * k, 0xffffff0a, 32)
     ImGui.DrawList_AddCircle(dl, cx, cy, 30 * k, 0x3c3f44ff, 32, 1.0)
     local x1, y1 = at(-24); local x2, y2 = at(12)
     ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, 0x2b2d31ff, math.max(1.5, 5 * k))
@@ -1023,6 +1071,9 @@ function W.knob(ctx, id, label, value, formatted, opts)
   W.knob_face(dl, cx, cy, dial_r, value, {
     style = opts.style, cap = opts.cap, bipolar = opts.bipolar,
     dim = opts.dim, hot = hovered or active, marks = sc and sc.marks })
+  if opts.mod then
+    W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap))
+  end
 
   -- the numbers, each just clear of its tick, however wide it is
   if sc then
@@ -1074,6 +1125,252 @@ function W.knob(ctx, id, label, value, formatted, opts)
   W.tip(ctx, id, tip, hovered, active)
 
   return changed, value, act, pressed
+end
+
+
+-- ---------------------------------------------------------------------
+-- concentric knob
+-- ---------------------------------------------------------------------
+-- Two parameters on one knob, as on hardware with a stacked pot: a dark,
+-- knurled outer ring with a white pointer turns the first, a smaller
+-- matte knob in the cap colour set in its middle turns the second. Its own
+-- look (the knob styles don't nest); the cap colour is the inner knob's.
+-- Drawn in a design space where the ring's edge is 40 units.
+local DUAL_RING, DUAL_IN = 40, 22.5      -- the ring's radius, the inner knob's
+
+-- `o`: cap (colour), dim, hot ("outer" / "inner" / nil), mod1, mod2.
+function W.dual_face(dl, cx, cy, r, v1, v2, o)
+  o = o or {}
+  local k = r / DUAL_RING
+  local function fade(col) return o.dim and U.with_alpha(col, 0x70) or col end
+  local a1 = A_MIN + A_SPAN * math.max(0, math.min(1, v1 or 0))
+  local a2 = A_MIN + A_SPAN * math.max(0, math.min(1, v2 or 0))
+  local function at(a, rv) return cx + math.cos(a) * rv * k, cy + math.sin(a) * rv * k end
+  -- the scale, for the ring
+  local tick = C.COL.knob_ring
+  local r0, r1 = r + 1.5, r + math.max(2.5, r * 0.26)
+  for i = 0, 10 do
+    local t = A_MIN + A_SPAN * i / 10
+    local c, sn = math.cos(t), math.sin(t)
+    ImGui.DrawList_AddLine(dl, cx + c * r0, cy + sn * r0, cx + c * r1, cy + sn * r1, tick, 1.0)
+  end
+  if W.hw > 0 then
+    ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.8 * k, r + 0.5 * k, U.with_alpha(0x000000ff, math.floor(0x40 * math.min(1.5, W.hw))), 36)
+  end
+  -- the ring: dark, knurled, turning with the first parameter
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, r, fade(o.hot == "outer" and 0x2a2c30ff or 0x1b1c1fff), 40)
+  for i = 0, 35 do
+    local t = a1 + i * TAU / 36
+    local x1, y1 = at(t, 36.5); local x2, y2 = at(t, 39.6)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0x0c0d0eff), math.max(1.0, 1.3 * k))
+  end
+  ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 7 * k, 14 * k, 0xffffff06, 24)
+  ImGui.DrawList_AddCircle(dl, cx, cy, r, fade(0x00000099), 40, math.max(1.0, 1.1 * k))
+  local px1, py1 = at(a1, 27); local px2, py2 = at(a1, 36)
+  ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, fade(0xf3f3f1ff), math.max(1.5, 4 * k))
+  -- the seam, then the inner knob in the cap colour, matte
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, 24.5 * k, fade(0x0b0c0dff), 32)
+  local base = o.cap or C.COL.knob_fill
+  if o.hot == "inner" then base = U.lighten(base, 0.1) end
+  local ri = DUAL_IN * k
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, ri, fade(base), 32)
+  ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 9 * k, o.hot == "inner" and 0xffffff0b or 0xffffff06, 20)
+  ImGui.DrawList_AddCircle(dl, cx, cy, ri, fade(0x00000080), 32, math.max(1.0, 1.2 * k))
+  local qx1, qy1 = at(a2, 7); local qx2, qy2 = at(a2, 19)
+  ImGui.DrawList_AddLine(dl, qx1, qy1, qx2, qy2, fade(cap_ink(base)), math.max(1.5, 3.5 * k))
+  -- modulation: a dot on the inner knob for its own, a mark on the ring
+  if o.mod2 then W.mod_dot(dl, cx, cy, math.max(2.0, ri * 0.22), base) end
+  if o.mod1 then
+    local mx, my = at(A_MIN + A_SPAN * 0.5 + math.pi, 31)
+    W.mod_dot(dl, mx, my, math.max(1.8, 2.6 * k), 0x1b1c1fff)
+  end
+  return ri
+end
+
+-- Two values on one line, the one being turned lit: "1.2k / +3.0".
+local function pair_text(ctx, dl, cx, y, a, b, lit, max_w, prefer)
+  local sep = " / "
+  local wa = ImGui.CalcTextSize(ctx, a)
+  local ws = ImGui.CalcTextSize(ctx, sep)
+  local wb = ImGui.CalcTextSize(ctx, b)
+  local tot = wa + ws + wb
+  if max_w and tot > max_w then
+    -- too wide: just the one being turned, or pointed at, or the first
+    local one = ((lit or prefer) == 2) and b or a
+    centred_text(ctx, dl, cx, y, one, lit and C.COL.accent or C.COL.value, max_w)
+    return
+  end
+  local x = math.floor(cx - tot * 0.5 + 0.5)
+  ImGui.DrawList_AddText(dl, x, y, lit == 1 and C.COL.accent or C.COL.value, a)
+  ImGui.DrawList_AddText(dl, x + wa, y, C.COL.value, sep)
+  ImGui.DrawList_AddText(dl, x + wa + ws, y, lit == 2 and C.COL.accent or C.COL.value, b)
+end
+W.pair_text = pair_text
+
+local dual_grab = {}   -- id -> "outer" / "inner": which one this drag turns
+
+-- A concentric knob in its cell at the cursor: the knob's size (medium or
+-- large), its name line (both names), the knob, the value line (both
+-- values). Where a drag starts says which one it turns: on the inner knob
+-- the inner, anywhere else the ring. The wheel turns the inner, Shift+wheel
+-- the ring. Returns changed1, v1, changed2, v2, act, where
+-- act.double_click is "outer" or "inner" (the one under the pointer).
+-- `o`: size, cap, dim, mod1, mod2, shown1, shown2, tip.
+function W.dual_knob(ctx, id, label, v1, v2, o)
+  o = o or {}
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local sz = (o.size == "large") and C.SIZES.large or C.SIZES.medium
+  local cw = math.tointeger(C.CELL_W * sz.w / 2) or C.CELL_W * sz.w / 2
+  local ch = math.tointeger(C.CELL_H * sz.h / 2) or C.CELL_H * sz.h / 2
+  local r = sz.d * 0.5
+  W.allow_overlap(ctx)
+  ImGui.InvisibleButton(ctx, id, cw, ch, ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  local hovered = ImGui.IsItemHovered(ctx)
+  local active = ImGui.IsItemActive(ctx)
+  local show_value = C.SHOW_VALUES
+  local room = ch - W.LABEL_H - C.LABEL_GAP - (show_value and 14 or 0)
+  local cx, cy = x + cw * 0.5, y + W.LABEL_H + C.LABEL_GAP + room * 0.5
+  local ri = DUAL_IN * r / DUAL_RING
+  local mx, my = ImGui.GetMousePos(ctx)
+  local function zone()
+    local dx, dy = mx - cx, my - cy
+    return (dx * dx + dy * dy <= (ri * 1.15) ^ 2) and "inner" or "outer"
+  end
+  if ImGui.IsItemActivated(ctx) then dual_grab[id] = zone() end
+  local act = {
+    right_click  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right),
+    double_click = (hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left)) and zone() or nil,
+  }
+  local c1, c2 = false, false
+  local turning
+  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+    turning = dual_grab[id] or "outer"
+    if turning == "inner" then
+      local nv = drag_value(ctx, v2)
+      if nv and nv ~= v2 then v2, c2 = nv, true end
+    else
+      local nv = drag_value(ctx, v1)
+      if nv and nv ~= v1 then v1, c1 = nv, true end
+    end
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+  elseif hovered then
+    local wheel = W.control_wheel(ctx)
+    if wheel ~= 0 then
+      local outer = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0
+      if outer then v1 = math.max(0, math.min(1, v1 + wheel * C.WHEEL_STEP)); c1 = true
+      else v2 = math.max(0, math.min(1, v2 + wheel * C.WHEEL_STEP)); c2 = true end
+      W.take_wheel()
+    end
+  end
+  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  local hot = turning or (hovered and zone()) or nil
+  W.dual_face(dl, cx, cy, r, v1, v2, { cap = o.cap, dim = o.dim, hot = hot, mod1 = o.mod1, mod2 = o.mod2 })
+  if show_value then
+    W.push_small(ctx)
+    pair_text(ctx, dl, cx, cy + r + 1, o.shown1 or "", o.shown2 or "",
+      (turning == "outer" and 1) or (turning == "inner" and 2) or nil, cw - 2,
+      (hot == "inner") and 2 or 1)
+    W.pop_small(ctx)
+  end
+  W.tip(ctx, id, o.tip, hovered, active)
+  return c1, v1, c2, v2, act
+end
+
+-- ---------------------------------------------------------------------
+-- XY pad
+-- ---------------------------------------------------------------------
+-- Two parameters on one pad: X across, Y up. In the cell (x, y, w, h) the
+-- layout gave it: its name line over the pad, its value line under. A
+-- click or touch puts the dot there and it follows; Shift-drag moves it
+-- finely from where it is, with no jump. Double-click resets both; the
+-- wheel moves Y, Shift+wheel X. Returns changed_x, vx, changed_y, vy, act.
+-- `o`: cap (the dot's colour), dim, mod, shown_x, shown_y, tip, bipolar
+-- (centre lines drawn stronger).
+local xy_fine = {}
+function W.xypad(ctx, id, x, y, w, h, vx, vy, label, o)
+  o = o or {}
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  W.allow_overlap(ctx)
+  ImGui.InvisibleButton(ctx, id, w, h, ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  local hovered = ImGui.IsItemHovered(ctx)
+  local active = ImGui.IsItemActive(ctx)
+  local show_value = C.SHOW_VALUES
+  local px1, py1 = x + 4, y + W.LABEL_H + C.LABEL_GAP + 1
+  local px2, py2 = x + w - 4, y + h - (show_value and 15 or 4)
+  local pw, ph = math.max(8, px2 - px1), math.max(8, py2 - py1)
+  local dot = 5.5
+  local function from_mouse()
+    local mx, my = ImGui.GetMousePos(ctx)
+    return math.max(0, math.min(1, (mx - px1 - dot) / math.max(1, pw - 2 * dot))),
+           math.max(0, math.min(1, 1 - (my - py1 - dot) / math.max(1, ph - 2 * dot)))
+  end
+  local act = {
+    right_click  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right),
+    double_click = hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
+  }
+  local cx_, cy_ = false, false
+  local shift = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0
+  if ImGui.IsItemActivated(ctx) then xy_fine[id] = shift end
+  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) and not act.double_click then
+    local nx, ny
+    if shift then
+      local dx, dy = ImGui.GetMouseDelta(ctx)
+      nx = math.max(0, math.min(1, vx + dx * C.FINE_MULT / math.max(1, pw)))
+      ny = math.max(0, math.min(1, vy - dy * C.FINE_MULT / math.max(1, ph)))
+    elseif xy_fine[id] then
+      -- began fine: carries on relative, at full speed, without a jump
+      local dx, dy = ImGui.GetMouseDelta(ctx)
+      nx = math.max(0, math.min(1, vx + dx / math.max(1, pw)))
+      ny = math.max(0, math.min(1, vy - dy / math.max(1, ph)))
+    else
+      nx, ny = from_mouse()
+    end
+    if nx ~= vx then vx, cx_ = nx, true end
+    if ny ~= vy then vy, cy_ = ny, true end
+  elseif hovered then
+    local wheel = W.control_wheel(ctx)
+    if wheel ~= 0 then
+      if shift then vx = math.max(0, math.min(1, vx + wheel * C.WHEEL_STEP)); cx_ = true
+      else vy = math.max(0, math.min(1, vy + wheel * C.WHEEL_STEP)); cy_ = true end
+      W.take_wheel()
+    end
+  end
+  local function fade(col) return o.dim and U.with_alpha(col, 0x70) or col end
+  centred_text(ctx, dl, x + w * 0.5, y, label or "", C.COL.label, w - 4, true)
+  -- the pad: set into the panel, a faint grid, the centre lines stronger
+  local under = o.under or C.COL.panel_bg
+  local light = U.is_light(under)
+  ImGui.DrawList_AddRectFilled(dl, px1, py1, px2, py2, light and 0x0000002e or 0x00000059, 4.0)
+  ImGui.DrawList_AddRect(dl, px1, py1, px2, py2, light and 0x00000066 or 0x00000099, 4.0, 0, 1.0)
+  ImGui.DrawList_AddLine(dl, px1 + 1, py1 + 0.5, px2 - 1, py1 + 0.5, 0x00000040, 1.0)
+  local grid = light and 0x0000001c or 0xffffff12
+  for i = 1, 3 do
+    local gx = px1 + pw * i / 4
+    local gy = py1 + ph * i / 4
+    local g = (i == 2) and (light and 0x00000030 or 0xffffff20) or grid
+    ImGui.DrawList_AddLine(dl, gx, py1 + 1, gx, py2 - 1, g, 1.0)
+    ImGui.DrawList_AddLine(dl, px1 + 1, gy, px2 - 1, gy, g, 1.0)
+  end
+  -- the crosshair and the dot, in the cap colour
+  local col = o.cap or C.COL.knob_fill
+  local dx = px1 + dot + vx * (pw - 2 * dot)
+  local dy = py1 + dot + (1 - vy) * (ph - 2 * dot)
+  ImGui.DrawList_AddLine(dl, dx, py1 + 1, dx, py2 - 1, fade(U.with_alpha(col, 0x70)), 1.0)
+  ImGui.DrawList_AddLine(dl, px1 + 1, dy, px2 - 1, dy, fade(U.with_alpha(col, 0x70)), 1.0)
+  local hot = hovered or active
+  if hot then ImGui.DrawList_AddCircleFilled(dl, dx, dy, dot + 4, fade(U.with_alpha(col, 0x30)), 20) end
+  ImGui.DrawList_AddCircleFilled(dl, dx, dy, dot, fade(col), 20)
+  ImGui.DrawList_AddCircle(dl, dx, dy, dot, fade(0x000000a0), 20, 1.0)
+  if o.mod then W.mod_corner(dl, px2, py1, 6, 0x101112ff) end
+  if show_value then
+    W.push_small(ctx)
+    pair_text(ctx, dl, x + w * 0.5, py2 + 2, o.shown_x or "", o.shown_y or "", nil, w - 4)
+    W.pop_small(ctx)
+  end
+  W.tip(ctx, id, o.tip, hovered, active)
+  return cx_, vx, cy_, vy, act
 end
 
 -- ---------------------------------------------------------------------
@@ -1230,6 +1527,9 @@ function W.toggle(ctx, id, label, value, formatted, opts)
               or C.COL.toggle_text, 0
   end
   glow_text(ctx, dl, cx, (by1 + by2) * 0.5 - th * 0.5 + dy, txt, ink, gcol, bx2 - bx1 - 4)
+  if opts.mod then
+    W.mod_corner(dl, bx2, by1, 5, on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off)
+  end
 
   if C.SHOW_VALUES and not opts.text and not small then
     W.push_small(ctx)
@@ -1333,6 +1633,15 @@ function W.button_row(ctx, id, label, value, choices, opts)
       ink, gcol, r[3] - r[1] - 2)
   end
   W.pop_small(ctx)
+  if opts.mod and #rects > 0 then
+    -- on the top-right button of the group
+    local best = 1
+    for i, r in ipairs(rects) do
+      if r[2] < rects[best][2] - 0.5 or (math.abs(r[2] - rects[best][2]) <= 0.5 and r[3] > rects[best][3]) then best = i end
+    end
+    local r = rects[best]
+    W.mod_corner(dl, r[3], r[2], 5, best == cur and on_col or C.COL.toggle_off)
+  end
 
   W.tip(ctx, id, under and choices[under].text or opts.tooltip, hovered, false)
   return changed, value, act, pressed
@@ -1458,6 +1767,7 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
     ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2,
       hovered and C.COL.icon_hot or U.with_alpha(C.COL.toggle_text, 0xa0))
   end
+  if opts.mod then W.mod_corner(dl, bx2, by1, 5, C.COL.knob_body) end
 
   W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
   return changed, value, act, pressed
@@ -1492,7 +1802,7 @@ local fader_moved = {}
 -- `look` (optional) is a panel fader's hardware style: { style, cap } --
 -- "flat" (the default), "console" or "rail", and a cap colour or nil for
 -- the style's usual one. The channel strip's own fader passes none.
-local FADER_CAP = { console = 28, rail = 34 }
+local FADER_CAP = { console = 28, rail = 34, slim = 9 }
 local grad_ok = true
 local function vgrad(dl, x0, y0, x1, y1, top, bot)
   if y1 - y0 < 0.5 then return end
@@ -1578,8 +1888,10 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   -- A GHOST fader is drawn over something else -- the meter on a
   -- collapsed strip -- so it gets no slot of its own and a cap you can
   -- see through: it has to be grabbable without hiding what it sits on.
+  local slim = (style == "slim")
   if not ghost then
-    ImGui.DrawList_AddRectFilled(dl, cx - 2, y + 4, cx + 2, y + h - 4,
+    local gw = slim and 1 or 2
+    ImGui.DrawList_AddRectFilled(dl, cx - gw, y + 4, cx + gw, y + h - 4,
       C.COL.knob_track, 2.0)
   end
 
@@ -1594,7 +1906,7 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
 
   -- A styled fader gets a scale either side of its slot, like hardware
   -- (not a ghost one: it lies over a meter, which has its own).
-  if look and not ghost then
+  if look and not ghost and not slim then
     for i = 0, 10 do
       local ty = math.floor(y + 4 + cap_h * 0.5 + trav * i / 10) + 0.5
       ImGui.DrawList_AddLine(dl, x, ty, x + 4, ty, C.COL.knob_ring, 1.0)
@@ -1605,6 +1917,26 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   -- cap
   local cy   = y + 4 + trav * (1 - math.max(0, math.min(1, value)))
   local lit  = (hovered or active)
+
+  if slim then
+    -- a thin groove filled up to the cap -- out from unity when it has
+    -- one -- in the cap's colour, and a small cap with a line across
+    local fill = (look and look.cap) or C.COL.accent
+    local from = unity and (y + 4 + cap_h * 0.5 + trav * (1 - math.max(0, math.min(1, unity))))
+                 or (y + h - 4)
+    local to = cy + cap_h * 0.5
+    ImGui.DrawList_AddRectFilled(dl, cx - 1.5, math.min(from, to), cx + 1.5, math.max(from, to), fill)
+    local face = (look and look.cap) or C.COL.fader_cap
+    if lit then face = U.lighten(face, 0.18) end
+    if not ghost then W.hw_shadow_rect(dl, x, cy, x + w, cy + cap_h, 2.0) end
+    ImGui.DrawList_AddRectFilled(dl, x, cy, x + w, cy + cap_h, face, 2.0)
+    ImGui.DrawList_AddRect(dl, x, cy, x + w, cy + cap_h,
+      lit and C.COL.knob_pointer or C.COL.knob_ring, 2.0, 0, 1.0)
+    ImGui.DrawList_AddLine(dl, x + 2, cy + cap_h * 0.5, x + w - 2, cy + cap_h * 0.5,
+      U.is_light(face) and 0x1d1e20ff or 0xf0f0eeff, 1.0)
+    W.tip(ctx, id, label, hovered, active)
+    return changed, value, act
+  end
 
   if style == "console" then
     -- A dark moulded cap: lit from above, ridged for the fingers, with a
@@ -1657,6 +1989,145 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
     U.with_alpha(C.COL.knob_body, a), 1.5)
 
   W.tip(ctx, id, label, hovered, active)
+  return changed, value, act
+end
+
+-- A horizontal fader for a plugin parameter: the same caps and drag as
+-- W.fader on its side, left the bottom. `look` = { style, cap } as there.
+-- Returns changed, value, act.
+function W.hfader(ctx, id, x, y, w, h, value, label, unity, look)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.InvisibleButton(ctx, id, math.max(1, w), math.max(1, h),
+    ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  local hovered = ImGui.IsItemHovered(ctx)
+  local active  = ImGui.IsItemActive(ctx)
+  local act = {
+    right_click  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right),
+    double_click = hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
+  }
+  local style = look and C.FADER_STYLE[look.style or ""] and look.style or "flat"
+  local slim = style == "slim"
+  local cap_w = FADER_CAP[style] or C.FADER_CAP_H
+  local trav = w - 8 - cap_w
+
+  local changed = false
+  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+    local dx = ImGui.GetMouseDelta(ctx)
+    if dx ~= 0 then
+      local mods = ImGui.GetKeyMods(ctx)
+      local sens = 1 / math.max(1, trav)
+      if (mods & ImGui.Mod_Shift) ~= 0 then sens = sens * C.FINE_MULT end
+      value = math.max(0, math.min(1, value + dx * sens))
+      changed = true
+    end
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
+  elseif hovered then
+    local wheel = W.control_wheel(ctx)
+    if wheel ~= 0 then
+      local mods = ImGui.GetKeyMods(ctx)
+      local stp = 0.01 * ((mods & ImGui.Mod_Shift) ~= 0 and C.FINE_MULT or 1)
+      value = math.max(0, math.min(1, value + wheel * stp))
+      changed = true
+      W.take_wheel()
+    end
+  end
+
+  local cy = y + h * 0.5
+  local gh = slim and 1 or 2
+  ImGui.DrawList_AddRectFilled(dl, x + 4, cy - gh, x + w - 4, cy + gh, C.COL.knob_track, 2.0)
+  local function at(v) return x + 4 + cap_w * 0.5 + trav * math.max(0, math.min(1, v)) end
+  if unity then
+    local ux = at(unity)
+    ImGui.DrawList_AddLine(dl, ux, y, ux, cy - 3, C.COL.header_dim, 1.0)
+    ImGui.DrawList_AddLine(dl, ux, cy + 3, ux, y + h, C.COL.header_dim, 1.0)
+  end
+  local cx = x + 4 + trav * math.max(0, math.min(1, value))
+  local lit = hovered or active
+  local ch = math.min(h - 2, slim and 16 or 26)
+  local y0, y1 = cy - ch * 0.5, cy + ch * 0.5
+  if slim then
+    local fill = (look and look.cap) or C.COL.accent
+    local from = unity and at(unity) or (x + 4)
+    local to = cx + cap_w * 0.5
+    ImGui.DrawList_AddRectFilled(dl, math.min(from, to), cy - 1.5, math.max(from, to), cy + 1.5, fill)
+  end
+  local face, line
+  if style == "console" then
+    face = 0x2a2d31ff
+    line = (look and look.cap) or C.CAP[C.FADER_STYLE.console.cap].col
+  elseif style == "rail" then
+    face = (look and look.cap) or C.CAP[C.FADER_STYLE.rail.cap].col
+    line = U.is_light(face) and 0x1d1e20ff or 0xf0f0eeff
+  else
+    face = (look and look.cap) or C.COL.fader_cap
+    line = slim and (U.is_light(face) and 0x1d1e20ff or 0xf0f0eeff) or C.COL.knob_body
+  end
+  if lit and style ~= "console" then face = U.lighten(face, 0.18) end
+  W.hw_shadow_rect(dl, cx, y0, cx + cap_w, y1, 2.5)
+  ImGui.DrawList_AddRectFilled(dl, cx, y0, cx + cap_w, y1, face, 2.5)
+  if style == "console" then
+    hgrad(dl, cx + 1, y0 + 1, cx + cap_w * 0.5, y1 - 1, 0x4c5056ff, 0x2a2d31ff)
+    hgrad(dl, cx + cap_w * 0.5, y0 + 1, cx + cap_w - 1, y1 - 1, 0x2a2d31ff, 0x1a1c1fff)
+    ImGui.DrawList_AddRectFilled(dl, cx + cap_w * 0.5 - 1.5, y0, cx + cap_w * 0.5 + 1.5, y1, line)
+  else
+    ImGui.DrawList_AddLine(dl, cx + cap_w * 0.5, y0 + 2, cx + cap_w * 0.5, y1 - 2, line, slim and 1.0 or 1.5)
+  end
+  ImGui.DrawList_AddRect(dl, cx, y0, cx + cap_w, y1,
+    lit and C.COL.knob_pointer or C.COL.knob_ring, 2.5, 0, 1.0)
+  W.tip(ctx, id, label, hovered, active)
+  return changed, value, act
+end
+
+-- A plugin parameter as a fader placed among the controls (TS_CV_Panel's
+-- "block" and "band" faders): its name over it, its value under it, in
+-- the cell (x, y, w, h) the layout gave it. `o` = { dir = "h" or nil,
+-- thin, unity, look, tip, mod (the surface for the modulation mark, or
+-- nil for none) }. Returns changed, value, act.
+function W.param_fader(ctx, id, x, y, w, h, value, label, shown, o)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local changed, act
+  if o.dir == "h" then
+    if o.thin then
+      -- half a row: the name left and the value right, over the track
+      W.push_small(ctx)
+      local vw = ImGui.CalcTextSize(ctx, shown or "")
+      local nm = label or ""
+      local room = w - vw - 10
+      if ImGui.CalcTextSize(ctx, nm) > room then
+        nm = U.abbreviate(nm, function(t) return ImGui.CalcTextSize(ctx, t) <= room end)
+      end
+      ImGui.DrawList_AddText(dl, x + 3, y + 1, C.COL.label, nm)
+      if C.SHOW_VALUES then ImGui.DrawList_AddText(dl, x + w - 3 - vw, y + 1, C.COL.value, shown or "") end
+      W.pop_small(ctx)
+      changed, value, act = W.hfader(ctx, id, x, y + 12, w, h - 12, value, o.tip, o.unity, o.look)
+    else
+      centred_text(ctx, dl, x + w * 0.5, y, label or "", C.COL.label, w - 4, true)
+      local bot = C.SHOW_VALUES and 14 or 2
+      changed, value, act = W.hfader(ctx, id, x, y + W.LABEL_H + 2, w, h - W.LABEL_H - 2 - bot,
+                                     value, o.tip, o.unity, o.look)
+      if C.SHOW_VALUES then
+        W.push_small(ctx)
+        centred_text(ctx, dl, x + w * 0.5, y + h - 13, shown or "", C.COL.value, w - 2)
+        W.pop_small(ctx)
+      end
+    end
+  else
+    -- vertical: a half-width one names itself in the small type
+    if o.thin then W.push_small(ctx) end
+    centred_text(ctx, dl, x + w * 0.5, y, label or "", C.COL.label, w - 1, true)
+    if o.thin then W.pop_small(ctx) end
+    local fw = o.thin and 14 or C.FADER_W
+    local top, bot = y + W.LABEL_H + 3, y + h - (C.SHOW_VALUES and 14 or 2)
+    changed, value, act = W.fader(ctx, id, x + (w - fw) * 0.5, top, fw, bot - top,
+                                  value, o.tip, o.unity, false, o.look)
+    if C.SHOW_VALUES then
+      W.push_small(ctx)
+      centred_text(ctx, dl, x + w * 0.5, y + h - 13, shown or "", C.COL.value, w - 1)
+      W.pop_small(ctx)
+    end
+  end
+  if o.mod then W.mod_corner(dl, x + w, y, 6, o.mod) end
   return changed, value, act
 end
 

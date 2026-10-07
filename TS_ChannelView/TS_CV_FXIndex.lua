@@ -181,4 +181,202 @@ end
 
 function IX.stats() return stats end
 
+-- ---------------------------------------------------------------------
+-- editing your FX Folders
+-- ---------------------------------------------------------------------
+-- reaper-fxfolders.ini, as REAPER's Add FX browser writes it:
+--   [Folder<id>]  Item<n>=<plugin>  Nb=<count>  Type<n>=<kind>
+--   [Folders]     Id<pos>=<id>  Name<pos>=<name>  NbFolders=<count>
+-- Kinds: 3 VST/VST3, 2 JS, 7 CLAP, 1 LV2, 5 AU (1000 an FX chain and
+-- 1048576 a smart folder, which are left exactly as they are). Every
+-- other section of the file is kept as it was, in place.
+
+-- The plugin kind for an installed plugin's name ("VST3: ..."), or nil.
+function IX.kind_of(name)
+  name = tostring(name or "")
+  if name:match("^VST3?i?:") then return 3 end
+  if name:match("^JS:") then return 2 end
+  if name:match("^CLAPi?:") then return 7 end
+  if name:match("^LV2i?:") then return 1 end
+  if name:match("^AUi?:") then return 5 end
+  return nil
+end
+
+-- The file's text -> { lines (everything that isn't a folder section),
+-- folders = { [id] = { items, types } }, order = { { id, name } } }.
+function IX.parse_folders(text)
+  local m = { lines = {}, folders = {}, order = {} }
+  local section, fid
+  local ids, names = {}, {}
+  for line in ((text or "") .. "\n"):gmatch("(.-)\r?\n") do
+    local sect = line:match("^%[(.-)%]%s*$")
+    if sect then
+      section = sect
+      fid = tonumber(sect:match("^Folder(%d+)$"))
+      if fid then m.folders[fid] = m.folders[fid] or { items = {}, types = {} } end
+      if not fid and sect ~= "Folders" then m.lines[#m.lines + 1] = line end
+    elseif fid then
+      local n, v = line:match("^Item(%d+)=(.*)$")
+      if n then m.folders[fid].items[tonumber(n) + 1] = v end
+      n, v = line:match("^Type(%d+)=(.*)$")
+      if n then m.folders[fid].types[tonumber(n) + 1] = v end
+    elseif section == "Folders" then
+      local n, v = line:match("^Id(%d+)=(%d+)$")
+      if n then ids[tonumber(n)] = tonumber(v) end
+      n, v = line:match("^Name(%d+)=(.*)$")
+      if n then names[tonumber(n)] = v end
+    else
+      m.lines[#m.lines + 1] = line
+    end
+  end
+  local pos = {}
+  for p in pairs(ids) do pos[#pos + 1] = p end
+  table.sort(pos)
+  for _, p in ipairs(pos) do
+    m.order[#m.order + 1] = { id = ids[p], name = names[p] or "" }
+    m.folders[ids[p]] = m.folders[ids[p]] or { items = {}, types = {} }
+  end
+  -- drop trailing blank lines from what's kept; they're written back once
+  while #m.lines > 0 and m.lines[#m.lines]:match("^%s*$") do m.lines[#m.lines] = nil end
+  return m
+end
+
+-- The model back to the file's text.
+function IX.write_folders(m)
+  local out = {}
+  for _, l in ipairs(m.lines) do out[#out + 1] = l end
+  if #out > 0 then out[#out + 1] = "" end
+  local ids = {}
+  for id in pairs(m.folders) do ids[#ids + 1] = id end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local f = m.folders[id]
+    out[#out + 1] = "[Folder" .. id .. "]"
+    for k = 1, #f.items do
+      if f.items[k] then out[#out + 1] = "Item" .. (k - 1) .. "=" .. f.items[k] end
+    end
+    out[#out + 1] = "Nb=" .. #f.items
+    for k = 1, #f.items do
+      if f.types[k] then out[#out + 1] = "Type" .. (k - 1) .. "=" .. f.types[k] end
+    end
+    out[#out + 1] = ""
+  end
+  out[#out + 1] = "[Folders]"
+  for p, e in ipairs(m.order) do out[#out + 1] = "Id" .. (p - 1) .. "=" .. e.id end
+  for p, e in ipairs(m.order) do out[#out + 1] = "Name" .. (p - 1) .. "=" .. e.name end
+  out[#out + 1] = "NbFolders=" .. #m.order
+  out[#out + 1] = ""
+  return table.concat(out, "\n")
+end
+
+-- Whether folder `id` holds the plugin `ident` (matched the way the
+-- picker matches: on a normalised file name).
+function IX.folder_has(m, id, ident)
+  local f = m.folders[id]
+  if not f then return false end
+  local key = norm_key(ident)
+  for _, it in ipairs(f.items) do
+    if norm_key(it) == key then return true end
+  end
+  return false
+end
+
+function IX.folder_add(m, id, ident, kind)
+  local f = m.folders[id]
+  if not f or not kind or IX.folder_has(m, id, ident) then return false end
+  f.items[#f.items + 1] = ident
+  f.types[#f.items] = tostring(kind)
+  return true
+end
+
+function IX.folder_remove(m, id, ident)
+  local f = m.folders[id]
+  if not f then return false end
+  local key, done = norm_key(ident), false
+  for k = #f.items, 1, -1 do
+    if norm_key(f.items[k]) == key then
+      table.remove(f.items, k); table.remove(f.types, k); done = true
+    end
+  end
+  return done
+end
+
+-- A new, empty folder at the end of the list. Returns its id.
+function IX.folder_new(m, name)
+  local id = -1
+  for k in pairs(m.folders) do if k > id then id = k end end
+  id = id + 1
+  m.folders[id] = { items = {}, types = {} }
+  m.order[#m.order + 1] = { id = id, name = name }
+  return id
+end
+
+-- Removes folder `id` (the plugins themselves are untouched, of course).
+function IX.folder_delete(m, id)
+  if not m.folders[id] then return false end
+  m.folders[id] = nil
+  for p = #m.order, 1, -1 do
+    if m.order[p].id == id then table.remove(m.order, p) end
+  end
+  return true
+end
+
+-- Whether a folder list entry is one of REAPER's separator rows.
+function IX.is_separator(e)
+  return e.name == "" or e.name:match("^%-+$") ~= nil
+end
+
+-- Your folders as the menus list them: separators ("------") left out.
+function IX.folder_list(m)
+  local out = {}
+  for _, e in ipairs(m.order) do
+    if e.name ~= "" and not e.name:match("^%-+$") then out[#out + 1] = e end
+  end
+  return out
+end
+
+local function folders_path() return reaper.GetResourcePath() .. "/reaper-fxfolders.ini" end
+
+-- The file as it is now (an empty model when there isn't one yet).
+function IX.read_folders()
+  local f = io.open(folders_path(), "rb")
+  local text = f and f:read("a") or ""
+  if f then f:close() end
+  return IX.parse_folders(text), text
+end
+
+-- Writes the model back, keeping the file as it was before as
+-- reaper-fxfolders.ini.bak, and has the picker read it again. REAPER's own
+-- browser keeps its copy in memory: it may need a restart to show this,
+-- and a folder edit there could write over it.
+function IX.save_folders(m, before)
+  local path = folders_path()
+  if before and before ~= "" then
+    local b = io.open(path .. ".bak", "wb")
+    if b then b:write(before); b:close() end
+  end
+  local f = io.open(path, "wb")
+  if not f then return false end
+  f:write(IX.write_folders(m))
+  f:close()
+  IX.reset()
+  return true
+end
+
+-- Forget what was read, so the next look reads the files afresh.
+function IX.reset()
+  built, dev_of, cats_of, fold_of, folders = false, {}, {}, {}, {}
+  stats = { tagged = 0, folders = 0, resolved = 0, total = 0 }
+end
+
+-- The folders file's size, to notice it changing (ChannelView's window
+-- writes it; the web bridge is another script with its own copy).
+function IX.folders_stamp()
+  local f = io.open(folders_path(), "rb")
+  if not f then return 0 end
+  local n = f:seek("end")
+  f:close()
+  return n or 0
+end
+
 return IX

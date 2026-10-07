@@ -261,15 +261,39 @@ strip's own radius so the two shapes agree about what a strip is.
 * Each panel header has the chain position, the plugin name, and four icon
   buttons: collapse, bypass (power), float (opens the plugin's own window)
   and the panel menu.
-* **Drag a panel by its name** to reorder the chain. A blue line shows where
-  it will land; the move goes through REAPER's undo. Plugins inside an FX
-  container can't be dragged — their addressing isn't something the
-  documented API lets you move through — and say so on hover.
+* **Drag a panel by its name** to reorder the chain, into and out of FX
+  containers too: dropped on the left half of a panel it lands before that
+  plugin, on the right half after it, in that plugin's container. A blue
+  line shows where it will land (violet when it's going into a container);
+  the move goes through REAPER's undo.
+* **Parallel FX and containers.** A bracket over the panels marks what runs
+  together: a parallel group (marked `||`) and each FX container (marked
+  with a small square, in a colour of its own). Panels only drop as far as
+  their own brackets need. A panel's menu ▸ **Route** sets how a plugin is routed
+  against the one before it — *In series*, *In parallel with previous*, or
+  *In parallel, merge MIDI* — and *Put in a new container* wraps it in one.
+  Click a container's square for its menu: bypass it, set its routing, add
+  a plugin into it, unpack it (its plugins move out to where it was),
+  remove it, or save it as an FX chain. *Move left / right* and *Remove*
+  work anywhere in the chain.
 * **Collapse a panel to a bar** (the chevron, or double-click the name) —
   a narrow vertical strip with the name running down it, keeping bypass and
   float reachable. Collapsed state is per FX instance and saves with the
   project, so collapsing the reverb on the drum bus leaves the vocal's
-  alone.
+  alone. ChannelView also remembers it per plugin: a plugin you last left
+  collapsed comes in collapsed when you add it to the track you're on.
+* **Parameter modulation.** Right-click a control ▸ *Parameter
+  modulation…* opens REAPER's Parameter Modulation / Link window for that
+  parameter (ticked while its modulation is on). A modulated control shows
+  a mark — a dot in the middle of a knob, a corner on a button, dropdown or
+  fader — in the accent colour, or black or white where the accent
+  wouldn't show.
+* **FX chains.** The chain button in the header, left of the FX bypass,
+  loads an FX chain onto the track; it can also **save this track's chain**
+  under a name of your own (in a folder of your FXChains folder, if you
+  like) and **delete** a chain. A container's menu saves just that
+  container as a chain. They're REAPER's own `.RfxChain` files, so REAPER's
+  FX browser sees them too.
 * **Add a plugin** from the dashed `+` tile at the end of the row (adds to
   the end), or a panel's menu ▸ *Insert plugin before / after* to land it at
   a specific slot. Both open a **cascading menu** — Recent, All plugins,
@@ -281,6 +305,14 @@ strip's own radius so the two shapes agree about what a strip is.
   fixed-width field, which lines up down the list and tells apart the two
   entries a plugin installed in more than one format produces — they
   otherwise have identical names.
+
+  **FX folders** are REAPER's own (the ones its FX browser shows), and the
+  menu edits them: right-click any plugin for *Add to folder* (or a new
+  folder, named on the spot) and *Remove from folder*; right-click a folder
+  in *Folders* to remove it (its plugins stay installed), or use *Remove
+  this folder…* inside it; the name box and **[+]** at the foot of the list
+  make a new one. A backup of REAPER's folders file is kept before each
+  change.
 
   The menu's first item opens a **search dialog** for when you know the name
   and typing is quicker: any words you type must all match somewhere in the
@@ -375,6 +407,33 @@ default), shared with the TCP window and the web page.
   **Metallic finish** (ticks in the same menus, or *Brushed* and *Metallic*
   in the editor), like a faceplate's. Sections in a row with the same
   style, faceplate and finish join into one.
+- **Faders of any shape.** Right-click a fader ▸ Style ▸ Shape, or in the
+  editor: *Direction* up or across, *Length* 2, 3 or 4 rows (columns,
+  across) or *Full*, *Thickness* a whole column (row) or half of one. Up
+  and full is the fader as it always was, a column of its own at the
+  panel's full height. The rest sit among the controls, their name over
+  them and the plugin's value under them — half-width ones side by side
+  make a graphic EQ's row of bands. A full-length fader across runs from
+  where it lands to the panel's right edge.
+- **XY pad.** Show as ▸ *XY pad*: two parameters on one pad, the first
+  across (X) and a second, chosen in the control's menu or the editor, up
+  and down (Y). 2×2, 3×2, 2×3 or 3×3 cells. Click or touch to put the dot
+  there; Shift-drag moves it finely without a jump; double-click puts both
+  back; the wheel moves Y, Shift+wheel X.
+- **Concentric knob.** Show as ▸ *Concentric knob*: two parameters on one
+  knob, as on a stacked pot — the outer ring turns the first, the inner
+  knob (in the cap colour) a second, chosen in the control's menu or the
+  editor. Where a drag starts decides which turns; the wheel turns the
+  inner knob, Shift+wheel the ring; double-click puts back the one under
+  the pointer. Medium or large. Either half of a concentric knob or an XY
+  pad can be reversed on its own.
+- **Where they go.** Controls fill a column top to bottom, then the next,
+  in the panel list's order. A fader among the controls or an XY pad takes
+  every cell it covers — like merged cells in a spreadsheet — and what
+  comes after flows round it: below it in its own column, then above or
+  below it in the columns it runs into. A fader across and an XY pad run
+  over a divider (its line stops at their edges); everything else starts a
+  new column at one. Panels with neither are laid out as they always were.
 - **Lock layout.** The padlock at the left of a panel's foot locks that
   plugin's layout, on every track: no more edits, and the controls keep the
   arrangement they had however the panel is resized — a panel too short
@@ -413,8 +472,10 @@ Right-click a knob for the quick things — remove it, alias it, change it
 to a button, make its fill centred, drop a gap in front of it.
 
 For the full dialog: panel menu **=** ▸ *Edit parameters…*, or just click an
-unconfigured panel. Plugin parameters on the right, what the panel shows on
-the left, `<< Add` / `Remove >>` between them. **Drag a row in the panel list
+unconfigured panel. What the panel shows on the left, the plugin's
+parameters in the middle, `<< Add` / `Remove >>` under them, and the
+selected control's settings in a column on the right — one per row, only
+the ones its type has. **Drag a row in the panel list
 anywhere you like** — it lands where you drop it, not one place per nudge —
 or use ▲/▼. Added parameters land *below* whatever is selected, since a
 panel gets built by working down it.
@@ -434,14 +495,21 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Trim pot*, *Round nose* (a round cap whose short, blunt nose is the
   pointer), *Bar* (a dome with a raised bar across it), *Fluted* (a domed
   body with finger flutes), *Bezel* (a black centre in a chrome ring),
-  *Reverse bezel* (a glossy black ring round a metal centre), *Hi-fi* (a
+  *Reverse bezel* (a satin black ring round a metal centre), *Hi-fi* (a
   spun-aluminium knob) and *LED ring* (a ring of lamps close round an
   encoder, lit up to the value, or out from the middle on a centred
-  control, in its cap colour). **Faders:** *Flat* (the default), *Console* and
-  *Rail*.
+  control, in its cap colour). Knob caps are matte, the way the skirted
+  knob's skirt is. **Faders:** *Flat* (the default), *Console*, *Rail* and
+  *Slim* (a fine groove and a small cap, filled to the value in its
+  colour — made for rows of narrow faders).
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,
   Silver, Stone, Black, White, Brown and Gold. *Apply to every knob on this panel* copies one
-  control's look to the rest. A toggle's Style is the colour it lights
+  control's look to the rest. **Copy style** (right-click any control)
+  takes its style, colour, size (a fader's shape), scale, background and
+  finish; **Paste style** puts it on another control, on any panel, and
+  *Paste to every knob (fader, button) in this section / on this panel*
+  does the lot. A pasted look takes only what fits: a knob's style stays
+  with knobs, but its colour goes onto a fader or a button. A toggle's Style is the colour it lights
   when on (Amber, Green, Red, Blue, Yellow, White or the theme's), and so
   is a button row's, along with its face: *Flat*, *Lit lens* (dark tinted
   glass that glows when on), *LED window* (a lamp strip across its top) or
@@ -682,9 +750,14 @@ script into the action list.
 ### Using it
 
 - **Plugins:** knobs drag up and down; double-tap for the default. ⋯ on a
-  header inserts, moves, opens or removes a plugin. Press and hold a header,
-  then drag, to reorder. The dashed + adds to the end of the chain, and the
-  chevron collapses a panel on this device.
+  header inserts, moves, opens or removes a plugin, sets its routing (in
+  series or parallel), puts it in a new container. Press and hold a header,
+  then drag, to reorder — into and out of containers, as on the desktop.
+  Tap a container's square for its options. The dashed + adds to the end
+  of the chain, and the chevron collapses a panel on this device.
+- **XY pads and concentric knobs** play here too: touch the pad to put the
+  dot there; on a concentric knob, start on the inner knob or the ring.
+  Modulated controls carry the same marks as on the desktop.
 - **ReaEQ:** drag a node for frequency and gain, double-tap empty space to
   add a band, tap a node to select it and set its type and Q underneath.
 - **Gain reduction:** tap a meter to open its trace; tap the trace for its

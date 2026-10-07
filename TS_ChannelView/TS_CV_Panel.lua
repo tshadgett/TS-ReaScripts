@@ -123,7 +123,34 @@ function P.button_span(ctl)
   return 2, math.ceil((n + 1) / 2)
 end
 
+-- Where a fader goes (its Shape<n>, TS_CV_Mappings.shape_of):
+--   "column"  vertical and full height: it splits the sections, as faders
+--             always have, a column wide or half of one
+--   "band"    horizontal and full length: from where it lands to the
+--             panel's right edge (place_flow)
+--   "block"   any other: placed among the controls like a knob, its
+--             length in rows (or columns) and its thickness
+function P.fader_kind(ctl)
+  if ctl.type ~= "fader" then return nil end
+  if ctl.dir == "h" then return ctl.len and "block" or "band" end
+  return ctl.len and "block" or "column"
+end
+
+-- A fader's thickness in half-cells.
+local function fader_thick(ctl) return ctl.thin and 1 or 2 end
+P.fader_thick = fader_thick
+
 function P.cell_size(ctl, half_rows)
+  if ctl.type == "fader" then
+    local t = fader_thick(ctl)
+    if ctl.dir == "h" then return (ctl.len or 2) * 2, t, "hfader" end
+    return t, math.min(half_rows, (ctl.len or 2) * 2), "vfader"
+  end
+  -- an XY pad: 2 or 3 columns by 2 or 3 rows, no taller than the panel
+  if ctl.type == "xy" then
+    local pw, ph = M.pad_dims(ctl)
+    return pw * 2, math.min(half_rows, ph * 2), "xy"
+  end
   local bw, bh = P.button_span(ctl)
   if bw and bh <= half_rows then return bw, bh, "buttons" end
   if ctl.type == "half_gap" then
@@ -131,6 +158,7 @@ function P.cell_size(ctl, half_rows)
     return 2, 1
   end
   local sizable = ctl.type == nil or ctl.type == "knob" or ctl.type == "stepped"
+    or (ctl.type == "dual" and ctl.size ~= "small")
     or (ctl.type == "toggle" and ctl.size == "small")
   local sz = sizable and ctl.size and C.SIZES[ctl.size]
   if sz and sz.h <= half_rows then return sz.w, sz.h end
@@ -210,6 +238,178 @@ local function place_column(sec, x0, half_rows, items, spacers)
   return hx(width), deepest
 end
 
+-- A panel with faders placed among its controls (any but the old
+-- full-height column fader), or an XY pad: MERGED-CELL FLOW. The same down-then-across
+-- strips as place_column, always in list order -- a control never goes
+-- back into an earlier gap -- but a fader takes every cell it covers when
+-- it's placed, like merged cells in a spreadsheet, and whatever comes
+-- after skips those cells: below it in its own column, then above, below
+-- or between in the columns it runs into. An across fader runs over
+-- dividers (the rule stops at its edges), and so does an XY pad wider
+-- than a column; everything else still starts a
+-- new column at one. A half-width control goes beside a half-width one
+-- before it if it's the same height (a row of them, a graphic EQ); any
+-- other control after one starts below it. A full-length across fader
+-- runs from where it lands to the panel's right edge, at least two
+-- columns. Everything is worked in half-cells first and turned into
+-- pixels at the end, once every divider's place is known.
+local function place_flow(controls, half_rows, rows)
+  local DW = C.DIVIDER_W
+  local occ, fulls, bounds, cuts = {}, {}, {}, {}
+  local placed, secs = {}, {}
+  local function free(c, r, w, h)
+    if r < 0 or r + h > half_rows then return false end
+    for i = c, c + w - 1 do
+      local col = occ[i]
+      if col then for j = r, r + h - 1 do if col[j] then return false end end end
+    end
+    for _, f in ipairs(fulls) do
+      if c + w > f.c and r < f.r + f.h and f.r < r + h then return false end
+    end
+    return true
+  end
+  local function take(c, r, w, h)
+    for i = c, c + w - 1 do
+      occ[i] = occ[i] or {}
+      for j = r, r + h - 1 do occ[i][j] = true end
+    end
+  end
+  local cs, sw, cy, strip, prev = 0, 0, 0, {}, nil
+  local function close()
+    for _, it in ipairs(strip) do it.sc, it.ssw = cs, sw end
+    cs, sw, cy, strip, prev = cs + sw, 0, 0, {}, nil
+  end
+  local sec = { c0 = 0, first = 1 }
+  for li, ctl in ipairs(controls) do
+    if ctl.type == "divider" then
+      if #strip > 0 then close() end
+      sec.c1, sec.last = cs, #placed
+      secs[#secs + 1] = sec
+      bounds[#bounds + 1] = { b = cs, no_rule = ctl.no_rule }
+      sec = { c0 = cs, first = #placed + 1, by = ctl }
+    else
+      local w, h, kind = P.cell_size(ctl, half_rows)
+      local k = P.fader_kind(ctl)
+      if k == "column" then h = half_rows end
+      local full = k == "band"
+      if full then w = 4; kind = "hfader" end
+      h = math.min(h, half_rows)
+      local pc, pr, pair
+      -- half-width beside the half-width one before it
+      if w == 1 and prev and prev.w == 1 and prev.h == h and prev.c == cs and not prev.pair
+         and free(cs + 1, prev.r, 1, h) then
+        pc, pr, pair = cs + 1, prev.r, true
+        prev.pair = true
+      end
+      local guard = 0
+      while not pc do
+        for r = cy, half_rows - h do
+          if free(cs, r, w, h) then pc, pr = cs, r break end
+        end
+        if not pc then
+          guard = guard + 1
+          if guard > 400 then pc, pr = cs, 0 break end
+          -- an empty strip that can't take it (spans in the way): skip a column
+          if #strip == 0 then cs, cy = cs + 2, 0 else close() end
+        end
+      end
+      -- across faders and XY pads take cells to their right: merged cells
+      local span = (kind == "hfader" or kind == "xy") or nil
+      if full then fulls[#fulls + 1] = { c = pc, r = pr, h = h } else take(pc, pr, w, h) end
+      local it = { ctl = ctl, c = pc, r = pr, w = w, h = h, kind = kind, span = span, full = full or nil,
+                   pair = pair or nil, spacer = ctl.type == "half_gap" or nil }
+      placed[#placed + 1] = it
+      strip[#strip + 1] = it
+      local used = span and 2 or (pc - cs + w)
+      if used > sw then sw = used end
+      if pr + h > cy then cy = pr + h end
+      prev = it
+    end
+  end
+  if #strip > 0 then close() end
+  sec.c1, sec.last = cs, #placed
+  secs[#secs + 1] = sec
+
+  -- how many half-columns across, and the full-length faders' lengths
+  local total, deepest = cs, 0
+  for _, it in ipairs(placed) do
+    if it.full then total = math.max(total, it.c + 4)
+    else total = math.max(total, it.c + it.w) end
+    -- a half-gap is room, not a control: it never makes the panel deeper
+    if not it.spacer and it.r + it.h > deepest then deepest = it.r + it.h end
+  end
+  for _, it in ipairs(placed) do if it.full then it.w = total - it.c end end
+
+  -- pixels: a half-column's left edge, past every divider gap at or before
+  -- it; a span's right edge, past the gaps inside it
+  local function left(c)
+    local n = 0
+    for _, g in ipairs(bounds) do if g.b <= c then n = n + 1 end end
+    return hx(c) + DW * n
+  end
+  local function right(c)
+    local n = 0
+    for _, g in ipairs(bounds) do if g.b < c then n = n + 1 end end
+    return hx(c) + DW * n
+  end
+  local items, spacers, rules, gaps, styled = {}, {}, {}, {}, {}
+  for _, it in ipairs(placed) do
+    local x = left(it.c)
+    local out = { ctl = it.ctl, x = x, y = hy(it.r), w = it.w, h = it.h, kind = it.kind }
+    if it.span then
+      out.pw = right(it.c + it.w) - x
+      out.sx, out.sw = x, out.pw
+    else
+      local ssw = it.ssw or it.w
+      if not it.pair and it.w < ssw and it.c == it.sc then out.x = x + hx(ssw - it.w) / 2 end
+      out.sx, out.sw = left(it.sc or it.c), hx(ssw)
+    end
+    it.out = out
+    if it.spacer then spacers[#spacers + 1] = out else items[#items + 1] = out end
+  end
+  -- the dividers: their gaps, their rules, where an across fader crosses
+  local per = {}
+  for _, g in ipairs(bounds) do
+    per[g.b] = (per[g.b] or 0) + 1
+    local n = 0
+    for _, o in ipairs(bounds) do if o.b < g.b then n = n + 1 end end
+    local gx = hx(g.b) + DW * (n + per[g.b] - 1)
+    gaps[#gaps + 1] = { x = gx, w = DW }
+    if not g.no_rule then
+      local rx = gx + DW * 0.5
+      rules[#rules + 1] = rx
+      local cut = {}
+      for _, it in ipairs(placed) do
+        if it.span and it.c < g.b and g.b < it.c + it.w then
+          cut[#cut + 1] = { hy(it.r) - 3, hy(it.r + it.h) + 3 }
+        end
+      end
+      if #cut > 0 then cuts[#rules] = cut end
+    end
+  end
+  -- sections a divider styled, joined to the one before when they match
+  -- and only a divider apart
+  for _, s in ipairs(secs) do
+    if s.by and P.section_style(s.by) and s.c1 > s.c0 then
+      local x = left(s.c0)
+      local w = right(s.c1) - x
+      local prev = styled[#styled]
+      if prev and math.abs(prev.x + prev.w + DW - x) < 0.5
+         and P.section_key(prev.by) == P.section_key(s.by) then
+        prev.w = x + w - prev.x
+      else
+        styled[#styled + 1] = { x = x, w = w, by = s.by }
+      end
+      for k = s.first, s.last do placed[k].out.sec = #styled end
+    end
+  end
+  return { rows = rows, items = items, rules = rules, rule_cuts = cuts, width = left(total),
+           sections = styled, gaps = gaps, spacers = spacers,
+           height = math.max(1, math.min(half_rows, deepest)) * HALF_H }
+end
+
+P.place_flow = place_flow   -- for the tests: it must agree with the strips
+
 local function place_row(sec, x0, half_rows, items)
   local area, widest, total_w = 0, 0, 0
   local sizes = {}
@@ -249,6 +449,14 @@ end
 function P.layout(controls, panel_h, lock)
   local rows  = lock or P.rows_for(panel_h)
   local half_rows = rows * 2
+  -- faders placed among the controls: merged-cell flow (place_flow);
+  -- anything else keeps the sections and strips it always had
+  if C.FLOW ~= "row" then
+    for _, ctl in ipairs(controls) do
+      local k = P.fader_kind(ctl)
+      if k == "block" or k == "band" or ctl.type == "xy" then return place_flow(controls, half_rows, rows) end
+    end
+  end
   local items, rules = {}, {}
 
   -- split the control list at dividers and faders; a leading, trailing
@@ -257,7 +465,7 @@ function P.layout(controls, panel_h, lock)
   -- `splitters[n]` is the control that opened sections[n+1].
   local sections, splitters, cur = {}, {}, {}
   for _, ctl in ipairs(controls) do
-    if ctl.type == "divider" or ctl.type == "fader" then
+    if ctl.type == "divider" or P.fader_kind(ctl) == "column" then
       sections[#sections + 1] = cur
       splitters[#splitters + 1] = ctl
       cur = {}
@@ -274,9 +482,10 @@ function P.layout(controls, panel_h, lock)
       local sp = splitters[si - 1]
       if sp.type == "fader" then
         -- full height always: a fader isn't capped by `deepest`, it sets it
-        items[#items + 1] = { ctl = sp, x = x, y = 0, w = 2, h = half_rows, sx = x, sw = C.CELL_W }
+        local t = fader_thick(sp)
+        items[#items + 1] = { ctl = sp, x = x, y = 0, w = t, h = half_rows, sx = x, sw = hx(t) }
         if half_rows > deepest then deepest = half_rows end
-        x = x + C.CELL_W
+        x = x + hx(t)
       else
         -- The gap is unconditional -- a no-rule divider still ends the
         -- column and opens the same C.DIVIDER_W space, it just adds no
@@ -518,6 +727,48 @@ local function combo_steps(track, addr, param, key, force)
   return steps_cache[ck]
 end
 P.combo_steps = combo_steps  -- exposed for TS_CV_Test.lua
+
+-- A dropdown's choices for its buttons. The scanned list when there is one;
+-- until then -- the transport is rolling, say, when nothing is swept in the
+-- background, and buttons never ask for a sweep the way an opened list
+-- does -- the plugin is asked what each position would read as, which
+-- moves nothing. Numbers only when it can't say (it answers every position
+-- the same, or not at all). `n`: how many there are, when the plugin
+-- reports no step size of its own (the layout's Buttons count).
+local fmt_cache = {}
+local function button_choices(track, addr, param, key, n)
+  local list = combo_steps(track, addr, param, key)
+  if type(list) == "table" then return list end
+  local st = step_norm(track, addr, param, key)
+  local count = st and (math.floor(1 / st + 0.5) + 1) or n
+  if not count or count < 2 then return {} end
+  local ck = key .. ":" .. param .. ":" .. count
+  local now = reaper.time_precise()
+  local hit = fmt_cache[ck]
+  if hit and now < hit.until_t then return hit.list end
+  local out, named, first, differ = {}, 0, nil, false
+  for k = 0, count - 1 do
+    local v = st and math.min(1, k * st) or (k / (count - 1))
+    local txt
+    if reaper.TrackFX_FormatParamValueNormalized then
+      local ok, sv = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+      if ok and sv and U.trim(sv) ~= "" then txt = U.trim(sv); named = named + 1 end
+    end
+    if txt then
+      if first == nil then first = txt elseif txt ~= first then differ = true end
+    end
+    out[k + 1] = { norm = v, text = txt }
+  end
+  local use = named == count and differ
+  for k, e in ipairs(out) do if not use then e.text = tostring(k) end end
+  fmt_cache[ck] = { list = out, until_t = now + 4 }
+  return out
+end
+P.button_choices = button_choices
+do
+  local clear = P.clear_caches
+  function P.clear_caches() clear(); fmt_cache = {} end
+end
 
 -- Drops both caches for one parameter so it is swept again -- the fix for
 -- a plugin that has been updated and renamed its positions.
@@ -812,9 +1063,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   ImGui.DrawList_AddText(dl, x + 5, y + (h - th) * 0.5, C.COL.header_dim, chip)
 
   -- The name area is the drag handle. It sits under the text so the whole
-  -- label is grabbable, and it is only a handle for top-level FX: moving
-  -- something into or out of a REAPER container isn't addressable through
-  -- the documented API, so those panels stay put.
+  -- label is grabbable -- anywhere in the chain, containers included.
   local name_x = x + 5 + tw + 6
   local name_w = math.max(8, (wet_x or btn_x) - name_x - 4)
   ImGui.SetCursorScreenPos(ctx, name_x, y)
@@ -822,21 +1071,19 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hdr_hovered = ImGui.IsItemHovered(ctx)
 
-  if fx.is_top_level then
-    if ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
-      -- x and y are output slots in the Lua API and must be passed as
-      -- nil; the button is the FOURTH argument, not the second.
-      local dx = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
-      if math.abs(dx) >= C.DRAG_THRESHOLD then req.begin_drag = true end
-      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
-    end
+  if ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+    -- x and y are output slots in the Lua API and must be passed as
+    -- nil; the button is the FOURTH argument, not the second.
+    local dx = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
+    if math.abs(dx) >= C.DRAG_THRESHOLD then req.begin_drag = true end
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
   end
 
   -- Hovering the header gives you the name in full. Panel headers are
   -- narrow and a long plugin name loses its tail exactly where the
-  -- version number lives, which is the part you were squinting at. The
-  -- container warning still has to get through, so it goes underneath
-  -- rather than instead.
+  -- version number lives, which is the part you were squinting at. Where
+  -- it sits -- the containers it's in, whether it runs in parallel -- goes
+  -- underneath.
   if hdr_hovered then
     local full = U.clean_fx_name(fx.name)
     if fx.alias then full = fx.alias .. "\n" .. full end
@@ -846,9 +1093,11 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     if fmt and fmt ~= "" then
       full = full .. ((ven and ven ~= "") and "   \u{00B7} " or "\n") .. fmt
     end
-    if not fx.is_top_level then
-      full = full ..
-        "\n\nInside an FX container \u{2014} reorder it in REAPER's FX chain window."
+    local _, where = T.where(fx)
+    if where then full = full .. "\n\nIn container: " .. where end
+    if (fx.index or 0) > 0 and (fx.parallel or 0) ~= 0 then
+      full = full .. (where and "\n" or "\n\n") .. "Runs in parallel with the one before it" ..
+        (fx.parallel == 2 and ", MIDI merged" or "")
     end
     W.tip(ctx, "hdr##" .. fx.guid, full, true, false)
   end
@@ -858,7 +1107,6 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   end
 
   local name = U.fx_label(fx)
-  if fx.depth and fx.depth > 0 then name = "\u{00BB} " .. name end
   local nw, nh = ImGui.CalcTextSize(ctx, name)
   if nw > name_w then
     local k = #name
@@ -977,8 +1225,7 @@ local function draw_collapsed(ctx, dl, x, y, w, h, track, fx, enabled, req, mete
   if ImGui.IsItemHovered(ctx) and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
     req.toggle_collapse = true
   end
-  if fx.is_top_level and ImGui.IsItemActive(ctx)
-     and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+  if ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     -- x and y are output slots in the Lua API and must be passed as
     -- nil; the button is the FOURTH argument, not the second.
     local dx = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
@@ -1179,6 +1426,33 @@ end
 -- `panel_h` is the panel's FULL height, header included -- the same value
 -- P.width() was given, so the column count here can't disagree with the
 -- width the panel was allotted.
+-- The faceplate and extent of the panel being drawn (see draw_plate).
+local cur_bg = { plate = nil, y = 0, h = 1 }
+
+-- Whether REAPER's parameter modulation is switched on for a parameter
+-- (LFO, audio control signal, MIDI or parameter link all hang off it).
+-- Read once and kept until the project changes -- switching modulation on
+-- or off is an edit like any other, so REAPER's change count moves -- with
+-- a slow re-read as a backstop for anything that doesn't move it.
+local mod_cache, mod_count, mod_at = {}, nil, 0
+local MOD_BACKSTOP = 5
+function P.mod_on(track, fx, p)
+  local now = reaper.time_precise()
+  local cc = reaper.GetProjectStateChangeCount(0)
+  if cc ~= mod_count or now - mod_at > MOD_BACKSTOP then
+    mod_cache, mod_count, mod_at = {}, cc, now
+  end
+  local k = fx.guid .. ":" .. p
+  local v = mod_cache[k]
+  if v == nil then
+    local ok, s = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.mod.active"):format(p))
+    v = ok and tonumber(s) == 1 or false
+    mod_cache[k] = v
+  end
+  return v
+end
+function P.forget_mod(fx, p) mod_cache[fx.guid .. ":" .. p] = nil end
+
 local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter, io)
   local controls = layout.controls or {}
   local lock = M.locked(layout)
@@ -1303,9 +1577,23 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   end
 
   -- Dividers first, so a control's hit area is never shadowed by a rule.
-  for _, rx in ipairs(lay.rules) do
-    ImGui.DrawList_AddLine(dl, gx0 + rx, gy0 + 2,
-      gx0 + rx, gy0 + lay.height - 2, C.COL.knob_ring, 1.0)
+  -- (an across fader running over one cuts it: lay.rule_cuts)
+  for ri, rx in ipairs(lay.rules) do
+    local y = 2
+    local cuts = lay.rule_cuts and lay.rule_cuts[ri]
+    if cuts then
+      table.sort(cuts, function(a, b) return a[1] < b[1] end)
+      for _, cut in ipairs(cuts) do
+        if cut[1] > y then
+          ImGui.DrawList_AddLine(dl, gx0 + rx, gy0 + y, gx0 + rx, gy0 + cut[1], C.COL.knob_ring, 1.0)
+        end
+        if cut[2] > y then y = cut[2] end
+      end
+    end
+    if lay.height - 2 > y then
+      ImGui.DrawList_AddLine(dl, gx0 + rx, gy0 + y,
+        gx0 + rx, gy0 + lay.height - 2, C.COL.knob_ring, 1.0)
+    end
   end
 
   -- Controls' own backgrounds, over the sections and the rules: controls
@@ -1382,7 +1670,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       -- turns like a knob (see W.knob's step_norm), not a list, so it
       -- reverses the same way a plain one does.
       local rev      = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle"
-                                        or ctl.type == "stepped")
+                                        or ctl.type == "stepped" or ctl.type == "dual"
+                                        or ctl.type == "xy")
       local raw      = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
       local value    = rev and (1 - raw) or raw
       local shown    = U.fmt_value(track, fx.addr, p)
@@ -1393,9 +1682,61 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       -- centimetres away and the parameter index is an implementation
       -- detail -- neither is what you're hovering to find out.
       local tip      = shown
+      local modded   = P.mod_on(track, fx, p)
+      if modded then tip = (tip or "") .. "\nParameter modulation on" end
 
       local changed, nv, act
-      if ctl.type == "toggle" then
+      if ctl.type == "xy" or ctl.type == "dual" then
+        -- two parameters: an XY pad's X and Y, a concentric knob's ring and
+        -- inner knob (Dual<n>); one not chosen yet, or out of range, shows ?
+        local p2 = ctl.param2
+        local ok2 = p2 ~= nil and p2 >= 0 and p2 < nparams
+        local raw2 = ok2 and (reaper.TrackFX_GetParamNormalized(track, fx.addr, p2) or 0) or 0
+        local rev2 = ctl.invert2 and true or false
+        if rev2 then raw2 = 1 - raw2 end
+        local shown2 = ok2 and U.fmt_value(track, fx.addr, p2) or "?"
+        local name1 = M.display_name(key, p, nil, pname, ctl.live or layout.live)
+        local name2 = "?"
+        if ok2 then
+          local _, pn2 = reaper.TrackFX_GetParamName(track, fx.addr, p2, "")
+          name2 = M.display_name(key, p2, nil, pn2, ctl.live or layout.live)
+        end
+        local mod2 = ok2 and P.mod_on(track, fx, p2) or false
+        local name = (ctl.label and ctl.label ~= "") and ctl.label or (name1 .. " / " .. name2)
+        local tip2 = name1 .. ": " .. (shown or "") .. "\n" .. name2 .. ": " .. shown2
+          .. (ok2 and "" or "\n(right-click to choose its second parameter)")
+          .. ((modded or mod2) and "\nParameter modulation on" or "")
+        local c1, v1, c2, v2
+        if ctl.type == "xy" then
+          local under = cur_bg.plate and cur_bg.plate.bg or C.COL.panel_bg
+          c1, v1, c2, v2, act = W.xypad(ctx, id, gx0 + item.x, gy0 + item.y,
+            item.pw or hx(item.w), hy(item.h), value, raw2, name,
+            { cap = W.cap_col(ctl.cap), dim = not T.get_enabled(track, fx.addr),
+              mod = modded or mod2, shown_x = shown, shown_y = shown2, tip = tip2, under = under })
+          -- a double-click puts both back: Y here, X below
+          if act.double_click and ok2 then
+            reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, U.param_mid_norm(track, fx.addr, p2))
+          end
+        else
+          c1, v1, c2, v2, act = W.dual_knob(ctx, id, name, value, raw2,
+            { size = (P.item_size(item) == "large") and "large" or nil, cap = W.cap_col(ctl.cap),
+              dim = not T.get_enabled(track, fx.addr), mod1 = modded, mod2 = mod2,
+              shown1 = shown, shown2 = shown2, tip = tip2 })
+          -- a double-click puts back the one under the pointer: the inner
+          -- knob's here, the ring's below
+          if act.double_click == "inner" then
+            if ok2 then
+              reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, U.param_mid_norm(track, fx.addr, p2))
+            end
+            act.double_click = nil
+          end
+        end
+        if c2 and ok2 then
+          reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, rev2 and (1 - v2) or v2)
+          TP.touched(track, fx.guid)
+        end
+        changed, nv = c1, v1
+      elseif ctl.type == "toggle" then
         -- your names for its two states, when you've given them
         local st = M.state_text(key, p, raw, shown)
         local lit = W.lit_col(ctl.cap)
@@ -1404,29 +1745,21 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.toggle(ctx, id, label, value, st,
           { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
             text = said or ((size == "small") and label or nil),
-            on_col = lit, size = size, style = ctl.style })
+            on_col = lit, size = size, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" and item.kind == "buttons" then
-        -- its choices as buttons: the plugin's own names once they've
-        -- been read (TS_CV_Steps keeps them between runs), evenly spaced
-        -- numbers until then
-        local list = combo_steps(track, fx.addr, p, key)
-        if type(list) ~= "table" then
-          local st = step_norm(track, fx.addr, p, key)
-          list = {}
-          if st then
-            for k = 0, math.floor(1 / st + 0.5) do list[#list + 1] = { norm = math.min(1, k * st), text = tostring(k + 1) } end
-          end
-        end
+        -- its choices as buttons: the plugin's own names (button_choices)
+        local list = button_choices(track, fx.addr, p, key, ctl.nbtn)
         local lit = W.lit_col(ctl.cap)
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
-            tooltip = tip, on_col = lit, style = ctl.style })
+            tooltip = tip, on_col = lit, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" then
         changed, nv, act = W.combo(ctx, id, label, value, shown,
           step_norm(track, fx.addr, p, key),
           { tooltip     = tip,
             steps       = combo_steps(track, fx.addr, p, key),
-            open_now    = pending_open[id] })
+            open_now    = pending_open[id],
+            mod         = modded })
         pending_open[id] = nil
         if act and act.want_steps then
           -- scan right now, and open the list on the next frame once it
@@ -1449,11 +1782,27 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- taper to speak of for an arbitrary plugin parameter, and
         -- W.fader doesn't care what 0..1 means, only that the caller
         -- does.
-        local fx0 = gx0 + item.x + (C.CELL_W - C.FADER_W) * 0.5
-        local fy0 = gy0 + item.y
-        changed, nv, act = W.fader(ctx, id, fx0, fy0, C.FADER_W, lay.height,
-          value, label .. "   " .. shown, ctl.bipolar and 0.5 or nil, false,
-          (ctl.style or ctl.cap) and { style = ctl.style, cap = W.cap_col(ctl.cap) } or nil)
+        local look = (ctl.style or ctl.cap) and { style = ctl.style, cap = W.cap_col(ctl.cap) } or nil
+        local unity = ctl.bipolar and 0.5 or nil
+        local under = cur_bg.plate and cur_bg.plate.bg or C.COL.panel_bg
+        if P.fader_kind(ctl) == "column" then
+          local cw = hx(item.w)
+          local fw = ctl.thin and 14 or C.FADER_W
+          local fx0 = gx0 + item.x + (cw - fw) * 0.5
+          local fy0 = gy0 + item.y
+          changed, nv, act = W.fader(ctx, id, fx0, fy0, fw, lay.height,
+            value, label .. "   " .. shown, unity, false, look)
+          if modded then
+            -- top right of the fader's column, against the panel under it
+            W.mod_corner(dl, fx0 + fw, fy0, 6, under)
+          end
+        else
+          -- placed among the controls: its name over it, its value under
+          changed, nv, act = W.param_fader(ctx, id, gx0 + item.x, gy0 + item.y,
+            item.pw or hx(item.w), hy(item.h), value, label, shown,
+            { dir = ctl.dir, thin = ctl.thin, unity = unity, look = look,
+              tip = label .. "   " .. shown, mod = modded and under or nil })
+        end
       elseif ctl.type == "stepped" then
         local size = P.item_size(item)
         local st = step_norm(track, fx.addr, p, key)
@@ -1465,14 +1814,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- control type, choice name included.
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            step_norm = st,
+            step_norm = st, mod = modded,
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = size,
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
@@ -1573,7 +1922,7 @@ end
 -- The background at height `yy` of the panel being drawn: what draw_plate
 -- painted there (gradient included), or the flat panel colour. The trace's
 -- fade blends into this.
-local cur_bg = { plate = nil, y = 0, h = 1 }
+-- (cur_bg is declared further up, before draw_controls, which uses it too)
 bg_at = function(yy)
   local pl = cur_bg.plate
   if not (pl and C.EFFECT_3D) then return C.COL.panel_bg end

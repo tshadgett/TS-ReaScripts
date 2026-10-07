@@ -85,7 +85,7 @@ local PAL_KEYS = { "win_bg", "panel_bg", "panel_border", "header_bg", "header_bg
   "knob_fill_bi", "knob_body", "knob_pointer", "knob_ring", "toggle_off", "toggle_on",
   "toggle_text", "accent", "strip_bg", "strip_sel", "gr_measured", "fader_cap",
   "bypass_on", "mute_on", "solo_on", "rec_on", "level_lo", "level_clip", "level_over",
-  "empty_text", "warn", "mon_on", "mon_auto", "eq_spectrum" }
+  "empty_text", "warn", "mon_on", "mon_auto", "eq_spectrum", "brk_parallel", "brk_container" }
 
 local function palette()
   local out = {}
@@ -147,6 +147,28 @@ end
 local function fx_by_guid(guid)
   for _, fx in ipairs(chain) do if fx.guid == guid then return fx end end
   return nil
+end
+
+-- A container in the chain's shape (T.collect's tree), by its GUID.
+local function box_by_guid(guid)
+  local function walk(nodes)
+    for _, n in ipairs(nodes or {}) do
+      if n.kind == "container" then
+        if n.guid == guid then return n end
+        local f = walk(n.children)
+        if f then return f end
+      end
+    end
+  end
+  return walk(chain and chain.tree)
+end
+
+-- A level's path as the page sends it: "" the chain itself, "1.0" slot 0
+-- of the container in slot 1, and so on.
+local function path_of(s)
+  local out = {}
+  for v in tostring(s or ""):gmatch("%d+") do out[#out + 1] = tonumber(v) end
+  return out
 end
 
 -- A track's colour, or nil when it has none. I_CUSTOMCOLOR's 0x1000000 bit
@@ -287,8 +309,12 @@ local function panel_of(fx, i)
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, ctl.param, "")
       o.p   = ctl.param
       o.l   = M.display_name(key, ctl.param, ctl.label, pname, ctl.live or layout.live)
+      -- under REAPER's parameter modulation: the page marks it. Read with
+      -- the layout, so the page only rebuilds when it's switched on or off.
+      local okm, mv = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.mod.active"):format(ctl.param))
+      o.md  = (okm and tonumber(mv) == 1) or nil
       o.bi  = ctl.bipolar or nil
-      o.inv = (ctl.invert and (o.t == "knob" or o.t == "toggle" or o.t == "stepped")) or nil
+      o.inv = (ctl.invert and (o.t == "knob" or o.t == "toggle" or o.t == "stepped" or o.t == "dual" or o.t == "xy")) or nil
       o.st  = ctl.style
       o.cap = cap_hex(ctl.cap)
       if o.t == "knob" or o.t == "stepped" then o.sz = ctl.size end
@@ -296,6 +322,27 @@ local function panel_of(fx, i)
       if o.t == "toggle" then
         o.cap = nil
         o.lit = lit_hex(ctl.cap)
+      end
+      -- an XY pad's Y, a concentric knob's inner knob (Dual<n>): its
+      -- parameter, its name, its modulation; and their sizes
+      if o.t == "xy" or o.t == "dual" then
+        local p2 = ctl.param2
+        if p2 and p2 >= 0 and p2 < nparams then
+          local _, pn2 = reaper.TrackFX_GetParamName(track, fx.addr, p2, "")
+          o.p2 = p2
+          o.l2 = M.display_name(key, p2, nil, pn2, ctl.live or layout.live)
+          local okm2, mv2 = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.mod.active"):format(p2))
+          o.md2 = (okm2 and tonumber(mv2) == 1) or nil
+        end
+        -- the first's own name, for the pair
+        o.l1 = M.display_name(key, ctl.param, nil, pname, ctl.live or layout.live)
+        if ctl.label and ctl.label ~= "" then o.l = ctl.label else o.l = nil end
+        o.sz = (o.t == "xy") and ctl.size or ((ctl.size == "large") and "large" or nil)
+        o.st = nil
+      end
+      -- a fader's shape: across, its length, half-thick (TS_CV_Panel.fader_kind)
+      if o.t == "fader" then
+        o.dr = ctl.dir; o.ln = ctl.len; o.th = ctl.thin and 1 or nil
       end
       if o.t == "combo" or o.t == "stepped" then o.ch, o.cn = choices(fx, key, ctl.param) end
       -- a numbered scale round the dial: where the numbers go, what they
@@ -367,6 +414,11 @@ local function panel_of(fx, i)
   return {
     g = fx.guid, i = i, n = U.fx_label(fx), k = key, an = fx.alias and U.clean_fx_name(fx.name) or nil, d = is_default or nil,
     ti = fx.is_top_level and fx.top_index or nil,
+    -- where it sits: its level ("" = the chain), its slot there and how
+    -- many slots that level has, its parallel setting, the container it's in
+    pp = table.concat(fx.parent_path or {}, "."), ix = fx.index, ns = fx.siblings,
+    pl = (fx.parallel or 0) ~= 0 and fx.parallel or nil,
+    bx = (fx.ancestors and #fx.ancestors > 0) and fx.ancestors[#fx.ancestors].guid or nil,
     c = ctls, plate = plate_json(layout),
     lk = M.locked(layout),
     gr = has_gr and (meter.range or C.MAX_GR_DB) or nil,
@@ -583,6 +635,27 @@ local function build_layout()
   end
   local panels = arr()
   for i, fx in ipairs(chain) do panels[#panels + 1] = panel_of(fx, i) end
+  -- the bracket strip over the row: containers and parallel runs, as the
+  -- desktop draws them (TS_CV_FXTree.groups) -- shown, not edited here
+  local brs, brn = arr(), 0
+  if track then
+    local list
+    list, brn = T.groups(chain)
+    for _, b in ipairs(list) do
+      local box = b.kind == "container"
+      brs[#brs + 1] = {
+        k = box and "c" or "p", a = b.first, b = b.last, r = b.row,
+        n = box and (b.node.alias or U.fx_label(b.node)) or nil,
+        off = (box and not T.get_enabled(track, b.node.addr)) or nil,
+        -- a container's own: its GUID, path, slot, parallel setting and size
+        g = box and b.node.guid or nil,
+        p = box and table.concat(b.node.path, ".") or nil,
+        ix = box and b.node.index or nil,
+        pl = box and b.node.parallel or nil,
+        nn = box and #(b.node.children or {}) or nil,
+      }
+    end
+  end
   local tn = track and math.floor(reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")) or 0
   return {
     tracks = tracks,
@@ -591,6 +664,7 @@ local function build_layout()
     track = track and { i = tn, n = track_name(track), c = track_colour(track),
                         m = (track == reaper.GetMasterTrack(0)) or nil, fl = fader_json(track) } or nil,
     fx = panels,
+    br = brs, brn = brn,
     nfx = track and reaper.TrackFX_GetCount(track) or 0,
     sends = on_master() and outputs_layout() or sends_layout(0),
     outs = on_master() or nil,
@@ -856,10 +930,18 @@ local function build_vals(lseq, ack)
     local layout = M.get_or_default(key, track, fx.addr, fx.guid)
     local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
     local v, x = arr(), arr()
+    local v2, x2                -- a second parameter's, where there is one
     for ci, ctl in ipairs(layout.controls or {}) do
+      if (ctl.type == "xy" or ctl.type == "dual") and ctl.param2 and ctl.param2 >= 0 and ctl.param2 < nparams then
+        v2, x2 = v2 or {}, x2 or {}
+        local r2 = reaper.TrackFX_GetParamNormalized(track, fx.addr, ctl.param2) or 0
+        v2[tostring(ci - 1)] = round(ctl.invert2 and (1 - r2) or r2)
+        x2[tostring(ci - 1)] = U.fmt_value(track, fx.addr, ctl.param2)
+      end
       if ctl.param and ctl.param >= 0 and ctl.param < nparams then
         local raw = reaper.TrackFX_GetParamNormalized(track, fx.addr, ctl.param) or 0
-        local inv = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle" or ctl.type == "stepped")
+        local inv = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle" or ctl.type == "stepped"
+                                    or ctl.type == "dual" or ctl.type == "xy")
         v[ci] = round(inv and (1 - raw) or raw)
         x[ci] = U.fmt_value(track, fx.addr, ctl.param)
         -- a toggle's text is what its button says: the state's name, or
@@ -876,7 +958,7 @@ local function build_vals(lseq, ack)
     end
     local est = (gr and T.gr_estimated(track, fx.addr, fx.guid)) or nil
     local pname, psame = PR.current(track, fx.addr)
-    fxv[fx.guid] = { e = T.get_enabled(track, fx.addr), v = v, x = x, gr = gr,
+    fxv[fx.guid] = { e = T.get_enabled(track, fx.addr), v = v, x = x, v2 = v2, x2 = x2, gr = gr,
                      pn = pname, pm = (pname ~= "" and not psame) or nil,
                      est = est,
                      tw = (gr and web_tr.set[fx.guid]) and trace_of(fx, meter, est, gr) or nil,
@@ -912,6 +994,7 @@ end
 -- at a position through TrackFX_AddByName's own -1000 - n. The recently
 -- used list is the desktop's, so both pick up where the other left off.
 local fx_lib, fx_tree = nil, nil
+local folders_stamp = nil
 local RECENT_KEY = "recent_fx"
 
 local function fx_library()
@@ -1138,7 +1221,10 @@ local function apply(verb, a)
       local inv = false
       for _, ctl in ipairs(layout.controls or {}) do
         if ctl.param == p and ctl.invert
-           and (ctl.type == "knob" or ctl.type == "toggle" or ctl.type == "stepped") then inv = true end
+           and (ctl.type == "knob" or ctl.type == "toggle" or ctl.type == "stepped"
+                or ctl.type == "dual" or ctl.type == "xy") then inv = true end
+        -- an XY pad's Y, a concentric knob's inner knob, reversed
+        if ctl.param2 == p and ctl.invert2 and (ctl.type == "dual" or ctl.type == "xy") then inv = true end
       end
       v = math.max(0, math.min(1, v))
       reaper.TrackFX_SetParamNormalized(track, fx.addr, p, inv and (1 - v) or v)
@@ -1298,13 +1384,23 @@ local function apply(verb, a)
     -- the page escapes the ident, so a "|" or "~" in it can't split the command
     local ident = (a[1] or ""):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
     local at = tonumber(a[2]) or -1
+    -- fxadd|ident|slot|level: a level ("1.0", ...) adds into a container
+    local parent = path_of(a[3])
     if ident and ident ~= "" then
       reaper.Undo_BeginBlock()
-      local idx = reaper.TrackFX_AddByName(track, ident, false, (at >= 0) and (-1000 - at) or -1)
+      reaper.PreventUIRefresh(1)
+      local ok
+      if #parent > 0 then
+        ok = T.add_into(track, ident, parent, math.max(0, at))
+      else
+        local idx = reaper.TrackFX_AddByName(track, ident, false, (at >= 0) and (-1000 - at) or -1)
+        ok = idx and idx >= 0
+      end
+      reaper.PreventUIRefresh(-1)
       local short = ident
       for _, e in ipairs(fx_library()) do if e.ident == ident then short = e.short break end end
       reaper.Undo_EndBlock("ChannelView: add " .. short, -1)
-      if idx and idx >= 0 then remember(ident) end
+      if ok then remember(ident) end
       layout_dirty = true
     end
   elseif track and verb == "fxmove" then
@@ -1321,11 +1417,63 @@ local function apply(verb, a)
       end
       layout_dirty = true
     end
-  elseif track and verb == "fxdel" then
-    local fx = fx_by_guid(a[1])
-    if fx and fx.is_top_level then
+  elseif track and verb == "fxmv" then
+    -- fxmv|guid|level|gap: to insertion point `gap` of a level ("" the
+    -- chain, "1.0" ... a container), anywhere -- see TS_CV_FXTree.move
+    local fx = fx_by_guid(a[1]); local gap = tonumber(a[3])
+    if fx and gap then
       reaper.Undo_BeginBlock()
-      reaper.TrackFX_Delete(track, fx.top_index)
+      reaper.PreventUIRefresh(1)
+      T.move(track, fx.path_t, path_of(a[2]), gap)
+      reaper.PreventUIRefresh(-1)
+      reaper.Undo_EndBlock("ChannelView: move " .. U.fx_label(fx), -1)
+      layout_dirty = true
+    end
+  elseif track and (verb == "fxpar" or verb == "boxpar") then
+    -- REAPER's parallel setting: 0 in series, 1 alongside the one before,
+    -- 2 alongside it merging MIDI
+    local node = verb == "fxpar" and fx_by_guid(a[1]) or box_by_guid(a[1])
+    local v = tonumber(a[2])
+    if node and (v == 0 or v == 1 or v == 2) and (node.index or 0) > 0 then
+      reaper.Undo_BeginBlock()
+      T.set_parallel(track, node.addr, v)
+      reaper.Undo_EndBlock("ChannelView: run " .. (verb == "fxpar" and "plugin" or "container") ..
+        (v == 0 and " in series" or " in parallel"), -1)
+      layout_dirty = true
+    end
+  elseif track and verb == "fxwrap" then
+    local fx = fx_by_guid(a[1])
+    if fx then
+      reaper.Undo_BeginBlock()
+      reaper.PreventUIRefresh(1)
+      T.wrap(track, fx.path_t)
+      reaper.PreventUIRefresh(-1)
+      reaper.Undo_EndBlock("ChannelView: put " .. U.fx_label(fx) .. " in a container", -1)
+      layout_dirty = true
+    end
+  elseif track and (verb == "boxbyp" or verb == "boxunp" or verb == "boxdel") then
+    local node = box_by_guid(a[1])
+    if node and T.guid_at(track, node.addr) == node.guid then
+      reaper.Undo_BeginBlock()
+      reaper.PreventUIRefresh(1)
+      if verb == "boxbyp" then
+        T.set_enabled(track, node.addr, not T.get_enabled(track, node.addr))
+      elseif verb == "boxunp" then
+        T.unpack(track, node.path)
+      else
+        reaper.TrackFX_Delete(track, node.addr)
+      end
+      reaper.PreventUIRefresh(-1)
+      reaper.Undo_EndBlock("ChannelView: " .. (verb == "boxbyp" and "bypass container"
+        or verb == "boxunp" and "unpack container" or "remove container"), -1)
+      layout_dirty = true
+    end
+  elseif track and verb == "fxdel" then
+    -- anywhere in the chain, containers included
+    local fx = fx_by_guid(a[1])
+    if fx then
+      reaper.Undo_BeginBlock()
+      reaper.TrackFX_Delete(track, fx.addr)
       reaper.Undo_EndBlock("ChannelView: remove " .. U.fx_label(fx), -1)
       layout_dirty = true
     end
@@ -1412,6 +1560,13 @@ local function cycle()
     end
     local h, t = pal_get()
     if C.apply_colour(h or C.BASE_HUE, t or C.TINT) then layout_dirty = true end
+    -- your FX Folders, edited from ChannelView's window: the picker reads
+    -- them again
+    local fs = IX.folders_stamp()
+    if fs ~= folders_stamp then
+      if folders_stamp then IX.reset(); fx_lib, fx_tree = nil, nil end
+      folders_stamp = fs
+    end
     C.EFFECT_3D = reaper.GetExtState("TS_ChannelView", "plate_texture") ~= "0"
     C.PRESET_BAR = reaper.GetExtState("TS_ChannelView", "preset_bar") ~= "0"
     TO.reload_fader_defaults()      -- the group fader looks, as ChannelView last set them

@@ -30,6 +30,7 @@ local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local SR = require("TS_CV_Search")
 local IX = require("TS_CV_FXIndex")
+local T  = require("TS_CV_FXTree")
 
 local B = {}
 local ImGui
@@ -69,7 +70,16 @@ function B.is_open() return st.open end
 
 -- ---------------------------------------------------------------------
 
-local function installed()
+local installed
+
+-- Forget the collection, so the next look reads it (and your FX Folders)
+-- afresh -- after a folder has been edited.
+function B.forget()
+  all_fx, devs, cats, folds = nil, nil, nil, nil
+  by_fold, by_cat, by_dev, by_letter = nil, nil, nil, nil
+end
+
+installed = function()
   if all_fx then return all_fx end
   local list, i = {}, 0
   while true do
@@ -217,7 +227,9 @@ end
 
 -- ---------------------------------------------------------------------
 
--- insert_at: top-level chain slot to insert before, or nil to append.
+-- insert_at: top-level chain slot to insert before, or nil to append --
+-- or { parent = a container's path, gap = the slot in it } to add into a
+-- container (see TS_CV_FXTree.add_into).
 -- `opts`, optional: { track = the track to add to (when it isn't the one
 -- the dialog is drawn for), input = true for the input FX chain }.
 function B.open(insert_at, opts)
@@ -239,6 +251,15 @@ end
 -- monitoring FX chain on the master, which is where REAPER keeps those.
 local function insert(track, entry, at, input)
   if not track or not entry then return false end
+  if type(at) == "table" and not input then
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+    local ok = T.add_into(track, entry.ident, at.parent or {}, at.gap or 0)
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock("ChannelView: add " .. entry.short, -1)
+    if ok then remember(entry.ident) end
+    return ok
+  end
   -- instantiate doubles as a position: -1000 - n inserts at slot n.
   local instantiate = (at and not input) and (-1000 - at) or -1
   reaper.Undo_BeginBlock()
@@ -311,6 +332,96 @@ local function badge(ctx, dl, fmt)
     cy - th * 0.5, col.fg, txt)
 end
 
+-- ---------------------------------------------------------------------
+-- your FX Folders, edited from the picker
+-- ---------------------------------------------------------------------
+-- REAPER's own (reaper-fxfolders.ini, TS_CV_FXIndex): right-click a
+-- plugin to add it to a folder or take it out of one; in the Folders
+-- menu, right-click a folder to remove it, and the [+] row at the foot
+-- makes a new one. Every write keeps the file as it was beside it (.bak).
+-- REAPER's own Add FX browser keeps its copy in memory, so it may only
+-- show a change after a restart.
+
+local fold_m, fold_at = nil, -1
+local function folder_model()
+  local now = reaper.time_precise()
+  if not fold_m or now - fold_at > 1 then fold_m, fold_at = IX.read_folders(), now end
+  return fold_m
+end
+
+local function edit_folders(fn)
+  local m, before = IX.read_folders()
+  if not fn(m) then return end
+  if IX.save_folders(m, before) then
+    fold_m = nil
+    B.forget()
+    installed()            -- rebuilt now: the menus being drawn read it
+  else
+    reaper.MB("Couldn't write reaper-fxfolders.ini.", "ChannelView", 0)
+  end
+end
+
+-- A name box and [+]: `make(name)` is called with what was typed.
+local newfold = { buf = "" }
+local function new_folder_row(ctx, id, make)
+  ImGui.SetNextItemWidth(ctx, 160)
+  local _, v = ImGui.InputTextWithHint(ctx, "##nf" .. id, "new folder\u{2026}", newfold.buf)
+  local enter = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+                or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
+  newfold.buf = v
+  ImGui.SameLine(ctx)
+  if (ImGui.SmallButton(ctx, "+##nfb" .. id) or enter) and U.trim(newfold.buf) ~= "" then
+    make(U.trim(newfold.buf))
+    newfold.buf = ""
+  end
+end
+
+-- Removing a folder, after asking. The plugins in it stay installed.
+local function remove_folder(f)
+  if reaper.MB(("Remove the folder \"%s\"?\n\nThe plugins in it stay installed; " ..
+      "only the folder goes."):format(f.name), "ChannelView", 4) == 6 then
+    edit_folders(function(mm) return IX.folder_delete(mm, f.id) end)
+  end
+end
+
+-- A plugin's right-click menu: add it to a folder, take it out of one.
+local function folder_actions(ctx, e)
+  local kind = IX.kind_of(e.name)
+  if not kind then
+    ImGui.TextDisabled(ctx, "Folders can't hold this kind of plugin")
+    return
+  end
+  local m = folder_model()
+  local ins, outs = {}, {}
+  for _, f in ipairs(IX.folder_list(m)) do
+    if IX.folder_has(m, f.id, e.ident) then ins[#ins + 1] = f else outs[#outs + 1] = f end
+  end
+  if ImGui.BeginMenu(ctx, "Add to folder") then
+    for _, f in ipairs(outs) do
+      if ImGui.MenuItem(ctx, f.name .. "##af" .. f.id) then
+        edit_folders(function(mm) return IX.folder_add(mm, f.id, e.ident, kind) end)
+      end
+    end
+    if #outs > 0 then ImGui.Separator(ctx) end
+    new_folder_row(ctx, "p", function(name)
+      edit_folders(function(mm)
+        IX.folder_add(mm, IX.folder_new(mm, name), e.ident, kind)
+        return true
+      end)
+      ImGui.CloseCurrentPopup(ctx)
+    end)
+    ImGui.EndMenu(ctx)
+  end
+  if ImGui.BeginMenu(ctx, "Remove from folder", #ins > 0) then
+    for _, f in ipairs(ins) do
+      if ImGui.MenuItem(ctx, f.name .. "##rf" .. f.id) then
+        edit_folders(function(mm) return IX.folder_remove(mm, f.id, e.ident) end)
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+end
+
 local function plugin_items(ctx, track, list)
   local dl  = ImGui.GetWindowDrawList(ctx)
   local pad = badge_pad(ctx)
@@ -319,6 +430,12 @@ local function plugin_items(ctx, track, list)
       if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
     end
     badge(ctx, dl, e.fmt)
+    if ImGui.BeginPopupContextItem(ctx, "##fxctx" .. i) then
+      ImGui.TextDisabled(ctx, e.short)
+      ImGui.Separator(ctx)
+      folder_actions(ctx, e)
+      ImGui.EndPopup(ctx)
+    end
   end
 end
 
@@ -365,9 +482,60 @@ local function items(ctx, track)
     ImGui.EndMenu(ctx)
   end
 
-  if #(folds or {}) > 0 and ImGui.BeginMenu(ctx, "Folders") then
-    for _, f in ipairs(folds) do
-      group_menu(ctx, track, f.name, by_fold[f.id])
+  -- every folder, empty ones too, in REAPER's order with its separators;
+  -- right-click one to remove it, [+] at the foot for a new one
+  if ImGui.BeginMenu(ctx, "Folders") then
+    local fm = folder_model()
+    local row_h = ImGui.GetTextLineHeightWithSpacing(ctx)
+    for _, f in ipairs(fm.order) do
+      if IX.is_separator(f) then
+        ImGui.Separator(ctx)
+      else
+        local members = (by_fold or {})[f.id] or {}
+        -- the row's own rectangle, read before the submenu can open over it
+        -- (across the whole menu window, not just the text)
+        local _, y = ImGui.GetCursorScreenPos(ctx)
+        local x = ImGui.GetWindowPos(ctx)
+        local w = ImGui.GetWindowSize(ctx)
+        -- (a folder's submenu opens as soon as its row is hovered, and an
+        -- open submenu counts as a popup over this one: without the flag
+        -- the window never reads as hovered while you're pointing at a row)
+        if ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Right)
+           and ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_AllowWhenBlockedByPopup) then
+          local mx, my = ImGui.GetMousePos(ctx)
+          if mx >= x and mx <= x + w and my >= y and my < y + row_h then
+            newfold.ctx = f
+            ImGui.OpenPopup(ctx, "##foldctx")
+          end
+        end
+        if ImGui.BeginMenu(ctx, ("%s  (%d)##fold%d"):format(f.name, #members, f.id)) then
+          if #members == 0 then ImGui.TextDisabled(ctx, "Empty") end
+          plugin_items(ctx, track, members)
+          ImGui.Separator(ctx)
+          if ImGui.MenuItem(ctx, "Remove this folder\u{2026}##rmf" .. f.id) then remove_folder(f) end
+          ImGui.EndMenu(ctx)
+        end
+        -- and the row itself, which ImGui hands back as the last item
+        -- once its submenu is done
+        if ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Right)
+           and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenBlockedByPopup) then
+          newfold.ctx = f
+          ImGui.OpenPopup(ctx, "##foldctx")
+        end
+      end
+    end
+    if #fm.order > 0 then ImGui.Separator(ctx) end
+    new_folder_row(ctx, "f", function(name)
+      edit_folders(function(mm) IX.folder_new(mm, name) return true end)
+    end)
+    if ImGui.BeginPopup(ctx, "##foldctx") then
+      local f = newfold.ctx
+      if f then
+        ImGui.TextDisabled(ctx, f.name)
+        ImGui.Separator(ctx)
+        if ImGui.MenuItem(ctx, "Remove folder") then remove_folder(f) end
+      end
+      ImGui.EndPopup(ctx)
     end
     ImGui.EndMenu(ctx)
   end
@@ -476,8 +644,8 @@ function B.draw_menu(ctx, track)
   end
   if not ImGui.BeginPopup(ctx, MENU_ID) then return false end
 
-  local where = menu.insert_at
-    and ("Insert at position " .. (menu.insert_at + 1))
+  local where = type(menu.insert_at) == "table" and "Add into the container"
+    or menu.insert_at and ("Insert at position " .. (menu.insert_at + 1))
     or "Add to the end of the chain"
   ImGui.TextDisabled(ctx, where)
 
@@ -532,6 +700,7 @@ function B.draw(ctx, track)
     if st.last_q ~= st.query or st.last_v ~= st.fkey then rebuild() end
 
     local where = st.input and "add to the input FX chain"
+      or (type(st.insert_at) == "table" and "add into the container")
       or (st.insert_at and ("insert at position " .. (st.insert_at + 1)))
       or "add to the end of the chain"
     ImGui.TextDisabled(ctx, where)
@@ -581,6 +750,15 @@ function B.draw(ctx, track)
         if ImGui.Selectable(ctx, lbl, st.kind == "folder" and st.val == f.id) then
           set_filter("folder", f.id)
           ImGui.CloseCurrentPopup(ctx)
+        end
+        if ImGui.BeginPopupContextItem(ctx, "##fodctx" .. f.id) then
+          ImGui.TextDisabled(ctx, f.name)
+          ImGui.Separator(ctx)
+          if ImGui.MenuItem(ctx, "Remove folder") then
+            remove_folder(f)
+            if st.kind == "folder" and st.val == f.id then st.kind, st.val, st.fkey = "", nil, "" end
+          end
+          ImGui.EndPopup(ctx)
         end
       end
       local function cat_item(c)
@@ -690,10 +868,16 @@ function B.draw(ctx, track)
           st.sel = i
         end
         badge(ctx, ImGui.GetWindowDrawList(ctx), e.fmt)
-        -- right-click a result to browse the rest of that developer
-        if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
-          set_filter("dev", e.dev or NO_DEV)
-          st.query = ""
+        -- right-click a result: the rest of that developer, or its folders
+        if ImGui.BeginPopupContextItem(ctx, "##fxdctx" .. i) then
+          ImGui.TextDisabled(ctx, e.short)
+          ImGui.Separator(ctx)
+          if ImGui.MenuItem(ctx, "More by " .. (e.dev or "the same developer")) then
+            set_filter("dev", e.dev or NO_DEV)
+            st.query = ""
+          end
+          folder_actions(ctx, e)
+          ImGui.EndPopup(ctx)
         end
         if ImGui.IsItemHovered(ctx)
            and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then

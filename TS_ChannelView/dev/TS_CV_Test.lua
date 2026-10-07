@@ -919,6 +919,204 @@ local function set(...)
   for k, v in pairs(real) do reaper[k] = v end
 end
 
+-- Containers and parallel FX, against a simulated chain that decodes
+-- addresses the way REAPER 7 does: a container's slot, then each nested
+-- slot, packed into one number past 0x2000000 with the level above's slot
+-- count (+1) as the radix. A move's destination is read against the chain
+-- BEFORE the move and the FX lands at that slot of that level.
+do
+  local FLAG = 0x2000000
+  local TOP = {}
+  local TR = {}
+  local function decode(addr)
+    if addr < FLAG then return TOP, addr end
+    -- each level's digit is its slot + 1, in base (that level's count + 1);
+    -- what's left once it fits in one digit is the slot itself, so one
+    -- past the last addresses the level's end
+    local v, list = addr - FLAG, TOP
+    while true do
+      local n = #list
+      if v <= n + 1 then return list, v - 1 end
+      local p = v % (n + 1) - 1
+      v = v // (n + 1)
+      local item = list[p + 1]
+      if not (item and item.kids) then return nil end
+      list = item.kids
+    end
+  end
+  local function item_at(addr)
+    local l, i = decode(addr)
+    return l and l[i + 1]
+  end
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetCount", "TrackFX_GetFXGUID", "TrackFX_GetFXName",
+                       "TrackFX_GetNamedConfigParm", "TrackFX_SetNamedConfigParm",
+                       "TrackFX_CopyToTrack", "TrackFX_Delete", "TrackFX_AddByName" }) do
+    saved[k] = reaper[k]
+  end
+  reaper.TrackFX_GetCount = function() return #TOP end
+  reaper.TrackFX_GetFXGUID = function(_, a) local it = item_at(a); return it and it.guid or "" end
+  reaper.TrackFX_GetFXName = function(_, a)
+    local it = item_at(a); if not it then return false, "" end
+    return true, it.name
+  end
+  reaper.TrackFX_GetNamedConfigParm = function(_, a, k)
+    local it = item_at(a); if not it then return false, "" end
+    if k == "container_count" then
+      if it.kids then return true, tostring(#it.kids) end
+      return false, ""
+    end
+    if k == "parallel" then return true, tostring(it.par or 0) end
+    return false, ""
+  end
+  reaper.TrackFX_SetNamedConfigParm = function(_, a, k, v)
+    local it = item_at(a); if not it then return false end
+    if k == "parallel" then it.par = tonumber(v) end
+    return true
+  end
+  reaper.TrackFX_CopyToTrack = function(_, src, _, dest, move)
+    local sl, si = decode(src)
+    local dl, di = decode(dest)          -- read before anything moves
+    assert(sl and sl[si + 1] and dl and di >= 0 and di <= #dl, "bad address")
+    local it = table.remove(sl, si + 1)
+    table.insert(dl, math.min(di, #dl) + 1, it)
+  end
+  reaper.TrackFX_Delete = function(_, a)
+    local l, i = decode(a)
+    if l and l[i + 1] then table.remove(l, i + 1) return true end
+    return false
+  end
+  local made = 0
+  reaper.TrackFX_AddByName = function(_, name, _, inst)
+    made = made + 1
+    local it = { name = name, guid = "{N" .. made .. "}" }
+    if name == "Container" then it.kids = {} end
+    if inst == -1 then TOP[#TOP + 1] = it; return #TOP - 1 end
+    local at = -1000 - inst
+    table.insert(TOP, at + 1, it); return at
+  end
+
+  local function fx(n, par) return { name = n, guid = "{" .. n .. "}", par = par } end
+  local function box(n, kids, par) return { name = n, guid = "{" .. n .. "}", kids = kids, par = par } end
+  -- the chain as text: [..] a container, |1 / |2 a parallel setting
+  local function shape(list)
+    local out = {}
+    for _, it in ipairs(list or TOP) do
+      local t = it.kids and (it.name .. "[" .. shape(it.kids) .. "]") or it.name
+      if (it.par or 0) ~= 0 then t = t .. "|" .. it.par end
+      out[#out + 1] = t
+    end
+    return table.concat(out, ",")
+  end
+  local function reset()
+    TOP = { fx("A"), box("C1", { fx("B"), box("C2", { fx("D"), fx("E", 1) }) }), fx("F", 1), fx("G", 2) }
+  end
+
+  reset()
+  local list = T.collect(TR)
+  local names = {}
+  for i, e in ipairs(list) do names[i] = e.name end
+  check("containers: every panel, in order", table.concat(names, ","), "A,B,D,E,F,G")
+  local ok_addr = true
+  for _, e in ipairs(list) do
+    if (item_at(e.addr) or {}).guid ~= e.guid then ok_addr = false end
+  end
+  check("containers: each address finds its own plugin", ok_addr, true)
+  check("containers: where E sits", list[4].path .. " " .. list[4].index .. "/" .. list[4].siblings, "1.1.1 1/2")
+  check("containers: E's containers, outermost first",
+        list[4].ancestors[1].name .. ">" .. list[4].ancestors[2].name, "C1>C2")
+  check("containers: parallel read", list[4].parallel .. list[5].parallel .. list[6].parallel, "112")
+  check("containers: top level has no ancestors", #list[1].ancestors, 0)
+
+  local br, rows = T.groups(list)
+  local desc = {}
+  for _, b in ipairs(br) do
+    desc[#desc + 1] = ("%s%d-%d@%d%s"):format(b.kind:sub(1, 1), b.first, b.last, b.row,
+                                              b.merge and "m" or "")
+  end
+  table.sort(desc)
+  -- E runs beside D inside C2; C2 inside C1; C1, F and G side by side --
+  -- four deep: rows from the outside in, the innermost two sharing the last
+  check("brackets: all of them", table.concat(desc, " "), "c2-4@1 c3-4@2 p2-6@0m p3-4@2")
+  check("brackets: rows", rows, 3)
+
+  -- deeper than the cap folds into the top row
+  TOP = { box("X1", { box("X2", { box("X3", { box("X4", { fx("Z") }) }) }) }) }
+  br, rows = T.groups(T.collect(TR))
+  local top_row = 0
+  for _, b in ipairs(br) do top_row = math.max(top_row, b.row) end
+  check("brackets: capped", rows .. "/" .. #br .. "/" .. top_row, "3/4/2")
+
+  -- a plain chain needs no strip at all
+  TOP = { fx("A"), fx("B") }
+  br, rows = T.groups(T.collect(TR))
+  check("brackets: none on a plain chain", #br .. "/" .. rows, "0/0")
+  -- a flag on the first slot means nothing
+  TOP = { fx("A", 1), fx("B") }
+  br, rows = T.groups(T.collect(TR))
+  check("brackets: first slot's flag ignored", #br, 0)
+  -- an empty container stands in for itself, bracket and all
+  TOP = { fx("A"), box("E0", {}) }
+  list = T.collect(TR)
+  br = T.groups(list)
+  check("brackets: empty container", #list .. (list[2].is_container and "c" or "") ..
+        "/" .. br[1].kind .. br[1].first .. br[1].last, "2c/container22")
+
+  -- moves
+  reset()
+  T.move(TR, { 1, 1, 0 }, {}, 0)                -- D out to the front
+  check("move: out of a nested container", shape(), "D,A,C1[B,C2[E|1]],F|1,G|2")
+  reset()
+  T.move(TR, { 0 }, { 1, 1 }, 2)                -- A to the end of C2
+  check("move: into a nested container", shape(), "C1[B,C2[D,E|1,A]],F|1,G|2")
+  reset()
+  T.move(TR, { 3 }, { 1 }, 0)                   -- G to the front of C1
+  check("move: later top-level FX into a container", shape(), "A,C1[G|2,B,C2[D,E|1]],F|1")
+  reset()
+  T.move(TR, { 1, 0 }, { 1 }, 2)                -- B after C2, same level
+  check("move: within a container", shape(), "A,C1[C2[D,E|1],B],F|1,G|2")
+  reset()
+  T.move(TR, { 0 }, {}, 4)                      -- A to the end, same level
+  check("move: within the chain", shape(), "C1[B,C2[D,E|1]],F|1,G|2,A")
+  reset()
+  check("move: back where it is goes nowhere", tostring(T.move(TR, { 2 }, {}, 3)), "nil")
+  check("move: a container into itself refused", tostring(T.move(TR, { 1 }, { 1, 1 }, 0)), "nil")
+  check("move: nothing changed", shape(), "A,C1[B,C2[D,E|1]],F|1,G|2")
+
+  -- containers made and unmade
+  reset()
+  check("wrap: done", T.wrap(TR, { 2 }), true)  -- F into a container of its own
+  check("wrap: in place, setting carried", shape(), "A,C1[B,C2[D,E|1]],Container[F]|1,G|2")
+  reset()
+  T.wrap(TR, { 1, 1, 1 })                       -- E, deep inside
+  check("wrap: nested", shape(), "A,C1[B,C2[D,Container[E]|1]],F|1,G|2")
+  reset()
+  check("unpack: done", T.unpack(TR, { 1 }), true)
+  check("unpack: contents in its place", shape(), "A,B,C2[D,E|1],F|1,G|2")
+  reset()
+  TOP[2].par = 1
+  T.unpack(TR, { 1, 1 })
+  check("unpack: nested, first takes the setting", shape(), "A,C1[B,D,E|1]|1,F|1,G|2")
+
+  -- adding a plugin straight into a container
+  reset()
+  check("add into: done", T.add_into(TR, "New", { 1, 1 }, 1), true)
+  check("add into: in place", shape(), "A,C1[B,C2[D,New,E|1]],F|1,G|2")
+  reset()
+  T.add_into(TR, "Top", {}, 1)
+  check("add into: top level", shape(), "A,Top,C1[B,C2[D,E|1]],F|1,G|2")
+
+  -- the parallel setting
+  reset()
+  list = T.collect(TR)
+  T.set_parallel(TR, list[2].addr, 2)
+  check("parallel: set inside a container", shape(), "A,C1[B|2,C2[D,E|1]],F|1,G|2")
+  check("parallel: changes the chain's hash", T.hash(T.collect(TR)) ~= T.hash(list), true)
+
+  for k, v in pairs(saved) do reaper[k] = v end
+end
+
+
 
 -- scan budgeting and the on-disk cache of stepped choices
 do
@@ -994,6 +1192,25 @@ os.remove("./TS_ChannelView_Steps.ini")
   check("rescan sweeps again",  SETS > writes_before, true)
   check("and still correct",    relist and relist[1].text, "Off")
   
+  -- buttons before any sweep (the budget spent, or the transport rolling):
+  -- the plugin's names for each position, asked without moving it
+  local fmt = reaper.TrackFX_FormatParamValueNormalized
+  local DEC = { "A", "E", "N", "T", "P" }
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, _, v) return true, DEC[math.floor(v * 4 + 0.5) + 1] end
+  P.clear_caches(); SC.init("./"); os.remove("./TS_ChannelView_Steps.ini"); SC.init("./")
+  C.SCAN_BUDGET = 0
+  P.begin_frame()
+  local sets0 = SETS
+  local bl = P.button_choices(nil, 0, 3, "Decap", 5)
+  check("buttons: the plugin's names before a sweep", table.concat((function() local o = {} for i, e in ipairs(bl) do o[i] = e.text end return o end)(), ","), "A,E,N,T,P")
+  check("buttons: nothing moved to read them", SETS, sets0)
+  -- a plugin that answers every position the same: numbers
+  reaper.TrackFX_FormatParamValueNormalized = function() return true, "A" end
+  P.clear_caches()
+  bl = P.button_choices(nil, 0, 3, "Decap", 5)
+  check("buttons: numbers when it can't say", bl[1].text .. bl[5].text, "15")
+  reaper.TrackFX_FormatParamValueNormalized = fmt
+
   os.remove("./TS_ChannelView_Steps.ini")
   C.SCAN_BUDGET = saved_budget
   for k, v in pairs(real) do reaper[k] = v end
@@ -2928,6 +3145,58 @@ do
   check("not a chain in its name",    CN.is_chain("RfxChain notes.txt"), false)
   check("named without the extension", CN.chain_name("Lead Vocal.RfxChain"), "Lead Vocal")
   check("dots in the name kept",      CN.chain_name("Mix v2.1.rfxchain"), "Mix v2.1")
+  -- saving: the chain's block from a track chunk, without its window lines
+  local CH = table.concat({
+    "<TRACK", "NAME x", "<FXCHAIN", "WNDRECT 1 2 3 4", "SHOW 0", "LASTSEL 1", "DOCKED 0",
+    "BYPASS 0 0 0", "<JS a/b \"\"", "0 0 -", ">", "FLOATPOS 0 0 0 0", "FXID {A}", "WAK 0 0",
+    "BYPASS 0 0 0", "<CONTAINER Container \"Bus\"", "CONTAINER_CFG 2 2 2 0", "SHOW 0", "LASTSEL 0", "DOCKED 0",
+      "BYPASS 0 0 0", "<VST \"VST3: X\" x.vst3 0 \"\" 1", "QUJD", ">", "FXID {B}", "WAK 0 0",
+      "BYPASS 1 0 0", "<CONTAINER Container \"\"", "CONTAINER_CFG 2 2 2 0", "SHOW 0", "LASTSEL 0", "DOCKED 0",
+        "BYPASS 0 0 0", "<JS c/d \"\"", ">", "FXID {D}", "WAK 0 0",
+      ">", "FXID {C2}", "WAK 0 0",
+    ">", "FLOATPOS 0 0 0 0", "FXID {C}", "WAK 0 0",
+    ">", "<FXCHAIN_REC", "BYPASS 0 0 0", "<JS rec \"\"", ">", "WAK 0 0", ">", ">" }, "\n")
+  local whole = CN.chain_text(CH)
+  check("save: starts at the first plugin", whole:match("^[^\n]*"), "BYPASS 0 0 0")
+  check("save: no window lines", whole:find("WNDRECT", 1, true) == nil and whole:find("LASTSEL 1", 1, true) == nil, true)
+  check("save: ends with the last plugin", whole:sub(-17), "FXID {C}\nWAK 0 0\n")
+  check("save: not the input FX", whole:find("rec", 1, true) == nil, true)
+  local box = CN.chain_text(CH, { 1 })
+  check("save container: from its BYPASS", box:match("^[^\n]*\n[^\n]*"), "BYPASS 0 0 0\n<CONTAINER Container \"Bus\"")
+  check("save container: all of it", box:sub(-17), "FXID {C}\nWAK 0 0\n")
+  local inner = CN.chain_text(CH, { 1, 1 })
+  check("save nested container", inner:match("^[^\n]*\n[^\n]*"), "BYPASS 1 0 0\n<CONTAINER Container \"\"")
+  check("save nested: stops at its own end", inner:sub(-18), "FXID {C2}\nWAK 0 0\n")
+  check("save: nothing at a bad path", tostring(CN.chain_text(CH, { 5 })), "nil")
+  check("save: no chain", tostring(CN.chain_text("<TRACK\nNAME x\n>")), "nil")
+  check("chain name made safe", CN.safe_name(' a/b:c*? "d" . '), "a b c d")
+
+  -- your FX Folders: read, edited and written back
+  local FI = require "TS_CV_FXIndex"
+  local INI = table.concat({
+    "[developer]", "X.vst3=Acme", "",
+    "[Folder0]", "Item0=C:\\VST3\\Pro-C 2.vst3", "Item1=C:\\VST3\\Saturn 2.vst3", "Nb=2", "Type0=3", "Type1=3", "",
+    "[Folder1]", "Item0=Drums", "Nb=1", "Type0=1000", "",
+    "[Folder2]", "Nb=0", "",
+    "[Folders]", "Id0=0", "Id1=2", "Id2=1", "Name0=Favourites", "Name1=-----", "Name2=Chains", "NbFolders=3", "" }, "\n")
+  local fm = FI.parse_folders(INI)
+  check("folders: in their order", #fm.order .. " " .. fm.order[1].name .. "/" .. fm.order[3].name, "3 Favourites/Chains")
+  check("folders: separators left out of the menu", #FI.folder_list(fm), 2)
+  check("folders: has, by file name", FI.folder_has(fm, 0, "C:/Other/pro-c_2.vst3"), true)
+  check("folders: kind of a VST3", FI.kind_of("VST3: Pro-C 2 (FabFilter)") .. FI.kind_of("JS: x") .. FI.kind_of("CLAP: y"), "327")
+  check("folders: add", FI.folder_add(fm, 0, "C:\\VST3\\Pro-Q 3.vst3", 3), true)
+  check("folders: no twice", FI.folder_add(fm, 0, "C:\\VST3\\Pro-Q 3.vst3", 3), false)
+  check("folders: remove", FI.folder_remove(fm, 0, "Saturn 2.vst3"), true)
+  local nid = FI.folder_new(fm, "Comps")
+  FI.folder_add(fm, nid, "JS: loser/comp", 2)
+  local out = FI.write_folders(fm)
+  local back = FI.parse_folders(out)
+  check("folders: other sections kept", out:sub(1, 23), "[developer]\nX.vst3=Acme")
+  check("folders: written and read back", table.concat(back.folders[0].items, "|") .. " " ..
+        table.concat(back.folders[0].types, "|"), "C:\\VST3\\Pro-C 2.vst3|C:\\VST3\\Pro-Q 3.vst3 3|3")
+  check("folders: a chain folder untouched", back.folders[1].items[1] .. "/" .. back.folders[1].types[1], "Drums/1000")
+  check("folders: the new one last", back.order[4].id .. " " .. back.order[4].name .. " " .. #back.folders[nid].items, "3 Comps 1")
+  check("folders: count", out:match("NbFolders=(%d+)"), "4")
   check("no chains: nothing to offer", CN.has_chains({ dirs = {}, files = {} }), false)
   check("a chain in a subfolder counts", CN.has_chains({ files = {}, dirs = { { name = "Vox",
     node = { dirs = {}, files = { { name = "Lead" } } } } } }), true)
@@ -3337,6 +3606,18 @@ do
           local got = { i = table.concat(items, " "), r = table.concat(rules, " "), w = lay.width, h = lay.height }
           if not bad and (got.i ~= want.i or got.r ~= want.r or got.w ~= want.w or got.h ~= want.h) then
             bad = fl .. " " .. rows .. " rows: " .. got.i .. " | w " .. got.w .. " h " .. got.h
+          end
+          -- the merged-cell flow, given the same panel, must put it all in
+          -- the same places (it's the strips plus spans)
+          if fl == "column" and not bad then
+            local fl2 = P.place_flow(ctl, rows * 2, rows)
+            local i2, r2 = {}, {}
+            for _, it in ipairs(fl2.items) do i2[#i2 + 1] = string.format("%d,%g,%g", idx[it.ctl], it.x, it.y) end
+            for _, r in ipairs(fl2.rules) do r2[#r2 + 1] = string.format("%g", r) end
+            local g2 = { i = table.concat(i2, " "), r = table.concat(r2, " "), w = fl2.width, h = fl2.height }
+            if g2.i ~= want.i or g2.r ~= want.r or g2.w ~= want.w or g2.h ~= want.h then
+              bad = "flow " .. rows .. " rows: " .. g2.i .. " | r " .. g2.r .. " | w " .. g2.w .. " h " .. g2.h
+            end
           end
         end
       end
@@ -3882,6 +4163,185 @@ do
   check("fader look: group cleared", ext["TS_ChannelViewfader_defaults"], "")
   for k, f in pairs(saved) do reaper[k] = f end
   TO.reload_fader_defaults()
+end
+
+-- Faders of any shape: up or across, 2 to 4 rows (columns) long or the
+-- full height (width), a whole column (row) or half of one
+do
+  local MP = require "TS_CV_Mappings"
+  check("shape: read", table.concat({ tostring(MP.shape_of("h|3|half")) }, ""), "h")
+  local d, l, t = MP.shape_of("v|full|half")
+  check("shape: full length, half thick", tostring(d) .. tostring(l) .. tostring(t), "nilniltrue")
+  check("shape: nonsense is the old fader", select(2, MP.shape_of("x|9|wide")) == nil, true)
+  check("shape: line", MP.shape_line({ type = "fader", dir = "h", len = 2 }), "h|2|full")
+  check("shape: no line for the old fader", tostring(MP.shape_line({ type = "fader" })), "nil")
+  check("shape: no line on a knob", tostring(MP.shape_line({ type = "knob", dir = "h" })), "nil")
+
+  local K = function(n) return { type = "knob", label = n, param = 0 } end
+  local F = function(n, dir, len, thin) return { type = "fader", label = n, param = 0, dir = dir, len = len, thin = thin } end
+  local function at(lay)
+    local out = {}
+    for _, it in ipairs(lay.items) do
+      out[#out + 1] = ("%s@%g,%g %dx%d"):format(it.ctl.label, it.x / (C.CELL_W / 2), it.y / (C.CELL_H / 2), it.w, it.h)
+    end
+    return table.concat(out, " ")
+  end
+  -- the mockup's compressor: knobs over a horizontal fader, side by side
+  local lay = P.layout({ K"Thr", K"Rat", F("Mk", nil, 2), K"Att", K"Knee", F("Mix", "h", 2), F("Wid", "h", 2),
+                         K"Rel", K"Look", F("Out") }, nil, 4)
+  check("faders: placed like the mockup", at(lay),
+    "Thr@0,0 2x2 Rat@0,2 2x2 Mk@0,4 2x4 Att@2,0 2x2 Knee@2,2 2x2 Mix@2,4 4x2 Wid@2,6 4x2 Rel@4,0 2x2 Look@4,2 2x2 Out@6,0 2x8")
+  check("faders: width", lay.width / C.CELL_W, 4)
+  -- a row of half-width faders, 3 rows tall, after two knobs
+  lay = P.layout({ K"A", K"B", F("31", nil, 3, true), F("63", nil, 3, true), F("125", nil, 3, true) }, nil, 4)
+  check("faders: a row of half-width ones", at(lay), "A@0,0 2x2 B@0,2 2x2 31@2,0 1x6 63@3,0 1x6 125@4,0 1x6")
+  -- full-length thin, as a column of its own
+  lay = P.layout({ K"A", F("Out", nil, nil, true), K"B" }, nil, 4)
+  check("faders: a half-width full-height one splits like the old one", at(lay), "A@0,0 2x2 Out@2,0 1x8 B@3,0 2x2")
+  -- full length across: from where it lands to the panel's right edge
+  lay = P.layout({ K"A", K"B", K"C", K"D", K"E", F("Pan", "h", nil, true) }, nil, 4)
+  check("faders: full length to the right edge", at(lay), "A@0,0 2x2 B@0,2 2x2 C@0,4 2x2 D@0,6 2x2 E@2,0 2x2 Pan@2,2 4x1")
+  lay = P.layout({ K"A", F("Pan", "h", nil, true), K"B", K"C", K"D", K"E" }, nil, 3)
+  check("faders: full length under the first knob, the rest flow round it", at(lay),
+    "A@0,0 2x2 Pan@0,2 6x1 B@0,3 2x2 C@2,0 2x2 D@2,3 2x2 E@4,0 2x2")
+  -- merged cells: in list order, never back into an earlier gap (a
+  -- Flow Mixing panel, 7 rows)
+  lay = P.layout({ K"M1", F("M4", "h", 2), K"M2", F("M3", nil, 2, true), K"M5", K"M6", K"M7", K"M8",
+                   { type = "divider" }, { type = "divider" }, K"P8" }, nil, 7)
+  check("faders: list order kept", at(lay),
+    "M1@0,0 2x2 M4@0,2 4x2 M2@0,4 2x2 M3@0.5,6 1x4 M5@0,10 2x2 M6@0,12 2x2 M7@2,0 2x2 M8@2,4 2x2 P8@" ..
+    (4 + 2 * C.DIVIDER_W / (C.CELL_W / 2)) .. ",0 2x2")
+  -- across a divider: the fader runs over it, the rule stops at it, the
+  -- knobs after it start a new column and skip the fader's cells
+  lay = P.layout({ K"A", F("X", "h", 3), K"B", { type = "divider" }, K"C", K"D" }, nil, 3)
+  local dx = C.DIVIDER_W / (C.CELL_W / 2)
+  check("faders: across a divider", at(lay), ("A@0,0 2x2 X@0,2 6x2 B@0,4 2x2 C@%g,0 2x2 D@%g,4 2x2"):format(2 + dx, 2 + dx))
+  check("faders: its width covers the gap", lay.items[2].pw, 3 * C.CELL_W + C.DIVIDER_W)
+  check("faders: the rule is cut", #lay.rule_cuts[1], 1)
+  check("faders: panel width", lay.width, 3 * C.CELL_W + C.DIVIDER_W)
+  -- half-width ones the same height pair up; anything else goes below
+  lay = P.layout({ F("a", nil, 2, true), F("b", nil, 2, true), F("c", nil, 2, true), F("d", nil, 2, true), K"K" }, nil, 4)
+  check("faders: half-width pairs", at(lay), "a@0,0 1x4 b@1,0 1x4 c@0,4 1x4 d@1,4 1x4 K@2,0 2x2")
+  -- too long for the panel: as long as it can be
+  lay = P.layout({ F("V", nil, 4) }, nil, 2)
+  check("faders: no taller than the panel", at(lay), "V@0,0 2x4")
+  -- an old layout doesn't move: no shapes, no change
+  lay = P.layout({ K"A", K"B", K"C", F("Out"), K"D" }, nil, 2)
+  check("faders: old layouts as they were", at(lay), "A@0,0 2x2 B@0,2 2x2 C@2,0 2x2 Out@4,0 2x4 D@6,0 2x2")
+end
+
+
+
+-- XY pads and concentric knobs: a second parameter (Dual<n>), their sizes,
+-- and where an XY pad goes (merged cells, over dividers like an across fader)
+do
+  local MP = require "TS_CV_Mappings"
+  MP.set("TwoPlug", { controls = {
+    { param = 1, type = "xy", param2 = 4, size = "3x2", cap = "red", invert = true, invert2 = true },
+    { param = 2, type = "dual", param2 = 3, size = "large" },
+    { param = 5, type = "dual", param2 = 6, size = "small" },
+    { param = 7, type = "xy" },
+    { param = 8, type = "knob", param2 = 9 } } })
+  MP.save(); MP.reload()
+  local l = MP.get("TwoPlug").controls
+  check("two: xy reads back", table.concat({ l[1].type, l[1].param, l[1].param2, l[1].size, l[1].cap }, "|"), "xy|1|4|3x2|red")
+  check("two: dual reads back", table.concat({ l[2].type, l[2].param, l[2].param2, l[2].size }, "|"), "dual|2|3|large")
+  check("two: both reversed", tostring(l[1].invert) .. tostring(l[1].invert2), "truetrue")
+  check("two: second not reversed", tostring(l[2].invert2), "nil")
+  check("two: a concentric knob is never small", tostring(l[3].size), "nil")
+  check("two: a 2x2 pad has no size line", tostring(l[4].size), "nil")
+  check("two: no second parameter yet", tostring(l[4].param2), "nil")
+  check("two: a knob has no second parameter", tostring(l[5].param2), "nil")
+  check("two: pad dims", table.concat({ MP.pad_dims(l[1]) }, "x") .. " " .. table.concat({ MP.pad_dims(l[4]) }, "x"), "3x2 2x2")
+  check("two: copy keeps it", MP.copy(MP.get("TwoPlug")).controls[1].param2, 4)
+  check("two: pad size nonsense", tostring(MP.pad_size_of("4x4")), "nil")
+  -- looks: a pad takes a pad's size, a knob's colour; a dual is a knob
+  local pad = { type = "xy" }
+  MP.paste_look(pad, MP.look_of({ type = "xy", size = "3x3", cap = "blue" }))
+  check("two: pad to pad", pad.size .. "|" .. pad.cap, "3x3|blue")
+  local pad2 = { type = "xy", size = "2x3" }
+  MP.paste_look(pad2, MP.look_of({ type = "knob", size = "large", cap = "red" }))
+  check("two: knob to pad: colour, not size", pad2.size .. "|" .. pad2.cap, "2x3|red")
+  local d = { type = "dual" }
+  MP.paste_look(d, MP.look_of({ type = "knob", size = "small", cap = "red" }))
+  check("two: a small knob's look leaves a dual its size", tostring(d.size) .. "|" .. d.cap, "nil|red")
+
+  local K = function(n) return { type = "knob", label = n, param = 0 } end
+  local X = function(n, size) return { type = "xy", label = n, param = 0, param2 = 1, size = size } end
+  local function at(lay)
+    local out = {}
+    for _, it in ipairs(lay.items) do
+      out[#out + 1] = ("%s@%g,%g %dx%d"):format(it.ctl.label, it.x / (C.CELL_W / 2), it.y / (C.CELL_H / 2), it.w, it.h)
+    end
+    return table.concat(out, " ")
+  end
+  -- merged cells: knobs above and below a 2x2 pad's second column
+  local lay = P.layout({ K"A", X("Pad"), K"B", K"C", K"D" }, nil, 4)
+  check("two: pad merges cells", at(lay), "A@0,0 2x2 Pad@0,2 4x4 B@0,6 2x2 C@2,0 2x2 D@2,6 2x2")
+  -- too tall for the panel: as tall as it can be
+  lay = P.layout({ X("Pad", "3x3") }, nil, 2)
+  check("two: pad no taller than the panel", at(lay), "Pad@0,0 6x4")
+  -- over a divider, like an across fader: the rule is cut
+  lay = P.layout({ K"A", X("Pad", "3x2"), { type = "divider" }, K"B" }, nil, 3)
+  local dx = C.DIVIDER_W / (C.CELL_W / 2)
+  check("two: pad over a divider", at(lay), ("A@0,0 2x2 Pad@0,2 6x4 B@%g,0 2x2"):format(2 + dx))
+  check("two: pad over a divider: rule cut", #(lay.rule_cuts[1] or {}), 1)
+  check("two: pad's width covers the gap", lay.items[2].pw, 3 * C.CELL_W + C.DIVIDER_W)
+  -- a concentric knob sizes like a knob
+  lay = P.layout({ { type = "dual", label = "Dl", param = 0, param2 = 1, size = "large" }, K"A" }, nil, 3)
+  check("two: dual large", at(lay), "Dl@0,0 3x3 A@0.5,3 2x2")
+end
+
+-- Copy and paste a control's look (TS_CV_Mappings.look_of / paste_look)
+do
+  local MP = require "TS_CV_Mappings"
+  local src = { type = "knob", param = 3, label = "Thr", style = "skirted", cap = "red", size = "large",
+                scale = "ten", scale_ink = "cap", back = "inset", brush = true, metal = true, bipolar = true }
+  local s = MP.look_of(src)
+  local k = { type = "stepped", param = 7, label = "Keep", style = "bar", cap = "blue" }
+  check("look: knob to knob", MP.paste_look(k, s), true)
+  check("look: knob to knob fields", table.concat({ k.style, k.cap, k.size, k.scale, k.scale_ink, k.back,
+    tostring(k.brush), tostring(k.metal) }, "|"), "skirted|red|large|ten|cap|inset|true|true")
+  check("look: what it is stays", k.param .. k.label .. k.type .. tostring(k.bipolar), "7Keepsteppednil")
+  local f = { type = "fader", style = "rail", dir = "h", len = 3, thin = true }
+  MP.paste_look(f, s)
+  check("look: knob to fader keeps its style and shape", table.concat({ f.style, f.cap, tostring(f.size), f.dir, f.len, tostring(f.thin), f.back }, "|"),
+    "rail|red|nil|h|3|true|inset")
+  local f3 = { type = "fader" }
+  MP.paste_look(f3, MP.look_of({ type = "fader", style = "slim", cap = "red", dir = "h", len = 3, thin = true }))
+  check("look: fader to fader takes its shape", table.concat({ f3.style, f3.cap, f3.dir, f3.len, tostring(f3.thin) }, "|"),
+    "slim|red|h|3|true")
+  local f4 = { type = "fader", dir = "h", len = 2 }
+  MP.paste_look(f4, MP.look_of({ type = "fader" }))
+  check("look: an ordinary fader's shape too", tostring(f4.dir) .. tostring(f4.len), "nilnil")
+  local b = { type = "toggle", style = "lens", size = "small" }
+  MP.paste_look(b, s)
+  check("look: knob red to a button is the button's red", table.concat({ b.style, b.cap, b.size }, "|"), "lens|red|small")
+  -- a colour only one kind has: as a custom colour
+  local t = { type = "toggle" }
+  MP.paste_look(t, MP.look_of({ type = "knob", cap = "orange" }))
+  check("look: a colour the buttons don't have", t.cap, "#d98a2f")
+  -- the knob's style colour when it has none of its own
+  local f2 = { type = "fader" }
+  MP.paste_look(f2, MP.look_of({ type = "knob", style = "skirted" }))
+  check("look: a style's own colour goes across", f2.cap, "black")
+  local k2 = { type = "knob", cap = "red" }
+  MP.paste_look(k2, MP.look_of({ type = "knob", style = "skirted" }))
+  check("look: the same kind takes no colour as no colour", tostring(k2.cap), "nil")
+  -- button to button: size too; the theme's colour stays the theme's
+  local b2 = { type = "toggle", cap = "amber" }
+  MP.paste_look(b2, MP.look_of({ type = "toggle", style = "window", size = "small" }))
+  check("look: button to button", table.concat({ b2.style, tostring(b2.cap), b2.size }, "|"), "window|nil|small")
+  local k3 = { type = "knob", cap = "red" }
+  MP.paste_look(k3, MP.look_of({ type = "toggle", cap = "theme" }))
+  check("look: the theme's button colour is a knob's own", tostring(k3.cap), "nil")
+  -- a gap carries a background only; a divider takes nothing
+  local k4 = { type = "knob", style = "bar", back = "inset", brush = true }
+  MP.paste_look(k4, MP.look_of({ type = "blank" }))
+  check("look: a gap's look is its background", table.concat({ k4.style, tostring(k4.back), tostring(k4.brush) }, "|"), "bar|nil|nil")
+  check("look: a divider takes nothing", MP.paste_look({ type = "divider" }, s), false)
+  check("look: family of a dropdown as buttons", MP.look_family({ type = "combo", buttons = "across" }), "button")
+  check("look: family of a plain dropdown", tostring(MP.look_family({ type = "combo" })), "nil")
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

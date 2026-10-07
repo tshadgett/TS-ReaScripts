@@ -401,6 +401,13 @@ C.WHEEL_SCROLL_PX = 70
 -- The trailing "+" tile that adds a plugin to the end of the chain.
 C.ADD_TILE_W = 34
 
+-- The bracket strip above the panel row: plugins running in parallel
+-- (REAPER 7's "Run selected FX in parallel with previous FX") and FX
+-- containers, one row per level of nesting. Only the panels under a
+-- bracket give up the height; the rest of the row keeps all of it.
+C.BRK_ROW_H = 12
+C.BRK_PAD   = 2
+
 -- Breathing room between the track-colour hairline and the top of the
 -- panels, so the panel borders don't sit on the rule.
 C.ROW_TOP_GAP = 5
@@ -598,6 +605,11 @@ C.PALETTE = {
   strip_sel     = { "solid",  -14.0, 0.661, 0.573 },
   empty_text    = { "tint",    0.1, 0.109, 0.414 },
   drop_marker   = { "solid",  -14.0, 0.661, 0.573 },
+  -- The bracket strip: a parallel run in the accent, an FX container in
+  -- a soft violet a third of the wheel round from it -- both follow the
+  -- hue, and stay that far apart whatever it is.
+  brk_parallel  = { "solid",  -14.0, 0.661, 0.573 },
+  brk_container = { "solid",   70.0, 0.420, 0.660 },
   header_drag   = { "tint",   -1.9, 0.183, 0.225 },
   icon          = { "tint",   -2.1, 0.148, 0.655 },
   icon_hot      = { "tint",   -2.1, 0.394, 0.935 },
@@ -882,6 +894,10 @@ C.FADER_STYLES = {
   { key = "flat",    label = "Flat" },
   { key = "console", label = "Console",  cap = "cream" },
   { key = "rail",    label = "Rail",     cap = "grey" },
+  -- a thin groove and a small cap, filled up to the value (out from the
+  -- middle when centred) in the cap's colour: made for rows of narrow
+  -- faders, a graphic EQ's bands say
+  { key = "slim",    label = "Slim" },
 }
 
 C.PLATE, C.CAP, C.KNOB_STYLE, C.FADER_STYLE = {}, {}, {}, {}
