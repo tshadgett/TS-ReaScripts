@@ -271,7 +271,17 @@ C.GR_RANGE_RELAX = 3.0    -- seconds before the scale steps back down
 -- Fader and meter split the panel's inner width in half each, so the two
 -- read as a balanced pair rather than a fader with an afterthought beside
 -- it. FADER_W is just the moving part; its half is wider than that.
-C.CHANNEL_W   = 112       -- expanded width of the Channel panel
+C.CHANNEL_W   = 112       -- expanded width of the Channel panel (View > Strip width)
+-- The width of an expanded channel strip: the pinned Channel panel, every
+-- mixer strip, and the track name buttons, which share it. Set from View >
+-- Strip width; the fader and meter scale with it (TS_CV_Channel.draw_body),
+-- so it can go narrower than the default as well as wider. Collapsed
+-- strips keep their own width.
+C.CHANNEL_W_DEFAULT, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX = 112, 72, 240
+function C.set_channel_w(v)
+  v = math.floor(tonumber(v) or C.CHANNEL_W_DEFAULT)
+  C.CHANNEL_W = math.max(C.CHANNEL_W_MIN, math.min(C.CHANNEL_W_MAX, v))
+end
                           -- (fader and meter take half each, and the
                           --  meter's scale needs room for its numbers)
 C.FADER_W     = 26        -- the fader's own track within its half
@@ -580,6 +590,10 @@ C.PALETTE = {
   panel_border  = { "tint",    3.4, 0.162, 0.206 },
   header_bg     = { "tint",    2.2, 0.186, 0.169 },
   header_bg_byp = { "alert",    1.0, 0.135, 0.145 },
+  -- an offline plugin (unloaded, not just bypassed): a cool steel blue of
+  -- its own, lighter than any header, so it reads apart from bypass's warm
+  -- red-brown and from a blue-based theme's ordinary header
+  header_bg_off = { "fixed",  205.0, 0.300, 0.270 },
   header_text   = { "tint",    3.9, 0.206, 0.867 },
   header_dim    = { "tint",   -3.0, 0.100, 0.512 },
   label         = { "tint",   -2.1, 0.148, 0.655 },

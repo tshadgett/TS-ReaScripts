@@ -49,7 +49,24 @@ package.loaded["TS_CV_Mappings"] = {
   meter_of = function(l) return (l and l.meter and l.meter.on) and l.meter or nil end,
 }
 
-local function F(addr) return track.fx[addr + 1] end
+-- Addresses as REAPER gives them: the top level 0, 1, 2...; anything in a
+-- container a number of its own (here 0x2000000 + n, in chain order), so
+-- moving things renumbers them, as it does in REAPER.
+local amap
+local function index()
+  amap = {}
+  local n = 0
+  local function walk(list, top)
+    for i, f in ipairs(list) do
+      local a
+      if top then a = i - 1 else n = n + 1; a = 0x2000000 + n end
+      f.addr = a; amap[a] = f
+      if f.kids then walk(f.kids, false) end
+    end
+  end
+  walk(track.fx, true)
+end
+local function F(addr) index(); return amap[addr] end
 extstate = {}
 
 local projext = {}
@@ -67,11 +84,40 @@ reaper = {
     local f = F(a)
     if not f then return false, "" end
     if k == "pdc" then return true, tostring(f.pdc or 0) end
+    if k == "parallel" then return true, tostring(f.par or 0) end
+    if f.kids then
+      if k == "container_count" then return true, tostring(#f.kids) end
+      local j = k:match("^container_item%.(%d+)$")
+      if j then
+        local kid = f.kids[tonumber(j) + 1]
+        index()
+        if kid then return true, tostring(kid.addr) end
+        return false, ""
+      end
+      if k == "container_nch" then return true, tostring(f.nch) end
+      if k == "container_nch_in" then return true, tostring(f.nin) end
+      if k == "container_nch_out" then return true, tostring(f.nout) end
+    end
     if k == "GainReduction_dB" then
       if f.gr then return true, tostring(f.gr) end
       return false, ""
     end
     return false, ""
+  end,
+  -- A container given more pins: REAPER maps each new one to its own
+  -- channel (pin k to k + 1), which TS_CV_Taps must clear.
+  TrackFX_SetNamedConfigParm = function(tr, a, k, v)
+    local f = F(a)
+    if not (f and f.kids) then return false end
+    v = tonumber(v)
+    if k == "container_nch" then f.nch = v
+    elseif k == "container_nch_in" or k == "container_nch_out" then
+      local pins = (k == "container_nch_in") and f.pin_in or f.pin_out
+      local was = (k == "container_nch_in") and f.nin or f.nout
+      for p = was, v - 1 do pins[p] = { p < 32 and (1 << p) or 0, 0 } end
+      if k == "container_nch_in" then f.nin = v else f.nout = v end
+    else return false end
+    return true
   end,
   TrackFX_GetParam = function(tr, a, p) return F(a).params[p] or 0 end,
   TrackFX_GetParamName = function(tr, a, p)
@@ -313,6 +359,188 @@ do
   check("trace: no meter, no tap",       TP.sync(track), false)
   St.clear_cache()
 end
+
+-- ---------------------------------------------------------------- inside containers
+-- PRE, EQ, K1[ X, K2[ LA-2A, Y ], W ], 1176, POST: the LA-2A two
+-- containers down. The copies keep their numbers (5/6 before, 7/8 after)
+-- all the way out, each container carrying them on its own pins.
+local function container(guid, kids)
+  local c = fx("Container", guid, 2, 2)
+  c.kids, c.nch = kids, 2
+  return c
+end
+local function setup_nested()
+  reset()
+  track.fx = {
+    fx("JS: TS_TrackProbe", "{PRE}", 18, 2, { params = { [0] = 0 } }),
+    fx("VST3: Pro-Q 3 (FabFilter)", "{EQ}", 2, 2),
+    container("{K1}", {
+      fx("VST3: Pro-Q 3 (FabFilter)", "{X}", 2, 2),
+      container("{K2}", {
+        fx("VST3: LA-2A (UA)", "{T}", 2, 2, { pdc = 32 }),
+        fx("VST3: Pro-Q 3 (FabFilter)", "{Y}", 2, 2),
+      }),
+      fx("VST3: Pro-Q 3 (FabFilter)", "{W}", 2, 2),
+    }),
+    fx("VST3: 1176 (UA)", "{B}", 2, 2),
+    fx("JS: TS_TrackProbe", "{POST}", 18, 2, { params = { [0] = 1 } }),
+  }
+end
+local function G(guid)
+  index()
+  for a, f in pairs(amap) do if f.guid == guid then return a end end
+end
+local function snapshot()
+  index()
+  local s = {}
+  for _, f in pairs(amap) do
+    local t = {}
+    for p, m in pairs(f.pin_in) do t["i" .. p] = m[1] end
+    for p, m in pairs(f.pin_out) do t["o" .. p] = m[1] end
+    s[f.guid] = t
+  end
+  return s
+end
+local function same_pins(was, skip)
+  local now, ok = snapshot(), true
+  for g, t in pairs(was) do
+    for k, v in pairs(t) do
+      if not (skip and skip[g] and k:sub(1, 1) == "i") and (now[g][k] or 0) ~= v then
+        ok = false; print("  pin differs", g, k, now[g][k], v)
+      end
+    end
+  end
+  return ok
+end
+
+setup_nested()
+measure = { ["LA-2A"] = true }
+levels = {}
+package.loaded["TS_CV_Mappings"].get = function(key)
+  return { measure = measure[key] or nil, levels = levels[key] or nil }
+end
+TP.invalidate()
+local was = snapshot()
+check("nested: lays",                  TP.sync(track), true)
+local POST, K1, K2 = G("{POST}"), G("{K1}"), G("{K2}")
+check("nested: one tap",               F(POST).params[TP.P_TAPN], 1)
+check("nested: v2 record with its path", track.ext[TP.EXT_KEY],
+      "v2|TOP|{POST}|{T},{PRE}+{EQ}+{X},5,7,32,g,{K1}+{K2}")
+check("nested: latency",               F(POST).params[TP.P_LAG], 32)
+check("nested: EQ writes before L",    outbits(G("{EQ}"), 0), b(1, 5))
+check("nested: X (inside) writes it too", outbits(G("{X}"), 1), b(2, 6))
+check("nested: LA-2A writes after",    outbits(G("{T}"), 0), b(1, 7))
+check("nested: Y untouched",           outbits(G("{Y}"), 0) .. "," .. outbits(G("{Y}"), 1), b(1) .. "," .. b(2))
+check("nested: W untouched",           outbits(G("{W}"), 0), b(1))
+check("nested: 1176 untouched",        outbits(G("{B}"), 0), b(1))
+check("nested: K1 pins in/out",        F(K1).nin .. "/" .. F(K1).nout, "6/8")
+check("nested: K2 pins in/out",        F(K2).nin .. "/" .. F(K2).nout, "6/8")
+check("nested: K2 channels",           F(K2).nch, 8)
+check("nested: K1 carries 5/6 in",     inbits(K1, 4) .. "," .. inbits(K1, 5), b(5) .. "," .. b(6))
+check("nested: K1 new pins 3/4 empty", inbits(K1, 2) .. "," .. inbits(K1, 3) .. "," ..
+      outbits(K1, 2) .. "," .. outbits(K1, 3), "0,0,0,0")
+check("nested: K2 carries 5-8 out",    outbits(K2, 4) .. "," .. outbits(K2, 5) .. "," ..
+      outbits(K2, 6) .. "," .. outbits(K2, 7), b(5) .. "," .. b(6) .. "," .. b(7) .. "," .. b(8))
+check("nested: K1's main pins as they were", inbits(K1, 0) .. "," .. outbits(K1, 1), b(1) .. "," .. b(2))
+check("nested: probe before L = 5",    inbits(POST, 2), b(5))
+check("nested: probe after R = 8",     inbits(POST, 5), b(8))
+check("nested: track grows to 8",      track.nch, 8)
+check("nested: status ok",             TP.status(track, "{T}"), "ok")
+check("nested: a second sync changes nothing", TP.sync(track), false)
+check("nested: is tapped",             TP.is_tapped(track, "{T}"), true)
+
+measure = {}
+TP.invalidate()
+check("nested: unticked, comes out",   TP.sync(track), true)
+check("nested: record gone",           track.ext[TP.EXT_KEY], "")
+check("nested: every pin as it was",   same_pins(was, { ["{POST}"] = true }), true)
+check("nested: counts stay raised",    F(K1).nin .. "/" .. F(K1).nout, "6/8")
+check("nested: but carry nothing",     inbits(K1, 4) .. "," .. outbits(K2, 6), "0,0")
+measure = { ["LA-2A"] = true }
+TP.invalidate()
+TP.sync(track)
+check("nested: laid again, same channels (no creep)",
+      track.ext[TP.EXT_KEY]:match("{T},[^,]*,(%d+,%d+)"), "5,7")
+
+-- moving it out of the containers: re-routed, and the containers' pins
+-- emptied though every nested address in the record has changed
+local moved = table.remove(F(K2).kids, 1)
+table.insert(track.fx, 4, moved)        -- after K1, before the 1176
+TP.invalidate()
+check("nested: a move out re-routes",  TP.sync(track), true)
+K1, K2 = G("{K1}"), G("{K2}")
+check("nested: now v1, no path",       track.ext[TP.EXT_KEY], "v1|TOP|{POST}|{T},{PRE}+{EQ}+{K1},5,7,32,g")
+check("nested: K2 carries nothing",    outbits(K2, 4) .. "," .. outbits(K2, 6) .. "," .. inbits(K2, 4), "0,0,0")
+check("nested: X no longer writes",    outbits(G("{X}"), 0), b(1))
+check("nested: K1 writes as one plugin", outbits(K1, 0), b(1, 5))
+
+-- ---------------------------------------------------------------- in parallel
+setup_nested()
+TP.invalidate()
+F(G("{Y}")).par = 1                     -- Y runs alongside the LA-2A
+check("parallel: status",              TP.status(track, "{T}"), "parallel")
+check("parallel: not tapped",          TP.sync(track), false)
+check("parallel: no record",           track.ext[TP.EXT_KEY], nil)
+F(G("{Y}")).par = 0
+F(G("{K2}")).par = 2                    -- the container it's in runs alongside X
+TP.invalidate()
+check("parallel: a container on its path", TP.status(track, "{T}"), "parallel")
+F(G("{K2}")).par = 0
+F(G("{X}")).par = 1                     -- first in its container: means nothing
+TP.invalidate()
+check("parallel: a flag on a first slot", TP.status(track, "{T}"), "ok")
+F(G("{X}")).par = 0
+F(G("{B}")).par = 1                     -- top level, alongside K1
+TP.invalidate()
+check("parallel: at the top too",      TP.status(track, "{B}"), "parallel")
+check("parallel: and everything in its neighbour", TP.status(track, "{X}"), "parallel")
+check("outside: still outside",        TP.status(track, "{NOPE}"), "outside")
+
+-- ---------------------------------------------------------------- ARA
+-- Header lines as REAPER saves them, from a track with Melodyne running ARA.
+check("ARA: Melodyne's header",        TP.ara_header('<VST "VST3: Melodyne (Celemony)" Melodyne.vst3 0 "" ' ..
+      '214222609{5653544D6C70676D656C6F64796E6520} com.celemony.ara.chunk.13'), true)
+check("ARA: an ordinary VST3",         TP.ara_header('<VST "VST3: SSL 360 Link (SSL)" "SSL 360 Link.vst3" 0 "" ' ..
+      '597173370{5653543336304C73736C20333630206C} ""'), false)
+check("ARA: a JSFX",                   TP.ara_header('<JS "DocShadrach FXs/Effects/The_Analog_Molecule.jsfx" ""'), false)
+check("ARA: a container",              TP.ara_header('<CONTAINER Container ""'), false)
+do
+  reset()
+  local chunk = '<TRACK\nNAME ACG\n<FXCHAIN\nWNDRECT 24 52 1898 1090\nSHOW 0\nBYPASS 0 0 0\n' ..
+    '<VST "VST3: Melodyne (Celemony)" Melodyne.vst3 0 "" 2142{56} com.celemony.ara.chunk.13\nAAAA\n>\n>\n>'
+  reaper.GetTrackStateChunk = function() return true, chunk end
+  track.fx = { fx("VST3: Melodyne (Celemony)", "{MEL}", 2, 2), fx("JS: Thing", "{J}", 2, 2) }
+  check("ARA: first slot, from the chunk", TP.ara_first(track), true)
+  chunk = chunk:gsub("com%.celemony%.ara%.chunk%.13", '""')
+  check("ARA: no archive yet, by name",  TP.ara_first(track), true)
+  track.fx[1] = fx("VST3: Pro-Q 3 (FabFilter)", "{EQ}", 2, 2)
+  check("ARA: an ordinary first plugin", TP.ara_first(track), false)
+  -- inserting: the pre probe goes in behind Melodyne, the post at the end
+  track.fx[1] = fx("VST3: Melodyne (Celemony)", "{MEL}", 2, 2)
+  local asked = {}
+  reaper.TrackFX_AddByName = function(tr, nm, rec, pos)
+    if nm ~= "TS_TrackProbe.jsfx" then return -1 end
+    asked[#asked + 1] = pos
+    local at = (pos == -1) and #tr.fx or (-1000 - pos)
+    table.insert(tr.fx, at + 1, fx("JS: TS_TrackProbe", "{P" .. #asked .. "}", 18, 2))
+    return at
+  end
+  check("ARA: probes inserted",          (TP.insert_probes(track)), true)
+  check("ARA: asked for slot 2, then the end", table.concat(asked, ","), "-1001,-1")
+  check("ARA: Melodyne still first",     F(0).guid, "{MEL}")
+  check("ARA: pre probe second, post last", F(1).params[TP.P_ROLE] .. "," .. F(3).params[TP.P_ROLE], "0,1")
+  check("ARA: the pair is found",        TP.status(track, "{J}"), "ok")
+  check("ARA: Melodyne outside it",      TP.status(track, "{MEL}"), "outside")
+  reaper.GetTrackStateChunk, reaper.TrackFX_AddByName = nil, nil
+end
+
+-- ---------------------------------------------------------------- records
+check("v2 round trip", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")),
+      "v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")
+check("v2 with a top-level tap too", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B},5,7,0,g,|{D},{B},9,11,0,l,{K}")),
+      "v2|TOP|{P}|{A},{B},5,7,0,g,|{D},{B},9,11,0,l,{K}")
+check("v1 reads with no path",         TP.parse_record("v1|TOP|{P}|{A},{B},5,7,0,g").taps[1].pathg, "")
+check("unknown version ignored",       TP.parse_record("v3|TOP|{P}|{A},{B},5,7,0,g"), nil)
 
 print(fails == 0 and ("\nALL PASS (" .. checks .. ")") or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

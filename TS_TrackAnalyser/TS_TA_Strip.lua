@@ -135,8 +135,10 @@ M.GR_KEY = "GainReduction_dB"
 -- report its reduction to the post probe, which measures it (see the
 -- PER-PLUGIN GAIN REDUCTION notes in TS_TrackProbe.jsfx). What it routed
 -- is written on the track as P_EXT:TS_CV_TAPS:
---   v1|<level>|<post probe guid>|<fx guid>,<prev guid>,<ch>,<ch>,<lag>|...
--- The Nth entry is the probe's tap N, read off its tap_grN slider.
+--   v1|<level>|<post probe guid>|<fx guid>,<writers>,<ch>,<ch>,<lag>,<what>|...
+-- The Nth entry is the probe's tap N, read off its tap_grN slider. A
+-- record with a plugin measured inside containers is v2: each entry has a
+-- seventh field, the containers it sits in, which isn't needed here.
 ----------------------------------------------------------
 
 M.TAP_EXT  = "P_EXT:TS_CV_TAPS"
@@ -155,18 +157,22 @@ end
 
 function M.tapIndex(tr, fx)
   local ok, rec = r.GetSetMediaTrackInfo_String(tr, M.TAP_EXT, "", false)
-  if not ok or rec == "" or rec:sub(1, 3) ~= "v1|" then return nil end
+  if not ok or rec == "" then return nil end
+  local ver = rec:sub(1, 3)
+  if ver ~= "v1|" and ver ~= "v2|" then return nil end
   local guid = r.TrackFX_GetFXGUID(tr, fx)
   if not guid then return nil end
   local n = 0
   for field in (rec .. "|"):gmatch("([^|]*)|") do
     n = n + 1
-    if n >= 4 and field:sub(1, #guid) == guid then
-      -- The tap's last field says what it's for: "g" reduction, "l" levels.
+    if n >= 4 and field:sub(1, #guid + 1) == guid .. "," then
+      -- The tap's sixth field says what it's for: "g" reduction, "l" levels.
       -- A levels-only tap has no reduction to read. (Older records have no
       -- such field, and every tap in them measured reduction.)
-      local what = field:match(",(%a+)$")
-      if what and not what:find("g", 1, true) then return nil end
+      local parts = {}
+      for p in (field .. ","):gmatch("([^,]*),") do parts[#parts + 1] = p end
+      local what = parts[6]
+      if what and what ~= "" and not what:find("g", 1, true) then return nil end
       return n - 3
     end
   end

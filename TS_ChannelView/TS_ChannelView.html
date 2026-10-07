@@ -25,7 +25,7 @@
 -->
 <style>
 :root {
-  --win: #15171a; --panel: #202327; --border: #2d3136; --head: #1a1c20; --head-byp: #3a2420;
+  --win: #15171a; --panel: #202327; --border: #2d3136; --head: #1a1c20; --head-byp: #3a2420; --head-off: #2f4a63;
   --text: #dfe2e6; --dim: #868b92; --label: #a6abb2; --value: #dfe2e6;
   --track: #34383d; --fill: #4aa3df; --fill-bi: #d9893a; --body: #2a2d32; --pointer: #f0f1f2;
   --ring: #454a50; --toff: #2c3035; --ton: #4aa3df; --ttext: #e4e6e9; --accent: #4aa3df;
@@ -121,7 +121,7 @@ button { font: inherit; color: inherit; }
 
 /* body */
 #main { flex-grow: 1; display: flex; min-height: 0; }
-#strip { width: 118px; flex-shrink: 0; background: var(--strip); border-right: 1px solid var(--border);
+#strip { width: calc(118px * var(--sk, 1)); flex-shrink: 0; background: var(--strip); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; align-items: center; padding: 8px 6px; gap: 8px; }
 #row { flex-grow: 1; display: flex; gap: 8px; padding: 8px; overflow-x: auto; overflow-y: hidden;
   align-items: stretch; touch-action: pan-x; }
@@ -319,7 +319,7 @@ button { font: inherit; color: inherit; }
   border-bottom: 4px solid var(--c, var(--border)); display: flex; align-items: center; justify-content: center;
   font-weight: 600; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sfr { flex-grow: 1; display: flex; gap: 6px; width: 100%; justify-content: center; min-height: 0; }
-.mtr { width: 8px; background: #0c0d0e; border-radius: 2px; position: relative; overflow: hidden; }
+.mtr { width: calc(8px * var(--mk, 1)); background: #0c0d0e; border-radius: 2px; position: relative; overflow: hidden; }
 .mtr .lv { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--lo); }
 .mrow { display: flex; gap: 4px; width: 100%; }
 .mrow button { flex: 1; height: 38px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel);
@@ -357,9 +357,9 @@ button { font: inherit; color: inherit; }
 /* centred over the meter pair below it, whatever its length ("C", "100L") */
 .mxs .pr .val { width: 24px; font-size: 10px; text-align: center; overflow: visible; white-space: nowrap;
   display: flex; justify-content: center; }
-.mxs .mm { width: 24px; display: flex; gap: 4px; justify-content: center; flex-shrink: 0; }
+.mxs .mm { width: calc(24px * var(--mk, 1)); display: flex; gap: 4px; justify-content: center; flex-shrink: 0; }
 .mxs .sfr { gap: 4px; }
-.mxs .mtr { width: 6px; }
+.mxs .mtr { width: calc(6px * var(--mk, 1)); }
 .mxs .vdb { font-size: 10px; height: 12px; line-height: 12px; flex-shrink: 0; }
 .mxs .mrow { gap: 3px; flex-shrink: 0; }
 .mxs .mrow button { height: 26px; font-size: 11px; border-radius: 4px; }
@@ -386,7 +386,6 @@ button { font: inherit; color: inherit; }
 /* the preset bar: the header's twin along the foot of a panel */
 .pf { height: 34px; flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 0 2px;
   background: var(--head); border-top: 1px solid var(--border); }
-.pf .pspc { visibility: hidden; }
 .pf .pprev { margin-left: auto; }
 .pf .pnext { margin-right: auto; }
 .pf .pdd { flex: 0 1 240px; min-width: 0; height: 26px; border-radius: 5px;
@@ -403,6 +402,28 @@ button { font: inherit; color: inherit; }
   border-radius: 5px; background: var(--text); }
 .lk svg { width: 15px; height: 15px; fill: none; stroke: var(--head); stroke-width: 2.2; stroke-linecap: round; }
 .ph .lk { width: 20px; height: 20px; }
+/* REAPER's oversampling: lit like the padlock while on, a quiet "OS" off,
+   outlined when a container or the chain oversamples it anyway */
+.os { height: 24px; min-width: 26px; padding: 0 4px; margin: 0 2px; flex-shrink: 0; border-radius: 5px;
+  border: 0; background: transparent; color: var(--dim); font-size: 11px; font-weight: 700; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; }
+.os.on { background: var(--text); color: var(--head); }
+.os.ox { box-shadow: inset 0 0 0 1px var(--text); color: var(--text); }
+.ph .os { height: 20px; }
+/* offline (unloaded): the head and foot in their own steel blue, and the
+   body saying so in place of controls */
+.pnl.offl .ph, .pnl.offl .pf { background: var(--head-off) !important; }
+.offm { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  height: 100%; color: var(--dim); font-size: 12px; }
+.offm b { color: var(--text); font-size: 14px; }
+.offm button { margin-top: 8px; height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--head-off);
+  background: var(--toff); color: var(--text); font-size: 12px; cursor: pointer; }
+.pnl.shut .offm { display: none; }
+.osc { position: absolute; left: 6px; bottom: 6px; z-index: 4; }
+.pnl.shut .osc { left: 50%; transform: translateX(-50%); }
+.mrow .cos { font-size: 12px; font-weight: 700; color: var(--dim); }
+.mrow .cos.on { background: var(--text); color: var(--head); }
+.mrow .cos.ox { box-shadow: inset 0 0 0 1px var(--text); color: var(--text); }
 .sheet .note { color: var(--dim); font-size: 12px; margin: 0 0 8px; line-height: 1.4; }
 .sheet .lbl2 { color: var(--dim); font-size: 12px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
 .sheet .plist { max-height: 42vh; overflow-y: auto; }
@@ -667,6 +688,7 @@ async function fetchLayout() {
   try {
     layout = JSON.parse(r.ext.layout);
     CELL_W = cellW(layout.cw);
+    applyStripWidth();
     layoutSeq = vals ? vals.L : -1;
     applyPalette(layout.pal || {});
     build();
@@ -694,7 +716,7 @@ function saveMacros() {
 // palette
 // ---------------------------------------------------------------------------
 const PAL_VARS = { win_bg: "--win", panel_bg: "--panel", panel_border: "--border", header_bg: "--head",
-  header_bg_byp: "--head-byp", header_text: "--text", header_dim: "--dim", label: "--label", value: "--value",
+  header_bg_byp: "--head-byp", header_bg_off: "--head-off", header_text: "--text", header_dim: "--dim", label: "--label", value: "--value",
   knob_track: "--track", knob_fill: "--fill", knob_fill_bi: "--fill-bi", knob_body: "--body",
   knob_pointer: "--pointer", knob_ring: "--ring", toggle_off: "--toff", toggle_on: "--ton",
   toggle_text: "--ttext", accent: "--accent", strip_bg: "--strip", strip_sel: "--sel",
@@ -2146,7 +2168,7 @@ function buildStrip() {
   const panBox = h("div", "knob"); panBox.append(pan.svg);
   const panLbl = h("div", "val", "C");
   const fr = h("div", "sfr");
-  const fdr = makeFader(46, ...faderLook(layout.track.fl));
+  const fdr = makeFader(Math.round(46 * fdK()), ...faderLook(layout.track.fl));
   const ml = h("div", "mtr"); const mlv = h("div", "lv"); ml.append(mlv);
   const mr = h("div", "mtr"); const mrv = h("div", "lv"); mr.append(mrv);
   fr.append(fdr.node, ml, mr);
@@ -2161,13 +2183,13 @@ function buildStrip() {
   if (layout.track.m) {
     // the master: mono in the second row, where a track has phase and monitoring
     const row2 = h("div", "mrow");
-    bmo = monoButton(); row2.append(bmo);
+    bmo = monoButton(); row2.append(bmo, chainOsButton());
     s.append(row2);
   } else {
     const row2 = h("div", "mrow");
     bp = h("button", "p", "ø"); bp.addEventListener("click", () => send("tset", layout.track.i, "phase"));
     bi = h("button", "i", "–"); bi.addEventListener("click", () => send("tmon", layout.track.i));
-    row2.append(bp, bi);
+    row2.append(bp, bi, chainOsButton());
     s.append(row2);
   }
   let pv = 0.5, fv = 0.7;
@@ -2503,7 +2525,7 @@ function buildMixer() {
     const pv = h("div", "val", "C");
     const pr = h("div", "pr"); pr.append(pb, pv);
     const fr = h("div", "sfr");
-    const fdr = makeFader(30, ...faderLook(fl));
+    const fdr = makeFader(Math.round(30 * fdK()), ...faderLook(fl));
     const ml = h("div", "mtr"), mlv = h("div", "lv"); ml.append(mlv);
     const mr = h("div", "mtr"), mrv = h("div", "lv"); mr.append(mrv);
     const mm = h("div", "mm"); mm.append(ml, mr);
@@ -2741,6 +2763,19 @@ function makeHFader(style, cap, bip) {
   } };
 }
 
+// View > Strip width (ChannelView's): the fader panel, each mixer strip and
+// the track name buttons scale by it from the default 112 px -- the meters
+// with them (to 1.75x), the faders a little (0.75x to 1.35x). Collapsed
+// strips keep their width.
+const SW_DEF = 112;
+const swK = () => ((layout && layout.chw) || SW_DEF) / SW_DEF;
+const fdK = () => Math.max(0.75, Math.min(1.35, swK()));
+function applyStripWidth() {
+  const k = swK(), r = document.documentElement.style;
+  r.setProperty("--sw", Math.round(100 * k) + "px");
+  r.setProperty("--sk", k);
+  r.setProperty("--mk", Math.min(k, 1.75));
+}
 function makeFader(w, style, cap, bip) {
   if (style === "slim") { const s = makeSlim(false, cap, bip); s.node.style.width = w + "px"; return s; }
   const node = h("div", "fdr");
@@ -2801,7 +2836,9 @@ function buildPanels() {
     const d = sink[k + 1] || 0;
     const el = buildPanel(p, bodyH - d);
     if (d) el.style.marginTop = d + "px";
-    if (layout.pbar) presetBar(el, p);
+    if (layout.pbar && !p.off) presetBar(el, p);
+    // no foot to carry the switch: oversampled, it sits lit in the corner
+    else if (p.os && p.os.l) { const ob = osButton(p); ob.classList.add("osc"); el.append(ob); }
     el.dataset.g = p.g;
     wirePanelDrag(el, p);
     row.append(el);
@@ -2846,8 +2883,9 @@ function drawBrackets(row, els, brs, drop) {
     const ly = Math.floor((b.r + 0.5) * BRK_ROW) + 0.5;
     let label = box ? b.n : "";
     let tw = label ? label.length * 6.2 : 0;
-    if (label && tw + 7 + 4 + 30 > x2 - x1) { label = ""; tw = 0; }
-    const mw = box ? 7 + (label ? 4 + tw : 0) : 6;
+    const os = box && b.os && b.os.l ? b.os.l + "x" : "", ow = os ? os.length * 6 + 6 : 0;
+    if (label && tw + 7 + 4 + (os ? ow + 8 : 0) + 30 > x2 - x1) { label = ""; tw = 0; }
+    const mw = box ? 7 + (label ? 4 + tw : 0) + (os ? 8 + ow : 0) : 6;
     const mid = Math.round((x1 + x2) / 2), m1 = mid - mw / 2 - 3, m2 = mid + mw / 2 + 3;
     const g = add("g", { stroke: col, fill: "none", "stroke-width": 1.5, opacity: b.off ? 0.5 : 1 });
     const path = document.createElementNS(SVGNS, "path");
@@ -2859,6 +2897,13 @@ function drawBrackets(row, els, brs, drop) {
                     "stroke-width": b.off ? 1 : 0, opacity: b.off ? 0.5 : 1 });
       if (label) { const t = add("text", { x: sx + 11, y: ly + 4, fill: col, opacity: b.off ? 0.5 : 1 });
                    t.textContent = label; }
+      if (os) {
+        const ox = sx + 11 + (label ? tw + 8 : 0);
+        add("rect", { x: ox, y: ly - (BRK_ROW - 1) / 2, width: ow, height: BRK_ROW - 1, rx: 2, fill: col, stroke: "none" });
+        const t = add("text", { x: ox + ow / 2, y: ly + 3.5, fill: "var(--panel)", "text-anchor": "middle",
+                                "font-size": 10, "font-weight": 700, stroke: "none" });
+        t.textContent = os;
+      }
       // the square (and its name) opens the container's sheet
       const hit = add("rect", { class: "hit", x: m1, y: ly - BRK_ROW / 2, width: m2 - m1, height: BRK_ROW, fill: "transparent" });
       hit.addEventListener("click", () => boxSheet(b));
@@ -2896,6 +2941,7 @@ function doubleTap(node, fn) {
 }
 
 function buildPanel(p, bodyH) {
+  if (p.off) return buildOffline(p, bodyH);
   if (p.eq) return buildEq(p, bodyH);
   // locked: arranged at its saved rows whatever the height, and scrolled
   // when that's taller than the panel
@@ -3335,6 +3381,9 @@ function panelMenu(p) {
     for (const [v, label] of RUNS)
       item(((p.pl || 0) === v ? "✓ " : "") + label, () => send("fxpar", p.g, v), ix > 0 && (p.pl || 0) !== v);
     item("Put in a new container", () => send("fxwrap", p.g));
+    item(`Oversampling${p.os && p.os.l ? ": " + p.os.l + "x" : ""}…`, () => osSheet(p.n, p.os, v => send("fxos", p.g, v)));
+    item(p.off ? "Bring online" : "Set offline (unload)", () => send("fxoff", p.g));
+    if (p.scg) item("Pass the sidechain into its container", () => send("fxsc", p.g));
     if (box) item(`Container: ${box.n}…`, () => boxSheet(box));
     sh.append(h("div", "gap"));
     item("Remove plugin", () => send("fxdel", p.g), true, true);
@@ -3356,10 +3405,94 @@ function boxSheet(b) {
     for (const [v, label] of RUNS)
       item(((b.pl || 0) === v ? "✓ " : "") + label, () => send("boxpar", b.g, v), b.ix > 0 && (b.pl || 0) !== v);
     item("Add plugin into it…", () => pickPlugin(b.nn || 0, b.p));
+    item(`Oversample everything in it${b.os && b.os.l ? ": " + b.os.l + "x" : ""}…`,
+         () => osSheet("Container: " + b.n, b.os, v => send("boxos", b.g, v)));
     sh.append(h("div", "gap"));
     item("Unpack: take everything out", () => send("boxunp", b.g));
     item("Remove container and everything in it", () => send("boxdel", b.g), true, true);
   });
+}
+
+// ---------------------------------------------------------------------------
+// offline: an unloaded plugin (the desktop's "Set offline") has no
+// parameters to show -- its panel keeps its width and says so, with the
+// head and foot in their offline colour
+// ---------------------------------------------------------------------------
+function buildOffline(p, bodyH) {
+  const lay = placeControls(p.c || [], p.lk ? p.lk * CELL_H : bodyH);
+  const pnl = h("div", "pnl offl");
+  pnl.style.width = Math.max(MIN_W, lay.width + PAD * 2) + "px";
+  const head = h("div", "ph");
+  const byp = h("button", "hb"); byp.innerHTML = `<svg viewBox="0 0 24 24">${ICON.power}</svg>`;
+  byp.addEventListener("click", () => send("byp", p.g));
+  const col = h("button", "hb col"); col.innerHTML = `<svg viewBox="0 0 24 24">${ICON.collapse}</svg>`;
+  col.setAttribute("aria-label", "Collapse");
+  const fold = () => {
+    if (shut.has(p.g)) shut.delete(p.g); else shut.add(p.g);
+    saveShut();
+    pnl.classList.toggle("shut", shut.has(p.g));
+  };
+  col.addEventListener("click", fold);
+  doubleTap(head, fold);
+  if (shut.has(p.g)) pnl.classList.add("shut");
+  head.append(h("span", "ix", p.i), h("span", "nm", p.n), moreBtn(p), col, byp);
+  const body = h("div", "pb");
+  const m = h("div", "offm");
+  const on = h("button", null, "Bring online");
+  on.addEventListener("click", () => send("fxoff", p.g));
+  m.append(h("b", null, "Offline"), h("span", null, "not loaded"), on);
+  body.append(m);
+  pnl.append(head, body);
+  if (layout.pbar) { const f = h("div", "pf"); f.append(osButton(p)); pnl.append(f); }
+  ui.panels.set(p.g, { p, ctl: [], byp, head, off: true });
+  return pnl;
+}
+
+// ---------------------------------------------------------------------------
+// oversampling: REAPER's own, as the desktop sets it (TS_CV_FXTree). The
+// setting is a ceiling: 1..4 = up to 88.2k/96k .. 705.6k/768k, the 44.1k
+// family at a multiple of 44.1k. A switch's state from the bridge is
+// { n: setting, l: factor to light, f: outlined, o: rate what's around reaches }
+// ---------------------------------------------------------------------------
+const kHz = hz => { const k = hz / 1000; return (Math.abs(k - Math.round(k)) < 0.01 ? Math.round(k) : k.toFixed(1)) + " kHz"; };
+const osCap = (n, rr) => n > 0 ? ((rr && rr % 11025 === 0) ? 44100 : 48000) * (1 << n) : 0;
+const osName = (n, rr) => n > 0 ? "Up to " + kHz(osCap(n, rr)) : "Off";
+// Off and the "up to" rates, each with what it means at the running rate
+function osSheet(title, os, set) {
+  os = os || {};
+  const cur = os.n || 0, rr = layout.rr, floor = Math.max(rr || 0, os.o || 0);
+  openSheet(sh => {
+    sh.append(h("h3", null, title + " — oversampling"));
+    if (os.o) sh.append(h("div", "note", `Something it's inside (a container, or the whole chain) already runs it at ${kHz(os.o)}.`));
+    for (const n of [0, 1, 2, 3, 4]) {
+      let hint = "";
+      if (n > 0 && rr) { const c = osCap(n, rr); hint = c > floor ? Math.round(c / rr) + "x" : "no effect"; }
+      const o = h("button", "opt", (cur === n ? "✓ " : "") + osName(n, rr) + (hint ? "  ·  " + hint : ""));
+      if (cur === n) o.disabled = true, o.style.opacity = 0.35;
+      else o.addEventListener("click", () => { closeSheet(); set(n); });
+      sh.append(o);
+    }
+    sh.append(h("div", "note", "Takes effect when playback next starts."));
+  });
+}
+const osText = os => os && os.l ? os.l + "x" : "OS";
+// a panel's switch: in its foot, or lit in its corner
+function osButton(p) {
+  const os = p.os || {}, on = !!os.l;
+  const b = h("button", "os" + (on ? " on" : (os.f ? " ox" : "")), osText(os));
+  if (on && p.plate) { b.style.background = p.plate.text; b.style.color = p.plate.head; }
+  b.title = on ? `Oversampled by REAPER: ${os.l}x here` : (os.f ? "Oversampled from around it, or set to no effect here" : "Oversampling: off");
+  b.setAttribute("aria-label", "Oversampling");
+  b.addEventListener("click", e => { e.stopPropagation(); osSheet(p.n, p.os, v => send("fxos", p.g, v)); });
+  return b;
+}
+// the whole chain's, in the fader strip
+function chainOsButton() {
+  const c = layout.cos || {};
+  const b = h("button", "cos" + (c.l ? " on" : (c.f ? " ox" : "")), osText(c));
+  b.title = c.l ? `The whole FX chain is oversampled ${c.l}x` : "Oversample the whole FX chain";
+  b.addEventListener("click", () => osSheet("Whole chain", c, v => send("chainos", v)));
+  return b;
 }
 
 // ---------------------------------------------------------------------------
@@ -3385,12 +3518,14 @@ function presetBar(pnl, p) {
   };
   const dd = h("button", "pdd", "No preset");
   dd.addEventListener("click", () => presetList(p));
-  // previous, the dropdown and next together in the middle; a hidden twin
-  // of the + on the left keeps them centred on the panel
-  const spc = btn("plus", "", () => {}); spc.classList.add("pspc"); spc.tabIndex = -1;
+  // previous, the dropdown and next together in the middle, the
+  // oversampling switch on the left balancing the + on the right
   const prev = btn("collapse", "Previous preset", () => send("pst", p.g, -1)); prev.classList.add("pprev");
   const next = btn("next", "Next preset", () => send("pst", p.g, 1)); next.classList.add("pnext");
-  f.append(p.lk ? lockMark(p) : spc, prev, dd, next, btn("plus", "Save, rename or delete", () => presetMenu(p)));
+  // the oversampling switch takes the twin's place (about its width), and
+  // sits beside the padlock when there is one
+  f.append(...(p.lk ? [lockMark(p), osButton(p)] : [osButton(p)]), prev, dd, next,
+           btn("plus", "Save, rename or delete", () => presetMenu(p)));
   pnl.append(f);
   const P = ui.panels.get(p.g);
   if (P) P.pf = dd;
@@ -4077,7 +4212,7 @@ function render() {
     }
     const byp = fv.e === false;
     P.byp.classList.toggle("on", byp);
-    P.head.style.background = byp ? "var(--head-byp)" : (P.pl ? P.pl.head : "");
+    P.head.style.background = P.off ? "var(--head-off)" : byp ? "var(--head-byp)" : (P.pl ? P.pl.head : "");
     for (const e of P.ctl) {
       const l = held(e.id);
       const v = l ? l.v : (fv.v[e.c.idx] || 0);

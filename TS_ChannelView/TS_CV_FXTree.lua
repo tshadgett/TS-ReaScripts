@@ -439,6 +439,169 @@ function T.set_parallel(track, addr, v)
   pcall(reaper.TrackFX_SetNamedConfigParm, track, addr, "parallel", tostring(v or 0))
 end
 
+-- ---------------------------------------------------------------------
+-- oversampling
+-- ---------------------------------------------------------------------
+-- REAPER's own oversampling, as its FX chain window sets it. The setting
+-- is a CEILING, not a factor: 0 off, 1 "oversample up to 88.2k/96k",
+-- 2 up to 176.4k/192k, 3 up to 352.8k/384k, 4 up to 705.6k/768k -- the
+-- 44.1k family when REAPER runs at a multiple of 44.1k, else the 48k one.
+-- So at 48k, 1 is 2x; at 96k, 1 does nothing and 2 is 2x.
+--   * every plugin, and every container, has its own
+--     ("instance_oversample_shift"; NEXT_FX_OVERSAMPLE in the chunk), and
+--     a container's oversamples everything in it
+--   * the track's chain has one for the whole chain
+--     ("chain_oversample_shift", read and set through any plugin at the
+--     top level; FX_OVERSAMPLE in the chunk). Asked of a plugin inside a
+--     container it answers for the container's own inner chain, which
+--     REAPER's container window sets -- ChannelView leaves that one alone
+--     and offers the container's own setting instead.
+--   * they don't stack: REAPER's menu says a plugin on an oversampled
+--     chain runs at the higher of the two. Containers are taken the same
+--     way: a plugin runs at the highest ceiling around it.
+--   * a change takes effect when playback next starts.
+-- Read every frame for every panel's foot, so cached briefly per address.
+T.OS_CHOICES = { 0, 1, 2, 3, 4 }
+
+local os_cache, os_at = {}, -10
+
+local function os_read(track, addr, key)
+  local now = reaper.time_precise()
+  if now - os_at > 0.25 then os_cache, os_at = {}, now end
+  local k = tostring(track) .. ":" .. tostring(addr) .. ":" .. key
+  local v = os_cache[k]
+  if v == nil then
+    v = math.floor(tonumber(safe_named(track, addr, key) or "") or 0)
+    os_cache[k] = v
+  end
+  return v
+end
+
+-- "96 kHz", "88.2 kHz"
+function T.khz(hz)
+  if not hz then return nil end
+  local k = hz / 1000
+  return (math.abs(k - math.floor(k + 0.5)) < 0.01) and ("%d kHz"):format(math.floor(k + 0.5))
+         or ("%.1f kHz"):format(k)
+end
+
+-- The rate a setting reaches up to, at `rate` (nil for off).
+function T.os_cap(n, rate)
+  if (n or 0) <= 0 then return nil end
+  local fam = (rate and rate % 11025 == 0) and 44100 or 48000
+  return fam * (1 << n)
+end
+
+-- A setting as REAPER's menu names it: "Off", "Up to 192 kHz".
+function T.os_label(n, rate)
+  if (n or 0) <= 0 then return "Off" end
+  return "Up to " .. T.khz(T.os_cap(n, rate))
+end
+
+-- How many times `rate` something running at `hz` is: 1, 2, 4...
+function T.os_factor(hz, rate)
+  if not (hz and rate and rate > 0) then return 1 end
+  return math.max(1, math.floor(hz / rate + 0.5))
+end
+
+-- One plugin's (or container's) own setting.
+function T.os_shift(track, addr)
+  if not (track and addr) then return 0 end
+  return os_read(track, addr, "instance_oversample_shift")
+end
+
+function T.set_os_shift(track, addr, n, what)
+  reaper.Undo_BeginBlock()
+  pcall(reaper.TrackFX_SetNamedConfigParm, track, addr, "instance_oversample_shift", tostring(n or 0))
+  reaper.Undo_EndBlock(("ChannelView: oversample %s %s"):format(what or "plugin",
+    (n or 0) > 0 and T.os_label(n, T.run_rate()):lower() or "off"), -1)
+  os_at = -10
+end
+
+-- The whole chain's setting (0 when the chain is empty: nothing to ask).
+function T.chain_os(track)
+  if not track then return 0 end
+  local pok, n = pcall(reaper.TrackFX_GetCount, track)
+  if not pok or (n or 0) == 0 then return 0 end
+  return os_read(track, 0, "chain_oversample_shift")
+end
+
+function T.set_chain_os(track, n)
+  local pok, cnt = pcall(reaper.TrackFX_GetCount, track)
+  if not pok or (cnt or 0) == 0 then return false end
+  reaper.Undo_BeginBlock()
+  pcall(reaper.TrackFX_SetNamedConfigParm, track, 0, "chain_oversample_shift", tostring(n or 0))
+  reaper.Undo_EndBlock(("ChannelView: oversample the whole chain %s"):format(
+    (n or 0) > 0 and T.os_label(n, T.run_rate()):lower() or "off"), -1)
+  os_at = -10
+  return true
+end
+
+-- The rate REAPER is running at: the project's own when it's set to use
+-- one, else the audio device's. nil when neither says.
+function T.run_rate()
+  local use = reaper.GetSetProjectInfo(0, "PROJECT_SRATE_USE", 0, false)
+  if use and use > 0 then
+    local r = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
+    if r and r > 0 then return r end
+  end
+  local ok, s = reaper.GetAudioDeviceInfo("SRATE", "")
+  local r = ok and tonumber(s)
+  if r and r > 0 then return r end
+  return nil
+end
+
+-- What oversamples something from outside it: the whole chain, and each
+-- container it sits in, outermost first, as { { what, n, hz } ... } --
+-- only those that actually raise the rate -- and the highest rate they
+-- reach (the running rate when none does).
+function T.os_outer(track, fx)
+  local out, rate = {}, T.run_rate()
+  local top = rate or 0
+  local function add(what, n)
+    local hz = T.os_cap(n, rate)
+    if hz and hz > (rate or 0) then
+      out[#out + 1] = { what = what, n = n, hz = hz }
+      if hz > top then top = hz end
+    end
+  end
+  add("the whole chain", T.chain_os(track))
+  for _, a in ipairs((fx and fx.ancestors) or {}) do add("its container", T.os_shift(track, a.addr)) end
+  return out, top
+end
+
+-- Everything a switch needs about one plugin or container (`fx` with its
+-- `addr` and `ancestors`):
+--   n      its own setting
+--   lit    the factor it runs at, when its own setting is what raises it
+--          (at least as high as anything around it); nil otherwise
+--   faint  true when it isn't lit but runs oversampled anyway (something
+--          around it), or its own setting does nothing at this rate
+--   rate, outer, top   as T.run_rate and T.os_outer
+function T.os_state(track, fx)
+  local rate = T.run_rate()
+  local n = T.os_shift(track, fx.addr)
+  local outer, top = T.os_outer(track, fx)
+  local own = T.os_cap(n, rate)
+  local st = { n = n, rate = rate, outer = outer, top = top }
+  if own and own > (rate or 0) and own >= top then
+    st.lit = T.os_factor(own, rate)
+  else
+    st.faint = (#outer > 0) or n > 0
+  end
+  return st
+end
+
+-- The whole chain's switch: its setting, and the factor it runs at (nil
+-- when off, or when the setting does nothing at this rate).
+function T.chain_state(track)
+  local rate = T.run_rate()
+  local n = T.chain_os(track)
+  local hz = T.os_cap(n, rate)
+  return { n = n, rate = rate, lit = (hz and hz > (rate or 0)) and T.os_factor(hz, rate) or nil,
+           faint = n > 0 and not (hz and hz > (rate or 0)) }
+end
+
 -- How many slots a container has (nil for something that isn't one).
 function T.count_in(track, path)
   if #path == 0 then
@@ -524,6 +687,73 @@ function T.get_enabled(track, addr)
   local pok, on = pcall(reaper.TrackFX_GetEnabled, track, addr)
   if pok then return on end
   return true
+end
+
+-- SIDECHAIN INTO A CONTAINER. A sidechain arrives on the track's 3/4 (the
+-- Receives panel sends it there), and a plugin with sidechain inputs reads
+-- 3/4 by default -- but a container passes only what its input pins carry,
+-- two channels unless it's been widened, so a compressor in one never hears
+-- its key. T.sidechain_gap lists the containers around a plugin that don't
+-- pass 3/4 in (outermost first); T.pass_sidechain widens them: two more
+-- input pins, each carrying its own channel, and room for them inside.
+local function pin_has(track, addr, pin, ch)
+  local pok, lo = pcall(reaper.TrackFX_GetPinMappings, track, addr, 0, pin)
+  lo = pok and math.floor(lo or 0) or 0
+  return (lo >> (ch - 1)) & 1 == 1
+end
+
+function T.has_sidechain_in(track, addr)
+  local pok, _, nin = pcall(reaper.TrackFX_GetIOSize, track, addr)
+  return pok and (nin or 0) >= 4
+end
+
+function T.sidechain_gap(track, fx)
+  local out = {}
+  if not (fx and fx.ancestors and #fx.ancestors > 0) then return out end
+  if not T.has_sidechain_in(track, fx.addr) then return out end
+  for _, a in ipairs(fx.ancestors) do
+    local nin = tonumber(safe_named(track, a.addr, "container_nch_in") or "") or 2
+    if nin < 4 or not (pin_has(track, a.addr, 2, 3) and pin_has(track, a.addr, 3, 4)) then
+      out[#out + 1] = a
+    end
+  end
+  return out
+end
+
+function T.pass_sidechain(track, fx)
+  local gap = T.sidechain_gap(track, fx)
+  if #gap == 0 then return false end
+  reaper.Undo_BeginBlock()
+  for _, a in ipairs(gap) do
+    local nch = tonumber(safe_named(track, a.addr, "container_nch") or "") or 2
+    if nch < 4 then pcall(reaper.TrackFX_SetNamedConfigParm, track, a.addr, "container_nch", "4") end
+    local nin = tonumber(safe_named(track, a.addr, "container_nch_in") or "") or 2
+    if nin < 4 then pcall(reaper.TrackFX_SetNamedConfigParm, track, a.addr, "container_nch_in", "4") end
+    for pin = 2, 3 do
+      local pok, lo, hi = pcall(reaper.TrackFX_GetPinMappings, track, a.addr, 0, pin)
+      lo, hi = pok and math.floor(lo or 0) or 0, pok and math.floor(hi or 0) or 0
+      -- a pin just created carries nothing else; one that existed keeps
+      -- what it had, plus its own channel
+      if nin <= pin then lo, hi = 0, 0 end
+      pcall(reaper.TrackFX_SetPinMappings, track, a.addr, 0, pin, (lo | (1 << pin)) & 0xFFFFFFFF, hi)
+    end
+  end
+  reaper.Undo_EndBlock("ChannelView: pass the sidechain into its container", -1)
+  return true
+end
+
+-- Offline: unloaded (REAPER's "Set FX offline"), which frees its CPU and
+-- memory -- not just bypassed. An offline plugin has no parameters to show.
+function T.get_offline(track, addr)
+  local pok, off = pcall(reaper.TrackFX_GetOffline, track, addr)
+  return pok and off == true
+end
+
+function T.set_offline(track, addr, off, label)
+  reaper.Undo_BeginBlock()
+  pcall(reaper.TrackFX_SetOffline, track, addr, off and true or false)
+  reaper.Undo_EndBlock(("ChannelView: %s %s"):format(off and "set offline" or "bring online",
+    label or "plugin"), -1)
 end
 
 function T.set_enabled(track, addr, on)

@@ -23,6 +23,21 @@
     * the post probe's tap pins are pointed at both, told the plugin's
       latency, and told how many taps are in use
 
+  INSIDE CONTAINERS. A plugin between the probes is measured however deep
+  it sits in containers. The copies use the same channel numbers at every
+  level, chosen free at all of them, and every container on the way in is
+  given the pins to carry them: an input pin for the "before" pair, output
+  pins for both. Inside a container, the plugins in front of the measured
+  one write the "before" copy too, after those in front of the container
+  -- so the copy is still the plugin's real input, whatever is bypassed. A
+  container's pin counts are only ever raised, and pins it didn't have are
+  created empty, so nothing it passed before changes.
+
+  IN PARALLEL. A plugin running in parallel with another (REAPER 7's "Run
+  in parallel"), or inside a container that does, isn't measured: its own
+  output isn't what the chain passes on, and the copies would sum with
+  its neighbours'. TP.status says "parallel" for it.
+
   Nothing is inserted next to the plugin. What was changed is written on
   the track (P_EXT:TS_CV_TAPS), so it can be taken back out exactly: when
   the box is unticked, the plugin moves, or anything around it changes,
@@ -160,12 +175,23 @@ end
 -- A record from before levels existed has no <what>, and means "g".
 -- <writers> is every plugin that writes the "before" copy, GUIDs joined
 -- with "+" (see WHO WRITES THE BEFORE COPY, below).
+--
+-- A tap inside containers (v2) adds a seventh field, <path>: the
+-- containers the copies pass out through, outermost first, GUIDs joined
+-- with "+". A record with no such tap is still written as v1, so an older
+-- ChannelView can still read -- and take out -- what this one laid.
 function TP.format_record(r)
   if not r or not r.taps or #r.taps == 0 then return "" end
-  local parts = { "v1", r.level or "TOP", r.probe or "" }
+  local v2 = false
   for _, t in ipairs(r.taps) do
-    parts[#parts + 1] = ("%s,%s,%d,%d,%d,%s"):format(t.guid, t.prev, t.pre, t.post,
-                                                    t.lag or 0, t.what or "g")
+    if (t.pathg or "") ~= "" then v2 = true end
+  end
+  local parts = { v2 and "v2" or "v1", r.level or "TOP", r.probe or "" }
+  for _, t in ipairs(r.taps) do
+    local s = ("%s,%s,%d,%d,%d,%s"):format(t.guid, t.prev, t.pre, t.post,
+                                           t.lag or 0, t.what or "g")
+    if v2 then s = s .. "," .. (t.pathg or "") end
+    parts[#parts + 1] = s
   end
   return table.concat(parts, "|")
 end
@@ -174,15 +200,20 @@ function TP.parse_record(s)
   if not s or s == "" then return nil end
   local f = {}
   for p in (s .. "|"):gmatch("([^|]*)|") do f[#f + 1] = p end
-  if f[1] ~= "v1" or #f < 4 then return nil end
+  if (f[1] ~= "v1" and f[1] ~= "v2") or #f < 4 then return nil end
   local r = { level = f[2], probe = f[3], taps = {} }
   for i = 4, #f do
-    local g, pv, a, b, l, w = f[i]:match("^([^,]+),([^,]+),(%d+),(%d+),(%-?%d+),?([gl]*)$")
-    -- pv is the "+"-joined list of writers
+    local g, pv, a, b, l, w, pg
+    if f[1] == "v2" then
+      g, pv, a, b, l, w, pg = f[i]:match("^([^,]+),([^,]+),(%d+),(%d+),(%-?%d+),([gl]*),([^,]*)$")
+    else
+      g, pv, a, b, l, w = f[i]:match("^([^,]+),([^,]+),(%d+),(%d+),(%-?%d+),?([gl]*)$")
+    end
+    -- pv is the "+"-joined list of writers, pg the containers
     if g then
       r.taps[#r.taps + 1] = { guid = g, prev = pv, pre = tonumber(a),
                               post = tonumber(b), lag = tonumber(l),
-                              what = (w ~= "") and w or "g" }
+                              what = (w ~= "") and w or "g", pathg = pg or "" }
     end
   end
   if #r.taps == 0 then return nil end
@@ -197,7 +228,8 @@ function TP.same_shape(a, b)
   if a.level ~= b.level or a.probe ~= b.probe or #a.taps ~= #b.taps then return false end
   for i, t in ipairs(a.taps) do
     local u = b.taps[i]
-    if t.guid ~= u.guid or t.prev ~= u.prev or (t.what or "g") ~= (u.what or "g") then
+    if t.guid ~= u.guid or t.prev ~= u.prev or (t.what or "g") ~= (u.what or "g")
+       or (t.pathg or "") ~= (u.pathg or "") then
       return false
     end
   end
@@ -368,8 +400,81 @@ function TP.nogr_mask(taps)
   return m
 end
 
+-- REAPER's "parallel" setting: 0 runs after the one before, 1 or 2
+-- alongside it.
+local function parallel_of(tr, addr)
+  local ok, v = reaper.TrackFX_GetNamedConfigParm(tr, addr, "parallel")
+  v = ok and tonumber(v) or 0
+  return v == 1 or v == 2
+end
+
+-- Whether the item at `i` in a level runs in parallel with a neighbour: it
+-- is flagged (a flag on a level's first slot means nothing), or the one
+-- after it is.
+local function in_parallel(tr, items, i)
+  if i > 1 and parallel_of(tr, items[i]) then return true end
+  return items[i + 1] ~= nil and parallel_of(tr, items[i + 1])
+end
+
+TP.MAX_DEPTH = 8     -- containers deep, below the probes' level
+
+local function copy_list(l)
+  local o = {}
+  for i, v in ipairs(l) do o[i] = v end
+  return o
+end
+
+-- Every plugin between the probes, however deep in containers, in chain
+-- order: { addr, writers, path, parallel }. `writers` are the addresses
+-- that write its "before" copy, `path` the containers it sits in below the
+-- probes' level, outermost first, and `parallel` whether it -- or any
+-- container on its path -- runs in parallel with a neighbour.
+--
+-- WHO WRITES THE BEFORE COPY
+--   Not just the plugin in front: every plugin from the pre probe up to
+--   the measured one. A BYPASSED plugin writes nothing to its extra pins
+--   -- REAPER passes the buffer straight through -- so with one writer,
+--   bypassing it left the copy silent and the reading dead. With all of
+--   them writing, a bypassed one leaves the copy as the enabled one
+--   before it wrote it, which is the same audio a bypassed plugin passes
+--   on. So the copy is always the measured plugin's real input, whatever
+--   is bypassed, and a bypass never needs re-routing.
+--
+--   Inside containers the same holds level by level: whatever is in front
+--   of the container at each level writes the copy, the container carries
+--   it in on an input pin, and whatever is in front of the plugin inside
+--   writes it again. A container in front -- not one the plugin is in --
+--   writes it as a single plugin would, from its own outputs.
+local function candidates(tr, lv)
+  local out = {}
+  local writers = { lv.items[lv.pre] }
+  local path = {}
+  local function walk(items, from, to, par, depth)
+    for i = from, to do
+      local a = items[i]
+      local p = par or in_parallel(tr, items, i)
+      if (container_count(tr, a) or 0) > 0 then
+        if depth < TP.MAX_DEPTH then
+          local kids = level_items(tr, a)
+          local mark = #writers
+          path[#path + 1] = a
+          walk(kids, 1, #kids, p, depth + 1)
+          path[#path] = nil
+          for k = #writers, mark + 1, -1 do writers[k] = nil end
+        end
+      elseif not is_probe(tr, a) then
+        out[#out + 1] = { addr = a, writers = copy_list(writers),
+                          path = copy_list(path), parallel = p }
+      end
+      writers[#writers + 1] = a
+    end
+  end
+  walk(lv.items, lv.pre + 1, lv.post - 1, false, 0)
+  return out
+end
+
 -- What SHOULD be tapped on a track right now: the level, and up to four
--- plugins strictly between its probes that want measuring -- their gain
+-- plugins between its probes that want measuring -- their gain
 -- reduction, their levels, or both. nil when nothing does (or there are
 -- no probes).
 function TP.desired(tr)
@@ -380,32 +485,20 @@ function TP.desired(tr)
     probe = fx_guid(tr, lv.items[lv.post]),
     taps = {},
   }
-  -- WHO WRITES THE BEFORE COPY
-  --   Not just the plugin in front: every plugin from the pre probe up to
-  --   the measured one. A BYPASSED plugin writes nothing to its extra pins
-  --   -- REAPER passes the buffer straight through -- so with one writer,
-  --   bypassing it left the copy silent and the reading dead. With all of
-  --   them writing, a bypassed one leaves the copy as the enabled one
-  --   before it wrote it, which is the same audio a bypassed plugin passes
-  --   on. So the copy is always the measured plugin's real input, whatever
-  --   is bypassed, and a bypass never needs re-routing.
-  for i = lv.pre + 1, lv.post - 1 do
-    local a = lv.items[i]
-    local gr = #r.taps < TP.MAX_TAPS and (container_count(tr, a) or 0) == 0
-               and not is_probe(tr, a) and wants_measure(tr, a)
-    local lvl = #r.taps < TP.MAX_TAPS and (container_count(tr, a) or 0) == 0
-                and not is_probe(tr, a)
+  for _, c in ipairs(candidates(tr, lv)) do
+    if #r.taps >= TP.MAX_TAPS then break end
+    local a = c.addr
+    local gr = not c.parallel and wants_measure(tr, a)
+    local lvl = not c.parallel
                 and (wants_levels(tr, a) or (not gr and wants_wave(tr, a)))
     if gr or lvl then
       local ok, pdc = reaper.TrackFX_GetNamedConfigParm(tr, a, "pdc")
-      local writers, gs = {}, {}
-      for j = lv.pre, i - 1 do
-        writers[#writers + 1] = lv.items[j]
-        gs[#gs + 1] = fx_guid(tr, lv.items[j])
-      end
+      local gs, pg = {}, {}
+      for _, w in ipairs(c.writers) do gs[#gs + 1] = fx_guid(tr, w) end
+      for _, ca in ipairs(c.path) do pg[#pg + 1] = fx_guid(tr, ca) end
       r.taps[#r.taps + 1] = {
         guid = fx_guid(tr, a), prev = table.concat(gs, "+"),
-        addr = a, writers = writers,
+        addr = a, writers = c.writers, path = c.path, pathg = table.concat(pg, "+"),
         lag = math.floor(tonumber(ok and pdc or 0) or 0),
         what = (gr and "g" or "") .. (lvl and "l" or ""),
       }
@@ -415,11 +508,20 @@ function TP.desired(tr)
   return r, lv
 end
 
-local function addr_by_guid(tr, items, guid)
-  for _, a in ipairs(items) do
-    if fx_guid(tr, a) == guid then return a end
+-- Every plugin and container on the track, by GUID, however deep: what a
+-- record names can have moved anywhere since it was laid.
+local function guid_map(tr)
+  local map = {}
+  local function walk(caddr, depth)
+    for _, a in ipairs(level_items(tr, caddr)) do
+      map[fx_guid(tr, a)] = a
+      if depth < TP.MAX_DEPTH + 4 and (container_count(tr, a) or 0) > 0 then
+        walk(a, depth + 1)
+      end
+    end
   end
-  return nil
+  walk(nil, 0)
+  return map
 end
 
 -- ---------------------------------------------------------------------
@@ -458,14 +560,15 @@ local function out_copy(tr, addr, ch, on)
   pin_channel(tr, addr, true, nout >= 2 and 1 or 0, ch + 1, on)
 end
 
--- Every channel something at this level reads or writes, plus sends and
--- receives at the top.
-local function used_channels(tr, lv)
-  local used = { [1] = true, [2] = true, [3] = true, [4] = true }
-  for _, a in ipairs(lv.items) do
+local function nconf(tr, addr, key, default)
+  local ok, v = reaper.TrackFX_GetNamedConfigParm(tr, addr, key)
+  return tonumber(ok and v or "") or default
+end
+
+-- The channels every item at one level reads or writes, into `used`.
+local function items_used(tr, items, used)
+  for _, a in ipairs(items) do
     local nin, nout = io_size(tr, a)
-    -- A probe's tap pins only ever READ, and the post probe's are ours to
-    -- set: neither makes a channel unusable.
     if is_probe(tr, a) then nin = math.min(nin, 2) end
     for p = 0, nin - 1 do
       local lo, hi = get_pin(tr, a, false, p)
@@ -476,6 +579,31 @@ local function used_channels(tr, lv)
       TP.channels_of(lo, hi, used)
     end
   end
+end
+
+-- Inside a container the copies pass out through: what its plugins use,
+-- and the channels its own pins carry in and out. By the pins' MAPPINGS,
+-- not their count -- the count only ever grows (see lay), and pins left
+-- empty carry nothing.
+local function container_used(tr, c, used)
+  items_used(tr, level_items(tr, c), used)
+  for p = 0, nconf(tr, c, "container_nch_in", 2) - 1 do
+    local lo, hi = get_pin(tr, c, false, p)
+    if lo ~= 0 or hi ~= 0 then used[p + 1] = true end
+  end
+  for p = 0, nconf(tr, c, "container_nch_out", 2) - 1 do
+    local lo, hi = get_pin(tr, c, true, p)
+    if lo ~= 0 or hi ~= 0 then used[p + 1] = true end
+  end
+end
+
+-- Every channel something at this level reads or writes, plus sends and
+-- receives at the top.
+local function used_channels(tr, lv)
+  local used = { [1] = true, [2] = true, [3] = true, [4] = true }
+  -- (A probe's tap pins only ever READ, and the post probe's are ours to
+  -- set: neither makes a channel unusable -- items_used skips them.)
+  items_used(tr, lv.items, used)
   if not lv.caddr then
     for i = 0, reaper.GetTrackNumSends(tr, 0) - 1 do
       TP.send_channels(reaper.GetTrackSendInfo_Value(tr, 0, i, "I_SRCCHAN"), used)
@@ -507,20 +635,50 @@ local function write_record(tr, r)
   reaper.GetSetMediaTrackInfo_String(tr, TP.EXT_KEY, TP.format_record(r), true)
 end
 
+-- A container a tap's copies pass out through: input pins for the
+-- "before" pair, output pins for both, each on its own channel number
+-- (container pin k is the container's channel k + 1, and the copies keep
+-- their numbers at every level). Adds (on) or removes them; a pin the
+-- container hasn't got is left alone.
+local function path_pins(tr, c, t, on)
+  local nin = nconf(tr, c, "container_nch_in", 0)
+  local nout = nconf(tr, c, "container_nch_out", 0)
+  for _, ch in ipairs({ t.pre, t.pre + 1 }) do
+    if ch - 1 < nin then pin_channel(tr, c, false, ch - 1, ch, on) end
+  end
+  for _, ch in ipairs({ t.pre, t.pre + 1, t.post, t.post + 1 }) do
+    if ch - 1 < nout then pin_channel(tr, c, true, ch - 1, ch, on) end
+  end
+end
+
+-- Raises one of a container's pin counts to at least `want`, never lowers
+-- it, and empties the pins it creates: whatever REAPER maps a new pin to,
+-- it carried nothing before, so it carries nothing now.
+local function grow_pins(tr, c, key, out, want)
+  local n = nconf(tr, c, key, 2)
+  if n >= want then return end
+  reaper.TrackFX_SetNamedConfigParm(tr, c, key, tostring(want))
+  for p = n, want - 1 do set_pin(tr, c, out, p, 0, 0) end
+end
+
 -- Takes out exactly what `rec` says was put in. Plugins that have since
 -- gone are skipped: there is nothing left on them to undo.
 local function lift(tr, rec)
   if not rec then return end
   local lv = find_level(tr, nil)
-  local items = lv and lv.items or level_items(tr, nil)
-  local probe = lv and addr_by_guid(tr, items, rec.probe)
+  local map = guid_map(tr)
+  local probe = lv and map[rec.probe]
   for _, t in ipairs(rec.taps) do
     for g in t.prev:gmatch("[^+]+") do
-      local w = addr_by_guid(tr, items, g)
+      local w = map[g]
       if w then out_copy(tr, w, t.pre, false) end
     end
-    local tgt = addr_by_guid(tr, items, t.guid)
+    local tgt = map[t.guid]
     if tgt then out_copy(tr, tgt, t.post, false) end
+    for g in (t.pathg or ""):gmatch("[^+]+") do
+      local c = map[g]
+      if c then path_pins(tr, c, t, false) end
+    end
   end
   if probe then
     for p = 2, 2 + TP.MAX_TAPS * 4 - 1 do set_pin(tr, probe, false, p, 0, 0) end
@@ -534,6 +692,20 @@ end
 -- Lays `want` down: channels, pins, latency, the record.
 local function lay(tr, want, lv)
   local used = used_channels(tr, lv)
+  -- The copies keep their channel numbers all the way out, so they must
+  -- be free inside every container they pass through as well.
+  local conts = {}       -- container address -> the taps through it
+  local order = {}
+  for _, t in ipairs(want.taps) do
+    for _, c in ipairs(t.path or {}) do
+      if not conts[c] then
+        conts[c] = {}
+        order[#order + 1] = c
+        container_used(tr, c, used)
+      end
+      table.insert(conts[c], t)
+    end
+  end
   local start = TP.FIRST_CH
   if not lv.caddr then
     local parent = reaper.GetParentTrack(tr)
@@ -556,6 +728,20 @@ local function lay(tr, want, lv)
     local ok, n = reaper.TrackFX_GetNamedConfigParm(tr, lv.caddr, "container_nch")
     n = tonumber(ok and n or 2) or 2
     if n < top then reaper.TrackFX_SetNamedConfigParm(tr, lv.caddr, "container_nch", tostring(top + (top % 2))) end
+  end
+  -- And in every container on the way: channels, and pins to carry them.
+  for _, c in ipairs(order) do
+    local need_in, need_out = 0, 0
+    for _, t in ipairs(conts[c]) do
+      need_in = math.max(need_in, t.pre + 1)
+      need_out = math.max(need_out, t.pre + 1, t.post + 1)
+    end
+    if nconf(tr, c, "container_nch", 2) < top then
+      reaper.TrackFX_SetNamedConfigParm(tr, c, "container_nch", tostring(top + (top % 2)))
+    end
+    grow_pins(tr, c, "container_nch_in", false, need_in)
+    grow_pins(tr, c, "container_nch_out", true, need_out)
+    for _, t in ipairs(conts[c]) do path_pins(tr, c, t, true) end
   end
 
   for i, t in ipairs(want.taps) do
@@ -636,14 +822,15 @@ end
 -- status, and adding a probe pair
 -- ---------------------------------------------------------------------
 
--- Where a plugin stands: "ok" (between a probe pair, so it can be
--- measured), "no_probes" (the track has no pair at all), or "outside"
--- (there is a pair, but not around this plugin, or not at its level).
+-- Where a plugin stands: "ok" (between a probe pair, at any depth, so it
+-- can be measured), "parallel" (between them, but running in parallel --
+-- see IN PARALLEL), "no_probes" (the track has no pair at all), or
+-- "outside" (there is a pair, but not around this plugin).
 function TP.status(tr, guid)
   local lv = find_level(tr, nil)
   if not lv then return "no_probes" end
-  for i = lv.pre + 1, lv.post - 1 do
-    if fx_guid(tr, lv.items[i]) == guid then return "ok" end
+  for _, c in ipairs(candidates(tr, lv)) do
+    if fx_guid(tr, c.addr) == guid then return c.parallel and "parallel" or "ok" end
   end
   return "outside"
 end
@@ -681,18 +868,51 @@ local function add_probe(tr, pos)
   return nil
 end
 
--- A pre probe in the first slot and a post probe in the last, both idle,
--- the way Track Analyser's own "insert probes" does it. Returns true, or
--- false and why not.
+-- ARA. REAPER allows an ARA plugin (Melodyne, VocAlign...) only in a
+-- track's first slot, and refuses -- with an error box -- anything put in
+-- front of it. So the pre probe goes second on such a track: the ARA
+-- plugin sits outside the pair and isn't measured, which costs nothing
+-- (it isn't a compressor), and the zero's test noise starts after it.
+--
+-- REAPER has no query for it. The FX chain says so instead: an instance
+-- running ARA saves an ARA archive name at the end of its header line
+--   <VST "VST3: Melodyne (Celemony)" Melodyne.vst3 0 "" 2142…{…} com.celemony.ara.chunk.13
+-- where any other plugin has "". The names below are a fallback for an
+-- instance that hasn't saved one yet; one of them in the first slot
+-- without ARA just means the pre probe goes after it.
+TP.ARA_NAMES = { "melodyne", "vocalign", "revoice", "spectralayers",
+                 "spectral editor", "auto-tune" }
+
+function TP.ara_header(line)
+  local last = line and line:match("(%S+)%s*$")
+  if not last or last:find('"', 1, true) then return false end
+  return last:lower():find("ara", 1, true) ~= nil
+end
+
+function TP.ara_first(tr)
+  if reaper.TrackFX_GetCount(tr) == 0 then return false end
+  local ok, chunk = reaper.GetTrackStateChunk(tr, "", false)
+  if ok and TP.ara_header(chunk:match("<FXCHAIN.-\n%s*(<[^\n]*)")) then return true end
+  local name = fx_name(tr, 0):lower()
+  for _, n in ipairs(TP.ARA_NAMES) do
+    if name:find(n, 1, true) then return true end
+  end
+  return false
+end
+
+-- A pre probe in the first slot (the second behind an ARA plugin) and a
+-- post probe in the last, both idle, the way Track Analyser's own "insert
+-- probes" does it. Returns true, or false and why not.
 function TP.insert_probes(tr)
   if find_level(tr, nil) then return true end
+  local first = TP.ara_first(tr) and 1 or 0
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
-  local pre = add_probe(tr, -1000)            -- -1000: insert at slot 0
+  local pre = add_probe(tr, -1000 - first)    -- -1000 - n: insert at slot n
   local post = pre and add_probe(tr, -1)      -- -1: append
   if pre then
-    reaper.TrackFX_SetParam(tr, 0, TP.P_ROLE, 0)
-    reaper.TrackFX_SetParam(tr, 0, 1, 0)      -- Publish: idle
+    reaper.TrackFX_SetParam(tr, pre, TP.P_ROLE, 0)
+    reaper.TrackFX_SetParam(tr, pre, 1, 0)    -- Publish: idle
   end
   if post then
     reaper.TrackFX_SetParam(tr, post, TP.P_ROLE, 1)

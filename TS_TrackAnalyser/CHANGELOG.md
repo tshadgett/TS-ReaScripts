@@ -1,5 +1,15 @@
 # Track Analyser — changelog
 
+## 1.9.1 — probes behind ARA plugins
+
+- **Inserting probes on a track with an ARA plugin.** REAPER keeps an ARA
+  plugin (Melodyne, VocAlign and the like) in the first slot and refuses
+  anything in front of it. On such a track the first probe now goes
+  second, behind it, so the panel shows what comes out of it.
+- **Measured reduction inside containers.** ChannelView 1.9.1 measures
+  plugins inside FX containers, and Track Analyser now reads those
+  readings too.
+
 ## 1.9.0 — in step with ChannelView
 
 No changes. The version moves to 1.9.0 to match ChannelView.

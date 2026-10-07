@@ -1036,6 +1036,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   local tint_bypassed = (not enabled) or T.chain_bypassed(track)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h,
     dragging and C.COL.header_drag
+      or (req.offline and C.COL.header_bg_off)
       or (tint_bypassed and C.COL.header_bg_byp or C.COL.header_bg), 0)
   ImGui.DrawList_AddLine(dl, x, y + h, x + w, y + h, C.COL.panel_border, 1.0)
 
@@ -1199,7 +1200,16 @@ local function draw_collapsed(ctx, dl, x, y, w, h, track, fx, enabled, req, mete
     req.toggle_float = true
   end
 
-  local text_y = y + 4 + (btn + 3) * 3 + 4
+  -- oversampled: the lit switch under them, so a folded plugin still says so
+  local rows = 3
+  local os_st = T.os_state(track, fx)
+  if os_st.lit then
+    P.os_switch(ctx, cx - W.os_width(ctx, os_st.lit) * 0.5, y + 4 + (btn + 3) * 3, btn,
+                track, fx, os_st)
+    rows = 4
+  end
+
+  local text_y = y + 4 + (btn + 3) * rows + 4
   local avail = h - (text_y - y) - 4
   local name = U.fx_label(fx)
 
@@ -1962,6 +1972,93 @@ local function draw_plate(ctx, dl, x, y, w, h, pl, brushed, metal)
   end
 end
 
+-- OFFLINE. An unloaded plugin has no parameters to show: its body says so
+-- and offers to bring it back. The header and foot take their offline
+-- colour (draw_header, draw_footer).
+local function draw_offline(ctx, dl, x, y, w, h, track, fx)
+  local cx = x + w * 0.5
+  local t1, t2 = "Offline", "not loaded"
+  local w1, h1 = ImGui.CalcTextSize(ctx, t1)
+  local w2 = ImGui.CalcTextSize(ctx, t2)
+  local ty = y + math.max(8, h * 0.35)
+  ImGui.DrawList_AddText(dl, cx - w1 * 0.5, ty, C.COL.header_text, t1)
+  ImGui.DrawList_AddText(dl, cx - w2 * 0.5, ty + h1 + 2, C.COL.header_dim, t2)
+  local bt = "Bring online"
+  local bw, bh = ImGui.CalcTextSize(ctx, bt)
+  bw, bh = bw + 14, bh + 8
+  local bx, by = math.floor(cx - bw * 0.5), math.floor(ty + h1 * 2 + 12)
+  ImGui.SetCursorScreenPos(ctx, bx, by)
+  if ImGui.InvisibleButton(ctx, "online##" .. fx.guid, bw, bh) then
+    T.set_offline(track, fx.addr, false, U.fx_label(fx))
+  end
+  local hot = ImGui.IsItemHovered(ctx)
+  ImGui.DrawList_AddRectFilled(dl, bx, by, bx + bw, by + bh,
+    hot and C.COL.header_bg_off or C.COL.toggle_off, 3.0)
+  ImGui.DrawList_AddRect(dl, bx + 0.5, by + 0.5, bx + bw - 0.5, by + bh - 0.5, C.COL.header_bg_off, 3.0, 0, 1.0)
+  ImGui.DrawList_AddText(dl, bx + 7, by + 4, C.COL.header_text, bt)
+end
+
+-- OVERSAMPLING. The switch in a panel's foot, beside the lock: REAPER's
+-- own per-plugin oversampling (TS_CV_FXTree), lit with the factor the
+-- plugin runs at while its setting is what raises the rate. Click for Off
+-- and REAPER's "up to" rates, each with what it would mean here. Outlined
+-- instead for a plugin oversampled from around it (its container, or the
+-- whole chain), or set to a rate REAPER already runs at.
+function P.os_tip(st)
+  local lines = {}
+  local rate = st.rate
+  if st.lit and st.n > 0 then
+    lines[1] = ("Oversampled by REAPER (%s): %dx here."):format(T.os_label(st.n, rate):lower(), st.lit)
+  elseif st.n > 0 then
+    lines[1] = ("Set to oversample %s, which REAPER already runs at: no effect here."):format(
+      T.os_label(st.n, rate):lower())
+  else
+    lines[1] = "Oversampling: off."
+  end
+  for _, o in ipairs(st.outer or {}) do
+    lines[#lines + 1] = ("Inside %s, oversampled %s."):format(o.what, T.os_label(o.n, rate):lower())
+  end
+  lines[#lines + 1] = "Click to change."
+  return table.concat(lines, "\n")
+end
+
+function P.os_switch(ctx, x, y, h, track, fx, st)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  if W.os_badge(ctx, "os##" .. fx.guid, st.lit, h, P.os_tip(st),
+                C.COL.header_text, C.COL.header_bg, st.faint) then
+    ImGui.OpenPopup(ctx, "osmenu##" .. fx.guid)
+  end
+  if ImGui.BeginPopup(ctx, "osmenu##" .. fx.guid) then
+    ImGui.TextDisabled(ctx, "Oversampling")
+    P.os_choices(ctx, track, fx.addr, st, "plugin")
+    ImGui.EndPopup(ctx)
+  end
+end
+
+-- Off and REAPER's "up to" rates for one plugin or container (`st` from
+-- T.os_state), as menu items, each with what it means at the rate REAPER
+-- runs at: the factor, or "no effect" when it's no higher than the rate
+-- (or than what's around it already gives).
+function P.os_choices(ctx, track, addr, st, what)
+  for _, o in ipairs(st.outer or {}) do
+    ImGui.TextDisabled(ctx, ("Inside %s, oversampled %s."):format(o.what, T.os_label(o.n, st.rate):lower()))
+  end
+  local floor = math.max(st.rate or 0, st.top or 0)
+  for _, n in ipairs(T.OS_CHOICES) do
+    local hint
+    if n > 0 then
+      local hz = T.os_cap(n, st.rate)
+      if st.rate then
+        hint = (hz > floor) and ("%dx"):format(T.os_factor(hz, st.rate)) or "no effect"
+      end
+    end
+    if ImGui.MenuItem(ctx, T.os_label(n, st.rate), hint, st.n == n) and st.n ~= n then
+      T.set_os_shift(track, addr, n, what)
+    end
+  end
+  ImGui.TextDisabled(ctx, "Takes effect when playback next starts.")
+end
+
 -- The panel's foot: the layout lock at the hard left -- a padlock, lit
 -- while locked -- and the preset bar beside it when that's on. Clicking
 -- the lock asks the caller (req.toggle_lock) to lock the layout at the
@@ -1969,14 +2066,21 @@ end
 -- so it has nothing to lock.
 draw_footer = function(ctx, dl, x, y, w, h, track, fx, layout, avail_h, is_eq, req)
   local btn = C.ICON_SIZE
-  local lw = is_eq and 0 or (btn + 3)
-  if C.PRESET_BAR then
+  local os_st = T.os_state(track, fx)
+  local osw = W.os_width(ctx, os_st.lit)
+  local lw = (is_eq and 0 or (btn + 3)) + osw + 3
+  -- offline: no presets to load into it, and the foot takes the header's
+  -- offline colour
+  if C.PRESET_BAR and not req.offline then
     PU.footer(ctx, dl, x, y, w, h, track, fx, lw)
   else
-    ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h - 1, C.COL.header_bg, 2.5,
+    ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h - 1,
+      req.offline and C.COL.header_bg_off or C.COL.header_bg, 2.5,
       ImGui.DrawFlags_RoundCornersBottom)
     ImGui.DrawList_AddLine(dl, x, y, x + w, y, C.COL.panel_border, 1.0)
   end
+  P.os_switch(ctx, x + 3 + (is_eq and 0 or (btn + 3)), y + (h - btn) * 0.5, btn,
+              track, fx, os_st)
   if is_eq then return end
   local rows = M.locked(layout)
   local bx, by = x + 3, y + (h - btn) * 0.5
@@ -2048,12 +2152,18 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
     -- the 3D effect: knobs and buttons cast shadows, the edges catch the light
     W.hw = (not is_drag_source and C.EFFECT_3D) and C.METAL_K or 0
 
+    req.offline = T.get_offline(track, fx.addr)
     if collapsed then
+      if req.offline and not is_drag_source then
+        ImGui.DrawList_AddRectFilled(dl, x + 1, y + 1, x + ww - 1, y + wh - 1, C.COL.header_bg_off, 3.0)
+      end
       draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
     else
       draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
       local fh = P.footer_h()
-      if is_eq then
+      if req.offline then
+        draw_offline(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx)
+      elseif is_eq then
         -- The whole body becomes the draggable-node curve canvas rather
         -- than the ordinary parameter grid: a ReaEQ panel IS the EQ view,
         -- not a grid you can optionally switch away from.

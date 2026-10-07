@@ -8,10 +8,11 @@
 --========================================================
 --
 -- Run it with tracks selected. For each one it makes sure there is a
--- TS_TrackProbe in the FIRST slot and another in the LAST, and sets each one's
--- Position so the panel knows which is which. Both are left idle -- the
--- panel arms the pair on whatever track you select, and an idle probe does
--- no FFT and writes nothing.
+-- TS_TrackProbe in the FIRST slot (the second, behind an ARA plugin such
+-- as Melodyne, which REAPER keeps first) and another in the LAST, and sets
+-- each one's Position so the panel knows which is which. Both are left
+-- idle -- the panel arms the pair on whatever track you select, and an
+-- idle probe does no FFT and writes nothing.
 --
 -- IT ONLY EVER ADDS. Nothing is removed, reordered or replaced, and a track
 -- that already has a pair is left alone -- including a pair living inside a
@@ -89,6 +90,36 @@ local function isProbe(tr, idx)
   return ok and nm and nm:find(PROBE, 1, true) ~= nil
 end
 
+-- ARA. REAPER allows an ARA plugin (Melodyne, VocAlign...) only in a
+-- track's first slot, and refuses anything put in front of it with an
+-- error box. On such a track the pre probe goes SECOND: the ARA plugin
+-- sits outside the pair, so the panel sees what comes out of it.
+--
+-- REAPER has no query for it, but an instance running ARA saves an ARA
+-- archive name at the end of its header line in the FX chain
+--   <VST "VST3: Melodyne (Celemony)" Melodyne.vst3 0 "" 2142...{...} com.celemony.ara.chunk.13
+-- where any other plugin has "". The names are a fallback for an instance
+-- that hasn't saved one yet (harmless if it isn't running ARA: the pre
+-- probe just goes after it). Same test as ChannelView's TS_CV_Taps.
+local ARA_NAMES = { "melodyne", "vocalign", "revoice", "spectralayers",
+                    "spectral editor", "auto-tune" }
+
+local function araFirst(tr)
+  if r.TrackFX_GetCount(tr) == 0 then return false end
+  local ok, chunk = r.GetTrackStateChunk(tr, "", false)
+  local line = ok and chunk:match("<FXCHAIN.-\n%s*(<[^\n]*)")
+  local last = line and line:match("(%S+)%s*$")
+  if last and not last:find('"', 1, true) and last:lower():find("ara", 1, true) then
+    return true
+  end
+  local _, nm = r.TrackFX_GetFXName(tr, 0, "")
+  nm = (nm or ""):lower()
+  for _, n in ipairs(ARA_NAMES) do
+    if nm:find(n, 1, true) then return true end
+  end
+  return false
+end
+
 -- Position 0 = pre, 1 = post. Publish 0 = idle.
 local function configure(tr, idx, role)
   r.TrackFX_SetParam(tr, idx, 0, role)
@@ -122,19 +153,20 @@ for t = 0, sel - 1 do
   else
     local n = r.TrackFX_GetCount(tr)
     local didSomething = false
+    local first = araFirst(tr) and 1 or 0   -- where the pre probe goes
 
     -- PRE: added at the end, then moved to the front. Adding directly at a
     -- position needs an encoded index whose exact form I could not confirm;
     -- moving is documented, does the same thing, and cannot land the plugin
     -- somewhere unintended.
-    if n == 0 or not isProbe(tr, 0) then
+    if n <= first or not isProbe(tr, first) then
       local idx, err = addProbe(tr)
       if not idx then
         failed[#failed + 1] = name .. ": " .. err
         goto continue
       end
-      r.TrackFX_CopyToTrack(tr, idx, tr, 0, true)
-      configure(tr, 0, 0)
+      r.TrackFX_CopyToTrack(tr, idx, tr, first, true)
+      configure(tr, first, 0)
       didSomething = true
     end
 
@@ -142,7 +174,7 @@ for t = 0, sel - 1 do
     -- the last thing on the track, the chain is empty and it still needs a
     -- partner behind it.
     n = r.TrackFX_GetCount(tr)
-    if n == 1 or not isProbe(tr, n - 1) then
+    if n - 1 == first or not isProbe(tr, n - 1) then
       local idx, err = addProbe(tr)
       if not idx then
         failed[#failed + 1] = name .. ": " .. err

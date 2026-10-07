@@ -127,7 +127,9 @@ button does not, because you went looking for it.
 
 You can also run **`TS_TA_InsertProbes.lua`** from the action list.
 It puts a `TS_TrackProbe` in the first slot and another in the last, sets each
-one's Position so the panel knows which is which, and leaves both idle.
+one's Position so the panel knows which is which, and leaves both idle. Behind
+an ARA plugin such as Melodyne, which REAPER keeps in the first slot, the first
+probe goes second.
 
 It only ever *adds*. Nothing is removed, reordered or replaced, and a track
 that already has a pair — including one living inside a container, which is

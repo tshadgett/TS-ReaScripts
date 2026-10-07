@@ -1,5 +1,42 @@
 # ChannelView — changelog
 
+## 1.9.1 — oversampling, offline, strip width, measuring inside containers
+
+- **Oversampling.** REAPER's own, set from ChannelView. **OS** in a
+  panel's foot oversamples that plugin; a container's menu ▸ *Oversample
+  everything in it* does a container; **OS** in the header bar does the
+  whole chain. The choices are REAPER's — up to 96, 192, 384 or 768 kHz —
+  each with what it means at the rate you're running. While it's on, the
+  switch is lit with the factor (a collapsed panel and a container's
+  bracket show it too); outlined, the plugin is oversampled from around it
+  or set to a rate REAPER already runs at. Also in a panel's right-click
+  menu.
+- **Offline.** A panel's menu ▸ *Set offline* unloads the plugin — unlike
+  bypass, it frees its CPU and memory. The panel's header and foot turn
+  steel blue, with *Bring online* where its controls were.
+- **Strip width.** View ▸ *Strip width* sets how wide the fader panel,
+  every mixer strip and the track name buttons are, from 72 to 240 px
+  (112 by default). The meter grows and shrinks with it, the fader a
+  little; collapsed strips keep their width.
+- **A sidechain into a container.** A container passes only two channels
+  in until it's widened, so a compressor inside one never hears a
+  sidechain on 3/4. When that's the case its menu offers *Pass the
+  sidechain into its container*.
+- **Measured plugins inside containers.** Measured gain reduction and
+  input/output meters now work on a plugin inside an FX container, however
+  deep it sits. Each container on the way gets the extra pins to carry the
+  copies out. Pins are only ever added, and the added ones are left empty
+  when you untick.
+- **Not while in parallel.** A plugin running in parallel with another, or
+  inside a container that does, isn't measured, because its own output
+  isn't what the chain passes on. Edit parameters says so.
+- **Probes behind ARA plugins.** REAPER keeps an ARA plugin (Melodyne,
+  VocAlign and the like) in the first slot and won't put anything in front
+  of it. On such a track the **Probes** button puts the first probe second,
+  behind it.
+- **On the web companion** too: oversampling, offline, strip width and the
+  sidechain fix. Restart the web companion script after updating.
+
 ## 1.9.0 — parallel FX and containers, new controls, FX chains and folders
 
 **The chain**

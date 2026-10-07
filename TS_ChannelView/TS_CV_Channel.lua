@@ -729,12 +729,16 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   local vol   = get(track, "D_VOL", 1)   -- unity if the track has none
   local inner = w - pad * 2
   local half  = inner * 0.5
+  -- the strip's width against the default: the meter scales with it, and
+  -- the fader a little (its cap stays a cap -- View > Strip width)
+  local k     = w / C.CHANNEL_W_DEFAULT
+  local fw    = math.floor(C.FADER_W * math.max(0.75, math.min(1.35, k)) + 0.5)
   local top   = geo.top
   local fh    = geo.fh
 
   if fh > 40 then
-    local fx = x + pad + (half - C.FADER_W) * 0.5
-    local fch, fnv, fact = W.fader(ctx, idp .. "fader", fx, top, C.FADER_W, fh,
+    local fx = x + pad + (half - fw) * 0.5
+    local fch, fnv, fact = W.fader(ctx, idp .. "fader", fx, top, fw, fh,
       U.vol_to_fader(vol), "Volume   " .. U.db_text(vol) .. " dB",
       U.UNITY_POS, false, look_for(track, now))
     if fact and fact.right_click then ImGui.OpenPopup(ctx, idp .. "fmenu") end
@@ -779,7 +783,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     -- narrower to make room, the pair centred together.
     local grt, gre, grp = TP.track_total(track)
     local gside = grt and (C.GR_BAR_W + 2) or 0
-    local mw = math.min(half - 4 - gside, C.LEVEL_METER_W)
+    local mw = math.min(half - 4 - gside, C.LEVEL_METER_W * math.min(k, 1.75))
     local mx = x + pad + half + (half - mw - gside) * 0.5
     W.level_meter(ctx, dl, mx, top, mw, fh, lv, hold, true, rms_live)
     if grt then
@@ -838,7 +842,30 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     local _, rh = ImGui.CalcTextSize(ctx, "0")
     local mbl = mx + 1.5                          -- the bars' own left
     local mbw = (mw - 3 - (nch - 1)) / nch        -- and their width
-    for i = 1, nch do
+    -- A strip narrowed until the columns would run into each other shows
+    -- ONE column instead -- the louder channel's figures, under the
+    -- middle of the meter. The tooltip still has every channel.
+    local show = nch
+    if nch > 1 then
+      local widest = 0
+      for i = 1, nch do
+        local pt = (hold[i] > C.METER_FLOOR) and U.db_str(hold[i]) or "-inf"
+        local pw = ImGui.CalcTextSize(ctx, pt)
+        widest = math.max(widest, pw)
+        if rms_hold[i] > C.METER_FLOOR then
+          local rw = ImGui.CalcTextSize(ctx, U.db_str(rms_hold[i]))
+          widest = math.max(widest, rw)
+        end
+      end
+      if widest + 2 > mbw + 1 then
+        show = 1
+        local hi, ri = -math.huge, -math.huge
+        for i = 1, nch do hi = math.max(hi, hold[i]); ri = math.max(ri, rms_hold[i]) end
+        hold, rms_hold = { hi }, { ri }
+        mbw = mw - 3
+      end
+    end
+    for i = 1, show do
       local ccx = mbl + (i - 1) * (mbw + 1) + mbw * 0.5
       local pt  = (hold[i] > C.METER_FLOOR) and U.db_str(hold[i]) or "-inf"
       local ptw = ImGui.CalcTextSize(ctx, pt)

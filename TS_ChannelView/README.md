@@ -276,6 +276,27 @@ strip's own radius so the two shapes agree about what a strip is.
   a plugin into it, unpack it (its plugins move out to where it was),
   remove it, or save it as an FX chain. *Move left / right* and *Remove*
   work anywhere in the chain.
+* **Oversampling.** REAPER's own, set from ChannelView: **OS** in a panel's
+  foot oversamples that plugin, a container's menu ▸ *Oversample everything
+  in it* does a container, and **OS** in the header bar does the whole
+  chain. The choices are REAPER's — *up to* 96, 192, 384 or 768 kHz — each
+  with what it means at the rate you're running (at 48 kHz, up to 192 kHz
+  is 4x; at 96 kHz it's 2x). While it's on, the switch is lit with the
+  factor (a collapsed panel and a container's bracket show it too), so you
+  can't miss it. Outlined **OS** means the plugin is oversampled from
+  around it (its container or the chain), or is set to a rate REAPER
+  already runs at. REAPER applies a change when playback next starts.
+* **Strip width.** View ▸ *Strip width* sets how wide the fader panel,
+  every mixer strip and the track name buttons are, from 72 to 240 px
+  (112 by default). The meter grows and shrinks with it, the fader a
+  little; collapsed strips keep their width. The web companion follows.
+* **Offline.** A panel's menu ▸ *Set offline* unloads the plugin — unlike
+  bypass, it frees its CPU and memory — and the panel's header and foot
+  turn steel blue, with *Bring online* where its controls were.
+* **A sidechain into a container.** A container passes only two channels
+  in until it's widened, so a compressor inside one never hears a
+  sidechain on the track's 3/4. When that's the case, the plugin's menu
+  offers *Pass the sidechain into its container*, which widens it.
 * **Collapse a panel to a bar** (the chevron, or double-click the name) —
   a narrow vertical strip with the name running down it, keeping bypass and
   float reachable. Collapsed state is per FX instance and saves with the
@@ -755,6 +776,9 @@ script into the action list.
   then drag, to reorder — into and out of containers, as on the desktop.
   Tap a container's square for its options. The dashed + adds to the end
   of the chain, and the chevron collapses a panel on this device.
+  Oversampling is in the preset bar (or ⋯), a container's options, and
+  **OS** under the fader for the whole chain; lit while it's on. ⋯ also
+  sets a plugin offline or brings it back.
 - **XY pads and concentric knobs** play here too: touch the pad to put the
   dot there; on a concentric knob, start on the inner knob or the ring.
   Modulated controls carry the same marks as on the desktop.
@@ -1440,13 +1464,20 @@ The probes are a small JSFX installed with ChannelView. They don't change
 the audio while you play and sit idle until something reads them. The
 **Probes** button in the header bar adds a pair to the selected tracks
 that lack one, after asking. Inside a container is fine, so a pair baked into
-a track template works as is.
+a track template works as is. On a track whose first plugin is an ARA plugin
+such as Melodyne, which REAPER keeps first, the first probe goes second.
 
 Nothing is inserted next to the plugin. ChannelView routes a copy of what
 goes in and what comes out on spare channels, from 5/6 up, skipping any
 pair a plugin, send or receive already uses. The post probe compares the
 two in ten bands. Up to four plugins per track. What was changed is written
 on the track (`P_EXT:TS_CV_TAPS`) and taken out exactly when you untick it.
+
+A plugin inside a container is measured too, however deep it sits. Each
+container on the way gets the extra pins to carry the copies out. Pins are
+only ever added, and the added ones are left empty when you untick. A
+plugin running in parallel with another, or inside a container that does,
+isn't measured, because its own output isn't what the chain passes on.
 
 Its zero, what "no reduction" looks like, is measured each time playback
 stops. The first probe plays a second of pink noise at −60 dBFS and one at

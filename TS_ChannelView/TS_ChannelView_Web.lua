@@ -80,7 +80,7 @@ local function hex(col)
   return string.format("#%06x", (col >> 8) & 0xffffff)
 end
 
-local PAL_KEYS = { "win_bg", "panel_bg", "panel_border", "header_bg", "header_bg_byp",
+local PAL_KEYS = { "win_bg", "panel_bg", "panel_border", "header_bg", "header_bg_byp", "header_bg_off",
   "header_text", "header_dim", "label", "value", "knob_track", "knob_fill",
   "knob_fill_bi", "knob_body", "knob_pointer", "knob_ring", "toggle_off", "toggle_on",
   "toggle_text", "accent", "strip_bg", "strip_sel", "gr_measured", "fader_cap",
@@ -297,6 +297,26 @@ end
 
 local scale_labels_cache = {}
 
+-- A switch's state for the page: { n, l (lit factor), f (faint), o (the
+-- rate what's around it reaches) }, or nil when there's nothing to show.
+local function os_json(st)
+  if not st or (st.n == 0 and not st.lit and not st.faint) then return nil end
+  return { n = st.n, l = st.lit, f = st.faint or nil,
+           o = (st.top and st.rate and st.top > st.rate) and st.top or nil }
+end
+
+-- The containers above a container, outermost first (the desktop's
+-- box_ancestors): read off the first panel inside it.
+local function box_anc(node)
+  local f = chain[node.first]
+  local out = {}
+  for _, a in ipairs((f and f.ancestors) or {}) do
+    if a.guid == node.guid then break end
+    out[#out + 1] = a
+  end
+  return out
+end
+
 local function panel_of(fx, i)
   local key = U.plugin_key(fx.name)
   local layout, is_default = M.get_or_default(key, track, fx.addr, fx.guid)
@@ -421,6 +441,11 @@ local function panel_of(fx, i)
     bx = (fx.ancestors and #fx.ancestors > 0) and fx.ancestors[#fx.ancestors].guid or nil,
     c = ctls, plate = plate_json(layout),
     lk = M.locked(layout),
+    -- REAPER's oversampling (TS_CV_FXTree.os_state): its own setting, the
+    -- factor to light, outlined or not, and the rate what's around it gives
+    os = os_json(T.os_state(track, fx)),
+    off = T.get_offline(track, fx.addr) or nil,     -- unloaded: no parameters to show
+    scg = (#T.sidechain_gap(track, fx) > 0) or nil, -- a container keeps its sidechain out
     gr = has_gr and (meter.range or C.MAX_GR_DB) or nil,
     gw = has_gr and (meter.win or C.GRV_DEFAULT) or nil,
     eq = (key == "ReaEQ") or nil,
@@ -653,6 +678,7 @@ local function build_layout()
         ix = box and b.node.index or nil,
         pl = box and b.node.parallel or nil,
         nn = box and #(b.node.children or {}) or nil,
+        os = box and os_json(T.os_state(track, { addr = b.node.addr, ancestors = box_anc(b.node) })) or nil,
       }
     end
   end
@@ -666,6 +692,9 @@ local function build_layout()
     fx = panels,
     br = brs, brn = brn,
     nfx = track and reaper.TrackFX_GetCount(track) or 0,
+    -- the whole chain's oversampling, and the rate REAPER runs at
+    cos = track and os_json(T.chain_state(track)) or nil,
+    rr = T.run_rate(),
     sends = on_master() and outputs_layout() or sends_layout(0),
     outs = on_master() or nil,
     oc = on_master() and output_choices() or nil,
@@ -680,6 +709,7 @@ local function build_layout()
     vals = C.SHOW_VALUES,
     pbar = C.PRESET_BAR,
     cw = C.CELL_W,
+    chw = C.CHANNEL_W,          -- View > Strip width: the page scales its strips by it
   }
 end
 
@@ -1239,6 +1269,16 @@ local function apply(verb, a)
   elseif verb == "byp" then
     local fx = fx_by_guid(a[1])
     if fx then T.set_enabled(track, fx.addr, not T.get_enabled(track, fx.addr)) end
+  elseif verb == "fxsc" then
+    local fx = fx_by_guid(a[1])
+    if fx then T.pass_sidechain(track, fx); layout_dirty = true end
+  elseif verb == "fxoff" then
+    -- offline (unloaded) or back online
+    local fx = fx_by_guid(a[1])
+    if fx then
+      T.set_offline(track, fx.addr, not T.get_offline(track, fx.addr), U.fx_label(fx))
+      layout_dirty = true
+    end
   elseif verb == "float" then
     local fx = fx_by_guid(a[1])
     if fx then T.toggle_float(track, fx.addr) end
@@ -1441,6 +1481,21 @@ local function apply(verb, a)
         (v == 0 and " in series" or " in parallel"), -1)
       layout_dirty = true
     end
+  elseif track and (verb == "fxos" or verb == "boxos" or verb == "chainos") then
+    -- REAPER's oversampling (TS_CV_FXTree): 0 off, 1..4 up to 96k..768k
+    --   fxos|guid|n  boxos|guid|n  chainos|n
+    local v = tonumber(verb == "chainos" and a[1] or a[2])
+    if v and v >= 0 and v <= 4 and v == math.floor(v) then
+      if verb == "chainos" then
+        T.set_chain_os(track, v)
+      else
+        local node = verb == "fxos" and fx_by_guid(a[1]) or box_by_guid(a[1])
+        if node and T.guid_at(track, node.addr) == node.guid then
+          T.set_os_shift(track, node.addr, v, verb == "fxos" and "plugin" or "container")
+        end
+      end
+      layout_dirty = true
+    end
   elseif track and verb == "fxwrap" then
     local fx = fx_by_guid(a[1])
     if fx then
@@ -1574,6 +1629,8 @@ local function cycle()
     C.SHOW_VALUES = (sv == "") or (sv == "1")
     local cw = reaper.GetExtState("TS_ChannelView", "cell_w")
     C.set_cell_w(cw ~= "" and cw or C.CELL_W_DEFAULT)
+    local chw = reaper.GetExtState("TS_ChannelView", "channel_w")
+    C.set_channel_w(chw ~= "" and chw or C.CHANNEL_W_DEFAULT)
   end
 
   -- The layout is rebuilt twice a second regardless, which also catches

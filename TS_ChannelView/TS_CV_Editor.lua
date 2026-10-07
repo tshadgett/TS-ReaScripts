@@ -850,6 +850,8 @@ function E.draw(ctx, track)
         end
       elseif status == "outside" then
         ImGui.TextDisabled(ctx, "Not between this track's probes, so not measured here.")
+      elseif status == "parallel" then
+        ImGui.TextDisabled(ctx, "Not measured while it runs in parallel.")
       end
       -- The zero: global, since it's how the probes behave on every track.
       local zch, zv = ImGui.Checkbox(ctx, "Measure the zero while stopped (all tracks)", TP.zero_on())
@@ -882,6 +884,8 @@ function E.draw(ctx, track)
         end
       elseif status == "outside" then
         ImGui.TextDisabled(ctx, "Input/output meters: not between this track's probes.")
+      elseif status == "parallel" then
+        ImGui.TextDisabled(ctx, "Input/output meters: not measured while it runs in parallel.")
       end
     end
 

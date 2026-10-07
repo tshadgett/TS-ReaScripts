@@ -4344,6 +4344,117 @@ do
   check("look: family of a plain dropdown", tostring(MP.look_family({ type = "combo" })), "nil")
 end
 
+-- REAPER's oversampling (TS_CV_FXTree): a ceiling, not a factor -- names,
+-- what each means at the running rate, what reads and writes which
+-- setting, and what oversamples a panel from around it
+do
+  local FT = require("TS_CV_FXTree")
+  check("os: names at 48k", table.concat({ FT.os_label(0, 48000), FT.os_label(1, 48000), FT.os_label(4, 48000) }, " | "),
+        "Off | Up to 96 kHz | Up to 768 kHz")
+  check("os: names at 44.1k", FT.os_label(2, 44100), "Up to 176.4 kHz")
+  check("os: names at 88.2k", FT.os_label(1, 88200), "Up to 88.2 kHz")
+  check("os: factor", table.concat({ FT.os_factor(96000, 48000), FT.os_factor(192000, 96000), FT.os_factor(96000, 96000) }, " "), "2 2 1")
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetNamedConfigParm", "TrackFX_SetNamedConfigParm", "TrackFX_GetCount",
+                       "GetSetProjectInfo", "GetAudioDeviceInfo", "Undo_BeginBlock", "Undo_EndBlock", "time_precise" }) do
+    saved[k] = reaper[k]
+  end
+  local cfg, sets, clock, rate = { [0] = { chain_oversample_shift = "2" }, [9] = { instance_oversample_shift = "3" } }, {}, 0, 48000
+  reaper.time_precise = function() clock = clock + 1; return clock end   -- never cached
+  reaper.TrackFX_GetNamedConfigParm = function(_, a, k) local v = cfg[a] and cfg[a][k]; return v ~= nil, v or "" end
+  reaper.TrackFX_SetNamedConfigParm = function(_, a, k, v) sets[#sets + 1] = a .. ":" .. k .. "=" .. v
+    cfg[a] = cfg[a] or {}; cfg[a][k] = v; return true end
+  reaper.TrackFX_GetCount = function() return 2 end
+  reaper.Undo_BeginBlock = function() end
+  reaper.Undo_EndBlock = function() end
+  reaper.GetSetProjectInfo = function(_, k) if k == "PROJECT_SRATE_USE" then return 0 end return 96000 end
+  reaper.GetAudioDeviceInfo = function() return true, tostring(rate) end
+  check("os: running at the device's rate", FT.run_rate(), 48000)
+  check("os: the chain's", FT.chain_os("TR"), 2)
+  check("os: chain lit 4x at 48k", FT.chain_state("TR").lit, 4)
+  local outer, top = FT.os_outer("TR", { ancestors = { { addr = 9 }, { addr = 8 } } })
+  check("os: outer, chain then container", #outer .. " " .. outer[1].hz .. " " .. outer[2].hz .. " " .. top, "2 192000 384000 384000")
+  -- a plugin's own 2x under a 4x chain: not what raises it, so not lit
+  cfg[1] = { instance_oversample_shift = "1" }
+  local st = FT.os_state("TR", { addr = 1 })
+  check("os: own lower than the chain: faint", tostring(st.lit) .. " " .. tostring(st.faint), "nil true")
+  cfg[1] = { instance_oversample_shift = "3" }
+  st = FT.os_state("TR", { addr = 1 })
+  check("os: own higher than the chain: lit at its own", st.lit, 8)
+  cfg[0].chain_oversample_shift = "0"
+  rate = 96000
+  cfg[1] = { instance_oversample_shift = "1" }
+  st = FT.os_state("TR", { addr = 1 })
+  check("os: up to 96k at 96k does nothing", tostring(st.lit) .. " " .. tostring(st.faint), "nil true")
+  cfg[1] = { instance_oversample_shift = "2" }
+  check("os: up to 192k at 96k is 2x", FT.os_state("TR", { addr = 1 }).lit, 2)
+  cfg[1] = {}
+  st = FT.os_state("TR", { addr = 1 })
+  check("os: off and nothing around: quiet", tostring(st.lit) .. " " .. tostring(st.faint), "nil false")
+  sets = {}
+  FT.set_os_shift("TR", 1, 2, "plugin")
+  FT.set_chain_os("TR", 0)
+  check("os: set a plugin's and the chain's (through the first plugin)", table.concat(sets, " "),
+        "1:instance_oversample_shift=2 0:chain_oversample_shift=0")
+  reaper.TrackFX_GetCount = function() return 0 end
+  check("os: an empty chain can't be set", FT.set_chain_os("TR", 1), false)
+  check("os: an empty chain reads off", FT.chain_os("TR"), 0)
+  reaper.GetSetProjectInfo = function(_, k) if k == "PROJECT_SRATE_USE" then return 1 end return 96000 end
+  check("os: or the project's rate, when it's set to use its own", FT.run_rate(), 96000)
+  for k, v in pairs(saved) do reaper[k] = v end
+end
+
+-- View > Strip width: clamped, and the strips' width follows it
+do
+  local Cf = require("TS_CV_Config")
+  local CHm = require("TS_CV_Channel")
+  local was = Cf.CHANNEL_W
+  Cf.set_channel_w(40);  check("strip width: floor", Cf.CHANNEL_W, Cf.CHANNEL_W_MIN)
+  Cf.set_channel_w(999); check("strip width: ceiling", Cf.CHANNEL_W, Cf.CHANNEL_W_MAX)
+  Cf.set_channel_w("x"); check("strip width: junk is the default", Cf.CHANNEL_W, 112)
+  Cf.set_channel_w(150)
+  check("strip width: expanded strips follow, collapsed don't", CHm.width(false) .. " " .. CHm.width(true),
+        "150 " .. Cf.COLLAPSED_W)
+  Cf.CHANNEL_W = was
+end
+
+-- a sidechain into a container, and offline (TS_CV_FXTree)
+do
+  local FT = require("TS_CV_FXTree")
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetNamedConfigParm", "TrackFX_SetNamedConfigParm", "TrackFX_GetIOSize",
+                       "TrackFX_GetPinMappings", "TrackFX_SetPinMappings", "Undo_BeginBlock", "Undo_EndBlock",
+                       "TrackFX_GetOffline", "TrackFX_SetOffline" }) do saved[k] = reaper[k] end
+  local cfg = { [7] = { container_nch = "2", container_nch_in = "2" }, [8] = { container_nch = "4", container_nch_in = "4" } }
+  local pins = { [7] = { [0] = 1, [1] = 2 }, [8] = { [0] = 1, [1] = 2, [2] = 4, [3] = 8 } }
+  local nin = { [5] = 4, [6] = 2 }
+  reaper.TrackFX_GetNamedConfigParm = function(_, a, k) local v = cfg[a] and cfg[a][k]; return v ~= nil, v or "" end
+  reaper.TrackFX_SetNamedConfigParm = function(_, a, k, v) cfg[a] = cfg[a] or {}; cfg[a][k] = v; return true end
+  reaper.TrackFX_GetIOSize = function(_, a) return 0, nin[a] or 2, 2 end
+  reaper.TrackFX_GetPinMappings = function(_, a, io, p) return (pins[a] or {})[p] or 0, 0 end
+  reaper.TrackFX_SetPinMappings = function(_, a, io, p, lo) pins[a] = pins[a] or {}; pins[a][p] = lo; return true end
+  reaper.Undo_BeginBlock = function() end
+  reaper.Undo_EndBlock = function() end
+  local comp = { addr = 5, ancestors = { { addr = 8 }, { addr = 7 } } }
+  local gap = FT.sidechain_gap("TR", comp)
+  check("sc: only the narrow container", #gap .. " " .. gap[1].addr, "1 7")
+  check("sc: two inputs, nothing to pass", #FT.sidechain_gap("TR", { addr = 6, ancestors = comp.ancestors }), 0)
+  check("sc: not in a container", #FT.sidechain_gap("TR", { addr = 5 }), 0)
+  check("sc: passed", FT.pass_sidechain("TR", comp), true)
+  check("sc: widened, pins on 3 and 4", table.concat({ cfg[7].container_nch, cfg[7].container_nch_in, pins[7][2], pins[7][3] }, " "),
+        "4 4 4 8")
+  check("sc: nothing left to pass", #FT.sidechain_gap("TR", comp), 0)
+  check("sc: the wide one untouched", pins[8][2] .. " " .. cfg[8].container_nch_in, "4 4")
+  local off = {}
+  reaper.TrackFX_GetOffline = function(_, a) return off[a] == true end
+  reaper.TrackFX_SetOffline = function(_, a, o) off[a] = o end
+  FT.set_offline("TR", 3, true, "X")
+  check("offline: set", FT.get_offline("TR", 3), true)
+  FT.set_offline("TR", 3, false, "X")
+  check("offline: back online", FT.get_offline("TR", 3), false)
+  for k, v in pairs(saved) do reaper[k] = v end
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

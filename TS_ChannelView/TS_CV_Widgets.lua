@@ -3151,6 +3151,47 @@ function W.icon_button(ctx, id, icon, size, active, tooltip, on_col, ink)
   return pressed
 end
 
+-- The oversampling switch, at the cursor, `h` tall. Off, it's a quiet
+-- "OS" in the icon colour. On, it's lit the way a locked padlock is: the
+-- factor it runs at ("4x") in `bg` on a block of `fg` -- the foot's (or
+-- header's) own text colour, which stands out on every faceplate -- so an
+-- oversampled plugin can't be missed. `lit` is that factor (nil when it
+-- isn't the one raising the rate); `faint` outlines "OS" in `fg` for
+-- something oversampled from around it, or set to a rate REAPER already
+-- runs at (see TS_CV_FXTree.os_state). Returns clicked, and the width.
+local function os_text(lit) return lit and ("%dx"):format(lit) or "OS" end
+
+function W.os_width(ctx, lit)
+  W.push_small(ctx)
+  local tw = ImGui.CalcTextSize(ctx, os_text(lit))
+  W.pop_small(ctx)
+  return math.floor(tw + 7)
+end
+
+function W.os_badge(ctx, id, lit, h, tooltip, fg, bg, faint)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local txt = os_text(lit)
+  local w = W.os_width(ctx, lit)
+  local pressed = ImGui.InvisibleButton(ctx, id, w, h)
+  local hovered = ImGui.IsItemHovered(ctx)
+  W.push_small(ctx)
+  local tw, th = ImGui.CalcTextSize(ctx, txt)
+  local tx, ty = x + (w - tw) * 0.5, y + (h - th) * 0.5
+  if lit then
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h,
+      hovered and U.with_alpha(fg, 0xbb) or fg, 2.5)
+    ImGui.DrawList_AddText(dl, tx, ty, bg, txt)
+  else
+    if hovered then ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body_hi, 2.5) end
+    if faint then ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + w - 0.5, y + h - 0.5, fg, 2.5, 0, 1.0) end
+    ImGui.DrawList_AddText(dl, tx, ty, faint and fg or (hovered and C.COL.icon_hot or C.COL.icon), txt)
+  end
+  W.pop_small(ctx)
+  W.tip(ctx, id, tooltip, hovered, false)
+  return pressed, w
+end
+
 -- The routing button.
 --
 -- Three lamps stacked in a column, the way REAPER's own routing button

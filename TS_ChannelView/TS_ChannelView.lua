@@ -1,19 +1,19 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.9.0
+-- @version 1.9.1
 -- @changelog
---  Parallel FX and FX containers: brackets over the panels, Route in
---  series / parallel / parallel with MIDI merged, put in a new container,
---  container menu (bypass, add into, unpack, remove, save as chain), drag
---  into and out of containers.
---  Parameter modulation from a control's menu, with marks on modulated
---  controls. Save and delete FX chains. Edit REAPER's FX folders from the
---  add-plugin menu. Collapsed plugins come in collapsed.
---  Faders of any shape (up or across, length, half thickness) placed among
---  the controls as merged cells; Slim fader style. XY pad and concentric
---  knob. Copy and paste a control's style. Matte knob caps. Buttons show
---  the plugin's own choice names. Edit parameters reorganised into a
---  settings column.
+--  REAPER's oversampling from ChannelView: OS in a panel's foot for a
+--  plugin, a container's menu for everything in it, OS in the header bar
+--  for the whole chain; lit with the factor while it's on.
+--  Set a plugin offline from its menu (its panel turns steel blue).
+--  View > Strip width: the fader panel, mixer strips and track name
+--  buttons, 72 to 240 px; the meter and fader scale with it.
+--  Measured gain reduction and input/output meters now work on plugins
+--  inside FX containers, however deep. A plugin running in parallel isn't
+--  measured, and Edit parameters says so. A plugin with sidechain inputs
+--  in a container that doesn't pass 3/4 offers to widen it.
+--  The Probes button puts the first probe after an ARA plugin (Melodyne
+--  and the like), which REAPER keeps in the first slot.
 --  The web page has the same: restart the web companion script after
 --  updating.
 -- @license MIT
@@ -268,6 +268,7 @@ local dock_id = tonumber(ext_get("dock", "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
 C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
+C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
 -- (saved under its old name, Faceplate texture, so the choice carries over)
 C.EFFECT_3D = ext_get("plate_texture", C.EFFECT_3D and "1" or "0") == "1"
 C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
@@ -1190,6 +1191,19 @@ local function panels_in(node)
   return out
 end
 
+-- The containers above a container, outermost first: read off the first
+-- panel inside it, whose own list runs down through this one. (An empty
+-- container's stand-in panel lists only the ones around it.)
+local function box_ancestors(node)
+  local f = app.chain[node.first]
+  local out = {}
+  for _, a in ipairs((f and f.ancestors) or {}) do
+    if a.guid == node.guid then break end
+    out[#out + 1] = a
+  end
+  return out
+end
+
 -- The container menu's items: from its square on the bracket, and as a
 -- submenu of the panel menu of anything inside it.
 box_menu_items = function(node)
@@ -1228,6 +1242,14 @@ box_menu_items = function(node)
     if ch then reaper.TrackFX_SetParam(tr, node.addr, wet, nv / 100) end
   end
   parallel_menu(node.addr, node.parallel, node.index, "container")
+  do
+    -- the container's own setting: everything inside it, oversampled
+    local st = T.os_state(tr, { addr = node.addr, ancestors = box_ancestors(node) })
+    if ImGui.BeginMenu(ctx, "Oversample everything in it" .. (st.lit and ("  (" .. st.lit .. "x)") or "")) then
+      P.os_choices(ctx, tr, node.addr, st, "container")
+      ImGui.EndMenu(ctx)
+    end
+  end
   ImGui.Separator(ctx)
 
   local inside = panels_in(node)
@@ -1407,6 +1429,37 @@ local function panel_menu()
     nudge(fx.path_t, 1)
   end
   parallel_menu(fx.addr, fx.parallel, fx.index, "plugin")
+  do
+    local st = T.os_state(app.track, fx)
+    if ImGui.BeginMenu(ctx, "Oversampling" .. (st.lit and ("  (" .. st.lit .. "x)") or "")) then
+      P.os_choices(ctx, app.track, fx.addr, st, "plugin")
+      ImGui.EndMenu(ctx)
+    end
+  end
+  do
+    -- offline: unloaded, not just bypassed (the panel turns steel blue)
+    local off = T.get_offline(app.track, fx.addr)
+    if ImGui.MenuItem(ctx, off and "Bring online" or "Set offline") then
+      T.set_offline(app.track, fx.addr, not off, U.fx_label(fx))
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, off and "Load the plugin again, as it was."
+        or "Unload the plugin: unlike bypass, it frees its CPU and memory.\nIts settings stay; bring it online to use it again.")
+    end
+  end
+  do
+    -- a plugin with sidechain inputs in a container that doesn't pass 3/4
+    if #T.sidechain_gap(app.track, fx) > 0 then
+      if ImGui.MenuItem(ctx, "Pass the sidechain into its container") then
+        T.pass_sidechain(app.track, fx)
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "This plugin has sidechain inputs, but the container it's in only\n" ..
+          "passes two channels in, so a sidechain on the track's 3/4 never\n" ..
+          "reaches it. This widens the container to pass 3/4 in as well.")
+      end
+    end
+  end
   if ImGui.MenuItem(ctx, "Put in a new container") then
     reaper.Undo_BeginBlock()
     reaper.PreventUIRefresh(1)
@@ -2132,6 +2185,28 @@ local function menu_bar()
       ImGui.EndMenu(ctx)
     end
 
+    -- the width of an expanded channel strip: the pinned fader panel, every
+    -- mixer strip and the track name buttons (collapsed ones keep theirs)
+    if ImGui.BeginMenu(ctx, "Strip width") then
+      ImGui.SetNextItemWidth(ctx, 140)
+      local swch, swv = ImGui.SliderInt(ctx, "##channel_w", C.CHANNEL_W, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX, "%d px")
+      if swch then
+        C.set_channel_w(swv)
+        ext_set("channel_w", tostring(C.CHANNEL_W))
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "How wide the fader panel, each mixer strip and the track name\n" ..
+          "buttons are. The fader and meter grow and shrink with it; collapsed\n" ..
+          "strips keep their width. Ctrl+click to type a number.")
+      end
+      if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CHANNEL_W_DEFAULT), nil, false,
+                        C.CHANNEL_W ~= C.CHANNEL_W_DEFAULT) then
+        C.set_channel_w(C.CHANNEL_W_DEFAULT)
+        ext_set("channel_w", tostring(C.CHANNEL_W))
+      end
+      ImGui.EndMenu(ctx)
+    end
+
     if ImGui.MenuItem(ctx, "Preset bar", nil, C.PRESET_BAR) then
       C.PRESET_BAR = not C.PRESET_BAR
       ext_set("preset_bar", C.PRESET_BAR and "1" or "0")
@@ -2398,6 +2473,44 @@ local function menu_bar()
     end
   end
 
+  -- Oversampling for the whole chain, left of the FX chain button: REAPER's
+  -- own chain setting (T.chain_os), lit while it's on.
+  if app.track then
+    local cst = T.chain_state(app.track)
+    local n = cst.n
+    local tw = W.os_width(ctx, cst.lit) + 6
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
+      local tip = cst.lit
+        and ("The whole FX chain is oversampled by REAPER (%s): %dx here. Click to change."):format(
+              T.os_label(n, cst.rate):lower(), cst.lit)
+        or (n > 0) and ("The whole FX chain is set to oversample %s, which REAPER already runs at:\n" ..
+              "no effect here. Click to change."):format(T.os_label(n, cst.rate):lower())
+        or  "Oversample the whole FX chain (REAPER's own oversampling)."
+      if W.os_badge(ctx, "chainos", cst.lit, C.ICON_SIZE, tip, C.COL.header_text, C.COL.header_bg, cst.faint) then
+        ImGui.OpenPopup(ctx, "chainosmenu")
+      end
+      if ImGui.BeginPopup(ctx, "chainosmenu") then
+        ImGui.TextDisabled(ctx, "Oversample the whole chain")
+        local rate = cst.rate
+        for _, k in ipairs(T.OS_CHOICES) do
+          local hint
+          if k > 0 and rate then
+            local hz = T.os_cap(k, rate)
+            hint = (hz > rate) and ("%dx"):format(T.os_factor(hz, rate)) or "no effect"
+          end
+          if ImGui.MenuItem(ctx, T.os_label(k, rate), hint, n == k) and n ~= k then
+            T.set_chain_os(app.track, k)
+          end
+        end
+        ImGui.TextDisabled(ctx, "Takes effect when playback next starts.")
+        ImGui.EndPopup(ctx)
+      end
+      fx_left = fx_left - tw
+    end
+  end
+
   -- Probes, left of the FX chain button: the TS_TrackProbe pair that
   -- measured gain reduction (and Track Analyser) need.
   if app.track then
@@ -2489,6 +2602,8 @@ local function bracket_tip(b)
       inside == 1 and "slot" or "slots")
     if not T.get_enabled(app.track, n.addr) then t = t .. "\nBypassed" end
     if n.parallel ~= 0 then t = t .. "\nRuns in parallel with the one before it" end
+    local st = T.os_state(app.track, { addr = n.addr, ancestors = box_ancestors(n) })
+    if st.lit then t = t .. ("\nEverything in it oversampled %dx (%s)"):format(st.lit, T.os_label(st.n, st.rate):lower()) end
     return t .. "\n\nClick for the container's menu"
   end
   local lines = { "Running in parallel:" }
@@ -2529,7 +2644,15 @@ local function draw_brackets()
         tw, th = ImGui.CalcTextSize(ctx, label)
         if tw + sq + 4 + 30 > x2 - x1 then label, tw = nil, 0 end
       end
-      local mw = box and (sq + (label and (4 + tw) or 0)) or 6
+      -- oversampled: the factor, lit, after the name
+      local os_lit = box and T.os_state(app.track, { addr = b.node.addr, ancestors = box_ancestors(b.node) }).lit or nil
+      local os_n = os_lit and 1 or 0
+      local ow = 0
+      if os_lit then
+        ow = W.os_width(ctx, os_lit)
+        if (label and tw or 0) + sq + 4 + ow + 4 + 30 > x2 - x1 then label, tw = nil, 0 end
+      end
+      local mw = box and (sq + (label and (4 + tw) or 0) + (os_n > 0 and (4 + ow) or 0)) or 6
       local mid = math.floor((x1 + x2) * 0.5)
       local m1, m2 = mid - mw * 0.5 - 3, mid + mw * 0.5 + 3
       ImGui.DrawList_AddLine(dl, x1, ra.y - 1, x1, ly, col, 1.5)
@@ -2545,6 +2668,16 @@ local function draw_brackets()
         end
         if label then
           ImGui.DrawList_AddText(dl, sx + sq + 4, ly - th * 0.5, col, label)
+        end
+        if os_n > 0 then
+          local ox = sx + sq + 4 + (label and (tw + 4) or 0)
+          local bh = C.BRK_ROW_H - 1
+          ImGui.DrawList_AddRectFilled(dl, ox, ly - bh * 0.5, ox + ow, ly + bh * 0.5, col, 2.0)
+          W.push_small(ctx)
+          local ot = ("%dx"):format(os_lit)
+          local otw, oth = ImGui.CalcTextSize(ctx, ot)
+          ImGui.DrawList_AddText(dl, ox + (ow - otw) * 0.5, ly - oth * 0.5, C.COL.panel_bg, ot)
+          W.pop_small(ctx)
         end
       else
         ImGui.DrawList_AddLine(dl, mid - 2, ly - 4, mid - 2, ly + 4, col, 1.5)
@@ -2786,6 +2919,7 @@ local function frame()
       C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
       TO.reload_fader_defaults()      -- the TCP window may have changed them
       C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
+      C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
     end
   end
   -- The name row's height for this whole frame: taller while any track
