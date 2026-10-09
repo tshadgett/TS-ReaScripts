@@ -21,6 +21,8 @@ local SC  = require("TS_CV_Steps")
 local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
+local RC  = require("TS_CV_ReaComp")
+local CP  = require("TS_CV_CompPanel")
 local TP  = require("TS_CV_Taps")
 local PU  = require("TS_CV_PresetUI")
 local Tr  = require("TS_CV_Trace")
@@ -28,7 +30,7 @@ local Tr  = require("TS_CV_Trace")
 local P   = {}
 local ImGui
 
-function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); PU.attach(imgui) end
+function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui) end
 
 -- An expanded panel's foot: the layout lock at its left, and the preset
 -- bar (TS_CV_PresetUI, View > Preset bar) when that's on. It's always
@@ -540,6 +542,8 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
   if key and RQ.is_eq(key) then
     return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
+  -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
+  if key and RC.is_comp(key) then return C.RC_PANEL_W end
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -2117,12 +2121,14 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local req = { is_drag_source = is_drag_source }
   local collapsed = St.is_collapsed(fx.guid)
   local is_eq = RQ.is_eq(key)
+  -- ReaComp's panel is its own canvas, with its own meters beside it
+  local is_rc = RC.is_comp(key)
   -- ReaEQ has nothing to meter -- T.reports_gr would already say no for
   -- it, but skipping the check entirely is one fewer FX-parameter scan
   -- for the one plugin type that's never going to answer yes.
-  local meter = (not is_eq) and M.meter_of(layout) or nil
+  local meter = (not is_eq and not is_rc) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
-  local io = P.has_io(track, fx, layout)
+  local io = (not is_rc) and P.has_io(track, fx, layout)
   local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key, io,
                     St.is_gr_open(fx.guid), M.locked(layout))
 
@@ -2176,6 +2182,9 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
           ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
         end
         EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H - fh, track, fx, req)
+      elseif is_rc and CP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx, req) then
+        -- drawn: the transfer-curve canvas (one missing a parameter it
+        -- needs falls through to the ordinary grid below instead)
       else
         draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
                       key, req, meter, io)

@@ -303,6 +303,30 @@ strip's own radius so the two shapes agree about what a strip is.
   project, so collapsing the reverb on the drum bus leaves the vocal's
   alone. ChannelView also remembers it per plugin: a plugin you last left
   collapsed comes in collapsed when you add it to the track you're on.
+* **ReaComp** gets a panel of its own, as ReaEQ does: a transfer curve
+  you drag. The threshold is a line across it (drag it up or down); the
+  grips on its edges widen the knee, which turns the line into a band as
+  wide as the knee and rounds the curve's corner; the curve's right-hand
+  end sets the ratio (flat at the top is ∞:1). The dotted line is where the
+  signal would go uncompressed, and the faint amber wedge between it and
+  the curve is the reduction. Behind the curve are the plugin's level and
+  gain reduction over the last few beats on the same dB scale, and a
+  **live dot** shows where the signal is on the curve right now, with a
+  short tail: a hit lands on the dotted line and sinks onto the curve at
+  the attack speed, and drifts back at the release speed. At the foot,
+  attack, release and pre-comp are an **envelope** — the reduction rising
+  over the attack and falling straight into the release from the moment
+  the signal crosses the threshold (the dotted tick). Drag the top node for
+  attack, the end node for release, and the start node back before the
+  tick for pre-comp (ReaComp's lookahead, which adds that much latency);
+  **A** is auto release. Wet, dry and auto make-up sit beside it, the
+  reduction and output meters run down the right, and the **detector** —
+  main input or sidechain, RMS, its low- and high-pass and preview — is in
+  a drawer underneath. The level history and the dot come from the track's
+  TS_TrackProbe pair, connected while the panel is open. ReaComp's *Limit
+  output* switch isn't one of its parameters, so the panel can't offer it.
+* **Duplicate** a plugin or a container from its menu: a copy, settings and
+  all, in the slot right after it.
 * **Parameter modulation.** Right-click a control ▸ *Parameter
   modulation…* opens REAPER's Parameter Modulation / Link window for that
   parameter (ticked while its modulation is on). A modulated control shows
@@ -340,7 +364,9 @@ strip's own radius so the two shapes agree about what a strip is.
   name, format or vendor, so `fab sat` finds FabFilter Saturn. It carries
   the same Folders / Categories / Developers filter, and filter and search
   compose — pick FabFilter, type `pro`, get the Pro- series. Arrows move,
-  Enter adds, and the last ten you added sit at the top.
+  Enter adds, and the last ten you added sit at the top. The search box at
+  the top of the menu itself works the same way: type, Up and Down to pick,
+  Enter to add.
 * **Gain reduction meter** — a full-height strip down the edge of the panel
   for plugins that report GR to REAPER. Turn it on per plugin (panel menu,
   or the editor) and it saves with that plugin's layout like everything
@@ -701,8 +727,8 @@ is kept as the `.bak`. The file is an ordinary layout library, so a whole
 `TS_ChannelView.html` puts ChannelView in a browser — built for an iPad in
 landscape beside the desk, and fine in any modern browser. It shows the
 selected track as ChannelView does (your layouts, styles and faceplates),
-with the transport, macro buttons, sends and receives, the ReaEQ curve
-editor, gain-reduction traces, a mixer and a session navigator.
+with the transport, macro buttons, sends and receives, the ReaEQ and
+ReaComp canvases, gain-reduction traces, a mixer and a session navigator.
 
 Two pieces, both installed by ReaPack with ChannelView:
 
@@ -784,6 +810,11 @@ script into the action list.
   Modulated controls carry the same marks as on the desktop.
 - **ReaEQ:** drag a node for frequency and gain, double-tap empty space to
   add a band, tap a node to select it and set its type and Q underneath.
+- **ReaComp:** the same canvas as on the desktop — drag the threshold line,
+  the knee grips, the curve's end for ratio and the envelope's nodes; tap
+  the Detector tab for the drawer.
+- **Wet:** in a panel's head where there's room (tap it for a slider), and
+  a slider at the top of every plugin's ⋯ sheet and container's sheet.
 - **Gain reduction:** tap a meter to open its trace; tap the trace for its
   window.
 - **Mixer:** drag the bar labelled MIXER up (closed, half or full), or tap
@@ -1514,8 +1545,10 @@ The waveform shown is one track's at a time, the selected one's.
 
 ### Wet
 
-Every panel header shows the plugin's wet %, REAPER's own wet/dry mix. It's
-dim at 100% and highlighted otherwise. Click it for a slider.
+Every panel header shows the plugin's wet %, REAPER's own wet/dry mix,
+where the panel has room for it. It's dim at 100% and highlighted
+otherwise. Click it for a slider. The panel menu has the same **Wet**
+slider at any width, and a container's menu has the container's.
 
 ## Where this came from
 

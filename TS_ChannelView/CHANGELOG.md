@@ -1,5 +1,36 @@
 # ChannelView — changelog
 
+## 1.9.2 — a ReaComp panel, duplicate, wet anywhere
+
+- **ReaComp panel.** ReaComp gets a canvas of its own, as ReaEQ does. The
+  transfer curve runs 1:1 up to the threshold, then at the ratio: drag the
+  threshold line up or down, the grips on its edges to widen the knee (the
+  line becomes a band as wide as the knee, and the corner rounds), and the
+  curve's right-hand end to set the ratio (flat at the top is ∞:1). The
+  dotted line is where the signal would go uncompressed. Behind it all are
+  the plugin's level and its gain reduction over the last few beats, on the
+  same dB scale, and a **live dot** shows where the signal is on the curve
+  right now: a hit lands on the dotted line and sinks onto the curve at the
+  attack speed. **Attack, release and pre-comp** are an envelope at the
+  foot: drag its top node for attack, its end node for release, its start
+  node back before the threshold crossing for pre-comp; **A** is auto
+  release. Wet, dry and auto make-up sit beside it, the reduction and
+  output meters run down the right, and the **detector** (main input or
+  sidechain, RMS, its filters and preview) is in a drawer underneath. The
+  level history and the dot need TS_TrackProbe on the track; the panel
+  connects to it while it's open. ReaComp's *Limit output* isn't one of its
+  parameters, so it isn't there.
+- **Duplicate.** A plugin's menu, or a container's, ▸ *Duplicate* puts a
+  copy with the same settings in the slot right after it.
+- **Wet at any width.** The wet % in a panel's header only shows where the
+  panel has room for it; every plugin's menu now has a **Wet** slider too.
+- **Arrow keys in the quick search.** In the add-plugin menu's search box,
+  Up and Down pick from the results and Enter adds the one picked, as in
+  REAPER's own windows.
+- **On the web companion** too: the ReaComp panel, Duplicate, and wet —
+  in a panel's head where there's room, and a slider in the plugin's and
+  the container's sheets. Restart the web companion script after updating.
+
 ## 1.9.1 — oversampling, offline, strip width, measuring inside containers
 
 - **Oversampling.** REAPER's own, set from ChannelView. **OS** in a

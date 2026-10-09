@@ -978,7 +978,17 @@ do
     local sl, si = decode(src)
     local dl, di = decode(dest)          -- read before anything moves
     assert(sl and sl[si + 1] and dl and di >= 0 and di <= #dl, "bad address")
-    local it = table.remove(sl, si + 1)
+    local it
+    if move == false then
+      local function clone(x)
+        local c = { name = x.name .. "'", guid = x.guid .. "'", par = x.par }
+        if x.kids then c.kids = {}; for k, y in ipairs(x.kids) do c.kids[k] = clone(y) end end
+        return c
+      end
+      it = clone(sl[si + 1])
+    else
+      it = table.remove(sl, si + 1)
+    end
     table.insert(dl, math.min(di, #dl) + 1, it)
   end
   reaper.TrackFX_Delete = function(_, a)
@@ -1078,6 +1088,19 @@ do
   reset()
   T.move(TR, { 0 }, {}, 4)                      -- A to the end, same level
   check("move: within the chain", shape(), "C1[B,C2[D,E|1]],F|1,G|2,A")
+  -- duplicates: a copy right after, at the same level
+  reset()
+  T.duplicate(TR, { 0 })
+  check("duplicate: top level", shape(), "A,A',C1[B,C2[D,E|1]],F|1,G|2")
+  reset()
+  T.duplicate(TR, { 1, 1, 1 })                  -- E, last in C2
+  check("duplicate: last in a nested container", shape(), "A,C1[B,C2[D,E|1,E'|1]],F|1,G|2")
+  reset()
+  T.duplicate(TR, { 1, 1 })                     -- C2 and what's in it
+  check("duplicate: a container", shape(), "A,C1[B,C2[D,E|1],C2'[D',E'|1]],F|1,G|2")
+  reset()
+  T.duplicate(TR, { 3 })
+  check("duplicate: the last slot", shape(), "A,C1[B,C2[D,E|1]],F|1,G|2,G'|2")
   reset()
   check("move: back where it is goes nowhere", tostring(T.move(TR, { 2 }, {}, 3)), "nil")
   check("move: a container into itself refused", tostring(T.move(TR, { 1 }, { 1, 1 }, 0)), "nil")
@@ -4453,6 +4476,99 @@ do
   FT.set_offline("TR", 3, false, "X")
   check("offline: back online", FT.get_offline("TR", 3), false)
   for k, v in pairs(saved) do reaper[k] = v end
+end
+
+-- ReaEQ: a band at -inf gain (ReaEQ's own floor) must not poison the curve
+do
+  local RQ = require("TS_CV_ReaEQ")
+  local floor = { bandtype = RQ.BAND_TYPE.BAND, freq = 100, gain = -math.huge, q = 1, enabled = true }
+  local bell  = { bandtype = RQ.BAND_TYPE.BAND, freq = 1000, gain = 6, q = 1, enabled = true }
+  local d = RQ.band_db(floor, 100, 48000)
+  check("eq: -inf band is finite", d == d and d > -math.huge, true)
+  check("eq: -inf band is a deep cut", d < -25, true)
+  local t = RQ.total_db({ floor, bell }, { val = 0 }, 1000, 48000)
+  check("eq: total with a -inf band is finite", t == t and t > -math.huge, true)
+  check("eq: total keeps the other band", ("%.1f"):format(RQ.total_db({ bell }, { val = 0 }, 1000, 48000)), "6.0")
+  check("eq: NaN master counts as 0", ("%.1f"):format(RQ.total_db({ bell }, { val = 0/0 }, 1000, 48000)), "6.0")
+  -- a shelf at the floor must not ring: nothing above its corner moves
+  local shelf = { bandtype = RQ.BAND_TYPE.LOSHELF, freq = 100, gain = -math.huge, q = 0.7071, enabled = true }
+  local s2k = RQ.band_db(shelf, 2000, 48000)
+  check("eq: floored shelf is flat above its corner", math.abs(s2k) < 1.5, true)
+  check("eq: floored shelf cuts below it", RQ.band_db(shelf, 30, 48000) < -20, true)
+end
+
+-- ReaComp: display text, the normalised/real curve, the transfer curve
+do
+  local RC = require("TS_CV_ReaComp")
+  check("rc: is_comp", RC.is_comp("ReaComp") and not RC.is_comp("ReaEQ"), true)
+  check("rc: parse -18.0", RC.parse("-18.0"), -18.0)
+  check("rc: parse unicode minus", RC.parse("\u{2212}6.5 dB"), -6.5)
+  check("rc: parse ratio", RC.parse("4.0:1"), 4.0)
+  check("rc: parse -inf", RC.parse("-inf"), -math.huge)
+  check("rc: parse inf ratio", RC.parse("inf:1"), math.huge)
+  check("rc: parse kHz", RC.parse("1.5 kHz"), 1500)
+  check("rc: parse a name", RC.parse("Main inputs"), nil)
+  check("rc: parse Off", RC.parse("Off"), nil)
+  -- a made-up threshold: -inf at 0, then dB rising with the value
+  local s = {}
+  for i = 0, 10 do
+    local n = i / 10
+    local v = (i == 0) and -math.huge or (20 * math.log(n, 10))
+    s[#s + 1] = { n, v, tostring(v) }
+  end
+  local m = RC.map_from(s)
+  check("rc: real at 1", RC.real(m, 1), 0)
+  check("rc: real at 0.5", ("%.2f"):format(RC.real(m, 0.5)), "-6.02")
+  check("rc: real next to -inf", RC.real(m, 0.01), -math.huge)
+  check("rc: norm of -6.02", ("%.3f"):format(RC.norm(m, 20 * math.log(0.5, 10))), "0.500")
+  check("rc: norm between samples", ("%.3f"):format(RC.norm(m, (20 * math.log(0.5, 10) + 20 * math.log(0.6, 10)) / 2)), "0.550")
+  check("rc: norm past the top clamps", RC.norm(m, 6), 1)
+  check("rc: norm of -inf", RC.norm(m, -math.huge), 0)
+  -- a falling display (larger value, smaller number)
+  local f = RC.map_from({ { 0, 10, "10" }, { 0.5, 5, "5" }, { 1, 0, "0" } })
+  check("rc: norm on a falling display", RC.norm(f, 7.5), 0.25)
+  -- choices
+  local c = RC.choices(RC.map_from({ { 0, nil, "Main" }, { 0.25, nil, "Main" }, { 0.5, nil, "Aux" },
+                                     { 0.75, nil, "Aux" }, { 1, nil, "Mid" } }))
+  check("rc: choices count", #c, 3)
+  check("rc: choice middles", c[1].norm .. " " .. c[2].norm .. " " .. c[3].text, "0.125 0.625 Mid")
+  -- the transfer curve
+  check("rc: below threshold 1:1", RC.transfer(-30, -18, 4, 0), -30)
+  check("rc: above threshold", RC.transfer(-10, -18, 4, 0), -16)
+  check("rc: infinite ratio holds", RC.transfer(-2, -18, math.huge, 0), -18)
+  check("rc: knee start is 1:1", RC.transfer(-21, -18, 4, 6), -21)
+  check("rc: knee end meets the ratio", RC.transfer(-15, -18, 4, 6), -18 + 3 / 4)
+  check("rc: knee middle below the line", ("%.4f"):format(RC.transfer(-18, -18, 4, 6)), ("%.4f"):format(-18 + (0.25 - 1) * 9 / 12))
+  check("rc: reduction", RC.reduction(-10, -18, 4, 0), 6)
+  -- continuous across the knee edges
+  local a1, a2 = RC.transfer(-15.0001, -18, 4, 6), RC.transfer(-14.9999, -18, 4, 6)
+  check("rc: knee joins smoothly", math.abs(a1 - a2) < 0.001, true)
+  -- the envelope's time axis
+  check("rc: time 0 at the start", RC.time_frac(0, 0.1, 500), 0)
+  check("rc: time at the top", RC.time_frac(500, 0.1, 500), 1)
+  check("rc: time round trip", ("%.3f"):format(RC.frac_time(RC.time_frac(14, 1, 5000), 1, 5000)), "14.000")
+  check("rc: rise ends at 1", ("%.6f"):format(RC.rise(1)), "1.000000")
+  -- parameters by name
+  local saved = { reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName }
+  -- REAPER 7.82's ReaComp, as it lists its parameters
+  local names = { "Threshold", "Ratio", "Attack", "Release", "Pre-comp", "resvd", "Lowpass", "Hipass",
+                  "SignIn", "AudIn", "Dry", "Wet", "Filter Preview", "RMS size", "Knee", "Auto Make Up Gain",
+                  "Auto Release", "Legacy Attack/Knee Options", "Deprecated Broken Anti-Alias",
+                  "Multichannel Mode", "Metering Index", "Bypass", "Wet", "Delta" }
+  reaper.TrackFX_GetNumParams = function() return #names end
+  reaper.TrackFX_GetParamName = function(_, _, i) return true, names[i + 1] end
+  local fp = RC.params("TR", 0, "{RC}")
+  check("rc: params found", table.concat({ fp.thr, fp.ratio, fp.atk, fp.rel, fp.pre, fp.lp, fp.hp, fp.det,
+    fp.audio, fp.dry, fp.wet, fp.rms, fp.knee, fp.autorel, fp.makeup }, " "),
+    "0 1 2 3 4 6 7 8 12 10 11 13 14 16 15")
+  check("rc: no limit parameter", fp.limit, nil)
+  check("rc: detector main", RC.det_text(0), "Main input")
+  check("rc: detector sidechain", RC.det_text(2 / RC.DET_MAX), "Sidechain (aux 3/4)")
+  check("rc: detector other", RC.det_text(5 / RC.DET_MAX), "Input 5")
+  check("rc: parse ratio with units", RC.parse("6.85 :1"), 6.85)
+  check("rc: parse inf ratio with units", RC.parse("inf :1"), math.huge)
+  check("rc: usable", RC.usable(fp), true)
+  reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = saved[1], saved[2]
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

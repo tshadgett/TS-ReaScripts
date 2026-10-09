@@ -65,6 +65,7 @@
 local U = require("TS_CV_Util")
 local M = require("TS_CV_Mappings")
 local RQ = require("TS_CV_ReaEQ")
+local RC = require("TS_CV_ReaComp")
 local St = require("TS_CV_State")
 
 local TP = {}
@@ -366,10 +367,68 @@ local function web_open(guid)
   return web_wave.set[guid] == true
 end
 
+-- A ReaComp panel (TS_CV_CompPanel) shows its trace whenever it's drawn,
+-- so it says so each frame it is; it stays tapped a while after it was
+-- last drawn, so scrolling it out of view for a moment doesn't take the
+-- routing out and put it back.
+local PANEL_LINGER = 8
+local panel_at = {}   -- guid -> when its panel was last drawn (TP.panel_open, below)
+-- Every script's open panels, not just this one's: the window and the web
+-- bridge each re-check the routing, so each publishes what it has open in
+-- ExtState TS_CV_WEB/panels ("guid=when,..."), and reads the others' --
+-- else one of them, not knowing the panel is open, takes the tap out and
+-- the other puts it back, once a second, and the history blinks.
+local shared = { at = -10, set = {} }
+local function shared_panels()
+  local now = reaper.time_precise()
+  if now - shared.at > 0.5 then
+    shared.at, shared.set = now, {}
+    local s = reaper.GetExtState("TS_CV_WEB", "panels") or ""
+    for g, t in s:gmatch("([^,=]+)=([^,]+)") do
+      local when = tonumber(t)
+      if when and now - when < PANEL_LINGER then shared.set[g] = when end
+    end
+  end
+  return shared.set
+end
+local function panel_open(guid)
+  local now = reaper.time_precise()
+  local t = panel_at[guid]
+  if t and now - t < PANEL_LINGER then return true end
+  local st = shared_panels()[guid]
+  return st ~= nil and now - st < PANEL_LINGER
+end
+TP.panel_is_open = panel_open
+
+-- this script's open panels, merged with the others' that are still
+-- fresh, written every half second while there are any
+local panels_written, panels_at = "", -10
+local function publish_panels(now)
+  if now - panels_at < 0.5 then return end
+  panels_at = now
+  local all = {}
+  for g, t in pairs(shared_panels()) do all[g] = t end
+  for g, t in pairs(panel_at) do
+    if now - t < PANEL_LINGER then all[g] = t end
+  end
+  local parts = {}
+  for g, t in pairs(all) do parts[#parts + 1] = g .. "=" .. string.format("%.2f", t) end
+  table.sort(parts)
+  local s = table.concat(parts, ",")
+  if s ~= panels_written then
+    panels_written = s
+    reaper.SetExtState("TS_CV_WEB", "panels", s, false)
+  end
+end
+
 local function wants_wave(tr, addr)
   local guid = fx_guid(tr, addr)
+  if panel_open(guid) then return true end
   if not (St.is_gr_open(guid) or web_open(guid)) then return false end
-  local layout = M.get(U.plugin_key(fx_name(tr, addr)))
+  local key = U.plugin_key(fx_name(tr, addr))
+  -- the web page's ReaComp canvas, open on some device
+  if RC.is_comp(key) then return true end
+  local layout = M.get(key)
   return layout ~= nil and M.meter_of(layout) ~= nil
 end
 
@@ -1125,11 +1184,21 @@ function TP.wave_track(tr)
   if not TP.active then any_until = 0 end
 end
 
+-- A ReaComp panel being drawn (see panel_open above).
+function TP.panel_open(guid)
+  local now = reaper.time_precise()
+  local was = panel_at[guid]
+  panel_at[guid] = now
+  -- newly open: re-check the routing now rather than on its next turn
+  if not was or now - was > PANEL_LINGER then any_until = 0; next_at = {} end
+end
+
 -- Whether any plugin type is ticked for measuring, or any track still has
 -- routing to take out. Checked now and then, not every frame.
 local function anything_to_do()
   if M.any_measure() then return true end
   if reaper.time_precise() - wave_at < 2 then return true end
+  if next(shared_panels()) then return true end
   for i = 0, reaper.CountTracks(0) - 1 do
     local ok, s = reaper.GetSetMediaTrackInfo_String(reaper.GetTrack(0, i), TP.EXT_KEY, "", false)
     if ok and s ~= "" then return true end
@@ -1147,6 +1216,7 @@ function TP.update(now)
     TP.active = anything_to_do()
     any_until = now + 2
   end
+  publish_panels(now)
   if not TP.active then return end
   if not attached then reaper.gmem_attach(TP.GMEM_NS); attached = true end
   hb = (hb + 1) % 1000000

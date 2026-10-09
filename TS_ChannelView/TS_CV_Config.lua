@@ -355,6 +355,10 @@ C.DIVIDER_W = 9
 -- fall out of P.layout, because there's no grid here to measure.
 C.EQ_PANEL_W  = 480
 
+-- The ReaComp panel (TS_CV_CompPanel.lua) is a canvas of the same kind, a
+-- fixed width with its meters inside it.
+C.RC_PANEL_W  = 480
+
 -- The canvas axes. Frequency is drawn log-scaled end to end (a straight
 -- read of what "extremes / a little in / the broad middle" means as
 -- pixel positions); gain is linear, +-EQ_GAIN_RANGE dB top to bottom.

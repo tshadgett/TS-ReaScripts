@@ -44,6 +44,7 @@ local St = require("TS_CV_State")
 local SC = require("TS_CV_Steps")
 local TP = require("TS_CV_Taps")
 local RQ = require("TS_CV_ReaEQ")
+local RC = require("TS_CV_ReaComp")
 local IX = require("TS_CV_FXIndex")
 local Tr = require("TS_CV_Trace")
 local G  = require("TS_CV_Gang")
@@ -317,6 +318,46 @@ local function box_anc(node)
   return out
 end
 
+-- ReaComp's canvas (TS_CV_CompPanel on the desktop): which parameter is
+-- which, the real ranges the page clamps to, and the detector's choices.
+-- nil when one it can't do without is missing (the page then shows the
+-- ordinary grid).
+local RC_SHORT = { thr = "t", ratio = "r", knee = "k", atk = "a", rel = "l", pre = "pc",
+                   wet = "we", dry = "dr", rms = "rm", lp = "lp", hp = "hp", det = "de",
+                   audio = "au", makeup = "mk", limit = "li", autorel = "ar" }
+local function rc_layout(fx)
+  local f = RC.params(track, fx.addr, fx.guid)
+  if not RC.usable(f) then return nil end
+  local idx, rng = {}, {}
+  for role, k in pairs(RC_SHORT) do
+    if f[role] then idx[k] = f[role] end
+  end
+  for _, role in ipairs({ "thr", "ratio", "knee", "atk", "rel", "pre" }) do
+    if f[role] then
+      local lo, hi = RC.range(RC.map(track, fx.addr, f[role]))
+      if lo then rng[RC_SHORT[role]] = arr({ round(lo, 3), round(hi, 3) }) end
+    end
+  end
+  local dch = nil
+  if f.det then
+    dch = arr()
+    for _, c in ipairs(RC.DET_CHOICES) do
+      dch[#dch + 1] = { n = round(c[1] / RC.DET_MAX, 6), t = c[2] }
+    end
+  end
+  return { i = idx, rng = rng, dch = dch }
+end
+
+-- REAPER's own wet for a plugin or container (its FX window's mix), 0..1,
+-- or nil when it has none. Asked for by name: its index moves with the
+-- plugin's parameter count.
+local function wet_of(addr)
+  if not reaper.TrackFX_GetParamFromIdent then return nil end
+  local p = reaper.TrackFX_GetParamFromIdent(track, addr, ":wet")
+  if not p or p < 0 then return nil end
+  return reaper.TrackFX_GetParam(track, addr, p), p
+end
+
 local function panel_of(fx, i)
   local key = U.plugin_key(fx.name)
   local layout, is_default = M.get_or_default(key, track, fx.addr, fx.guid)
@@ -449,6 +490,7 @@ local function panel_of(fx, i)
     gr = has_gr and (meter.range or C.MAX_GR_DB) or nil,
     gw = has_gr and (meter.win or C.GRV_DEFAULT) or nil,
     eq = (key == "ReaEQ") or nil,
+    rc = RC.is_comp(key) and rc_layout(fx) or nil,
     ps = presets_json(fx),
   }
 end
@@ -521,10 +563,11 @@ local function eq_vals(fx)
   local r = eq_read(fx)
   local out = arr()
   for _, b in ipairs(r.bands) do
+    -- a little past the canvas is enough (a shelf rings at an extreme gain)
     local g = b.gain or 0
     if g ~= g then g = 0 end
     out[#out + 1] = { t = b.bandtype, i = b.bandidx, f = round(b.freq or 1000, 1),
-                      g = round(math.max(-60, math.min(60, g)), 2), q = round(b.q or 1, 3),
+                      g = round(math.max(-30, math.min(30, g)), 2), q = round(b.q or 1, 3),
                       e = b.enabled or nil }
   end
   local m = r.master and r.master.val or 0
@@ -776,6 +819,75 @@ local function trace_of(fx, meter, est, gr)
            g = table.concat(g), b = d.beats }
 end
 
+-- ReaComp's values, real units where the page draws them (TS_CV_ReaComp):
+-- t threshold, r ratio (-1 = infinite), k knee, a attack, l release, pc
+-- pre-comp; x their display texts; n the rest normalised, keyed as in
+-- rc_layout, with their texts in nx; g the reduction it reports; ip, op,
+-- orms its probe-tap levels; h the level history in dB (rc_history).
+local RC_DB_LO = -60
+local function rc_db(a)
+  if not a or a <= 0.000001 then return RC_DB_LO end
+  return math.max(RC_DB_LO, 20 * math.log(a, 10))
+end
+local function rc_history(fx, gr)
+  local w = web_tr.set[fx.guid]
+  if w == nil then return nil end
+  Tr.want(track)
+  TP.panel_open(fx.guid)
+  local d, m1, m2 = Tr.columns(track, fx, { win = (w ~= "" and w) or C.GRV_DEFAULT }, false, gr, TRACE_W)
+  if not d then return { m = m1, m2 = m2 } end
+  -- one character a column, 0..63 over -60..0 dB; the reduction as in trace_of
+  local i, o, g = {}, {}, {}
+  for k = 1, TRACE_W do
+    i[k] = q64((rc_db(d.ip[k]) - RC_DB_LO) / -RC_DB_LO)
+    o[k] = q64((rc_db(math.max(d.mx[k] or 0, -(d.mn[k] or 0))) - RC_DB_LO) / -RC_DB_LO)
+    local v = d.g[k]
+    if v then
+      local n = math.floor(math.max(0, math.min(4095, v * 64 + 0.5)))
+      g[k] = B64C[n // 64] .. B64C[n % 64]
+    else
+      g[k] = ".."
+    end
+  end
+  return { i = table.concat(i), o = table.concat(o), g = table.concat(g) }
+end
+
+local function rc_vals(fx)
+  local f = RC.params(track, fx.addr, fx.guid)
+  if not RC.usable(f) then return nil end
+  local out = { x = {}, n = {}, nx = {} }
+  local function real(role, short, lo_inf, hi_inf)
+    local v, _, txt = RC.value(track, fx.addr, f[role])
+    if v == nil then return end
+    if v == -math.huge then v = lo_inf elseif v == math.huge then v = hi_inf end
+    out[short] = round(v, 3)
+    out.x[short] = txt
+  end
+  real("thr", "t", -150, 0)
+  real("ratio", "r", 1, -1)
+  real("knee", "k", 0, 0)
+  real("atk", "a", 0, 0)
+  real("rel", "l", 0, 0)
+  real("pre", "pc", 0, 0)
+  for _, role in ipairs({ "wet", "dry", "rms", "lp", "hp", "det", "audio", "makeup", "limit", "autorel" }) do
+    local p = f[role]
+    if p then
+      local k = RC_SHORT[role]
+      local nv = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+      out.n[k] = round(nv, 6)
+      out.nx[k] = (role == "det") and RC.det_text(nv) or RC.text(track, fx.addr, p, nv)
+    end
+  end
+  local gr = T.gain_reduction(track, fx.addr) or 0
+  out.g = round(gr, 2)
+  local lv = TP.levels(track, fx.guid)
+  if lv and not lv.old then
+    out.ip, out.op, out.orms = round(lv.in_pk, 1), round(lv.out_pk, 1), round(lv.out_rms, 1)
+  end
+  out.h = rc_history(fx, gr)
+  return out
+end
+
 local function peak_db(tr, ch)
   local v = reaper.Track_GetPeakInfo(tr, ch) or 0
   return v > 0.0000001 and 20 * math.log(v, 10) or -150
@@ -992,7 +1104,9 @@ local function build_vals(lseq, ack)
                      pn = pname, pm = (pname ~= "" and not psame) or nil,
                      est = est,
                      tw = (gr and web_tr.set[fx.guid]) and trace_of(fx, meter, est, gr) or nil,
-                     eq = RQ.is_eq(key) and eq_vals(fx) or nil }
+                     eq = RQ.is_eq(key) and eq_vals(fx) or nil,
+                     wt = (function() local w = wet_of(fx.addr); return w and round(w, 3) end)(),
+                     rc = RC.is_comp(key) and rc_vals(fx) or nil }
     if RQ.is_eq(key) then any_eq = true end
   end
   local tr = nil
@@ -1011,10 +1125,22 @@ local function build_vals(lseq, ack)
       mo = math.floor(reaper.GetMediaTrackInfo_Value(track, "I_RECMON") or 0) % 3,
     }
   end
+  -- the containers' own wet, for their sheets
+  local bw = nil
+  local function walk(nodes)
+    for _, n in ipairs(nodes or {}) do
+      if n.kind == "container" then
+        local w = wet_of(n.addr)
+        if w then bw = bw or {}; bw[n.guid] = round(w, 3) end
+        walk(n.children)
+      end
+    end
+  end
+  if track then walk(chain and chain.tree) end
   local mx = (reaper.time_precise() - mix_at < MIX_TTL) and mixer_vals() or nil
   return { L = lseq, A = ack, fx = fxv, msg = last_msg, tr = tr, s = sends_vals(on_master() and HO.CAT or 0), r = sends_vals(-1), mx = mx,
            nv = nav_open() and nav_vals() or nil,
-           sp = any_eq and spectrum_vals() or nil }
+           sp = any_eq and spectrum_vals() or nil, bw = bw }
 end
 
 -- ---------------------------------------------------------------------
@@ -1260,6 +1386,25 @@ local function apply(verb, a)
       reaper.TrackFX_SetParamNormalized(track, fx.addr, p, inv and (1 - v) or v)
       TP.touched(track, fx.guid)
     end
+  elseif verb == "rcset" then
+    -- rcset|guid|role|real: one of ReaComp's real-unit settings, by its
+    -- short name (rc_layout), clamped to its range
+    local fx = fx_by_guid(a[1]); local v = tonumber(a[3])
+    if fx and v then
+      local f = RC.params(track, fx.addr, fx.guid)
+      for role, k in pairs(RC_SHORT) do
+        if k == a[2] and f[role] then
+          local p = f[role]
+          local lo, hi = RC.range(RC.map(track, fx.addr, p))
+          if role == "ratio" and v < 0 then
+            reaper.TrackFX_SetParamNormalized(track, fx.addr, p, 1)   -- infinite
+          else
+            if lo then v = math.max(lo, math.min(hi, v)) end
+            RC.set(track, fx.addr, p, v)
+          end
+        end
+      end
+    end
   elseif verb == "def" then
     local fx = fx_by_guid(a[1]); local p = tonumber(a[2])
     if fx and p then
@@ -1494,6 +1639,27 @@ local function apply(verb, a)
           T.set_os_shift(track, node.addr, v, verb == "fxos" and "plugin" or "container")
         end
       end
+      layout_dirty = true
+    end
+  elseif track and verb == "wet" then
+    -- wet|guid|0..1: a plugin's or a container's own wet
+    local node = fx_by_guid(a[1]) or box_by_guid(a[1])
+    local v = tonumber(a[2])
+    if node and v and T.guid_at(track, node.addr) == node.guid then
+      local _, p = wet_of(node.addr)
+      if p then reaper.TrackFX_SetParam(track, node.addr, p, math.max(0, math.min(1, v))) end
+    end
+  elseif track and (verb == "fxdup" or verb == "boxdup") then
+    -- a copy in the slot right after it
+    local node = (verb == "fxdup") and fx_by_guid(a[1]) or box_by_guid(a[1])
+    local path = node and (node.path_t or node.path)
+    if path and T.guid_at(track, node.addr) == node.guid then
+      reaper.Undo_BeginBlock()
+      reaper.PreventUIRefresh(1)
+      T.duplicate(track, path)
+      reaper.PreventUIRefresh(-1)
+      reaper.Undo_EndBlock("ChannelView: duplicate " ..
+        ((verb == "fxdup") and U.fx_label(node) or "container"), -1)
       layout_dirty = true
     end
   elseif track and verb == "fxwrap" then

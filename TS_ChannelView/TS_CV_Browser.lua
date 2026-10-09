@@ -281,7 +281,7 @@ end
 -- opens the search dialog from its first item.
 
 local MENU_ID = "addfxmenu"
-local menu = { request = false, insert_at = nil, query = "", focus = false }
+local menu = { request = false, insert_at = nil, query = "", focus = false, sel = 1, scroll = false }
 
 -- Where the menu's items insert: set by B.draw_menu for the chain, or by
 -- B.menu_items when the same list is shown somewhere else (the input FX
@@ -617,7 +617,24 @@ local function results_list(ctx, track, found)
   w = math.min(w, 520)
   local h = math.min(#found, MENU_ROWS) * row_h + 4
   if ImGui.BeginChild(ctx, "##addfxres", w, h, 0) then
-    plugin_items(ctx, track, found)
+    -- as plugin_items, but rows that show which one the arrow keys are on
+    local dl = ImGui.GetWindowDrawList(ctx)
+    for i, e in ipairs(found) do
+      if ImGui.Selectable(ctx, ("%s%s##q%d"):format(pad, e.short, i), menu.sel == i) then
+        if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
+      end
+      badge(ctx, dl, e.fmt)
+      if ImGui.BeginPopupContextItem(ctx, "##fxqctx" .. i) then
+        ImGui.TextDisabled(ctx, e.short)
+        ImGui.Separator(ctx)
+        folder_actions(ctx, e)
+        ImGui.EndPopup(ctx)
+      end
+      if menu.sel == i and menu.scroll then
+        ImGui.SetScrollHereY(ctx, 0.5)
+        menu.scroll = false
+      end
+    end
     ImGui.EndChild(ctx)
   end
 end
@@ -655,7 +672,7 @@ function B.draw_menu(ctx, track)
   end
   ImGui.SetNextItemWidth(ctx, 240)
   local ch, q = ImGui.InputTextWithHint(ctx, "##addfxq", "type to search\u{2026}", menu.query)
-  if ch then menu.query = q end
+  if ch then menu.query = q; menu.sel, menu.scroll = 1, true end
   ImGui.Separator(ctx)
 
   cur.insert_at, cur.track, cur.input = menu.insert_at, nil, false
@@ -664,6 +681,15 @@ function B.draw_menu(ctx, track)
     if #found == 0 then
       ImGui.TextDisabled(ctx, "No matches")
     else
+      -- the arrow keys pick from the list while the search box keeps focus,
+      -- as in REAPER's own windows; Enter adds the one picked
+      local n = #found
+      menu.sel = math.max(1, math.min(n, menu.sel or 1))
+      if ImGui.IsKeyPressed(ctx, ImGui.Key_DownArrow) then
+        menu.sel, menu.scroll = math.min(n, menu.sel + 1), true
+      elseif ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow) then
+        menu.sel, menu.scroll = math.max(1, menu.sel - 1), true
+      end
       results_list(ctx, track, found)
       -- a click inside the list's own window doesn't close the menu by
       -- itself, as it would a row of the menu proper
@@ -671,7 +697,7 @@ function B.draw_menu(ctx, track)
       if #found >= MENU_MAX then ImGui.TextDisabled(ctx, "\u{2026}keep typing to narrow it") end
       if not inserted_now and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
                                or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
-        if insert(track, found[1], cur.insert_at, false) then inserted_now = true end
+        if insert(track, found[menu.sel] or found[1], cur.insert_at, false) then inserted_now = true end
         ImGui.CloseCurrentPopup(ctx)
       end
     end

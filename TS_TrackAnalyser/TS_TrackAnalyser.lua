@@ -2,11 +2,9 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 1.9.1
+-- @version 1.9.2
 -- @changelog
---  Inserting probes puts the first one after an ARA plugin (Melodyne and
---  the like), which REAPER keeps in the first slot. Reads ChannelView's
---  measured gain reduction for plugins inside FX containers.
+--  No changes: the version moves to 1.9.2 to match ChannelView.
 -- @about
 --  # Track Analyser
 --

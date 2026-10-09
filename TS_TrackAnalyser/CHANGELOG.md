@@ -1,5 +1,9 @@
 # Track Analyser — changelog
 
+## 1.9.2 — in step with ChannelView
+
+No changes. The version moves to 1.9.2 to match ChannelView.
+
 ## 1.9.1 — probes behind ARA plugins
 
 - **Inserting probes on a track with an ARA plugin.** REAPER keeps an ARA

@@ -434,6 +434,22 @@ function T.move(track, src_path, dest_parent, gap)
   return final
 end
 
+-- Copies the FX (or container, and everything in it) at `path` into the
+-- slot right after it, at the same level. No undo block of its own.
+-- Returns the copy's slot, or nil.
+function T.duplicate(track, path)
+  local src = T.addr_of(track, path)
+  if not src then return nil end
+  local parent, i = parent_of(path)
+  local dest
+  if #parent == 0 then dest = i + 1
+  else dest = container_addr(track, copy_path(parent, i + 1)) end
+  if not dest then return nil end
+  local ok = pcall(reaper.TrackFX_CopyToTrack, track, src, track, dest, false)
+  if not ok then return nil end
+  return i + 1
+end
+
 -- REAPER's "parallel" setting (see parallel_of): 0, 1 or 2.
 function T.set_parallel(track, addr, v)
   pcall(reaper.TrackFX_SetNamedConfigParm, track, addr, "parallel", tostring(v or 0))

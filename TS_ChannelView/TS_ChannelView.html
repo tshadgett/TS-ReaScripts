@@ -205,6 +205,15 @@ button { font: inherit; color: inherit; }
 .pnl.hw .knob:not(.flat) svg:not(.scl) { filter: drop-shadow(calc(1.5px * var(--hwk,1)) calc(3px * var(--hwk,1)) calc(2.5px * var(--hwk,1)) rgba(0,0,0,calc(0.36 + 0.1 * (var(--hwk,1) - 1)))); }
 .pnl.hw .tog, .pnl.hw .cmb { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), calc(1.5px * var(--hwk,1)) calc(3px * var(--hwk,1)) calc(4px * var(--hwk,1)) rgba(0,0,0,calc(0.30 + 0.1 * (var(--hwk,1) - 1))); }
 .ph .ix { margin-right: 4px; }
+/* REAPER's own wet, in the head where there's room (as the desktop's) */
+.ph .wet { flex-shrink: 0; height: 26px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.ph .wet.mix { color: var(--accent); font-weight: 600; }
+.wsl { position: relative; height: 44px; border-radius: 6px; background: var(--toff); border: 1px solid var(--ring);
+  margin: 4px 0 10px; touch-action: none; overflow: hidden; cursor: ew-resize; }
+.wsl .f { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: 0.55; }
+.wsl .t { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
 .ph .nm { flex-grow: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hb { width: 29px; height: 30px; flex-shrink: 0; border: 0; border-radius: 5px; background: transparent; padding: 0; cursor: pointer;
   display: flex; align-items: center; justify-content: center; }
@@ -590,7 +599,7 @@ const outbox = [];
 function send(verb, ...args) {
   // A run of moves on one control collapses to its latest: the target is
   // the verb and every argument but the value.
-  const coalesce = ["p", "vol", "pan", "svol", "eqf", "eqg", "eqq", "grset", "tvol", "tpan", "mix", "nav", "navview"].includes(verb);
+  const coalesce = ["p", "vol", "pan", "svol", "eqf", "eqg", "eqq", "rcset", "wet", "grset", "tvol", "tpan", "mix", "nav", "navview"].includes(verb);
   const target = verb + "|" + args.slice(0, -1).join("|");
   if (coalesce) {
     const i = outbox.findIndex(o => o.target === target);
@@ -635,8 +644,13 @@ function saveGrv() {
   try { localStorage.setItem("tscv.grv", JSON.stringify(Object.fromEntries(grv))); } catch (e) {}
   sendGrv();
 }
-function sendGrv() { send("grset", [...grv].map(([g, w]) => g + "=" + w).join(",")); }
-setInterval(() => { if (grv.size) sendGrv(); }, 3000);
+// ReaComp canvases (buildComp) always show their trace: they're asked for too.
+function sendGrv() {
+  const all = new Map(grv);
+  for (const g of rcOpen) if (!all.has(g)) all.set(g, "");
+  send("grset", [...all].map(([g, w]) => g + "=" + w).join(","));
+}
+setInterval(() => { if (grv.size || rcOpen.size) sendGrv(); }, 3000);
 setTimeout(() => { if (grv.size) sendGrv(); }, 300);
 try { showMacros = localStorage.getItem("tscv.macros") !== "0"; } catch (e) {}
 
@@ -2821,6 +2835,7 @@ function buildPanels() {
   const keep = row.dataset.trk === trk ? row.scrollLeft : 0;
   row.innerHTML = "";
   ui.panels.clear();
+  rcOpen.clear();
   const fx = layout.fx || [];
   if (!layout.track) { row.append(h("div", "empty", "No track selected")); return; }
   const rowH = row.clientHeight - 16;
@@ -2943,6 +2958,7 @@ function doubleTap(node, fn) {
 function buildPanel(p, bodyH) {
   if (p.off) return buildOffline(p, bodyH);
   if (p.eq) return buildEq(p, bodyH);
+  if (p.rc) return buildComp(p, bodyH);
   // locked: arranged at its saved rows whatever the height, and scrolled
   // when that's taller than the panel
   const lay = placeControls(p.c || [], p.lk ? p.lk * CELL_H : bodyH);
@@ -2982,7 +2998,8 @@ function buildPanel(p, bodyH) {
   head.append(h("span", "ix", p.i));
   // the padlock goes in the foot with the preset bar; without one, here
   if (p.lk && !layout.pbar) head.append(lockMark(p));
-  head.append(h("span", "nm", p.n), moreBtn(p), col, flt, byp);
+  const wet = wetChip(p, w);
+  head.append(h("span", "nm", p.n), ...(wet ? [wet] : []), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
   pnl.append(head, body);
   const gridX = PAD + Math.max(0, (w - PAD * 2 - gr - SB - lay.width) / 2);
@@ -3331,7 +3348,7 @@ function buildPanel(p, bodyH) {
     });
     grEl = { fill, gv, bar, cv, pnl };
   }
-  ui.panels.set(p.g, { p, ctl, byp, head, grEl, pl });
+  ui.panels.set(p.g, { p, ctl, byp, head, grEl, pl, wet });
   return pnl;
 }
 
@@ -3346,6 +3363,57 @@ function nearestChoice(c, v) {
 // ---------------------------------------------------------------------------
 // adding, moving and removing plugins (top level only, as on the desktop)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// wet: REAPER's own mix for a plugin or container, as the desktop has it --
+// a % in the head where the panel has room for it (dim at 100%, in the
+// accent when mixed back), and a slider in the panel's and the container's
+// sheets at any width
+// ---------------------------------------------------------------------------
+const WET_MIN_W = 230;
+const wetNow = (g, box) => {
+  const l = held("wet/" + g);
+  if (l) return l.v;
+  if (box) return vals && vals.bw && vals.bw[g] != null ? vals.bw[g] : null;
+  const fv = vals && vals.fx && vals.fx[g];
+  return fv && fv.wt != null ? fv.wt : null;
+};
+const pct = v => Math.round(v * 100) + "%";
+function wetSlider(g, box) {
+  const el = h("div", "wsl"), f = h("div", "f"), t = h("div", "t");
+  el.append(f, t);
+  const paint = v => { f.style.width = (v * 100) + "%"; t.textContent = "Wet " + pct(v); };
+  paint(wetNow(g, box) ?? 1);
+  const at = e => { const r = el.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
+  const set = v => { touch("wet/" + g, v); paint(v); send("wet", g, v.toFixed(3)); };
+  el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); set(at(e)); });
+  el.addEventListener("pointermove", e => { if (el.hasPointerCapture(e.pointerId)) set(at(e)); });
+  // a double tap puts it back to 100%
+  let last = 0;
+  el.addEventListener("pointerup", () => { const n = Date.now(); if (n - last < 350) set(1); last = n; });
+  return el;
+}
+function wetSheet(title, g, box) {
+  openSheet(sh => { sh.append(h("h3", null, title + " — wet"), wetSlider(g, box),
+    h("div", "note", "REAPER's own wet/dry mix. Double-tap for 100%.")); });
+}
+// the head's %, or nothing on a panel too narrow for it
+function wetChip(p, w) {
+  if (w < WET_MIN_W) return null;
+  const b = h("button", "wet", "");
+  b.setAttribute("aria-label", "Wet");
+  b.addEventListener("click", e => { e.stopPropagation(); wetSheet(p.n, p.g); });
+  return b;
+}
+function paintWet(P, g) {
+  if (!P.wet) return;
+  const v = wetNow(g);
+  P.wet.style.display = v == null ? "none" : "";
+  if (v == null) return;
+  const t = pct(v);
+  if (P.wet.textContent !== t) P.wet.textContent = t;
+  P.wet.classList.toggle("mix", v < 0.995);
+}
+
 function moreBtn(p) {
   const b = h("button", "hb mo"); b.innerHTML = `<svg viewBox="0 0 24 24">${ICON.more}</svg>`;
   b.setAttribute("aria-label", "Plugin menu");
@@ -3364,6 +3432,7 @@ function panelMenu(p) {
   const box = p.bx && (layout.br || []).find(b => b.g === p.bx);
   openSheet(sh => {
     sh.append(h("h3", null, p.n));
+    if (!p.off && wetNow(p.g) != null) sh.append(wetSlider(p.g));
     const item = (label, fn, enabled = true, danger = false) => {
       const o = h("button", "opt", label);
       if (danger) o.style.color = "var(--clip)";
@@ -3380,6 +3449,7 @@ function panelMenu(p) {
     sh.append(h("div", "gap"));
     for (const [v, label] of RUNS)
       item(((p.pl || 0) === v ? "✓ " : "") + label, () => send("fxpar", p.g, v), ix > 0 && (p.pl || 0) !== v);
+    item("Duplicate", () => send("fxdup", p.g));
     item("Put in a new container", () => send("fxwrap", p.g));
     item(`Oversampling${p.os && p.os.l ? ": " + p.os.l + "x" : ""}…`, () => osSheet(p.n, p.os, v => send("fxos", p.g, v)));
     item(p.off ? "Bring online" : "Set offline (unload)", () => send("fxoff", p.g));
@@ -3394,6 +3464,7 @@ function panelMenu(p) {
 function boxSheet(b) {
   openSheet(sh => {
     sh.append(h("h3", null, "Container: " + b.n));
+    if (wetNow(b.g, true) != null) sh.append(wetSlider(b.g, true));
     const item = (label, fn, enabled = true, danger = false) => {
       const o = h("button", "opt", label);
       if (danger) o.style.color = "var(--clip)";
@@ -3405,6 +3476,7 @@ function boxSheet(b) {
     for (const [v, label] of RUNS)
       item(((b.pl || 0) === v ? "✓ " : "") + label, () => send("boxpar", b.g, v), b.ix > 0 && (b.pl || 0) !== v);
     item("Add plugin into it…", () => pickPlugin(b.nn || 0, b.p));
+    item("Duplicate", () => send("boxdup", b.g));
     item(`Oversample everything in it${b.os && b.os.l ? ": " + b.os.l + "x" : ""}…`,
          () => osSheet("Container: " + b.n, b.os, v => send("boxos", b.g, v)));
     sh.append(h("div", "gap"));
@@ -3976,7 +4048,8 @@ function buildEq(p, bodyH) {
   col.addEventListener("click", fold);
   doubleTap(head, fold);
   if (shut.has(p.g)) pnl.classList.add("shut");
-  head.append(h("span", "ix", p.i), h("span", "nm", p.n), moreBtn(p), col, flt, byp);
+  const wet = wetChip(p, w);
+  head.append(h("span", "ix", p.i), h("span", "nm", p.n), ...(wet ? [wet] : []), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
   pnl.append(head, body);
   const cv = h("canvas", "eqc");
@@ -4162,7 +4235,7 @@ function buildEq(p, bodyH) {
   });
   cv.addEventListener("pointerup", () => { st.drag = null; });
 
-  const P = { p, ctl: [], byp, head, grEl: null, pl: null,
+  const P = { p, ctl: [], byp, head, grEl: null, pl: null, wet,
     eq(ev) {
       if (!ev) return;
       st.bands = ev.b || []; st.master = ev.m || 0;
@@ -4171,6 +4244,396 @@ function buildEq(p, bodyH) {
     } };
   ui.panels.set(p.g, P);
   paintStrip();
+  requestAnimationFrame(draw);
+  return pnl;
+}
+
+// ---------------------------------------------------------------------------
+// ReaComp: the transfer-curve canvas, as the desktop draws it
+// (TS_CV_CompPanel). The bridge sends real units (vals.fx[g].rc) and takes
+// them back with rcset; the plain knobs and switches go through p by their
+// parameter index (p.rc.i).
+// ---------------------------------------------------------------------------
+const RC_W = 560, RC_MW = 66, RC_DB_TOP = 6, RC_DB_BOT = -60;
+const RC_ATK = [0.1, 500], RC_REL = [1, 5000], RC_PRE = [0.1, 250];
+const rcOpen = new Set();            // ReaComp canvases built: their traces are asked for
+const rcDrawer = new Set();          // ...and which have the detector drawer out
+function rcTransfer(x, thr, ratio, knee) {
+  const slope = ratio < 0 ? 0 : (ratio > 0 ? 1 / ratio : 1);
+  knee = Math.max(0, knee || 0);
+  if (knee > 0) {
+    const h2 = knee / 2;
+    if (x <= thr - h2) return x;
+    if (x >= thr + h2) return thr + (x - thr) * slope;
+    const t = x - thr + h2;
+    return x + (slope - 1) * t * t / (2 * knee);
+  }
+  return x <= thr ? x : thr + (x - thr) * slope;
+}
+const rcFrac = (ms, r) => (!ms || ms <= r[0]) ? 0 : ms >= r[1] ? 1 : Math.log(ms / r[0]) / Math.log(r[1] / r[0]);
+const rcTime = (f, r) => f <= 0 ? 0 : f >= 1 ? r[1] : r[0] * Math.pow(r[1] / r[0], f);
+const rcRise = (t, k) => (1 - Math.exp(-t * k)) / (1 - Math.exp(-k));
+// a readout's units, when the plugin's own text has none
+const rcMs = t => (t && !/[a-z]/i.test(t)) ? t + " ms" : (t || "");
+
+function buildComp(p, bodyH) {
+  const W = RC_W + PAD * 2;
+  const pnl = h("div", "pnl");
+  pnl.style.width = W + "px";
+  const head = h("div", "ph");
+  const byp = h("button", "hb"); byp.innerHTML = `<svg viewBox="0 0 24 24">${ICON.power}</svg>`;
+  byp.addEventListener("click", () => send("byp", p.g));
+  const flt = h("button", "hb fl"); flt.innerHTML = `<svg viewBox="0 0 24 24">${ICON.float}</svg>`;
+  flt.addEventListener("click", () => send("float", p.g));
+  const col = h("button", "hb col"); col.innerHTML = `<svg viewBox="0 0 24 24">${ICON.collapse}</svg>`;
+  const fold = () => {
+    if (shut.has(p.g)) shut.delete(p.g); else shut.add(p.g);
+    saveShut(); pnl.classList.toggle("shut", shut.has(p.g));
+  };
+  col.addEventListener("click", fold);
+  doubleTap(head, fold);
+  if (shut.has(p.g)) pnl.classList.add("shut");
+  const wet = wetChip(p, W);
+  head.append(h("span", "ix", p.i), h("span", "nm", p.n), ...(wet ? [wet] : []), moreBtn(p), col, flt, byp);
+  const body = h("div", "pb");
+  pnl.append(head, body);
+  const cv = h("canvas", "eqc");
+  const H = Math.max(200, bodyH - 0);
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = RC_W * dpr; cv.height = H * dpr; cv.style.height = H + "px"; cv.style.width = RC_W + "px";
+  body.append(cv);
+
+  const I = p.rc.i || {}, RNG = p.rc.rng || {};
+  const st = { v: null, over: new Map(), trail: [], zones: [], drag: null, tap: null };
+  rcOpen.add(p.g); sendGrv();
+  // A setting the finger is moving wins over the bridge's echo for a moment.
+  const now = () => Date.now();
+  const get = k => { const o = st.over.get(k); if (o && now() - o.t < 700) return o.v; return st.v ? st.v[k] : undefined; };
+  const put = (k, v) => st.over.set(k, { v, t: now() });
+  const clamp = (k, v) => { const r = RNG[k]; return r ? Math.max(r[0], Math.min(r[1], v)) : v; };
+  const setReal = (k, v) => { v = clamp(k, v); put(k, v); send("rcset", p.g, k, (+v).toFixed(4)); draw(); };
+  const getN = k => { const o = st.over.get("n." + k); if (o && now() - o.t < 700) return o.v; return st.v && st.v.n ? (st.v.n[k] || 0) : 0; };
+  const setN = (k, v) => { if (I[k] == null) return; v = Math.max(0, Math.min(1, v)); st.over.set("n." + k, { v, t: now() }); send("p", p.g, I[k], v.toFixed(4)); draw(); };
+  const flip = k => setN(k, getN(k) >= 0.5 ? 0 : 1);
+  let K = null;
+  const colours = () => {
+    const cs = getComputedStyle(pnl), v = n => cs.getPropertyValue(n).trim();
+    K = { acc: v("--accent"), bi: v("--fill-bi"), cap: v("--cap"), label: v("--label"), dim: v("--dim"),
+          value: v("--value"), ring: v("--ring"), panel: v("--panel"), win: v("--win"), toff: v("--toff"),
+          ton: v("--ton"), ttext: v("--ttext"), body: v("--body"), track: v("--track"), lo: v("--lo") };
+  };
+
+  function draw() {
+    if (!K) colours();
+    const c = cv.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, RC_W, H);
+    const zones = st.zones = [];
+    const dh = rcDrawer.has(p.g) ? 84 : 22;
+    const gw = RC_W - RC_MW, gh = H - dh;
+    const v = st.v || {};
+    let thr = get("t"); if (thr == null) thr = -20; thr = Math.max(RC_DB_BOT, thr);
+    let ratio = get("r"); if (ratio == null) ratio = 1;
+    const knee = Math.max(0, get("k") || 0);
+    const gr = v.g || 0;
+    const X = db => (db - RC_DB_BOT) / (RC_DB_TOP - RC_DB_BOT) * gw;
+    const Y = db => (RC_DB_TOP - db) / (RC_DB_TOP - RC_DB_BOT) * gh;
+    const out = db => rcTransfer(db, thr, ratio, knee);
+    const perDb = gh / (RC_DB_TOP - RC_DB_BOT);
+    c.font = "11px -apple-system, system-ui, sans-serif";
+
+    c.save(); c.beginPath(); c.rect(0, 0, gw, gh); c.clip();
+    c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(0, 0, gw, gh);
+    c.lineWidth = 1;
+    for (const g of [0, -12, -24, -36, -48]) {
+      const y = Math.round(Y(g)) + 0.5;
+      c.strokeStyle = withA(K.ring, 0.45); c.beginPath(); c.moveTo(0, y); c.lineTo(gw, y); c.stroke();
+      c.fillStyle = withA(K.dim, 0.8); c.fillText(String(g), 4, y - 3);
+    }
+    // the level history: output filled from the foot, the input a fainter
+    // wash above it, the reduction hanging from the top
+    const hst = v.h;
+    if (hst && !hst.m && hst.o) {
+      const N = hst.o.length, cw = gw / N;
+      const q = (s, k) => (B64V[s.charCodeAt(k)] || 0) / 63;
+      for (let k = 0; k < N; k++) {
+        const yo = Y(RC_DB_BOT + q(hst.o, k) * 60), yi = Y(RC_DB_BOT + q(hst.i, k) * 60);
+        c.fillStyle = withA(K.label, 0.25); c.fillRect(k * cw, yo, cw + 0.3, gh - yo);
+        if (yi < yo - 0.5) { c.fillStyle = withA(K.label, 0.11); c.fillRect(k * cw, yi, cw + 0.3, yo - yi); }
+      }
+      const pts = [];
+      c.fillStyle = withA(K.bi, 0.17);
+      for (let k = 0; k < N; k++) {
+        const a = B64V[hst.g.charCodeAt(2 * k)], b = B64V[hst.g.charCodeAt(2 * k + 1)];
+        if (a < 0 || b < 0) continue;
+        const gy = Math.min(gh, (a * 64 + b) / 64 * perDb);
+        if (gy > 0.5) c.fillRect(k * cw, 0, cw + 0.3, gy);
+        pts.push((k + 0.5) * cw, gy);
+      }
+      if (pts.length > 2) {
+        c.strokeStyle = K.bi; c.lineWidth = 1.5; c.beginPath(); c.moveTo(pts[0], pts[1]);
+        for (let k = 2; k < pts.length; k += 2) c.lineTo(pts[k], pts[k + 1]);
+        c.stroke();
+      }
+    }
+    // faded on the left, where the curve starts, and at the foot
+    let gr1 = c.createLinearGradient(0, 0, gw * 0.7, 0);
+    gr1.addColorStop(0, withA(K.panel, 0.7)); gr1.addColorStop(0.64, withA(K.panel, 0.25)); gr1.addColorStop(1, withA(K.panel, 0));
+    c.fillStyle = gr1; c.fillRect(0, 0, gw, gh);
+    gr1 = c.createLinearGradient(0, gh * 0.55, 0, gh);
+    gr1.addColorStop(0, withA(K.panel, 0)); gr1.addColorStop(1, withA(K.panel, 0.88));
+    c.fillStyle = gr1; c.fillRect(0, gh * 0.55, gw, gh * 0.45);
+    if (hst && hst.m) {
+      c.fillStyle = K.dim; c.textAlign = "right";
+      c.fillText(hst.m, gw - 6, 14); if (hst.m2) c.fillText(hst.m2, gw - 6, 28);
+      c.textAlign = "left";
+    }
+    // the threshold, widened by the knee into a band fading at its edges
+    const ty = Y(thr);
+    if (knee > 0) {
+      const ta = Y(thr + knee / 2), tb = Y(thr - knee / 2);
+      const g2 = c.createLinearGradient(0, ta, 0, tb);
+      g2.addColorStop(0, withA(K.acc, 0)); g2.addColorStop(0.5, withA(K.acc, 0.5)); g2.addColorStop(1, withA(K.acc, 0));
+      c.fillStyle = g2; c.fillRect(0, ta, gw, tb - ta);
+    }
+    c.strokeStyle = K.acc; c.lineWidth = 1.6; c.beginPath(); c.moveTo(0, ty); c.lineTo(gw, ty); c.stroke();
+    // the reduction wedge and the dotted no-compression line
+    const k0 = thr - knee / 2;
+    c.beginPath(); c.moveTo(X(k0), Y(k0));
+    for (let i = 0; i <= 60; i++) { const d = k0 + (RC_DB_TOP - k0) * i / 60; c.lineTo(X(d), Y(d)); }
+    for (let i = 60; i >= 0; i--) { const d = k0 + (RC_DB_TOP - k0) * i / 60; c.lineTo(X(d), Y(out(d))); }
+    c.closePath(); c.fillStyle = withA(K.bi, 0.11); c.fill();
+    c.setLineDash([3, 4]); c.strokeStyle = withA(K.label, 0.65); c.lineWidth = 1;
+    c.beginPath(); c.moveTo(X(k0), Y(k0)); c.lineTo(X(RC_DB_TOP), Y(RC_DB_TOP)); c.stroke(); c.setLineDash([]);
+    // the transfer curve
+    c.beginPath();
+    for (let i = 0; i <= 200; i++) { const d = RC_DB_BOT + (RC_DB_TOP - RC_DB_BOT) * i / 200; i ? c.lineTo(X(d), Y(out(d))) : c.moveTo(X(d), Y(out(d))); }
+    c.strokeStyle = K.cap; c.lineWidth = 2.4; c.stroke();
+    // the live dot, and its tail
+    const tr = st.trail;
+    tr.forEach((pt, i) => {
+      if (!pt || i === tr.length - 1) return;
+      c.fillStyle = withA(K.bi, 0.12 + i * 0.045);
+      c.beginPath(); c.arc(X(pt[0]), Y(pt[1]), 1.6 + i * 0.2, 0, Math.PI * 2); c.fill();
+    });
+    const hd = tr[tr.length - 1];
+    if (hd) {
+      const hx = X(hd[0]), hy = Y(hd[1]), cy = Y(out(hd[0]));
+      if (cy - hy > 2) { c.setLineDash([2, 2]); c.strokeStyle = withA(K.bi, 0.7); c.lineWidth = 1; c.beginPath(); c.moveTo(hx, hy + 6); c.lineTo(hx, cy - 1); c.stroke(); c.setLineDash([]); }
+      c.fillStyle = withA(K.bi, 0.2); c.beginPath(); c.arc(hx, hy, 10, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "#ffd8b0"; c.strokeStyle = K.bi; c.lineWidth = 1.5;
+      c.beginPath(); c.arc(hx, hy, 5, 0, Math.PI * 2); c.fill(); c.stroke();
+    }
+    // readouts
+    const tx = (v.x && v.x.t) || "";
+    c.fillStyle = K.value; c.font = "600 15px -apple-system, system-ui, sans-serif";
+    c.fillText(st.over.has("t") && now() - st.over.get("t").t < 700 ? thr.toFixed(1) + " dB" : tx, 10, ty - 8);
+    c.font = "11px -apple-system, system-ui, sans-serif"; c.fillStyle = K.dim; c.fillText("Threshold", 10, ty + 15);
+    const ex = gw - 8, ey = Y(out(RC_DB_TOP));
+    const rx = (v.x && v.x.r) || "";
+    const dragR = st.over.has("r") && now() - st.over.get("r").t < 700;
+    const rl = ratio < 0 ? "∞ : 1" : (dragR || !rx ? (ratio >= 10 ? ratio.toFixed(0) : ratio.toFixed(2)) : rx.replace(/\s*:\s*1\s*$/, "")) + " : 1";
+    c.textAlign = "right"; c.fillStyle = K.value; c.font = "600 15px -apple-system, system-ui, sans-serif";
+    c.fillText(rl, ex - 12, ey - 9);
+    c.font = "11px -apple-system, system-ui, sans-serif"; c.fillStyle = K.dim; c.fillText("Ratio", ex - 12, ey + 15);
+    c.textAlign = "left";
+    c.restore();
+
+    // the handles
+    const kx = X(thr);
+    c.fillStyle = K.acc; c.beginPath(); c.roundRect ? c.roundRect(kx - 24, ty - 5, 48, 10, 5) : c.rect(kx - 24, ty - 5, 48, 10); c.fill();
+    zones.push({ k: "thr", x: 0, y: ty - 14, w: gw - 26, h: 28 });
+    if (I.k != null) {
+      const gx = Math.max(80, kx - 96);
+      [[thr + knee / 2, -1], [thr - knee / 2, 1]].forEach(([e, s], j) => {
+        const yy = Y(e) + s * 4;
+        c.fillStyle = withA(K.acc, 0.9); c.fillRect(gx, yy - 2.5, 18, 5);
+        zones.push({ k: "knee", s, x: gx - 8, y: yy - 12, w: 34, h: 24 });
+        if (j === 0) { c.textAlign = "right"; c.fillStyle = K.label; c.fillText("Knee " + ((v.x && v.x.k) || knee.toFixed(1) + " dB"), gx - 6, yy + 4); c.textAlign = "left"; }
+      });
+    }
+    c.fillStyle = K.cap; c.beginPath(); c.arc(ex, ey, 6, 0, Math.PI * 2); c.fill();
+    zones.push({ k: "ratio", x: ex - 18, y: ey - 18, w: 30, h: 36, ey });
+
+    // the envelope and the output, see-through, riding on the canvas's foot
+    const ph = 98, ow = 126, ew = 212;
+    const py = gh - ph - 8, ox = gw - 8 - ow, el = ox - 8 - ew;
+    const panelBox = (x, y, w, hh) => {
+      c.fillStyle = withA(K.win, 0.8); c.strokeStyle = K.ring; c.lineWidth = 1;
+      c.beginPath(); c.roundRect ? c.roundRect(x + 0.5, y + 0.5, w, hh, 6) : c.rect(x + 0.5, y + 0.5, w, hh); c.fill(); c.stroke();
+    };
+    if (py > 40 && el > 40) {
+      panelBox(el, py, ew, ph);
+      const atk = get("a") || 0, rel = get("l") || 0, pre = I.pc != null ? (get("pc") || 0) : 0;
+      const auto = I.ar != null && getN("ar") >= 0.5;
+      const gx0 = el + 12, gx1 = el + ew - 12, base = py + ph - 28, peak = py + 16;
+      const PW = I.pc != null ? 28 : 0, inner = gx1 - gx0 - PW, AW = inner * 0.34, RW = inner * 0.62;
+      const on = gx0 + PW, sx = on - rcFrac(pre, RC_PRE) * PW, ak = on + rcFrac(atk, RC_ATK) * AW, re = ak + rcFrac(rel, RC_REL) * RW;
+      c.setLineDash([2, 3]); c.strokeStyle = withA(K.dim, 0.6); c.beginPath(); c.moveTo(on, peak - 2); c.lineTo(on, base + 2); c.stroke(); c.setLineDash([]);
+      c.strokeStyle = withA(K.ring, 0.8); c.beginPath(); c.moveTo(gx0, base); c.lineTo(gx1, base); c.stroke();
+      const A = [[gx0, base], [sx, base]];
+      for (let i = 1; i <= 20; i++) { const t = i / 20; A.push([sx + (ak - sx) * t, base + (peak - base) * rcRise(t, 3.2)]); }
+      const Rr = [[ak, peak]];
+      for (let i = 1; i <= 26; i++) { const t = i / 26; Rr.push([ak + (re - ak) * t, peak + (base - peak) * rcRise(t, 3.5)]); }
+      Rr.push([gx1, base]);
+      c.beginPath(); c.moveTo(gx0, base); [...A, ...Rr].forEach(q => c.lineTo(q[0], q[1])); c.lineTo(gx1, base); c.closePath();
+      c.fillStyle = withA(K.acc, 0.18); c.fill();
+      c.strokeStyle = K.acc; c.lineWidth = 2;
+      c.beginPath(); A.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.stroke();
+      if (auto) c.setLineDash([4, 3]);
+      c.beginPath(); Rr.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.stroke(); c.setLineDash([]);
+      const node = (x, y, hollow) => {
+        c.beginPath(); c.arc(x, y, 6, 0, Math.PI * 2);
+        c.fillStyle = hollow ? K.win : "#e4e6e9"; c.fill(); c.strokeStyle = K.acc; c.lineWidth = 1.8; c.stroke();
+      };
+      if (I.pc != null) { node(sx, base, false); zones.push({ k: "env", r: "pc", rng: RC_PRE, w0: PW, dir: -1, x: sx - 14, y: base - 14, w: 28, h: 28 }); }
+      node(ak, peak, false); zones.push({ k: "env", r: "a", rng: RC_ATK, w0: AW, dir: 1, x: ak - 14, y: peak - 14, w: 28, h: 28 });
+      node(re, base, auto); zones.push({ k: "env", r: "l", rng: RC_REL, w0: RW, dir: 1, x: re - 14, y: base - 14, w: 28, h: 28 });
+      c.fillStyle = K.value; c.font = "11px -apple-system, system-ui, sans-serif";
+      c.fillText("Atk " + rcMs(v.x && v.x.a), gx0, py + ph - 9);
+      c.textAlign = "right"; c.fillText("Rel " + (auto ? "auto" : rcMs(v.x && v.x.l)), gx1, py + ph - 9);
+      if (pre > 0) { c.textAlign = "right"; c.fillStyle = K.label; c.fillText("Pre " + rcMs(v.x && v.x.pc), gx1 - (I.ar != null ? 26 : 0), py + 19); }
+      c.textAlign = "left";
+      const btn = (x, y, w, hh, on, text, k) => {
+        c.fillStyle = on ? K.ton : K.toff; c.strokeStyle = on ? K.ton : K.ring;
+        c.beginPath(); c.roundRect ? c.roundRect(x, y, w, hh, 4) : c.rect(x, y, w, hh); c.fill(); c.stroke();
+        c.fillStyle = on ? "#0d1116" : K.ttext; c.font = "600 10px -apple-system, system-ui, sans-serif"; c.textAlign = "center";
+        c.fillText(text, x + w / 2, y + hh / 2 + 3.5); c.textAlign = "left"; c.font = "11px -apple-system, system-ui, sans-serif";
+        zones.push({ k: "flip", r: k, x: x - 4, y: y - 4, w: w + 8, h: hh + 8 });
+      };
+      if (I.ar != null) btn(gx1 - 18, py + 6, 20, 18, auto, "A", "ar");
+      panelBox(ox, py, ow, ph);
+      const knob = (cx, cy, r, k, name) => {
+        const n = getN(k), a0 = Math.PI * 0.75, a1 = a0 + Math.PI * 1.5 * n;
+        c.lineWidth = 3; c.strokeStyle = K.track; c.beginPath(); c.arc(cx, cy, r + 3, a0, a0 + Math.PI * 1.5); c.stroke();
+        c.strokeStyle = K.acc; c.beginPath(); c.arc(cx, cy, r + 3, a0, a1); c.stroke();
+        c.fillStyle = K.body; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = "#f0f1f2"; c.lineWidth = 2; c.beginPath();
+        c.moveTo(cx + Math.cos(a1) * r * 0.25, cy + Math.sin(a1) * r * 0.25); c.lineTo(cx + Math.cos(a1) * r * 0.8, cy + Math.sin(a1) * r * 0.8); c.stroke();
+        c.textAlign = "center"; c.fillStyle = K.label; c.font = "10px -apple-system, system-ui, sans-serif";
+        c.fillText(name, cx, cy + r + 14);
+        c.fillStyle = K.value; c.fillText((v.nx && v.nx[k]) || "", cx, cy + r + 26);
+        c.textAlign = "left"; c.font = "11px -apple-system, system-ui, sans-serif";
+        zones.push({ k: "knob", r: k, x: cx - r - 10, y: cy - r - 8, w: 2 * r + 20, h: 2 * r + 36 });
+      };
+      if (I.we != null) knob(ox + 32, py + 22, 13, "we", "Wet");
+      if (I.dr != null) knob(ox + ow - 32, py + 22, 13, "dr", "Dry");
+      const bw = I.li != null ? (ow - 18) / 2 : ow - 12;
+      if (I.mk != null) btn(ox + 6, py + ph - 24, bw, 18, getN("mk") >= 0.5, "MAKE-UP", "mk");
+      if (I.li != null) btn(ox + 12 + bw, py + ph - 24, bw, 18, getN("li") >= 0.5, "LIMIT", "li");
+
+      // the drawer
+      const dy = gh;
+      c.fillStyle = withA(K.win, 0.6); c.fillRect(0, dy, gw, dh);
+      c.strokeStyle = K.ring; c.beginPath(); c.moveTo(0, dy + 0.5); c.lineTo(gw, dy + 0.5); c.stroke();
+      const tw = 100, tx0 = (gw - tw) / 2;
+      c.fillStyle = K.body; c.beginPath(); c.roundRect ? c.roundRect(tx0, dy, tw, 18, 4) : c.rect(tx0, dy, tw, 18); c.fill();
+      c.fillStyle = K.label; c.textAlign = "center"; c.fillText((rcDrawer.has(p.g) ? "▾ " : "▴ ") + "Detector", gw / 2, dy + 13); c.textAlign = "left";
+      zones.push({ k: "drawer", x: tx0 - 10, y: dy - 6, w: tw + 20, h: 28 });
+      if (rcDrawer.has(p.g)) {
+        const yy = dy + 30;
+        if (I.de != null) {
+          c.fillStyle = K.dim; c.fillText("Detector", 10, yy - 6);
+          c.fillStyle = K.body; c.strokeStyle = K.ring;
+          c.beginPath(); c.roundRect ? c.roundRect(10, yy, 120, 26, 4) : c.rect(10, yy, 120, 26); c.fill(); c.stroke();
+          c.fillStyle = K.ttext; c.fillText(((v.nx && v.nx.de) || "") + "  ▾", 16, yy + 17);
+          zones.push({ k: "det", x: 10, y: yy, w: 120, h: 26 });
+        }
+        let kx2 = 170;
+        for (const [k, n] of [["rm", "RMS"], ["lp", "Low-pass"], ["hp", "High-pass"]]) {
+          if (I[k] != null) { knob(kx2, yy + 8, 11, k, n); kx2 += 70; }
+        }
+        if (I.au != null) btn(gw - 118, yy + 2, 108, 24, getN("au") >= 0.5, "PREVIEW FILTER", "au");
+      }
+    }
+
+    // the meters, full height on the right
+    const mx = gw;
+    c.fillStyle = withA(K.win, 0.45); c.fillRect(mx, 0, RC_MW, H);
+    c.strokeStyle = K.ring; c.beginPath(); c.moveTo(mx + 0.5, 0); c.lineTo(mx + 0.5, H); c.stroke();
+    const mh = H - 36, bw2 = 12;
+    const gx = mx + 12, ox2 = mx + RC_MW - 12 - bw2;
+    c.fillStyle = "#0c0d0e"; c.fillRect(gx, 6, bw2, mh); c.fillRect(ox2, 6, bw2, mh);
+    const grR = Math.max(12, Math.ceil(gr / 6) * 6);
+    c.fillStyle = K.bi; c.fillRect(gx + 1, 7, bw2 - 2, Math.min(1, gr / grR) * (mh - 2));
+    const op = v.op != null ? v.op : -150;
+    const of = Math.max(0, Math.min(1, (op + 60) / 66));
+    c.fillStyle = op > -0.1 ? css("--clip") : K.lo; c.fillRect(ox2 + 1, 6 + mh - of * mh, bw2 - 2, of * mh);
+    c.font = "10px -apple-system, system-ui, sans-serif"; c.textAlign = "center";
+    c.fillStyle = K.dim; c.fillText("GR", gx + bw2 / 2, mh + 18); c.fillText("Out", ox2 + bw2 / 2, mh + 18);
+    c.fillStyle = K.bi; c.fillText(gr >= 0.05 ? gr.toFixed(1) : "–", gx + bw2 / 2, mh + 30);
+    c.fillStyle = K.value; c.fillText(op > -149 ? op.toFixed(1) : "–", ox2 + bw2 / 2, mh + 30);
+    c.textAlign = "left";
+  }
+
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const hitZone = (x, y) => { for (let i = st.zones.length - 1; i >= 0; i--) { const z = st.zones[i]; if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return z; } return null; };
+  cv.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    const [x, y] = pos(e);
+    const z = hitZone(x, y);
+    if (!z) return;
+    const t = now(), dbl = st.tap && st.tap.z === z.k + (z.r || "") && t - st.tap.t < 350;
+    st.tap = { z: z.k + (z.r || ""), t };
+    if (z.k === "flip") { flip(z.r); return; }
+    if (z.k === "drawer") { if (rcDrawer.has(p.g)) rcDrawer.delete(p.g); else rcDrawer.add(p.g); draw(); return; }
+    if (z.k === "det") {
+      const list = p.rc.dch || [], cur = (st.v && st.v.nx && st.v.nx.de) || "";
+      openSheet(sh => {
+        sh.append(h("h3", null, "Detector input"));
+        for (const ch of list) {
+          const o = h("button", "opt" + (ch.t === cur ? " cur" : ""), ch.t);
+          o.addEventListener("click", () => { setN("de", ch.n); closeSheet(); });
+          sh.append(o);
+        }
+      });
+      return;
+    }
+    if (z.k === "knob" && dbl) { send("def", p.g, I[z.r]); return; }
+    cv.setPointerCapture(e.pointerId);
+    const gh = H - (rcDrawer.has(p.g) ? 84 : 22);
+    st.drag = { z, x0: x, y0: y, perDb: (RC_DB_TOP - RC_DB_BOT) / gh, gh,
+      t: get("t"), k: get("k") || 0, n: z.r ? getN(z.r) : 0,
+      f: z.k === "env" ? rcFrac(get(z.r) || 0, z.rng) : 0 };
+  });
+  cv.addEventListener("pointermove", e => {
+    const d = st.drag;
+    if (!d || !cv.hasPointerCapture(e.pointerId)) return;
+    const [x, y] = pos(e);
+    const fine = e.shiftKey ? 0.25 : 1;
+    const dx = (x - d.x0) * fine, dy = (y - d.y0) * fine;
+    const z = d.z;
+    if (z.k === "thr") setReal("t", d.t - dy * d.perDb);
+    else if (z.k === "knee") setReal("k", Math.max(0, d.k + z.s * dy * d.perDb * 2));
+    else if (z.k === "ratio") {
+      const thr = get("t");
+      const endDb = RC_DB_TOP - (z.ey + dy) / d.gh * (RC_DB_TOP - RC_DB_BOT);
+      const rise = RC_DB_TOP - thr, hi = (RNG.r && RNG.r[1]) || 100;
+      // flat at the top of the range: infinite
+      if (rise > 0.01 && endDb - thr <= rise / hi) { put("r", -1); send("rcset", p.g, "r", "-1"); draw(); }
+      else setReal("r", rise <= 0.01 ? get("r") : rise / Math.max(0.0001, endDb - thr));
+    }
+    else if (z.k === "env") {
+      const f = Math.max(0, Math.min(1, d.f + z.dir * dx / z.w0));
+      setReal(z.r, rcTime(f, z.rng));
+    }
+    else if (z.k === "knob") setN(z.r, d.n - dy / 160);
+  });
+  const end = () => { st.drag = null; };
+  cv.addEventListener("pointerup", end);
+  cv.addEventListener("pointercancel", end);
+
+  const P = { p, ctl: [], byp, head, grEl: null, pl: null, wet,
+    rc(rv) {
+      if (!rv) return;
+      st.v = rv;
+      const tr = st.trail;
+      if (rv.ip != null && rv.ip > RC_DB_BOT && !(vals.fx[p.g] && vals.fx[p.g].e === false)) tr.push([Math.min(6, rv.ip), Math.min(6, rv.ip) - (rv.g || 0)]);
+      else tr.push(null);
+      while (tr.length > 14) tr.shift();
+      draw();
+    } };
+  ui.panels.set(p.g, P);
   requestAnimationFrame(draw);
   return pnl;
 }
@@ -4226,7 +4689,9 @@ function render() {
       e.set(v, x);
       if (e.val) e.val.textContent = layout.vals === false ? "" : x;
     }
+    paintWet(P, g);
     if (P.eq) P.eq(fv.eq);
+    if (P.rc) P.rc(fv.rc);
     if (P.grEl) {
       const gr = fv.gr || 0, range = Math.max(P.p.gr || 18, gr);
       P.grEl.fill.style.height = `calc(${Math.min(100, gr / range * 100)}% - 4px)`;

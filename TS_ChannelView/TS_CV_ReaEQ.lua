@@ -484,9 +484,25 @@ end
 -- instead.
 local LOG10 = math.log(10)
 
+-- A band's gain can read back as -inf (ReaEQ's own floor -- see RQ.read),
+-- and 10^(-inf/40) is 0, which puts an infinity in the denominators
+-- below and NaN in what comes out. NaN poisons everything it's summed
+-- with, so one such band took the combined curve off the canvas with it.
+-- Clamped here to a little past what the canvas can show (the curve runs
+-- off its edge either way): -inf draws as a cut that leaves the canvas,
+-- which is what it is. Not further: a shelf's filter maths goes unstable
+-- at an extreme gain (at -90 dB a low shelf rings like a resonant peak
+-- a decade up). A NaN gain (nothing to read at all) counts as 0.
+local GAIN_CLAMP = 30
+local function sane_gain(g)
+  if g ~= g then return 0 end
+  return math.max(-GAIN_CLAMP, math.min(GAIN_CLAMP, g or 0))
+end
+
 local function coeffs(bandtype, freq, gain_db, q, sr)
   freq = math.max(1, math.min(sr * 0.499, freq))
   q = math.max(0.05, q or 1.0)
+  gain_db = sane_gain(gain_db)
   local w0 = 2 * math.pi * freq / sr
   local cw, sw = math.cos(w0), math.sin(w0)
   -- The RBJ cookbook's own alpha, sw/(2*q), is the standard convention
@@ -571,12 +587,15 @@ function RQ.band_db(band, f, sr)
   local dre, dim = 1 + a1 * c1 + a2 * c2, -(a1 * s1 + a2 * s2)
   local num = math.sqrt(nre * nre + nim * nim)
   local den = math.max(1e-12, math.sqrt(dre * dre + dim * dim))
-  return 20 * math.log(math.max(1e-9, num / den)) / LOG10
+  local db = 20 * math.log(math.max(1e-9, num / den)) / LOG10
+  -- never NaN out of here: a reading that can't be drawn draws as nothing
+  if db ~= db then return 0 end
+  return db
 end
 
 -- The combined response of every band plus the master gain, in dB, at f.
 function RQ.total_db(bands, master, f, sr)
-  local db = master and master.val or 0
+  local db = sane_gain(master and master.val or 0)
   for _, b in ipairs(bands) do
     db = db + RQ.band_db(b, f, sr)
   end

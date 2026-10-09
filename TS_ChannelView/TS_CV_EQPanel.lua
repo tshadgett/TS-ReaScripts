@@ -590,8 +590,10 @@ function EQP.draw(ctx, dl, x, y, w, h, track, fx, req)
       -- notch, bandpass) pin their node to the 0dB centre line instead of
       -- using that value -- matching that they don't move on the gain
       -- axis in the drag handler below either.
+      -- (at the canvas's edge, not past it, so a band driven to its floor
+      -- keeps a node you can see and grab)
       local node_db = has_gain
-        and math.max(-C.EQ_GAIN_RANGE * 1.5, math.min(C.EQ_GAIN_RANGE * 1.5, b.gain or 0))
+        and math.max(-C.EQ_GAIN_RANGE, math.min(C.EQ_GAIN_RANGE, b.gain or 0))
         or 0
       local nx, ny = x_of(b.freq, gx0, gw), y_of(node_db, gy0, gh)
       local id = ("eqn##%s:%d:%d"):format(fx.guid, b.bandtype, b.bandidx)

@@ -1,19 +1,15 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.9.1
+-- @version 1.9.2
 -- @changelog
---  REAPER's oversampling from ChannelView: OS in a panel's foot for a
---  plugin, a container's menu for everything in it, OS in the header bar
---  for the whole chain; lit with the factor while it's on.
---  Set a plugin offline from its menu (its panel turns steel blue).
---  View > Strip width: the fader panel, mixer strips and track name
---  buttons, 72 to 240 px; the meter and fader scale with it.
---  Measured gain reduction and input/output meters now work on plugins
---  inside FX containers, however deep. A plugin running in parallel isn't
---  measured, and Edit parameters says so. A plugin with sidechain inputs
---  in a container that doesn't pass 3/4 offers to widen it.
---  The Probes button puts the first probe after an ARA plugin (Melodyne
---  and the like), which REAPER keeps in the first slot.
+--  ReaComp gets a panel of its own, as ReaEQ does: a transfer curve to
+--  drag (threshold, knee, ratio), attack, release and pre-comp as an
+--  envelope, a live dot showing where the signal sits on the curve, the
+--  level history and gain reduction behind it, and the detector in a
+--  drawer. Needs TS_TrackProbe on the track for the history and the dot.
+--  Duplicate a plugin or a container from its menu.
+--  A Wet slider in every plugin's menu, at any panel width.
+--  The quick search in the add-plugin menu: Up and Down pick, Enter adds.
 --  The web page has the same: restart the web companion script after
 --  updating.
 -- @license MIT
@@ -39,6 +35,8 @@
 --  [nomain] TS_CV_Editor.lua
 --  [nomain] TS_CV_Envelopes.lua
 --  [nomain] TS_CV_EQPanel.lua
+--  [nomain] TS_CV_ReaComp.lua
+--  [nomain] TS_CV_CompPanel.lua
 --  [nomain] TS_CV_Focus.lua
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
@@ -164,6 +162,8 @@ local IC = require("TS_CV_Icons")
 local CN = require("TS_CV_Chains")
 local TP = require("TS_CV_Taps")
 local RQ = require("TS_CV_ReaEQ")
+local RC = require("TS_CV_ReaComp")
+local RCP = require("TS_CV_CompPanel")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
@@ -1268,6 +1268,18 @@ box_menu_items = function(node)
   if ImGui.MenuItem(ctx, "Move right", nil, false, node.index < node.count - 1) then
     nudge(node.path, 1, "container")
   end
+  if ImGui.MenuItem(ctx, "Duplicate") then
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+    T.duplicate(tr, node.path)
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock("ChannelView: duplicate container", -1)
+    rescan(true)
+    ImGui.CloseCurrentPopup(ctx)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "A copy of the container and everything in it, right after it.")
+  end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Open the container's window") then
     reaper.TrackFX_Show(tr, node.addr, 3)
@@ -1338,6 +1350,20 @@ local function panel_menu()
     app.fxren_for = nil
     rescan(true)
     ImGui.CloseCurrentPopup(ctx)
+  end
+  -- REAPER's own wet for the plugin: the header shows it where there's
+  -- room, and here it works at any panel width
+  do
+    local wet = reaper.TrackFX_GetParamFromIdent and reaper.TrackFX_GetParamFromIdent(app.track, fx.addr, ":wet")
+    if wet and wet >= 0 then
+      local wv = reaper.TrackFX_GetParam(app.track, fx.addr, wet) or 1
+      ImGui.SetNextItemWidth(ctx, 150)
+      local ch, nv = ImGui.SliderDouble(ctx, "Wet##fxwet", wv * 100, 0, 100, "%.0f%%")
+      if ch then reaper.TrackFX_SetParam(app.track, fx.addr, wet, nv / 100) end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "REAPER's own wet/dry mix for this plugin.\nCtrl+click to type a value.")
+      end
+    end
   end
   ImGui.Separator(ctx)
 
@@ -1459,6 +1485,17 @@ local function panel_menu()
           "reaches it. This widens the container to pass 3/4 in as well.")
       end
     end
+  end
+  if ImGui.MenuItem(ctx, "Duplicate") then
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+    T.duplicate(app.track, fx.path_t)
+    reaper.PreventUIRefresh(-1)
+    reaper.Undo_EndBlock("ChannelView: duplicate " .. U.fx_label(fx), -1)
+    rescan(true)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "A copy, settings and all, in the slot right after it.")
   end
   if ImGui.MenuItem(ctx, "Put in a new container") then
     reaper.Undo_BeginBlock()
@@ -2812,7 +2849,13 @@ local function panel_row(row_h, row_w)
         end
         if req.grv_window then
           local l = materialise(fx)
-          if l.meter then l.meter.win = (req.grv_window ~= C.GRV_DEFAULT) and req.grv_window or nil end
+          if l.meter then
+            l.meter.win = (req.grv_window ~= C.GRV_DEFAULT) and req.grv_window or nil
+          elseif RC.is_comp(key) then
+            -- ReaComp's canvas keeps its history's window in the same
+            -- place, with no meter of its own (the canvas has the meters)
+            l.meter = { on = false, win = (req.grv_window ~= RCP.WINDOW_DEFAULT) and req.grv_window or nil }
+          end
           M.set(key, l); M.save()
         end
         if req.ctx_control then
