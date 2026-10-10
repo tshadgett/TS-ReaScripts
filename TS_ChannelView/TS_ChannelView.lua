@@ -1,23 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.9.5
+-- @version 1.9.6
 -- @changelog
---  Pages: a Page break in a plugin's layout splits its panel into tabs,
---  each with a name and a colour stripe.
---  Show when: a control can show only while another parameter is, isn't,
---  is above, is below or is between given values -- a delay's sync
---  switch swapping its note knob for its ms knob in one place.
---  More than one layout per plugin, picked per instance from the panel
---  menu (Layout): copy the one you have to a new one, or start empty.
---  Background tint: the strip, the track name and the Channel panel can
---  take a share of the track's colour, per group or per track; the TCP
---  window can follow.
---  While REAPER is busy on a long job, such as a plugin scan, ChannelView
---  backs off rather than keep reading plugins through it.
---  A gain-reduction trace says when its plugin is outside the probes.
---  Fix: a trace could flicker while the web companion was running.
---  The web page has the same: restart the web companion script after
---  updating.
+--  Fix: Edit Parameters could stop ChannelView with an error when the
+--  selected track changed while it was open (nothing selected, or the
+--  project closed or switched). It now keeps working on the plugin it
+--  was opened for, follows it if it moves in the chain, and closes if
+--  it's deleted, putting back anything applied.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

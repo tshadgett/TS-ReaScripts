@@ -978,8 +978,38 @@ local function draw_layout_row(ctx, track)
   if not ok then ImGui.EndDisabled(ctx) end
 end
 
-function E.draw(ctx, track)
+-- Where the plugin being edited is now: its track still there, and the
+-- plugin found by its GUID (it may have moved in the chain). Updates
+-- st.fx.addr; false when either has gone.
+local function still_there()
+  local tr = st.track
+  if not (tr and reaper.ValidatePtr2(0, tr, "MediaTrack*")) then return false end
+  if reaper.TrackFX_GetFXGUID(tr, st.fx.addr) == st.fx.guid then return true end
+  for _, fx in ipairs(require("TS_CV_FXTree").collect(tr)) do
+    if fx.guid == st.fx.guid then st.fx.addr = fx.addr; return true end
+  end
+  return false
+end
+
+-- `_selected` is the track selected now, which is not necessarily the
+-- one the dialog is editing: the dialog works on the track it was opened
+-- for (st.track), whatever is selected meanwhile -- and closes, putting
+-- back anything applied, if that track or its plugin goes away (deleted,
+-- the project closed or switched).
+function E.draw(ctx, _selected)
   if not st.open then return nil end
+  -- gone: put back anything applied (the library, not the track, so this
+  -- holds either way) and close, from inside the popup so ImGui lets go
+  if not still_there() then
+    revert_applied()
+    st.open, st.request = false, false
+    if ImGui.BeginPopupModal(ctx, TITLE, true, ImGui.WindowFlags_NoCollapse) then
+      ImGui.CloseCurrentPopup(ctx)
+      ImGui.EndPopup(ctx)
+    end
+    return "cancelled"
+  end
+  local track = st.track
 
   if st.request then
     ImGui.OpenPopup(ctx, TITLE)

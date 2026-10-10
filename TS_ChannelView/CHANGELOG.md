@@ -1,5 +1,16 @@
 # ChannelView — changelog
 
+## 1.9.6 — a fix for Edit Parameters
+
+- **Fix:** Edit Parameters could stop ChannelView with an error
+  ("TrackFX_GetParamName (MediaTrack expected)") when the selected track
+  changed while the dialog was open — nothing selected, or the project
+  closed or switched. Selecting a different track also had it read
+  parameter names from the wrong plugin. The dialog now works on the
+  plugin it was opened for whatever is selected, follows it if it moves
+  in the chain, and closes if its track or the plugin is deleted, putting
+  back anything you had applied.
+
 ## 1.9.5 — pages, conditional controls, layouts per instance, background tint
 
 - **Pages.** A **Page** break in a plugin's layout (the editor's *Page*
