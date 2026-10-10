@@ -4184,6 +4184,48 @@ do
   check("fader look: a group's unset part falls to the Default", l and (l.style .. "|" .. l.cap), "rail|#c9a24a")
   TO.set_fader_default("fxret", "cap", nil, true); TO.set_fader_default("default", "style", nil, true)
   check("fader look: group cleared", ext["TS_ChannelViewfader_defaults"], "")
+  -- background tint by group: the group's strength, else the Default's; 0 off
+  check("bg tint: off by default", TO.track_tint("parent"), 0)
+  check("bg tint: nothing to do when none set", TO.any_bg_tint(), false)
+  TO.set_bg_tint("parent", 60, true)
+  TO.set_bg_tint("default", 15, true)
+  clock = clock + 2
+  check("bg tint: parent", TO.track_tint("parent"), 0.6)
+  check("bg tint: child takes the Default", TO.track_tint("child"), 0.15)
+  check("bg tint: return takes the Default", TO.track_tint("ret"), 0.15)
+  check("bg tint: master never", TO.track_tint("master"), 0)
+  check("bg tint: saved", ext["TS_ChannelViewbg_tints"], "parent=60;default=15")
+  TO.set_bg_tint("fxret", 30.4, true)
+  clock = clock + 2
+  check("bg tint: return's own", TO.track_tint("ret"), 0.3)
+  -- a track's own strength wins over its group's, 0 included
+  TO.set_own_tint({ "child" }, 45)
+  clock = clock + 2
+  check("bg tint: own", TO.track_tint("child"), 0.45)
+  check("bg tint: own saved with the track", pext["childP_EXT:TS_CV_BGTINT"], "45")
+  TO.set_own_tint({ "ret" }, 0)
+  clock = clock + 2
+  check("bg tint: own 0 beats the group", TO.track_tint("ret"), 0)
+  TO.set_own_tint({ "child", "ret" }, nil)
+  clock = clock + 2
+  check("bg tint: back to the group's", TO.track_tint("child"), 0.15)
+  check("bg tint: cleared from the track", pext["childP_EXT:TS_CV_BGTINT"], "")
+  TO.set_bg_tint("parent", 0, true); TO.set_bg_tint("default", 0, true); TO.set_bg_tint("fxret", 0, true)
+  check("bg tint: all off clears", ext["TS_ChannelViewbg_tints"], "")
+  check("bg tint: off again", TO.track_tint("ret"), 0)
+  TO.set_own_tint({ "plain" }, 20)
+  clock = clock + 2
+  check("bg tint: own works with no group strengths", TO.track_tint("plain"), 0.2)
+  TO.set_own_tint({ "plain" }, nil)
+  -- the colour maths
+  local U = require("TS_CV_Util")
+  check("tint: 0 is the base", U.tint(0x202327ff, 0xd9893aff, 0), 0x202327ff)
+  check("tint: 1 is the colour, base alpha", U.tint(0x202327ff, 0xd9893aff, 1), 0xd9893aff)
+  check("tint: half way", ("%08x"):format(U.tint(0x000000ff, 0x80808000, 0.5)), "404040ff")
+  check("tint: a dark colour at full strength stays", U.tint_readable(0x202327ff, 0x2a4a6aff, 0.8), U.tint(0x202327ff, 0x2a4a6aff, 0.8))
+  local y = U.tint_readable(0x202327ff, 0xe2d84aff, 0.9)
+  check("tint: a pale colour is held back", U.is_light(y), false)
+  check("tint: ...but still tinted", y ~= 0x202327ff, true)
   for k, f in pairs(saved) do reaper[k] = f end
   TO.reload_fader_defaults()
 end
@@ -4569,6 +4611,271 @@ do
   check("rc: parse inf ratio with units", RC.parse("inf :1"), math.huge)
   check("rc: usable", RC.usable(fp), true)
   reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = saved[1], saved[2]
+end
+
+-- ---------------------------------------------------------------------
+-- Pages: a page-break control splits a panel into tabbed pages
+do
+  local St = require "TS_CV_State"
+  local function K(p) return { type = "knob", param = p } end
+  local function PG(l, cap) return { type = "page", param = -1, label = l, cap = cap } end
+  local D = { type = "divider", param = -1 }
+
+  check("pages: none without a break", P.pages({ K(0), D, K(1) }), nil)
+  check("pages: empty list", P.pages({}), nil)
+  check("pages: nil list", P.pages(nil), nil)
+
+  -- controls before the first break are page 1 (unnamed)
+  local pages = P.pages({ K(0), K(1), PG("EQ", "#d9893a"), K(2), D, K(3), PG("Dyn"), K(4) })
+  check("pages: count", #pages, 3)
+  check("pages: first page unnamed", pages[1].label, nil)
+  check("pages: first page label is its number", P.page_label(pages[1]), "1")
+  check("pages: first page controls", #pages[1].controls, 2)
+  check("pages: named page label", P.page_label(pages[2]), "EQ")
+  check("pages: page colour", pages[2].cap, "#d9893a")
+  check("pages: theme colour by default", pages[3].cap, nil)
+  check("pages: divider stays inside a page", #pages[2].controls, 3)
+  check("pages: break index in the full list", pages[2].idx, 3)
+  check("pages: last page", #pages[3].controls .. " " .. pages[3].n, "1 3")
+  check("pages: empty name falls back to number", P.page_label({ label = "", n = 2 }), "2")
+
+  -- a leading break: no empty first page
+  pages = P.pages({ PG("A"), K(0), PG("B"), K(1) })
+  check("pages: leading break drops empty page", #pages .. " " .. P.page_label(pages[1]), "2 A")
+  -- a trailing break is a page of its own, empty
+  pages = P.pages({ K(0), PG("Z") })
+  check("pages: trailing break keeps its page", #pages .. " " .. #pages[2].controls, "2 0")
+
+  -- the grid ignores page breaks: they take no cell
+  local lay = P.layout({ K(0), PG("EQ"), K(1), K(2) }, nil, 3)
+  local lay1 = P.layout({ K(0), K(1), K(2) }, nil, 3)
+  check("pages: layout skips breaks", lay.width, lay1.width)
+
+  -- width: the widest page, not all pages together
+  local six = { K(0), K(1), K(2), K(3), K(4), K(5) }
+  local flat, split = {}, {}
+  for i = 1, 12 do flat[i] = K(i) end
+  for i = 1, 6 do split[i] = K(i) end
+  split[7] = PG("B")
+  for i = 7, 12 do split[i + 1] = K(i) end
+  local one = P.width(flat, 400, false, false, "x")
+  local paged = P.width(split, 400, false, false, "x")
+  local half = P.width(six, 400 - C.TAB_STRIP_H, false, false, "x")
+  check("pages: flat panel wider than the minimum", one > C.PANEL_MIN_W, true)
+  check("pages: paged narrower than flat", paged < one, true)
+  check("pages: paged as wide as its widest page", paged, half)
+  -- ...but never narrower than its tab strip
+  local wide = P.width({ K(0), PG("A rather long tab name"), K(1), PG("And another long one"), K(2) }, 400, false, false, "x")
+  check("pages: tab strip sets a floor", wide > half, true)
+
+  -- the open page, per instance, in the project
+  local PROJ = {}
+  reaper.GetProjExtState = function(_, ns, k) return 1, PROJ[ns .. k] or "" end
+  reaper.SetProjExtState = function(_, ns, k, v) PROJ[ns .. k] = v end
+  St.clear_cache()
+  check("pages: page 1 by default", St.page("{P}"), 1)
+  St.set_page("{P}", 2)
+  check("pages: set page", St.page("{P}"), 2)
+  check("pages: page saved with the project", PROJ["TS_ChannelViewpage:{P}"], "2")
+  St.set_page("{P}", 1)
+  check("pages: page 1 clears the key", PROJ["TS_ChannelViewpage:{P}"], "")
+  St.set_page("{P}", 9)
+  check("pages: open page clamped to what it has", P.page_of("{P}", P.pages({ K(0), PG("B"), K(1) })), 2)
+  check("pages: no guid is page 1", St.page(nil), 1)
+  St.clear_cache()
+  check("pages: cache cleared rereads", St.page("{P}"), 9)
+  reaper.GetProjExtState, reaper.SetProjExtState = nil, nil
+  St.clear_cache()
+end
+
+-- ---------------------------------------------------------------------
+-- Busy: backing off while REAPER is busy
+do
+  local BZ = require "TS_CV_Busy"
+  BZ.reset()
+  local t = 0
+  local function frames(n, dur) local b for i = 1, n do t = t + dur; b = BZ.note(dur, t) end return b end
+  check("busy: quick frames never back off", frames(50, 0.02), false)
+  check("busy: typical settles", BZ.typical() > 0.015 and BZ.typical() < 0.025, true)
+  check("busy: one slow frame is nothing", frames(1, 0.5), false)
+  check("busy: two slow frames still nothing", frames(1, 0.5), false)
+  frames(1, 0.02)
+  check("busy: a quick one resets the run", frames(2, 0.5), false)
+  check("busy: three in a row back off", frames(1, 0.5), true)
+  check("busy: no probe straight away", BZ.probe_due(t + 0.5), false)
+  check("busy: probe after a second", BZ.probe_due(t + 1.1), true)
+  check("busy: a slow probe stays backed off", BZ.note(0.6, t + 1.1), true)
+  check("busy: a quick probe resumes", BZ.note(0.02, t + 2.2), false)
+  check("busy: not backed off means frames run", BZ.probe_due(t + 2.3), true)
+  -- a slow machine: every frame slow, none of them "suddenly"
+  BZ.reset()
+  frames(200, 0.2)
+  check("busy: uniformly slow is not busy", BZ.backed(), false)
+  check("busy: typical follows a slow machine", BZ.typical() > 0.15, true)
+  check("busy: slow machine needs 5x to trip", frames(3, 0.8), false)
+  check("busy: ...and trips at 5x", frames(3, 1.6), true)
+  BZ.reset()
+end
+
+-- ---------------------------------------------------------------------
+-- Show: conditional controls
+do
+  check("show: parse toggle rule", M.show_line(M.show_of("3|1|0.499|0")), "3|1.0000|0.4990|0")
+  check("show: parse short rule", M.show_of("4|0").tol, 0.499)
+  check("show: parse not (old 0/1 field)", M.show_of("4|0|0.1|1").op, "not")
+  check("show: bad line", M.show_of("x|y"), nil)
+  check("show: nil line", M.show_of(nil), nil)
+  check("show: value clamped", M.show_of("2|7").norm, 1)
+  local on  = { param = 3, norm = 1, tol = 0.499 }
+  local off = { param = 3, norm = 1, tol = 0.499, inv = true }
+  check("show: on matches 1", M.show_match(1, on), true)
+  check("show: on misses 0", M.show_match(0, on), false)
+  check("show: not-on matches 0", M.show_match(0, off), true)
+  -- above / below / between: a knob's value, or a dropdown's order
+  local ab = M.show_of("6|0.5|0.005|2")
+  check("show: parse above", ab.op, "above")
+  check("show: above", M.show_match(0.51, ab), true)
+  check("show: above excludes the value", M.show_match(0.5, ab), false)
+  local be = M.show_of("6|0.5|0.005|3")
+  check("show: below", M.show_match(0.2, be) and not M.show_match(0.7, be), true)
+  local bt = M.show_of("6|0.75|0.005|4|0.25")
+  check("show: parse between", bt.op .. " " .. bt.norm2, "between 0.25")
+  check("show: between either way round", M.show_match(0.5, bt), true)
+  check("show: between includes ends", M.show_match(0.25, bt) and M.show_match(0.75, bt), true)
+  check("show: between excludes outside", M.show_match(0.8, bt), false)
+  check("show: between line", M.show_line(bt), "6|0.7500|0.0050|4|0.2500")
+  check("show: between with no second value", M.show_of("6|0.3|0.005|4").norm2, 0.3)
+  check("show: unknown op reads as is", M.show_of("6|0.3|0.005|9").op, "is")
+  check("show: rule made before ops", M.show_match(0, { param = 1, norm = 1, tol = 0.499, inv = true }), true)
+  local mid = { param = 5, norm = 0.5, tol = 0.124 }
+  check("show: choice hits its step", M.show_match(0.5, mid), true)
+  check("show: choice misses the next", M.show_match(0.75, mid), false)
+
+  -- a delay: sync on shows the note knob, off the ms knob, in one place
+  local K = function(p, extra) local c = { type = "knob", param = p }; for k, v in pairs(extra or {}) do c[k] = v end; return c end
+  local ctls = { K(0), { type = "toggle", param = 3 }, K(1, { show = on }), K(2, { show = off }), K(4) }
+  local vals = { [3] = 1 }
+  local get = function(p) return vals[p] or 0 end
+  local shown, hidden = M.visible(ctls, get)
+  check("show: sync on shows note", #shown .. " " .. tostring(shown[3].param), "4 1")
+  check("show: sync on hides ms", hidden[4], true)
+  vals[3] = 0
+  shown, hidden = M.visible(ctls, get)
+  check("show: sync off shows ms", tostring(shown[3].param), "2")
+  check("show: sync off hides note", hidden[3], true)
+  check("show: same tables kept", shown[1] == ctls[1], true)
+  local plain = { K(0), K(1) }
+  check("show: no rules is the same list", M.visible(plain, get) == plain, true)
+  -- the swap takes one cell: the grid is as wide either way
+  local la = P.layout(M.visible(ctls, get), nil, 3)
+  vals[3] = 1
+  local lb = P.layout(M.visible(ctls, get), nil, 3)
+  check("show: swap keeps the width", la.width, lb.width)
+  check("show: swap takes one cell", #la.items, 4)
+
+  -- round trip through the file, and a page break keeps no rule
+  M.set("ShowTest", { controls = { K(1, { show = on }), K(2, { show = off }),
+                                   { type = "page", param = -1, label = "B", show = on } } })
+  M.save(); M.reload()
+  local back = M.get("ShowTest")
+  check("show: round trip", M.show_line(back.controls[1].show), "3|1.0000|0.4990|0")
+  check("show: round trip not", back.controls[2].show.op, "not")
+  check("show: page keeps no rule", back.controls[3].show, nil)
+  check("show: copy carries rule", M.copy(back).controls[2].show.op, "not")
+  check("show: copy is a copy", M.copy(back).controls[1].show ~= back.controls[1].show, true)
+  M.set("ShowTest", { controls = { K(1, { show = { param = 6, op = "between", norm = 0.2, norm2 = 0.6, tol = 0.005 } }) } })
+  M.save(); M.reload()
+  check("show: between round trip", M.show_line(M.get("ShowTest").controls[1].show), "6|0.2000|0.0050|4|0.6000")
+  check("show: copy carries between", M.copy(M.get("ShowTest")).controls[1].show.norm2, 0.6)
+  M.remove("ShowTest"); M.save(); M.reload()
+end
+
+-- ---------------------------------------------------------------------
+-- Variants: more than one layout per plugin, picked per instance
+do
+  local St = require "TS_CV_State"
+  check("variant: key", M.variant_key("Kontakt 7", "Strings"), "Kontakt 7 :: Strings")
+  check("variant: no name is the plugin's", M.variant_key("Kontakt 7", nil), "Kontakt 7")
+  local b, v = M.split_variant("Kontakt 7 :: Strings")
+  check("variant: split", b .. "|" .. v, "Kontakt 7|Strings")
+  b, v = M.split_variant("Kontakt 7")
+  check("variant: split plain", b .. "|" .. tostring(v), "Kontakt 7|nil")
+  check("variant: clean brackets", M.clean_variant(" [Pno] "), "Pno")
+  check("variant: clean separator", M.clean_variant("a :: b"), "a - b")
+  check("variant: clean empty", M.clean_variant("   "), nil)
+
+  M.set("Kontakt 7", { controls = { { type = "knob", param = 0 } } })
+  M.set("Kontakt 7 :: Strings", { controls = { { type = "knob", param = 1 }, { type = "knob", param = 2 } } })
+  M.set("Kontakt 7 :: Piano", { controls = { { type = "knob", param = 3 } } })
+  M.set("Kontakt 70", { controls = {} })
+  M.save(); M.reload()
+  check("variant: list", table.concat(M.variants("Kontakt 7"), ","), "Piano,Strings")
+  check("variant: none for others", #M.variants("Kontakt 70"), 0)
+
+  local PROJ = {}
+  reaper.GetProjExtState = function(_, ns, k) return 1, PROJ[ns .. k] or "" end
+  reaper.SetProjExtState = function(_, ns, k, val) PROJ[ns .. k] = val end
+  St.clear_cache()
+  local name = "VST3i: Kontakt 7 (Native Instruments)"
+  check("variant: default instance", St.layout_key(name, "{A}"), "Kontakt 7")
+  St.set_variant("{A}", "Strings")
+  check("variant: set", St.layout_key(name, "{A}"), "Kontakt 7 :: Strings")
+  check("variant: other instance unchanged", St.layout_key(name, "{B}"), "Kontakt 7")
+  check("variant: saved with project", PROJ["TS_ChannelViewvariant:{A}"], "Strings")
+  St.clear_cache()
+  check("variant: reread after cache clear", St.layout_key(name, "{A}"), "Kontakt 7 :: Strings")
+  M.remove("Kontakt 7 :: Strings"); M.save(); M.reload()
+  check("variant: deleted falls back", St.layout_key(name, "{A}"), "Kontakt 7")
+  St.set_variant("{A}", nil)
+  check("variant: back to default clears", PROJ["TS_ChannelViewvariant:{A}"], "")
+  -- making variants: a copy, or empty with the names kept
+  local src = { controls = { { type = "knob", param = 5 } }, aliases = { [5] = "Verb" }, lock = 3 }
+  local k, nm = M.new_variant("Kontakt 7", " Pads ", src, false)
+  check("variant: new copy key", k, "Kontakt 7 :: Pads")
+  check("variant: new copy name", nm, "Pads")
+  check("variant: copy has controls", #M.get(k).controls, 1)
+  check("variant: copy is saved", M.has(k), true)
+  check("variant: name taken", M.new_variant("Kontakt 7", "Pads", src, false), nil)
+  check("variant: bad name", M.new_variant("Kontakt 7", "  ", src, false), nil)
+  local ke = M.new_variant("Kontakt 7", "Blank", src, true)
+  check("variant: empty has no controls", #M.get(ke).controls, 0)
+  check("variant: empty keeps names", M.get(ke).aliases[5], "Verb")
+  check("variant: empty is unlocked", M.get(ke).lock, nil)
+  check("variant: copy left the source alone", #src.controls, 1)
+  check("variant: signature same", M.signature(M.get(k)) == M.signature(M.copy(M.get(k))), true)
+  check("variant: signature differs", M.signature(M.get(k)) ~= M.signature(M.get(ke)), true)
+  M.remove(k); M.remove(ke)
+  reaper.GetProjExtState, reaper.SetProjExtState = nil, nil
+  St.clear_cache()
+  M.remove("Kontakt 7"); M.remove("Kontakt 7 :: Piano"); M.remove("Kontakt 70"); M.save(); M.reload()
+end
+
+-- ---------------------------------------------------------------------
+-- Shared state: the window and the web bridge each have their own copy
+-- of TS_CV_State; a change one makes reaches the other within a second
+do
+  local St = require "TS_CV_State"
+  local PROJ, T = {}, 100
+  local real_t = reaper.time_precise
+  reaper.time_precise = function() return T end
+  reaper.GetProjExtState = function(_, ns, k) return 1, PROJ[ns .. k] or "" end
+  reaper.SetProjExtState = function(_, ns, k, v) PROJ[ns .. k] = v end
+  St.clear_cache()
+  check("shared: trace closed at first", St.is_gr_open("{G}"), false)
+  PROJ["TS_ChannelViewgrview:{G}"] = "1"            -- the other script opens it
+  check("shared: cached within the second", St.is_gr_open("{G}"), false)
+  T = T + 1.1
+  check("shared: open seen after a second", St.is_gr_open("{G}"), true)
+  St.set_gr_open("{G}", false)
+  check("shared: own write at once", St.is_gr_open("{G}"), false)
+  check("shared: own write saved", PROJ["TS_ChannelViewgrview:{G}"], "")
+  check("shared: no variant at first", St.variant("{G}"), nil)
+  PROJ["TS_ChannelViewvariant:{G}"] = "Strings"     -- switched in the window
+  T = T + 1.1
+  check("shared: variant seen after a second", St.variant("{G}"), "Strings")
+  reaper.time_precise = real_t
+  reaper.GetProjExtState, reaper.SetProjExtState = nil, nil
+  St.clear_cache()
 end
 
 os.remove("./TS_ChannelView_Mappings.ini")

@@ -45,6 +45,7 @@ C.PANEL_PAD   = 6         -- inner padding around a panel's control grid
 C.GRID_TOP_PAD = C.PANEL_PAD
 C.PANEL_GAP   = 6         -- gap between adjacent panels
 C.HEADER_H    = 20        -- panel header bar height
+C.TAB_STRIP_H = 18        -- a paged panel's tab strip, under its header (TS_CV_Panel P.pages)
 C.FOOTER_H    = 20        -- a panel's foot: the layout lock, and the preset bar
 C.SCROLL_W    = 8         -- a locked panel's scrollbar, when it's too short
 C.PRESET_BAR  = true      -- View > Preset bar (persisted)

@@ -481,6 +481,25 @@ default), shared with the TCP window and the web page.
   below it in the columns it runs into. A fader across and an XY pad run
   over a divider (its line stops at their edges); everything else starts a
   new column at one. Panels with neither are laid out as they always were.
+- **Pages.** A **Page** break (the editor's *Page* button, beside Gap,
+  Half-gap and Divider) starts a new page: everything after it, up to the
+  next break, is a page of its own, and the panel shows one page at a time
+  with a tab strip under its header. Controls before the first break are
+  page 1. Select a break in the editor to name its tab and pick its
+  colour (the stripe over the name; the theme's accent unless you choose
+  one). Click a tab, or roll the wheel over the strip, to change page;
+  right-click a tab for its colour. Dividers inside a page split its
+  columns as usual. The panel is as wide as its widest page, and keeps
+  the page it's on with the project.
+- **Show when.** A control can be shown only while another parameter of
+  the plugin — on the panel or not — reads a given way: *is*, *is not*,
+  *is above*, *is below* or *is between*. Set it in the editor's *Show
+  when* row: pick the parameter, then the comparison and the value, from
+  its choices for a switch or dropdown, or on a slider in the plugin's own
+  readout for a knob. A hidden control takes no room, so two side by side
+  with opposite rules swap in one place: a delay's sync switch showing its
+  note knob when on and its ms knob when off. Conditional controls are
+  marked ◐ in the editor's panel list.
 - **Lock layout.** The padlock at the left of a panel's foot locks that
   plugin's layout, on every track: no more edits, and the controls keep the
   arrangement they had however the panel is resized — a panel too short
@@ -530,8 +549,28 @@ Turn on **Learn** and touching a control in the plugin's own window adds
 that parameter. **Auto-fill** grabs the plugin's first eight parameters as a
 starting point.
 
-Nothing is written until you hit **Save** — and Save changes that plugin's
-panel everywhere, which the dialog says at the top.
+Nothing is written until you hit **Save** — and Save changes the panel of
+every instance on that layout, which the dialog says at the top.
+
+### More than one layout for a plugin
+
+A plugin's layout is shared by every instance of it, which is usually what
+you want. When it isn't — a Kontakt with a piano on one track and strings
+on another — the panel menu's **Layout** (at the top) picks which layout
+this instance shows: *Default*, the plugin's own, or any you've made. Type
+a name in the box and **Copy to new layout** makes a copy of the one
+you're on, or **New empty layout** starts with no controls (your names for
+the plugin's parameters come with it); either switches this instance to
+it. Pick it on any other instance from the same menu. *Delete layout…*
+removes one, and the instances using it go back to the default. Each
+instance's choice is kept with the project; the layouts themselves are in
+the library like any other, as `<plugin> :: <name>`.
+
+*Edit Parameters* has the same at the top of its window: which layout
+you're editing (switching it switches the instance, and asks first if
+you've changes you haven't saved), and *Copy to new layout* / *New empty
+layout*, which work from what's in the editor — unsaved changes go to the
+new layout and the one you started from is left as it was.
 
 ## Hardware looks
 
@@ -608,6 +647,15 @@ group leaves unset — all kept with ChannelView for every project. A
 track's own choice wins, then its group's, then the Default, part by part,
 and *Reset to default* takes it back to its group's (or the Default).
 A VCA leader that's also a folder parent counts as a VCA leader.
+
+**Background tint** gives a track's mixer strip, its name button and the
+Channel panel a share of the track's colour. Each group in *Group looks*
+has a **Background** strength (folder parents at 60% and everything else at
+15%, say), and a track can have its own in the fader menu's **Background**
+slider; *As group* goes back to its group's. Off by default. A light
+colour is held back so the readouts on it stay readable. The TCP window
+follows, unless its View menu ▸ *Background tint* is off. The web page has
+it too.
 
 ## Controls
 
@@ -813,6 +861,10 @@ script into the action list.
 - **ReaComp:** the same canvas as on the desktop — drag the threshold line,
   the knee grips, the curve's end for ratio and the envelope's nodes; tap
   the Detector tab for the drawer.
+- **Pages and conditional controls** work as on the desktop: tap a tab to
+  change page (the page is remembered per device), and a control with a
+  *Show when* rule comes and goes as its parameter changes. Each plugin
+  shows its instance's layout, as chosen on the desktop.
 - **Wet:** in a panel's head where there's room (tap it for a slider), and
   a slider at the top of every plugin's ⋯ sheet and container's sheet.
 - **Gain reduction:** tap a meter to open its trace; tap the trace for its
@@ -837,6 +889,16 @@ script into the action list.
 - **Macros:** the pencil turns on editing. + adds a button for any action
   (searchable) or a spacer, tap a button to change it, press and drag to
   move it, × removes it.
+
+## While REAPER is busy
+
+On a long job — a plugin scan, say — REAPER keeps running scripts behind
+its progress window, and ChannelView reading plugins every frame got in
+the way. It times its own frames, and when they suddenly take many times
+longer than usual it shows *ChannelView is waiting while REAPER is busy…*
+and stops reading plugins, trying again once a second until REAPER is
+free. A machine that's simply slow never trips it: it goes by what a frame
+usually costs on that machine. The web companion backs off the same way.
 
 ## Installing
 
@@ -1541,7 +1603,11 @@ The audio comes from the probes, so the track needs a TS_TrackProbe pair
 (1.5.0 or newer: reopen the project after updating). A measured plugin is
 already tapped; one that reports its own reduction is tapped for its levels
 while its trace is open, which counts toward the four taps a track can have.
-The waveform shown is one track's at a time, the selected one's.
+The waveform shown is one track's at a time, the selected one's. With
+nothing to show, the trace says why: *needs TS_TrackProbe* (no pair on the
+track), *outside the probes* (the plugin isn't between them), *in
+parallel* (it is, but runs in parallel, which a tap can't measure), or
+*connecting…* while the tap is being laid.
 
 ### Wet
 

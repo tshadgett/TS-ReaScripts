@@ -19,7 +19,21 @@ local cache = {}   -- guid -> bool, so a frame doesn't hit ProjExtState per pane
 
 local gr_open = {} -- guid -> bool: the gain-reduction meter opened out into its trace
 
-function S.clear_cache() cache = {}; gr_open = {} end
+local pages = {}   -- guid -> page a paged panel is open at (S.page, below)
+
+local variants = {} -- guid -> layout variant an instance shows ("" for the plugin's own)
+
+-- Two of these are shared with another script: ChannelView's window and
+-- the web bridge each keep their own copy of this module, and both lay
+-- the probe taps (TS_CV_Taps) from whether a trace is open and which
+-- layout an instance shows. A copy cached for good goes stale the moment
+-- the other script changes it, and then the two lay the taps differently
+-- in turn, every second -- the trace flashes. So those two are read from
+-- the project again after SHARED_TTL; this script's own writes land at once.
+local SHARED_TTL = 1.0
+local gr_at, var_at = {}, {}   -- guid -> when it was last read
+
+function S.clear_cache() cache = {}; gr_open = {}; pages = {}; variants = {}; gr_at = {}; var_at = {} end
 
 -- `default` is what an instance nobody has touched shows as -- false
 -- (expanded) unless a caller says otherwise. Only a departure from the
@@ -79,22 +93,75 @@ end
 function S.is_gr_open(guid)
   if guid == nil or guid == "" then return false end
   local v = gr_open[guid]
-  if v ~= nil then return v end
+  local now = reaper.time_precise()
+  if v ~= nil and now - (gr_at[guid] or 0) < SHARED_TTL then return v end
   local _, str = reaper.GetProjExtState(0, NS, "grview:" .. guid)
   v = (str == "1")
-  gr_open[guid] = v
+  gr_open[guid], gr_at[guid] = v, now
   return v
 end
 
 function S.set_gr_open(guid, on)
   if guid == nil or guid == "" then return end
   on = on and true or false
-  gr_open[guid] = on
+  gr_open[guid], gr_at[guid] = on, reaper.time_precise()
   reaper.SetProjExtState(0, NS, "grview:" .. guid, on and "1" or "")
 end
 
 function S.toggle_gr_open(guid)
   S.set_gr_open(guid, not S.is_gr_open(guid))
+end
+
+-- The page a paged panel is open at (TS_CV_Panel's page breaks), per
+-- instance, saved with the project. 1 when never set.
+function S.page(guid)
+  if guid == nil or guid == "" then return 1 end
+  local v = pages[guid]
+  if v then return v end
+  local _, str = reaper.GetProjExtState(0, NS, "page:" .. guid)
+  v = math.max(1, math.floor(tonumber(str) or 1))
+  pages[guid] = v
+  return v
+end
+function S.set_page(guid, n)
+  if guid == nil or guid == "" then return end
+  n = math.max(1, math.floor(n or 1))
+  pages[guid] = n
+  reaper.SetProjExtState(0, NS, "page:" .. guid, (n > 1) and tostring(n) or "")
+end
+
+-- The layout variant an instance shows (TS_CV_Mappings, "<plugin> ::
+-- <name>"), per instance, saved with the project. nil for the plugin's
+-- own layout.
+function S.variant(guid)
+  if guid == nil or guid == "" then return nil end
+  local v = variants[guid]
+  local now = reaper.time_precise()
+  if v == nil or now - (var_at[guid] or 0) >= SHARED_TTL then
+    local _, str = reaper.GetProjExtState(0, NS, "variant:" .. guid)
+    v = str or ""
+    variants[guid], var_at[guid] = v, now
+  end
+  return v ~= "" and v or nil
+end
+function S.set_variant(guid, name)
+  if guid == nil or guid == "" then return end
+  variants[guid], var_at[guid] = name or "", reaper.time_precise()
+  reaper.SetProjExtState(0, NS, "variant:" .. guid, name or "")
+end
+
+-- The library key an instance's layout lives under: its variant's when
+-- it has one the library still holds, else the plugin's own.
+function S.layout_key(fx_name, guid)
+  local U = require("TS_CV_Util")
+  local M = require("TS_CV_Mappings")
+  local base = U.plugin_key(fx_name)
+  local v = S.variant(guid)
+  if v then
+    local k = M.variant_key(base, v)
+    if M.has(k) then return k end
+  end
+  return base
 end
 
 return S

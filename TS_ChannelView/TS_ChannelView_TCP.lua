@@ -182,6 +182,9 @@ C.TCP_INDENT_FOLDERS = ext_get("indent", C.TCP_INDENT_FOLDERS and "1" or "0") ==
 C.TCP_LANES       = ext_get("lanes", C.TCP_LANES and "1" or "0") == "1"
 C.TCP_STATE_CHIPS = ext_get("chips", C.TCP_STATE_CHIPS and "1" or "0") == "1"
 C.TCP_PDC         = ext_get("pdc", C.TCP_PDC and "1" or "0") == "1"
+-- the rows in the track's colour at ChannelView's background strengths
+-- (its fader menu ▸ Background / Group looks), or plain
+local TCP_TINT    = ext_get("tint", "1") == "1"
 C.TCP_PANEL_H     = tonumber(ext_get("panel_h", C.TCP_PANEL_H)) or C.TCP_PANEL_H
 local dock_id     = tonumber(ext_get("dock", "0")) or 0
 
@@ -378,8 +381,12 @@ local function draw_row(dl, e, x, w, now)
 
   -- Frame. One pixel short at the bottom, so neighbouring rows read as
   -- separate things with the window colour between them.
-  ImGui.DrawList_AddRectFilled(dl, ix, y0, x + w, y1 - 1,
-    sel and C.COL.header_bg or C.COL.panel_bg, 0)
+  -- The row's body in the track's colour at its group's strength
+  -- (ChannelView's Group looks ▸ Background), as the mixer strips are.
+  local row_bg = sel and C.COL.header_bg or C.COL.panel_bg
+  local tint = (TCP_TINT and not e.master) and TO.track_tint(tr) or 0
+  if tint > 0 and col then row_bg = U.tint_readable(row_bg, col, tint) end
+  ImGui.DrawList_AddRectFilled(dl, ix, y0, x + w, y1 - 1, row_bg, 0)
   ImGui.DrawList_AddRectFilled(dl, ix, y0, body_l, y1 - 1, base, 0)
   if e.env > 1 then
     -- Envelope lanes belong to the track: the colour carries on down
@@ -796,7 +803,10 @@ local function draw_flyout()
     if tr == reaper.GetMasterTrack(0) and not col then col = 0x8a90a0ff end
     local base = col or C.COL.header_bg
     local ink  = U.contrast_text(base)
-    ImGui.DrawList_AddRectFilled(dl, wx, wy, wx + CW, wy + H, C.COL.panel_bg, 3.0)
+    local fly_bg = C.COL.panel_bg
+    local tint = (TCP_TINT and tr ~= reaper.GetMasterTrack(0)) and TO.track_tint(tr) or 0
+    if tint > 0 and col then fly_bg = U.tint_readable(fly_bg, col, tint) end
+    ImGui.DrawList_AddRectFilled(dl, wx, wy, wx + CW, wy + H, fly_bg, 3.0)
 
     -- Background first, so right-click anywhere empty is the track menu,
     -- as on ChannelView's own Channel panel.
@@ -898,6 +908,14 @@ local function settings_menu()
   if ImGui.MenuItem(ctx, "Fixed item lane controls", nil, C.TCP_LANES) then
     C.TCP_LANES = not C.TCP_LANES
     ext_set("lanes", C.TCP_LANES and "1" or "0")
+  end
+  if ImGui.MenuItem(ctx, "Background tint", nil, TCP_TINT) then
+    TCP_TINT = not TCP_TINT
+    ext_set("tint", TCP_TINT and "1" or "0")
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "The rows in the track's colour at the strengths set in\n" ..
+      "ChannelView (right-click a fader: Background, and Group looks).")
   end
   if ImGui.MenuItem(ctx, "Indent folders", nil, C.TCP_INDENT_FOLDERS) then
     C.TCP_INDENT_FOLDERS = not C.TCP_INDENT_FOLDERS

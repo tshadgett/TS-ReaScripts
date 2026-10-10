@@ -294,6 +294,10 @@ local function name_button(ctx, label, col, selected, id, w, t)
   local o  = lw * 0.5
   local sh = C.COLOUR_STRIPE
   local fill = selected and C.COL.header_bg or (hovered and C.COL.knob_body_hi or C.COL.panel_bg)
+  -- the group's background tint, as on the strip above (the selected
+  -- track keeps its own fill, so it stays the obvious one)
+  local tint = (t and t.track and not selected) and TO.track_tint(t.track) or 0
+  if tint > 0 and col then fill = U.tint(fill, col, tint) end
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + full_h, fill, C.STRIP_ROUND)
   if block > 0 and t and t.icon then
     local pad = 4
@@ -312,8 +316,9 @@ local function name_button(ctx, label, col, selected, id, w, t)
   y = y + block                         -- the name part is laid out below
   local text_h = h - sh                 -- what the stripe leaves for the name
 
-  -- The fill is always the neutral one now, so the ink is too.
-  local text_col = C.COL.header_text
+  -- Light ink on the neutral fill; dark once a strong tint of a pale
+  -- colour has made the button light.
+  local text_col = U.is_light(fill) and 0x0d1116ff or C.COL.header_text
 
   -- The folder icon, in its own square at the left end.
   local left = 0
@@ -499,8 +504,12 @@ local function column(ctx, t, avail_h, cur_track)
     local over = ImGui.IsWindowHovered(ctx)
     local sel_col = U.sel_colour(C.SEL_OUTLINE, t.col, C.COL.strip_sel)
 
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + strip_h,
-      selected and C.COL.header_drag or C.COL.panel_bg, C.STRIP_ROUND)
+    -- the body in the track's colour at its group's strength (Group looks
+    -- ▸ Background), held to a shade the light readouts still read on
+    local body = selected and C.COL.header_drag or C.COL.panel_bg
+    local tint = TO.track_tint(t.track)
+    if tint > 0 and t.col then body = U.tint_readable(body, t.col, tint) end
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + strip_h, body, C.STRIP_ROUND)
 
     -- The strip's background is both the select target and the
     -- double-click target, submitted BEFORE the controls so every one of

@@ -1,5 +1,58 @@
 # ChannelView — changelog
 
+## 1.9.5 — pages, conditional controls, layouts per instance, background tint
+
+- **Pages.** A **Page** break in a plugin's layout (the editor's *Page*
+  button, beside Gap, Half-gap and Divider) starts a new page: the panel
+  shows one page at a time, with a tab strip under its header. Each tab
+  has a name and a colour stripe, the theme's accent unless you give it
+  one. Click a tab or roll the wheel over the strip to change page;
+  right-click a tab for its colour. Dividers inside a page split its
+  columns as they always have. The panel is as wide as its widest page,
+  and remembers which page it's on with the project.
+- **Show when.** Any control can be shown only while another parameter
+  of the plugin reads a given way: *is*, *is not*, *is above*, *is below*
+  or *is between*, in the plugin's own values (a switch's or dropdown's
+  choices, a knob's readout). A hidden control takes no room, so two
+  controls side by side with opposite rules swap in one place — a delay's
+  sync switch swapping its note knob for its ms knob. Set it in the
+  editor's *Show when* row; conditional controls are marked ◐ in the
+  panel list.
+- **More than one layout per plugin.** The panel menu's **Layout** (at
+  the top) picks which layout this instance shows: *Default*, shared by
+  every instance not set to another, or any you've made. Type a name and
+  **Copy to new layout** copies the one you're on, or **New empty layout**
+  starts with no controls (your names for the plugin's parameters come
+  with it); *Delete layout…* removes one, and instances using it go back
+  to the default. Each instance's choice is kept with the project — a
+  Kontakt with a piano on one track and strings on another. Edit
+  Parameters has the same at the top of its window, and says which layout
+  you're editing.
+- **Background tint.** The mixer strip, the track's name button and the
+  Channel panel can take a share of the track's colour. Set a strength per
+  group in the fader menu ▸ *Group looks* ▸ *Background* (folder parent,
+  VCA leader, FX return, Default) — say 60% for folder parents and 15% for
+  the rest — or per track with the fader menu's own *Background* slider
+  (*As group* goes back to its group's). Off by default. Readouts stay
+  readable: a light colour is held back so the text on it still shows. The
+  TCP window follows (its View menu ▸ *Background tint* turns that off).
+- **While REAPER is busy.** On a long job such as a plugin scan, REAPER
+  keeps running scripts, and ChannelView's reading of plugins every frame
+  got in the way of it. It now notices when its frames suddenly take far
+  longer than usual, shows *waiting while REAPER is busy* and stops
+  reading plugins until REAPER is free again. The web companion does the
+  same.
+- **The trace says why it's empty.** A gain-reduction trace with nothing
+  to show says *needs TS_TrackProbe*, *outside the probes*, *in parallel*
+  or *connecting…*, rather than *connecting…* for all of them.
+- **Fix: a trace flickering** while the web companion was running. The
+  window and the web companion each lay the probe taps, and each kept its
+  own idea of which traces were open; after one changed, the other
+  disagreed and they re-laid the taps in turn.
+- **On the web companion** too: pages (tabs under the panel's head),
+  conditional controls, each instance's layout, and the background tint.
+  Restart the web companion script after updating.
+
 ## 1.9.2 — a ReaComp panel, duplicate, wet anywhere
 
 - **ReaComp panel.** ReaComp gets a canvas of its own, as ReaEQ does. The

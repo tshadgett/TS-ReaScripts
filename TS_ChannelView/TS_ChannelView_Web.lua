@@ -52,6 +52,7 @@ local SR = require("TS_CV_Search")
 local PR = require("TS_CV_Presets")
 local HO = require("TS_CV_HwOut")
 local TO = require("TS_CV_TrackOps")
+local BZ = require("TS_CV_Busy")
 
 local NS = "TS_CV_WEB"
 
@@ -359,7 +360,7 @@ local function wet_of(addr)
 end
 
 local function panel_of(fx, i)
-  local key = U.plugin_key(fx.name)
+  local key = St.layout_key(fx.name, fx.guid)
   local layout, is_default = M.get_or_default(key, track, fx.addr, fx.guid)
   local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
   local ctls = arr()
@@ -452,6 +453,11 @@ local function panel_of(fx, i)
         o.sb = M.part_brushed(o.sec, C.plate_of(ctl.cap), ctl.brush) or nil
         o.sm = M.part_metal(o.sec, ctl.metal) or nil
       end
+    elseif o.t == "page" then
+      -- a page break: its tab's name and stripe colour (the theme's accent
+      -- when unset); the page splits the controls at these
+      o.l = (ctl.label and ctl.label ~= "") and ctl.label or nil
+      o.cap = cap_hex(ctl.cap)
     elseif o.t ~= "blank" and o.t ~= "half_gap" then
       o.t = "missing"
     end
@@ -693,6 +699,9 @@ local function build_layout()
       fb = fb,                         -- ...and these folder tracks are why
       g = reaper.GetTrackGUID(tr),     -- the page keys per-device strip state by it
       i = i + 1, n = track_name(tr), c = track_colour(tr), fl = fader_json(tr),
+      -- the strip's background in the track's colour, at its group's
+      -- strength (ChannelView's Group looks ▸ Background), 0..1
+      bt = (function() local v = TO.track_tint(tr); return v > 0 and round(v, 2) or nil end)(),
       s = reaper.IsTrackSelected(tr) or nil,
       f = math.floor(reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")),
       -- REAPER's own TCP spacer above this track: a gap, as the mixer draws it
@@ -731,7 +740,8 @@ local function build_layout()
     mc = track_colour(reaper.GetMasterTrack(0)),
     mfl = fader_json(reaper.GetMasterTrack(0)),
     track = track and { i = tn, n = track_name(track), c = track_colour(track),
-                        m = (track == reaper.GetMasterTrack(0)) or nil, fl = fader_json(track) } or nil,
+                        m = (track == reaper.GetMasterTrack(0)) or nil, fl = fader_json(track),
+                        bt = (function() local v = TO.track_tint(track); return v > 0 and round(v, 2) or nil end)() } or nil,
     fx = panels,
     br = brs, brn = brn,
     nfx = track and reaper.TrackFX_GetCount(track) or 0,
@@ -1068,7 +1078,7 @@ local function build_vals(lseq, ack)
   local fxv = {}
   local any_eq = false
   for _, fx in ipairs(chain) do
-    local key = U.plugin_key(fx.name)
+    local key = St.layout_key(fx.name, fx.guid)
     local layout = M.get_or_default(key, track, fx.addr, fx.guid)
     local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
     local v, x = arr(), arr()
@@ -1100,7 +1110,18 @@ local function build_vals(lseq, ack)
     end
     local est = (gr and T.gr_estimated(track, fx.addr, fx.guid)) or nil
     local pname, psame = PR.current(track, fx.addr)
-    fxv[fx.guid] = { e = T.get_enabled(track, fx.addr), v = v, x = x, v2 = v2, x2 = x2, gr = gr,
+    -- conditional controls (Show<n>): the indexes (0-based, into the
+    -- layout's list) hidden right now; the page lays the panel out
+    -- without them and rebuilds when the set changes
+    local hid = nil
+    do
+      local _, hidden = M.visible(layout.controls, function(p)
+        return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+      end)
+      for ci in pairs(hidden) do hid = hid or arr(); hid[#hid + 1] = ci - 1 end
+      if hid then table.sort(hid) end
+    end
+    fxv[fx.guid] = { e = T.get_enabled(track, fx.addr), v = v, x = x, v2 = v2, x2 = x2, gr = gr, h = hid,
                      pn = pname, pm = (pname ~= "" and not psame) or nil,
                      est = est,
                      tw = (gr and web_tr.set[fx.guid]) and trace_of(fx, meter, est, gr) or nil,
@@ -1372,7 +1393,7 @@ local function apply(verb, a)
   elseif verb == "p" then
     local fx = fx_by_guid(a[1]); local p, v = tonumber(a[2]), tonumber(a[3])
     if fx and p and v then
-      local key = U.plugin_key(fx.name)
+      local key = St.layout_key(fx.name, fx.guid)
       local layout = M.get_or_default(key, track, fx.addr, fx.guid)
       local inv = false
       for _, ctl in ipairs(layout.controls or {}) do
@@ -1742,8 +1763,12 @@ local alive = 0
 local chain_hash = nil
 local lib_body = nil
 
-local function cycle()
-  local now = reaper.time_precise()
+local cycle
+
+-- One cycle's work; `cycle` below times it and backs off while REAPER
+-- is busy on a long job (TS_CV_Busy), so the bridge's FX polling isn't
+-- in the way of a plugin scan.
+local function work(now)
   eq_reads = {}
 
   read_commands()
@@ -1844,7 +1869,14 @@ local function cycle()
   end
 
   TP.update(now)
+end
 
+cycle = function()
+  local now = reaper.time_precise()
+  if BZ.probe_due(now) then
+    work(now)
+    BZ.note(reaper.time_precise() - now, now)
+  end
   alive = (alive + 1) % 1000000
   reaper.SetExtState(NS, "alive", tostring(alive), false)
   reaper.defer(cycle)

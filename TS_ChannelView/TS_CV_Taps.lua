@@ -334,7 +334,7 @@ end
 -- curve's effect on the programme, which swings with every note. (Older
 -- layouts can still carry Measure=1 for it; it is ignored.)
 local function wants_measure(tr, addr)
-  local key = U.plugin_key(fx_name(tr, addr))
+  local key = St.layout_key(fx_name(tr, addr), fx_guid(tr, addr))
   if RQ.is_eq(key) then return false end
   local layout = M.get(key)
   if not (layout and layout.measure == true) then return false end
@@ -343,7 +343,7 @@ end
 
 -- Whether a plugin's input and output levels are wanted (Levels=1).
 local function wants_levels(tr, addr)
-  local layout = M.get(U.plugin_key(fx_name(tr, addr)))
+  local layout = M.get(St.layout_key(fx_name(tr, addr), fx_guid(tr, addr)))
   return layout ~= nil and layout.levels == true
 end
 
@@ -425,7 +425,7 @@ local function wants_wave(tr, addr)
   local guid = fx_guid(tr, addr)
   if panel_open(guid) then return true end
   if not (St.is_gr_open(guid) or web_open(guid)) then return false end
-  local key = U.plugin_key(fx_name(tr, addr))
+  local key = St.layout_key(fx_name(tr, addr), guid)
   -- the web page's ReaComp canvas, open on some device
   if RC.is_comp(key) then return true end
   local layout = M.get(key)

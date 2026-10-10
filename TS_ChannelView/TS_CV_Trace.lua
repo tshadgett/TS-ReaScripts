@@ -129,6 +129,7 @@ function Tr.label(win)
 end
 
 local waiting = {}   -- guid -> when the trace started waiting for the probe
+local where_cache = {}   -- guid -> { t, where }: TP.status, asked once a second
 
 -- Asks for the probe's waveforms for this track. Call every frame a trace
 -- on it is showing.
@@ -144,7 +145,21 @@ function Tr.want(track) TP.wave_track(track) end
 function Tr.columns(track, fx, meter, est, gr, pw)
   local ti, probe = TP.tap_index(track, fx.guid)
   if not ti then
-    return nil, TP.has_probes(track) and "connecting\u{2026}" or "needs TS_TrackProbe"
+    -- why there's no tap: no probes, or this plugin isn't between them
+    -- (or runs in parallel there, which a tap can't measure); otherwise
+    -- the tap just hasn't been laid yet
+    if not TP.has_probes(track) then return nil, "needs TS_TrackProbe" end
+    -- walking the chain every frame is wasteful: asked once a second
+    local now = reaper.time_precise()
+    local hit = where_cache[fx.guid]
+    if not hit or now - hit.t > 1 then
+      hit = { t = now, where = TP.status(track, fx.guid) }
+      where_cache[fx.guid] = hit
+    end
+    local where = hit.where
+    if where == "outside" then return nil, "outside the probes" end
+    if where == "parallel" then return nil, "in parallel", "can't be measured" end
+    return nil, "connecting\u{2026}"
   end
   local live = tw_sync()
   local mine = math.floor(reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER"))

@@ -526,6 +526,36 @@ function U.is_light(col)
   return (0.299 * r + 0.587 * g + 0.114 * b) > 140
 end
 
+-- `col` laid over `under` at strength `amt` (0..1): the tint a strip gets
+-- from its track colour. Both 0xRRGGBBAA; the result keeps under's alpha.
+function U.tint(under, col, amt)
+  amt = math.max(0, math.min(1, amt or 0))
+  if amt <= 0 or not col then return under end
+  local function ch(sh)
+    local u, c = (under >> sh) & 0xff, (col >> sh) & 0xff
+    return math.floor(u + (c - u) * amt + 0.5)
+  end
+  return (ch(24) << 24) | (ch(16) << 16) | (ch(8) << 8) | (under & 0xff)
+end
+
+-- The same, kept readable for light ink: a pale track colour at a high
+-- strength would wash the strip's readouts out, so the strength is held
+-- back to where the result is still a dark surface (U.is_light's own
+-- threshold). A dark colour tints at the full strength asked for.
+local function lum(col)
+  return 0.299 * ((col >> 24) & 0xff) + 0.587 * ((col >> 16) & 0xff) + 0.114 * ((col >> 8) & 0xff)
+end
+U.lum = lum
+function U.tint_readable(under, col, amt)
+  amt = math.max(0, math.min(1, amt or 0))
+  if amt <= 0 or not col then return under end
+  local lu, lc = lum(under), lum(col)
+  if lc > 136 and lc > lu then
+    amt = math.min(amt, (136 - lu) / (lc - lu))
+  end
+  return U.tint(under, col, amt)
+end
+
 -- Pull a colour towards white by `amt` (0..1). Alpha is left alone.
 function U.lighten(col, amt)
   amt = math.max(0, math.min(1, amt or 0.5))

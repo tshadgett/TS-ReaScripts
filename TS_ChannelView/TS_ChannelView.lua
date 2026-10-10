@@ -1,15 +1,21 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.9.2
+-- @version 1.9.5
 -- @changelog
---  ReaComp gets a panel of its own, as ReaEQ does: a transfer curve to
---  drag (threshold, knee, ratio), attack, release and pre-comp as an
---  envelope, a live dot showing where the signal sits on the curve, the
---  level history and gain reduction behind it, and the detector in a
---  drawer. Needs TS_TrackProbe on the track for the history and the dot.
---  Duplicate a plugin or a container from its menu.
---  A Wet slider in every plugin's menu, at any panel width.
---  The quick search in the add-plugin menu: Up and Down pick, Enter adds.
+--  Pages: a Page break in a plugin's layout splits its panel into tabs,
+--  each with a name and a colour stripe.
+--  Show when: a control can show only while another parameter is, isn't,
+--  is above, is below or is between given values -- a delay's sync
+--  switch swapping its note knob for its ms knob in one place.
+--  More than one layout per plugin, picked per instance from the panel
+--  menu (Layout): copy the one you have to a new one, or start empty.
+--  Background tint: the strip, the track name and the Channel panel can
+--  take a share of the track's colour, per group or per track; the TCP
+--  window can follow.
+--  While REAPER is busy on a long job, such as a plugin scan, ChannelView
+--  backs off rather than keep reading plugins through it.
+--  A gain-reduction trace says when its plugin is outside the probes.
+--  Fix: a trace could flicker while the web companion was running.
 --  The web page has the same: restart the web companion script after
 --  updating.
 -- @license MIT
@@ -28,6 +34,7 @@
 --  [nomain] TS_CV_Arrange.lua
 --  [nomain] TS_CV_Toolbar.lua
 --  [nomain] TS_CV_Browser.lua
+--  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_Chains.lua
 --  [nomain] TS_CV_ColourPick.lua
 --  [nomain] TS_CV_Channel.lua
@@ -164,6 +171,7 @@ local TP = require("TS_CV_Taps")
 local RQ = require("TS_CV_ReaEQ")
 local RC = require("TS_CV_ReaComp")
 local RCP = require("TS_CV_CompPanel")
+local BZ = require("TS_CV_Busy")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
@@ -385,7 +393,8 @@ end
 
 -- The layout a panel should draw, and the key it's filed under.
 local function layout_for(fx)
-  local key = U.plugin_key(fx.name)
+  -- the instance's layout variant when it has one (St.variant)
+  local key = St.layout_key(fx.name, fx.guid)
   local layout, is_default = M.get_or_default(key, app.track, fx.addr, fx.guid)
   return layout, key, is_default
 end
@@ -1350,6 +1359,60 @@ local function panel_menu()
     app.fxren_for = nil
     rescan(true)
     ImGui.CloseCurrentPopup(ctx)
+  end
+  -- Layout variants: another layout for the same plugin, picked per
+  -- instance (TS_CV_Mappings "<plugin> :: <name>", St.variant). Not for
+  -- ReaEQ or ReaComp, whose panels are their own.
+  if not RQ.is_eq(key) and not RC.is_comp(key) then
+    local base, cur = M.split_variant(key)
+    if ImGui.BeginMenu(ctx, "Layout: " .. (cur and U.truncate(cur, 20) or "Default")) then
+      if ImGui.MenuItem(ctx, "Default", nil, cur == nil) then St.set_variant(fx.guid, nil) end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "The plugin's own layout, shared by every instance not set to another.")
+      end
+      for _, nm in ipairs(M.variants(base)) do
+        if ImGui.MenuItem(ctx, nm .. "##var", nil, cur == nm) then St.set_variant(fx.guid, nm) end
+      end
+      ImGui.Separator(ctx)
+      ImGui.SetNextItemWidth(ctx, 190)
+      -- (not EnterReturnsTrue: with it ImGui only hands the text back on
+      -- Enter, so the buttons would always see an empty name)
+      local _, txt = ImGui.InputTextWithHint(ctx, "##newvar", "new layout's name", app.var_name or "")
+      local ch = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+                 or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
+      app.var_name = txt
+      local ok = M.clean_variant(txt) ~= nil and not M.has(M.variant_key(base, M.clean_variant(txt) or ""))
+      local function make(empty)
+        local _, nm = M.new_variant(base, txt, layout, empty)
+        if nm then St.set_variant(fx.guid, nm); app.var_name = nil; ImGui.CloseCurrentPopup(ctx) end
+      end
+      if ch and ok then make(false) end
+      if not ok then ImGui.BeginDisabled(ctx, true) end
+      if ImGui.Button(ctx, "Copy to new layout") then make(false) end
+      if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+        ImGui.SetTooltip(ctx, "A copy of this layout under the name above, for this instance.\n" ..
+          "Pick it on any other instance from this menu. (Enter does the same.)")
+      end
+      ImGui.SameLine(ctx)
+      if ImGui.Button(ctx, "New empty layout") then make(true) end
+      if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+        ImGui.SetTooltip(ctx, "A layout with no controls yet, under the name above, for this\n" ..
+          "instance. Your names for its parameters come with it.")
+      end
+      if not ok then ImGui.EndDisabled(ctx) end
+      if cur then
+        ImGui.Separator(ctx)
+        if ImGui.MenuItem(ctx, "Delete layout \"" .. U.truncate(cur, 20) .. "\"\u{2026}") then
+          if reaper.MB(("Delete the layout \"%s\"?\n\nEvery instance using it goes back to " ..
+              "the plugin's default layout. The library as it was before is kept as\n" ..
+              "TS_ChannelView_Mappings.bak.ini, until the next save."):format(cur), "ChannelView", 1) == 1 then
+            M.remove(key); M.save()
+            St.set_variant(fx.guid, nil)
+          end
+        end
+      end
+      ImGui.EndMenu(ctx)
+    end
   end
   -- REAPER's own wet for the plugin: the header shows it where there's
   -- room, and here it works at any panel width
@@ -2782,7 +2845,7 @@ local function panel_row(row_h, row_w)
           local lay, k = layout_for(fx)
           local has_meter = M.meter_of(lay) ~= nil
                             and T.reports_gr(app.track, fx.addr, fx.guid)
-          total = total + P.width(lay.controls or {}, panel_h(i),
+          total = total + P.width(P.visible(lay.controls or {}, app.track, fx), panel_h(i),
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   P.has_io(app.track, fx, lay),
                                   St.is_gr_open(fx.guid), M.locked(lay))
@@ -2845,6 +2908,17 @@ local function panel_row(row_h, row_w)
             local l = materialise(fx)
             l.lock = req.toggle_lock or nil
             M.set(key, l); M.save()
+          end
+        end
+        if req.page_cap then
+          -- a page tab's colour, from its right-click picker: previewed as
+          -- you hover (not saved to disk until you pick)
+          local l = materialise(fx)
+          local c = l.controls and l.controls[req.page_cap.idx]
+          if c and c.type == "page" then
+            c.cap = req.page_cap.cap
+            M.set(key, l)
+            if req.page_cap.save then M.save() end
           end
         end
         if req.grv_window then
@@ -3314,8 +3388,49 @@ end
 -- traceback naming every frame on the way down, the layouts are saved,
 -- and the loop stops rather than throwing the same error sixty times a
 -- second.
+-- While REAPER is busy on a long job (TS_CV_Busy), the window is drawn
+-- with a note and nothing else: no FX calls to contend with the job,
+-- and the ImGui context stays alive. A full frame is tried once a
+-- second, and the first quick one ends it.
+local function busy_frame()
+  ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.win_bg)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_FramePadding, 6, C.MENU_PAD_Y)
+  local wflags = ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_NoScrollWithMouse
+  if C.WIN_NO_SCROLLBAR then wflags = wflags | ImGui.WindowFlags_NoScrollbar end
+  local visible, open = ImGui.Begin(ctx, C.WIN_TITLE, true, wflags)
+  if visible then
+    local msg = "ChannelView is waiting while REAPER is busy\u{2026}"
+    local w, h = ImGui.GetContentRegionAvail(ctx)
+    local tw, th = ImGui.CalcTextSize(ctx, msg)
+    local cx, cy = ImGui.GetCursorScreenPos(ctx)
+    ImGui.DrawList_AddText(ImGui.GetWindowDrawList(ctx),
+      cx + (w - tw) * 0.5, cy + (h - th) * 0.5, C.COL.empty_text, msg)
+    ImGui.End(ctx)
+  end
+  ImGui.PopStyleVar(ctx)
+  ImGui.PopStyleColor(ctx)
+  local now = reaper.time_precise()
+  if not app.alive_t or now - app.alive_t > 0.5 then
+    app.alive_t = now
+    reaper.SetExtState(C.EXT_SECT, ALIVE, tostring(now), false)
+  end
+  if open and not app.want_quit then
+    reaper.defer(safe_frame)
+  else
+    M.save()
+    SC.save()
+  end
+end
+
+local function timed_frame()
+  local now = reaper.time_precise()
+  if not BZ.probe_due(now) then return busy_frame() end
+  frame()
+  BZ.note(reaper.time_precise() - now, now)
+end
+
 function safe_frame()
-  local ok, err = xpcall(frame, function(e)
+  local ok, err = xpcall(timed_frame, function(e)
     return debug.traceback(tostring(e), 2)
   end)
   if ok then return end

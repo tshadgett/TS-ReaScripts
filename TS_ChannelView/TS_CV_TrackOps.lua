@@ -710,9 +710,91 @@ function TO.set_fader_default(cat, field, value, persist)
   reaper.SetExtState(C.EXT_SECT, DEF_KEY, table.concat(parts, ";"), persist ~= false)
 end
 
+-- ---------------------------------------------------------------------
+-- background tint by group
+-- ---------------------------------------------------------------------
+-- A strip's body, its name button and the pinned Channel panel take the
+-- track's colour at a strength per group -- a folder parent at 60%, say,
+-- its children at 15% -- so the row reads as groups. The same four
+-- groups as the fader looks, with the same precedence (the group's
+-- strength, else the Default's); 0 is off, and the default. ExtState
+-- "bg_tints": "vca=60;parent=60;fxret=15;default=15". A track with no
+-- colour of its own has nothing to tint with.
+local TINT_KEY = "bg_tints"
+local tints
+local function read_tints()
+  if tints then return tints end
+  tints = {}
+  for k, v in (reaper.GetExtState(C.EXT_SECT, TINT_KEY) or ""):gmatch("(%w+)=([^;]*)") do
+    local n = tonumber(v)
+    if n then tints[k] = math.max(0, math.min(100, math.floor(n + 0.5))) end
+  end
+  return tints
+end
+
+-- A group's strength, 0..100 (0 when unset).
+function TO.bg_tint(cat) return (cat and read_tints()[cat]) or 0 end
+
+function TO.set_bg_tint(cat, pct, persist)
+  local d = read_tints()
+  pct = pct and math.max(0, math.min(100, math.floor(pct + 0.5))) or 0
+  d[cat] = pct > 0 and pct or nil
+  local parts = {}
+  for _, c in ipairs(TO.FADER_CATS) do
+    if d[c.key] then parts[#parts + 1] = c.key .. "=" .. d[c.key] end
+  end
+  reaper.SetExtState(C.EXT_SECT, TINT_KEY, table.concat(parts, ";"), persist ~= false)
+end
+
+-- Whether any group has a strength at all: nothing to compute when not.
+function TO.any_bg_tint()
+  for _, v in pairs(read_tints()) do if v > 0 then return true end end
+  return false
+end
+
+-- A track's own strength, saved with the track (P_EXT, as its fader look
+-- is): 0..100, or nil for "as its group". Cached half a second.
+local TINT_TRACK_KEY = "P_EXT:TS_CV_BGTINT"
+local tint_cache = {}
+function TO.own_tint(track, now)
+  if not track then return nil end
+  now = now or reaper.time_precise()
+  local c = tint_cache[track]
+  if c and now - c.t < 0.5 then return c.v end
+  local _, s = reaper.GetSetMediaTrackInfo_String(track, TINT_TRACK_KEY, "", false)
+  local v = tonumber(s)
+  if v then v = math.max(0, math.min(100, math.floor(v + 0.5))) end
+  tint_cache[track] = { t = now, v = v }
+  return v
+end
+
+-- Sets `tracks`' own strength (nil: back to the group's). One undo point.
+function TO.set_own_tint(tracks, pct)
+  reaper.Undo_BeginBlock()
+  for _, tr in ipairs(tracks) do
+    local s = pct and tostring(math.max(0, math.min(100, math.floor(pct + 0.5)))) or ""
+    reaper.GetSetMediaTrackInfo_String(tr, TINT_TRACK_KEY, s, true)
+    tint_cache[tr] = nil
+  end
+  reaper.Undo_EndBlock(pct and "ChannelView: set track background" or "ChannelView: reset track background", -1)
+end
+
+-- A track's strength, 0..1: its own, else its group's, else the Default's.
+-- The master has no group and is never tinted.
+function TO.track_tint(track)
+  if not track or TO.is_master(track) then return 0 end
+  local own = TO.own_tint(track)
+  if own then return own / 100 end
+  if not TO.any_bg_tint() then return 0 end
+  local cat = TO.fader_category(track)
+  local v = cat and read_tints()[cat] or nil
+  if v == nil then v = read_tints().default end
+  return (v or 0) / 100
+end
+
 -- Another window (the TCP's, or ChannelView's) may have changed the
 -- groups' looks: read them again next time.
-function TO.reload_fader_defaults() defaults = nil end
+function TO.reload_fader_defaults() defaults = nil; tints = nil end
 
 -- What a track's fader looks like: its own choice, else its group's, else
 -- the Default look, part by part. { style, cap } or nil for the plain fader.

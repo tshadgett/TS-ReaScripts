@@ -23,6 +23,7 @@ local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
 local RC  = require("TS_CV_ReaComp")
 local CP  = require("TS_CV_CompPanel")
+local CK  = require("TS_CV_ColourPick")
 local TP  = require("TS_CV_Taps")
 local PU  = require("TS_CV_PresetUI")
 local Tr  = require("TS_CV_Trace")
@@ -449,6 +450,16 @@ end
 -- `lock` is a locked layout's row count (Lock=<rows>): the arrangement it
 -- had then, whatever the panel's height now.
 function P.layout(controls, panel_h, lock)
+  -- a page break has no place in a grid: a list that still has them (a
+  -- caller that didn't go through P.pages) lays out as if they weren't there
+  for _, ctl in ipairs(controls) do
+    if ctl.type == "page" then
+      local rest = {}
+      for _, c in ipairs(controls) do if c.type ~= "page" then rest[#rest + 1] = c end end
+      controls = rest
+      break
+    end
+  end
   local rows  = lock or P.rows_for(panel_h)
   local half_rows = rows * 2
   -- faders placed among the controls: merged-cell flow (place_flow);
@@ -530,6 +541,80 @@ end
 -- don't have to pass one) and only ever matters for one thing: a ReaEQ
 -- panel isn't a grid at all, so none of the layout below applies to it --
 -- it gets a fixed canvas width instead. See TS_CV_EQPanel.lua.
+-- ---------------------------------------------------------------------
+-- pages
+-- ---------------------------------------------------------------------
+-- A "page" control is a page break: what follows it, up to the next
+-- break, is a page of its own, and the panel shows one page at a time
+-- with a tab strip under its header. Controls before the first break are
+-- page 1. Dividers inside a page split its columns as they always have.
+-- Returns a list of { label, cap, controls, ctl }, or nil when the layout
+-- has no break (an ordinary, unpaged panel); a leading break's empty
+-- first page is dropped.
+function P.pages(controls)
+  local pages, cur, any = {}, { controls = {} }, false
+  for i, ctl in ipairs(controls or {}) do
+    if ctl.type == "page" then
+      any = true
+      pages[#pages + 1] = cur
+      cur = { label = ctl.label, cap = ctl.cap, controls = {}, ctl = ctl, idx = i }
+    else
+      cur.controls[#cur.controls + 1] = ctl
+    end
+  end
+  pages[#pages + 1] = cur
+  if not any then return nil end
+  if #pages[1].controls == 0 and not pages[1].ctl then table.remove(pages, 1) end
+  for i, pg in ipairs(pages) do pg.n = i end
+  return pages
+end
+
+-- A page's tab text: its name, else its number.
+function P.page_label(pg)
+  return (pg.label and pg.label ~= "") and pg.label or tostring(pg.n)
+end
+
+-- About how wide the tab strip needs to be: the panel is never narrower
+-- than its strip. P.width has no context to measure text with, so this
+-- is a guess by character count until the strip has been drawn once,
+-- after which its measured width (per set of tab names) is used instead.
+local TAB_PAD_X, TAB_GAP = 8, 2
+local strip_measured = {}   -- joined tab names -> width the strip needed
+local function tab_strip_key(pages)
+  local t = {}
+  for i, pg in ipairs(pages) do t[i] = P.page_label(pg) end
+  return table.concat(t, "\n")
+end
+local function tab_strip_est(pages)
+  local m = strip_measured[tab_strip_key(pages)]
+  if m then return m end
+  local w = C.PANEL_PAD
+  for _, pg in ipairs(pages) do
+    w = w + #P.page_label(pg) * 6.2 + TAB_PAD_X * 2 + TAB_GAP
+  end
+  return w + C.PANEL_PAD
+end
+
+-- The controls a panel shows right now: those whose Show rule (if any)
+-- the plugin's current values satisfy (TS_CV_Mappings M.visible). The
+-- full list is what the context menu indexes into; this is what gets
+-- laid out.
+function P.visible(controls, track, fx)
+  if not (track and fx) then return controls or {} end
+  local any = false
+  for _, c in ipairs(controls or {}) do if c.show then any = true break end end
+  if not any then return controls or {} end
+  local shown = M.visible(controls, function(p)
+    return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+  end)
+  return shown
+end
+
+-- The page a panel is open at, clamped to what it has.
+function P.page_of(guid, pages)
+  return math.max(1, math.min(#pages, St.page(guid)))
+end
+
 -- Whether a locked panel's grid is taller than its body, and scrolls.
 function P.scrolls(lay, panel_h, lock)
   if not lock then return false end
@@ -551,10 +636,24 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
     controls = {}
     for i = 1, n do controls[i] = { type = "knob" } end
   end
-  local lay = P.layout(controls, avail_h, lock)
-  -- a locked grid too tall for the panel scrolls, its scrollbar beside it
-  local sb = P.scrolls(lay, avail_h, lock) and C.SCROLL_W + 2 or 0
-  local w = math.max(C.PANEL_MIN_W, lay.width + sb + C.PANEL_PAD * 2)
+  -- paged: as wide as its widest page, never narrower than its tab strip
+  local pages = type(controls) == "table" and P.pages(controls) or nil
+  local inner = 0
+  if pages then
+    local body_h = avail_h - C.TAB_STRIP_H
+    for _, pg in ipairs(pages) do
+      local lay = P.layout(pg.controls, body_h, lock)
+      local sb = P.scrolls(lay, body_h, lock) and C.SCROLL_W + 2 or 0
+      inner = math.max(inner, lay.width + sb)
+    end
+    inner = math.max(inner, tab_strip_est(pages) - C.PANEL_PAD * 2)
+  else
+    local lay = P.layout(controls, avail_h, lock)
+    -- a locked grid too tall for the panel scrolls, its scrollbar beside it
+    local sb = P.scrolls(lay, avail_h, lock) and C.SCROLL_W + 2 or 0
+    inner = lay.width + sb
+  end
+  local w = math.max(C.PANEL_MIN_W, inner + C.PANEL_PAD * 2)
   -- The meter is a strip, not a column: it adds its own narrow width
   -- rather than pushing the panel out by a whole CELL_W.
   if has_meter then w = w + C.METER_COL_W + C.PANEL_PAD end
@@ -1467,10 +1566,117 @@ function P.mod_on(track, fx, p)
 end
 function P.forget_mod(fx, p) mod_cache[fx.guid .. ":" .. p] = nil end
 
+-- The tab strip under a paged panel's header: a tab per page, its name
+-- under a stripe in its colour (the theme's accent unless the page break
+-- was given one), the open one lifted into the body. Click a tab, or
+-- wheel over the strip, to change page; right-click a tab for its colour.
+local tab_menu = nil   -- { guid, page, orig } while a tab's colour popup is open
+local function draw_tab_strip(ctx, dl, x, y, w, fx, pages, cur, req)
+  local guid = fx.guid
+  local h = C.TAB_STRIP_H
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.header_bg)
+  ImGui.DrawList_AddLine(dl, x, y + h - 0.5, x + w, y + h - 0.5, C.COL.panel_border, 1.0)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  W.allow_overlap(ctx)
+  ImGui.InvisibleButton(ctx, "tabs##" .. guid, math.max(1, w), h)
+  if ImGui.IsItemHovered(ctx) then
+    local wheel = W.control_wheel(ctx)
+    if wheel ~= 0 then
+      St.set_page(guid, math.max(1, math.min(#pages, cur - wheel)))
+      W.take_wheel()
+    end
+  end
+  W.push_small(ctx)
+  -- measure the whole strip first, so P.width can size the panel to it
+  -- from the next frame on (its guess by character count is only for
+  -- the first)
+  local need = C.PANEL_PAD * 2
+  for _, pg in ipairs(pages) do
+    need = need + ImGui.CalcTextSize(ctx, P.page_label(pg)) + TAB_PAD_X * 2 + TAB_GAP
+  end
+  strip_measured[tab_strip_key(pages)] = need
+  local tx = x + C.PANEL_PAD
+  local open_x1, open_x2
+  for i, pg in ipairs(pages) do
+    local label = P.page_label(pg)
+    local tw, th = ImGui.CalcTextSize(ctx, label)
+    local bw = tw + TAB_PAD_X * 2
+    local on = (i == cur)
+    local x1, y1, x2, y2 = tx, y + (on and 2 or 4), tx + bw, y + h
+    ImGui.SetCursorScreenPos(ctx, x1, y1)
+    W.allow_overlap(ctx)
+    ImGui.InvisibleButton(ctx, "tab" .. i .. "##" .. guid, bw, y2 - y1,
+      ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+    local hov = ImGui.IsItemHovered(ctx)
+    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then St.set_page(guid, i) end
+    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+      tab_menu = { guid = guid, page = i, orig = pg.cap }
+      ImGui.OpenPopup(ctx, "tabcol##" .. guid)
+    end
+    local fill = on and C.COL.panel_bg or (hov and C.COL.knob_body_hi or C.COL.toggle_off)
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2 + (on and 1 or 0), fill, 3.0,
+      ImGui.DrawFlags_RoundCornersTop)
+    ImGui.DrawList_AddRect(dl, x1 + 0.5, y1 + 0.5, x2 - 0.5, y2 + (on and 1.5 or 0.5),
+      C.COL.panel_border, 3.0, ImGui.DrawFlags_RoundCornersTop, 1.0)
+    local stripe = W.cap_col(pg.cap) or C.COL.accent
+    if not on then stripe = U.with_alpha(stripe, 0xa0) end
+    ImGui.DrawList_AddRectFilled(dl, x1 + 4, y1 + 2, x2 - 4, y1 + 4, stripe, 1.0)
+    ImGui.DrawList_AddText(dl, x1 + TAB_PAD_X, y1 + (y2 - y1 - th) * 0.5 + 1.5,
+      on and C.COL.header_text or C.COL.label, label)
+    if on then open_x1, open_x2 = x1, x2 end
+    tx = x2 + TAB_GAP
+  end
+  W.pop_small(ctx)
+  -- the open tab joins the body: no line along its foot
+  if open_x1 then
+    ImGui.DrawList_AddLine(dl, open_x1 + 1, y + h - 0.5, open_x2 - 1, y + h - 0.5, C.COL.panel_bg, 1.0)
+  end
+  -- its colour, from the cap swatches, previewed as you hover and kept
+  -- when you pick (or put back when you cancel)
+  if tab_menu and tab_menu.guid == guid and ImGui.BeginPopup(ctx, "tabcol##" .. guid) then
+    local pg = pages[tab_menu.page]
+    if pg then
+      ImGui.TextDisabled(ctx, "Tab colour: " .. P.page_label(pg))
+      ImGui.Separator(ctx)
+      if ImGui.Selectable(ctx, "Theme accent##tabcol", pg.cap == nil, CK.KEEP_OPEN, 160, 0) then
+        req.page_cap = { idx = pg.idx, cap = nil, save = true }
+      end
+      local from = W.cap_col(pg.cap) or C.COL.accent
+      CK.cap_swatches(ctx, "tabcol" .. guid, pg.cap, from >> 8, "Tab colour",
+        function(k, save) req.page_cap = { idx = pg.idx, cap = k, save = save } end,
+        function() req.page_cap = { idx = pg.idx, cap = tab_menu.orig, save = true } end)
+    end
+    ImGui.EndPopup(ctx)
+  elseif tab_menu and tab_menu.guid == guid then
+    tab_menu = nil
+  end
+end
+
 local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter, io)
   local controls = layout.controls or {}
+  -- conditional controls left out, then paged: the strip under the
+  -- header, then one page's controls below (the index lookup for the
+  -- context menu still runs over the whole list)
+  local page_controls = P.visible(controls, track, fx)
+  local pages = P.pages(page_controls)
+  -- a break's index is into the list it was split from; the colour menu
+  -- wants the full list's (a hidden control before it shifts them)
+  if pages and page_controls ~= controls then
+    for _, pg in ipairs(pages) do
+      if pg.ctl then
+        for i, c in ipairs(controls) do if c == pg.ctl then pg.idx = i break end end
+      end
+    end
+  end
+  if pages then
+    local cur = P.page_of(fx.guid, pages)
+    draw_tab_strip(ctx, dl, x, y, w, fx, pages, cur, req)
+    y = y + C.TAB_STRIP_H
+    panel_h = panel_h - C.TAB_STRIP_H
+    page_controls = pages[cur].controls
+  end
   local lock = M.locked(layout)
-  local lay = P.layout(controls, panel_h, lock)
+  local lay = P.layout(page_controls, panel_h, lock)
   local h = panel_h - C.HEADER_H - P.footer_h()
   local scroll = P.scrolls(lay, panel_h, lock)
 
@@ -2129,7 +2335,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local meter = (not is_eq and not is_rc) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
   local io = (not is_rc) and P.has_io(track, fx, layout)
-  local w = P.width(layout.controls or {}, avail_h, collapsed, meter ~= nil, key, io,
+  local w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
                     St.is_gr_open(fx.guid), M.locked(layout))
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)

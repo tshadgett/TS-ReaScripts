@@ -27,16 +27,18 @@ local M = require("TS_CV_Mappings")
 local CP = require("TS_CV_ColourPick")
 local TP = require("TS_CV_Taps")
 local RQ = require("TS_CV_ReaEQ")
+local RC = require("TS_CV_ReaComp")
+local St = require("TS_CV_State")
 
 local E = {}
 local ImGui
 
 local TITLE = "Setup Edit Parameters"
 
-local TYPES       = { "knob", "toggle", "combo", "stepped", "fader", "xy", "dual", "blank", "half_gap", "divider" }
+local TYPES       = { "knob", "toggle", "combo", "stepped", "fader", "xy", "dual", "blank", "half_gap", "divider", "page" }
 local TYPE_NAMES = { knob = "Knob", toggle = "Button", combo = "Dropdown", stepped = "Stepped knob",
                      fader = "Fader", xy = "XY pad", dual = "Concentric knob", blank = "Gap",
-                     half_gap = "Half gap", divider = "Divider" }
+                     half_gap = "Half gap", divider = "Divider", page = "Page" }
 local SIZES_COMBO = ""
 for _, k in ipairs(C.SIZE_LIST) do SIZES_COMBO = SIZES_COMBO .. C.SIZES[k].label .. "\0" end
 local TOGGLE_SIZES_COMBO = C.SIZES.small.label .. "\0" .. C.SIZES.medium.label .. "\0"
@@ -238,6 +240,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
       local label
       if c.type == "divider" then
         label = ("%2d  \u{2502}\u{2502}\u{2502} divider"):format(i)
+      elseif c.type == "page" then
+        label = ("%2d  \u{25A3} page%s"):format(i, (c.label and c.label ~= "") and (": " .. c.label) or "")
       elseif c.type == "blank" then
         label = ("%2d  \u{2014} blank \u{2014}"):format(i)
       elseif c.type == "half_gap" then
@@ -249,6 +253,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
         if not shown or shown == "" then shown = pname end
         label = ("%2d  %-16s  %s"):format(i, U.truncate(shown, 16), TYPE_NAMES[c.type] or c.type)
       end
+      -- a conditional control: shown only while another parameter reads a given way
+      if c.show and c.type ~= "page" then label = label .. "  \u{25D0}" end
 
       if ImGui.Selectable(ctx, label .. "##asg" .. i, st.sel_asg == i) then
         st.sel_asg = i
@@ -338,6 +344,19 @@ local function draw_assigned(ctx, track, list_w, list_h)
       "A rule between groups of controls. Ends the current column,\n" ..
       "so it separates sections rather than taking a cell. Select it\n" ..
       "below to turn its line off and keep only the spacing.")
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Page", 50) then
+    local at = (sel >= 1 and sel < n) and (sel + 1) or (n + 1)
+    table.insert(st.scratch.controls, at,
+      { param = -1, type = "page", bipolar = false, label = "" })
+    st.sel_asg = at
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx,
+      "A page break. Everything after it is a new page of the panel,\n" ..
+      "with a tab strip under the header to switch between them.\n" ..
+      "Select it below to name the tab and pick its colour.")
   end
 end
 
@@ -430,7 +449,7 @@ local function draw_entry_editor(ctx)
   for _, p in ipairs(st.params or {}) do
     if p.index == c.param then pname = p.name break end
   end
-  local is_param = c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap"
+  local is_param = c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap" and c.type ~= "page"
   local two = c.type == "xy" or c.type == "dual"
 
   -- what it controls
@@ -472,7 +491,7 @@ local function draw_entry_editor(ctx)
       local n = reaper.TrackFX_GetNumParams(st.track, st.fx.addr)
       c.param2 = (c.param + 1 < n) and (c.param + 1) or c.param
     end
-    is_param = c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap"
+    is_param = c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap" and c.type ~= "page"
     two = c.type == "xy" or c.type == "dual"
   end
 
@@ -596,6 +615,29 @@ local function draw_entry_editor(ctx)
     if sch then c.size = (si == 1) and "large" or nil end
   end
 
+  -- a page break: the tab's name and its stripe's colour
+  if c.type == "page" then
+    row_name("Tab name")
+    ImGui.SetNextItemWidth(ctx, FIELD_W)
+    local ch, v = ImGui.InputTextWithHint(ctx, "##pglabel", "unnamed: its number", c.label or "")
+    if ch then c.label = (v ~= "") and v or nil end
+    tip("Everything after this break, up to the next one, is a page of its\n" ..
+      "own; the panel shows one page at a time with a tab strip under its\n" ..
+      "header. Dividers inside a page split its columns as they always have.")
+    row_name("Tab colour")
+    ImGui.SetNextItemWidth(ctx, FIELD_W)
+    local keys, names, now = { "" }, { "Theme" }, 0
+    for i, ck in ipairs(C.CAPS) do
+      keys[#keys + 1] = ck.key; names[#names + 1] = ck.label
+      if ck.key == c.cap then now = i end
+    end
+    if c.cap and now == 0 then keys[#keys + 1] = c.cap; names[#names + 1] = c.cap; now = #keys - 1 end
+    local cch, ci = ImGui.Combo(ctx, "##pgcap", now, table.concat(names, "\0") .. "\0")
+    if cch then c.cap = (ci > 0) and keys[ci + 1] or nil end
+    tip("The stripe over the tab's name. Right-click the tab on the panel\n" ..
+      "for the full colour picker.")
+  end
+
   -- a divider: its line, and the section after it
   if c.type == "divider" then
     row_name("Line")
@@ -628,8 +670,9 @@ local function draw_entry_editor(ctx)
     local spl = (c.style == "plate") and C.plate_of(c.cap) or nil
     local skind = (c.style == "inset" and "inset") or (spl and "plate") or nil
     if skind then row_name("Finish"); brush_box(ctx, c, skind, spl, "sec_brush") end
-  else
+  elseif c.type ~= "page" then
     -- its own background (an inset or a faceplate), joined with neighbours'
+    -- (a page break draws nothing of its own, so it has none)
     local names, keys = { "None", "Inset" }, { "", "inset" }
     for _, pl in ipairs(C.PLATES) do
       if pl.bg then names[#names + 1] = pl.label; keys[#keys + 1] = pl.key end
@@ -653,6 +696,123 @@ local function draw_entry_editor(ctx)
     local bpl = (c.back and c.back ~= "inset") and C.plate_of(c.back) or nil
     local bkind = (c.back == "inset" and "inset") or (bpl and "plate") or nil
     if bkind then row_name("Finish"); brush_box(ctx, c, bkind, bpl, "back_brush") end
+  end
+
+  -- shown only while another parameter reads a given way (Show<n>)
+  if c.type ~= "page" and st.track and st.fx then
+    local P = require("TS_CV_Panel")
+    local tr, addr = st.track, st.fx.addr
+    local n = reaper.TrackFX_GetNumParams(tr, addr)
+    local names = { "Always" }
+    for p = 0, n - 1 do
+      local _, pn = reaper.TrackFX_GetParamName(tr, addr, p, "")
+      names[#names + 1] = ("%d  %s"):format(p, (M.display_name(st.key, p, nil, pn, false):gsub("%z", "")))
+    end
+    -- a parameter's choices when it has a few (a switch, a dropdown, a
+    -- stepped knob), else nil: it's continuous, and takes a slider
+    local function choices_of(p)
+      local list = P.button_choices(tr, addr, p, st.key, nil)
+      if #list >= 2 and #list <= 64 then
+        local step = list[2].norm - list[1].norm
+        return list, math.max(0.0005, step * 0.5 - 0.0005)
+      end
+      -- a two-state switch: the plugin reports a step as big as the whole
+      -- range (or says it's a toggle), which reads as "no steps" above;
+      -- one placed on the panel as a button counts too
+      local ok, step, _, _, istog = reaper.TrackFX_GetParameterStepSizes(tr, addr, p)
+      local switch = ok and (istog or (step and step >= 1))
+      if not switch then
+        for _, o in ipairs(st.scratch.controls) do
+          if o.param == p and o.type == "toggle" then switch = true break end
+        end
+      end
+      if not switch then return nil end
+      local function say(n, dflt)
+        if reaper.TrackFX_FormatParamValueNormalized then
+          local fok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, n, "")
+          if fok and U.trim(sv or "") ~= "" then return U.trim(sv) end
+        end
+        return dflt
+      end
+      local off, on = say(0, "Off"), say(1, "On")
+      if off == on then off, on = "Off", "On" end
+      return { { norm = 0, text = off }, { norm = 1, text = on } }, 0.499
+    end
+    row_name("Show when")
+    ImGui.SetNextItemWidth(ctx, FIELD_W)
+    local cur_p = c.show and (c.show.param + 1) or 0
+    local sch, si = ImGui.Combo(ctx, "##showp", cur_p, table.concat(names, "\0") .. "\0")
+    if sch then
+      if si == 0 then c.show = nil
+      else
+        -- a switch or dropdown starts at "is <its last choice>", a knob
+        -- at "above halfway"
+        local list, tol = choices_of(si - 1)
+        if list then c.show = { param = si - 1, op = "is", norm = list[#list].norm, tol = tol }
+        else c.show = { param = si - 1, op = "above", norm = 0.5, tol = 0.005 } end
+      end
+    end
+    tip("Show this control only while the chosen parameter reads a given\n" ..
+      "way -- a delay's \"ms\" knob while sync is off, say. A hidden control\n" ..
+      "takes no cell, so two with opposite rules swap in one place.")
+    if c.show then
+      local r = c.show
+      r.op = M.show_op(r); r.inv = nil
+      local list, ctol = choices_of(r.param)
+      -- one value: a dropdown of the choices, or a slider showing the
+      -- plugin's own reading of where it is
+      local function value_field(id, norm, w)
+        ImGui.SetNextItemWidth(ctx, w)
+        if list then
+          local cur, best = 0, math.huge
+          for k, e in ipairs(list) do
+            local d = math.abs(e.norm - (norm or 0))
+            if d < best then best, cur = d, k - 1 end
+          end
+          local opts = {}
+          for k, e in ipairs(list) do opts[k] = (e.text or tostring(k)):gsub("%z", "") end
+          local ch, i = ImGui.Combo(ctx, id, cur, table.concat(opts, "\0") .. "\0")
+          if ch then return list[i + 1].norm end
+          return nil
+        end
+        local txt = ""
+        if reaper.TrackFX_FormatParamValueNormalized then
+          local ok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, r.param, norm or 0, "")
+          if ok then txt = U.trim(sv or "") end
+        end
+        if txt == "" then txt = ("%.0f%%"):format((norm or 0) * 100) end
+        local ch, v = ImGui.SliderDouble(ctx, id, norm or 0, 0, 1, (txt:gsub("%%", "%%%%")))
+        if ch then return v end
+        return nil
+      end
+      local OP_LABEL = { is = "is", ["not"] = "is not", above = "is above", below = "is below", between = "is between" }
+      local labels, cur_op = {}, 0
+      for i, k in ipairs(M.SHOW_OPS) do
+        labels[i] = OP_LABEL[k]
+        if k == r.op then cur_op = i - 1 end
+      end
+      row_name("")
+      ImGui.SetNextItemWidth(ctx, 92)
+      local och, oi = ImGui.Combo(ctx, "##showop", cur_op, table.concat(labels, "\0") .. "\0")
+      if och then
+        r.op = M.SHOW_OPS[oi + 1]
+        if r.op == "between" and not r.norm2 then r.norm2 = list and list[#list].norm or 1 end
+      end
+      tip("is / is not: that value (a knob within a hair of it).\n" ..
+        "is above / is below: past it, not including it.\n" ..
+        "is between: from one value to the other, both included.")
+      ImGui.SameLine(ctx, 0, 4)
+      local v = value_field("##showv", r.norm, FIELD_W - 96)
+      if v then r.norm = v end
+      r.tol = list and ctol or 0.005
+      if r.op == "between" then
+        row_name("and")
+        local v2 = value_field("##showv2", r.norm2, FIELD_W)
+        if v2 then r.norm2 = v2 end
+      else
+        r.norm2 = nil
+      end
+    end
   end
 
   -- the ticks
@@ -731,6 +891,93 @@ end
 -- ---------------------------------------------------------------------
 
 -- Returns "saved", "cancelled", or nil while still open.
+-- Which layout is being edited, at the top of the window: the plugin's
+-- default or one of its variants (TS_CV_Mappings "<plugin> :: <name>"),
+-- the one this instance shows. Switching here switches the instance;
+-- Copy to new and New empty make a variant from what's in the editor
+-- (unsaved edits go to the new one, the old one is left as it was).
+local function edited()
+  return M.signature(st.scratch) ~= M.signature(st.original)
+end
+local function switch_to(track, key)
+  local l = M.get(key)
+  if not l then
+    local base = M.split_variant(key)
+    l = M.get_or_default(base, track, st.fx.addr, st.fx.guid)
+  end
+  E.open(track, st.fx, key, l)
+  st.request = false        -- already open: don't open it again
+end
+local function draw_layout_row(ctx, track)
+  if RQ.is_eq(st.key) or RC.is_comp(st.key) then return end
+  local base, cur = M.split_variant(st.key)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, "Layout")
+  ImGui.SameLine(ctx)
+  ImGui.SetNextItemWidth(ctx, 180)
+  if ImGui.BeginCombo(ctx, "##edlayout", cur or "Default") then
+    local list = { { name = nil, label = "Default" } }
+    for _, nm in ipairs(M.variants(base)) do list[#list + 1] = { name = nm, label = nm } end
+    for i, e in ipairs(list) do
+      local k = M.variant_key(base, e.name)
+      local locked = M.locked(M.get(k)) ~= nil
+      if locked then ImGui.BeginDisabled(ctx, true) end
+      if ImGui.Selectable(ctx, e.label .. (locked and "  (locked)" or "") .. "##edl" .. i, e.name == cur)
+         and e.name ~= cur then
+        if not edited() or reaper.MB("Leave this layout without saving your changes?",
+                                     "ChannelView", 1) == 1 then
+          revert_applied()
+          St.set_variant(st.fx.guid, e.name)
+          switch_to(track, k)
+        end
+      end
+      if locked then ImGui.EndDisabled(ctx) end
+    end
+    ImGui.EndCombo(ctx)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "The layout this instance shows, and you're editing. Default is\n" ..
+      "shared by every instance not set to another; pick another on any\n" ..
+      "instance from its panel menu (Layout).")
+  end
+  ImGui.SameLine(ctx, 0, 16)
+  ImGui.SetNextItemWidth(ctx, 170)
+  -- (not EnterReturnsTrue: with it ImGui only hands the text back on
+  -- Enter, so the buttons would always see an empty name)
+  local _, txt = ImGui.InputTextWithHint(ctx, "##ednewvar", "new layout's name", st.var_name or "")
+  local ch = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+             or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
+  st.var_name = txt
+  local nm = M.clean_variant(txt)
+  local ok = nm ~= nil and not M.has(M.variant_key(base, nm))
+  local function make(empty)
+    local from = M.copy(st.scratch)
+    local k, made = M.new_variant(base, txt, from, empty)
+    if not k then return end
+    revert_applied()          -- the old layout keeps what it had
+    St.set_variant(st.fx.guid, made)
+    st.var_name = nil
+    switch_to(track, k)
+  end
+  if ch and ok then make(false) end
+  ImGui.SameLine(ctx)
+  if not ok then ImGui.BeginDisabled(ctx, true) end
+  if ImGui.Button(ctx, "Copy to new layout") then make(false) end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, ok and "What's in the editor now, as a new layout under that name,\n" ..
+      "for this instance. The layout you started from stays as it was."
+      or "Type a name for the new layout first.")
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "New empty layout") then make(true) end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, ok and "A new layout with no controls, under that name, for this\n" ..
+      "instance. Your names for the plugin's parameters come with it."
+      or "Type a name for the new layout first.")
+  end
+  if not ok then ImGui.EndDisabled(ctx) end
+end
+
 function E.draw(ctx, track)
   if not st.open then return nil end
 
@@ -760,8 +1007,13 @@ function E.draw(ctx, track)
 
     ImGui.Text(ctx, U.clean_fx_name(st.fx.name) .. (st.fx.alias and ("  (" .. st.fx.alias .. ")") or ""))
     ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, ("\u{2014}  saved as \"%s\", used by every instance of this plugin")
-      :format(st.key))
+    do
+      local _, var = M.split_variant(st.key)
+      ImGui.TextDisabled(ctx, (var and "\u{2014}  saved as \"%s\", used by every instance set to this layout"
+                                    or "\u{2014}  saved as \"%s\", used by every instance on the default layout")
+        :format(st.key))
+    end
+    draw_layout_row(ctx, track)
 
     -- Panel-level, so it sits above the lists rather than inside them: a
     -- plugin has one gain reduction, not one per parameter. The three

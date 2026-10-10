@@ -35,7 +35,12 @@
       Lock     = <rows>
 
   <type> is knob | toggle | combo | stepped | fader | xy | dual | blank |
-  divider | half_gap. "xy" is an XY pad (Ctl is X, Dual<n> Y), "dual" a
+  divider | half_gap | page. "page" is a page break: everything after it,
+  up to the next one, is a page of its own, and the panel shows one page
+  at a time with a tab strip under its header (TS_CV_Panel's P.pages).
+  Its label names the tab; its Style<n> colour (the cap field) is the
+  tab's stripe, the theme's accent when unset. Dividers inside a page
+  split its columns as they always have. "xy" is an XY pad (Ctl is X, Dual<n> Y), "dual" a
   concentric knob (Ctl the outer ring, Dual<n> the inner knob).
   "blank" is a deliberate empty cell, so a layout can leave a gap where a
   hardware strip would have one; "divider" ends the current column and,
@@ -103,6 +108,21 @@
   at its marks, "ten" 0 to 10; "|cap" prints them in the cap's colour.
   Medium and large knobs only (a small one has no room).
 
+  VARIANTS: a section named "<plugin> :: <name>" is another layout for
+  the same plugin, picked per instance from the panel's menu (Layout).
+  Which instance shows which is kept with the project, not here.
+
+  SHOW<n> makes control n conditional:
+  Show<n>=<param>|<value>|<tol>|<op>[|<value2>] shows the control only
+  while parameter <param> (any parameter of the plugin, on the panel or
+  not) reads a given way, values normalised 0..1. <op>: 0 is (within
+  <tol> of <value>), 1 is not, 2 above <value>, 3 below it, 4 between
+  <value> and <value2>. A hidden control takes no cell, so two side by
+  side with opposite rules swap in one place (a delay's "sync" knob for
+  its "ms" knob when sync is on). A toggle rule is 1|0.499|0 (on); a
+  dropdown's is the choice's value with half a step either side. Page
+  breaks have no rule of their own.
+
   LOCK freezes the layout: no edits, and the controls keep the arrangement
   they had at <rows> rows however tall the panel is -- a shorter panel
   scrolls instead of reflowing. Meters are not part of it: they can still
@@ -125,7 +145,7 @@ local FILE_NAME  = "TS_ChannelView_Mappings.ini"
 local BAK_NAME   = "TS_ChannelView_Mappings.bak.ini"
 local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Ctl<n>=<param index>|<type>|<bipolar 0|1>|<label>\n"
-                .. ";   type: knob | toggle | combo | stepped | fader | xy | dual | blank | divider | half_gap\n"
+                .. ";   type: knob | toggle | combo | stepped | fader | xy | dual | blank | divider | half_gap | page\n"
                 .. ";   label overrides the alias for that one slot only\n"
                 .. "; Alias<param>=<your name for that parameter, used everywhere>\n"
                 .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>\n"
@@ -156,7 +176,7 @@ local dirty       = false
 
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
-                     xy = true, dual = true }
+                     xy = true, dual = true, page = true }
 
 -- ---------------------------------------------------------------------
 
@@ -363,6 +383,7 @@ local function parse_section(sect)
         metal   = (U.trim(sect["Metal" .. i] or "") == "1") or nil,
         scale   = scale_of(sect["Scale" .. i]),
         scale_ink = scale_ink_of(sect["Scale" .. i]),
+        show    = (t ~= "page") and M.show_of(sect["Show" .. i]) or nil,
       }
       if t == "fader" then
         local cc = controls[#controls]
@@ -451,8 +472,90 @@ local function serialize(layout)
     if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
+    if c.show and c.type ~= "page" then out["Show" .. (i - 1)] = M.show_line(c.show) end
   end
   return out
+end
+
+-- A layout as one string, to tell whether two are the same.
+function M.signature(layout)
+  local t, keys = serialize(layout or { controls = {} }), {}
+  for k in pairs(t) do keys[#keys + 1] = k end
+  table.sort(keys)
+  for i, k in ipairs(keys) do keys[i] = k .. "=" .. t[k] end
+  return table.concat(keys, "\n")
+end
+
+-- ---------------------------------------------------------------------
+-- conditional controls (Show<n>)
+-- ---------------------------------------------------------------------
+
+-- A rule from its line, or nil: { param, op, norm, norm2, tol }.
+-- op: "is" (within tol of norm), "not" (isn't), "above" / "below" (past
+-- norm), "between" (norm..norm2, either way round, ends included). The
+-- fourth field was once 0 / 1 for is / is not, which still reads the same.
+local SHOW_OPS  = { [0] = "is", "not", "above", "below", "between" }
+local SHOW_CODE = { is = 0, ["not"] = 1, above = 2, below = 3, between = 4 }
+M.SHOW_OPS = { "is", "not", "above", "below", "between" }
+
+function M.show_of(line)
+  if not line then return nil end
+  local f = {}
+  for v in (U.trim(line) .. "|"):gmatch("([^|]*)|") do f[#f + 1] = U.trim(v) end
+  local p, v = tonumber(f[1] or ""), tonumber(f[2] or "")
+  if not p or not v or p < 0 then return nil end
+  local op = SHOW_OPS[tonumber(f[4] or "") or 0] or "is"
+  local r = { param = math.floor(p), op = op, norm = math.max(0, math.min(1, v)),
+              tol = math.max(0.0005, tonumber(f[3] or "") or 0.499) }
+  if op == "between" then
+    r.norm2 = math.max(0, math.min(1, tonumber(f[5] or "") or r.norm))
+  end
+  return r
+end
+
+-- A rule's op, allowing for one made before ops (inv = is not).
+function M.show_op(r) return r.op or (r.inv and "not") or "is" end
+
+function M.show_line(r)
+  local op = M.show_op(r)
+  local line = ("%d|%.4f|%.4f|%d"):format(r.param or 0, r.norm or 0, r.tol or 0.499, SHOW_CODE[op] or 0)
+  if op == "between" then line = line .. ("|%.4f"):format(r.norm2 or r.norm or 0) end
+  return line
+end
+
+-- Whether a value satisfies a rule.
+function M.show_match(v, r)
+  v = v or 0
+  local op, eps = M.show_op(r), 1e-6
+  if op == "above" then return v > r.norm + eps end
+  if op == "below" then return v < r.norm - eps end
+  if op == "between" then
+    local a, b = r.norm, r.norm2 or r.norm
+    if a > b then a, b = b, a end
+    return v >= a - eps and v <= b + eps
+  end
+  local hit = math.abs(v - r.norm) <= r.tol
+  if op == "not" then return not hit end
+  return hit
+end
+
+-- The controls a layout shows right now, given a reader for its
+-- parameters' normalised values (`getv(param)`), plus the set of
+-- indexes (into `controls`) it hides. The list keeps the controls'
+-- own tables, so a caller can still find each one in the full list.
+function M.visible(controls, getv)
+  local out, hidden, any = {}, {}, false
+  for i, c in ipairs(controls or {}) do
+    local r = c.show
+    if r and c.type ~= "page" then
+      any = true
+      if M.show_match(getv(r.param), r) then out[#out + 1] = c else hidden[i] = true end
+    else
+      out[#out + 1] = c
+    end
+  end
+  if not any then return controls, hidden end
+  return out, hidden
 end
 
 -- ---------------------------------------------------------------------
@@ -480,6 +583,61 @@ function M.file_path() return path() end
 
 function M.has(key)
   return sections[key] ~= nil
+end
+
+-- ---------------------------------------------------------------------
+-- layout variants: more than one layout for a plugin, picked per
+-- instance (a Kontakt with a piano on one track, strings on another).
+-- A variant is a section of its own, "<plugin> :: <name>"; which one an
+-- instance shows is kept with the project (TS_CV_State St.variant).
+-- ---------------------------------------------------------------------
+M.VARIANT_SEP = " :: "
+
+function M.variant_key(base, name)
+  if not name or name == "" then return base end
+  return base .. M.VARIANT_SEP .. name
+end
+
+-- The plugin's own key and the variant's name, from a layout key.
+function M.split_variant(key)
+  local b, v = (key or ""):match("^(.-) :: (.+)$")
+  if b then return b, v end
+  return key, nil
+end
+
+-- A variant's name as typed, made safe for a section name.
+function M.clean_variant(name)
+  name = U.trim((name or ""):gsub("[%[%]\r\n]", ""):gsub(" :: ", " - "))
+  return name ~= "" and name or nil
+end
+
+-- Makes a variant: a copy of `from` (a layout), or an empty one that
+-- keeps `from`'s aliases, button names and meter (a fresh arrangement of
+-- the same plugin). Saved straight away. Returns its key, or nil when
+-- the name is unusable or already taken.
+function M.new_variant(base, name, from, empty)
+  name = M.clean_variant(name)
+  if not name then return nil end
+  local k = M.variant_key(base, name)
+  if M.has(k) then return nil end
+  local l = M.copy(from or { controls = {} })
+  if empty then
+    l.controls = {}
+    l.lock = nil
+  end
+  M.set(k, l)
+  M.save()
+  return k, name
+end
+
+-- The variants the library has for a plugin, by name, sorted.
+function M.variants(base)
+  local out, pre = {}, base .. M.VARIANT_SEP
+  for _, k in ipairs(order) do
+    if sections[k] and k:sub(1, #pre) == pre then out[#out + 1] = k:sub(#pre + 1) end
+  end
+  table.sort(out, function(a, b) return a:lower() < b:lower() end)
+  return out
 end
 
 -- Whether any plugin in the library is set to have its gain reduction or
@@ -894,7 +1052,10 @@ function M.copy(layout)
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         metal = c.metal, scale = c.scale, scale_ink = c.scale_ink,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
-                        invert2 = c.invert2 }
+                        invert2 = c.invert2,
+                        show = c.show and { param = c.show.param, op = M.show_op(c.show),
+                                            norm = c.show.norm, norm2 = c.show.norm2,
+                                            tol = c.show.tol } or nil }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.states = {}

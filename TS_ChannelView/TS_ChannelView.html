@@ -220,6 +220,16 @@ button { font: inherit; color: inherit; }
 .hb svg { width: 18px; height: 18px; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
 .hb.on { background: var(--byp); } .hb.on svg { stroke: #fff; }
 .pb { flex-grow: 1; position: relative; }
+/* a paged panel's tab strip under its head: a tab per page, its name under
+   a stripe in its colour, the open one lifted into the body */
+.ptabs { height: 26px; flex-shrink: 0; display: flex; align-items: flex-end; gap: 2px; padding: 0 8px;
+  background: var(--head); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.ptabs::-webkit-scrollbar { display: none; }
+.ptab { flex-shrink: 0; position: relative; height: 21px; padding: 4px 10px 0; border: 1px solid var(--border); border-bottom: 0;
+  border-radius: 5px 5px 0 0; background: var(--toff); color: var(--label); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.ptab::before { content: ""; position: absolute; left: 6px; right: 6px; top: 2px; height: 2px; border-radius: 1px; background: var(--c, var(--accent)); opacity: 0.65; }
+.ptab.on { height: 23px; background: var(--panel); color: var(--text); font-weight: 600; margin-bottom: -1px; }
+.ptab.on::before { opacity: 1; }
 /* collapsed: a narrow bar, name running up it -- this device only */
 .pnl.shut { width: 46px !important; }
 .pnl.shut .ph { flex-direction: column; height: auto; padding: 6px 0; gap: 4px; border-bottom: 0; flex-grow: 1; align-items: center; }
@@ -2083,6 +2093,7 @@ function buildTracks() {
   const mk = (i, name, col, sel, t) => {
     const b = h("button", "trb" + (sel ? " sel" : ""), name);
     if (col) b.style.setProperty("--c", col);
+    if (!sel) applyTint(b, t, "--panel", false);   // the selected one keeps its own fill
     const key = t ? stripKey(t) : "master";
     b.addEventListener("click", () => stripTap(key, i, () => {
       if (mixState === "closed") return;
@@ -2175,6 +2186,8 @@ function buildStrip() {
   s.innerHTML = "";
   s.classList.toggle("shut", stripShut);
   if (!layout.track) return;
+  s.style.background = "";
+  applyTint(s, layout.track, "--strip", true);
   if (stripShut) return buildStripShut(s);
   const name = h("div", "sname", layout.track.m ? "MASTER" : layout.track.n || ("Track " + layout.track.i));
   if (layout.track.c) name.style.setProperty("--c", layout.track.c);
@@ -2491,6 +2504,7 @@ function buildMixer() {
   const folded = (t, user) => {
     const i = t.i, master = i === 0, key = stripKey(t);
     const el = h("div", "mxs fold");
+    applyTint(el, t, "--panel", true);
     const nm = h("div", "mxc");
     if (t.c) nm.style.setProperty("--c", t.c);
     const ex = h("button", "fexp");
@@ -2529,9 +2543,10 @@ function buildMixer() {
     ui.mix.set(i, { el, fdr, mlv, mrv, vdb, bm, bs, br, bmo, setVol: v => { fvv = v; },
       mp });
   };
-  const strip = (i, name, col, key, fl) => {
+  const strip = (i, name, col, key, fl, t) => {
     const master = i === 0;
     const el = h("div", "mxs");
+    applyTint(el, t, "--panel", true);
     const nm = h("div", "mxc");
     if (col) nm.style.setProperty("--c", col);
     const pan = makeKnob(30, "arc", null, true);
@@ -2591,7 +2606,7 @@ function buildMixer() {
     if (t.sp) mix.append(h("div", "tsp"));
     if (t.fo) folded(t, false);
     else if (mxShut.has(stripKey(t))) folded(t, true);
-    else strip(t.i, t.i + " " + t.n, t.c, stripKey(t), t.fl);
+    else strip(t.i, t.i + " " + t.n, t.c, stripKey(t), t.fl, t);
   }
 }
 
@@ -2955,18 +2970,83 @@ function doubleTap(node, fn) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// pages: a "page" control is a page break, as on the desktop (TS_CV_Panel
+// P.pages) -- what follows it, up to the next, is a page of its own, shown
+// one at a time with a tab strip under the head. The open page is per
+// device (localStorage tscv.page). Each page's controls keep their index in
+// the panel's whole list, which is what the values arrive by.
+// ---------------------------------------------------------------------------
+const TAB_H = 26;
+let pageOpen = {};
+try { pageOpen = JSON.parse(localStorage.getItem("tscv.page") || "{}") || {}; } catch (e) {}
+function pagesOf(ctls) {
+  const pages = []; let cur = { c: [] }, any = false;
+  ctls.forEach((c, i) => {
+    if (c.t === "page") { any = true; pages.push(cur); cur = { l: c.l, cap: c.cap, c: [] }; }
+    else cur.c.push(Object.assign({ idx: i }, c));
+  });
+  pages.push(cur);
+  if (!any) return null;
+  if (!pages[0].c.length && pages[0].l === undefined && pages[0].cap === undefined) pages.shift();
+  pages.forEach((pg, k) => { pg.n = k + 1; pg.label = pg.l || String(k + 1); });
+  return pages;
+}
+function pageOf(g, pages) { return Math.max(1, Math.min(pages.length, pageOpen[g] || 1)); }
+function setPage(g, n) {
+  pageOpen[g] = n;
+  try { localStorage.setItem("tscv.page", JSON.stringify(pageOpen)); } catch (e) {}
+  rebuildKeeping(g);
+}
+function tabStrip(p, pages, cur) {
+  const strip = h("div", "ptabs");
+  pages.forEach(pg => {
+    const t = h("button", "ptab" + (pg.n === cur ? " on" : ""), pg.label);
+    if (pg.cap) t.style.setProperty("--c", pg.cap);
+    t.title = "Page " + pg.n + (pg.l ? ": " + pg.l : "");
+    t.addEventListener("click", e => { e.stopPropagation(); if (pg.n !== cur) setPage(p.g, pg.n); });
+    strip.append(t);
+  });
+  // the wheel pages too, as on the desktop
+  strip.addEventListener("wheel", e => {
+    const d = Math.sign(e.deltaY || e.deltaX); if (!d) return;
+    const n = Math.max(1, Math.min(pages.length, cur + d));
+    if (n !== cur) { e.preventDefault(); setPage(p.g, n); }
+  }, { passive: false });
+  return strip;
+}
+
+// conditional controls (the bridge's vals.fx[g].h, as TS_CV_Mappings'
+// Show<n> rules read right now): left out of the panel, which is rebuilt
+// when the set changes (see render)
+function hiddenSig(g) { const fv = vals && vals.fx && vals.fx[g]; return (fv && fv.h || []).join(","); }
 function buildPanel(p, bodyH) {
   if (p.off) return buildOffline(p, bodyH);
   if (p.eq) return buildEq(p, bodyH);
   if (p.rc) return buildComp(p, bodyH);
+  const hsig = hiddenSig(p.g);
+  const hid = new Set(hsig ? hsig.split(",").map(Number) : []);
+  const all = (p.c || []).map((c, i) => Object.assign({ idx: i }, c));
+  const ctlsAll = hid.size ? all.filter(c => !hid.has(c.idx)) : all;
+  // paged: the strip under the head, one page's controls below it, the
+  // panel as wide as its widest page
+  const pages = pagesOf(ctlsAll);
+  let ctlsNow = ctlsAll, cur = 0, pagesW = 0;
+  if (pages) {
+    bodyH -= TAB_H;
+    cur = pageOf(p.g, pages);
+    ctlsNow = pages[cur - 1].c;
+    for (const pg of pages) pagesW = Math.max(pagesW, placeControls(pg.c, p.lk ? p.lk * CELL_H : bodyH).width);
+    pagesW = Math.max(pagesW, pages.reduce((a, pg) => a + pg.label.length * 7 + 22, 0));
+  }
   // locked: arranged at its saved rows whatever the height, and scrolled
   // when that's taller than the panel
-  const lay = placeControls(p.c || [], p.lk ? p.lk * CELL_H : bodyH);
+  const lay = placeControls(ctlsNow, p.lk ? p.lk * CELL_H : bodyH);
   const scr = !!p.lk && lay.rows * CELL_H > bodyH;
   const SB = scr ? 10 : 0;
   const trOpen = !!p.gr && grv.has(p.g);
   const gr = p.gr ? GR_W + PAD + (trOpen ? TRACE_W + PAD : 0) : 0;
-  const w = Math.max(MIN_W, lay.width + PAD * 2 + gr + SB);
+  const w = Math.max(MIN_W, Math.max(lay.width, pagesW) + PAD * 2 + gr + SB);
   const pnl = h("div", "pnl");
   pnl.style.width = w + "px";
   const pl = p.plate;
@@ -3001,7 +3081,9 @@ function buildPanel(p, bodyH) {
   const wet = wetChip(p, w);
   head.append(h("span", "nm", p.n), ...(wet ? [wet] : []), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
-  pnl.append(head, body);
+  pnl.append(head);
+  if (pages) pnl.append(tabStrip(p, pages, cur));
+  pnl.append(body);
   const gridX = PAD + Math.max(0, (w - PAD * 2 - gr - SB - lay.width) / 2);
   // what the grid goes in: the body, or a scrolling box in it that stops
   // short of the meters, holding the grid's whole height
@@ -3348,7 +3430,7 @@ function buildPanel(p, bodyH) {
     });
     grEl = { fill, gv, bar, cv, pnl };
   }
-  ui.panels.set(p.g, { p, ctl, byp, head, grEl, pl, wet });
+  ui.panels.set(p.g, { p, ctl, byp, head, grEl, pl, wet, hsig });
   return pnl;
 }
 
@@ -3369,6 +3451,30 @@ function nearestChoice(c, v) {
 // accent when mixed back), and a slider in the panel's and the container's
 // sheets at any width
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// the group background tint (ChannelView's Group looks ▸ Background): a
+// strip, its name button and the channel panel in the track's colour at
+// the strength the bridge resolved for it (t.bt, 0..1). Held to a shade
+// the light text still reads on, as the desktop does; the name button
+// flips to dark ink instead when a strong tint of a pale colour makes it
+// light.
+const hexRgb = hex => { const n = parseInt((hex || "#000000").slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+const lumOf = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
+function tintCss(under, hex, amt, readable) {
+  if (!hex || !(amt > 0)) return null;
+  const u = hexRgb(under), c = hexRgb(hex);
+  if (readable) { const lu = lumOf(u), lc = lumOf(c); if (lc > 136 && lc > lu) amt = Math.min(amt, (136 - lu) / (lc - lu)); }
+  const m = u.map((v, k) => Math.round(v + (c[k] - v) * amt));
+  return { css: `rgb(${m[0]},${m[1]},${m[2]})`, light: lumOf(m) > 140 };
+}
+function applyTint(el, t, under, readable) {
+  if (!t || !(t.bt > 0) || !t.c) return;
+  const r = tintCss(css(under), t.c, t.bt, readable);
+  if (!r) return;
+  el.style.background = r.css;
+  if (!readable && r.light) el.style.color = "#0d1116";
+}
+
 const WET_MIN_W = 230;
 const wetNow = (g, box) => {
   const l = held("wet/" + g);
@@ -4662,6 +4768,10 @@ function render() {
   if (showNav) drawNav();
   if (!vals || !layout) return;
   showMsg(vals.msg);
+  // a conditional control come or gone: that panel is laid out again
+  for (const [g, P] of ui.panels) {
+    if (P.hsig !== undefined && P.hsig !== hiddenSig(g)) { rebuildKeeping(g); break; }
+  }
   for (const [g, P] of ui.panels) {
     const fv = vals.fx && vals.fx[g];
     if (!fv) continue;

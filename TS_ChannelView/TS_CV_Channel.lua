@@ -120,6 +120,29 @@ local function fader_menu(ctx, track, pid)
     function(field, value, save) TO.set_fader_part(tg, field, value, save) end,
     revert, col and (col >> 8), "Fader colour")
 
+  -- this track's (or the selection's) own background strength, over its
+  -- group's -- as the fader look above
+  do
+    local mine = TO.own_tint(track, now)
+    local grp = TO.track_tint(track)
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Background")
+    ImGui.SetNextItemWidth(ctx, 160)
+    local shown = mine or math.floor(grp * 100 + 0.5)
+    local fmt = mine and (mine > 0 and "%d%% track colour" or "Off")
+                or (shown > 0 and ("%d%%  (" .. (cat_label and cat_label:lower() or "default") .. ")") or "As group: off")
+    local bch, bv = ImGui.SliderInt(ctx, "##bgown", shown, 0, 100, fmt)
+    if bch then TO.set_own_tint(tg, bv) end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "This track's strip, name button and Channel panel in its colour\n" ..
+        "at this strength, over its group's setting (Group looks, below).")
+    end
+    if mine then
+      ImGui.SameLine(ctx)
+      if ImGui.SmallButton(ctx, "As group##bgown") then TO.set_own_tint(tg, nil) end
+    end
+  end
+
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Reset to default", nil, false, own ~= nil) then TO.clear_fader_look(tg) end
@@ -146,11 +169,25 @@ local function fader_menu(ctx, track, pid)
             or "The Default look, unless a track has a look of its own",
           function(field, value, save) TO.set_fader_default(c.key, field, value, save) end,
           grevert, dc and (dc >> 8), c.label .. " fader colour")
+        -- the strip's background in the track's colour, at a strength
+        ImGui.Spacing(ctx)
+        ImGui.TextDisabled(ctx, "Background")
+        ImGui.SetNextItemWidth(ctx, 160)
+        local pct = TO.bg_tint(c.key)
+        local tch, tv = ImGui.SliderInt(ctx, "##bgt" .. c.key, pct, 0, 100,
+          pct > 0 and "%d%% track colour" or "Off")
+        if tch then TO.set_bg_tint(c.key, tv, true) end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "The strip, its name button and the Channel panel in the\n" ..
+            "track's colour at this strength. " ..
+            ((c.key == "default") and "Every track no group above covers."
+              or "Tracks in this group; others take the Default's."))
+        end
         ImGui.EndMenu(ctx)
       end
     end
     ImGui.Separator(ctx)
-    ImGui.TextDisabled(ctx, "A track's own look wins, then its group's, then the Default.")
+    ImGui.TextDisabled(ctx, "A track's own look wins, then its group's, then the Default.\nBackgrounds: the group's strength, else the Default's.")
     ImGui.EndMenu(ctx)
   end
   ImGui.EndPopup(ctx)
@@ -898,7 +935,13 @@ function CH.draw(ctx, track, avail_h)
     local x, y = ImGui.GetWindowPos(ctx)
     local ww, wh = ImGui.GetWindowSize(ctx)
 
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
+    local bg = C.COL.panel_bg
+    local tint = track and TO.track_tint(track) or 0
+    if tint > 0 then
+      local tc = U.track_colour(track, 0xff)
+      if tc then bg = U.tint_readable(bg, tc, tint) end
+    end
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, bg, 3.0)
     ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
 
     -- The panel's own background is a double-click target: back to mixer
