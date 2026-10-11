@@ -54,6 +54,8 @@ local HO = require("TS_CV_HwOut")
 local TO = require("TS_CV_TrackOps")
 local BZ = require("TS_CV_Busy")
 local MD = require("TS_CV_Mod")
+local ME = require("TS_CV_MapEQ")
+local UN = require("TS_CV_Units")
 
 local NS = "TS_CV_WEB"
 
@@ -360,6 +362,76 @@ local function wet_of(addr)
   return reaper.TrackFX_GetParam(track, addr, p), p
 end
 
+-- An EQ layout: whether it's ready (every band learned), and its bands'
+-- names and colours' order; the values come with vals (mq_vals).
+local function mq_layout(fx, layout)
+  local cv = layout and layout.canvas
+  if not cv or cv.kind ~= "eq" then return nil end
+  local b = arr()
+  for k, band in ipairs(cv.bands or {}) do
+    local o = { k = k, n = (band.name ~= "" and band.name) or ("Band " .. k), g = band.gain and 1 or nil }
+    -- a shape switch: its settings, by name
+    local shs = ME.shapes(track, fx.addr, band)
+    if shs then
+      o.sh = arr()
+      for i, sh in ipairs(shs) do o.sh[i] = ME.shape_label(sh) end
+    end
+    b[#b + 1] = o
+  end
+  return { r = (M.canvas_todo(cv) == nil) or nil, b = b }
+end
+
+-- A Compressor layout: which roles it has (short names), which are
+-- reversed, and a switched ratio's positions.
+local MC_SHORT = { Threshold = "t", Input = "in", Ratio = "r", Knee = "k", Attack = "a", Hold = "h",
+                   Release = "l", Makeup = "mk", Mix = "mx" }
+local function mc_layout(fx, layout)
+  local cv = layout and layout.canvas
+  if not cv or cv.kind ~= "comp" then return nil end
+  local r = {}
+  for role, p in pairs(cv.roles or {}) do r[MC_SHORT[role]] = p end
+  local out = { i = r, rv = (cv.rev and cv.rev.Threshold) or nil }
+  -- the threshold's ends, for the canvas's level scale; a plain number
+  -- running below zero is in dB (as the desktop reads it)
+  local tp = cv.roles and (cv.roles.Threshold or cv.roles.Input)
+  if tp then
+    local fmt = UN.formatter(track, fx.addr, tp)
+    local a, ua = UN.at(fmt, 0)
+    local b = UN.at(fmt, 1)
+    if a and b and a > -1e9 and b > -1e9 and a < 1e9 and b < 1e9 then
+      out.tr = arr({ round(math.min(a, b), 2), round(math.max(a, b), 2) })
+      out.td = (ua == "db" or (ua == "" and math.min(a, b) < 0)) or nil
+    end
+  end
+  -- attack / hold / release: which run the other way, and a switch's
+  -- settings along the envelope's scale (as the desktop draws them)
+  local TIMES = { { "Attack", "a", 0.1, 500 }, { "Hold", "h", 1, 2000 }, { "Release", "l", 1, 5000 } }
+  for _, t in ipairs(TIMES) do
+    local tp2 = cv.roles and cv.roles[t[1]]
+    local rv2 = cv.rev and cv.rev[t[1]] or nil
+    if tp2 then
+      if rv2 then out.ra = out.ra or {}; out.ra[t[2]] = true end
+      local st = UN.time_steps(UN.formatter(track, fx.addr, tp2), t[3], t[4], rv2)
+      if st then
+        out.es = out.es or {}
+        local l = arr()
+        for _, ps in ipairs(st) do
+          l[#l + 1] = { n = round(ps.norm, 4), lo = round(ps.lo, 4), hi = round(ps.hi, 4), f = round(ps.f, 4) }
+        end
+        out.es[t[2]] = l
+      end
+    end
+  end
+  if cv.roles and cv.roles.Ratio then
+    local pos = UN.positions(UN.formatter(track, fx.addr, cv.roles.Ratio), 200, 12)
+    if pos then
+      out.rs = arr()
+      for _, ps in ipairs(pos) do out.rs[#out.rs + 1] = { n = round(ps.norm, 4), lo = round(ps.lo, 4), hi = round(ps.hi, 4), t = ps.text } end
+    end
+  end
+  return out
+end
+
 local function panel_of(fx, i)
   local key = St.layout_key(fx.name, fx.guid)
   local layout, is_default = M.get_or_default(key, track, fx.addr, fx.guid)
@@ -516,6 +588,9 @@ local function panel_of(fx, i)
     gw = has_gr and (meter.win or C.GRV_DEFAULT) or nil,
     eq = (key == "ReaEQ") or nil,
     rc = RC.is_comp(key) and rc_layout(fx) or nil,
+    -- any plugin's EQ or Compressor layout (TS_CV_MapPanel / CompPanel)
+    mq = (key ~= "ReaEQ" and not RC.is_comp(key)) and mq_layout(fx, layout) or nil,
+    mc = (key ~= "ReaEQ" and not RC.is_comp(key)) and mc_layout(fx, layout) or nil,
     ps = presets_json(fx),
   }
 end
@@ -902,6 +977,52 @@ local function rc_history(fx, gr)
   return { i = table.concat(i), o = table.concat(o), g = table.concat(g) }
 end
 
+-- A mapped EQ's bands as they are: type, frequency, gain, Q, on, and the
+-- plugin's own readings for the strip (TS_CV_MapEQ ME.read_band).
+local function mq_vals(fx, layout)
+  local cv = layout.canvas
+  if M.canvas_todo(cv) then return nil end
+  local out = arr()
+  for k, b in ipairs(cv.bands) do
+    local r = ME.read_band(track, fx.addr, b, cv.all_on)
+    if r then
+      local tx = {}
+      for _, f in ipairs({ "freq", "gain", "q" }) do
+        local p = b[f]
+        local t = p and select(2, reaper.TrackFX_GetFormattedParamValue(track, fx.addr, p, ""))
+        if t and t ~= "" then tx[#tx + 1] = U.trim(t) end
+      end
+      local g = r.g or 0
+      if g ~= g then g = 0 end
+      out[#out + 1] = { k = k, t = r.type, o = r.order, f = round(r.f or 1000, 1),
+                        g = round(math.max(-30, math.min(30, g)), 2), q = round(r.q or 0.7, 3),
+                        e = r.on or nil, x = table.concat(tx, "   "), wq = b.q and 1 or nil,
+                        s = b.shape and r.s or nil }
+    end
+  end
+  return { b = out }
+end
+
+-- A mapped compressor's roles as they read: real value and unit where the
+-- text gives one, the normalised value always, and the text.
+local function mc_vals(fx, layout)
+  local cv = layout.canvas
+  local out = { v = {}, u = {}, n = {}, x = {} }
+  for role, p in pairs(cv.roles or {}) do
+    local k = MC_SHORT[role]
+    local nv = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+    local txt = RC.text(track, fx.addr, p, nv)
+    local v, unit = UN.parse(txt)
+    if v == math.huge then v = 1000 elseif v == -math.huge then v = -150 end
+    out.v[k] = v and round(v, 3) or nil
+    out.u[k] = unit
+    out.n[k] = round(nv, 5)
+    out.x[k] = txt
+  end
+  out.g = round(T.gain_reduction(track, fx.addr) or 0, 2)
+  return out
+end
+
 local function rc_vals(fx)
   local f = RC.params(track, fx.addr, fx.guid)
   if not RC.usable(f) then return nil end
@@ -1180,7 +1301,9 @@ local function build_vals(lseq, ack)
                      tw = (gr and web_tr.set[fx.guid]) and trace_of(fx, meter, est, gr) or nil,
                      eq = RQ.is_eq(key) and eq_vals(fx) or nil,
                      wt = (function() local w = wet_of(fx.addr); return w and round(w, 3) end)(),
-                     rc = RC.is_comp(key) and rc_vals(fx) or nil }
+                     rc = RC.is_comp(key) and rc_vals(fx) or nil,
+                     mq = (layout.canvas and layout.canvas.kind == "eq" and not RQ.is_eq(key)) and mq_vals(fx, layout) or nil,
+                     mc = (layout.canvas and layout.canvas.kind == "comp" and not RC.is_comp(key)) and mc_vals(fx, layout) or nil }
     if RQ.is_eq(key) then any_eq = true end
   end
   local tr = nil
@@ -1502,6 +1625,50 @@ local function apply(verb, a)
        and a[2] ~= "out" and a[2] ~= "outb" then
       MD.set_field(track, src.slot, src.j, a[2], v)
       if a[2] == "fsrc" and v >= 0.5 then MD.need_sidechain(track) end
+    end
+  elseif track and verb == "mq0" then
+    -- mq0|guid|band: the band flat, or off
+    local fx = fx_by_guid(a[1]); local k = tonumber(a[2])
+    local layout = fx and M.get(St.layout_key(fx.name, fx.guid))
+    local b = k and layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
+    if b then ME.reset(track, fx.addr, b); TP.touched(track, fx.guid) end
+  elseif track and verb == "mqs" then
+    -- mqs|guid|band|setting: the band's shape switch to that setting
+    local fx = fx_by_guid(a[1]); local k, v = tonumber(a[2]), tonumber(a[3])
+    local layout = fx and M.get(St.layout_key(fx.name, fx.guid))
+    local b = k and layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
+    if b and v then ME.set_shape(track, fx.addr, b, math.floor(v)); TP.touched(track, fx.guid) end
+  elseif track and (verb == "mqf" or verb == "mqg" or verb == "mqq") then
+    -- a mapped EQ's band: mqf|guid|band|hz, mqg|guid|band|db, mqq|guid|band|delta
+    local fx = fx_by_guid(a[1]); local k, v = tonumber(a[2]), tonumber(a[3])
+    if fx and k and v then
+      local layout = M.get(St.layout_key(fx.name, fx.guid))
+      local b = layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
+      if b then
+        if verb == "mqf" then ME.set_freq(track, fx.addr, b, v)
+        elseif verb == "mqg" then ME.set_gain(track, fx.addr, b, v)
+        else ME.nudge_q(track, fx.addr, b, v) end
+        TP.touched(track, fx.guid)
+      end
+    end
+  elseif track and (verb == "mcn" or verb == "mcv") then
+    -- a mapped compressor's role: mcn|guid|role|norm (along its range),
+    -- mcv|guid|role|real (in the unit its text reads in)
+    local fx = fx_by_guid(a[1]); local v = tonumber(a[3])
+    if fx and v then
+      local layout = M.get(St.layout_key(fx.name, fx.guid))
+      local cv = layout and layout.canvas
+      for role, p in pairs((cv and cv.roles) or {}) do
+        if MC_SHORT[role] == a[2] then
+          if verb == "mcn" then
+            reaper.TrackFX_SetParamNormalized(track, fx.addr, p, math.max(0, math.min(1, v)))
+          else
+            local n = UN.find_norm(UN.formatter(track, fx.addr, p), v)
+            if n then reaper.TrackFX_SetParamNormalized(track, fx.addr, p, n) end
+          end
+          TP.touched(track, fx.guid)
+        end
+      end
     end
   elseif verb == "rcset" then
     -- rcset|guid|role|real: one of ReaComp's real-unit settings, by its

@@ -152,11 +152,16 @@ end
 
 -- The library key an instance's layout lives under: its variant's when
 -- it has one the library still holds, else the plugin's own.
+-- An instance never set to one follows the plugin's default layout
+-- (TS_CV_Mappings M.default_variant); S.OWN pins it to the plugin's own.
+S.OWN = "*"
 function S.layout_key(fx_name, guid)
   local U = require("TS_CV_Util")
   local M = require("TS_CV_Mappings")
   local base = U.plugin_key(fx_name)
   local v = S.variant(guid)
+  if v == S.OWN then return base end
+  v = v or (M.default_variant and M.default_variant(base))
   if v then
     local k = M.variant_key(base, v)
     if M.has(k) then return k end

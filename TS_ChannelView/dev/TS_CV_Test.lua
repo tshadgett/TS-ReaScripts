@@ -4935,6 +4935,214 @@ WAK 0 0
   check("env remove: not there", ENr.chunk_without(chunk, "{MOD}", 5, nil), nil)
 end
 
+-- ---------------------------------------------------------------------
+-- mapped canvases: units, band models, fitting, learned tables, layouts
+-- ---------------------------------------------------------------------
+do
+  local UN = require("TS_CV_Units")
+  local function pv(t) local v, u = UN.parse(t); return tostring(v) .. "|" .. tostring(u) end
+  check("units: kHz", pv("1.20 kHz"), "1200.0|hz")
+  check("units: 1k2", pv("1k2"), "1200.0|hz")
+  check("units: dB", pv("-3.5 dB"), "-3.5|db")
+  check("units: ratio", pv("4.0:1"), "4.0|ratio")
+  check("units: ratio other way", pv("1:4"), "4.0|ratio")
+  check("units: limit", pv("Limit"), "inf|ratio")
+  check("units: -inf dB", pv("-inf dB"), "-inf|db")
+  check("units: seconds", pv("0.35 s"), "350.0|ms")
+  check("units: percent", pv("50 %"), "50|pct")
+  check("units: thousands comma", pv("1,200 Hz"), "1200|hz")
+  check("units: decimal comma", pv("1,5 dB"), "1.5|db")
+  check("units: no number", UN.parse("Off"), nil)
+  local steps = { "Off", "50", "80", "160", "300" }
+  local fmt = function(n) return steps[math.min(5, math.floor(n * 5) + 1)] end
+  local pos = UN.positions(fmt)
+  check("units: switch positions", pos and #pos, 5)
+  check("units: first position at 0", pos and pos[1].norm, 0)
+  check("units: last position at 1", pos and pos[5].norm, 1)
+  check("units: a knob isn't a switch", UN.positions(function(n) return ("%.3f"):format(n) end), nil)
+  local f2 = function(n) return ("%.2f dB"):format(-20 + 40 * n * n) end
+  local n0 = UN.find_norm(f2, 0)
+  checkf("units: find_norm lands on 0 dB", function() return math.abs(n0 - math.sqrt(0.5)) < 0.002 end)
+  check("units: find_norm clamps", (UN.find_norm(f2, 99)), 1)
+  checkf("units: interp log", function() return math.abs(UN.interp({ { 0, 20 }, { 1, 20000 } }, 0.5, true) - 632.46) < 0.1 end)
+  checkf("units: invert log", function() return math.abs(UN.invert({ { 0, 20 }, { 1, 20000 } }, 632.46, true) - 0.5) < 0.001 end)
+
+  local ME = require("TS_CV_MapEQ")
+  local fr = ME.centres()
+  check("mapeq: 120 bands", #fr, 120)
+  local function synth(b) local D = {} for i, f in ipairs(fr) do D[i] = ME.band_db(b, f) end return D end
+  checkf("mapeq: bell peak = gain", function() return math.abs(ME.band_db({ type = "bell", f = 1000, g = 6, q = 1 }, 1000) - 6) < 0.01 end)
+  checkf("mapeq: low shelf full gain far below", function() return math.abs(ME.band_db({ type = "ls", f = 1000, g = 6, q = 0.7 }, 20) - 6) < 0.1 end)
+  checkf("mapeq: 12 dB/oct cut", function()
+    local b = { type = "hp", f = 1000, order = 2, q = 0.7071 }
+    return math.abs(ME.band_db(b, 125) - ME.band_db(b, 250) + 12) < 0.3 end)
+  local cases = {
+    { { type = "bell", f = 1600, g = -3.5, q = 0.9 }, "gain" },
+    { { type = "ls", f = 110, g = 6, q = 0.7 }, "gain" },
+    { { type = "hs", f = 12000, g = 8, q = 0.7 }, "gain" },
+    { { type = "hp", f = 80, order = 3, q = 1 }, "cut" },
+    { { type = "lp", f = 8000, order = 1 }, "cut" },
+  }
+  for _, c in ipairs(cases) do
+    local b = c[1]
+    local r = ME.fit(fr, synth(b), c[2])
+    check(("mapeq: fits %s %g"):format(b.type, b.f), r and r.type, b.type)
+    checkf(("mapeq: %s %g frequency"):format(b.type, b.f), function() return r and math.abs(math.log(r.f / b.f)) < 0.05 end)
+    if b.order then check(("mapeq: %s order"):format(b.type), r and r.order, b.order) end
+  end
+  check("mapeq: flat is no fit", ME.fit(fr, synth({ type = "bell", f = 1000, g = 0, q = 1 }), "gain"), nil)
+  -- summarise: three frequencies x two gains of a proportional-Q bell
+  local samples = {}
+  for _, fn in ipairs({ 0, 0.5, 1 }) do
+    for _, gn in ipairs({ 1, 0 }) do
+      local f = 200 * 10 ^ fn
+      local g = (gn == 1) and 12 or -12
+      local q = (gn == 1) and 1.5 or 0.8
+      samples[#samples + 1] = { s = 1, fn = fn, gn = gn, fit = { type = "bell", f = f, g = g, q = q } }
+    end
+  end
+  local L = ME.summarise(samples, { kind = "gain", Z = 0.5 })
+  check("mapeq: summary type", L and L.shapes[1].type, "bell")
+  check("mapeq: summary F points", L and #L.shapes[1].F, 3)
+  check("mapeq: summary G has flat", L and #L.shapes[1].G, 3)
+  check("mapeq: Q against gain", L and #L.shapes[1].Q, 2)
+  local L2 = ME.decode(ME.encode(L))
+  check("mapeq: round trip type", L2 and L2.shapes[1].type, "bell")
+  checkf("mapeq: round trip F", function() return L2 and math.abs(L2.shapes[1].F[2][2] - L.shapes[1].F[2][2]) < 1 end)
+  check("mapeq: round trip Z", L2 and L2.Z, 0.5)
+  local Ld = ME.summarise({ { s = 1, fit = { type = "bell", f = 1100, g = 12, q = 1.4 }, rep_f = 1000, rep_q = 0.7 } },
+    { direct = true, has_freq = true })
+  check("mapeq: direct keeps type", Ld and Ld.shapes[1].type, "bell")
+  checkf("mapeq: direct Q correction", function() return Ld and math.abs(Ld.shapes[1].K[2] - 2) < 0.001 end)
+  local Ld2 = ME.decode(ME.encode(Ld))
+  check("mapeq: direct round trip", Ld2 and Ld2.D, true)
+  local g = ME.guess({ "Low Gain", "Low Freq", "Mid Gain", "Mid Freq", "High Gain", "HPF Freq", "Input", "EQ In" })
+  check("mapeq: guess bands", #g, 4)
+  check("mapeq: guess low cut first", g[1] and g[1].name, "Low cut")
+  check("mapeq: guess low gain", g[2] and g[2].gain, 0)
+  check("mapeq: guess mid freq", g[3] and g[3].freq, 3)
+  check("mapeq: guess high has no freq", g[4] and g[4].freq, nil)
+
+  -- layouts: a canvas survives the library
+  local key = "TestEQ73 :: EQ"
+  M.set(key, { controls = { { param = 6, type = "knob", label = "" } }, aliases = {},
+               canvas = { kind = "eq", all_on = 7, bands = {
+                 { name = "Low", freq = 1, gain = 0, learn = ME.encode(L), learn_sig = "1,0,-,-,-" },
+                 { name = "High", gain = 4 } } } })
+  M.save(); M.reload()
+  local back = M.get(key)
+  check("canvas: kind", back and back.canvas and back.canvas.kind, "eq")
+  check("canvas: all on", back and back.canvas.all_on, 7)
+  check("canvas: bands", back and #back.canvas.bands, 2)
+  check("canvas: band freq", back and back.canvas.bands[1].freq, 1)
+  check("canvas: band no freq", back and back.canvas.bands[2].freq, nil)
+  check("canvas: learned for its mapping", back and M.band_learned(back.canvas.bands[1]), true)
+  check("canvas: not learned", back and M.band_learned(back.canvas.bands[2]), false)
+  check("canvas: todo", back and M.canvas_todo(back.canvas).learned, 1)
+  back.canvas.bands[1].q = 9
+  check("canvas: mapping changed: learn again", M.band_learned(back.canvas.bands[1]), false)
+  check("canvas: copy keeps it", M.copy(back).canvas.bands[2].name, "High")
+  M.set("TestComp :: Comp", { controls = {}, aliases = {}, canvas = { kind = "comp",
+    roles = { Threshold = 2, Ratio = 3, Hold = 9 }, rev = { Threshold = true } } })
+  M.save(); M.reload()
+  local cb = M.get("TestComp :: Comp")
+  check("canvas: comp roles", cb and cb.canvas.roles.Hold, 9)
+  check("canvas: comp reversed", cb and cb.canvas.rev.Threshold, true)
+  check("canvas: comp not reversed", cb and cb.canvas.rev.Ratio, nil)
+  check("canvas: a canvas layout is a layout", (function()
+    for _, k in ipairs(M.keys()) do if k == "TestComp :: Comp" then return true end end
+    return false end)(), true)
+  -- a plugin's default layout
+  check("default layout: none set", M.default_variant("TestComp"), nil)
+  M.set_default_variant("TestComp", "Comp"); M.save(); M.reload()
+  check("default layout: set", M.default_variant("TestComp"), "Comp")
+  check("default layout: not a layout itself", (function()
+    for _, k in ipairs(M.keys()) do if k == M.DEFAULTS_SECT then return true end end
+    return false end)(), false)
+  check("default layout: an unknown one is ignored", (function()
+    M.set_default_variant("TestComp", "Gone"); return M.default_variant("TestComp") end)(), nil)
+  M.set_default_variant("TestComp", nil)
+  M.remove(key); M.remove("TestComp :: Comp"); M.save()
+
+  -- a new canvas layout keeps the controls its canvas doesn't take
+  local src = { controls = {
+      { param = -1, type = "divider" }, { param = 2, type = "knob", style = "skirted" },
+      { param = 4, type = "stepped" }, { param = -1, type = "divider" },
+      { param = 7, type = "knob", style = "skirted", cap = "blue" }, { param = -1, type = "blank" },
+      { param = 3, type = "knob" }, { param = 5, type = "dual", param2 = 6 },
+      { param = -1, type = "half_gap" }, { param = -1, type = "divider" }, { param = 8, type = "knob" } },
+    aliases = {}, plate = "navy", lock = 5 }
+  local cl = M.copy(src)
+  cl.canvas = { kind = "comp", roles = { Threshold = 2, Attack = 4, Release = 6, Makeup = 3, Mix = 8 }, rev = {} }
+  local _, dropped = M.drop_placed(cl)
+  local types = {}
+  for _, c in ipairs(cl.controls) do types[#types + 1] = c.type .. (c.param >= 0 and c.param or "") end
+  check("canvas: placed controls leave", table.concat(types, " "), "knob7")
+  check("canvas: kept control keeps its look", cl.controls[1].cap, "blue")
+  check("canvas: the faceplate comes", cl.plate, "navy")
+  check("canvas: something taken", dropped, true)
+  check("canvas: lock goes", cl.lock, nil)
+  local cl2 = M.copy(src); cl2.canvas = { kind = "comp", roles = { Ratio = 11 } }
+  local _, d2 = M.drop_placed(cl2)
+  check("canvas: nothing taken, nothing changes", #cl2.controls .. " " .. tostring(d2) .. " " .. cl2.lock, "11 false 5")
+  local cl3 = M.copy(src)
+  cl3.canvas = { kind = "eq", all_on = 8, bands = { { name = "Lo", freq = 4, gain = 5 } } }
+  M.drop_placed(cl3)
+  types = {}
+  for _, c in ipairs(cl3.controls) do types[#types + 1] = c.type .. (c.param >= 0 and c.param or "") end
+  check("canvas: EQ bands' controls leave (a pair with either half)",
+    table.concat(types, " "), "knob2 divider knob7 blank knob3")
+end
+
+-- an EQ band's shape switch
+do
+  local ME = require("TS_CV_MapEQ")
+  local SH = { "Peak", "Shelf" }
+  local f0, s0, g0 = reaper.TrackFX_FormatParamValueNormalized, reaper.TrackFX_SetParamNormalized,
+                     reaper.TrackFX_GetParamNormalized
+  local set
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, _, v) return true, SH[v < 0.5 and 1 or 2] end
+  reaper.TrackFX_SetParamNormalized = function(_, _, p, v) set = { p, v } end
+  reaper.TrackFX_GetParamNormalized = function() return 1 end
+  local b = { freq = 1, gain = 2, shape = 3,
+    learn = "Z=0.5;H=0,1;T1=bell,0;F1=0:100 1:10000;G1=0:-15 1:15;Q1=15:1;T2=ls,0;F2=0:100 1:10000;G2=0:-15 1:15;Q2=15:0.7" }
+  local shs = ME.shapes(nil, 0, b)
+  check("shapes: one per setting", shs and #shs, 2)
+  check("shapes: learned as", shs and shs[2].type, "ls")
+  check("shapes: label is the plugin's name", shs and ME.shape_label(shs[1]), "Peak  \u{00B7}  Bell")
+  check("shapes: label says the learned kind", ME.shape_label({ s = 3, text = "", type = "hp", order = 2 }), "Low cut 12 dB/oct")
+  check("shapes: label without repeating", ME.shape_label({ s = 1, text = "Bell", type = "bell" }), "Bell")
+  check("shapes: band reads its setting", ME.read_band(nil, 0, b).s, 2)
+  ME.set_shape(nil, 0, b, 1)
+  check("shapes: set writes the switch", set and (set[1] .. ":" .. (set[2] + 0.0)), "3:0.0")
+  check("shapes: none without a switch", ME.shapes(nil, 0, { freq = 1, learn = b.learn }), nil)
+  reaper.TrackFX_FormatParamValueNormalized, reaper.TrackFX_SetParamNormalized,
+    reaper.TrackFX_GetParamNormalized = f0, s0, g0
+end
+
+-- switched times: steps along the envelope
+do
+  local UN = require("TS_CV_Units")
+  local rel = { "0.1 s", "0.3 s", "0.6 s", "1.2 s", "Auto" }
+  local fmt = function(n) return rel[math.min(#rel, math.floor(n * #rel) + 1)] end
+  local st = UN.time_steps(fmt, 1, 5000)
+  check("steps: one per setting", st and #st, 5)
+  checkf("steps: in time order", function()
+    for i = 2, #st do if st[i].f <= st[i - 1].f then return false end end return true end)
+  checkf("steps: Auto beyond the last", function() return st[5].f > st[4].f and st[5].f <= 1 end)
+  check("steps: a setting's step", UN.step_at(st, st[3].norm).text, "0.6 s")
+  check("steps: nearest", UN.step_near(st, 0.99).text, "Auto")
+  check("steps: nearest low", UN.step_near(st, 0).text, "0.1 s")
+  local seven = function(n) return tostring(math.floor(n * 6.999) + 1) end
+  local s7 = UN.step_at(UN.time_steps(seven, 0.1, 500, true), 1)
+  check("steps: reversed with no time", s7.text .. " " .. s7.f, "7 0.0")
+  check("steps: a knob has none", UN.time_steps(function(n) return ("%.2f ms"):format(n * 300) end, 1, 5000), nil)
+  -- a knob whose top reads Auto: still findable below it
+  local kfmt = function(n) return n > 0.97 and "Auto" or ("%.1f ms"):format(10 + n * 990) end
+  local n = UN.find_norm(kfmt, 500)
+  checkf("find_norm: past a word at the end", function() return n and math.abs(UN.at(kfmt, n) - 500) < 2 end)
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

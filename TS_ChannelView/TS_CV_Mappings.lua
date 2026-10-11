@@ -128,6 +128,20 @@
   scrolls instead of reflowing. Meters are not part of it: they can still
   be switched on and off, and the trace opened, while locked.
 
+  CANVAS makes the layout an EQ or a compressor canvas, for any plugin:
+  the canvas fills the panel and the layout's controls (Ctl<n>) sit in
+  columns beside it.
+      Canvas=eq|<all bands' On param, or ->       Canvas=comp
+      Band<k>=<name>|<freq>|<gain>|<Q>|<shape switch>|<On>   (k 1..8, - for none)
+      Learn<k>=<what was learned about band k, see TS_CV_MapEQ>
+      Role<name>=<param>[|rev]   compressor roles: Threshold, Input, Ratio,
+                                 Knee, Attack, Hold, Release, Makeup, Mix
+                                 (Input: a compressor with no threshold,
+                                 driven into a fixed one by its input)
+  An EQ band's shape isn't set by hand: it is learned (TS_CV_Learn) from a
+  copy of the plugin and kept in Learn<k>, with the mapping it was learned
+  for, so changing the mapping asks for it to be learned again.
+
   METER turns the gain-reduction strip on for this plugin and sets its
   full-scale range. It sits at the layout level rather than in the control
   list because a plugin has exactly one gain reduction, not one per
@@ -318,6 +332,167 @@ function M.part_brushed(kind, pl, brush)
   return (kind == "plate" and pl and pl.brushed) or false
 end
 
+-- ---------------------------------------------------------------------
+-- canvases (Canvas, Band<k>, Learn<k>, Role<name>)
+-- ---------------------------------------------------------------------
+
+M.MAX_BANDS = 8
+M.COMP_ROLES = { "Threshold", "Input", "Ratio", "Knee", "Attack", "Hold", "Release", "Makeup", "Mix" }
+local BAND_FIELDS = { "freq", "gain", "q", "shape", "on" }
+
+local function pnum(v)
+  v = U.trim(v or "")
+  local n = tonumber(v)
+  return (n and n >= 0) and math.floor(n) or nil
+end
+
+-- What a band's mapping is, as text: what its learning is checked against.
+function M.band_sig(b)
+  local t = {}
+  for i, f in ipairs(BAND_FIELDS) do t[i] = b[f] and tostring(b[f]) or "-" end
+  return table.concat(t, ",")
+end
+
+function M.canvas_of(sect)
+  local raw = U.trim(sect.Canvas or "")
+  local kind, rest = raw:match("^(%a+)%s*|?%s*(.*)$")
+  if kind ~= "eq" and kind ~= "comp" then return nil end
+  local cv = { kind = kind }
+  if kind == "eq" then
+    cv.all_on = pnum(rest)
+    cv.bands = {}
+    for k = 1, M.MAX_BANDS do
+      local line = sect["Band" .. k]
+      if line then
+        local f = {}
+        for v in (line .. "|"):gmatch("([^|]*)|") do f[#f + 1] = v end
+        local b = { name = U.trim(f[1] or "") }
+        for i, key in ipairs(BAND_FIELDS) do b[key] = pnum(f[i + 1]) end
+        local l = sect["Learn" .. k]
+        if l and l ~= "" then
+          local sig, data = l:match("^([^~]*)~(.*)$")
+          if sig then b.learn_sig, b.learn = sig, data end
+        end
+        cv.bands[#cv.bands + 1] = b
+      end
+    end
+  else
+    cv.roles, cv.rev = {}, {}
+    for _, r in ipairs(M.COMP_ROLES) do
+      local line = sect["Role" .. r]
+      if line then
+        local p, flag = U.trim(line):match("^(%d+)%s*|?%s*(%a*)")
+        if p then
+          cv.roles[r] = tonumber(p)
+          if flag == "rev" then cv.rev[r] = true end
+        end
+      end
+    end
+  end
+  return cv
+end
+
+function M.canvas_lines(cv, out)
+  if not cv then return end
+  if cv.kind == "eq" then
+    out.Canvas = "eq" .. (cv.all_on and ("|" .. cv.all_on) or "")
+    for k, b in ipairs(cv.bands or {}) do
+      if k > M.MAX_BANDS then break end
+      local f = { ((b.name or ""):gsub("[|\r\n]", " ")) }
+      for i, key in ipairs(BAND_FIELDS) do f[i + 1] = b[key] and tostring(b[key]) or "-" end
+      out["Band" .. k] = table.concat(f, "|")
+      if b.learn and b.learn_sig then out["Learn" .. k] = b.learn_sig .. "~" .. b.learn end
+    end
+  elseif cv.kind == "comp" then
+    out.Canvas = "comp"
+    for _, r in ipairs(M.COMP_ROLES) do
+      local p = cv.roles and cv.roles[r]
+      if p then out["Role" .. r] = tostring(p) .. ((cv.rev and cv.rev[r]) and "|rev" or "") end
+    end
+  end
+end
+
+function M.copy_canvas(cv)
+  if not cv then return nil end
+  local out = { kind = cv.kind, all_on = cv.all_on }
+  if cv.bands then
+    out.bands = {}
+    for i, b in ipairs(cv.bands) do
+      out.bands[i] = { name = b.name, freq = b.freq, gain = b.gain, q = b.q, shape = b.shape,
+                       on = b.on, learn = b.learn, learn_sig = b.learn_sig }
+    end
+  end
+  if cv.roles then
+    out.roles, out.rev = {}, {}
+    for k, v in pairs(cv.roles) do out.roles[k] = v end
+    for k, v in pairs(cv.rev or {}) do out.rev[k] = v end
+  end
+  return out
+end
+
+-- The parameters a canvas puts on itself: { [param] = true }.
+function M.canvas_params(cv)
+  local out = {}
+  if not cv then return out end
+  if cv.all_on then out[cv.all_on] = true end
+  for _, b in ipairs(cv.bands or {}) do
+    for _, f in ipairs(BAND_FIELDS) do if b[f] then out[b[f]] = true end end
+  end
+  for _, p in pairs(cv.roles or {}) do out[p] = true end
+  return out
+end
+
+local SPACERS = { divider = true, blank = true, half_gap = true }
+-- A canvas layout's side columns: the controls it has, less any its canvas
+-- already puts on itself (a pair goes if either half does). The spacers
+-- left with nothing between them close up -- a run of them becomes one
+-- (a divider if there is one) -- and none is left at either end. Each
+-- control keeps its own look (style, size, cap, background), so the
+-- layout it was made from comes across. A lock goes: the rows it froze
+-- aren't the same any more. Nothing changes when nothing is taken.
+function M.drop_placed(layout)
+  local on = M.canvas_params(layout.canvas)
+  local kept, dropped = {}, false
+  for _, c in ipairs(layout.controls or {}) do
+    if SPACERS[c.type] then
+      local last = kept[#kept]
+      if last and SPACERS[last.type] then
+        if c.type == "divider" and last.type ~= "divider" then kept[#kept] = c end
+      elseif last then
+        kept[#kept + 1] = c
+      end
+    elseif (c.param and on[c.param]) or (c.param2 and on[c.param2]) then
+      dropped = true
+    else
+      kept[#kept + 1] = c
+    end
+  end
+  while kept[#kept] and SPACERS[kept[#kept].type] do kept[#kept] = nil end
+  if dropped then
+    layout.controls = kept
+    layout.lock = nil
+  end
+  return layout, dropped
+end
+
+-- Whether band b's learning is for its mapping as it is now.
+function M.band_learned(b)
+  return b ~= nil and b.learn ~= nil and b.learn_sig == M.band_sig(b)
+end
+
+-- How far an EQ canvas is from usable: nil when ready, else
+-- { mapped = n, learned = n, total = n }.
+function M.canvas_todo(cv)
+  if not cv or cv.kind ~= "eq" then return nil end
+  local total, mapped, learned = #(cv.bands or {}), 0, 0
+  for _, b in ipairs(cv.bands or {}) do
+    if b.freq or b.gain then mapped = mapped + 1 end
+    if M.band_learned(b) then learned = learned + 1 end
+  end
+  if total > 0 and learned == total then return nil end
+  return { mapped = mapped, learned = learned, total = total }
+end
+
 local function parse_section(sect)
   local controls, aliases, states = {}, {}, {}
   local meter = nil
@@ -401,6 +576,7 @@ local function parse_section(sect)
     i = i + 1
   end
   return { controls = controls, aliases = aliases, states = states, meter = meter,
+           canvas = M.canvas_of(sect),
            live = (U.trim(sect.Live or "") == "1") or nil,
            measure = (U.trim(sect.Measure or "") == "1") or nil,
            levels = (U.trim(sect.Levels or "") == "1") or nil,
@@ -419,6 +595,7 @@ local function serialize(layout)
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
   if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
+  M.canvas_lines(layout.canvas, out)
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
                               layout.meter.range or C.MAX_GR_DB)
@@ -628,6 +805,30 @@ function M.new_variant(base, name, from, empty)
   M.set(k, l)
   M.save()
   return k, name
+end
+
+-- Which of a plugin's layouts its instances use unless set to another:
+-- a variant's name, or nil for the plugin's own. Kept in a section of its
+-- own ("*default layouts*", one line per plugin), so the plugin's own
+-- layout section -- or its absence, which means "generate one" -- is
+-- left as it is.
+M.DEFAULTS_SECT = "*default layouts*"
+function M.default_variant(base)
+  local d = sections[M.DEFAULTS_SECT]
+  local v = d and d[base]
+  v = v and U.trim(v) or ""
+  if v == "" or not M.has(M.variant_key(base, v)) then return nil end
+  return v
+end
+function M.set_default_variant(base, name)
+  local d = sections[M.DEFAULTS_SECT]
+  if not d then
+    d = {}
+    sections[M.DEFAULTS_SECT] = d
+    order[#order + 1] = M.DEFAULTS_SECT
+  end
+  d[base] = (name and name ~= "") and name or nil
+  dirty = true
 end
 
 -- The variants the library has for a plugin, by name, sorted.
@@ -873,7 +1074,8 @@ end
 -- ini) isn't offered.
 local function is_layout(t)
   for k in pairs(t) do
-    if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k == "Plate" then
+    if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k == "Plate"
+       or k == "Canvas" then
       return true
     end
   end
@@ -1058,6 +1260,7 @@ function M.copy(layout)
                                             tol = c.show.tol } or nil }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
+  out.canvas = M.copy_canvas(layout.canvas)
   out.states = {}
   for p, st in pairs(layout.states or {}) do out.states[p] = { st[1], st[2] } end
   return out

@@ -1,5 +1,29 @@
 # ChannelView — changelog
 
+## 2.0.5 — EQ and compressor layouts for any plugin
+
+- **EQ layouts.** Any EQ can have a canvas like ReaEQ's: *Layout* ▸ *New EQ
+  layout…*. Name up to 8 bands' controls (or Guess them), and ChannelView
+  learns each band's shape by measuring a hidden copy of the plugin — every
+  switch position, boost and cut separately, each shape and the Q; a band
+  that reports its own values needs only a quick check. Drag a node for
+  frequency and gain, wheel for Q, double-click to take the band out,
+  right-click or Alt+wheel for its shape. Needs *Run FX when stopped* on.
+- **Compressor layouts.** Any compressor can have a canvas like ReaComp's:
+  *Layout* ▸ *New compressor layout…*. Map its threshold, ratio, knee,
+  attack, hold, release, make-up and mix; values are the plugin's own.
+  *Reversed* for a Compression control, or an attack or release that's
+  fastest at the top; *Input* for a compressor with no threshold (driven
+  into a fixed one). Switched ratios and times snap to the plugin's
+  settings.
+- The rest of the plugin's controls sit beside the canvas, starting with
+  those of the layout it was made from, faceplate and looks included. Set
+  a canvas up again from the layout menu, the panel, or Edit Parameters.
+- On the web companion too: drag, double-tap, and pick a band's shape.
+- **A default layout per plugin.** *Make "<name>" the default* in the
+  layout menu: new instances, and any not set to another, show it. The
+  plugin's own layout is now called *Standard*.
+
 ## 2.0.1 — hiding plugins, copying a toolbar
 
 - **Hide plugins in one place.** A plugin taken out of its developer in

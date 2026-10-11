@@ -673,4 +673,16 @@ function EQP.draw(ctx, dl, x, y, w, h, track, fx, req)
   ImGui.DrawList_PopClipRect(dl)
 end
 
+-- The drawing helpers, for the mapped EQ canvas (TS_CV_MapPanel), so the
+-- two canvases look the same.
+EQP.util = {
+  polyline = function(...) return polyline(...) end,
+  fill_to_zero = function(...) return fill_to_zero(...) end,
+  draw_grid = function(...) return draw_grid(...) end,
+  draw_spectrum = function(...) return draw_spectrum(...) end,
+  band_colour = band_colour,
+  sample_xs = sample_xs,
+  x_of = x_of, y_of = y_of, freq_of_x = freq_of_x, gain_of_y = gain_of_y,
+}
+
 return EQP

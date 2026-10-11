@@ -1,0 +1,156 @@
+desc:ChannelView Learn (temporary)
+author: Tim Shadgett
+noindex: true
+
+/*
+  TS_CV_Learn.jsfx -- ChannelView's measuring pair for learning an EQ's
+  bands (TS_CV_Learn.lua). Used only on the temporary hidden track that
+  learning makes, and removed with it.
+
+  Source (Role 0), before the plugin: quiet white noise on channels 1/2,
+  and the same noise on channel 7, which the plugin leaves alone.
+
+  Analyser (Role 1), after the plugin: compares channel 1 (what came out
+  of the plugin) with channel 7 (what went in, delayed by the plugin's
+  latency), in 120 bands of 1/12 octave from 20 Hz to 20 kHz, and writes
+  the difference to gmem. Everything it passes on is silent.
+
+  A new Measurement number starts a measurement: settle for Settle
+  seconds (plus the latency), then average Frames FFT frames.
+
+  gmem (namespace TS_TA_Mem, shared with TS_TrackProbe, clear of it):
+    LB+0   the Measurement number last finished
+    LB+1   bands (120)
+    LB+2   sample rate
+    LB+3   the input's average level, dB (0-ish when audio is flowing)
+    LB+4   counts the analyser's blocks: it is running
+    LB+8 + b   band b's response, dB (-999 above the Nyquist frequency)
+*/
+
+options:gmem=TS_TA_Mem
+options:no_meter
+
+slider1:role=0<0,1,1{Source,Analyser}>-Role
+slider2:meas=0<0,10000000,1>-Measurement
+slider3:lat=0<0,200000,1>-Latency
+slider4:frames=4<1,16,1>-Frames
+slider5:settle=0.2<0,2,0.01>-Settle
+
+in_pin:1
+in_pin:2
+in_pin:3
+in_pin:4
+in_pin:5
+in_pin:6
+in_pin:7
+in_pin:8
+out_pin:1
+out_pin:2
+out_pin:3
+out_pin:4
+out_pin:5
+out_pin:6
+out_pin:7
+out_pin:8
+
+@init
+ext_noinit = 1;
+LB = 1048576;
+NB = 120;
+N = 8192;
+BUF_Y = 0;          // N complex
+BUF_X = 16384;      // N complex
+ACC_Y = 32768;      // N/2
+ACC_X = 36864;      // N/2
+WIN   = 40960;      // N
+FY    = 49152;      // N
+FX    = 57344;      // N
+DLY   = 65536;      // DMAX
+DMAX  = 262144;
+
+i = 0;
+loop(N, WIN[i] = 0.5 - 0.5 * cos(2 * $pi * i / N); i += 1;);
+cur = -1; state = 0; pos = 0; nfr = 0; dpos = 0; count = 0;
+
+function bands() local(b, flo, fhi, k0, k1, k, py, px, sumx, nx) (
+  b = 0; sumx = 0; nx = 0;
+  loop(NB,
+    flo = 20 * 2 ^ (b / 12);
+    fhi = 20 * 2 ^ ((b + 1) / 12);
+    fhi > srate * 0.5 ? (
+      gmem[LB + 8 + b] = -999;
+    ) : (
+      k0 = ceil(flo * N / srate);
+      k1 = ceil(fhi * N / srate) - 1;
+      k1 < k0 ? ( k0 = floor(sqrt(flo * fhi) * N / srate + 0.5); k1 = k0; );
+      py = 0; px = 0; k = k0;
+      loop(k1 - k0 + 1,
+        k > 0 && k < N / 2 ? ( py += ACC_Y[k]; px += ACC_X[k]; );
+        k += 1;
+      );
+      gmem[LB + 8 + b] = 10 * log10(max(py, 0.0000000001) / max(px, 0.0000000001));
+      sumx += px; nx += (k1 - k0 + 1);
+    );
+    b += 1;
+  );
+  gmem[LB + 1] = NB;
+  gmem[LB + 2] = srate;
+  gmem[LB + 3] = (nx > 0 ? 10 * log10(max(sumx / nx / frames, 0.0000000001)) : -999);
+);
+
+@block
+// a heartbeat, so ChannelView can tell "not running" from "not finished"
+role == 1 ? gmem[LB + 4] += 1;
+role == 1 && meas != cur ? (
+  cur = meas;
+  state = 1;
+  count = floor(settle * srate) + lat;
+  pos = 0; nfr = 0;
+  memset(ACC_Y, 0, N / 2);
+  memset(ACC_X, 0, N / 2);
+);
+
+@sample
+role == 0 ? (
+  n = (rand(2) - 1) * 0.1;
+  spl0 = n; spl1 = n;
+  spl2 = 0; spl3 = 0; spl4 = 0; spl5 = 0;
+  spl6 = n; spl7 = 0;
+) : (
+  y = spl0;
+  DLY[dpos] = spl6;
+  rp = dpos - lat;
+  rp < 0 ? rp += DMAX;
+  xd = DLY[rp];
+  dpos += 1;
+  dpos >= DMAX ? dpos = 0;
+  state == 1 ? (
+    count -= 1;
+    count <= 0 ? state = 2;
+  ) : ( state == 2 ? (
+    FY[pos] = y; FX[pos] = xd; pos += 1;
+    pos >= N ? (
+      i = 0;
+      loop(N,
+        BUF_Y[2 * i] = FY[i] * WIN[i]; BUF_Y[2 * i + 1] = 0;
+        BUF_X[2 * i] = FX[i] * WIN[i]; BUF_X[2 * i + 1] = 0;
+        i += 1;
+      );
+      fft(BUF_Y, N); fft_permute(BUF_Y, N);
+      fft(BUF_X, N); fft_permute(BUF_X, N);
+      i = 0;
+      loop(N / 2,
+        ACC_Y[i] += sqr(BUF_Y[2 * i]) + sqr(BUF_Y[2 * i + 1]);
+        ACC_X[i] += sqr(BUF_X[2 * i]) + sqr(BUF_X[2 * i + 1]);
+        i += 1;
+      );
+      pos = 0; nfr += 1;
+      nfr >= frames ? (
+        bands();
+        gmem[LB] = cur;
+        state = 0;
+      );
+    );
+  ); );
+  spl0 = 0; spl1 = 0; spl2 = 0; spl3 = 0; spl4 = 0; spl5 = 0; spl6 = 0; spl7 = 0;
+);

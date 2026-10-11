@@ -915,9 +915,12 @@ local function draw_layout_row(ctx, track)
   ImGui.Text(ctx, "Layout")
   ImGui.SameLine(ctx)
   ImGui.SetNextItemWidth(ctx, 180)
-  if ImGui.BeginCombo(ctx, "##edlayout", cur or "Default") then
-    local list = { { name = nil, label = "Default" } }
-    for _, nm in ipairs(M.variants(base)) do list[#list + 1] = { name = nm, label = nm } end
+  local dflt = M.default_variant(base)
+  if ImGui.BeginCombo(ctx, "##edlayout", cur or "Standard") then
+    local list = { { name = nil, label = "Standard" .. (dflt == nil and "  (default)" or "") } }
+    for _, nm in ipairs(M.variants(base)) do
+      list[#list + 1] = { name = nm, label = nm .. (dflt == nm and "  (default)" or "") }
+    end
     for i, e in ipairs(list) do
       local k = M.variant_key(base, e.name)
       local locked = M.locked(M.get(k)) ~= nil
@@ -927,7 +930,7 @@ local function draw_layout_row(ctx, track)
         if not edited() or reaper.MB("Leave this layout without saving your changes?",
                                      "ChannelView", 1) == 1 then
           revert_applied()
-          St.set_variant(st.fx.guid, e.name)
+          St.set_variant(st.fx.guid, e.name or St.OWN)
           switch_to(track, k)
         end
       end
@@ -936,9 +939,9 @@ local function draw_layout_row(ctx, track)
     ImGui.EndCombo(ctx)
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "The layout this instance shows, and you're editing. Default is\n" ..
-      "shared by every instance not set to another; pick another on any\n" ..
-      "instance from its panel menu (Layout).")
+    ImGui.SetTooltip(ctx, "The layout this instance shows, and you're editing. The default\n" ..
+      "is what every instance not set to another shows; choose it in a\n" ..
+      "panel's menu (Layout \u{25B8} Make \"...\" the default).")
   end
   ImGui.SameLine(ctx, 0, 16)
   ImGui.SetNextItemWidth(ctx, 170)
@@ -1044,6 +1047,35 @@ function E.draw(ctx, _selected)
         :format(st.key))
     end
     draw_layout_row(ctx, track)
+    -- an EQ or Compressor layout's canvas: its own setup page
+    if st.scratch and st.scratch.canvas then
+      ImGui.SameLine(ctx, 0, 16)
+      local kind = st.scratch.canvas.kind == "eq" and "EQ" or "compressor"
+      if ImGui.Button(ctx, "Set up the " .. kind .. " canvas\u{2026}") then
+        local go = true
+        if edited() then
+          local a = reaper.MB("Save your changes to this layout first?", "ChannelView", 3)
+          if a == 6 then
+            M.set(st.key, st.scratch); TP.invalidate(); M.save()
+            st.was_saved = true; result = "saved"
+          elseif a == 7 then
+            revert_applied(); result = "cancelled"
+          else
+            go = false
+          end
+        else
+          revert_applied(); result = "cancelled"
+        end
+        if go then
+          require("TS_CV_CanvasSetup").open(st.track, st.fx, st.key)
+          ImGui.CloseCurrentPopup(ctx)
+        end
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Which of the plugin's controls the canvas uses" ..
+          (kind == "EQ" and ", and learning its bands." or "."))
+      end
+    end
 
     -- Panel-level, so it sits above the lists rather than inside them: a
     -- plugin has one gain reduction, not one per parameter. The three

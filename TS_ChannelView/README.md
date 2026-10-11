@@ -634,20 +634,67 @@ every instance on that layout, which the dialog says at the top.
 A plugin's layout is shared by every instance of it, which is usually what
 you want. When it isn't — a Kontakt with a piano on one track and strings
 on another — the panel menu's **Layout** (at the top) picks which layout
-this instance shows: *Default*, the plugin's own, or any you've made. Type
+this instance shows: *Standard*, the plugin's own, or any you've made. Type
 a name in the box and **Copy to new layout** makes a copy of the one
 you're on, or **New empty layout** starts with no controls (your names for
 the plugin's parameters come with it); either switches this instance to
 it. Pick it on any other instance from the same menu. *Delete layout…*
-removes one, and the instances using it go back to the default. Each
-instance's choice is kept with the project; the layouts themselves are in
-the library like any other, as `<plugin> :: <name>`.
+removes one, and the instances using it go back to the plugin's default.
+Each instance's choice is kept with the project; the layouts themselves are
+in the library like any other, as `<plugin> :: <name>`.
+
+Any of them can be the plugin's **default**: *Make "<name>" the default* in
+the same menu. New instances, and any not set to another, show it; the
+menu marks it *(default)*. *Standard* is the default until you choose
+another.
 
 *Edit Parameters* has the same at the top of its window: which layout
 you're editing (switching it switches the instance, and asks first if
 you've changes you haven't saved), and *Copy to new layout* / *New empty
 layout*, which work from what's in the editor — unsaved changes go to the
 new layout and the one you started from is left as it was.
+
+### EQ and compressor layouts for any plugin
+
+ReaEQ and ReaComp have canvases of their own. Any other EQ or compressor can
+have one too, as a layout: panel menu **=** ▸ *Layout* ▸ **New EQ layout…**
+or **New compressor layout…**. The canvas fills the left of the panel and
+the plugin's other controls sit in columns beside it: the new layout starts
+with the controls of the one you made it from, less those the canvas takes,
+with their looks and the faceplate. Set it up in the window that opens;
+*Set up this layout…* in the same menu, the panel's own button, or *Set up
+the EQ/compressor canvas…* in Edit Parameters brings it back.
+
+**An EQ layout** has up to 8 bands. Name each band's controls — frequency,
+gain, Q, a shape switch, an On switch; any can be left out — or **Guess**
+them from the parameters' names. A plugin's controls don't say what shape a
+band is, so ChannelView **learns** it: it puts a copy of the plugin on a
+hidden track between a pair of its own measuring plugins
+(`TS_CV_Learn.jsfx`), plays noise through it and measures what each
+setting does — every position of a switch, a range of gains (boost and cut
+separately, since many EQs differ), each shape and the Q. A band whose
+plugin reports its frequency, gain and Q needs only a quick check of each
+shape. REAPER has to be processing FX while stopped (Preferences ▸ Audio ▸
+*Run FX when stopped*, on by default). The canvas is ready once every band
+is learned; change a band's controls and it learns that band again.
+On the canvas, drag a node across for frequency (a switch snaps to its
+settings) and up or down for gain; the wheel turns Q; double-click takes
+the band out (flat, or off). Right-click a node for its shapes and its On
+switch, or Alt+wheel to step the shape. The nodes say what the plugin's
+own controls read.
+
+**A compressor layout** maps roles to the plugin's controls: Threshold,
+Input, Ratio, Knee, Attack, Hold, Release, Make-up and Mix, each optional.
+Nothing is learned — the canvas takes the plugin's own values as fact, and
+a control that doesn't read in its role's unit (a 1176's attack of 1 to 7)
+runs along its range instead. Tick **Reversed** for a *Compression* or
+*Peak reduction* control (more of it is a lower threshold), or an attack,
+hold or release that's fastest at the top. A compressor with no threshold
+maps its **Input**: the input drives the signal into a fixed −10 dB
+threshold, drawn as the threshold moving down as the input goes up; map its
+Output as Make-up. A switched ratio or time snaps to the plugin's own
+settings (a release's *Auto* sits after its longest time). Hold draws as a
+flat top on the envelope.
 
 ## Hardware looks
 
@@ -832,6 +879,12 @@ theme's own folder, as REAPER's toolbars find them, and a toggle with an
 | `TS_CV_Mod.lua` | macros and modulators: the plugin, the links, ranges and swings |
 | `TS_CV_ModRack.lua` | the Macros and Modulators panels |
 | `TS_CV_Modulators.jsfx` | the ChannelView Modulators plugin. Goes in `Effects/` |
+| `TS_CV_CanvasSetup.lua` | setting up an EQ or compressor layout for any plugin |
+| `TS_CV_MapPanel.lua` | an EQ layout's canvas |
+| `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them |
+| `TS_CV_Learn.lua` | learning an EQ's bands on a hidden copy of the plugin |
+| `TS_CV_Learn.jsfx` | the measuring pair learning uses. Goes in `Effects/` |
+| `TS_CV_Units.lua` | reading a plugin's values from its own text (dB, Hz, ms, ratios) |
 | `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
 | `TS_CV_Share.lua` | importing and exporting layouts (*Layouts ▸ Import / Export*) |
@@ -957,6 +1010,12 @@ script into the action list.
 - **ReaComp:** the same canvas as on the desktop — drag the threshold line,
   the knee grips, the curve's end for ratio and the envelope's nodes; tap
   the Detector tab for the drawer.
+- **EQ and compressor layouts** of other plugins show their canvas too,
+  with the layout's other controls beside it: drag an EQ node for frequency
+  and gain, double-tap it to take the band out, tap it to select it for its
+  Q and shape underneath; drag a compressor's threshold, the curve's end
+  for ratio (snapping to a switch's settings) and the envelope's nodes.
+  They're set up on the desktop.
 - **Pages and conditional controls** work as on the desktop: tap a tab to
   change page (the page is remembered per device), and a control with a
   *Show when* rule comes and goes as its parameter changes. Each plugin
@@ -1035,6 +1094,11 @@ checks every one is still where it was. `dev/TS_CV_WebLayoutTest.js` does
 the same for the web page (`node dev/TS_CV_WebLayoutTest.js`).
 `dev/TS_CV_LayoutSnap.lua` records a new baseline — only ever before a
 layout change, never after it.
+
+`dev/TS_CV_LearnSim.lua` runs EQ learning end to end against made-up
+plugins (a switched 73-style EQ and a parametric whose Q means something
+else and cuts narrower than it boosts) and checks the canvas draws them
+within a dB (`lua5.4 dev/TS_CV_LearnSim.lua`).
 
 `TS_CV_Audit.py` catches the class of mistake Lua only reports mid-frame — a
 call with the wrong number of arguments, a missing `ctx`, a function that

@@ -362,6 +362,10 @@ C.EQ_PANEL_W  = 480
 -- The ReaComp panel (TS_CV_CompPanel.lua) is a canvas of the same kind, a
 -- fixed width with its meters inside it.
 C.RC_PANEL_W  = 480
+-- A mapped EQ or compressor canvas (any plugin, TS_CV_MapPanel): the
+-- canvas's own width; its layout's controls take columns beside it.
+C.MAP_EQ_W    = 400
+C.MAP_COMP_W  = 440
 
 -- The canvas axes. Frequency is drawn log-scaled end to end (a straight
 -- read of what "extremes / a little in / the broad middle" means as

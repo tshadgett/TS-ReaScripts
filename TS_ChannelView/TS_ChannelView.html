@@ -508,6 +508,8 @@ button { font: inherit; color: inherit; }
   padding: 0 10px; cursor: pointer; font-size: 12px; }
 .eqs .qd { height: 36px; min-width: 96px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); display: flex; align-items: center; justify-content: center; touch-action: none; cursor: ew-resize; }
+.eqs .shp { height: 36px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff); color: var(--ttext);
+  font-size: 12px; padding: 0 8px; max-width: 46%; }
 .eqs .rd { color: var(--value); font-variant-numeric: tabular-nums; flex-grow: 1; }
 .eqs .rm { color: var(--clip); }
 
@@ -3408,6 +3410,7 @@ function buildPanel(p, bodyH) {
   if (p.off) return buildOffline(p, bodyH);
   if (p.eq) return buildEq(p, bodyH);
   if (p.rc) return buildComp(p, bodyH);
+  if ((p.mq || p.mc) && !p._side) return buildMapped(p, bodyH);
   const hsig = hiddenSig(p.g);
   const hid = new Set(hsig ? hsig.split(",").map(Number) : []);
   const all = (p.c || []).map((c, i) => Object.assign({ idx: i }, c));
@@ -4748,6 +4751,365 @@ function buildEq(p, bodyH) {
 }
 
 // ---------------------------------------------------------------------------
+// Any plugin as an EQ or a compressor (an EQ / Compressor layout, set up on
+// the desktop: TS_CV_MapPanel, TS_CV_CompPanel's draw_mapped). The canvas
+// sits at the panel's left, the layout's own controls beside it as an
+// ordinary panel's grid. EQ bands come from what was learned (vals.mq: type,
+// frequency, gain, Q); a compressor's roles as their text reads (vals.mc).
+// ---------------------------------------------------------------------------
+const MAP_EQ_W = 400, MAP_COMP_W = 440;
+function mqBandDb(b, f) {
+  const f0 = b.f || 1000, q = Math.max(0.05, b.q || 0.7071);
+  let x = f / f0;
+  const d10 = v => 10 * Math.log10(Math.max(v, 1e-30));
+  if (b.t === "bell" || b.t === "ls" || b.t === "hs") {
+    const g = b.g || 0; if (!g) return 0;
+    const A = Math.pow(10, g / 40), x2 = x * x;
+    if (b.t === "bell") { const a = 1 - x2; return d10((a * a + Math.pow(A * x / q, 2)) / (a * a + Math.pow(x / (A * q), 2))); }
+    const k = A / (q * q) * x2;
+    if (b.t === "ls") return d10(A * A * (Math.pow(A - x2, 2) + k) / (Math.pow(1 - A * x2, 2) + k));
+    return d10(A * A * (Math.pow(1 - A * x2, 2) + k) / (Math.pow(A - x2, 2) + k));
+  }
+  if (b.t === "hp" || b.t === "lp") {
+    if (b.t === "lp") x = 1 / x;
+    const x2 = x * x, hp1 = x2 / (1 + x2), hp2 = qq => { const a = 1 - x2; return (x2 * x2) / (a * a + x2 / (qq * qq)); };
+    const o = b.o || 2;
+    return d10(o === 1 ? hp1 : o === 2 ? hp2(q) : o === 3 ? hp1 * hp2(q) : hp2(0.5412) * hp2(q));
+  }
+  return 0;
+}
+const MQ_TYPE = { bell: "Bell", ls: "Low shelf", hs: "High shelf", hp: "Low cut", lp: "High cut" };
+
+function buildMapped(p, bodyH) {
+  const kind = p.mq ? "eq" : "comp";
+  const CW = kind === "eq" ? MAP_EQ_W : MAP_COMP_W;
+  const hasSide = (p.c || []).length > 0;
+  const pnl = buildPanel(Object.assign({}, p, { _side: true }), bodyH);
+  const sideW = hasSide ? parseFloat(pnl.style.width) || 0 : 0;
+  pnl.style.width = (CW + sideW) + "px";
+  const body = pnl.querySelector(".pb");
+  const side = h("div");
+  side.style.cssText = `position:absolute;left:${CW}px;top:0;right:0;bottom:0`;
+  while (body.firstChild) side.append(body.firstChild);
+  const hold = h("div");
+  hold.style.cssText = `position:absolute;left:0;top:0;width:${CW}px;bottom:0`;
+  body.append(hold);
+  if (hasSide) body.append(side);
+  const P = ui.panels.get(p.g) || { p, ctl: [] };
+  ui.panels.set(p.g, P);
+  if (kind === "eq") mapEqCanvas(p, P, hold, CW, bodyH); else mapCompCanvas(p, P, hold, CW, bodyH);
+  return pnl;
+}
+
+function mapSetupNote(hold, text) {
+  const n = h("div", "mqn", text);
+  n.style.cssText = "position:absolute;left:8px;right:8px;top:40%;text-align:center;color:var(--dim)";
+  hold.append(n);
+}
+
+function mapEqCanvas(p, P, hold, CW, bodyH) {
+  if (!p.mq.r) { mapSetupNote(hold, "This EQ layout isn't learned yet. Set it up in ChannelView on the desktop."); return; }
+  const W_ = CW - 16;
+  const cv = h("canvas", "eqc");
+  const ch = Math.max(120, bodyH - EQ_STRIP - 8);
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = W_ * dpr; cv.height = ch * dpr; cv.style.height = ch + "px"; cv.style.width = W_ + "px";
+  cv.style.right = "auto";
+  const strip = h("div", "eqs");
+  hold.append(cv, strip);
+  const R = { lo: 20, hi: 20000, g: 18 };
+  const st = { bands: [], sel: null, drag: null, over: new Map() };
+  const X = f => Math.log(Math.max(R.lo, Math.min(R.hi, f)) / R.lo) / Math.log(R.hi / R.lo) * W_;
+  const F = x => R.lo * Math.pow(R.hi / R.lo, Math.max(0, Math.min(1, x / W_)));
+  const top = 10, gh = ch - 20;
+  const Y = db => top + gh / 2 - (db / R.g) * gh / 2;
+  const G = y => (top + gh / 2 - y) / (gh / 2) * R.g;
+  const hasG = b => b.t === "bell" || b.t === "ls" || b.t === "hs";
+  function bandsNow() {
+    const now = Date.now();
+    return st.bands.map(b => { const o = st.over.get(b.k); return (o && now - o.t < 700) ? Object.assign({}, b, o.v) : b; });
+  }
+  function draw() {
+    const c = cv.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, W_, ch);
+    c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(0, 0, W_, ch);
+    c.lineWidth = 1; c.strokeStyle = css("--ring"); c.globalAlpha = 0.5;
+    c.font = "11px -apple-system, system-ui, sans-serif"; c.fillStyle = css("--dim");
+    for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
+      const x = Math.round(X(f)) + 0.5;
+      c.beginPath(); c.moveTo(x, 0); c.lineTo(x, ch); c.stroke();
+      c.globalAlpha = 0.9; c.fillText(f >= 1000 ? f / 1000 + "k" : String(f), x + 3, ch - 4); c.globalAlpha = 0.5;
+    }
+    for (let d = -R.g; d <= R.g; d += 6) {
+      const y = Math.round(Y(d)) + 0.5;
+      c.globalAlpha = d === 0 ? 0.9 : 0.4;
+      c.beginPath(); c.moveTo(0, y); c.lineTo(W_, y); c.stroke();
+    }
+    c.globalAlpha = 1;
+    const bands = bandsNow(), N = 200, xs = [], y0 = Y(0);
+    for (let i = 0; i < N; i++) xs.push(i / (N - 1) * W_);
+    const tot = xs.map(() => 0);
+    bands.forEach(b => {
+      if (!b.e) return;
+      const ds = xs.map(x => mqBandDb(b, F(x)));
+      ds.forEach((d, i) => { tot[i] += d; });
+      const ys = ds.map(d => Y(Math.max(-R.g * 1.5, Math.min(R.g * 1.5, d))));
+      c.beginPath(); c.moveTo(xs[0], y0); xs.forEach((x, i) => c.lineTo(x, ys[i])); c.lineTo(xs[N - 1], y0); c.closePath();
+      c.fillStyle = bandCol(b.k - 1, 0.16); c.fill();
+      c.beginPath(); xs.forEach((x, i) => i ? c.lineTo(x, ys[i]) : c.moveTo(x, ys[i]));
+      c.strokeStyle = bandCol(b.k - 1, 0.7); c.lineWidth = 1.2; c.stroke();
+    });
+    c.beginPath(); xs.forEach((x, i) => { const y = Y(Math.max(-R.g * 1.5, Math.min(R.g * 1.5, tot[i]))); i ? c.lineTo(x, y) : c.moveTo(x, y); });
+    c.strokeStyle = css("--accent"); c.lineWidth = 2.4; c.stroke();
+    bands.forEach(b => {
+      const x = X(b.f), y = hasG(b) ? Y(Math.max(-R.g, Math.min(R.g, b.g))) : Y(0);
+      const sel = st.sel === b.k;
+      c.beginPath(); c.arc(x, y, sel ? 11 : 8, 0, Math.PI * 2);
+      c.fillStyle = bandCol(b.k - 1, b.e ? 1 : 0.35); c.fill();
+      c.lineWidth = sel ? 3 : 1.5; c.strokeStyle = sel ? "#fff" : "rgba(0,0,0,0.6)"; c.stroke();
+    });
+    c.fillStyle = withA(css("--accent"), 0.8); c.fillText("learned", 6, ch - 18);
+  }
+  let stripSig = null;
+  function paintStrip() {
+    const b = bandsNow().find(v => v.k === st.sel);
+    const sig = b ? [b.k, b.x, b.e, b.s].join("|") : "none";
+    if (sig === stripSig) return;
+    stripSig = sig; strip.innerHTML = "";
+    if (!b) { strip.append(h("span", null, "Drag a node to move a band · tap one to select it · double-tap: flat")); return; }
+    const meta = (p.mq.b || []).find(v => v.k === b.k) || {};
+    const dot = h("span", "dot"); dot.style.background = bandCol(b.k - 1);
+    strip.append(dot, h("span", null, (meta.n || ("Band " + b.k)) + " · " + (MQ_TYPE[b.t] || b.t)), h("span", "rd", b.x || ""));
+    if (meta.sh && meta.sh.length > 1) {
+      // the band's shape switch
+      const sel = h("select", "shp");
+      meta.sh.forEach((t, i) => { const o = h("option", null, t); o.value = i + 1; if (b.s === i + 1) o.selected = true; sel.append(o); });
+      sel.addEventListener("change", () => send("mqs", p.g, b.k, sel.value));
+      strip.append(sel);
+    }
+    if (b.wq) {
+      const qd = h("div", "qd", "Q");
+      let x0 = 0;
+      qd.addEventListener("pointerdown", e => { e.preventDefault(); qd.setPointerCapture(e.pointerId); x0 = e.clientX; st.qdrag = true; });
+      qd.addEventListener("pointerup", () => { st.qdrag = false; });
+      qd.addEventListener("pointercancel", () => { st.qdrag = false; });
+      qd.addEventListener("pointermove", e => {
+        if (!qd.hasPointerCapture(e.pointerId)) return;
+        const d = (e.clientX - x0) / 300; if (Math.abs(d) < 0.005) return;
+        x0 = e.clientX; send("mqq", p.g, b.k, d.toFixed(4));
+      });
+      strip.append(qd);
+    }
+  }
+  function hit(x, y) {
+    let best = null, bd = 26;
+    bandsNow().forEach(b => {
+      const d = Math.hypot(X(b.f) - x, (hasG(b) ? Y(Math.max(-R.g, Math.min(R.g, b.g))) : Y(0)) - y);
+      if (d < bd) { bd = d; best = b; }
+    });
+    return best;
+  }
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    const [x, y] = pos(e), b = hit(x, y);
+    if (!b) { if (st.sel) { st.sel = null; paintStrip(); draw(); } return; }
+    // double-tap a node: the band out of the sound (flat, or off)
+    const now = Date.now();
+    if (st.tap && st.tap.k === b.k && now - st.tap.t < 350) { st.tap = null; st.drag = null; send("mq0", p.g, b.k); return; }
+    st.tap = { k: b.k, t: now };
+    cv.setPointerCapture(e.pointerId);
+    st.sel = b.k; st.drag = { k: b.k, g: hasG(b) };
+    paintStrip(); draw();
+  });
+  cv.addEventListener("pointermove", e => {
+    if (!st.drag || !cv.hasPointerCapture(e.pointerId)) return;
+    const [x, y] = pos(e), f = F(x), g = Math.max(-R.g, Math.min(R.g, G(y)));
+    const v = { f }; if (st.drag.g) v.g = g;
+    st.over.set(st.drag.k, { t: Date.now(), v });
+    send("mqf", p.g, st.drag.k, f.toFixed(1));
+    if (st.drag.g) send("mqg", p.g, st.drag.k, g.toFixed(2));
+    draw();
+  });
+  cv.addEventListener("pointerup", () => { st.drag = null; });
+  P.mq = ev => { if (!ev) return; st.bands = ev.b || []; draw(); if (!st.drag && !st.qdrag) paintStrip(); };
+  paintStrip();
+  requestAnimationFrame(draw);
+}
+
+function mapCompCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {};
+  if (!Object.keys(I).length) { mapSetupNote(hold, "This compressor layout has no roles yet. Set it up in ChannelView on the desktop."); return; }
+  const W_ = CW - 16, ch = Math.max(140, bodyH - 16);
+  const cv = h("canvas", "eqc");
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = W_ * dpr; cv.height = ch * dpr; cv.style.height = ch + "px"; cv.style.width = W_ + "px"; cv.style.right = "auto";
+  hold.append(cv);
+  // the level scale: wide enough for the threshold's whole range
+  // no threshold but an input (1176-style): the input drives the signal
+  // into a fixed threshold, drawn as the threshold moving the other way
+  const VIA_IN = I.t == null && I.in != null, FIXED = -10, TK = VIA_IN ? "in" : "t";
+  const TR0 = p.mc.tr, TD = !!p.mc.td && (VIA_IN || !p.mc.rv);
+  const TR = (TR0 && VIA_IN) ? [FIXED - TR0[1], FIXED - TR0[0]] : TR0;
+  const TOP = (TD && TR) ? Math.max(6, TR[1] + 3) : 6, BOT = (TD && TR) ? Math.min(-60, TR[0] - 6) : -60, MW = 30;
+  const gw = W_ - MW - 4;
+  const X = db => (db - BOT) / (TOP - BOT) * gw;
+  const Y = db => (TOP - db) / (TOP - BOT) * ch;
+  const st = { v: null, drag: null, hot: [] };
+  const ATK = [0.1, 500], HLD = [1, 2000], REL = [1, 5000];
+  const tf = (ms, r) => ms <= r[0] ? 0 : ms >= r[1] ? 1 : Math.log(ms / r[0]) / Math.log(r[1] / r[0]);
+  const ft = (f, r) => f <= 0 ? 0 : f >= 1 ? r[1] : r[0] * Math.pow(r[1] / r[0], f);
+  const rv = VIA_IN || !!p.mc.rv;
+  // attack / hold / release: reversed ones, and a switch's settings along
+  // the envelope (ES[k]: {n, lo, hi, f}), as the desktop draws them
+  const RA = p.mc.ra || {};
+  const stepAt = (es, n) => {
+    let best = es[0], bd = 1e9;
+    for (const s of es) {
+      if (n >= s.lo - 1e-6 && n <= s.hi + 1e-6) return s;
+      const d = Math.abs(s.n - n); if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  };
+  const stepNear = (es, f) => es.reduce((b, s) => Math.abs(s.f - f) < Math.abs(b.f - f) ? s : b, es[0]);
+  function thrNow(v) {
+    if (I[TK] == null) return null;
+    if (VIA_IN && (v.u[TK] === "db" || TD) && v.v[TK] != null) return Math.max(BOT, FIXED - v.v[TK]);
+    if ((v.u[TK] === "db" || TD) && v.v[TK] != null && !rv) return Math.max(BOT, v.v[TK]);
+    const n = rv ? 1 - (v.n[TK] || 0) : (v.n[TK] || 0);
+    return BOT + 6 + n * (TOP - BOT - 12);
+  }
+  const transfer = (x, t, r, k) => {
+    if (k > 0 && x > t - k / 2 && x < t + k / 2) { const d = x - t + k / 2; return x + (1 / r - 1) * d * d / (2 * k); }
+    return x > t ? t + (x - t) / r : x;
+  };
+  function envGeom(v) {
+    const ex = 8, ew = Math.min(220, gw * 0.55), ey = ch - 92, eh = 82;
+    const hasH = I.h != null, inner = ew - 20;
+    const HW = hasH ? inner * 0.22 : 0, AW = inner * (hasH ? 0.28 : 0.34), RW = inner - AW - HW - 4;
+    const fr = (k, r) => {
+      const es = p.mc.es && p.mc.es[k];
+      if (es) return stepAt(es, v.n[k] || 0).f;
+      if (v.u[k] === "ms" && v.v[k] != null) return tf(v.v[k], r);
+      return RA[k] ? 1 - (v.n[k] || 0) : (v.n[k] || 0);
+    };
+    const on = ex + 10, base = ey + eh - 24, peak = ey + 14;
+    const ak = on + fr("a", ATK) * AW, hk = ak + (hasH ? fr("h", HLD) * HW : 0), re = hk + fr("l", REL) * RW;
+    return { ex, ey, ew, eh, on, base, peak, ak, hk, re, AW, HW, RW, fr };
+  }
+  function draw() {
+    const v = st.v; const c = cv.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, W_, ch);
+    c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(0, 0, W_, ch);
+    if (!v) return;
+    c.font = "11px -apple-system, system-ui, sans-serif";
+    c.strokeStyle = css("--ring"); c.globalAlpha = 0.4;
+    for (const g of [0, -12, -24, -36, -48]) { const y = Math.round(Y(g)) + 0.5; c.beginPath(); c.moveTo(0, y); c.lineTo(gw, y); c.stroke(); }
+    c.globalAlpha = 1;
+    const thr = thrNow(v);
+    let ratio = 4; if (v.v.r != null && v.v.r >= 1) ratio = v.v.r; else if (I.r != null && v.v.r == null) ratio = 1000;
+    const knee = (v.v.k != null && v.v.k > 0 && v.v.k < 60) ? v.v.k : 0;
+    if (thr != null) {
+      const ty = Y(thr);
+      c.strokeStyle = css("--accent"); c.lineWidth = 1.6; c.beginPath(); c.moveTo(0, ty); c.lineTo(gw, ty); c.stroke();
+      c.setLineDash([3, 4]); c.strokeStyle = withA(css("--label"), 0.6); c.lineWidth = 1;
+      c.beginPath(); c.moveTo(X(thr), Y(thr)); c.lineTo(X(TOP), Y(TOP)); c.stroke(); c.setLineDash([]);
+      c.beginPath();
+      for (let i = 0; i <= 120; i++) { const db = BOT + (TOP - BOT) * i / 120, y = Y(transfer(db, thr, ratio, knee)); i ? c.lineTo(X(db), y) : c.moveTo(X(db), y); }
+      c.strokeStyle = css("--value"); c.lineWidth = 2.2; c.stroke();
+      c.fillStyle = css("--accent"); c.fillRect(X(thr) - 20, ty - 4, 40, 8);
+      c.fillStyle = css("--value"); c.fillText((v.x[TK] || "") + "  " + (VIA_IN ? "Input" : rv ? "Compression" : "Threshold"), 8, ty - 8);
+    } else {
+      c.fillStyle = css("--dim"); c.textAlign = "center"; c.fillText("no threshold: no transfer curve", gw / 2, ch * 0.42); c.textAlign = "left";
+    }
+    st.rend = null;
+    if (I.r != null && thr != null) {
+      const ex = gw - 6, ey = Y(transfer(TOP, thr, ratio, knee));
+      c.fillStyle = css("--value"); c.beginPath(); c.arc(ex, ey, 7, 0, Math.PI * 2); c.fill();
+      c.textAlign = "right"; c.fillText((v.x.r || "") + "  Ratio", ex - 12, ey - 10); c.textAlign = "left";
+      st.rend = { x: ex, y: ey, thr };
+    }
+    if (I.a != null || I.h != null || I.l != null) {
+      const e = envGeom(v);
+      c.fillStyle = withA(css("--panel") || "#202327", 0.85); c.fillRect(e.ex, e.ey, e.ew, e.eh);
+      c.strokeStyle = css("--ring"); c.strokeRect(e.ex + 0.5, e.ey + 0.5, e.ew, e.eh);
+      c.beginPath(); c.moveTo(e.on, e.base); c.lineTo(e.ak, e.peak); c.lineTo(e.hk, e.peak);
+      c.quadraticCurveTo(e.hk + (e.re - e.hk) * 0.2, e.base, e.re, e.base); c.lineTo(e.ex + e.ew - 10, e.base);
+      c.strokeStyle = css("--accent"); c.lineWidth = 2; c.stroke();
+      const nodes = [["a", e.ak, e.peak], ["h", e.hk, e.peak], ["l", e.re, e.base]].filter(n => I[n[0]] != null);
+      for (const n of nodes) { c.fillStyle = css("--text"); c.beginPath(); c.arc(n[1], n[2], 6, 0, Math.PI * 2); c.fill(); }
+      c.fillStyle = css("--value");
+      const lbl = [I.a != null ? "Atk " + (v.x.a || "") : null, I.h != null ? "Hold " + (v.x.h || "") : null, I.l != null ? "Rel " + (v.x.l || "") : null].filter(Boolean).join("   ");
+      c.fillText(lbl, e.ex + 6, e.ey + e.eh - 6);
+      st.env = e; st.nodes = nodes;
+    }
+    const mtxt = [I.mk != null ? "Make-up " + (v.x.mk || "") : null, I.mx != null ? "Mix " + (v.x.mx || "") : null].filter(Boolean).join("   ");
+    if (mtxt) { c.fillStyle = css("--value"); c.textAlign = "right"; c.fillText(mtxt, gw - 6, ch - 8); c.textAlign = "left"; }
+    // the reduction meter
+    const gr = v.g || 0, mx = gw + 4;
+    c.fillStyle = "rgba(0,0,0,0.3)"; c.fillRect(mx, 0, MW, ch);
+    c.fillStyle = css("--fill-bi") || "#d9a33a"; c.fillRect(mx + 4, 0, MW - 8, Math.min(ch, gr / 18 * ch));
+    c.fillStyle = css("--value"); c.fillText(gr >= 0.05 ? gr.toFixed(1) : "–", mx + 2, ch - 6);
+  }
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener("pointerdown", e => {
+    if (!st.v) return;
+    const [x, y] = pos(e);
+    if (st.rend && Math.hypot(st.rend.x - x, st.rend.y - y) < 24) {
+      e.preventDefault(); cv.setPointerCapture(e.pointerId);
+      st.drag = { k: "r", y0: y, ey: st.rend.y, thr: st.rend.thr }; return;
+    }
+    for (const n of st.nodes || []) if (Math.hypot(n[1] - x, n[2] - y) < 22) {
+      e.preventDefault(); cv.setPointerCapture(e.pointerId);
+      st.drag = { k: n[0], x0: x, f0: st.env.fr(n[0], n[0] === "a" ? ATK : n[0] === "h" ? HLD : REL) }; return;
+    }
+    const thr = thrNow(st.v);
+    if (thr != null && Math.abs(Y(thr) - y) < 18 && x < gw) {
+      e.preventDefault(); cv.setPointerCapture(e.pointerId);
+      st.drag = { k: "t", y0: y, t0: thr, n0: st.v.n[TK] };
+    }
+  });
+  cv.addEventListener("pointermove", e => {
+    const d = st.drag; if (!d || !cv.hasPointerCapture(e.pointerId)) return;
+    const [x, y] = pos(e), v = st.v;
+    if (d.k === "r") {
+      // the curve's end: the ratio it makes, snapped to a switch's settings
+      const endDb = TOP - (d.ey + (y - d.y0)) / ch * (TOP - BOT), rise = TOP - d.thr;
+      if (rise <= 0.01) return;
+      const r = rise / Math.max(0.0001, endDb - d.thr);
+      if (p.mc.rs) {
+        let best = null, bd = 1e9;
+        for (const ps of p.mc.rs) {
+          const m = String(ps.t || "").match(/([\d.]+)\s*:\s*([\d.]+)/);
+          let val = m ? Math.max(+m[1] / +m[2], +m[2] / +m[1]) : 1000;
+          const dd = Math.abs(Math.log(val) - Math.log(Math.max(1, r)));
+          if (dd < bd) { bd = dd; best = ps.n; }
+        }
+        if (best != null && Math.abs(best - (v.n.r || 0)) > 1e-6) send("mcn", p.g, "r", best.toFixed(5));
+      } else send("mcv", p.g, "r", Math.max(1, Math.min(100, r)).toFixed(3));
+    } else if (d.k === "t") {
+      const tgt = d.t0 - (y - d.y0) / ch * (TOP - BOT);
+      if (VIA_IN && (v.u[TK] === "db" || TD)) send("mcv", p.g, TK, (FIXED - tgt).toFixed(2));
+      else if ((v.u[TK] === "db" || TD) && !rv) send("mcv", p.g, TK, tgt.toFixed(2));
+      else { const dn = (y - d.y0) / (ch * (TOP - BOT - 12) / (TOP - BOT)); send("mcn", p.g, TK, Math.max(0, Math.min(1, d.n0 + (rv ? dn : -dn))).toFixed(5)); }
+    } else {
+      const e2 = st.env, w = d.k === "a" ? e2.AW : d.k === "h" ? e2.HW : e2.RW, r = d.k === "a" ? ATK : d.k === "h" ? HLD : REL;
+      const f = Math.max(0, Math.min(1, d.f0 + (x - d.x0) / Math.max(1, w)));
+      const es = p.mc.es && p.mc.es[d.k];
+      if (es) {
+        const s_ = stepNear(es, f);
+        if (Math.abs(s_.n - (v.n[d.k] || 0)) > 1e-6) send("mcn", p.g, d.k, s_.n.toFixed(5));
+      } else if (v.u[d.k] === "ms" && v.v[d.k] != null) send("mcv", p.g, d.k, ft(f, r).toFixed(3));
+      else send("mcn", p.g, d.k, (RA[d.k] ? 1 - f : f).toFixed(5));
+    }
+  });
+  cv.addEventListener("pointerup", () => { st.drag = null; });
+  P.mc = ev => { if (!ev) return; st.v = ev; draw(); };
+}
+
+// ---------------------------------------------------------------------------
 // ReaComp: the transfer-curve canvas, as the desktop draws it
 // (TS_CV_CompPanel). The bridge sends real units (vals.fx[g].rc) and takes
 // them back with rcset; the plain knobs and switches go through p by their
@@ -5197,6 +5559,8 @@ function render() {
     paintWet(P, g);
     if (P.eq) P.eq(fv.eq);
     if (P.rc) P.rc(fv.rc);
+    if (P.mq) P.mq(fv.mq);
+    if (P.mc) P.mc(fv.mc);
     if (P.grEl) {
       const gr = fv.gr || 0, range = Math.max(P.p.gr || 18, gr);
       P.grEl.fill.style.height = `calc(${Math.min(100, gr / range * 100)}% - 4px)`;

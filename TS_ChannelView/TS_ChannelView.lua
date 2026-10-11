@@ -1,14 +1,15 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.0.1
+-- @version 2.0.5
 -- @changelog
---  Plugins removed from their developer in REAPER's FX browser are hidden
---  from ChannelView's add-plugin menu and search too; one already on a
---  track keeps its panel. Shell plugins such as Waves are matched to
---  REAPER's developers, categories and folders build by build.
---  TCP window toolbar: right-click ▸ Copy a REAPER toolbar. Icons are also
---  found in the theme's own folder, and a toggle with an _off icon shows
---  its _on partner while on.
+--  EQ and compressor layouts for any plugin: Layout ▸ New EQ layout… /
+--  New compressor layout…. An EQ's bands are mapped to its controls and
+--  their shapes learned from a hidden copy of the plugin; a compressor's
+--  threshold, ratio, attack, hold, release and the rest are mapped and
+--  read from the plugin's own values. The plugin's other controls sit
+--  beside the canvas. On the web companion too.
+--  A default layout per plugin (Make "<name>" the default); the plugin's
+--  own layout is now called Standard.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -26,6 +27,11 @@
 --  [nomain] TS_CV_Toolbar.lua
 --  [nomain] TS_CV_Browser.lua
 --  [nomain] TS_CV_Mod.lua
+--  [nomain] TS_CV_Units.lua
+--  [nomain] TS_CV_MapEQ.lua
+--  [nomain] TS_CV_MapPanel.lua
+--  [nomain] TS_CV_Learn.lua
+--  [nomain] TS_CV_CanvasSetup.lua
 --  [nomain] TS_CV_ModRack.lua
 --  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_Chains.lua
@@ -69,6 +75,7 @@
 --  [nomain] TS_CV_WebLink.lua
 --  [effect] TS_TrackProbe.jsfx
 --  [effect] TS_CV_Modulators.jsfx
+--  [effect] TS_CV_Learn.jsfx
 -- @about
 --  A dockable window showing one panel per plugin on the selected track.
 --  Each panel carries a float button, a bypass button and a set of knobs
@@ -152,6 +159,7 @@ local St = require("TS_CV_State")
 local B  = require("TS_CV_Browser")
 local PU = require("TS_CV_PresetUI")
 local LS = require("TS_CV_Share")
+local CS = require("TS_CV_CanvasSetup")
 local SC = require("TS_CV_Steps")
 local CH = require("TS_CV_Channel")
 local SD = require("TS_CV_Sends")
@@ -175,7 +183,9 @@ local MR = require("TS_CV_ModRack")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
-CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui)
+CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui)
+-- a learning track left behind by a ChannelView stopped mid-learn
+pcall(function() require("TS_CV_Learn").sweep() end)
 
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
@@ -1383,13 +1393,27 @@ local function panel_menu()
   -- ReaEQ or ReaComp, whose panels are their own.
   if not RQ.is_eq(key) and not RC.is_comp(key) then
     local base, cur = M.split_variant(key)
-    if ImGui.BeginMenu(ctx, "Layout: " .. (cur and U.truncate(cur, 20) or "Default")) then
-      if ImGui.MenuItem(ctx, "Default", nil, cur == nil) then St.set_variant(fx.guid, nil) end
+    local dflt = M.default_variant(base)
+    local function mark(nm) return (nm == dflt) and "  (default)" or "" end
+    if ImGui.BeginMenu(ctx, "Layout: " .. (cur and U.truncate(cur, 20) or "Standard")) then
+      if ImGui.MenuItem(ctx, "Standard" .. mark(nil) .. "##varown", nil, cur == nil) then
+        St.set_variant(fx.guid, St.OWN)
+      end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "The plugin's own layout, shared by every instance not set to another.")
+        ImGui.SetTooltip(ctx, "The plugin's own layout.")
       end
       for _, nm in ipairs(M.variants(base)) do
-        if ImGui.MenuItem(ctx, nm .. "##var", nil, cur == nm) then St.set_variant(fx.guid, nm) end
+        if ImGui.MenuItem(ctx, nm .. mark(nm) .. "##var", nil, cur == nm) then St.set_variant(fx.guid, nm) end
+      end
+      -- which one new instances (and any not set to another) use
+      if cur ~= dflt then
+        if ImGui.MenuItem(ctx, "Make \"" .. U.truncate(cur or "Standard", 20) .. "\" the default") then
+          M.set_default_variant(base, cur); M.save()
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "New instances of this plugin, and any not set to another\n" ..
+            "layout, show this one.")
+        end
       end
       ImGui.Separator(ctx)
       ImGui.SetNextItemWidth(ctx, 190)
@@ -1418,12 +1442,45 @@ local function panel_menu()
           "instance. Your names for its parameters come with it.")
       end
       if not ok then ImGui.EndDisabled(ctx) end
+      -- an EQ or compressor canvas for any plugin (TS_CV_CanvasSetup):
+      -- the name above, or "EQ" / "Compressor" (numbered if taken)
+      local function make_canvas(kind)
+        local nm = M.clean_variant(txt)
+        if not nm or M.has(M.variant_key(base, nm)) then
+          local stem = (kind == "eq") and "EQ" or "Compressor"
+          nm = stem
+          local i = 2
+          while M.has(M.variant_key(base, nm)) do nm = stem .. " " .. i; i = i + 1 end
+        end
+        local made = CS.create(app.track, fx, base, nm, kind, layout)
+        if made then St.set_variant(fx.guid, made); app.var_name = nil; ImGui.CloseCurrentPopup(ctx) end
+      end
+      if ImGui.Button(ctx, "New EQ layout\u{2026}") then make_canvas("eq") end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "This plugin on an EQ canvas: name its bands' controls,\n" ..
+          "then ChannelView learns each band's shape. Its other controls\n" ..
+          "can sit in columns beside the canvas.")
+      end
+      ImGui.SameLine(ctx)
+      if ImGui.Button(ctx, "New compressor layout\u{2026}") then make_canvas("comp") end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "This plugin on a compressor canvas: name its threshold,\n" ..
+          "ratio, attack and so on. Its other controls can sit in\n" ..
+          "columns beside the canvas.")
+      end
+      do
+        local cl = M.get(key)
+        if cl and cl.canvas and ImGui.MenuItem(ctx, "Set up this layout\u{2026}") then
+          CS.open(app.track, fx, key)
+        end
+      end
       if cur then
         ImGui.Separator(ctx)
         if ImGui.MenuItem(ctx, "Delete layout \"" .. U.truncate(cur, 20) .. "\"\u{2026}") then
           if reaper.MB(("Delete the layout \"%s\"?\n\nEvery instance using it goes back to " ..
               "the plugin's default layout. The library as it was before is kept as\n" ..
               "TS_ChannelView_Mappings.bak.ini, until the next save."):format(cur), "ChannelView", 1) == 1 then
+            if dflt == cur then M.set_default_variant(base, nil) end
             M.remove(key); M.save()
             St.set_variant(fx.guid, nil)
           end
@@ -3096,7 +3153,8 @@ local function panel_row(row_h, row_w)
           total = total + P.width(P.visible(lay.controls or {}, app.track, fx), panel_h(i),
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   P.has_io(app.track, fx, lay),
-                                  St.is_gr_open(fx.guid), M.locked(lay))
+                                  St.is_gr_open(fx.guid), M.locked(lay),
+                                  (not RQ.is_eq(k) and not RC.is_comp(k)) and lay.canvas or nil)
           if i > 1 then total = total + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)
@@ -3147,6 +3205,7 @@ local function panel_row(row_h, row_w)
         if req.open_editor and not M.locked(layout) then
           E.open(app.track, fx, key, layout)
         end
+        if req.canvas_setup then CS.open(app.track, fx, key) end
         -- a modulator's link dropped on a control: linked, after asking
         -- when that replaces another modulator
         if req.mod_drop then
@@ -3628,6 +3687,7 @@ local function frame()
     if B.draw(ctx, app.track) then rescan(true) end
     PU.draw(ctx)
     if LS.draw(ctx, function(k) return E.is_open() and E.key() == k end) then rescan(true) end
+    CS.draw(ctx)
     if TM.draw(ctx) then rescan(true) end
     CP.draw(ctx)
     if CN.draw(ctx) then rescan(true) end

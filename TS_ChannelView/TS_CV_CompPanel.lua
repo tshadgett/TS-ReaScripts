@@ -730,4 +730,351 @@ function CP.draw(ctx, dl, x, y, w, h, track, fx, req)
   return true
 end
 
+-- ---------------------------------------------------------------------
+-- any plugin as a compressor (a Compressor layout, TS_CV_Mappings Role<name>)
+-- ---------------------------------------------------------------------
+-- The same canvas, drawn from the roles the layout maps: each piece only
+-- when its role is there. Values are the plugin's own text, taken as
+-- fact (TS_CV_Units); a role whose text isn't in its unit -- a 1176's
+-- attack of 1 to 7, a "Compression" amount -- runs along the control's
+-- own range instead. With no threshold there's no transfer curve: the
+-- history, the reduction and the envelope only.
+local UN = require("TS_CV_Units")
+
+local HOLD_LO, HOLD_HI = 1, 2000
+-- the fixed threshold an input-driven compressor is drawn against, dBFS
+CP.FIXED_THR = -10
+
+local function mapped(track, addr, p)
+  if not p then return nil end
+  local nv = reaper.TrackFX_GetParamNormalized(track, addr, p) or 0
+  local txt = RC.text(track, addr, p, nv)
+  local v, unit = UN.parse(txt)
+  return { p = p, n = nv, text = txt, v = v, unit = unit }
+end
+
+local pos_cache = {}
+local function switch_positions(track, addr, guid, p)
+  local k = guid .. ":" .. p
+  if pos_cache[k] == nil then
+    pos_cache[k] = UN.positions(UN.formatter(track, addr, p), 200, 12) or false
+  end
+  return pos_cache[k] or nil
+end
+-- a switched attack / hold / release, as steps along its scale
+local step_cache = {}
+local function time_steps(track, addr, guid, p, lo, hi, rev)
+  local k = ("%s:%d:%s"):format(guid, p, rev and "r" or "")
+  if step_cache[k] == nil then
+    step_cache[k] = UN.time_steps(UN.formatter(track, addr, p), lo, hi, rev) or false
+  end
+  return step_cache[k] or nil
+end
+function CP.forget_mapped() pos_cache, step_cache = {}, {} end
+
+local function set_to(track, addr, p, target)
+  local n = UN.find_norm(UN.formatter(track, addr, p), target)
+  if n then set_norm(track, addr, p, n) end
+end
+
+-- the envelope for a mapped compressor: attack, hold and release
+-- Each time control is drawn where its time puts it on a log scale; a
+-- switch snaps to its settings (one reading "Auto" sits beside the
+-- others); one that doesn't read in time runs along its range, the other
+-- way round when the layout says it's reversed (rev[role]).
+local function draw_env_mapped(ctx, dl, px, py, pw, ph, track, addr, R, ps, guid, rev)
+  ImGui.DrawList_AddRectFilled(dl, px, py, px + pw, py + ph, U.with_alpha(C.COL.win_bg, 0xc8), 5.0)
+  ImGui.DrawList_AddRect(dl, px, py, px + pw, py + ph, C.COL.knob_ring, 5.0, 0, 1.0)
+  rev = rev or {}
+  local a, hd, r = R.Attack, R.Hold, R.Release
+  if a then a.rev = rev.Attack end
+  if hd then hd.rev = rev.Hold end
+  if r then r.rev = rev.Release end
+  local function steps_of(m, lo, hi)
+    return time_steps(track, addr, guid, m.p, lo, hi, m.rev)
+  end
+  local function frac(m, lo, hi)
+    if not m then return 0 end
+    local st = steps_of(m, lo, hi)
+    if st then return UN.step_at(st, m.n).f end
+    if m.unit == "ms" and m.v then return RC.time_frac(m.v, lo, hi) end
+    return m.rev and (1 - m.n) or m.n
+  end
+  local gx0, gx1 = px + 10, px + pw - 10
+  local base, peak = py + ph - 24, py + 14
+  local inner = gx1 - gx0
+  local HOLD_W = hd and inner * 0.22 or 0
+  local ATK_W = inner * (hd and 0.28 or 0.34)
+  local REL_W = inner - ATK_W - HOLD_W - 4
+  local on = gx0
+  local ak = on + frac(a, ATK_LO, ATK_HI) * ATK_W
+  local hk = ak + frac(hd, HOLD_LO, HOLD_HI) * HOLD_W
+  local re = hk + frac(r, REL_LO, REL_HI) * REL_W
+  ImGui.DrawList_AddLine(dl, gx0, base, gx1, base, U.with_alpha(C.COL.knob_ring, 0xc0), 1.0)
+  local xs, ys = { gx0 }, { base }
+  for i = 1, 20 do
+    local t = i / 20
+    xs[#xs + 1] = on + (ak - on) * t
+    ys[#ys + 1] = base + (peak - base) * RC.rise(t, 3.2)
+  end
+  xs[#xs + 1], ys[#ys + 1] = hk, peak
+  for i = 1, 26 do
+    local t = i / 26
+    xs[#xs + 1] = hk + (re - hk) * t
+    ys[#ys + 1] = peak + (base - peak) * RC.rise(t, 3.5)
+  end
+  xs[#xs + 1], ys[#ys + 1] = gx1, base
+  local fill = U.with_alpha(C.COL.accent, 0x2e)
+  for i = 1, #xs - 1 do
+    local y0 = math.min(ys[i], ys[i + 1])
+    if xs[i + 1] > xs[i] + 0.01 and y0 < base then
+      ImGui.DrawList_AddRectFilled(dl, xs[i], y0, xs[i + 1], base, fill)
+    end
+  end
+  polyline(dl, xs, ys, #xs, C.COL.accent, 2.0)
+  local NR = 5
+  local function node(key, m, nx, ny, w_px, lo, hi, label)
+    if not m then return end
+    local id = "mc" .. key .. "##" .. guid
+    local hov, act, dragging = handle(ctx, id, nx - NR - 3, ny - NR - 3, (NR + 3) * 2, (NR + 3) * 2)
+    if dragging then
+      local fr0 = frac(m, lo, hi)
+      local fr = math.max(0, math.min(1, drag_real(ctx, ps, id, fr0, 1 / math.max(1, w_px), 0)))
+      local st = steps_of(m, lo, hi)
+      if st then
+        local s_ = UN.step_near(st, fr)
+        if s_ and math.abs(s_.norm - m.n) > 1e-6 then set_norm(track, addr, m.p, s_.norm) end
+      elseif m.unit == "ms" and m.v then set_to(track, addr, m.p, RC.frac_time(fr, lo, hi))
+      else set_norm(track, addr, m.p, m.rev and (1 - fr) or fr) end
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
+    end
+    if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+    ImGui.DrawList_AddCircleFilled(dl, nx, ny, NR, C.COL.header_text)
+    ImGui.DrawList_AddCircle(dl, nx, ny, NR, (hov or act) and C.COL.header_text or C.COL.accent, 0, 1.6)
+    W.tip(ctx, id, ("%s %s\nDrag left or right"):format(label, m.text or ""), hov, act)
+  end
+  node("atk", a, ak, peak, ATK_W, ATK_LO, ATK_HI, "Attack")
+  node("hold", hd, hk, peak, HOLD_W, HOLD_LO, HOLD_HI, "Hold")
+  node("rel", r, re, base, REL_W, REL_LO, REL_HI, "Release")
+  local ly = py + ph - 15
+  if a then small_text(ctx, dl, gx0, ly, C.COL.value, "Atk " .. (a.text or "")) end
+  if hd then small_text(ctx, dl, (gx0 + gx1) * 0.5, ly, C.COL.value, "Hold " .. (hd.text or ""), "centre") end
+  if r then small_text(ctx, dl, gx1, ly, C.COL.value, "Rel " .. (r.text or ""), "right") end
+end
+
+-- A role's ends, as the plugin reads them (cached per instance).
+local ends_cache = {}
+local function ends_of(track, addr, guid, p)
+  local k = guid .. ":" .. p
+  local e = ends_cache[k]
+  if not e then
+    local fmt = UN.formatter(track, addr, p)
+    local a, ua = UN.at(fmt, 0)
+    local b = UN.at(fmt, 1)
+    e = { lo = a and b and math.min(a, b), hi = a and b and math.max(a, b), unit = ua }
+    ends_cache[k] = e
+  end
+  return e
+end
+
+function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
+  local roles = cv.roles or {}
+  if not next(roles) then return false end
+  local addr, guid = fx.addr, fx.guid
+  local ps = panel_state(guid)
+  if w < 120 or h < 80 then return true end
+  local enabled = T.get_enabled(track, addr)
+  local R = {}
+  for name, p in pairs(roles) do R[name] = mapped(track, addr, p) end
+  -- a threshold, knee or make-up that reads as a plain number running
+  -- below zero is in dB, whatever its text leaves off
+  for _, name in ipairs({ "Threshold", "Knee", "Makeup", "Input" }) do
+    local m = R[name]
+    if m and m.unit == "" and m.v then
+      local e = ends_of(track, addr, guid, m.p)
+      if e.lo and e.lo < 0 then m.unit = "db" end
+    end
+  end
+  -- the level scale: wide enough for the whole of the threshold's range
+  -- A compressor driven by its input (1176-style, no threshold control):
+  -- its input pushes the signal against a fixed threshold, which is the
+  -- same as the threshold moving down as the input goes up. Drawn so.
+  local via_in = (R.Threshold == nil) and (R.Input ~= nil)
+  local rev = via_in or (cv.rev and cv.rev.Threshold) or false
+  local thr_name = via_in and "Input" or (rev and "Compression" or "Threshold")
+  local DB_TOP, DB_BOT = DB_TOP, DB_BOT
+  local tsrc = R.Threshold or R.Input
+  if tsrc and tsrc.unit == "db" and not (rev and not via_in) then
+    local e = ends_of(track, addr, guid, tsrc.p)
+    local lo, hi = e.lo, e.hi
+    if via_in and lo and hi then lo, hi = CP.FIXED_THR - hi, CP.FIXED_THR - lo end
+    if hi and hi > -math.huge and hi < math.huge then DB_TOP = math.max(DB_TOP, hi + 3) end
+    if lo and lo > -math.huge and lo < math.huge then DB_BOT = math.min(DB_BOT, lo - 6) end
+  end
+
+  local mw = CP.METERS_W
+  local gx0, gy0 = x + 1, y
+  local gw, gh = w - mw - 1, h
+  local gr = T.gain_reduction(track, addr) or 0
+
+  local function x_of(db) return gx0 + (db - DB_BOT) / (DB_TOP - DB_BOT) * gw end
+  local function y_of(db) return gy0 + (DB_TOP - db) / (DB_TOP - DB_BOT) * gh end
+
+  -- the threshold in dB: as the plugin says, or along the control's range
+  -- (reversed: more compression is a lower line)
+  local T_ = tsrc
+  local thr, thr_pos
+  if T_ then
+    if T_.unit == "db" and T_.v and via_in then
+      thr = CP.FIXED_THR - ((T_.v == -math.huge) and -60 or T_.v)
+    elseif T_.unit == "db" and T_.v and not rev then
+      thr = (T_.v == -math.huge) and DB_BOT or T_.v
+    else
+      thr_pos = true
+      local n = rev and (1 - T_.n) or T_.n
+      thr = DB_BOT + 6 + n * (DB_TOP - DB_BOT - 12)
+    end
+  end
+  local ratio = 4
+  if R.Ratio and R.Ratio.unit == "ratio" and R.Ratio.v then ratio = R.Ratio.v
+  elseif R.Ratio and R.Ratio.v and R.Ratio.v >= 1 then ratio = R.Ratio.v
+  elseif R.Ratio and not R.Ratio.v then ratio = 1000 end
+  local knee = (R.Knee and R.Knee.v and R.Knee.v > 0 and R.Knee.v < 60) and R.Knee.v or 0
+  local function out(db) return RC.transfer(db, thr, ratio, knee) end
+
+  ImGui.DrawList_PushClipRect(dl, gx0, gy0, gx0 + gw, gy0 + gh, true)
+  ImGui.DrawList_AddRectFilled(dl, gx0, gy0, gx0 + gw, gy0 + gh, 0x00000030)
+  for _, g in ipairs({ 0, -12, -24, -36, -48 }) do
+    local yy = math.floor(y_of(g)) + 0.5
+    ImGui.DrawList_AddLine(dl, gx0, yy, gx0 + gw, yy, U.with_alpha(C.COL.eq_grid, 0xc0), 1.0)
+    small_text(ctx, dl, gx0 + 3, yy - 11, U.with_alpha(C.COL.header_dim, 0xa0), tostring(g))
+  end
+  local gr_peak, gr_range = W.gr_state(guid, gr, reaper.time_precise(), 12)
+  local m1, m2 = draw_history(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, y_of, gr_range)
+  if m1 then
+    small_text(ctx, dl, gx0 + gw - 4, gy0 + 3, C.COL.header_dim, m1, "right")
+    if m2 then small_text(ctx, dl, gx0 + gw - 4, gy0 + 14, C.COL.header_dim, m2, "right") end
+  end
+
+  if thr then
+    local ty = y_of(thr)
+    if knee > 0 then
+      local mid, clear = U.with_alpha(C.COL.accent, 0x80), U.with_alpha(C.COL.accent, 0)
+      vgrad(dl, gx0, y_of(thr + knee * 0.5), gx0 + gw, ty, clear, mid)
+      vgrad(dl, gx0, ty, gx0 + gw, y_of(thr - knee * 0.5), mid, clear)
+    end
+    ImGui.DrawList_AddLine(dl, gx0, ty, gx0 + gw, ty, C.COL.accent, 1.6)
+    local k0 = thr - knee * 0.5
+    dashed(dl, x_of(k0), y_of(k0), x_of(DB_TOP), y_of(DB_TOP), U.with_alpha(C.COL.label, 0xa0), 3, 4, 1.0)
+    local xs, ys, n = {}, {}, 0
+    for i = 0, 160 do
+      local db = DB_BOT + (DB_TOP - DB_BOT) * i / 160
+      n = n + 1; xs[n], ys[n] = x_of(db), y_of(out(db))
+    end
+    polyline(dl, xs, ys, n, C.COL.fader_cap, 2.2)
+    ImGui.DrawList_AddText(dl, gx0 + 8, ty - 17, C.COL.value, T_.text or "")
+    small_text(ctx, dl, gx0 + 8, ty + 3, C.COL.header_dim,
+      thr_name)
+  else
+    small_text(ctx, dl, gx0 + gw * 0.5, gy0 + gh * 0.42, U.with_alpha(C.COL.header_dim, 0xa0),
+      "no threshold: no transfer curve", "centre")
+  end
+  ImGui.DrawList_PopClipRect(dl)
+
+  -- the threshold's handle: the whole line
+  if thr then
+    local ty = y_of(thr)
+    local id = "mcthr##" .. guid
+    local hov, act, dragging = handle(ctx, id, gx0, ty - 4, gw - 18, 8)
+    if dragging then
+      if thr_pos then
+        local per = 1 / (gh * (DB_TOP - DB_BOT - 12) / (DB_TOP - DB_BOT))
+        local v = drag_real(ctx, ps, id, T_.n, 0, rev and per or -per)
+        set_norm(track, addr, T_.p, math.max(0, math.min(1, v)))
+      else
+        local v = drag_real(ctx, ps, id, thr, 0, -(DB_TOP - DB_BOT) / gh)
+        set_to(track, addr, T_.p, via_in and (CP.FIXED_THR - v) or v)
+      end
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+    elseif hov then
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+    end
+    if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+    local kx = x_of(thr)
+    ImGui.DrawList_AddRectFilled(dl, kx - 20, ty - 4, kx + 20, ty + 4,
+      (hov or act) and C.COL.header_text or C.COL.accent, 4.0)
+    W.tip(ctx, id, ("%s %s\nDrag up or down (Shift: fine)%s"):format(thr_name, T_.text or "",
+      via_in and "\n(no threshold: the input drives it into a fixed one)" or ""), hov, act)
+  end
+
+  -- the ratio: the curve's end, dragged up or down; a switch snaps to
+  -- its positions (a position that isn't a ratio, such as a limit
+  -- setting, is the far end)
+  if R.Ratio and thr then
+    local sw = switch_positions(track, addr, guid, R.Ratio.p)
+    local ex, ey = gx0 + gw - 7, y_of(out(DB_TOP))
+    local id = "mcratio##" .. guid
+    local hov, act, dragging = handle(ctx, id, ex - 7, ey - 7, 14, 14)
+    if dragging then
+      local d = ps.drag
+      if not d or d.id ~= id then
+        local _, my = ImGui.GetMousePos(ctx)
+        ps.drag = { id = id, my = my, y0 = ey }
+        d = ps.drag
+      end
+      local _, my = ImGui.GetMousePos(ctx)
+      local fine = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0 and 0.25 or 1
+      local end_db = DB_TOP - ((d.y0 + (my - d.my) * fine) - gy0) / gh * (DB_TOP - DB_BOT)
+      local rise = DB_TOP - thr
+      if rise > 0.01 then
+        local r = rise / math.max(0.0001, end_db - thr)
+        if sw then
+          local best, bd = nil, math.huge
+          for _, ps_ in ipairs(sw) do
+            local v = UN.parse(ps_.text)
+            if not (v and v >= 1) then v = 1000 end
+            local dd = math.abs(math.log(v) - math.log(math.max(1, r)))
+            if dd < bd then best, bd = ps_.norm, dd end
+          end
+          if best and math.abs(best - R.Ratio.n) > 1e-6 then set_norm(track, addr, R.Ratio.p, best) end
+        else
+          set_to(track, addr, R.Ratio.p, math.max(1, math.min(100, r)))
+        end
+      end
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+    elseif hov then
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+    end
+    if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+    ImGui.DrawList_AddCircleFilled(dl, ex, ey, 5, (hov or act) and C.COL.header_text or C.COL.fader_cap)
+    local rl = R.Ratio.text or ""
+    if R.Ratio.unit == "ratio" then rl = (rl:gsub("%s*:%s*1%s*$", "")) .. " : 1" end
+    local rw = ImGui.CalcTextSize(ctx, rl)
+    ImGui.DrawList_AddText(dl, ex - 10 - rw, ey - 19, C.COL.value, rl)
+    small_text(ctx, dl, ex - 10, ey + 6, C.COL.header_dim, "Ratio", "right")
+    W.tip(ctx, id, ("Ratio %s\nDrag up or down%s"):format(R.Ratio.text or "",
+      sw and " (it steps through the plugin's settings)" or ""), hov, act)
+  elseif R.Ratio then
+    small_text(ctx, dl, gx0 + gw - 8, gy0 + 22, C.COL.value, "Ratio " .. (R.Ratio.text or ""), "right")
+  end
+
+  -- the envelope, and make-up and mix
+  local ph, ow, ew = 82, 104, 196
+  local py = gy0 + gh - ph - 8
+  local ox = gx0 + gw - 8 - ow
+  local exl = ox - 8 - ew
+  if (R.Attack or R.Hold or R.Release) and py > gy0 + 30 and exl > gx0 + 4 then
+    draw_env_mapped(ctx, dl, exl, py, ew, ph, track, addr, R, ps, guid, cv.rev)
+  end
+  if (R.Makeup or R.Mix) and py > gy0 + 30 then
+    ImGui.DrawList_AddRectFilled(dl, ox, py, ox + ow, py + ph, U.with_alpha(C.COL.win_bg, 0xc8), 5.0)
+    ImGui.DrawList_AddRect(dl, ox, py, ox + ow, py + ph, C.COL.knob_ring, 5.0, 0, 1.0)
+    if R.Makeup then mini_knob(ctx, dl, "mcmk##" .. guid, ox + 26, py + 22, 10, track, addr, R.Makeup.p, "Make-up", ps) end
+    if R.Mix then mini_knob(ctx, dl, "mcmix##" .. guid, ox + ow - 26, py + 22, 10, track, addr, R.Mix.p, "Mix", ps) end
+  end
+
+  draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range)
+  return true
+end
+
 return CP

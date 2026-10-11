@@ -23,6 +23,7 @@ local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
 local RC  = require("TS_CV_ReaComp")
 local CP  = require("TS_CV_CompPanel")
+local MP  = require("TS_CV_MapPanel")
 local CK  = require("TS_CV_ColourPick")
 local TP  = require("TS_CV_Taps")
 local PU  = require("TS_CV_PresetUI")
@@ -34,7 +35,7 @@ local P   = {}
 local ImGui
 local panel_at = {}
 
-function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui) end
+function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui) end
 
 -- An expanded panel's foot: the layout lock at its left, and the preset
 -- bar (TS_CV_PresetUI, View > Preset bar) when that's on. It's always
@@ -625,8 +626,18 @@ function P.scrolls(lay, panel_h, lock)
   return C.GRID_TOP_PAD + lay.height + C.PANEL_PAD > body
 end
 
-function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock)
+function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
   if collapsed then return C.COLLAPSED_W end
+  -- an EQ or compressor canvas (any plugin): the canvas, and its layout's
+  -- controls in columns beside it
+  if canvas then
+    local side = 0
+    local n = type(n_or_controls) == "table" and #n_or_controls or (n_or_controls or 0)
+    if n > 0 then
+      side = P.width(n_or_controls, avail_h, false, false, nil, false, false, lock) - C.PANEL_PAD
+    end
+    return MP.width(canvas.kind) + side
+  end
   if key and RQ.is_eq(key) then
     return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
@@ -2573,8 +2584,10 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local meter = (not is_eq and not is_rc) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
   local io = (not is_rc) and P.has_io(track, fx, layout)
+  local canvas = (not is_eq and not is_rc) and layout.canvas or nil
+  if canvas then meter, io = nil, false end
   local w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
-                    St.is_gr_open(fx.guid), M.locked(layout))
+                    St.is_gr_open(fx.guid), M.locked(layout), canvas)
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
@@ -2627,6 +2640,22 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
           ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
         end
         EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H - fh, track, fx, req)
+      elseif canvas then
+        -- any plugin's EQ or compressor layout: the canvas, then the
+        -- layout's own controls in columns beside it
+        local cw = MP.width(canvas.kind)
+        local bh = wh - C.HEADER_H - fh
+        if canvas.kind == "comp" then
+          if not CP.draw_mapped(ctx, dl, x, y + C.HEADER_H, cw, bh, track, fx, req, canvas) then
+            MP.draw_setup(ctx, dl, x, y + C.HEADER_H, cw, bh, fx, canvas, req)
+          end
+        else
+          MP.draw_eq(ctx, dl, x, y + C.HEADER_H, cw, bh, track, fx, layout, req)
+        end
+        if #(layout.controls or {}) > 0 then
+          draw_controls(ctx, dl, x + cw - C.PANEL_PAD, y + C.HEADER_H, ww - cw + C.PANEL_PAD, wh, track, fx, layout,
+                        key, req, nil, nil)
+        end
       elseif is_rc and CP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx, req) then
         -- drawn: the transfer-curve canvas (one missing a parameter it
         -- needs falls through to the ordinary grid below instead)
