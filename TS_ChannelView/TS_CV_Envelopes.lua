@@ -140,7 +140,8 @@ function EN.set_active(env, on) write_flags(env, { { "act", on } }, on and "enab
 function EN.set_height(env, h)
   local c = chunk_of(env)
   if not c then return end
-  reaper.SetEnvelopeStateChunk(env, EN.set_lane_height(c, h), false)
+  local nc = EN.set_lane_height(c, h)
+  reaper.SetEnvelopeStateChunk(env, nc, false)
   reaper.TrackList_AdjustWindows(false)
 end
 
@@ -497,9 +498,11 @@ function EN.show_track_env(track, def)
 end
 
 function EN.show_fx_env(track, fx, p)
+  local key = ("param.%d.mod.active"):format(p)
+  local ok0, was = reaper.TrackFX_GetNamedConfigParm(track, fx, key)
+  local was_on = ok0 and tonumber(was) == 1
   reaper.Undo_BeginBlock()
   local env = reaper.GetFXEnvelope(track, fx, p, true)
-  reaper.Undo_EndBlock("ChannelView TCP: add automation lane", -1)
   if env then
     local s = chunk_of(env)
     if s then
@@ -508,12 +511,127 @@ function EN.show_fx_env(track, fx, p)
       cache[tostring(env)] = nil
     end
   end
+  -- A new lane is automation, not modulation -- but REAPER switches the
+  -- parameter's modulation on when it makes the envelope (seen in a log:
+  -- mod.active absent before GetFXEnvelope(create), 1 after, with no LFO,
+  -- audio follower or link). Switch it back off, unless it was on before.
+  if not was_on then
+    local ok1, now_ = reaper.TrackFX_GetNamedConfigParm(track, fx, key)
+    if ok1 and tonumber(now_) == 1 then
+      reaper.TrackFX_SetNamedConfigParm(track, fx, key, "0")
+    end
+  end
+  reaper.Undo_EndBlock("ChannelView TCP: add automation lane", -1)
   reaper.TrackList_AdjustWindows(false)
   reaper.UpdateArrange()
 end
 
 local function shown(env)
   return env ~= nil and EN.flags(env).vis
+end
+
+-- pure: the track chunk without one envelope's block. An FX parameter's
+-- (`fxguid` set) is the <PARMENV p ...> block among that plugin's, which
+-- follow its FXID line until its WAK line; a track envelope's is the
+-- first block whose header line is `tag` (e.g. "<VOLENV2"). nil when not
+-- found.
+function EN.chunk_without(chunk, fxguid, param, tag)
+  local lines = {}
+  for l in (chunk .. "\n"):gmatch("([^\n]*)\n") do lines[#lines + 1] = l end
+  local from, to = 1, #lines
+  if fxguid then
+    from = nil
+    for i, l in ipairs(lines) do
+      if l:match("^%s*FXID%s+(%S+)") == fxguid then from = i + 1 break end
+    end
+    if not from then return nil end
+    to = from
+    while to <= #lines and not lines[to]:match("^%s*WAK ") and not lines[to]:match("^%s*BYPASS ") do to = to + 1 end
+  end
+  local start
+  for i = from, math.min(to, #lines) do
+    local l = lines[i]:match("^%s*(.*)$")
+    if fxguid then
+      local p = l:match("^<PARMENV%s+(%d+)")
+      if p and tonumber(p) == param then start = i break end
+    elseif l == tag or l:find(tag .. " ", 1, true) == 1 then
+      start = i break
+    end
+  end
+  if not start then return nil end
+  local depth, stop = 0, nil
+  for i = start, #lines do
+    local l = lines[i]:match("^%s*(.*)$")
+    if l:sub(1, 1) == "<" then depth = depth + 1 end
+    if l == ">" then depth = depth - 1; if depth == 0 then stop = i break end end
+  end
+  if not stop then return nil end
+  local out = {}
+  for i, l in ipairs(lines) do if i < start or i > stop then out[#out + 1] = l end end
+  return table.concat(out, "\n")
+end
+
+-- Removes an envelope -- its lane and all its automation. One undo point.
+-- Returns true when it went.
+function EN.remove(track, env)
+  if not (track and env) then return false end
+  local fx, p = parent_of(env)
+  local ok, chunk = reaper.GetTrackStateChunk(track, "", false)
+  if not ok then return false end
+  local nc
+  if fx >= 0 then
+    nc = EN.chunk_without(chunk, reaper.TrackFX_GetFXGUID(track, fx), p, nil)
+  else
+    local ec = chunk_of(env)
+    local tag = ec and ec:match("^(<%S+)")
+    nc = tag and EN.chunk_without(chunk, nil, nil, tag)
+  end
+  if not nc then return false end
+  reaper.Undo_BeginBlock()
+  reaper.SetTrackStateChunk(track, nc, false)
+  reaper.Undo_EndBlock("ChannelView: remove envelope", -1)
+  cache = {}
+  reaper.TrackList_AdjustWindows(false)
+  reaper.UpdateArrange()
+  return true
+end
+
+-- A lane's state for a right-click menu: nil when there's no envelope,
+-- else { env, shown, auto } (auto: points beyond the first, or an
+-- automation item).
+function EN.lane_state(env)
+  if not env then return nil end
+  local auto = (reaper.CountEnvelopePoints(env) or 0) > 1
+               or (reaper.CountAutomationItems and (reaper.CountAutomationItems(env) or 0) > 0)
+  return { env = env, shown = shown(env) and true or false, auto = auto and true or false }
+end
+
+function EN.def_named(name)
+  for _, def in ipairs(EN.TRACK_ENVS) do if def.name == name then return def end end
+  return nil
+end
+
+-- A track envelope's lane ("Volume", "Pan"...), and showing / hiding it
+-- (made if it isn't there).
+function EN.track_lane(track, name)
+  local def = EN.def_named(name)
+  return def and EN.lane_state(EN.track_env(track, def)) or nil
+end
+function EN.toggle_track_lane(track, name)
+  local def = EN.def_named(name)
+  if not def then return end
+  local l = EN.track_lane(track, name)
+  if l and l.shown then EN.show(track, l.env, false) else EN.show_track_env(track, def) end
+end
+
+-- An FX parameter's lane, and showing / hiding it (made if it isn't).
+function EN.fx_lane(track, fx, p)
+  return EN.lane_state(reaper.GetFXEnvelope(track, fx, p, false))
+end
+function EN.toggle_fx_lane(track, fx, p)
+  local l = EN.fx_lane(track, fx, p)
+  if not l then EN.show_fx_env(track, fx, p)
+  else EN.set_shown(l.env, not l.shown) end
 end
 
 -- ---------------------------------------------------------------------
@@ -675,6 +793,13 @@ local function lane_menu(ctx)
     reaper.TrackFX_Show(L.track, L.fx, 3)
   end
   if ImGui.MenuItem(ctx, "Clear all points") then EN.clear_points(L.env) end
+  if ImGui.MenuItem(ctx, "Remove envelope") then
+    local pts = reaper.CountEnvelopePoints(L.env) or 0
+    if pts <= 1 or reaper.MB(("Remove %s and its automation (%d points)?"):format(L.name, pts),
+                             "ChannelView", 4) == 6 then
+      EN.remove(L.track, L.env)
+    end
+  end
   ImGui.EndPopup(ctx)
 end
 

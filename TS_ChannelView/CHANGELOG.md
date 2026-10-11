@@ -1,5 +1,63 @@
 # ChannelView — changelog
 
+## 2.0.0 — macros and modulators
+
+- **Macros and modulators.** Two new panels between the Channel panel and
+  the plugins, folded until you open them. **Macros** (up to 16) are a
+  knob, an on/off button, a fader, a dropdown of 2 to 8 named choices, or
+  an XY pad (two macros). **Modulators** (up to 8) are an LFO (six shapes,
+  synced or free rate, phase, depth, smoothing), a Follower (the track's
+  audio or its sidechain, attack, release, floor and ceiling or a gate) or
+  MIDI (velocity, note, CC, pitch bend or aftertouch). Add one from the
+  dashed tile at the end of each panel.
+- **Linking.** Drag a macro's or modulator's ◯ onto any control, or
+  right-click a control ▸ *Link to a macro or modulator*. One source drives
+  as many controls as you like; XY pads and concentric knobs take one per
+  parameter. A driven control follows its source and shows its reach on a
+  ring or a bar: from a macro, handles for where it sits at 0% and 100%;
+  from a modulator, the two ends of its swing (centred controls such as
+  ±dB gains and pans swing both ways). Turn the control to move the whole
+  range. Hover a source or a driven control for lines between them.
+- **One plugin, automatable.** Macros and modulators run in a small plugin
+  of ChannelView's own, *ChannelView Modulators*, put on the track with the
+  first one you add and taken off with the last. Controls follow it through
+  REAPER's own parameter links, so the track plays back the same without
+  ChannelView, and every macro and modulator setting has an automation
+  lane button.
+- **Credit.** Macros and modulators are the idea of Saxmand's (Jesper
+  Ankarfeldt's) FX Modulator Linking, with thanks for his blessing. Taken
+  from it: modulators in the chain as a plugin driving others through
+  REAPER's parameter links, the kinds of source, one source driving many
+  controls, reaching into containers, and the synced LFO rates. Decided
+  against: his modulator plugins and *Modulators* container (ChannelView has
+  its own single plugin), and compatibility with his script — ChannelView
+  doesn't read or need setups made with it. Not included: the A/B snapshot
+  slider, the curve-mapped and 4-in-1-out modulators, modulators driving
+  modulators, the counter, and mapping by touch.
+- **Automation lanes everywhere.** Right-click any control ▸ *Automation
+  lane* to show or hide its lane, or *Remove the lane*. Also on the Channel
+  panel's fader (Volume) and pan knob (Pan) and a ReaEQ band's menu
+  (Frequency / Gain / Q). REAPER switches a parameter's modulation on when
+  it makes a lane, which held the control still; ChannelView now switches
+  it back off.
+- **Track probes out of the way.** The probes are hidden from the plugin
+  row and kept at the ends of the chain as you insert, move or remove
+  plugins. The header's Probes button shows what's there (lit for a pair,
+  teal when the track feeds TS Visualizer's spectrum, amber when one is
+  missing) and opens a menu: add the missing probe, choose which probe the
+  Visualizer listens to, open either, **Remove the probes…**, or show them
+  in the plugin row again.
+- **TCP window: track buttons.** Settings ▸ *Track buttons* picks which of
+  monitoring, record arm, mute and solo are always on every row; the
+  others can still appear while they're on. Each keeps its own place, so
+  they line up, and mute, solo and record arm swipe down the column as in
+  the mixer. Monitoring is new here. A lane's menu has **Remove envelope**.
+- **Web companion.** The Macros and Modulators panels on the tablet: play
+  the macros, adjust the modulators' settings, and see driven controls
+  follow with their ranges and swings. Setting things up stays on the
+  desktop. The macro bar is renamed **Actions**. Restart the web companion
+  after updating.
+
 ## 1.9.6 — a fix for Edit Parameters
 
 - **Fix:** Edit Parameters could stop ChannelView with an error

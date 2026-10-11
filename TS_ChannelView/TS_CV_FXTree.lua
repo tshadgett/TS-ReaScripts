@@ -361,6 +361,35 @@ function T.hash(list)
   return table.concat(parts, "|")
 end
 
+-- T.collect's list without some top-level slots (`drop(slot)` true): the
+-- plugin row leaves out what has panels of its own (ChannelView
+-- Modulators) or nothing to show (the probes, when hidden). The tree's
+-- first/last indexes point into the list, so they're renumbered.
+function T.without(list, drop)
+  local out = { tree = {} }
+  for k, v in pairs(list) do if type(k) ~= "number" and k ~= "tree" then out[k] = v end end
+  for _, fx in ipairs(list) do
+    if not (fx.path_t and #fx.path_t == 1 and drop(fx.path_t[1])) then out[#out + 1] = fx end
+  end
+  for _, node in ipairs(list.tree or {}) do
+    if not (node.path and #node.path == 1 and drop(node.path[1])) then out.tree[#out.tree + 1] = node end
+  end
+  local function renum(nodes)
+    for _, node in ipairs(nodes) do
+      local first, last
+      for i, fx in ipairs(out) do
+        local inside = true
+        for d = 1, #node.path do if not fx.path_t or fx.path_t[d] ~= node.path[d] then inside = false break end end
+        if inside then first = first or i; last = i end
+      end
+      node.first, node.last = first or 1, last or 0
+      if node.children then renum(node.children) end
+    end
+  end
+  renum(out.tree)
+  return out
+end
+
 -- ---------------------------------------------------------------------
 -- editing the chain's shape: moves, containers, parallel
 -- ---------------------------------------------------------------------

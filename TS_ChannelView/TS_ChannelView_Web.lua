@@ -53,6 +53,7 @@ local PR = require("TS_CV_Presets")
 local HO = require("TS_CV_HwOut")
 local TO = require("TS_CV_TrackOps")
 local BZ = require("TS_CV_Busy")
+local MD = require("TS_CV_Mod")
 
 local NS = "TS_CV_WEB"
 
@@ -375,6 +376,18 @@ local function panel_of(fx, i)
       -- the layout, so the page only rebuilds when it's switched on or off.
       local okm, mv = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.mod.active"):format(ctl.param))
       o.md  = (okm and tonumber(mv) == 1) or nil
+      -- driven by a macro or modulator (TS_CV_Mod): its colour and which;
+      -- the ring's numbers come with the values
+      local lk = MD.link_of(track, fx.guid, ctl.param)
+      if lk then
+        o.lk = { s = lk.mod.guid, k = lk.out, c = hex(lk.mod.col), m = lk.macro or nil }
+        -- the mark is for REAPER's own LFO / follower, not our links
+        local own = function(key)
+          local ok2, s2 = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.%s"):format(ctl.param, key))
+          return ok2 and tonumber(s2) == 1
+        end
+        o.md = (own("lfo.active") or own("acs.active")) or nil
+      end
       o.bi  = ctl.bipolar or nil
       o.inv = (ctl.invert and (o.t == "knob" or o.t == "toggle" or o.t == "stepped" or o.t == "dual" or o.t == "xy")) or nil
       o.st  = ctl.style
@@ -395,6 +408,12 @@ local function panel_of(fx, i)
           o.l2 = M.display_name(key, p2, nil, pn2, ctl.live or layout.live)
           local okm2, mv2 = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.mod.active"):format(p2))
           o.md2 = (okm2 and tonumber(mv2) == 1) or nil
+          -- its own link (an XY pad's Y, a dual knob's inner knob)
+          local lk2 = MD.link_of(track, fx.guid, p2)
+          if lk2 then
+            o.lk2 = { s = lk2.mod.guid, k = lk2.out, c = hex(lk2.mod.col), m = lk2.macro or nil }
+            o.md2 = nil
+          end
         end
         -- the first's own name, for the pair
         o.l1 = M.display_name(key, ctl.param, nil, pname, ctl.live or layout.live)
@@ -735,7 +754,28 @@ local function build_layout()
     end
   end
   local tn = track and math.floor(reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")) or 0
+  -- the track's macros and modulators (TS_CV_Mod): what they are; their
+  -- values come with the values
+  local mr = nil
+  if track then
+    local s = MD.scan(track)
+    if #s.list > 0 then
+      local ms, os = arr(), arr()
+      for _, m in ipairs(s.macros) do
+        ms[#ms + 1] = { g = m.guid, k = m.kind, n = m.name, c = hex(m.col),
+                        ch = m.choices and arr({ table.unpack(m.choices) }) or nil,
+                        lb = m.labels and arr({ table.unpack(m.labels) }) or nil,
+                        nl = #(s.by_mod[m.guid] or {}) }
+      end
+      for _, o in ipairs(s.mods) do
+        os[#os + 1] = { g = o.guid, k = o.kind, n = o.name, c = hex(o.col), j = o.j,
+                        nl = #(s.by_mod[o.guid] or {}) }
+      end
+      mr = { m = ms, o = os, nm = MD.macros_used(track), NM = MD.NM, NO = MD.NO }
+    end
+  end
   return {
+    mr = mr,
     tracks = tracks,
     mc = track_colour(reaper.GetMasterTrack(0)),
     mfl = fader_json(reaper.GetMasterTrack(0)),
@@ -1083,10 +1123,13 @@ local function build_vals(lseq, ack)
     local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
     local v, x = arr(), arr()
     local v2, x2                -- a second parameter's, where there is one
+    local rg                    -- linked controls' rings: index -> { lo, hi, live, ends }
     for ci, ctl in ipairs(layout.controls or {}) do
       if (ctl.type == "xy" or ctl.type == "dual") and ctl.param2 and ctl.param2 >= 0 and ctl.param2 < nparams then
         v2, x2 = v2 or {}, x2 or {}
         local r2 = reaper.TrackFX_GetParamNormalized(track, fx.addr, ctl.param2) or 0
+        local lk2 = MD.link_of(track, fx.guid, ctl.param2)
+        if lk2 then r2 = MD.live(track, lk2) end
         v2[tostring(ci - 1)] = round(ctl.invert2 and (1 - r2) or r2)
         x2[tostring(ci - 1)] = U.fmt_value(track, fx.addr, ctl.param2)
       end
@@ -1094,6 +1137,16 @@ local function build_vals(lseq, ack)
         local raw = reaper.TrackFX_GetParamNormalized(track, fx.addr, ctl.param) or 0
         local inv = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle" or ctl.type == "stepped"
                                     or ctl.type == "dual" or ctl.type == "xy")
+        -- driven by a macro or modulator: where it is now, and its ring
+        local lk = MD.link_of(track, fx.guid, ctl.param)
+        if lk then
+          local lo, hi, live, ends = MD.ring_of(track, lk, inv)
+          raw = inv and (1 - live) or live
+          rg = rg or {}
+          local e = arr()
+          for k2, ev in ipairs(ends) do e[k2] = round(ev) end
+          rg[tostring(ci - 1)] = { round(lo), round(hi), round(live), e }
+        end
         v[ci] = round(inv and (1 - raw) or raw)
         x[ci] = U.fmt_value(track, fx.addr, ctl.param)
         -- a toggle's text is what its button says: the state's name, or
@@ -1121,7 +1174,7 @@ local function build_vals(lseq, ack)
       for ci in pairs(hidden) do hid = hid or arr(); hid[#hid + 1] = ci - 1 end
       if hid then table.sort(hid) end
     end
-    fxv[fx.guid] = { e = T.get_enabled(track, fx.addr), v = v, x = x, v2 = v2, x2 = x2, gr = gr, h = hid,
+    fxv[fx.guid] = { e = T.get_enabled(track, fx.addr), v = v, x = x, v2 = v2, x2 = x2, gr = gr, h = hid, rg = rg,
                      pn = pname, pm = (pname ~= "" and not psame) or nil,
                      est = est,
                      tw = (gr and web_tr.set[fx.guid]) and trace_of(fx, meter, est, gr) or nil,
@@ -1159,7 +1212,29 @@ local function build_vals(lseq, ack)
   end
   if track then walk(chain and chain.tree) end
   local mx = (reaper.time_precise() - mix_at < MIX_TTL) and mixer_vals() or nil
-  return { L = lseq, A = ack, fx = fxv, msg = last_msg, tr = tr, s = sends_vals(on_master() and HO.CAT or 0), r = sends_vals(-1), mx = mx,
+  -- macros' values and modulators' outputs and settings
+  local mrv = nil
+  if track then
+    local s = MD.scan(track)
+    if #s.list > 0 then
+      local mv, ov = {}, {}
+      for _, m in ipairs(s.macros) do
+        local t = arr()
+        for k2 = 1, #m.out do t[k2] = round(MD.value(track, m, k2)) end
+        mv[m.guid] = t
+      end
+      for _, o in ipairs(s.mods) do
+        local f = {}
+        for _, fd in ipairs(MD.FIELDS) do
+          local key = fd[1]
+          if key ~= "type" and key ~= "outb" then f[key] = round(MD.field(track, o.slot, o.j, key), 3) end
+        end
+        ov[o.guid] = f
+      end
+      mrv = { m = mv, o = ov }
+    end
+  end
+  return { L = lseq, A = ack, fx = fxv, mrv = mrv, msg = last_msg, tr = tr, s = sends_vals(on_master() and HO.CAT or 0), r = sends_vals(-1), mx = mx,
            nv = nav_open() and nav_vals() or nil,
            sp = any_eq and spectrum_vals() or nil, bw = bw }
 end
@@ -1404,8 +1479,29 @@ local function apply(verb, a)
         if ctl.param2 == p and ctl.invert2 and (ctl.type == "dual" or ctl.type == "xy") then inv = true end
       end
       v = math.max(0, math.min(1, v))
-      reaper.TrackFX_SetParamNormalized(track, fx.addr, p, inv and (1 - v) or v)
+      local lk = MD.link_of(track, fx.guid, p)
+      if lk then
+        -- linked: turning it moves its whole range / swing (as on the desktop)
+        local want = inv and (1 - v) or v
+        MD.shift_link(track, lk, want - MD.live(track, lk))
+      else
+        reaper.TrackFX_SetParamNormalized(track, fx.addr, p, inv and (1 - v) or v)
+      end
       TP.touched(track, fx.guid)
+    end
+  elseif verb == "mset" then
+    -- mset|guid|k|v: a macro's value (its output k: an XY pad's 1 or 2)
+    local src = track and MD.find(track, a[1])
+    local k, v = tonumber(a[2]), tonumber(a[3])
+    if src and src.src == "macro" and k and v then MD.set_macro(track, src, k, v) end
+  elseif verb == "mfield" then
+    -- mfield|guid|key|real: one of a modulator's settings
+    local src = track and MD.find(track, a[1])
+    local v = tonumber(a[3])
+    if src and src.src == "mod" and v and MD.FIELDS[a[2] or ""] and a[2] ~= "type"
+       and a[2] ~= "out" and a[2] ~= "outb" then
+      MD.set_field(track, src.slot, src.j, a[2], v)
+      if a[2] == "fsrc" and v >= 0.5 then MD.need_sidechain(track) end
     end
   elseif verb == "rcset" then
     -- rcset|guid|role|real: one of ReaComp's real-unit settings, by its
@@ -1780,7 +1876,9 @@ local function work(now)
     layout_dirty = true
   end
   if valid(track) then
-    local list = T.collect(track)
+    -- the Modulators container (TS_CV_Mod) isn't a plugin in the row
+    local list = MD.strip(track, T.collect(track))
+    if not TP.probes_shown() then list = TP.strip_probes(track, list) end
     local h = T.hash(list)
     if h ~= chain_hash then
       chain_hash = h

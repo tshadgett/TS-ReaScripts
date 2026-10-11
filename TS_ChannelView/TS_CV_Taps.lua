@@ -965,10 +965,14 @@ end
 function TP.insert_probes(tr)
   if find_level(tr, nil) then return true end
   local first = TP.ara_first(tr) and 1 or 0
+  -- one already there (the other deleted): only the missing one is added
+  local have_pre, have_post = TP.top_probes(tr)
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
-  local pre = add_probe(tr, -1000 - first)    -- -1000 - n: insert at slot n
-  local post = pre and add_probe(tr, -1)      -- -1: append
+  local pre = have_pre or add_probe(tr, -1000 - first)    -- -1000 - n: insert at slot n
+  -- a pre probe put in front of the lone post probe moves it along one
+  if have_post and not have_pre and pre and pre <= have_post then have_post = have_post + 1 end
+  local post = pre and (have_post or add_probe(tr, -1))   -- -1: append
   if pre then
     reaper.TrackFX_SetParam(tr, pre, TP.P_ROLE, 0)
     reaper.TrackFX_SetParam(tr, pre, 1, 0)    -- Publish: idle
@@ -984,6 +988,195 @@ function TP.insert_probes(tr)
     return false, "REAPER couldn't load TS_TrackProbe.jsfx -- is it installed under Effects?"
   end
   return true
+end
+
+-- ---------------------------------------------------------------------
+-- hidden, and kept at the ends
+-- ---------------------------------------------------------------------
+-- The probes have nothing to show, so the plugin row leaves them out
+-- (unless "Show the probes in the plugin row" is ticked) -- and since you
+-- can't see them, ChannelView keeps them where they belong: the pre probe
+-- first (second behind an ARA plugin), the post probe last, after any
+-- insert, move or removal. One of the pair dragged into a container comes
+-- back out to its end; a pair kept together inside a container is left
+-- alone (that's deliberate).
+--
+-- The moves make NO undo point of their own. If they did, undoing your
+-- insert would first undo the move, which would put the probe straight
+-- back -- and you could never get past it. Without one, undo takes the
+-- chain back to before your insert, probes and all.
+
+TP.SHOWN_KEY = "probes_shown"
+function TP.probes_shown()
+  return reaper.GetExtState("TS_ChannelView", TP.SHOWN_KEY) == "1"
+end
+function TP.set_probes_shown(on)
+  reaper.SetExtState("TS_ChannelView", TP.SHOWN_KEY, on and "1" or "0", true)
+end
+
+-- The top-level pre and post probe slots (the first of each), or nil.
+function TP.top_probes(tr)
+  local pre, post
+  for i = 0, (reaper.TrackFX_GetCount(tr) or 0) - 1 do
+    if is_probe(tr, i) then
+      local r = probe_role(tr, i)
+      if r == 0 and not pre then pre = i
+      elseif r == 1 and not post then post = i end
+    end
+  end
+  return pre, post
+end
+
+-- The first probe of `role` inside any container, its address.
+local function nested_probe(tr, caddr, role, depth)
+  depth = depth or 0
+  for _, a in ipairs(level_items(tr, caddr)) do
+    if caddr and is_probe(tr, a) and probe_role(tr, a) == role then return a end
+    if depth < 4 and (container_count(tr, a) or 0) > 0 then
+      local hit = nested_probe(tr, a, role, depth + 1)
+      if hit then return hit end
+    end
+  end
+  return nil
+end
+
+local function top_slot_of(tr, guid)
+  for i = 0, (reaper.TrackFX_GetCount(tr) or 0) - 1 do
+    if fx_guid(tr, i) == guid then return i end
+  end
+  return nil
+end
+
+-- Moves the FX at `src` to top-level slot `final` (REAPER reads the
+-- destination against the chain before the move, which within one level
+-- is the final slot; one try more covers anything else).
+local function move_to(tr, src, final)
+  local g = fx_guid(tr, src)
+  for _, d in ipairs({ final, final + 1 }) do
+    reaper.TrackFX_CopyToTrack(tr, src, tr, d, true)
+    local at = top_slot_of(tr, g)
+    if at == final or not at then return true end
+    src = at
+  end
+  return true
+end
+
+-- Puts the probes back where they belong. Returns true if anything moved.
+function TP.keep_in_place(tr)
+  if not tr or TP.probes_shown() or tr == reaper.GetMasterTrack(0) then return false end
+  local pre, post = TP.top_probes(tr)
+  if not (pre or post) then return false end
+  local moved = false
+  reaper.PreventUIRefresh(1)
+  -- one of the pair taken into a container: back out to its end
+  if pre and not post then
+    local a = nested_probe(tr, nil, 1)
+    if a then move_to(tr, a, reaper.TrackFX_GetCount(tr)); moved = true end
+  elseif post and not pre then
+    local a = nested_probe(tr, nil, 0)
+    if a then move_to(tr, a, TP.ara_first(tr) and 1 or 0); moved = true end
+  end
+  pre, post = TP.top_probes(tr)
+  if pre and post then
+    local n = reaper.TrackFX_GetCount(tr)
+    if post ~= n - 1 then move_to(tr, post, n - 1); moved = true end
+    pre = TP.top_probes(tr)
+    if pre ~= 0 then
+      -- ask about ARA (it reads the chain) only when it could matter
+      local want = TP.ara_first(tr) and 1 or 0
+      if pre ~= want then move_to(tr, pre, want); moved = true end
+    end
+  end
+  reaper.PreventUIRefresh(-1)
+  if moved then TP.invalidate() end
+  return moved
+end
+
+-- The plugin row without the top-level probes.
+function TP.strip_probes(tr, list)
+  local T = require("TS_CV_FXTree")
+  return T.without(list, function(slot) return is_probe(tr, slot) end)
+end
+
+-- Which top-level probes the track has: "pair", "pre", "post" (one of
+-- them missing) or nil, and (for a pair) which is in the Visualizer.
+-- Cached for a second, as has_probes is -- the header asks every frame.
+local which_cache = {}
+function TP.probe_state(tr)
+  if not tr then return nil end
+  local key = tostring(tr)
+  local now = reaper.time_precise()
+  local c = which_cache[key]
+  if not c or now - c.t > 1.0 then
+    local v, vis
+    if find_level(tr, nil) then v, vis = "pair", TP.vis_state(tr)
+    else
+      local pre, post = TP.top_probes(tr)
+      v = (pre and "pre") or (post and "post") or nil
+    end
+    c = { t = now, v = v, vis = vis }
+    which_cache[key] = c
+  end
+  return c.v, c.vis
+end
+
+-- "Include in Visualizer Spectrum" (the probe's own slider4): TS_Visualizer
+-- takes the first probe on a track with it ticked, and shows what that
+-- probe hears -- the pre probe the track's input, the post probe its
+-- output. "pre", "post" or nil.
+TP.P_VIS = 3
+function TP.vis_state(tr)
+  local lv = tr and find_level(tr, nil)
+  if not lv then return nil end
+  local function on(a) return (reaper.TrackFX_GetParam(tr, a, TP.P_VIS) or 0) >= 0.5 end
+  if on(lv.items[lv.pre]) then return "pre" end
+  if on(lv.items[lv.post]) then return "post" end
+  return nil
+end
+function TP.set_vis(tr, which)
+  local lv = tr and find_level(tr, nil)
+  if not lv then return end
+  reaper.Undo_BeginBlock()
+  reaper.TrackFX_SetParam(tr, lv.items[lv.pre], TP.P_VIS, which == "pre" and 1 or 0)
+  reaper.TrackFX_SetParam(tr, lv.items[lv.post], TP.P_VIS, which == "post" and 1 or 0)
+  reaper.Undo_EndBlock(which and "ChannelView: include the track in the Visualizer"
+                              or "ChannelView: leave the track out of the Visualizer", -1)
+  which_cache = {}
+end
+
+-- Takes the probes off the track: the measuring routing first (every pin
+-- it set put back), then the pair and any lone pre or post probe at the
+-- top level. One undo point. A Comparison probe (another track's) stays.
+function TP.remove_probes(tr)
+  if not tr then return end
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  lift(tr, read_record(tr))
+  local lv = find_level(tr, nil)
+  if lv and lv.caddr then
+    -- a pair inside a container: the later one first, so the other's
+    -- address still holds
+    reaper.TrackFX_Delete(tr, lv.items[lv.post])
+    lv = find_level(tr, nil) or lv
+    local pre = nil
+    for _, a in ipairs(level_items(tr, lv.caddr)) do
+      if is_probe(tr, a) and probe_role(tr, a) == 0 then pre = a break end
+    end
+    if pre then reaper.TrackFX_Delete(tr, pre) end
+  end
+  for i = (reaper.TrackFX_GetCount(tr) or 0) - 1, 0, -1 do
+    if is_probe(tr, i) and probe_role(tr, i) <= 1 then reaper.TrackFX_Delete(tr, i) end
+  end
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock("ChannelView: remove TS_TrackProbe pair", -1)
+  TP.invalidate()
+end
+
+-- The pre or post probe's address, for opening its window.
+function TP.probe_addr(tr, which)
+  local lv = tr and find_level(tr, nil)
+  if not lv then return nil end
+  return lv.items[which == "pre" and lv.pre or lv.post]
 end
 
 -- ---------------------------------------------------------------------
@@ -1254,6 +1447,7 @@ function TP.invalidate()
   next_at, readers, native, sources = {}, {}, {}, {}
   levels_ok = {}
   has_cache = {}
+  which_cache = {}
   any_until = 0
 end
 

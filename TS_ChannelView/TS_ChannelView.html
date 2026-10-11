@@ -401,7 +401,44 @@ button { font: inherit; color: inherit; }
   border-width: 0 6px 6px 0; border-color: transparent var(--mdc) transparent transparent;
   pointer-events: none; z-index: 3; }
 .on > .mdk { border-right-color: var(--mdc-on, var(--mdc)); }
+/* a second parameter's link (an XY pad's Y, a dual knob's inner): top left */
+.mdk2 { position: absolute; top: 2px; left: 2px; width: 0; height: 0; border-style: solid;
+  border-width: 6px 6px 0 0; border-color: var(--mdc2) transparent transparent transparent;
+  pointer-events: none; z-index: 3; }
 .ph { touch-action: none; }
+/* macros and modulators (TS_CV_Mod): their panels, and the rings and bars
+   on the controls they drive */
+.mrp .pb { overflow: hidden; }
+.mrp .mft { height: 26px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--dim); background: var(--head); border-top: 1px solid var(--border); }
+.pnl.shut.mrp .mft { display: none; }
+.mcell { position: absolute; border: 1px solid var(--border); border-radius: 5px; display: flex;
+  flex-direction: column; align-items: center; box-sizing: border-box; }
+.mcell .mn { font-size: 12px; font-weight: 600; margin-top: 4px; max-width: 92%; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; color: var(--mc); }
+.mcell .ms { position: absolute; bottom: 3px; font-size: 10px; color: var(--dim); }
+.mcell .mv { font-size: 11px; color: var(--value); }
+.mcell .tog.on { background: var(--mc); }
+.mtile { position: absolute; border: 1px solid var(--border); border-radius: 5px; padding: 5px 7px; box-sizing: border-box; }
+.mtile.open { border-color: var(--mc); }
+.mtile .mth { display: flex; align-items: center; gap: 6px; height: 22px; cursor: pointer; }
+.mtile .sw { width: 10px; height: 10px; border-radius: 2px; background: var(--mc); flex-shrink: 0; }
+.mtile .mtn { font-weight: 600; font-size: 13px; flex-grow: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mtile .mts { font-size: 10px; color: var(--dim); height: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mtile canvas { display: block; width: 100%; height: 28px; border-radius: 3px; background: #121416; margin-top: 3px; }
+.mtile .lvl { height: 8px; border-radius: 2px; background: #121416; margin-top: 6px; position: relative; overflow: hidden; }
+.mtile .lvl i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--mc); }
+.mtile .pills { display: flex; gap: 3px; margin-top: 6px; }
+.mtile .pill { flex: 1; height: 26px; border-radius: 4px; border: 0; background: var(--toff); color: var(--label);
+  font-size: 11px; padding: 0; cursor: pointer; }
+.mtile .pill.on { background: var(--accent); color: #fff; }
+.mtile .pill svg { width: 22px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.mtile .kr { display: flex; margin-top: 4px; }
+.mtile .kc { display: flex; flex-direction: column; align-items: center; width: 33.3%; touch-action: none; }
+.mtile .kc .lbl, .mtile .kc .val { font-size: 10px; max-width: 100%; }
+.lkbar { position: absolute; border-radius: 2px; pointer-events: none; z-index: 2; }
+.lkdot { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%;
+  pointer-events: none; z-index: 3; box-sizing: border-box; }
 /* the preset bar: the header's twin along the foot of a panel */
 .pf { height: 34px; flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 0 2px;
   background: var(--head); border-top: 1px solid var(--border); }
@@ -1568,13 +1605,13 @@ function buildTransport() {
       btns.macros.classList.toggle("on", showMacros);
       $("mac").classList.toggle("hidden", !showMacros);
       relayout();
-    }, "Macros"),
+    }, "Actions"),
     btns.edit = iconBtn("", "edit", () => {
       macroEdit = !macroEdit;
       btns.edit.classList.toggle("on", macroEdit);
       if (macroEdit && !showMacros) btns.macros.click();
       buildMacros();
-    }, "Edit macros"),
+    }, "Edit actions"),
   );
   // full screen: hides the browser's bars and the tablet's status bar. Not
   // offered where the page already opens full screen (installed as an app)
@@ -1605,7 +1642,7 @@ function buildMacros() {
   const bar = $("mac");
   bar.innerHTML = "";
   bar.classList.toggle("edit", macroEdit);
-  if (!macros.length && !macroEdit) bar.append(h("div", "mempty", "No macros yet. Tap the pencil to add some."));
+  if (!macros.length && !macroEdit) bar.append(h("div", "mempty", "No actions yet. Tap the pencil to add some."));
   macros.forEach((m, i) => {
     if (m.sp) {
       // a spacer: tap it while editing to move or remove it
@@ -1729,7 +1766,7 @@ let findSeq = 0, findTimer = null;
 function editMacro(i) {
   const m = i >= 0 ? Object.assign({}, macros[i]) : { l: "", a: "", c: "" };
   openSheet(sh => {
-    sh.append(h("h3", null, i >= 0 ? "Edit macro" : "New macro"));
+    sh.append(h("h3", null, i >= 0 ? "Edit action" : "New action"));
     const lab = h("input", "fld"); lab.placeholder = "Label"; lab.value = m.l || "";
     const act = h("input", "fld"); act.placeholder = "Search actions, or an action ID"; act.value = m.a || "";
     const res = h("div", "res");
@@ -2789,7 +2826,8 @@ function makeHFader(style, cap, bip) {
   return { node, set(v) {
     const W = node.clientWidth || 160;
     c.style.left = (6 + v * (W - 12 - capW)) + "px";
-  } };
+  },
+  pos(v) { const W = node.clientWidth || 160; return 6 + capW / 2 + v * (W - 12 - capW); } };
 }
 
 // View > Strip width (ChannelView's): the fader panel, each mixer strip and
@@ -2826,7 +2864,9 @@ function makeFader(w, style, cap, bip) {
   return { node, set(v) {
     const H = node.clientHeight || 200;
     c.style.top = (6 + (1 - v) * (H - 12 - capH)) + "px";
-  } };
+  },
+  // where value v's cap centre is, down from the top (a link's bar)
+  pos(v) { const H = node.clientHeight || 200; return 6 + capH / 2 + (1 - v) * (H - 12 - capH); } };
 }
 
 function touch(id, v) { local.set(id, { v, t: Date.now() }); }
@@ -2840,6 +2880,342 @@ function modDot(svg, st, cap) {
   const col = modCol(under);
   el("circle", { cx: 50, cy: 50, r: 10, fill: lum(col) > 0.55 ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)" }, svg);
   el("circle", { cx: 50, cy: 50, r: 7, fill: col }, svg);
+}
+
+// ---------------------------------------------------------------------------
+// macros and modulators (TS_CV_Mod, ChannelView 2.0) -- set up on the
+// desktop; here they're played, and a modulator's settings turned
+// ---------------------------------------------------------------------------
+// A link's ring round a knob (TS_CV_Widgets.mod_ring): the span in the
+// source's colour, its ends, and where it is now. Drawn past the dial.
+function linkRing(svg, col) {
+  svg.style.overflow = "visible";
+  const R = 56;
+  const g = el("g", {}, svg);
+  const arc = el("path", { fill: "none", stroke: col, "stroke-width": 5, "stroke-linecap": "round", opacity: 0.65 }, g);
+  const ends = [];
+  const live = el("circle", { r: 4.2, fill: col }, g);
+  const deg = v => A0 + (A1 - A0) * v;
+  return { set(lo, hi, lv, es) {
+    arc.setAttribute("d", arcPath(R, deg(lo), deg(Math.max(hi, lo + 0.004))));
+    while (ends.length < es.length) ends.push(el("circle", { r: 4.6, fill: PAL.panel_bg || "#202327", stroke: col, "stroke-width": 2 }, g));
+    ends.forEach((c, i) => {
+      const on = i < es.length;
+      c.style.display = on ? "" : "none";
+      if (on) { const q = pt(R, deg(es[i])); c.setAttribute("cx", f2(q[0])); c.setAttribute("cy", f2(q[1])); }
+    });
+    g.appendChild(live);
+    const q = pt(R, deg(lv)); live.setAttribute("cx", f2(q[0])); live.setAttribute("cy", f2(q[1]));
+  } };
+}
+// ...and its bar beside a fader (right of an upright one, under one across)
+function linkBar(fd, across, col) {
+  const bar = h("div", "lkbar"), dot = h("div", "lkdot"), es = [];
+  bar.style.background = col; bar.style.opacity = 0.7;
+  dot.style.background = col;
+  fd.node.append(bar, dot);
+  const at = (v, el, w) => {
+    const p = fd.pos(v);
+    if (across) { el.style.left = p + "px"; el.style.top = "calc(100% + 4px)"; }
+    else { el.style.top = p + "px"; el.style.left = "calc(100% + 5px)"; }
+  };
+  return { set(lo, hi, lv, ends) {
+    const a = fd.pos(lo), b = fd.pos(hi);
+    if (across) Object.assign(bar.style, { left: Math.min(a, b) + "px", width: Math.max(2, Math.abs(b - a)) + "px", top: "calc(100% + 3px)", height: "3px" });
+    else Object.assign(bar.style, { top: Math.min(a, b) + "px", height: Math.max(2, Math.abs(b - a)) + "px", left: "calc(100% + 4px)", width: "3px" });
+    while (es.length < ends.length) { const e = h("div", "lkdot"); e.style.border = `2px solid ${col}`;
+      e.style.background = PAL.panel_bg || "#202327"; fd.node.append(e); es.push(e); }
+    es.forEach((e, i) => { e.style.display = i < ends.length ? "" : "none"; if (i < ends.length) at(ends[i], e); });
+    at(lv, dot);
+  } };
+}
+// a corner in the source's colour, on what has no ring or bar
+function linkCorner(node, lk) {
+  modCorner(node, PAL.toggle_off);
+  node.style.setProperty("--mdc", lk.c); node.style.setProperty("--mdc-on", lk.c);
+}
+// ...and the second parameter's, top left
+function linkCorner2(node, lk) {
+  node.style.position = "relative";
+  node.style.setProperty("--mdc2", lk.c);
+  node.append(h("i", "mdk2"));
+}
+
+let mrOpen = new Set();            // panels open: "macros", "mods" (per device)
+let mtOpen = new Set();            // modulator tiles opened for their settings
+try { mrOpen = new Set(JSON.parse(localStorage.getItem("tscv.mrpanels") || "[]")); } catch (e) {}
+try { mtOpen = new Set(JSON.parse(localStorage.getItem("tscv.mrtiles") || "[]")); } catch (e) {}
+const saveMr = () => { try { localStorage.setItem("tscv.mrpanels", JSON.stringify([...mrOpen]));
+  localStorage.setItem("tscv.mrtiles", JSON.stringify([...mtOpen])); } catch (e) {} };
+const mrHist = new Map();          // modulator -> its output's recent past
+const MR_SYNC = ["1/16", "1/8 T", "1/8", "1/8 D", "1/4 T", "1/4", "1/4 D", "1/2 T", "1/2", "1/2 D", "1 T", "1", "1 D", "2", "4", "8"];
+const MR_SHAPES = ["Sine", "Triangle", "Square", "Saw up", "Saw down", "Random"];
+const MR_SHAPE_D = [
+  "M1 6 C4 -1 8 -1 11 6 S18 13 21 6", "M1 11 L6 1 L11 11 L16 1 L21 11", "M1 11 V1 H11 V11 H21 V1",
+  "M1 11 L11 1 V11 L21 1", "M1 1 L11 11 V1 L21 11", "M1 8 H5 V2 H9 V10 H13 V4 H17 V7 H21"];
+const MR_MIDI = ["Vel", "Note", "CC", "Bend", "AT"];
+const MR_MIDI_NAME = ["Velocity", "Note", "CC", "Pitch bend", "Aftertouch"];
+const noteName = n => { n = Math.round(n); return ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1); };
+// a modulator's settings as knobs: real value <-> 0..1, its text, default
+const lin = (lo, hi) => [v => (v - lo) / (hi - lo), n => lo + n * (hi - lo)];
+const sqr = hi => [v => Math.sqrt(Math.max(0, v) / hi), n => hi * n * n];
+const MK = {
+  depth:  { l: "Depth",   m: lin(0, 1), t: v => Math.round(v * 100) + "%", d: 1 },
+  phase:  { l: "Phase",   m: lin(0, 1), t: v => Math.round(v * 360) + "°", d: 0 },
+  smooth: { l: "Smooth",  m: lin(0, 1), t: v => v <= 0 ? "Off" : Math.round(v * v * 500) + " ms", d: 0 },
+  rsync:  { l: "Rate",    m: lin(0, 15), t: v => MR_SYNC[Math.round(v)] || "?", d: 5, steps: 16 },
+  rhz:    { l: "Rate",    m: [v => Math.log(Math.max(0.01, v) / 0.01) / Math.log(2000), n => 0.01 * Math.pow(2000, n)],
+            t: v => v >= 1 ? v.toFixed(2) + " Hz" : v.toFixed(3) + " Hz", d: 1 },
+  att:    { l: "Attack",  m: sqr(500), t: v => Math.round(v) + " ms", d: 10 },
+  rel:    { l: "Release", m: sqr(2000), t: v => Math.round(v) + " ms", d: 200 },
+  floor:  { l: "Floor",   m: lin(-80, 0), t: v => Math.round(v) + " dB", d: -48 },
+  ceil:   { l: "Ceiling", m: lin(-60, 12), t: v => Math.round(v) + " dB", d: 0 },
+  mch:    { l: "Channel", m: lin(0, 16), t: v => Math.round(v) === 0 ? "Omni" : "Ch " + Math.round(v), d: 0, steps: 17 },
+  mcc:    { l: "CC",      m: lin(0, 127), t: v => "CC " + Math.round(v), d: 1, steps: 128 },
+  mlo:    { l: "Low",     m: lin(0, 127), t: noteName, d: 36, steps: 128 },
+  mhi:    { l: "High",    m: lin(0, 127), t: noteName, d: 96, steps: 128 },
+};
+const mrVals = g => (vals && vals.mrv && vals.mrv.o && vals.mrv.o[g]) || null;
+
+// Macros: two columns of cells, an XY pad a whole row; down, then another
+// pair of columns (TS_CV_ModRack's place_macros)
+const MC_H = 96, MGAP = 6;
+function placeMacros(ms, room) {
+  const gw = CELL_W * 2 + MGAP;
+  const out = []; let gx = 0, y = 0, col = 0, groups = 1;
+  const newrow = () => { y += MC_H + MGAP; col = 0; };
+  for (const m of ms) {
+    // an XY pad: both columns, two rows, so its pad is square
+    const wide = m.k === "xy", ch = wide ? MC_H * 2 + MGAP : MC_H;
+    if (wide && col === 1) newrow();
+    if (y > 0 && y + ch > room && col === 0) { gx += gw + MGAP; y = 0; groups++; }
+    out.push({ m, x: gx + col * (CELL_W + MGAP), y, w: wide ? gw : CELL_W, h: ch });
+    if (wide) { y += ch + MGAP; col = 0; } else if (col === 1) newrow(); else col = 1;
+  }
+  return { items: out, w: groups * gw + (groups - 1) * MGAP };
+}
+function mrPanel(kind, title, bodyH, inside, foot) {
+  const pnl = h("div", "pnl mrp");
+  const head = h("div", "ph");
+  const col = h("button", "hb col"); col.innerHTML = `<svg viewBox="0 0 24 24">${ICON.collapse}</svg>`;
+  col.setAttribute("aria-label", "Collapse");
+  const fold = () => {
+    if (mrOpen.has(kind)) mrOpen.delete(kind); else mrOpen.add(kind);
+    saveMr(); pnl.classList.toggle("shut", !mrOpen.has(kind));
+  };
+  col.addEventListener("click", fold);
+  doubleTap(head, fold);
+  head.append(h("span", "nm", title), col);
+  const body = h("div", "pb");
+  pnl.append(head, body);
+  const w = inside(body, bodyH);
+  pnl.style.width = (w + PAD * 2) + "px";
+  pnl.append(h("div", "mft", foot));
+  if (!mrOpen.has(kind)) pnl.classList.add("shut");
+  return pnl;
+}
+function buildMacrosPanel(mr, bodyH) {
+  const ctl = new Map();
+  const pnl = mrPanel("macros", "Macros", bodyH, (body, room) => {
+    const lay = placeMacros(mr.m, room - PAD * 2);
+    for (const it of lay.items) {
+      const m = it.m, cell = h("div", "mcell");
+      Object.assign(cell.style, { left: (PAD + it.x) + "px", top: (PAD + it.y) + "px", width: it.w + "px", height: it.h + "px" });
+      cell.style.setProperty("--mc", m.c);
+      cell.append(h("div", "mn", m.n));
+      if (m.nl) cell.append(h("div", "ms", "drives " + m.nl));
+      body.append(cell);
+      const id = k => "mr:" + m.g + ":" + k;
+      const go = (k, v) => { touch(id(k), v); send("mset", m.g, k, v.toFixed(4)); };
+      let set;
+      if (m.k === "button") {
+        const b = h("button", "tog"); b.style.width = "58px"; b.style.marginTop = "12px";
+        const tx = h("span"); b.append(tx); cell.append(b);
+        let cur = 0;
+        b.addEventListener("click", () => { cur = cur >= 0.5 ? 0 : 1; go(1, cur); set([cur]); });
+        set = vs => { cur = vs[0]; b.classList.toggle("on", cur >= 0.5); tx.textContent = cur >= 0.5 ? "On" : "Off"; };
+      } else if (m.k === "fader") {
+        const fd = makeHFader("flat", m.c, false);
+        fd.node.style.width = (it.w - 16) + "px"; fd.node.style.height = "30px"; fd.node.style.marginTop = "12px";
+        const v = h("div", "mv"); cell.append(fd.node, v);
+        let cur = 0;
+        dragger(fd.node, () => cur, n => { cur = n; fd.set(n); go(1, n); }, { across: true, travel: it.w - 16, reset: () => go(1, 0) });
+        set = vs => { cur = vs[0]; fd.set(cur); v.textContent = Math.round(cur * 100) + "%"; };
+      } else if (m.k === "dropdown") {
+        const ch = m.ch || ["1", "2", "3"], n = ch.length;
+        const b = h("button", "cmb"); b.style.width = (it.w - 12) + "px"; b.style.marginTop = "12px";
+        const tx = h("span"); b.append(tx);
+        const cnt = h("div", "ms"); cell.append(b);
+        let cur = 0;
+        const c = { l: m.n, ch };
+        b.addEventListener("click", () => pickChoice(c, cur, v => { cur = v; go(1, v); set([v]); }));
+        set = vs => { cur = vs[0]; const i = Math.round(cur * (n - 1)); tx.textContent = ch[i] || ""; };
+      } else if (m.k === "xy") {
+        const S = Math.max(40, Math.min(it.w - 12, it.h - 30));
+        const pad = makeXY(S, S, m.c); pad.node.style.marginTop = "3px";
+        cell.append(pad.node);
+        let a = 0, b2 = 0;
+        const at = e => { const r = pad.node.getBoundingClientRect(), d = 7;
+          return [Math.max(0, Math.min(1, (e.clientX - r.left - d) / Math.max(1, r.width - 2 * d))),
+                  Math.max(0, Math.min(1, 1 - (e.clientY - r.top - d) / Math.max(1, r.height - 2 * d)))]; };
+        const mv = e => { const [x, y] = at(e); if (x !== a) { a = x; go(1, x); } if (y !== b2) { b2 = y; go(2, y); } pad.set(a, b2); };
+        pad.node.addEventListener("pointerdown", e => { e.preventDefault(); pad.node.setPointerCapture(e.pointerId); mv(e); });
+        pad.node.addEventListener("pointermove", e => { if (pad.node.hasPointerCapture(e.pointerId)) mv(e); });
+        set = vs => { a = vs[0] || 0; b2 = vs[1] || 0; pad.set(a, b2); };
+      } else {
+        const k = makeKnob(40, "arc", m.c, false);
+        const box = h("div", "knob"); box.append(k.svg); box.style.margin = "6px 0 2px";
+        const v = h("div", "mv"); cell.append(box, v);
+        let cur = 0;
+        dragger(box, () => cur, n => { cur = n; k.set(n); go(1, n); }, { reset: () => go(1, 0) });
+        set = vs => { cur = vs[0]; k.set(cur); v.textContent = Math.round(cur * 100) + "%"; };
+      }
+      ctl.set(m.g, { m, set, id });
+    }
+    return lay.w;
+  }, `${mr.nm} of ${mr.NM} used`);
+  ui.mr.mac = ctl;
+  return pnl;
+}
+
+// a modulator's tile: closed, what it's doing; open, its settings
+const TILE_W = 196;
+function tileH(o, open) { const base = o.k === "lfo" ? 80 : 64; return open ? base + 36 + 2 * 74 : base; }
+function knobCell(o, key, col, get) {
+  const d = MK[key], c = h("div", "kc");
+  const k = makeKnob(34, "arc", col, false);
+  const box = h("div", "knob"); box.append(k.svg); box.style.margin = "2px 0 0";
+  const lb = h("div", "lbl", d.l), vl = h("div", "val", "");
+  c.append(lb, box, vl);
+  let cur = 0;
+  const id = "mf:" + o.g + ":" + key;
+  dragger(box, () => cur, n => {
+    if (d.steps) n = Math.round(n * (d.steps - 1)) / (d.steps - 1);
+    cur = n; k.set(n);
+    const real = d.m[1](n);
+    touch(id, real); send("mfield", o.g, key, real.toFixed(4));
+    vl.textContent = d.t(real);
+  }, { reset: () => send("mfield", o.g, key, String(d.d)), steps: d.steps });
+  return { node: c, set(f) {
+    const l = held(id), real = l ? l.v : f[key];
+    if (real == null) return;
+    cur = Math.max(0, Math.min(1, d.m[0](real))); k.set(cur); vl.textContent = d.t(real);
+  } };
+}
+function pills(names, on, pick, tips) {
+  const row = h("div", "pills");
+  const bs = names.map((n, i) => {
+    const b = h("button", "pill");
+    if (n.startsWith("<")) b.innerHTML = n; else b.textContent = n;
+    if (tips) b.title = tips[i];
+    b.addEventListener("click", () => pick(i));
+    row.append(b); return b;
+  });
+  return { node: row, set(i) { bs.forEach((b, k) => b.classList.toggle("on", Array.isArray(i) ? i[k] : k === i)); } };
+}
+function buildModsPanel(mr, bodyH) {
+  const tiles = new Map();
+  const trk = layout.track ? layout.track.i : 0;
+  const pnl = mrPanel("mods", "Modulators", bodyH, (body, room) => {
+    let x = 0, y = 0, cols = 1;
+    for (const o of mr.o) {
+      const key = trk + ":" + o.g, open = mtOpen.has(key), th = tileH(o, open);
+      if (y > 0 && y + th > room - PAD * 2) { x += TILE_W + MGAP; y = 0; cols++; }
+      const t = h("div", "mtile" + (open ? " open" : ""));
+      Object.assign(t.style, { left: (PAD + x) + "px", top: (PAD + y) + "px", width: TILE_W + "px", height: th + "px" });
+      t.style.setProperty("--mc", o.c);
+      y += th + MGAP;
+      const hd = h("div", "mth"); hd.append(h("i", "sw"), h("span", "mtn", o.n));
+      hd.addEventListener("click", () => { if (mtOpen.has(key)) mtOpen.delete(key); else mtOpen.add(key); saveMr(); build(); });
+      const sub = h("div", "mts", "");
+      t.append(hd, sub);
+      const T = { o, sub, parts: [] };
+      if (o.k === "lfo") { T.cv = h("canvas"); t.append(T.cv); }
+      else { const l = h("div", "lvl"); T.lvl = h("i"); l.append(T.lvl); t.append(l); }
+      if (open) {
+        const f = (k, v) => send("mfield", o.g, k, String(v));
+        if (o.k === "lfo") {
+          const sh = pills(MR_SHAPE_D.map(d => `<svg viewBox="0 0 22 12"><path d="${d}"/></svg>`), 0, i => f("shape", i), MR_SHAPES);
+          t.append(sh.node); T.parts.push(F => sh.set(Math.round(F.shape)));
+          const r1 = h("div", "kr"), r2 = h("div", "kr");
+          const rs = knobCell(o, "rsync", o.c), rh = knobCell(o, "rhz", o.c);
+          const dp = knobCell(o, "depth", o.c), ph = knobCell(o, "phase", o.c), sm = knobCell(o, "smooth", o.c);
+          r1.append(rs.node, rh.node, dp.node, ph.node); r2.append(sm.node);
+          const sy = pills(["Sync", "Free"], 0, i => f("sync", i === 0 ? 1 : 0));
+          sy.node.style.flex = "1"; sy.node.style.margin = "18px 4px 0";
+          r2.append(sy.node); t.append(r1, r2);
+          T.parts.push(F => { const synced = F.sync >= 0.5; rs.node.style.display = synced ? "" : "none";
+            rh.node.style.display = synced ? "none" : ""; rs.set(F); rh.set(F); dp.set(F); ph.set(F); sm.set(F);
+            sy.set(synced ? 0 : 1); });
+        } else if (o.k === "follower") {
+          const src = pills(["Track", "Sidechain", "Gate"], 0, i => {
+            const F = mrVals(o.g) || {};
+            if (i === 2) f("gate", F.gate >= 0.5 ? 0 : 1); else f("fsrc", i);
+          });
+          t.append(src.node);
+          const r1 = h("div", "kr"), r2 = h("div", "kr");
+          const at = knobCell(o, "att", o.c), rl = knobCell(o, "rel", o.c), dp = knobCell(o, "depth", o.c);
+          const fl = knobCell(o, "floor", o.c), cl = knobCell(o, "ceil", o.c), sm = knobCell(o, "smooth", o.c);
+          r1.append(at.node, rl.node, dp.node); r2.append(fl.node, cl.node, sm.node); t.append(r1, r2);
+          T.parts.push(F => { src.set([F.fsrc < 0.5, F.fsrc >= 0.5, F.gate >= 0.5]);
+            cl.node.style.visibility = F.gate >= 0.5 ? "hidden" : "";
+            for (const k of [at, rl, dp, fl, cl, sm]) k.set(F); });
+        } else {
+          const src = pills(MR_MIDI, 0, i => f("msrc", i), MR_MIDI_NAME);
+          t.append(src.node);
+          const r1 = h("div", "kr"), r2 = h("div", "kr");
+          const chn = knobCell(o, "mch", o.c), cc = knobCell(o, "mcc", o.c), lo = knobCell(o, "mlo", o.c), hi = knobCell(o, "mhi", o.c);
+          const hold = pills(["Hold"], 0, () => { const F = mrVals(o.g) || {}; f("mhold", F.mhold >= 0.5 ? 0 : 1); });
+          hold.node.style.flex = "1"; hold.node.style.margin = "18px 4px 0";
+          const dp = knobCell(o, "depth", o.c), sm = knobCell(o, "smooth", o.c);
+          r1.append(chn.node, cc.node, lo.node, hi.node, hold.node); r2.append(dp.node, sm.node); t.append(r1, r2);
+          T.parts.push(F => { const ms = Math.round(F.msrc); src.set(ms);
+            cc.node.style.display = ms === 2 ? "" : "none";
+            lo.node.style.display = hi.node.style.display = ms === 1 ? "" : "none";
+            hold.node.style.display = ms === 0 ? "" : "none"; hold.set(F.mhold >= 0.5 ? 0 : -1);
+            for (const k of [chn, cc, lo, hi, dp, sm]) k.set(F); });
+        }
+      }
+      body.append(t);
+      tiles.set(o.g, T);
+    }
+    return cols * TILE_W + (cols - 1) * MGAP;
+  }, `${mr.o.length} of ${mr.NO} used`);
+  ui.mr.mods = tiles;
+  return pnl;
+}
+function modSub(o, F, nl) {
+  const d = nl ? "drives " + nl : "not linked";
+  if (o.k === "lfo") return `${d} · ${F.sync >= 0.5 ? (MR_SYNC[Math.round(F.rsync)] || "?") : F.rhz.toFixed(2) + " Hz"} · ${(MR_SHAPES[Math.round(F.shape)] || "").toLowerCase()}`;
+  if (o.k === "follower") return `${F.fsrc >= 0.5 ? "sidechain" : "track"}${F.gate >= 0.5 ? " gate" : ""} · ${d}`;
+  const ms = Math.round(F.msrc);
+  return `${ms === 2 ? "CC " + Math.round(F.mcc) : MR_MIDI_NAME[ms] || "MIDI"} · ${d}`;
+}
+function renderMr() {
+  if (!ui.mr || !vals || !vals.mrv) return;
+  for (const [g, C] of ui.mr.mac || []) {
+    const vs = (vals.mrv.m && vals.mrv.m[g]) || [0];
+    const shown = vs.map((v, i) => { const l = held(C.id(i + 1)); return l ? l.v : v; });
+    C.set(shown);
+  }
+  for (const [g, T] of ui.mr.mods || []) {
+    const F = mrVals(g);
+    if (!F) continue;
+    T.sub.textContent = modSub(T.o, F, T.o.nl);
+    const out = F.out || 0;
+    if (T.lvl) T.lvl.style.width = (Math.max(0, Math.min(1, out)) * 100) + "%";
+    if (T.cv) {
+      let hs = mrHist.get(g); if (!hs) { hs = []; mrHist.set(g, hs); }
+      hs.push(out); if (hs.length > 80) hs.shift();
+      const cv = T.cv, W = cv.clientWidth || 180, H = cv.clientHeight || 28;
+      if (cv.width !== W * 2) { cv.width = W * 2; cv.height = H * 2; }
+      const x = cv.getContext("2d"); x.setTransform(2, 0, 0, 2, 0, 0); x.clearRect(0, 0, W, H);
+      x.strokeStyle = T.o.c; x.lineWidth = 1.5; x.beginPath();
+      hs.forEach((v, i) => { const px = 2 + (W - 4) * i / 79, py = H - 2 - (H - 4) * v; if (i) x.lineTo(px, py); else x.moveTo(px, py); });
+      x.stroke();
+    }
+    for (const p of T.parts) p(F);
+  }
 }
 
 function buildPanels() {
@@ -2861,6 +3237,14 @@ function buildPanels() {
   const sink = [];
   for (const b of brs) for (let i = b.a; i <= b.b; i++)
     sink[i] = Math.max(sink[i] || 0, (b.r + 1) * BRK_ROW + 2);
+  // the track's macros and modulators, before its plugins (as the desktop)
+  ui.mr = {};
+  const mr = layout.mr;
+  if (mr) {
+    const mh = rowH - HEAD - 28;
+    if (mr.m && mr.m.length) row.append(buildMacrosPanel(mr, mh));
+    if (mr.o && mr.o.length) row.append(buildModsPanel(mr, mh));
+  }
   const els = [];
   fx.forEach((p, k) => {
     const d = sink[k + 1] || 0;
@@ -3203,6 +3587,8 @@ function buildPanel(p, bodyH) {
         const pad = makeXY(W, Math.max(30, Hc - 36), c.cap);
         cell.append(lbl, pad.node, val);
         if (c.md || c.md2) modCorner(pad.node, "#101112");
+        if (c.lk) linkCorner(pad.node, c.lk);
+        if (c.lk2) linkCorner2(pad.node, c.lk2);
         let fine = false, sx = 0, sy = 0, s1 = 0, s2 = 0, lastTap = 0, moved = false;
         const at = e => { const r = pad.node.getBoundingClientRect(), d = 7;
           return [Math.max(0, Math.min(1, (e.clientX - r.left - d) / Math.max(1, r.width - 2 * d))),
@@ -3234,6 +3620,8 @@ function buildPanel(p, bodyH) {
         const mg = Math.max(0, (CELL_H * it.hu / 2 - CELL_H - (D - KNOB)) / 2);
         const k = makeDual(D, c.cap, c.md, c.md2);
         const box = h("div", "knob"); box.append(k.svg);
+        if (c.lk) linkCorner(box, c.lk);
+        if (c.lk2) linkCorner2(box, c.lk2);
         box.style.margin = (6 + mg) + "px 0 " + (4 + mg) + "px";
         cell.append(lbl, box, val);
         let zone = "outer", sy = 0, sv = 0, lastTap = 0, moved = false;
@@ -3286,6 +3674,7 @@ function buildPanel(p, bodyH) {
       // the arc is a printed scale, not a knob standing on the plate: no shadow
       if (!BODY[STYLE_ALIAS[c.st] || c.st]) box.classList.add("flat");
       if (c.md) modDot(k.svg, c.st, c.cap);
+      if (c.lk) entry.ring = linkRing(k.svg, c.lk.c);
       if (size === "small") {
         // a small name over a smaller dial: there's no hovering on a touch
         // screen, so the name has to be on the panel; no room for the value
@@ -3333,6 +3722,7 @@ function buildPanel(p, bodyH) {
       if (small) cell.append(b); else cell.append(lbl, b);
       const tx = h("span"); b.append(tx);
       if (c.md) modCorner(b, PAL.toggle_off, c.lit || PAL.toggle_on);
+      if (c.lk) linkCorner(b, c.lk);
       let cur = 0;
       b.addEventListener("click", () => { cur = cur >= 0.5 ? 0 : 1; b.classList.toggle("on", cur >= 0.5); sendV(cur); });
       entry.set = (v, x) => { cur = v; b.classList.toggle("on", v >= 0.5);
@@ -3354,6 +3744,7 @@ function buildPanel(p, bodyH) {
       cell.append(lbl, row);
       // on the top-right button: the last across, the first down
       if (c.md && btns.length) modCorner(c.btn === "down" ? btns[0] : btns[btns.length - 1], PAL.toggle_off, c.lit || PAL.toggle_on);
+      if (c.lk && btns.length) linkCorner(c.btn === "down" ? btns[0] : btns[btns.length - 1], c.lk);
       entry.set = v => {
         const ref = c.ch && c.ch.length ? c : { ch: names };
         const k = nearestChoice(ref, v);
@@ -3365,6 +3756,7 @@ function buildPanel(p, bodyH) {
       cell.append(lbl, b);
       const tx = h("span"); b.append(tx);
       if (c.md) modCorner(b, PAL.toggle_off);
+      if (c.lk) linkCorner(b, c.lk);
       let cur = 0, curText = "";
       b.addEventListener("click", () => pickChoice(c, cur, v => { cur = v; sendV(v); }));
       entry.set = (v, x) => { cur = v; curText = x; tx.textContent = x; };
@@ -3403,6 +3795,7 @@ function buildPanel(p, bodyH) {
         travel = H;
       }
       if (c.md) modCorner(fd.node, under);
+      if (c.lk) { if (fd.pos) entry.ring = linkBar(fd, c.dr === "h", c.lk.c); else linkCorner(fd.node, c.lk); }
       let cur = 0;
       dragger(fd.node, () => cur, v => { cur = v; fd.set(v); sendV(v); },
         { travel, across: c.dr === "h", reset: () => send("def", p.g, c.p) });
@@ -4798,6 +5191,8 @@ function render() {
       }
       e.set(v, x);
       if (e.val) e.val.textContent = layout.vals === false ? "" : x;
+      // driven by a macro or modulator: its ring / bar
+      if (e.ring) { const r = fv.rg && fv.rg[String(e.c.idx)]; if (r) e.ring.set(r[0], r[1], r[2], r[3] || []); }
     }
     paintWet(P, g);
     if (P.eq) P.eq(fv.eq);
@@ -4816,6 +5211,7 @@ function render() {
     (vals.r || []).forEach((sv, i) => ui.sends[-1][i] && ui.sends[-1][i].set(sv));
   }
   renderMixer();
+  renderMr();
   const t = vals.tr, S = ui.strip;
   if (t && S) {
     const pl = held("pan"), vl = held("vol");

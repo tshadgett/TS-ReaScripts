@@ -534,6 +534,103 @@ do
   reaper.GetTrackStateChunk, reaper.TrackFX_AddByName = nil, nil
 end
 
+-- ---------------------------------------------------------------- probes hidden, kept at the ends
+do
+  -- REAPER's move: the destination is read against the chain before the
+  -- move; within one level that's the final slot
+  reaper.TrackFX_CopyToTrack = function(tr, src, dtr, dest, move)
+    index()
+    local function find(list)
+      for i, f in ipairs(list) do
+        if f.addr == src then return list, i end
+        if f.kids then local l, j = find(f.kids) if l then return l, j end end
+      end
+    end
+    local list, i = find(tr.fx)
+    local f = table.remove(list, i)
+    table.insert(tr.fx, math.min(dest, #tr.fx) + 1, f)
+  end
+  reaper.GetTrackStateChunk = function() return true, "<TRACK\n<FXCHAIN\n<JS x \"\"\n>\n>\n>" end
+  local function P(role, g) return fx("JS: TS_TrackProbe", g, 18, 2, { params = { [0] = role } }) end
+  local function order()
+    index()
+    local t = {}
+    for _, f in ipairs(track.fx) do
+      t[#t + 1] = f.guid:gsub("[{}]", "")
+      if f.kids then
+        local k = {}
+        for _, c in ipairs(f.kids) do k[#k + 1] = c.guid:gsub("[{}]", "") end
+        t[#t] = t[#t] .. "[" .. table.concat(k, " ") .. "]"
+      end
+    end
+    return table.concat(t, " ")
+  end
+  reset()
+  track.fx = { P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}"), fx("B", "{NEW}", 2, 2) }
+  check("keep: insert after the post probe", (TP.keep_in_place(track)), true)
+  check("keep: post back last",           order(), "PRE EQ NEW POST")
+  check("keep: nothing more to do",       (TP.keep_in_place(track)), false)
+  track.fx = { fx("B", "{NEW}", 2, 2), P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+  TP.keep_in_place(track)
+  check("keep: insert in front of the pre probe", order(), "PRE NEW EQ POST")
+  track.fx = { P(0, "{PRE}"), P(1, "{POST}"), fx("A", "{EQ}", 2, 2) }
+  TP.keep_in_place(track)
+  check("keep: post dragged up",          order(), "PRE EQ POST")
+  -- the pre probe behind an ARA plugin stays second
+  reaper.GetTrackStateChunk = function() return true, '<TRACK\n<FXCHAIN\n<VST "VST3: Melodyne (Celemony)" M.vst3 0 "" 1{2} com.celemony.ara.chunk.13\n>\n>' end
+  track.fx = { fx("VST3: Melodyne (Celemony)", "{MEL}", 2, 2), P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+  check("keep: behind ARA, left alone",   (TP.keep_in_place(track)), false)
+  track.fx = { fx("VST3: Melodyne (Celemony)", "{MEL}", 2, 2), fx("A", "{EQ}", 2, 2), P(0, "{PRE}"), P(1, "{POST}") }
+  TP.keep_in_place(track)
+  check("keep: pre back behind ARA",      order(), "MEL PRE EQ POST")
+  reaper.GetTrackStateChunk = function() return true, "<TRACK\n<FXCHAIN\n<JS x \"\"\n>\n>\n>" end
+  -- one of the pair dragged into a container comes back out
+  track.fx = { P(0, "{PRE}"), fx("Container", "{BOX}", 2, 2, { kids = { P(1, "{POST}"), fx("A", "{EQ}", 2, 2) },
+               nch = 2, pin_in = {}, pin_out = {} }), fx("B", "{X}", 2, 2) }
+  TP.keep_in_place(track)
+  check("keep: post out of the container", order(), "PRE BOX[EQ] X POST")
+  -- a pair kept together inside a container is deliberate
+  track.fx = { fx("Container", "{BOX}", 2, 2, { kids = { P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}") },
+               nch = 2, pin_in = {}, pin_out = {} }), fx("B", "{X}", 2, 2) }
+  check("keep: a pair in a container left", (TP.keep_in_place(track)), false)
+  -- shown: where you put them
+  track.fx = { P(0, "{PRE}"), P(1, "{POST}"), fx("A", "{EQ}", 2, 2) }
+  TP.set_probes_shown(true)
+  check("keep: shown, nothing moved",     (TP.keep_in_place(track)), false)
+  TP.set_probes_shown(false)
+  -- state, the Visualizer, the row
+  track.fx = { P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+  TP.invalidate()
+  check("state: pair",                    TP.probe_state(track), "pair")
+  check("vis: none",                      TP.vis_state(track), nil)
+  TP.set_vis(track, "post")
+  check("vis: post",                      TP.vis_state(track) .. F(2).params[TP.P_VIS] .. F(0).params[TP.P_VIS], "post10")
+  TP.set_vis(track, "pre")
+  check("vis: pre (post cleared)",        TP.vis_state(track) .. F(2).params[TP.P_VIS], "pre0")
+  TP.set_vis(track, nil)
+  check("vis: off",                       TP.vis_state(track), nil)
+  local list = { { path_t = { 0 }, name = "pre" }, { path_t = { 1 }, name = "eq" }, { path_t = { 2 }, name = "post" },
+                 tree = { { path = { 0 } }, { path = { 1 } }, { path = { 2 } } } }
+  local st = TP.strip_probes(track, list)
+  check("row: probes left out",           #st .. " " .. st[1].name .. " " .. #st.tree .. " " .. st.tree[1].first, "1 eq 1 1")
+  -- one probe missing: only it is added
+  track.fx = { fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+  TP.invalidate()
+  check("state: pre missing",             TP.probe_state(track), "post")
+  local added = 0
+  reaper.TrackFX_AddByName = function(tr, nm, rec, pos)
+    if nm ~= "TS_TrackProbe.jsfx" then return -1 end
+    added = added + 1
+    local at = (pos == -1) and #tr.fx or (-1000 - pos)
+    table.insert(tr.fx, at + 1, fx("JS: TS_TrackProbe", "{N" .. added .. "}", 18, 2, { params = {} }))
+    return at
+  end
+  check("complete: inserted",             (TP.insert_probes(track)), true)
+  check("complete: only the pre probe",   added .. " " .. order(), "1 N1 EQ POST")
+  check("complete: roles",                F(0).params[TP.P_ROLE] .. F(2).params[TP.P_ROLE], "01")
+  reaper.GetTrackStateChunk, reaper.TrackFX_AddByName, reaper.TrackFX_CopyToTrack = nil, nil, nil
+end
+
 -- ---------------------------------------------------------------- records
 check("v2 round trip", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")),
       "v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")

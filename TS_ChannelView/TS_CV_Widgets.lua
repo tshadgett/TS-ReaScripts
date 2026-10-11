@@ -345,6 +345,53 @@ local function drag_value(ctx, value)
   local v = value - dy * sens
   return math.max(0, math.min(1, v))
 end
+W.drag_value = drag_value
+
+-- A modulator's ring round a knob (TS_CV_Mod / TS_CV_ModRack): the arc
+-- the value can swing over, in the modulator's colour, and a dot where it
+-- is right now. `ring` = { col, lo, hi, live (0..1, or nil), hot }.
+-- A macro's range (TS_CV_Mod) has `ends` = { from, to }: where the
+-- control sits at 0% and at 100%, each a handle you can drag.
+function W.ring_radius(r) return r + math.max(4.0, r * 0.32) end
+function W.ring_point(cx, cy, r, v)
+  local a = A_MIN + A_SPAN * v
+  local rr = W.ring_radius(r)
+  return cx + math.cos(a) * rr, cy + math.sin(a) * rr
+end
+-- The value at the pointer's angle round a knob; past either end of the
+-- sweep (the gap at the bottom) it's the nearer end.
+function W.ring_value(cx, cy, mx, my)
+  local a = math.atan(my - cy, mx - cx)
+  while a < A_MIN do a = a + 2 * math.pi end
+  while a >= A_MIN + 2 * math.pi do a = a - 2 * math.pi end
+  local v = (a - A_MIN) / A_SPAN
+  if v > 1 then
+    local gap = (2 * math.pi - A_SPAN) / A_SPAN
+    v = (v - 1 < gap * 0.5) and 1 or 0
+  end
+  return math.max(0, math.min(1, v))
+end
+function W.mod_ring(dl, cx, cy, r, ring)
+  local rr = W.ring_radius(r)
+  local a0, a1 = A_MIN + A_SPAN * ring.lo, A_MIN + A_SPAN * ring.hi
+  if a1 - a0 < 0.04 then a1 = a0 + 0.04 end
+  ImGui.DrawList_PathClear(dl)
+  ImGui.DrawList_PathArcTo(dl, cx, cy, rr, a0, a1, 24)
+  ImGui.DrawList_PathStroke(dl, U.with_alpha(ring.col, ring.hot and 0xe0 or 0x90), 0, ring.hot and 3.0 or 2.2)
+  if ring.ends then
+    local hr = math.max(3.2, r * 0.2)
+    for e = 1, #ring.ends do
+      local hx, hy = W.ring_point(cx, cy, r, ring.ends[e])
+      ImGui.DrawList_AddCircleFilled(dl, hx, hy, hr, C.COL.panel_bg, 12)
+      ImGui.DrawList_AddCircle(dl, hx, hy, hr, ring.col, 12, (ring.hot_end == e) and 2.4 or 1.6)
+    end
+  end
+  if ring.live then
+    local a = A_MIN + A_SPAN * ring.live
+    ImGui.DrawList_AddCircleFilled(dl, cx + math.cos(a) * rr, cy + math.sin(a) * rr,
+      math.max(2.2, r * 0.13), ring.col, 10)
+  end
+end
 
 -- ---------------------------------------------------------------------
 -- knob faces
@@ -624,6 +671,13 @@ function W.mod_dot(dl, cx, cy, r, surface)
 end
 
 -- a corner, top right of the rectangle ending at (x2, y1)
+-- The same corner in a modulator's own colour: a non-knob control driven
+-- from the rack (a knob gets a ring instead).
+function W.mod_corner_col(dl, x2, y1, s, col)
+  local x, y = x2 - 2, y1 + 2
+  ImGui.DrawList_AddTriangleFilled(dl, x - s, y, x, y, x, y + s, col)
+end
+
 function W.mod_corner(dl, x2, y1, s, surface)
   local col = W.mod_col(surface)
   local x, y = x2 - 2, y1 + 2
@@ -1074,6 +1128,9 @@ function W.knob(ctx, id, label, value, formatted, opts)
   if opts.mod then
     W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap))
   end
+  if opts.ring then W.mod_ring(dl, cx, cy, dial_r, opts.ring) end
+  -- where the dial is, for whoever draws to it (the rack's hover lines)
+  W.last_knob = { cx = cx, cy = cy, r = dial_r }
 
   -- the numbers, each just clear of its tick, however wide it is
   if sc then
@@ -1266,6 +1323,8 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
   centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
   local hot = turning or (hovered and zone()) or nil
   W.dual_face(dl, cx, cy, r, v1, v2, { cap = o.cap, dim = o.dim, hot = hot, mod1 = o.mod1, mod2 = o.mod2 })
+  -- where it is, for a link's rings: the ring's radius and the inner knob's
+  W.last_knob = { cx = cx, cy = cy, r = r, ri = ri, dual = true }
   if show_value then
     W.push_small(ctx)
     pair_text(ctx, dl, cx, cy + r + 1, o.shown1 or "", o.shown2 or "",
@@ -1301,6 +1360,10 @@ function W.xypad(ctx, id, x, y, w, h, vx, vy, label, o)
   local px2, py2 = x + w - 4, y + h - (show_value and 15 or 4)
   local pw, ph = math.max(8, px2 - px1), math.max(8, py2 - py1)
   local dot = 5.5
+  -- where values sit, for whoever draws beside it (a link's bars): X from
+  -- x1 (0) to x2 (1), Y from y2 (0) up to y1 (1); the pad's own edges
+  W.last_xy = { x1 = px1 + dot, x2 = px2 - dot, y1 = py1 + dot, y2 = py2 - dot,
+                left = px1, bottom = py2 }
   local function from_mouse()
     local mx, my = ImGui.GetMousePos(ctx)
     return math.max(0, math.min(1, (mx - px1 - dot) / math.max(1, pw - 2 * dot))),
@@ -1884,6 +1947,10 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   local style = look and C.FADER_STYLE[look.style or ""] and look.style or "flat"
   local cap_h = FADER_CAP[style] or C.FADER_CAP_H
   local trav  = h - 8 - cap_h
+  -- where it is, for whoever draws beside it (a macro's range): the cap's
+  -- centre at 0 (p0) and at 1 (p1)
+  W.last_fader = { v = true, x0 = x, x1 = x + w, y0 = y, y1 = y + h,
+                   p0 = y + 4 + cap_h * 0.5 + trav, p1 = y + 4 + cap_h * 0.5 }
 
   -- A GHOST fader is drawn over something else -- the meter on a
   -- collapsed strip -- so it gets no slot of its own and a cap you can
@@ -2010,6 +2077,8 @@ function W.hfader(ctx, id, x, y, w, h, value, label, unity, look)
   local slim = style == "slim"
   local cap_w = FADER_CAP[style] or C.FADER_CAP_H
   local trav = w - 8 - cap_w
+  W.last_fader = { v = false, x0 = x, x1 = x + w, y0 = y, y1 = y + h,
+                   p0 = x + 4 + cap_w * 0.5, p1 = x + 4 + cap_w * 0.5 + trav }
 
   local changed = false
   if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
@@ -2975,6 +3044,18 @@ end
 local function icon_mono(dl, x, y, sz, col)
   ImGui.DrawList_AddCircle(dl, x + sz * 0.5, y + sz * 0.5, sz * 0.26, col, 20, 1.5)
 end
+-- A loudspeaker with one wave, for record monitoring.
+local function icon_speaker(dl, x, y, sz, col)
+  local cy = y + sz * 0.5
+  local b0, b1, c1 = x + sz * 0.16, x + sz * 0.36, x + sz * 0.58
+  local bh, ch = sz * 0.13, sz * 0.31
+  ImGui.DrawList_AddRectFilled(dl, b0, cy - bh, b1, cy + bh, col)
+  ImGui.DrawList_AddTriangleFilled(dl, b1 - 0.5, cy - bh, c1, cy - ch, c1, cy + ch, col)
+  ImGui.DrawList_AddTriangleFilled(dl, b1 - 0.5, cy - bh, c1, cy + ch, b1 - 0.5, cy + bh, col)
+  ImGui.DrawList_PathClear(dl)
+  ImGui.DrawList_PathArcTo(dl, x + sz * 0.58, cy, sz * 0.26, -0.95, 0.95, 8)
+  ImGui.DrawList_PathStroke(dl, col, 0, 1.2)
+end
 local function icon_stereo(dl, x, y, sz, col)
   local r = sz * 0.22
   ImGui.DrawList_AddCircle(dl, x + sz * 0.5 - r * 0.6, y + sz * 0.5, r, col, 18, 1.4)
@@ -3018,6 +3099,7 @@ W.ICONS = {
   unlock   = function(dl, x, y, sz, col) icon_lock(dl, x, y, sz, col, true) end,
   mono     = icon_mono,
   stereo   = icon_stereo,
+  speaker  = icon_speaker,
   tablet   = icon_tablet,
   tablet_on = icon_tablet_on,
   midi     = icon_midi,

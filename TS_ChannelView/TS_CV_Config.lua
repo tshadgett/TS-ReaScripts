@@ -47,6 +47,9 @@ C.PANEL_GAP   = 6         -- gap between adjacent panels
 C.HEADER_H    = 20        -- panel header bar height
 C.TAB_STRIP_H = 18        -- a paged panel's tab strip, under its header (TS_CV_Panel P.pages)
 C.FOOTER_H    = 20        -- a panel's foot: the layout lock, and the preset bar
+-- The header's probe button while the track is in TS_Visualizer's
+-- spectrum (teal: apart from the lit blue and the amber of a missing one)
+C.PROBE_VIS_COL = 0x3fb39aff
 C.SCROLL_W    = 8         -- a locked panel's scrollbar, when it's too short
 C.PRESET_BAR  = true      -- View > Preset bar (persisted)
 C.PANEL_MIN_W = 132       -- a panel never narrower than this (header needs room)
@@ -525,8 +528,9 @@ C.TCP_ICON_MAX   = 40     -- the track icon's box is never bigger than this
 C.TCP_LANES      = true   -- fixed item lane controls (settings menu)
 C.TCP_LANE_W     = 18     -- their column (one button), reserved on every row while any
                           -- track in the project uses fixed lanes
-C.TCP_CHIP       = 13     -- the M / S / rec chips shown while one is on
-C.TCP_STATE_CHIPS = true  -- show them at all
+C.TCP_CHIP       = 13     -- the M / S / monitoring / rec buttons on a row
+C.TCP_STATE_CHIPS = true  -- the buttons not always shown appear while on
+C.TCP_ALWAYS      = ""    -- the ones always shown: any of "M", "S", "I", "R"
 C.TCP_ICONS      = true   -- track icons on the right of a row (settings)
 C.TCP_EDGE       = 6      -- the grab zone straddling a row's bottom edge
 C.TCP_ADD_H      = 22     -- the "+" tile under the last track

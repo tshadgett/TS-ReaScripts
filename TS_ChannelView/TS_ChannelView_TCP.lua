@@ -15,8 +15,9 @@
       level the way REAPER's own panel does it
     * the name, and a horizontal peak meter under it
     * the track's icon on the right, when View > Track icons is on
-    * small M / S / record chips, only while one of those is ON -- so a
-      muted track still says so with the panel below closed
+    * small monitoring / record arm / M / S buttons, each in a fixed
+      place: always there, or only while on (settings ▸ Track buttons);
+      M, S and arm swipe down the column, as in the mixer
 
   What you can do to one:
     * click          select it (ctrl adds, shift takes the range) and
@@ -181,6 +182,7 @@ C.set_channel_w(cv_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
 C.TCP_INDENT_FOLDERS = ext_get("indent", C.TCP_INDENT_FOLDERS and "1" or "0") == "1"
 C.TCP_LANES       = ext_get("lanes", C.TCP_LANES and "1" or "0") == "1"
 C.TCP_STATE_CHIPS = ext_get("chips", C.TCP_STATE_CHIPS and "1" or "0") == "1"
+C.TCP_ALWAYS      = ext_get("always", C.TCP_ALWAYS)
 C.TCP_PDC         = ext_get("pdc", C.TCP_PDC and "1" or "0") == "1"
 -- the rows in the track's colour at ChannelView's background strengths
 -- (its fader menu ▸ Background / Group looks), or plain
@@ -314,6 +316,13 @@ end
 -- ---------------------------------------------------------------------
 -- one row
 -- ---------------------------------------------------------------------
+
+-- Record monitoring's three states, as the Channel panel shows them.
+local TCP_MON = {
+  [0] = { col = nil,        tip = "Monitoring off" },
+  [1] = { col = "mon_on",   tip = "Monitoring input" },
+  [2] = { col = "mon_auto", tip = "Monitoring auto (input while stopped)" },
+}
 
 local FOLDER_ICON = { [0] = "folder_full", [1] = "folder_collapsed", [2] = "folder_hidden" }
 local FOLDER_TIP  = {
@@ -517,29 +526,54 @@ local function draw_row(dl, e, x, w, now)
       end
       chip_r = chip_r - 4
     end
-    if C.TCP_STATE_CHIPS then
+    -- Monitoring, record arm, mute and solo, left to right (placed right
+    -- to left here, so solo first). Each one
+    -- shown has a place of its own that every row keeps, whether the
+    -- button is drawn or not, so they line up down the panel: one set to
+    -- Always is drawn on every row; the others (with "while on") only
+    -- while they're on. The master has no monitoring or record arm and
+    -- leaves their places empty. Mute, solo and record arm swipe -- press
+    -- one and drag down the column -- the same as the mixer's, and every
+    -- write goes through the gang.
+    do
       local cs = math.min(C.TCP_CHIP, th + 1)
       local cy = name_y + (th - cs) * 0.5
-      local function chip(id, text, on_col, tip, key, icon)
+      local always = C.TCP_ALWAYS
+      local function slot(k, on, draw)
+        local a = always:find(k, 1, true) ~= nil
+        if not (a or C.TCP_STATE_CHIPS) then return end
         chip_r = chip_r - cs
-        local hit, dbl
-        if icon then
-          hit, dbl = W.state_icon(ctx, id, icon, chip_r, cy, cs, cs, true, on_col, tip)
-        else
-          hit, dbl = W.state_button(ctx, id, text, chip_r, cy, cs, cs, true, on_col, tip)
-        end
-        if hit or dbl then G.set(tr, key, 0) end
+        if a or on then draw(chip_r) end
         chip_r = chip_r - 3
       end
-      if not e.master and CH.read(tr, "I_RECARM") > 0.5 then
-        chip("tcpR" .. e.guid, nil, C.COL.rec_on, "Disarm",
-             "I_RECARM", "record")
+      local function two_state(id, text, icon, key, col, tip, kind)
+        local on = CH.read(tr, key) > 0.5
+        slot(id:sub(4, 4), on, function(bx)
+          local _, dbl, want
+          if icon then
+            _, dbl, want = W.state_icon(ctx, id .. e.guid, icon, bx, cy, cs, cs, on, col, tip, kind)
+          else
+            _, dbl, want = W.state_button(ctx, id .. e.guid, text, bx, cy, cs, cs, on, col, tip, kind)
+          end
+          if dbl then G.set(tr, key, 0)
+          elseif want ~= nil then G.set(tr, key, want and 1 or 0) end
+        end)
       end
-      if CH.read(tr, "I_SOLO") > 0.5 then
-        chip("tcpS" .. e.guid, "S", C.COL.solo_on, "Unsolo", "I_SOLO")
-      end
-      if CH.read(tr, "B_MUTE") > 0.5 then
-        chip("tcpM" .. e.guid, "M", C.COL.mute_on, "Unmute", "B_MUTE")
+      two_state("tcpS", "S", nil, "I_SOLO", C.COL.solo_on, "Solo", "solo")
+      two_state("tcpM", "M", nil, "B_MUTE", C.COL.mute_on, "Mute", "mute")
+      if e.master then
+        slot("R", false, function() end)
+        slot("I", false, function() end)
+      else
+        two_state("tcpR", nil, "record", "I_RECARM", C.COL.rec_on, "Record arm", "rec")
+        local mon = math.floor(CH.read(tr, "I_RECMON")) % 3
+        slot("I", mon > 0, function(bx)
+          local m = TCP_MON[mon]
+          local hit, dbl = W.state_icon(ctx, "tcpI" .. e.guid, "speaker", bx, cy, cs, cs,
+            mon > 0, m.col and C.COL[m.col] or nil, m.tip .. "  \u{2014} click to cycle")
+          if dbl then G.set(tr, "I_RECMON", 0)
+          elseif hit then G.set(tr, "I_RECMON", (mon + 1) % 3) end
+        end)
       end
     end
 
@@ -921,12 +955,28 @@ local function settings_menu()
     C.TCP_INDENT_FOLDERS = not C.TCP_INDENT_FOLDERS
     ext_set("indent", C.TCP_INDENT_FOLDERS and "1" or "0")
   end
-  if ImGui.MenuItem(ctx, "Mute / solo / record chips", nil, C.TCP_STATE_CHIPS) then
-    C.TCP_STATE_CHIPS = not C.TCP_STATE_CHIPS
-    ext_set("chips", C.TCP_STATE_CHIPS and "1" or "0")
-  end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Only while on")
+  if ImGui.BeginMenu(ctx, "Track buttons") then
+    ImGui.TextDisabled(ctx, "Always show")
+    for _, b in ipairs({ { "I", "Monitoring" }, { "R", "Record arm" }, { "M", "Mute" }, { "S", "Solo" } }) do
+      local on = C.TCP_ALWAYS:find(b[1], 1, true) ~= nil
+      if ImGui.MenuItem(ctx, b[2] .. "##tba" .. b[1], nil, on) then
+        local t = {}
+        for _, k in ipairs({ "I", "R", "M", "S" }) do
+          if (k == b[1]) ~= (C.TCP_ALWAYS:find(k, 1, true) ~= nil) then t[#t + 1] = k end
+        end
+        C.TCP_ALWAYS = table.concat(t)
+        ext_set("always", C.TCP_ALWAYS)
+      end
+    end
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Show the others while on", nil, C.TCP_STATE_CHIPS) then
+      C.TCP_STATE_CHIPS = not C.TCP_STATE_CHIPS
+      ext_set("chips", C.TCP_STATE_CHIPS and "1" or "0")
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Each keeps its place on every row,\nso the buttons line up down the panel")
+    end
+    ImGui.EndMenu(ctx)
   end
   if ImGui.MenuItem(ctx, "Plugin delay (PDC) under meters", nil, C.TCP_PDC) then
     C.TCP_PDC = not C.TCP_PDC
@@ -1012,6 +1062,10 @@ local safe_frame
 local function frame()
   local now = reaper.time_precise()
   W.begin_frame()
+  -- A swipe ends when the mouse comes up. Said here because a button
+  -- shown only while on can vanish under the pointer (unmuting the last
+  -- muted track hides its M), leaving no button to notice the release.
+  if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then W.end_paint() end
   poll_shared(now)
   follow_selection()
   -- A double-click whose second release landed somewhere else never

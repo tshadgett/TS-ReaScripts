@@ -27,9 +27,12 @@ local CK  = require("TS_CV_ColourPick")
 local TP  = require("TS_CV_Taps")
 local PU  = require("TS_CV_PresetUI")
 local Tr  = require("TS_CV_Trace")
+local MD  = require("TS_CV_Mod")
+local MR  = require("TS_CV_ModRack")
 
 local P   = {}
 local ImGui
+local panel_at = {}
 
 function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui) end
 
@@ -1560,11 +1563,113 @@ function P.mod_on(track, fx, p)
   if v == nil then
     local ok, s = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.mod.active"):format(p))
     v = ok and tonumber(s) == 1 or false
+    -- a link from the rack shows as its ring, not this mark: the mark is
+    -- for the parameter's own LFO or audio follower set in REAPER
+    if v and MD.link_of(track, fx.guid, p) then
+      local function on(key)
+        local ok2, s2 = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, ("param.%d.%s"):format(p, key))
+        return ok2 and tonumber(s2) == 1
+      end
+      v = on("lfo.active") or on("acs.active") or false
+    end
     mod_cache[k] = v
   end
   return v
 end
 function P.forget_mod(fx, p) mod_cache[fx.guid .. ":" .. p] = nil end
+
+-- A link's handles on a control -- on a knob's ring, or beside a fader.
+-- From a macro: its range's two ends, where the control sits at 0% (the
+-- first) and at 100% (the second); they can cross, to run it backwards.
+-- From a modulator: the two ends of its swing, where the control is with
+-- the modulator at rest and at full; they can cross (it then works the
+-- other way). `pos(v)` is where value v is drawn, `val(mx, my)`
+-- the value at the pointer.
+local range_hot = {}    -- "guid:param" -> the end under the pointer
+
+-- The ends as values (the plugin's way up, not reversed), and what
+-- dragging end e to value v does.
+local function link_ends(track, link)
+  if link.macro then
+    local from, to = MD.range(link)
+    return { from, to }, function(e, v)
+      local a, b = MD.range(link)
+      if e == 1 then MD.set_range(track, link, v, b) else MD.set_range(track, link, a, v) end
+    end
+  end
+  return (MD.swing_ends(track, link)), function(e, v) MD.set_swing_end(track, link, e, v) end
+end
+
+local function clamp01(v) return math.max(0, math.min(1, v)) end
+
+local function range_ends(ctx, track, link, rev, key, pos, val)
+  local ends, set_end = link_ends(track, link)
+  local hot
+  for e, v0 in ipairs(ends) do
+    local v = clamp01(v0)
+    if rev then v = 1 - v end
+    local hx, hy = pos(v)
+    local id = ("##rangeend%d%s"):format(e, key)
+    ImGui.SetCursorScreenPos(ctx, hx - 7, hy - 7)
+    ImGui.InvisibleButton(ctx, id, 14, 14)
+    local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+    if hov or act then
+      hot = e
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_Hand)
+    end
+    local tip
+    if link.macro then
+      tip = ("Where it sits at %s of %s: drag to set it"):format(e == 1 and "0%" or "100%", link.mod.name)
+    else
+      tip = ("%s's swing, %s: drag to set it"):format(link.mod.name, e == 1 and "at rest" or "at full")
+    end
+    W.tip(ctx, id, tip, hov and not act, false)
+    if act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+      local mx, my = ImGui.GetMousePos(ctx)
+      local nv = val(mx, my)
+      if rev then nv = 1 - nv end
+      set_end(e, nv)
+    end
+  end
+  range_hot[key] = hot
+end
+
+-- The ends as the ring / bar draws them (clamped, reversed if need be).
+local function drawn_ends(track, link, rev)
+  local ends = link_ends(track, link)
+  local out = {}
+  for i, v in ipairs(ends) do
+    v = clamp01(v)
+    out[i] = rev and (1 - v) or v
+  end
+  return out
+end
+
+-- A link on a fader: a bar beside it over where the source can take it,
+-- the live dot, and the handles.
+local function fader_pos(fd, v)
+  local p = fd.p0 + (fd.p1 - fd.p0) * v
+  if fd.v then return fd.x1 + 5, p end
+  return p, fd.y1 + 2
+end
+local function fader_range(ctx, dl, track, link, fd, ring, rev, key)
+  local ax, ay = fader_pos(fd, ring.lo)
+  local bx, by = fader_pos(fd, ring.hi)
+  ImGui.DrawList_AddLine(dl, ax, ay, bx, by, U.with_alpha(ring.col, ring.hot and 0xe0 or 0x90), ring.hot and 3.0 or 2.2)
+  local lx, ly = fader_pos(fd, ring.live or 0)
+  ImGui.DrawList_AddCircleFilled(dl, lx, ly, 2.6, ring.col, 10)
+  range_ends(ctx, track, link, rev, key,
+    function(v) return fader_pos(fd, v) end,
+    function(mx, my)
+      local q = fd.v and my or mx
+      return clamp01((q - fd.p0) / (fd.p1 - fd.p0))
+    end)
+  for e, v in ipairs(ring.ends or {}) do
+    local hx, hy = fader_pos(fd, v)
+    ImGui.DrawList_AddCircleFilled(dl, hx, hy, 3.6, C.COL.panel_bg, 12)
+    ImGui.DrawList_AddCircle(dl, hx, hy, 3.6, ring.col, 12, range_hot[key] == e and 2.4 or 1.6)
+  end
+end
 
 -- The tab strip under a paged panel's header: a tab per page, its name
 -- under a stripe in its colour (the theme's accent unless the page break
@@ -1892,8 +1997,34 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       local rev      = ctl.invert and (ctl.type == "knob" or ctl.type == "toggle"
                                         or ctl.type == "stepped" or ctl.type == "dual"
                                         or ctl.type == "xy")
-      local raw      = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+      -- Linked, the control follows its source: it's where the macro or
+      -- modulator has it now, and the ring's handles set the range or
+      -- swing; turning it moves the whole range.
+      local link     = MD.link_of(track, fx.guid, p)
+      local raw
+      if link then raw = MD.live(track, link)
+      else raw = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0 end
       local value    = rev and (1 - raw) or raw
+      local function make_ring(lk, rv, pp)
+        local lo, hi = MD.span(lk, track)
+        local live = MD.live(track, lk)
+        if rv then lo, hi, live = 1 - hi, 1 - lo, 1 - live end
+        return { col = lk.mod.col, lo = lo, hi = hi, live = live,
+                 hot = MR.hover == lk.mod.guid
+                       or (MR.ctl_hover_prev and MR.ctl_hover_prev.guid == lk.mod.guid),
+                 ends = drawn_ends(track, lk, rv), hot_end = range_hot[fx.guid .. ":" .. pp] }
+      end
+      local ring = link and make_ring(link, rev, p) or nil
+      -- an XY pad's Y, a dual knob's inner knob: a link of its own
+      local link2, ring2
+      local p2x = (ctl.type == "xy" or ctl.type == "dual") and ctl.param2 or nil
+      if p2x and p2x >= 0 and p2x < nparams then
+        link2 = MD.link_of(track, fx.guid, p2x)
+        if link2 then ring2 = make_ring(link2, ctl.invert2 and true or false, p2x) end
+      end
+      local cell_x, cell_y = gx0 + item.x, gy0 + item.y
+      local cell_w, cell_h = item.pw or hx(item.w), hy(item.h)
+      W.last_knob, W.last_fader, W.last_xy = nil, nil, nil
       local shown    = U.fmt_value(track, fx.addr, p)
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, p, "")
       local label    = M.display_name(key, p, ctl.label, pname,
@@ -1912,6 +2043,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         local p2 = ctl.param2
         local ok2 = p2 ~= nil and p2 >= 0 and p2 < nparams
         local raw2 = ok2 and (reaper.TrackFX_GetParamNormalized(track, fx.addr, p2) or 0) or 0
+        if link2 then raw2 = MD.live(track, link2) end
+        local live2 = raw2
         local rev2 = ctl.invert2 and true or false
         if rev2 then raw2 = 1 - raw2 end
         local shown2 = ok2 and U.fmt_value(track, fx.addr, p2) or "?"
@@ -1952,7 +2085,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           end
         end
         if c2 and ok2 then
-          reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, rev2 and (1 - v2) or v2)
+          local pv2 = rev2 and (1 - v2) or v2
+          if link2 then MD.shift_link(track, link2, pv2 - live2)
+          else reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, pv2) end
           TP.touched(track, fx.guid)
         end
         changed, nv = c1, v1
@@ -2010,6 +2145,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           local fw = ctl.thin and 14 or C.FADER_W
           local fx0 = gx0 + item.x + (cw - fw) * 0.5
           local fy0 = gy0 + item.y
+          -- linked: its handles sit at its edge and must win the pointer
+          if link then W.allow_overlap(ctx) end
           changed, nv, act = W.fader(ctx, id, fx0, fy0, fw, lay.height,
             value, label .. "   " .. shown, unity, false, look)
           if modded then
@@ -2018,6 +2155,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           end
         else
           -- placed among the controls: its name over it, its value under
+          if link then W.allow_overlap(ctx) end
           changed, nv, act = W.param_fader(ctx, id, gx0 + item.x, gy0 + item.y,
             item.pw or hx(item.w), hy(item.h), value, label, shown,
             { dir = ctl.dir, thin = ctl.thin, unity = unity, look = look,
@@ -2034,14 +2172,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- control type, choice name included.
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            step_norm = st, mod = modded,
+            step_norm = st, mod = modded, ring = ring,
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded,
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
@@ -2050,12 +2188,107 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         nv, changed = rev and (1 - d) or d, true
       end
       if changed then
-        reaper.TrackFX_SetParamNormalized(track, fx.addr, p,
-          rev and (1 - nv) or nv)
+        local pv = rev and (1 - nv) or nv
+        if link then MD.shift_link(track, link, pv - raw)
+        else reaper.TrackFX_SetParamNormalized(track, fx.addr, p, pv) end
         -- A measured plugin relearns its zero point when it's changed.
         TP.touched(track, fx.guid)
       end
       if act and act.right_click then req.ctx_control = i end
+      -- the rack: a knob has its ring; anything else a corner in the
+      -- modulator's colour. Where it is, for the hover lines.
+      local kn = W.last_knob
+      local tx, ty = cell_x + cell_w * 0.5, cell_y + cell_h * 0.5
+      if kn then tx, ty = kn.cx, kn.cy end
+      local fd = (not kn) and W.last_fader or nil
+      local xy = (ctl.type == "xy") and W.last_xy or nil
+      local dk = (kn and kn.dual) and kn or nil
+      local k1, k2 = fx.guid .. ":" .. p, p2x and (fx.guid .. ":" .. p2x) or nil
+      local rev_2 = ctl.invert2 and true or false
+      -- which of a two-parameter control's the pointer is over: an XY pad's
+      -- right half is Y, a dual knob's middle its inner knob
+      local function second_under()
+        local mx, my = ImGui.GetMousePos(ctx)
+        if xy then return mx > (xy.x1 + xy.x2) * 0.5 end
+        if dk then return (mx - dk.cx) ^ 2 + (my - dk.cy) ^ 2 <= (dk.ri * 1.15) ^ 2 end
+        return false
+      end
+      if xy then
+        -- bars along the pad's foot (X) and left side (Y), handles on them
+        local fX = { v = false, p0 = xy.x1, p1 = xy.x2, y1 = xy.bottom }
+        local fY = { v = true, p0 = xy.y2, p1 = xy.y1, x1 = xy.left - 7 }
+        if link and ring then fader_range(ctx, dl, track, link, fX, ring, rev, k1) end
+        if link2 and ring2 then fader_range(ctx, dl, track, link2, fY, ring2, rev_2, k2) end
+      elseif dk then
+        -- the ring's link round the outside, the inner knob's just outside it
+        if link and ring then W.mod_ring(dl, dk.cx, dk.cy, dk.r, ring) end
+        if link2 and ring2 then
+          W.mod_ring(dl, dk.cx, dk.cy, dk.ri, ring2)
+          range_ends(ctx, track, link2, rev_2, k2,
+            function(v) return W.ring_point(dk.cx, dk.cy, dk.ri, v) end,
+            function(mx, my) return W.ring_value(dk.cx, dk.cy, mx, my) end)
+        end
+      end
+      if link and kn then
+        range_ends(ctx, track, link, rev, fx.guid .. ":" .. p,
+          function(v) return W.ring_point(kn.cx, kn.cy, kn.r, v) end,
+          function(mx, my) return W.ring_value(kn.cx, kn.cy, mx, my) end)
+      end
+      if link and fd and ring then fader_range(ctx, dl, track, link, fd, ring, rev, fx.guid .. ":" .. p) end
+      if link2 then
+        local x2, y2 = tx, ty
+        if xy then x2, y2 = xy.left - 2, (xy.y1 + xy.y2) * 0.5 end
+        MR.note_target(link2.mod.guid, fx.guid, p2x, x2, y2)
+        if not MR.drag then
+          local mx, my = ImGui.GetMousePos(ctx)
+          if mx >= cell_x and mx < cell_x + cell_w and my >= cell_y and my < cell_y + cell_h
+             and (second_under() or not link) then
+            MR.note_ctl_hover(link2.mod.guid, link2.out, x2, y2)
+          end
+        end
+      end
+      if link then
+        if not ring or not (kn or fd or xy) then W.mod_corner_col(dl, cell_x + cell_w, cell_y, 6, link.mod.col) end
+        MR.note_target(link.mod.guid, fx.guid, p, tx, ty)
+        -- under the pointer: its line back to the modulator
+        if not MR.drag then
+          local mx, my = ImGui.GetMousePos(ctx)
+          if mx >= cell_x and mx < cell_x + cell_w and my >= cell_y and my < cell_y + cell_h
+             and not (link2 and second_under()) then
+            local hx_, hy_ = tx, ty
+            if xy then hx_, hy_ = (xy.x1 + xy.x2) * 0.5, xy.bottom + 2 end
+            MR.note_ctl_hover(link.mod.guid, link.out, hx_, hy_)
+          end
+        end
+      end
+      -- a modulator's link being dragged in: this control takes it
+      if MR.drag then
+        local mx, my = ImGui.GetMousePos(ctx)
+        if mx >= cell_x and mx < cell_x + cell_w and my >= cell_y and my < cell_y + cell_h then
+          local col = MR.drag.mod.col
+          -- a two-parameter control: the half (or middle) under the pointer
+          local second = p2x and p2x >= 0 and p2x < nparams and second_under()
+          local dp, dwas = p, link
+          if second then dp, dwas = p2x, link2 end
+          if xy then
+            local mid = (xy.x1 + xy.x2) * 0.5
+            local ax0 = second and mid or (xy.left)
+            local ax1 = second and (xy.x2 + 5) or mid
+            ImGui.DrawList_AddRect(dl, ax0, xy.y1 - 5, ax1, xy.bottom, col, 3, 0, 2.0)
+            local t = second and "Y" or "X"
+            local tw = ImGui.CalcTextSize(ctx, t)
+            ImGui.DrawList_AddText(dl, (ax0 + ax1 - tw) * 0.5, xy.y1, col, t)
+          elseif dk then
+            if second then ImGui.DrawList_AddCircle(dl, dk.cx, dk.cy, dk.ri + 3, col, 32, 2.0)
+            else ImGui.DrawList_AddCircle(dl, dk.cx, dk.cy, dk.r + 9, col, 32, 2.0) end
+          elseif kn then ImGui.DrawList_AddCircle(dl, kn.cx, kn.cy, kn.r + 9, col, 32, 2.0)
+          else ImGui.DrawList_AddRect(dl, cell_x + 1, cell_y + 1, cell_x + cell_w - 1, cell_y + cell_h - 1, col, 4, 0, 2.0) end
+          if ImGui.IsMouseReleased(ctx, ImGui.MouseButton_Left) then
+            req.mod_drop = { mod = MR.drag.mod, k = MR.drag.k or 1, path = fx.path_t, param = dp,
+                             guid = fx.guid, was = dwas, label = label , centre = ctl.bipolar or nil }
+          end
+        end
+      end
     end
 
     -- No remove badge on a parameter cell. A control is taken off a panel
@@ -2320,6 +2553,11 @@ end
 -- public
 -- ---------------------------------------------------------------------
 
+-- Where each panel's header was drawn this frame, for the rack's lines
+-- to controls that aren't on screen.
+function P.begin_rects() panel_at = {} end
+function P.panel_at(guid) return panel_at[guid] end
+
 -- Draws one panel at the current cursor position and advances past it.
 -- Returns a `req` table of things the caller should act on this frame:
 --   toggle_bypass, toggle_float, open_menu, open_editor, ctx_control
@@ -2345,6 +2583,7 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
     local dl = ImGui.GetWindowDrawList(ctx)
     local x, y = ImGui.GetWindowPos(ctx)
     local ww, wh = ImGui.GetWindowSize(ctx)
+    panel_at[fx.guid] = { x + ww * 0.5, y + C.HEADER_H * 0.5 }
     local enabled = T.get_enabled(track, fx.addr)
     local plate = C.plate_of(layout.plate)
     local saved = plate and push_plate(plate)

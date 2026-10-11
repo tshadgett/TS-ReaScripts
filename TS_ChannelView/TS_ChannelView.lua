@@ -1,12 +1,21 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 1.9.6
+-- @version 2.0.0
 -- @changelog
---  Fix: Edit Parameters could stop ChannelView with an error when the
---  selected track changed while it was open (nothing selected, or the
---  project closed or switched). It now keeps working on the plugin it
---  was opened for, follows it if it moves in the chain, and closes if
---  it's deleted, putting back anything applied.
+--  Macros and modulators. Two new panels between the Channel panel and the
+--  plugins: up to 16 macros (knob, button, fader, dropdown, XY pad) and 8
+--  modulators (LFO, audio follower, MIDI). Drag a source's handle onto any
+--  control to drive it; set the range or swing with handles on the
+--  control's ring or bar. They run in one small plugin, ChannelView
+--  Modulators, through REAPER's own parameter links, so every setting can
+--  be automated. The idea is Saxmand's FX Modulator Linking, with thanks
+--  (see the README for what was used and what wasn't).
+--  Automation lanes from any control's right-click menu, and removable.
+--  Track probes hidden from the plugin row and kept at the ends of the
+--  chain, with a header indicator, a Visualizer option and Remove.
+--  TCP window: track buttons that are always there, swipeable.
+--  Web companion: macros and modulators; the macro bar is now Actions.
+--  Restart the web companion after updating.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -23,6 +32,8 @@
 --  [nomain] TS_CV_Arrange.lua
 --  [nomain] TS_CV_Toolbar.lua
 --  [nomain] TS_CV_Browser.lua
+--  [nomain] TS_CV_Mod.lua
+--  [nomain] TS_CV_ModRack.lua
 --  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_Chains.lua
 --  [nomain] TS_CV_ColourPick.lua
@@ -64,6 +75,7 @@
 --  [nomain] TS_CV_Widgets.lua
 --  [nomain] TS_CV_WebLink.lua
 --  [effect] TS_TrackProbe.jsfx
+--  [effect] TS_CV_Modulators.jsfx
 -- @about
 --  A dockable window showing one panel per plugin on the selected track.
 --  Each panel carries a float button, a bypass button and a set of knobs
@@ -89,6 +101,10 @@
 --  The container-aware FX chain walk is ported from RackLib.lua, shared by
 --  my own Plugin Rack.lua and Docked Plugin Display.lua. That is my code,
 --  not a third party's.
+--
+--  Macros and modulators are the idea of Saxmand's FX Modulator Linking
+--  (Jesper Ankarfeldt), with thanks; none of its code or JSFX is used, and
+--  ChannelView doesn't read or need setups made with it.
 --
 --  Requires the ReaImGui extension (v0.9 or newer).
 
@@ -161,10 +177,12 @@ local RQ = require("TS_CV_ReaEQ")
 local RC = require("TS_CV_ReaComp")
 local RCP = require("TS_CV_CompPanel")
 local BZ = require("TS_CV_Busy")
+local MD = require("TS_CV_Mod")
+local MR = require("TS_CV_ModRack")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
-CN.attach(ImGui); LS.attach(ImGui)
+CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui)
 
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
@@ -300,7 +318,25 @@ local function rescan(force)
   if not force and (now - app.last_scan) < C.RESCAN_INTERVAL then return end
   app.last_scan = now
 
-  local list = app.track and T.collect(app.track) or {}
+  -- ChannelView Modulators (TS_CV_Mod) has panels of its own, Macros
+  -- and Modulators; it isn't a plugin in the row. Nor are the probes,
+  -- unless they're asked for -- and while they're out of sight they're
+  -- kept at the ends of the chain (TP.keep_in_place), checked whenever
+  -- the whole chain's shape changes.
+  local list = {}
+  if app.track then
+    local full = T.collect(app.track)
+    local fh = T.hash(full)
+    if fh ~= app.full_hash or app.track ~= app.full_track then
+      app.full_hash, app.full_track = fh, app.track
+      if TP.keep_in_place(app.track) then
+        full = T.collect(app.track)
+        app.full_hash = T.hash(full)
+      end
+    end
+    list = MD.strip(app.track, full)
+    if not TP.probes_shown() then list = TP.strip_probes(app.track, list) end
+  end
   local h = T.hash(list)
   -- Two different things happen here. A FORCED rescan re-reads the chain,
   -- because an FX address is a position and an edit anywhere can have
@@ -1776,6 +1812,150 @@ local function param_mod_item(fx, c)
   end
 end
 
+-- Links a macro or modulator to a control, after asking when that
+-- replaces another. A dropdown macro dropped on a stepped parameter
+-- (2 to 8 steps) offers to take that parameter's choices.
+local function link_source(src, k, path, param, label, was, centre)
+  if was and was.mod.guid == src.guid and was.out == (k or 1) then return end
+  local nm = src.name .. ((src.labels and src.labels[k or 1]) and (" " .. src.labels[k or 1]) or "")
+  if was and reaper.MB(("%s is driven by %s.\n\nReplace it with %s?"):format(
+       label or "This control", was.mod.name, nm), "ChannelView", 4) ~= 6 then
+    return
+  end
+  if not MD.link(app.track, src, k or 1, path, param, centre) then return end
+  if src.kind == "dropdown" then
+    local taddr = T.addr_of(app.track, path)
+    local names = taddr and MD.steps_of(app.track, taddr, param)
+    if names and table.concat(names, "\0") ~= table.concat(src.choices or {}, "\0") then
+      local q = ("Use %s's choices for %s?\n\n%s"):format(label or "this control", src.name,
+                  table.concat(names, ", "))
+      if reaper.MB(q, "ChannelView", 4) == 6 then
+        local n0 = #(src.choices or {})
+        local c = n0 >= 2 and MD.choice_of(MD.value(app.track, src, 1), n0) or 1
+        MD.set_choices(app.track, src, names)
+        MD.set_macro(app.track, src, 1, MD.choice_value(math.min(c, #names), #names))
+      end
+    end
+  end
+end
+
+-- The link on this control (TS_CV_Mod): which macro or modulator drives
+-- it and how -- a macro's range, a modulator's depth, invert, bipolar --
+-- and Link to / Remove. Not a layout edit: offered when the layout is
+-- locked too.
+local function link_items(fx, c, param, axis)
+  local s = MD.scan(app.track)
+  local l = MD.link_of(app.track, fx.guid, param)
+  local tag = "##" .. param
+  local pre = axis and (axis .. ": ") or ""
+  if l then
+    local dl = ImGui.GetWindowDrawList(ctx)
+    local x, y = ImGui.GetCursorScreenPos(ctx)
+    ImGui.DrawList_AddRectFilled(dl, x + 1, y + 4, x + 10, y + 13, l.mod.col, 2)
+    ImGui.SetCursorScreenPos(ctx, x + 16, y)
+    local who = l.mod.name .. ((l.mod.labels and l.mod.labels[l.out]) and (" " .. l.mod.labels[l.out]) or "")
+    ImGui.Text(ctx, pre .. "Driven by " .. who)
+    if l.macro then
+      local a, b = MD.range(l)
+      ImGui.SetNextItemWidth(ctx, 170)
+      local ca, na = ImGui.SliderDouble(ctx, "At 0%##modfrom" .. tag, a * 100, 0, 100, "%.0f%%")
+      if ca then MD.set_range(app.track, l, na / 100, b) end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Where the control sits with the macro at 0%.\nCtrl+click to type a value.") end
+      ImGui.SetNextItemWidth(ctx, 170)
+      local cb, nb = ImGui.SliderDouble(ctx, "At 100%##modto" .. tag, b * 100, 0, 100, "%.0f%%")
+      if cb then MD.set_range(app.track, l, a, nb / 100) end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Where it sits with the macro at 100%.\nCtrl+click to type a value.") end
+      if ImGui.MenuItem(ctx, "Swap the ends" .. tag) then MD.set_range(app.track, l, b, a) end
+      if ImGui.MenuItem(ctx, "Whole range" .. tag) then MD.set_range(app.track, l, 0, 1) end
+      if ImGui.MenuItem(ctx, "Remove the link" .. tag) then MD.unlink(app.track, l) end
+    else
+      ImGui.SetNextItemWidth(ctx, 170)
+      local depth = math.abs(l.scale) * 100
+      local ch, nv = ImGui.SliderDouble(ctx, "Depth##moddepth" .. tag, depth, 0, 100, "%.0f%%")
+      if ch then MD.set_depth(app.track, l, (l.scale < 0 and -1 or 1) * nv / 100) end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "How far the modulator moves it.\nCtrl+click to type a value.") end
+      local inv = l.scale < 0
+      local ich = ImGui.Checkbox(ctx, "Invert##modinv" .. tag, inv)
+      if ich then MD.invert(app.track, l) end
+      ImGui.SameLine(ctx, 0, 14)
+      local bi = MD.is_bipolar(l)
+      local bch = ImGui.Checkbox(ctx, "Bipolar##modbi" .. tag, bi)
+      if bch then MD.set_bipolar(app.track, l, not bi) end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "On: it swings both ways around where the control is set.\nOff: only one way from it.")
+      end
+      if ImGui.MenuItem(ctx, "Remove modulation" .. tag) then MD.unlink(app.track, l) end
+    end
+  end
+  if #s.list > 0 then
+    if ImGui.BeginMenu(ctx, pre .. (l and "Driven by another\u{2026}" or "Link to a macro or modulator") .. tag) then
+      local last
+      for _, src in ipairs(s.list) do
+        if last and last ~= src.src then ImGui.Separator(ctx) end
+        last = src.src
+        -- one entry per output (an XY pad's X and Y)
+        for k = 1, #src.out do
+          local dl = ImGui.GetWindowDrawList(ctx)
+          local x, y = ImGui.GetCursorScreenPos(ctx)
+          local nm = src.name
+          if #src.out > 1 then nm = nm .. " \u{00B7} " .. ((src.labels and src.labels[k]) or tostring(k)) end
+          local cur = l and l.mod.guid == src.guid and l.out == k
+          if ImGui.MenuItem(ctx, "      " .. nm .. "##lk" .. src.guid .. k .. tag, nil, cur) then
+            if not cur then
+              link_source(src, k, fx.path_t, param, c.label, l, c.bipolar or nil)
+            end
+          end
+          ImGui.DrawList_AddRectFilled(dl, x + 2, y + 4, x + 11, y + 13, src.col, 2)
+        end
+      end
+      ImGui.EndMenu(ctx)
+    end
+  end
+  if l or #s.list > 0 then ImGui.Separator(ctx) end
+end
+
+-- The links on this control: an XY pad's X and Y, a dual knob's ring and
+-- inner knob each take their own.
+local function mod_items(fx, c)
+  if not (app.track and c and c.param and c.param >= 0) then return end
+  local two = (c.type == "xy" or c.type == "dual") and c.param2 and c.param2 >= 0
+  if not two then return link_items(fx, c, c.param, nil) end
+  local a1, a2 = "X", "Y"
+  if c.type == "dual" then a1, a2 = "Ring", "Inner" end
+  link_items(fx, c, c.param, a1)
+  link_items(fx, c, c.param2, a2)
+end
+
+-- "Automation lane" for a control's parameter(s): shows it (made if
+-- there isn't one), or hides it. An XY pad or a dual knob has two.
+local function lane_items(fx, c)
+  if not (app.track and c and c.param and c.param >= 0) then return end
+  local EN = require("TS_CV_Envelopes")
+  local function item(p, what)
+    local l = EN.fx_lane(app.track, fx.addr, p)
+    if ImGui.MenuItem(ctx, "Automation lane" .. (what and (": " .. what) or "") .. "##lane" .. p,
+                      l and l.auto and "has automation" or nil, l ~= nil and l.shown) then
+      EN.toggle_fx_lane(app.track, fx.addr, p)
+    end
+    if l and ImGui.MenuItem(ctx, "Remove the lane" .. (what and (": " .. what) or "") .. "##lanerm" .. p) then
+      local n = reaper.CountEnvelopePoints(l.env) or 0
+      if not l.auto or reaper.MB(("Remove the lane and its automation (%d points)?"):format(n), "ChannelView", 4) == 6 then
+        EN.remove(app.track, l.env)
+      end
+    end
+  end
+  local two = (c.type == "xy" or c.type == "dual") and c.param2 and c.param2 >= 0
+  if two then
+    local _, n1 = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param, "")
+    local _, n2 = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param2, "")
+    item(c.param, U.truncate(n1 or "", 20))
+    item(c.param2, U.truncate(n2 or "", 20))
+  else
+    item(c.param)
+  end
+  ImGui.Separator(ctx)
+end
+
 local function control_menu()
   if not ImGui.BeginPopup(ctx, "ctlmenu") then return end
   local cm = app.ctl_menu
@@ -1789,6 +1969,8 @@ local function control_menu()
   local _, pname = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param or 0, "")
   ImGui.TextDisabled(ctx, U.truncate(pname or "", 28))
   ImGui.Separator(ctx)
+  mod_items(fx, c)
+  lane_items(fx, c)
 
   -- a locked layout takes no edits: say so, and offer only what isn't one
   if M.locked(layout) then
@@ -2201,6 +2383,72 @@ local function confirm_probes()
   return true
 end
 
+-- The probes' menu, from the header's probe button.
+local function probes_menu(state, vis)
+  if not ImGui.BeginPopup(ctx, "probesmenu") then return end
+  ImGui.TextDisabled(ctx, state == "pair" and "TS_TrackProbe pair in place"
+                          or (state == "pre" and "The post probe is missing"
+                          or "The pre probe is missing"))
+  ImGui.Separator(ctx)
+  if state ~= "pair" then
+    if ImGui.MenuItem(ctx, "Add the missing probe") then
+      local ok, why = TP.insert_probes(app.track)
+      if not ok then reaper.MB(why, "ChannelView", 0) end
+      rescan(true)
+    end
+  else
+    ImGui.TextDisabled(ctx, "In the Visualizer's spectrum")
+    local function opt(label, which, note)
+      if ImGui.MenuItem(ctx, "   " .. label .. "##vis" .. tostring(which), note, vis == which) then
+        TP.set_vis(app.track, which)
+        TP.invalidate()
+      end
+    end
+    opt("Not included", nil)
+    opt("Before the chain", "pre", "pre probe")
+    opt("After the chain", "post", "post probe")
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Open the pre probe") then
+      local a = TP.probe_addr(app.track, "pre")
+      if a then reaper.TrackFX_Show(app.track, a, 3) end
+    end
+    if ImGui.MenuItem(ctx, "Open the post probe") then
+      local a = TP.probe_addr(app.track, "post")
+      if a then reaper.TrackFX_Show(app.track, a, 3) end
+    end
+  end
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Remove the probes\u{2026}") then
+    local n = 0
+    for _, fx in ipairs(app.chain) do
+      local l = M.get(St.layout_key(fx.name, fx.guid))
+      if l and (l.measure or l.levels) then n = n + 1 end
+    end
+    local q = "Take the TS_TrackProbe pair off this track?"
+    if n > 0 then
+      q = q .. ("\n\n%d plugin%s here %s measured by them: %s meter%s go%s until probes are added again.")
+            :format(n, n == 1 and "" or "s", n == 1 and "is" or "are", n == 1 and "its" or "their",
+                    n == 1 and "" or "s", n == 1 and "es" or "")
+    end
+    if reaper.MB(q, "ChannelView", 4) == 6 then
+      TP.remove_probes(app.track)
+      app.full_hash = nil
+      rescan(true)
+    end
+  end
+  local shown = TP.probes_shown()
+  if ImGui.MenuItem(ctx, "Show the probes in the plugin row", nil, shown) then
+    TP.set_probes_shown(not shown)
+    app.full_hash = nil
+    rescan(true)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "While they're hidden, ChannelView keeps them at the\n" ..
+                          "start and end of the chain. Shown, they stay where you put them.")
+  end
+  ImGui.EndPopup(ctx)
+end
+
 -- The web companion's tablet, in the header while there's anything to
 -- say: dim while the bridge runs with no page open, lit and filled in
 -- while a page is connected, amber when a page is open but the bridge isn't running (a
@@ -2601,17 +2849,35 @@ local function menu_bar()
   end
 
   -- Probes, left of the FX chain button: the TS_TrackProbe pair that
-  -- measured gain reduction (and Track Analyser) need.
+  -- measured gain reduction (and Track Analyser) need. The plugin row
+  -- leaves them out, so this says they're there: dim with none, lit when
+  -- the pair is in place, in the Visualizer's colour while the track is
+  -- in the Visualizer's spectrum, amber with one of them missing. Click
+  -- for the menu.
   if app.track then
     local tw = C.ICON_SIZE + 6
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
-      local have = TP.has_probes(app.track)
-      if W.icon_button(ctx, "probes", "probe", C.ICON_SIZE, false,
-          have and "Probes in place" or "Add probes") then
-        if confirm_probes() then rescan(true) end
+      local state, vis = TP.probe_state(app.track)
+      local tip, col
+      if state == "pair" and vis then
+        tip, col = "Probes in place \u{00B7} in the Visualizer (" .. vis .. ")", C.PROBE_VIS_COL
+      elseif state == "pair" then
+        tip = "Probes in place"
+      elseif state then
+        tip, col = "One probe missing", C.COL.warn or 0xe0a040ff
+      else
+        tip = "Add probes"
       end
+      if W.icon_button(ctx, "probes", "probe", C.ICON_SIZE, state ~= nil, tip, col) then
+        if state == nil then
+          if confirm_probes() then rescan(true) end
+        else
+          ImGui.OpenPopup(ctx, "probesmenu")
+        end
+      end
+      probes_menu(state, vis)
       fx_left = fx_left - tw
     end
   end
@@ -2888,6 +3154,12 @@ local function panel_row(row_h, row_w)
         if req.open_editor and not M.locked(layout) then
           E.open(app.track, fx, key, layout)
         end
+        -- a modulator's link dropped on a control: linked, after asking
+        -- when that replaces another modulator
+        if req.mod_drop then
+          local d = req.mod_drop
+          link_source(d.mod, d.k or 1, d.path, d.param, d.label, d.was, d.centre)
+        end
         -- the padlock: lock at the rows the panel has now, or unlock
         if req.toggle_lock ~= nil then
           if E.is_open() and E.key() == key then
@@ -3009,6 +3281,8 @@ local colour_poll = 0
 local function frame()
   W.begin_frame()
   P.begin_frame()
+  P.begin_rects()
+  MR.begin_frame()
   follow_selection()
   do
     local now = reaper.time_precise()
@@ -3244,8 +3518,11 @@ local function frame()
     local on_master = app.track ~= nil and app.track == reaper.GetMasterTrack(0)
     local rv_w   = on_master and 0 or RV.width_for(app.track, row_h)
     local sd_w   = SD.width_for(app.track, row_h)
-    local mid_w  = math.max(80, full_w - ch_w - rv_w - sd_w
-                                - C.PANEL_GAP * (on_master and 2 or 3))
+    -- the macros and the modulators, pinned beside the fader panel
+    local mr_w   = MR.width_for("macros", app.track, row_h) + MR.width_for("mods", app.track, row_h)
+                   + C.PANEL_GAP
+    local mid_w  = math.max(80, full_w - ch_w - mr_w - rv_w - sd_w
+                                - C.PANEL_GAP * (on_master and 3 or 4))
 
     -- A double-click on a NAME BUTTON opens that track in channel view,
     -- in either branch below -- the button means the same thing whether
@@ -3281,6 +3558,22 @@ local function frame()
       end
     else
       CH.draw(ctx, app.track, row_h)
+      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+      local _, ma_req = MR.draw_macros(ctx, app.track, row_h)
+      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+      local _, mo_req = MR.draw_mods(ctx, app.track, row_h)
+      if app.track and (ma_req.add_macro or mo_req.add_mod) then
+        local ok
+        if ma_req.add_macro then ok = MD.add_macro(app.track, ma_req.add_macro, TP.ara_first(app.track))
+        else ok = MD.add_mod(app.track, mo_req.add_mod, TP.ara_first(app.track)) end
+        if not ok and not MD.plugin(app.track) then
+          reaper.MB("ChannelView couldn't find its ChannelView Modulators plugin\n" ..
+                    "(TS_CV_Modulators.jsfx). Reinstalling ChannelView from ReaPack puts it back.",
+                    "ChannelView", 0)
+        end
+        rescan(true)
+      end
+      if ma_req.changed or mo_req.changed then rescan(true) end
       ImGui.SameLine(ctx, 0, C.PANEL_GAP)
       panel_row(row_h, mid_w)
       ImGui.SameLine(ctx, 0, C.PANEL_GAP)
@@ -3354,6 +3647,7 @@ local function frame()
     -- Last thing in the frame, on the foreground draw list: a tooltip
     -- that is following a control being dragged has to sit above every
     -- panel, popup and menu regardless of what was drawn when.
+    MR.overlay(ctx, (not C.MIXER_VIEW) and app.track or nil, P.panel_at)
     W.draw_tip(ctx)
     ImGui.End(ctx)
   end

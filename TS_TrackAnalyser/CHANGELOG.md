@@ -1,5 +1,9 @@
 # Track Analyser — changelog
 
+## 2.0.0 — in step with ChannelView
+
+No changes. The version moves to 2.0.0 to match ChannelView.
+
 ## 1.9.6 — in step with ChannelView
 
 No changes. The version moves to 1.9.6 to match ChannelView.

@@ -4878,6 +4878,58 @@ do
   St.clear_cache()
 end
 
+-- removing an envelope: its block out of the track chunk
+do
+  local ENr = require("TS_CV_Envelopes")
+  local chunk = [[<TRACK
+NAME Vox
+<VOLENV2
+EGUID {V}
+ACT 1 -1
+PT 0 1 0
+>
+<FXCHAIN
+SHOW 0
+BYPASS 0 0 0
+<JS "TS_ChannelView/TS_CV_Modulators.jsfx" ""
+0 0 0
+>
+FLOATPOS 0 0 0 0
+FXID {MOD}
+<PARMENV 0:0 0 1 0.5
+EGUID {E0}
+ACT 1 -1
+VIS 1 1 1
+PT 0 0.4351 0
+>
+<PARMENV 1 0 1 0.5
+EGUID {E1}
+ACT 1 -1
+PT 0 0 0
+>
+WAK 0 0
+BYPASS 0 0 0
+<VST "VST3: X" x 0 ""
+abc
+>
+FXID {X}
+<PARMENV 0 0 1 0.5
+EGUID {EX}
+>
+WAK 0 0
+>
+>]]
+  local a = ENr.chunk_without(chunk, "{MOD}", 1, nil)
+  check("env remove: the param's block gone", a:find("{E1}") == nil and a:find("{E0}") ~= nil and a:find("{EX}") ~= nil, true)
+  local b = ENr.chunk_without(chunk, "{MOD}", 0, nil)
+  check("env remove: 0:0 form", b:find("{E0}") == nil and b:find("{E1}") ~= nil, true)
+  local c = ENr.chunk_without(chunk, "{X}", 0, nil)
+  check("env remove: the other plugin's", c:find("{EX}") == nil and c:find("{E0}") ~= nil, true)
+  local d = ENr.chunk_without(chunk, nil, nil, "<VOLENV2")
+  check("env remove: a track envelope", d:find("{V}") == nil and d:find("<FXCHAIN") ~= nil, true)
+  check("env remove: not there", ENr.chunk_without(chunk, "{MOD}", 5, nil), nil)
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

@@ -89,6 +89,17 @@ local function look_choices(ctx, id, now, none, none_tip, choose_part, undo_pick
     function(k, save) choose_part("cap", k, save) end, undo_pick)
 end
 
+-- "Volume / Pan automation lane": shows the track's envelope (made if
+-- there isn't one), or hides it.
+function CH.lane_item(ctx, track, name)
+  local EN = require("TS_CV_Envelopes")
+  local l = EN.track_lane(track, name)
+  if ImGui.MenuItem(ctx, name .. " automation lane", l and l.auto and "has automation" or nil,
+                    l ~= nil and l.shown) then
+    EN.toggle_track_lane(track, name)
+  end
+end
+
 -- The menu itself; call every frame with the popup id the fader opened.
 local function fader_menu(ctx, track, pid)
   if not ImGui.BeginPopup(ctx, pid) then return end
@@ -104,6 +115,8 @@ local function fader_menu(ctx, track, pid)
   for _, c in ipairs(TO.FADER_CATS) do if c.key == cat then cat_label = c.label end end
   local _, name = reaper.GetTrackName(track)
   ImGui.TextDisabled(ctx, (#tg > 1) and (#tg .. " tracks' faders") or ((name or "Track") .. "'s fader"))
+  ImGui.Separator(ctx)
+  CH.lane_item(ctx, track, "Volume")
   ImGui.Separator(ctx)
 
   -- this track's (or the selection's) own
@@ -688,6 +701,11 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     { bipolar = true, tooltip = pan_txt })
   local dblp = pact and pact.double_click
   if dblp then pnv, pch = 0.5, true end
+  if pact and pact.right_click then ImGui.OpenPopup(ctx, idp .. "panmenu") end
+  if ImGui.BeginPopup(ctx, idp .. "panmenu") then
+    CH.lane_item(ctx, track, "Pan")
+    ImGui.EndPopup(ctx)
+  end
   -- Centre is a place; a drag is a distance. See the fader below.
   if pch then
     local np = pnv * 2 - 1

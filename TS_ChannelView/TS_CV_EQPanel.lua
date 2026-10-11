@@ -425,6 +425,20 @@ local function draw_context_menu(ctx, track, addr, ps, bands)
     ImGui.EndMenu(ctx)
   end
   ImGui.Separator(ctx)
+  if ImGui.BeginMenu(ctx, "Automation lanes") then
+    local EN = require("TS_CV_Envelopes")
+    for _, f in ipairs({ { "freq_pidx", "Frequency" }, { "gain_pidx", "Gain" }, { "q_pidx", "Q" } }) do
+      local pi = band[f[1]]
+      if pi then
+        local l = EN.fx_lane(track, addr, pi)
+        if ImGui.MenuItem(ctx, f[2], l and l.auto and "has automation" or nil, l ~= nil and l.shown) then
+          EN.toggle_fx_lane(track, addr, pi)
+        end
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Remove") then
     -- No true delete in the API -- see TS_CV_ReaEQ.lua. This disables the
     -- band, which is the closest thing scripting has to removing it.

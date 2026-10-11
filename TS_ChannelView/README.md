@@ -329,10 +329,21 @@ strip's own radius so the two shapes agree about what a strip is.
   all, in the slot right after it.
 * **Parameter modulation.** Right-click a control ▸ *Parameter
   modulation…* opens REAPER's Parameter Modulation / Link window for that
-  parameter (ticked while its modulation is on). A modulated control shows
-  a mark — a dot in the middle of a knob, a corner on a button, dropdown or
-  fader — in the accent colour, or black or white where the accent
-  wouldn't show.
+  parameter (ticked while its modulation is on). A control with REAPER's
+  own LFO or audio follower on shows a mark — a dot in the middle of a
+  knob, a corner on a button, dropdown or fader — in the accent colour, or
+  black or white where the accent wouldn't show. A control driven by a
+  macro or modulator shows that instead (see *Macros and modulators*).
+* **Automation lanes.** Right-click any control ▸ *Automation lane* shows
+  its lane in the arrange view (ticked while it's showing, with *has
+  automation* beside it when it has some), and *Remove the lane* takes the
+  lane away, asking first if there's automation on it. An XY pad or a
+  concentric knob has one of each for its two parameters. The Channel
+  panel's fader menu has *Volume automation lane*, a right-click on its pan
+  knob *Pan automation lane*, and a ReaEQ band's menu *Automation lanes ▸
+  Frequency / Gain / Q*. REAPER switches a parameter's modulation on when
+  it makes a lane for it, which holds the control where it is; ChannelView
+  switches that straight back off.
 * **FX chains.** The chain button in the header, left of the FX bypass,
   loads an FX chain onto the track; it can also **save this track's chain**
   under a name of your own (in a folder of your FXChains folder, if you
@@ -417,6 +428,66 @@ strip's own radius so the two shapes agree about what a strip is.
   parameters, which follows it everywhere rather than being tied to one
   knob. Right-click a control and set it there, or use the editor.
 * The strip along the bottom mirrors REAPER's track selection both ways.
+
+## Macros and modulators
+
+Two panels sit between the Channel panel and the plugins: **Macros** and
+**Modulators**. Both start folded; click the header to open one. The
+dashed tile at the end of each adds one, and the foot says how many of
+the track's 16 macros or 8 modulators are in use.
+
+They live in one small plugin, **ChannelView Modulators**
+(`TS_CV_Modulators.jsfx`), which ChannelView puts on the track when you
+add the first macro or modulator and takes off again with the last (unless
+it has automation lanes). It sits at the start of the chain, after the
+pre probe and behind an ARA plugin such as Melodyne, and is kept out of
+the plugin row. Controls follow it through REAPER's own parameter links,
+so the track plays back the same without ChannelView running, and every
+macro and every modulator setting is a parameter you can automate, learn
+to a control surface, or draw in a lane.
+
+**Macros** are a knob, an on/off button, a fader, a dropdown or an XY pad
+(which uses two macros, X and Y). Right-click a macro's name to rename
+it, change its colour, change what it's shown as, open its automation
+lane, see what it drives, or remove it. A **dropdown** has 2 to 8 named
+choices, spread evenly (right-click ▸ *Choices…*); drop one on a stepped
+parameter and it offers to take that parameter's own choices.
+
+**Modulators** are an **LFO** (six shapes, a rate synced to the tempo or
+free in Hz, phase, depth, smoothing), a **Follower** (the track's own
+audio or its sidechain on 3/4, attack, release, floor and ceiling, or a
+gate that's on above the floor) or **MIDI** (velocity, note, CC, pitch
+bend or aftertouch, on any channel or one, with the note range, CC number
+or a velocity hold as fits). MIDI passes through untouched. Click a tile's
+name to open its settings; every setting has a small lane button for its
+automation lane.
+
+**Linking.** Drag the ◯ on a macro or modulator onto any control, or
+right-click a control ▸ *Link to a macro or modulator*. One source can
+drive as many controls as you like; a control takes one source, and
+dropping a different one on it asks first. An XY pad or a concentric knob
+takes one per parameter: drop on the pad's left or right half for X or Y,
+on the knob's ring or its inner knob. Linking switches off any LFO or
+audio follower REAPER itself had on that parameter. Hover a ◯ to see
+faint lines to everything it drives, or hover a driven control for the
+line back to its source.
+
+A driven control **follows its source** as it moves, and shows its reach:
+a ring around a knob, a bar beside a fader or along an XY pad's edges.
+Turn the control itself and the whole range moves with it.
+
+- From a **macro**, the two handles are where the control sits with the
+  macro at 0% and at 100%. They can cross, to run it backwards. A new link
+  takes the control's whole range. The control's menu has the same as
+  *At 0%* and *At 100%*, *Swap the ends* and *Whole range*.
+- From a **modulator**, the handles are the two ends of its swing, at rest
+  and at full. A control that sits in the middle of its range (a gain in
+  ±dB, a pan) swings both ways round where it's set; others swing one way.
+  The control's menu has *Depth*, *Invert* and *Bipolar*.
+
+Right-click a lane button (on a macro, or on a modulator setting) to show
+or hide its lane, or to remove it, automation and all after asking. A
+lane that exists but is hidden shows faintly in the source's colour.
 
 ## Panels are a fixed height and grow in columns
 
@@ -717,6 +788,15 @@ meters** shows each track's plugin delay compensation under its meter,
 in samples and milliseconds — on tracks with any, when the row is tall
 enough.
 
+Its **Track buttons** (the settings menu) choose which of monitoring,
+record arm, mute and solo are on every row; with *Show the others while
+on*, the rest appear only while they're on. Each keeps its own place, in
+that order, so they line up down the panel. Press mute, solo or record arm
+and drag down the column to set a run of tracks, as in the mixer;
+double-click clears one. Monitoring cycles off, input and auto. A lane's
+menu in the TCP window has **Remove envelope**, which asks first when the
+lane has automation.
+
 ## Files
 
 | | |
@@ -737,6 +817,9 @@ enough.
 | `TS_CV_Channel.lua` | the pinned Channel panel |
 | `TS_CV_Taps.lua` | routing for measured gain reduction, and reading it back |
 | `TS_CV_Trace.lua` | the gain-reduction trace's data, shared with the web page |
+| `TS_CV_Mod.lua` | macros and modulators: the plugin, the links, ranges and swings |
+| `TS_CV_ModRack.lua` | the Macros and Modulators panels |
+| `TS_CV_Modulators.jsfx` | the ChannelView Modulators plugin. Goes in `Effects/` |
 | `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
 | `TS_CV_Share.lua` | importing and exporting layouts (*Layouts ▸ Import / Export*) |
@@ -838,9 +921,10 @@ script into the action list.
 - The spectrum behind the ReaEQ canvas comes from **Track Analyser** while
   it's running. Without it the canvas has no backdrop.
 - Choices made on the page — collapsed panels, open traces and their
-  windows, the mixer's height, whether the navigator and macro bar show —
-  are kept by the browser, so a tablet and a laptop can differ. Macro
-  buttons are stored in REAPER, so every device shares one set.
+  windows, the mixer's height, whether the navigator and Actions bar show,
+  which Macros and Modulators panels are open — are kept by the browser,
+  so a tablet and a laptop can differ. Action buttons are stored in
+  REAPER, so every device shares one set.
 
 ### Using it
 
@@ -881,14 +965,21 @@ script into the action list.
   channel button to move it. The Mono switch sits under M and S.
 - **Fader panel:** double-tap its empty space to collapse it, and again to
   open it.
-- **Navigator:** the button to the left of the macro button. Tap to move the
+- **Navigator:** the button to the left of the Actions button. Tap to move the
   edit cursor, tap a region's name to go to it, drag the box to scroll
   REAPER's arrange view.
 - **Presets:** the bar along the foot of a panel — tap the name for the
   list, ‹ › to step, + to save, save as default, rename or delete.
-- **Macros:** the pencil turns on editing. + adds a button for any action
-  (searchable) or a spacer, tap a button to change it, press and drag to
-  move it, × removes it.
+- **Actions:** the bar of action buttons (called the macro bar before 2.0).
+  The pencil turns on editing. + adds a button for any action (searchable)
+  or a spacer, tap a button to change it, press and drag to move it, ×
+  removes it.
+- **Macros and modulators:** their panels come first in the row when the
+  track has any, folded until you open them. Macros play here — knobs,
+  buttons, faders, dropdowns and XY pads — and a modulator's tile opens to
+  its settings. Controls they drive follow them and show their range or
+  swing, as on the desktop. Adding and removing, linking, ranges, names,
+  colours and lanes are done on the desktop.
 
 ## While REAPER is busy
 
@@ -1560,6 +1651,21 @@ that lack one, after asking. Inside a container is fine, so a pair baked into
 a track template works as is. On a track whose first plugin is an ARA plugin
 such as Melodyne, which REAPER keeps first, the first probe goes second.
 
+The probes are kept out of the plugin row, and the **Probes** button says
+what's there: dim with none (click it to add a pair), lit with a pair,
+teal when this track feeds TS Visualizer's spectrum, amber when one of
+the pair is missing. With any there, clicking it opens a menu: *Add the
+missing probe*; *In the Visualizer's spectrum* — *Not included*, *Before
+the chain* (the pre probe) or *After the chain* (the post probe); open
+either probe's window; *Remove the probes…*, which asks first, saying how
+many plugins they measure, and takes the measuring routing out with them;
+and *Show the probes in the plugin row*. While they're hidden ChannelView
+keeps them at the ends of the chain: insert, move or remove a plugin and
+the pre probe goes back to first (second behind an ARA plugin) and the
+post probe to last. One dragged into a container comes back out; a pair
+put together inside a container is left there. Shown, they stay where you
+put them.
+
 Nothing is inserted next to the plugin. ChannelView routes a copy of what
 goes in and what comes out on spare channels, from 5/6 up, skipping any
 pair a plugin, send or receive already uses. The post probe compares the
@@ -1617,6 +1723,24 @@ otherwise. Click it for a slider. The panel menu has the same **Wet**
 slider at any width, and a container's menu has the container's.
 
 ## Where this came from
+
+Macros and modulators are **Saxmand**'s idea (Jesper Ankarfeldt's **FX
+Modulator Linking**), with thanks to him for his blessing to build on it.
+What ChannelView takes from it: modulators living in the track's own chain
+as a plugin whose parameters drive other plugins' through REAPER's
+parameter links, so the modulation is part of the project rather than of
+the script; the kinds of source (macros, an XY pad, an on/off button, an
+LFO, an audio follower, MIDI sources); one source driving many controls;
+reaching a plugin inside a container by exposing its parameter up through
+each container; and the list of synced LFO rates. Apart from that list,
+none of his code or JSFX is used. What ChannelView decided against: his
+separate modulator plugins in a *Modulators* container (it has one plugin
+of its own, ChannelView Modulators, at the top of the chain), and any
+compatibility with his script — it doesn't read, control or need setups
+made with it; the two are independent. Also left out: his A/B snapshot
+slider, the curve-mapped (MSEG) and 4-in-1-out modulators, modulators
+driving other modulators, the counter, and mapping by touching a plugin's
+parameter.
 
 The parameter-mapping idea, the per-plugin layout library and its file
 format were taken from Wormhole Labs' **StripLink** — the concepts and the
