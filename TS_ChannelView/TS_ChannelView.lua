@@ -1,21 +1,14 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.0.0
+-- @version 2.0.1
 -- @changelog
---  Macros and modulators. Two new panels between the Channel panel and the
---  plugins: up to 16 macros (knob, button, fader, dropdown, XY pad) and 8
---  modulators (LFO, audio follower, MIDI). Drag a source's handle onto any
---  control to drive it; set the range or swing with handles on the
---  control's ring or bar. They run in one small plugin, ChannelView
---  Modulators, through REAPER's own parameter links, so every setting can
---  be automated. The idea is Saxmand's FX Modulator Linking, with thanks
---  (see the README for what was used and what wasn't).
---  Automation lanes from any control's right-click menu, and removable.
---  Track probes hidden from the plugin row and kept at the ends of the
---  chain, with a header indicator, a Visualizer option and Remove.
---  TCP window: track buttons that are always there, swipeable.
---  Web companion: macros and modulators; the macro bar is now Actions.
---  Restart the web companion after updating.
+--  Plugins removed from their developer in REAPER's FX browser are hidden
+--  from ChannelView's add-plugin menu and search too; one already on a
+--  track keeps its panel. Shell plugins such as Waves are matched to
+--  REAPER's developers, categories and folders build by build.
+--  TCP window toolbar: right-click ▸ Copy a REAPER toolbar. Icons are also
+--  found in the theme's own folder, and a toggle with an _off icon shows
+--  its _on partner while on.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

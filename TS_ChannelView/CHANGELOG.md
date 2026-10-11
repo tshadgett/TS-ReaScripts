@@ -1,5 +1,17 @@
 # ChannelView — changelog
 
+## 2.0.1 — hiding plugins, copying a toolbar
+
+- **Hide plugins in one place.** A plugin taken out of its developer in
+  REAPER's FX browser (*Remove from developer*) is left out of
+  ChannelView's add-plugin menu and search too. One already on a track
+  keeps its panel. Shell plugins such as Waves are now matched to
+  REAPER's developers, categories and folders build by build.
+- **TCP window toolbar.** Right-click it ▸ *Copy a REAPER toolbar* takes
+  the buttons of any toolbar you've customised in REAPER. Icons are found
+  in the theme's own folder as well as `Data/toolbar_icons`, and a toggle
+  with an `_off` icon shows its `_on` partner while on.
+
 ## 2.0.0 — macros and modulators
 
 - **Macros and modulators.** Two new panels between the Channel panel and

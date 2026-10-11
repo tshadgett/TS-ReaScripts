@@ -105,6 +105,16 @@ installed = function()
   -- metadata, with counts over what's actually installed.
   devs, cats, folds = IX.build(list)
 
+  -- Plugins REAPER has "removed from developer" are hidden from the
+  -- browser altogether -- not listed, not searched (TS_CV_FXIndex sets
+  -- e.hidden). A hidden plugin already on a track still gets its panel.
+  do
+    local kept = {}
+    for _, e in ipairs(list) do if not e.hidden then kept[#kept + 1] = e end end
+    list = kept
+    all_fx = list
+  end
+
   -- Reverse indexes, so the cascading menu can hand each submenu its own
   -- plugins without walking the whole collection per frame.
   by_fold, by_cat, by_dev, by_letter = {}, {}, {}, {}

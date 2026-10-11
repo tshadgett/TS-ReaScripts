@@ -141,6 +141,107 @@ function TB.short_name(text)
   return s
 end
 
+-- "toolbar_metro_off.png" -> "toolbar_metro_on.png"; nil for any other.
+function TB.on_icon(file)
+  local base = file and file:match("^(.*)_off%.png$")
+  return base and (base .. "_on.png") or nil
+end
+
+-- ---------------------------------------------------------------------
+-- copying one of REAPER's toolbars
+-- ---------------------------------------------------------------------
+
+-- The icon REAPER draws for an action whose toolbar entry names none:
+-- its built-in default. Only the ones that come up; an action not here
+-- copies as a text button, and can be given an icon afterwards.
+TB.DEFAULT_ICONS = {
+  ["40023"] = "toolbar_new.png",        -- New project
+  ["40025"] = "toolbar_load.png",       -- Open project
+  ["40026"] = "toolbar_save.png",       -- Save project
+  ["40021"] = "toolbar_projprop.png",   -- Project settings
+  ["40029"] = "toolbar_undo.png",       -- Undo
+  ["40030"] = "toolbar_redo.png",       -- Redo
+  ["40364"] = "toolbar_metro_off.png",  -- Metronome
+  ["42616"] = "toolbar_marquee_cursor_selection_off.png", -- Marquee selection
+  ["40041"] = "toolbar_xfade_off.png",  -- Auto-crossfade
+  ["1156"]  = "toolbar_group_off.png",  -- Item/track grouping
+  ["1162"]  = "toolbar_ripple_off.png", -- Ripple editing
+  ["40070"] = "toolbar_envitem_off.png",-- Envelope points move with items
+  ["40145"] = "toolbar_grid_off.png",   -- Grid
+  ["1157"]  = "toolbar_snap_off.png",   -- Snapping
+  ["1135"]  = "toolbar_lock_off.png",   -- Locking
+  ["42618"] = "toolbar_razor_off.png",  -- Razor editing
+}
+
+local function menu_ini()
+  return reaper.GetResourcePath() .. package.config:sub(1, 1) .. "reaper-menu.ini"
+end
+
+-- The toolbar sections in reaper-menu.ini, in file order. REAPER writes
+-- one there for every toolbar you've customised.
+function TB.reaper_toolbars(text)
+  if not text then
+    local fh = io.open(menu_ini(), "r")
+    if not fh then return {} end
+    text = fh:read("a"); fh:close()
+  end
+  local out = {}
+  for name in text:gmatch("%[([^%]\n]+)%]") do
+    if name:lower():find("toolbar", 1, true) then out[#out + 1] = name end
+  end
+  return out
+end
+
+-- One section's buttons, as this toolbar's items. Pure: `text` is the
+-- whole ini. `name_of` (optional) gives an action's full name, so a
+-- label that only repeats it is left blank.
+function TB.parse_reaper_toolbar(text, section)
+  local body, inside = {}, false
+  for line in (text .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    local head = line:match("^%[(.*)%]%s*$")
+    if head then
+      if inside then break end
+      inside = (head == section)
+    elseif inside then
+      local k, n, v = line:match("^(%a+)_(%d+)=(.*)$")
+      if k then
+        n = tonumber(n)
+        body[n] = body[n] or {}
+        body[n][k] = v
+      end
+    end
+  end
+  local idx = {}
+  for n, e in pairs(body) do if e.item then idx[#idx + 1] = n end end
+  table.sort(idx)
+  local out = {}
+  for _, n in ipairs(idx) do
+    local e = body[n]
+    local cmd, desc = e.item:match("^(%S+)%s*(.*)$")
+    if cmd and cmd:match("^%-%d+$") then
+      out[#out + 1] = { sep = true }
+    elseif cmd and cmd ~= "" then
+      if cmd:match("^[%a_]") and cmd:sub(1, 1) ~= "_" then cmd = "_" .. cmd end
+      local icon = e.icon or ""
+      if not icon:lower():match("%.png$") then icon = "" end
+      if icon == "" then icon = TB.DEFAULT_ICONS[cmd] or "" end
+      out[#out + 1] = { cmd = cmd, icon = clean(icon), label = clean(desc or "") }
+    end
+  end
+  return out
+end
+
+function TB.import(section)
+  local fh = io.open(menu_ini(), "r")
+  if not fh then return false end
+  local text = fh:read("a"); fh:close()
+  local items = TB.parse_reaper_toolbar(text, section)
+  if #items == 0 then return false end
+  TB.items = items
+  TB.save()
+  return true
+end
+
 -- ---------------------------------------------------------------------
 -- load / save
 -- ---------------------------------------------------------------------
@@ -162,6 +263,15 @@ function TB.icon_dir()
   return reaper.GetResourcePath() .. sep .. "Data" .. sep .. "toolbar_icons"
 end
 
+-- The active theme's resource folder ("Foo.ReaperTheme" -> "Foo"), where
+-- REAPER's own default toolbar icons live (toolbar_new.png and so on).
+-- nil for a zipped theme: nothing in it can be loaded from here.
+function TB.theme_dir()
+  local f = reaper.GetLastColorThemeFile and reaper.GetLastColorThemeFile()
+  if type(f) ~= "string" then return nil end
+  return f:match("^(.*)%.[Rr][Ee][Aa][Pp][Ee][Rr][Tt][Hh][Ee][Mm][Ee]$")
+end
+
 local images = {}          -- file name -> image, or false once it has failed
 local loads_left = 0       -- per-frame load budget, see TB.draw / the picker
 
@@ -175,12 +285,22 @@ local function image(ctx, file)
     -- frame. A button drawn before its icon arrives shows its label.
     if loads_left <= 0 then return nil end
     loads_left = loads_left - 1
-    local ok, res = pcall(ImGui.CreateImage, TB.icon_dir() .. sep .. file)
-    if ok and res then
-      pcall(ImGui.Attach, ctx, res)
-      img = res
-    else
-      img = false
+    -- Data/toolbar_icons first (your own icons), then the theme's
+    -- folder -- the same two places REAPER's toolbars look.
+    img = false
+    -- Checked with io.open first: a CreateImage on a missing file is
+    -- caught by the pcall but still reported in REAPER's error window.
+    for _, dir in ipairs({ TB.icon_dir(), TB.theme_dir() }) do
+      local path = dir .. sep .. file
+      local fh = io.open(path, "rb")
+      if fh then fh:close() end
+      local ok, res = false, nil
+      if fh then ok, res = pcall(ImGui.CreateImage, path) end
+      if ok and res then
+        pcall(ImGui.Attach, ctx, res)
+        img = res
+        break
+      end
     end
     images[file] = img
   end
@@ -309,22 +429,30 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh)
 
   local state = (held or on) and 3 or (hovered and 2 or 1)
   local drawn, frames = nil, nil
-  if it.icon ~= "" then
+  -- A toggle drawn from an "_off" icon shows its "_on" partner while on,
+  -- as REAPER's own toolbars do. That partner is the "on" look, so the
+  -- pressed frame and the extra marks below aren't wanted with it.
+  local icon, paired = it.icon, false
+  if on and icon ~= "" then
+    local alt = TB.on_icon(icon)
+    if alt and image(ctx, alt) then icon, paired, state = alt, true, (held and 3 or (hovered and 2 or 1)) end
+  end
+  if icon ~= "" then
     -- A single-frame icon has no hover or pressed look of its own, so
     -- the button supplies one behind it.
-    local img = image(ctx, it.icon)
+    local img = image(ctx, icon)
     if img then
       local iw, ih = ImGui.Image_GetSize(img)
-      if iw and ih and ih > 0 and iw < ih * 2.5 and (hovered or on or held) then
+      if iw and ih and ih > 0 and iw < ih * 2.5 and (hovered or (on and not paired) or held) then
         ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh,
           on and U.with_alpha(C.COL.accent, 0x99) or C.COL.knob_body_hi, 2.5)
       end
     end
-    drawn, frames = draw_icon(ctx, dl, it.icon, x, y, bh, state)
+    drawn, frames = draw_icon(ctx, dl, icon, x, y, bh, state)
     -- A three-frame icon whose "pressed" frame looks like its normal one
     -- would leave an "on" toggle unmarked; a thin accent underline is
     -- cheap insurance.
-    if drawn and on and frames == 3 then
+    if drawn and on and not paired and frames == 3 then
       ImGui.DrawList_AddLine(dl, x + 3, y + bh - 1, x + bw - 3, y + bh - 1,
         C.COL.accent, 2.0)
     end
@@ -506,6 +634,14 @@ local function bg_menu(ctx)
     TB.items[#TB.items + 1] = { sep = true, gap = true }; TB.save()
   end
   ImGui.Separator(ctx)
+  if ImGui.BeginMenu(ctx, "Copy a REAPER toolbar") then
+    local list = TB.reaper_toolbars()
+    if #list == 0 then ImGui.TextDisabled(ctx, "No customised toolbars found") end
+    for k, name in ipairs(list) do
+      if ImGui.MenuItem(ctx, name .. "##" .. ID .. "imp" .. k) then TB.import(name) end
+    end
+    ImGui.EndMenu(ctx)
+  end
   if ImGui.MenuItem(ctx, "Reset to the default buttons") then
     TB.items = TB.parse(""); TB.save()
   end

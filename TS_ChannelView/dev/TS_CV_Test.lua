@@ -450,9 +450,14 @@ local IX = require "TS_CV_FXIndex"
 -- the key normaliser has to cope with every identifier shape
 check("bare filename",      IX.norm_key("reacomp.dll"),                    "reacomp.dll")
 check("full windows path",  IX.norm_key([[C:\Program Files\VST3\Foo.vst3]]), "foo.vst3")
-check("drive letter kept",  IX.norm_key([[C:\x\Pro-Q 3.vst3]]),            "pro-q_3.vst3")
+check("drive letter kept",  IX.norm_key([[C:\x\Pro-Q 3.vst3]]),            "pro_q_3.vst3")
 check("type prefix",        IX.norm_key("vst3:Saturn 2.vst3"),             "saturn_2.vst3")
-check("shell hash",         IX.norm_key("WaveShell1.dll<12345"),           "waveshell1.dll")
+-- a shell plugin's "<hash" tells its builds apart, and REAPER's tag file
+-- keys them with it
+check("shell hash kept",    IX.norm_key("WaveShell1.dll<12345"),           "waveshell1.dll<12345")
+checkf("hyphens = underscores", function()
+  return IX.norm_key("WaveShell1-VST3 14.15_x64.vst3") == IX.norm_key("WaveShell1_VST3_14.15_x64.vst3")
+end)
 check("spaces = underscores", IX.norm_key("Nectar Pro.vst3"),              "nectar_pro.vst3")
 checkf("space/underscore agree", function()
   return IX.norm_key("Nectar Pro.vst3") == IX.norm_key("Nectar_Pro.vst3")

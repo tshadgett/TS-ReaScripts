@@ -362,6 +362,12 @@ strip's own radius so the two shapes agree about what a strip is.
   entries a plugin installed in more than one format produces — they
   otherwise have identical names.
 
+  A plugin you've taken out of its developer in REAPER's FX browser
+  (right-click ▸ *Remove from developer*) is left out of the menu and the
+  search too, so one gesture hides it everywhere; one already on a track
+  keeps its panel. Shell plugins such as Waves are matched to REAPER's
+  developers, categories and folders build by build.
+
   **FX folders** are REAPER's own (the ones its FX browser shows), and the
   menu edits them: right-click any plugin for *Add to folder* (or a new
   folder, named on the spot) and *Remove from folder*; right-click a folder
@@ -796,6 +802,12 @@ and drag down the column to set a run of tracks, as in the mixer;
 double-click clears one. Monitoring cycles off, input and auto. A lane's
 menu in the TCP window has **Remove envelope**, which asks first when the
 lane has automation.
+
+Right-click the TCP window's toolbar ▸ **Copy a REAPER toolbar** to fill
+it with the buttons of any toolbar you've customised in REAPER, icons
+and all. Icons are found in `Data/toolbar_icons` and in the current
+theme's own folder, as REAPER's toolbars find them, and a toggle with an
+`_off` icon shows its `_on` partner while it's on.
 
 ## Files
 

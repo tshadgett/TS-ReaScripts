@@ -45,8 +45,12 @@ local function norm_key(s)
   s = tostring(s or "")
   s = s:gsub("^[%a][%w][%w]*:%s*", "")   -- "vst3:" but never a "C:" drive
   s = s:match("([^/\\]+)$") or s         -- basename
-  s = s:gsub("<.*$", "")                 -- shell-plugin hash suffix
-  s = s:lower():gsub("[%s_]+", "_")      -- spaces and underscores are the same
+  -- The "<hash" suffix is KEPT: it is what tells one shell plugin's
+  -- builds apart (every Waves plugin lives in one WaveShell), and
+  -- REAPER's tag file keys them with it too.
+  -- Spaces, underscores and hyphens are the same: REAPER writes
+  -- "WaveShell1_VST3_14.15_x64.vst3" for "WaveShell1-VST3 14.15_x64.vst3".
+  s = s:lower():gsub("[%s_%-]+", "_")
   return s
 end
 IX.norm_key = norm_key
@@ -147,6 +151,15 @@ function IX.build(list)
     -- REAPER's tag wins; the name-parsed vendor is the fallback, which is
     -- what covers JS effects since REAPER doesn't tag those.
     local d = dev_of[key] or (e.vendor ~= "" and e.vendor or nil)
+    -- A plugin REAPER has tagged elsewhere but not this one has been
+    -- "removed from developer" in REAPER's FX browser: hide it here too,
+    -- so that one gesture hides a plugin everywhere. JS effects are never
+    -- tagged, so they keep their name-parsed vendor.
+    local taggable = key:match("%.vst3") or key:match("%.dll") or key:match("%.clap")
+    if taggable and stats.tagged > 0 and not dev_of[key] then
+      e.hidden = true
+      d = nil
+    end
     e.dev     = d
     e.cats    = cats_of[key]
     e.folders = fold_of[key]
