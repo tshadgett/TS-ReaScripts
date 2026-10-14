@@ -323,14 +323,28 @@ end
 -- { user = sorted names, factory = names, default = name|nil,
 --   can_save = bool, file = path } -- cached per instance until REAPER's
 -- preset count for it moves or this module writes.
+--
+-- REAPER's preset count (TrackFX_GetPresetIndex) is asked for at most
+-- every PR.COUNT_EVERY seconds, not every frame: for most plugins it's
+-- quick, but some list their whole library to answer -- VSL's Synchron
+-- Player takes a third of a second -- and asking every frame stalled the
+-- window. One that's slow to answer (PR.SLOW_CALL) is asked only every
+-- PR.SLOW_EVERY, or when the preset it's on changes (PR.seen).
+PR.COUNT_EVERY = 2
+PR.SLOW_CALL   = 0.02
+PR.SLOW_EVERY  = 60
 local cache = {}
 function PR.forget(guid) if guid then cache[guid] = nil else cache = {} end end
 
 function PR.list(track, fx)
   local guid = reaper.TrackFX_GetFXGUID(track, fx) or ""
-  local _, count = reaper.TrackFX_GetPresetIndex(track, fx)
   local c = cache[guid]
-  if c and c.count == count then return c.info end
+  local now = reaper.time_precise()
+  if c and now < c.next_at then return c.info end
+  local _, count = reaper.TrackFX_GetPresetIndex(track, fx)
+  local took = reaper.time_precise() - now
+  local next_at = now + ((took > PR.SLOW_CALL) and PR.SLOW_EVERY or PR.COUNT_EVERY)
+  if c and c.count == count then c.next_at = next_at; return c.info end
   local file = preset_file(track, fx)
   local user = {}
   for _, p in ipairs(PR.parse(read(file)).presets) do
@@ -343,7 +357,7 @@ function PR.list(track, fx)
     can_default = PR.default_key(track, fx) ~= nil,
     file = file,
   }
-  cache[guid] = { count = count, info = info }
+  cache[guid] = { count = count, info = info, next_at = next_at }
   return info
 end
 
@@ -446,8 +460,89 @@ function PR.delete(track, fx, name)
 end
 
 -- Load by name (user or factory), the default, or step.
-function PR.load(track, fx, name) return reaper.TrackFX_SetPreset(track, fx, name) end
-function PR.load_default(track, fx) return reaper.TrackFX_SetPresetByIndex(track, fx, -1) end
-function PR.step(track, fx, dir) return reaper.TrackFX_NavigatePresets(track, fx, dir) end
+-- ---------------------------------------------------------------------
+-- a plugin's own (factory) presets that REAPER doesn't hear about
+-- ---------------------------------------------------------------------
+-- A user preset is a saved state: REAPER loads it and reads every
+-- parameter back. A factory preset is the plugin's own program: REAPER
+-- asks the plugin to switch, and some plugins (TDR Slick EQ, as VST3)
+-- change without telling it their parameters moved -- the plugin's window
+-- shows the preset, ChannelView (which reads REAPER) the old values. So
+-- after a load, once the plugin has had a moment: if the preset is a
+-- factory one and next to nothing reads as changed, its state is handed
+-- straight back to it, which has REAPER read every parameter again. A
+-- plugin with no state to hand back (no vst_chunk) is left as it is.
+PR.RESYNC_AFTER = 0.25   -- s
+local pending = {}       -- guid -> { track, before = { [p] = norm }, n, t }
+local function snapshot(track, fx)
+  local n = math.min(reaper.TrackFX_GetNumParams(track, fx) or 0, 400)
+  local t = {}
+  for p = 0, n - 1 do t[p] = reaper.TrackFX_GetParamNormalized(track, fx, p) end
+  return t, n
+end
+local function fx_of(track, guid)
+  if not reaper.ValidatePtr(track, "MediaTrack*") then return nil end
+  for i = 0, reaper.TrackFX_GetCount(track) - 1 do
+    if reaper.TrackFX_GetFXGUID(track, i) == guid then return i end
+  end
+  -- (inside a container: the flat addresses aren't walked; it's left)
+  return nil
+end
+local function watch(track, fx)
+  local guid = reaper.TrackFX_GetFXGUID(track, fx)
+  if not guid then return end
+  local before, n = snapshot(track, fx)
+  pending[guid] = { track = track, before = before, n = n, t = reaper.time_precise() }
+end
+-- How many of a plugin's parameters differ from `before`.
+function PR.moved(track, fx, before, n)
+  local c = 0
+  for p = 0, (n or 0) - 1 do
+    if math.abs((reaper.TrackFX_GetParamNormalized(track, fx, p) or 0) - (before[p] or 0)) > 1e-6 then c = c + 1 end
+  end
+  return c
+end
+-- Hands a plugin its own state back (REAPER reads every parameter again).
+function PR.resync(track, fx)
+  local ok, chunk = reaper.TrackFX_GetNamedConfigParm(track, fx, "vst_chunk")
+  if not (ok and chunk and chunk ~= "") then return false end
+  return reaper.TrackFX_SetNamedConfigParm(track, fx, "vst_chunk", chunk) and true or false
+end
+-- Each frame (TS_ChannelView's loop and the web bridge's).
+function PR.tick(now)
+  now = now or reaper.time_precise()
+  for guid, w in pairs(pending) do
+    if now - w.t >= PR.RESYNC_AFTER then
+      pending[guid] = nil
+      local fx = fx_of(w.track, guid)
+      if fx then
+        local _, name = reaper.TrackFX_GetPreset(w.track, fx, "")
+        if name and name ~= "" and not PR.is_user(w.track, fx, name) and PR.moved(w.track, fx, w.before, w.n) <= 1 then
+          PR.resync(w.track, fx)
+        end
+      end
+    end
+  end
+end
+
+-- A preset picked somewhere else (the plugin's own window): when the name
+-- the plugin is on changes, it's watched the same way. REAPER still has
+-- the old values then, so they serve as "before".
+local last_name = {}
+function PR.seen(track, fx, name)
+  local guid = reaper.TrackFX_GetFXGUID(track, fx)
+  if not guid then return end
+  local was = last_name[guid]
+  last_name[guid] = name
+  if was ~= nil and was ~= name then
+    -- on another preset: one saved from the plugin's own window shows up
+    if cache[guid] then cache[guid].next_at = 0 end
+    if name ~= "" and not pending[guid] then watch(track, fx) end
+  end
+end
+
+function PR.load(track, fx, name) watch(track, fx); return reaper.TrackFX_SetPreset(track, fx, name) end
+function PR.load_default(track, fx) watch(track, fx); return reaper.TrackFX_SetPresetByIndex(track, fx, -1) end
+function PR.step(track, fx, dir) watch(track, fx); return reaper.TrackFX_NavigatePresets(track, fx, dir) end
 
 return PR

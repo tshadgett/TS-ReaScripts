@@ -215,6 +215,8 @@ button { font: inherit; color: inherit; }
 .wsl .t { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 600;
   font-variant-numeric: tabular-nums; }
 .ph .nm { flex-grow: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph .ra { flex-shrink: 1; min-width: 0; max-width: 45%; font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pnl.shut .ph .ra { display: none; }
 .hb { width: 29px; height: 30px; flex-shrink: 0; border: 0; border-radius: 5px; background: transparent; padding: 0; cursor: pointer;
   display: flex; align-items: center; justify-content: center; }
 .hb svg { width: 18px; height: 18px; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
@@ -508,6 +510,12 @@ button { font: inherit; color: inherit; }
   padding: 0 10px; cursor: pointer; font-size: 12px; }
 .eqs .qd { height: 36px; min-width: 96px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); display: flex; align-items: center; justify-content: center; touch-action: none; cursor: ew-resize; }
+.mbtab { flex: 0 0 auto; height: 26px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--ring); background: var(--toff);
+  color: var(--ttext); font-size: 12px; }
+.mbtab.on { background: var(--accent); color: #fff; }
+/* a canvas is a screen set into the faceplate: on a light plate it gets
+   the theme's dark ground (its text is the theme's light ink) */
+.pnl.lightplate .eqc { background: var(--panel); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.38); }
 .eqs .shp { height: 36px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff); color: var(--ttext);
   font-size: 12px; padding: 0 8px; max-width: 46%; }
 .eqs .rd { color: var(--value); font-variant-numeric: tabular-nums; flex-grow: 1; }
@@ -648,7 +656,7 @@ const outbox = [];
 function send(verb, ...args) {
   // A run of moves on one control collapses to its latest: the target is
   // the verb and every argument but the value.
-  const coalesce = ["p", "vol", "pan", "svol", "eqf", "eqg", "eqq", "rcset", "wet", "grset", "tvol", "tpan", "mix", "nav", "navview"].includes(verb);
+  const coalesce = ["p", "vctl", "vol", "pan", "svol", "eqf", "eqg", "eqq", "rcset", "wet", "grset", "tvol", "tpan", "mix", "nav", "navview"].includes(verb);
   const target = verb + "|" + args.slice(0, -1).join("|");
   if (coalesce) {
     const i = outbox.findIndex(o => o.target === target);
@@ -1922,6 +1930,12 @@ const METAL_SHEEN = `radial-gradient(140% 70% at 25% 0%, rgba(255,255,255,${(0.1
 
 // A panel's background: the plate, with the 3D effect's light (the
 // gradient) and its own finish -- metallic, brushed, both or neither.
+// a light faceplate (its colour more than half way to white)
+function plateLight(pl) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(pl.bg || "");
+  if (!m) return false;
+  return (0.299 * parseInt(m[1], 16) + 0.587 * parseInt(m[2], 16) + 0.114 * parseInt(m[3], 16)) / 255 > 0.5;
+}
 function plateFill(pl) {
   if (!pl) return "";
   const sh = pl.sheen || 1;
@@ -3442,6 +3456,7 @@ function buildPanel(p, bodyH) {
 
     pnl.style.borderColor = pl.border;
     for (const [k, v] of [["--label", pl.text], ["--value", pl.dim], ["--dim", pl.dim], ["--text", pl.text], ["--ring", pl.tick]]) pnl.style.setProperty(k, v);
+    if (plateLight(pl)) pnl.classList.add("lightplate");
   }
   // the 3D effect: edges that catch the light, and knobs and buttons
   // casting shadows (any panel, faceplate or not)
@@ -3466,7 +3481,10 @@ function buildPanel(p, bodyH) {
   // the padlock goes in the foot with the preset bar; without one, here
   if (p.lk && !layout.pbar) head.append(lockMark(p));
   const wet = wetChip(p, w);
-  head.append(h("span", "nm", p.n), ...(wet ? [wet] : []), moreBtn(p), col, flt, byp);
+  // put up by a layout switching rule: that layout's name in a pill
+  const ra = p.ra ? h("span", "ra", p.ra) : null;
+  if (ra) ra.title = "Layout put up by a switching rule";
+  head.append(h("span", "nm", p.n), ...(ra ? [ra] : []), ...(wet ? [wet] : []), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
   pnl.append(head);
   if (pages) pnl.append(tabStrip(p, pages, cur));
@@ -3572,7 +3590,8 @@ function buildPanel(p, bodyH) {
     const lbl = h("div", "lbl", c.l || ""); lbl.style.width = (cw - 4) + "px";
     const val = h("div", "val", ""); val.style.width = (cw - 4) + "px";
     const entry = { c, id, val };
-    const sendV = v => { touch(id, v); send("p", p.g, c.p, v.toFixed(4)); };
+    // a virtual control (the layout's own): its setting on this instance, by its name
+    const sendV = v => { touch(id, v); if (c.vn != null) send("vctl", p.g, enc(c.vn), v.toFixed(4)); else send("p", p.g, c.p, v.toFixed(4)); };
     if (c.t === "xy" || c.t === "dual") {
       // two parameters: an XY pad's X and Y, a concentric knob's ring and
       // inner knob (TS_CV_Widgets.xypad / dual_knob)
@@ -3711,7 +3730,7 @@ function buildPanel(p, bodyH) {
         if (snap) v = choiceNorm(c, nearestChoice(c, v));
         if (v === cur) return;
         cur = v; k.set(v); sendV(v);
-      }, { reset: () => send("def", p.g, c.p) });
+      }, { reset: () => { if (c.vn != null) { cur = c.vs || 0; k.set(cur); sendV(cur); } else send("def", p.g, c.p); } });
       entry.set = v => { cur = v; k.set(v); };
     } else if (c.t === "toggle") {
       const b = h("button", "tog"); b.style.width = (CELL_W - 12) + "px";
@@ -4818,8 +4837,20 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
   const strip = h("div", "eqs");
   hold.append(cv, strip);
   const R = { lo: 20, hi: 20000, g: 18 };
-  const st = { bands: [], sel: null, drag: null, over: new Map() };
+  const st = { bands: [], sel: null, drag: null, over: new Map(), fd: null };
   const X = f => Math.log(Math.max(R.lo, Math.min(R.hi, f)) / R.lo) / Math.log(R.hi / R.lo) * W_;
+  // a dynamic band: what the probe measures where it's heard (dB, below 0 cut)
+  const devAt = f => {
+    const fd = st.fd; if (!fd || !fd.length) return 0;
+    let x = 16 + 3 * Math.log2(f / 1000); x = Math.max(0, Math.min(fd.length - 1, x));
+    const a = Math.floor(x), b = Math.min(fd.length - 1, a + 1), t = x - a;
+    let ga = fd[a] > -900 ? fd[a] : null, gb = fd[b] > -900 ? fd[b] : null;
+    if (ga == null && gb == null) return 0; if (ga == null) ga = gb; if (gb == null) gb = ga;
+    return -(ga + (gb - ga) * t);
+  };
+  const focusF = b => b.t === "ls" ? b.f / 2 : b.t === "hs" ? b.f * 2 : b.f;
+  const nodeY = b => hasG(b) ? Y(Math.max(-R.g, Math.min(R.g, b.g))) : Y(0);
+  const tailY = b => Y(Math.max(-R.g, Math.min(R.g, (hasG(b) ? b.g : 0) + b.d.r)));
   const F = x => R.lo * Math.pow(R.hi / R.lo, Math.max(0, Math.min(1, x / W_)));
   const top = 10, gh = ch - 20;
   const Y = db => top + gh / 2 - (db / R.g) * gh / 2;
@@ -4860,8 +4891,47 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
       c.beginPath(); xs.forEach((x, i) => i ? c.lineTo(x, ys[i]) : c.moveTo(x, ys[i]));
       c.strokeStyle = bandCol(b.k - 1, 0.7); c.lineWidth = 1.2; c.stroke();
     });
-    c.beginPath(); xs.forEach((x, i) => { const y = Y(Math.max(-R.g * 1.5, Math.min(R.g * 1.5, tot[i]))); i ? c.lineTo(x, y) : c.moveTo(x, y); });
-    c.strokeStyle = css("--accent"); c.lineWidth = 2.4; c.stroke();
+    const yc = d => Y(Math.max(-R.g * 1.5, Math.min(R.g * 1.5, d)));
+    // a dynamic EQ: every band at its range (dotted, the reach shaded)
+    const dyn = bands.filter(b => b.d && b.e);
+    const ranged = dyn.filter(b => b.d.r != null && b.d.on && hasG(b));
+    if (ranged.length) {
+      const full = tot.map((t, i) => t + ranged.reduce((a, b) => a + mqBandDb(Object.assign({}, b, { g: b.g + b.d.r }), F(xs[i])) - mqBandDb(b, F(xs[i])), 0));
+      c.beginPath(); xs.forEach((x, i) => i ? c.lineTo(x, yc(tot[i])) : c.moveTo(x, yc(tot[i])));
+      for (let i = N - 1; i >= 0; i--) c.lineTo(xs[i], yc(full[i]));
+      c.closePath(); c.fillStyle = withA(css("--accent"), 0.08); c.fill();
+      c.setLineDash([3, 3]); c.beginPath(); xs.forEach((x, i) => i ? c.lineTo(x, yc(full[i])) : c.moveTo(x, yc(full[i])));
+      c.strokeStyle = css("--dim"); c.lineWidth = 1; c.stroke(); c.setLineDash([]);
+    }
+    const live = dyn.length && st.fd;
+    if (live) {
+      const now = tot.map((t, i) => t + devAt(F(xs[i])));
+      c.beginPath(); xs.forEach((x, i) => i ? c.lineTo(x, yc(tot[i])) : c.moveTo(x, yc(tot[i])));
+      for (let i = N - 1; i >= 0; i--) c.lineTo(xs[i], yc(now[i]));
+      c.closePath(); c.fillStyle = "rgba(230,207,121,0.25)"; c.fill();
+      c.beginPath(); xs.forEach((x, i) => i ? c.lineTo(x, yc(tot[i])) : c.moveTo(x, yc(tot[i])));
+      c.strokeStyle = withA(css("--accent"), 0.6); c.lineWidth = 1.2; c.stroke();
+      c.beginPath(); xs.forEach((x, i) => i ? c.lineTo(x, yc(now[i])) : c.moveTo(x, yc(now[i])));
+      c.strokeStyle = "#f2f4f7"; c.lineWidth = 2.4; c.stroke();
+    } else {
+      c.beginPath(); xs.forEach((x, i) => { const y = yc(tot[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); });
+      c.strokeStyle = css("--accent"); c.lineWidth = 2.4; c.stroke();
+    }
+    // each dynamic band's tail (to its range) and where it is now
+    bands.forEach(b => {
+      if (!b.d) return;
+      const x = X(b.f), y = nodeY(b), col = bandCol(b.k - 1, b.d.on ? 1 : 0.4);
+      if (b.d.r != null) {
+        const ty = tailY(b);
+        c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y); c.lineTo(x, ty); c.stroke();
+        c.beginPath(); c.arc(x, ty, st.drag && st.drag.tail === b.k ? 8 : 6, 0, Math.PI * 2);
+        c.fillStyle = css("--panel") || "#1d2026"; c.fill(); c.lineWidth = 2; c.strokeStyle = col; c.stroke();
+      }
+      if (live && b.e) {
+        const nd = devAt(focusF(b));
+        if (Math.abs(nd) > 0.1) { c.beginPath(); c.arc(x, Y(Math.max(-R.g, Math.min(R.g, (hasG(b) ? b.g : 0) + nd))), 4, 0, Math.PI * 2); c.fillStyle = "#e6cf79"; c.fill(); }
+      }
+    });
     bands.forEach(b => {
       const x = X(b.f), y = hasG(b) ? Y(Math.max(-R.g, Math.min(R.g, b.g))) : Y(0);
       const sel = st.sel === b.k;
@@ -4874,7 +4944,7 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
   let stripSig = null;
   function paintStrip() {
     const b = bandsNow().find(v => v.k === st.sel);
-    const sig = b ? [b.k, b.x, b.e, b.s].join("|") : "none";
+    const sig = b ? [b.k, b.x, b.e, b.s, b.d ? [b.d.xt, b.d.xr, b.d.xra, b.d.xa, b.d.xl, b.d.on].join("/") : ""].join("|") : "none";
     if (sig === stripSig) return;
     stripSig = sig; strip.innerHTML = "";
     if (!b) { strip.append(h("span", null, "Drag a node to move a band · tap one to select it · double-tap: flat")); return; }
@@ -4887,6 +4957,33 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
       meta.sh.forEach((t, i) => { const o = h("option", null, t); o.value = i + 1; if (b.s === i + 1) o.selected = true; sel.append(o); });
       sel.addEventListener("change", () => send("mqs", p.g, b.k, sel.value));
       strip.append(sel);
+    }
+    if (b.d) {
+      // its dynamics: drag a value across; DYN its switch
+      const dm = meta.dy || {};
+      if (dm.o) {
+        const t = h("button", "mbtab" + (b.d.on ? " on" : ""), "DYN");
+        t.addEventListener("click", () => send("mqo", p.g, b.k));
+        strip.append(t);
+      }
+      // compact: the range is the tail on the canvas, units left off
+      const sh = t => String(t).replace(/\s*(dB|ms)$/i, "");
+      for (const [f, lab, x] of [["thr", "Thr ", b.d.xt], ["ratio", "", b.d.xra], ["atk", "A ", b.d.xa], ["rel", "R ", b.d.xl]]) {
+        if (x == null) continue;
+        const dd = h("div", "qd", lab + sh(x));
+        dd.style.cssText += ";width:auto;padding:0 7px;white-space:nowrap;font-size:12px";
+        dd.title = { thr: "Threshold", ratio: "Ratio", atk: "Attack", rel: "Release" }[f] + " " + x + " (drag across)";
+        let x0 = 0;
+        dd.addEventListener("pointerdown", e => { e.preventDefault(); dd.setPointerCapture(e.pointerId); x0 = e.clientX; st.qdrag = true; });
+        dd.addEventListener("pointerup", () => { st.qdrag = false; });
+        dd.addEventListener("pointercancel", () => { st.qdrag = false; });
+        dd.addEventListener("pointermove", e => {
+          if (!dd.hasPointerCapture(e.pointerId)) return;
+          const d = (e.clientX - x0) / 300; if (Math.abs(d) < 0.004) return;
+          x0 = e.clientX; send("mqd", p.g, b.k, f, d.toFixed(4));
+        });
+        strip.append(dd);
+      }
     }
     if (b.wq) {
       const qd = h("div", "qd", "Q");
@@ -4913,7 +5010,16 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
   const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
   cv.addEventListener("pointerdown", e => {
     e.preventDefault();
-    const [x, y] = pos(e), b = hit(x, y);
+    const [x, y] = pos(e);
+    // a dynamic band's tail end: its range, up or down
+    const tb = bandsNow().find(v => v.d && v.d.r != null && Math.hypot(X(v.f) - x, tailY(v) - y) < 14
+                               && Math.hypot(X(v.f) - x, nodeY(v) - y) > 10);
+    if (tb) {
+      cv.setPointerCapture(e.pointerId);
+      st.sel = tb.k; st.drag = { k: tb.k, tail: tb.k, y0: y, r0: tb.d.r };
+      paintStrip(); draw(); return;
+    }
+    const b = hit(x, y);
     if (!b) { if (st.sel) { st.sel = null; paintStrip(); draw(); } return; }
     // double-tap a node: the band out of the sound (flat, or off)
     const now = Date.now();
@@ -4925,6 +5031,12 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
   });
   cv.addEventListener("pointermove", e => {
     if (!st.drag || !cv.hasPointerCapture(e.pointerId)) return;
+    if (st.drag.tail) {
+      const [, y] = pos(e), r = st.drag.r0 - (y - st.drag.y0) / (gh / 2) * R.g;
+      const b = st.bands.find(v => v.k === st.drag.k);
+      if (b && b.d) st.over.set(b.k, { t: Date.now(), v: { d: Object.assign({}, b.d, { r }) } });
+      send("mqr", p.g, st.drag.k, r.toFixed(2)); draw(); return;
+    }
     const [x, y] = pos(e), f = F(x), g = Math.max(-R.g, Math.min(R.g, G(y)));
     const v = { f }; if (st.drag.g) v.g = g;
     st.over.set(st.drag.k, { t: Date.now(), v });
@@ -4933,13 +5045,1443 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
     draw();
   });
   cv.addEventListener("pointerup", () => { st.drag = null; });
-  P.mq = ev => { if (!ev) return; st.bands = ev.b || []; draw(); if (!st.drag && !st.qdrag) paintStrip(); };
+  P.mq = ev => { if (!ev) return; st.bands = ev.b || []; st.fd = ev.fd || null; draw(); if (!st.drag && !st.qdrag) paintStrip(); };
   paintStrip();
   requestAnimationFrame(draw);
 }
 
-function mapCompCanvas(p, P, hold, CW, bodyH) {
+// ---------------------------------------------------------------------------
+// A Gate or Limiter layout (as the desktop draws them, TS_CV_CompPanel.lua)
+// ---------------------------------------------------------------------------
+// shared: the canvas, time steps, the reduction meter
+function roleCanvas(hold, CW, bodyH) {
+  const W_ = CW - 16, ch = Math.max(140, bodyH - 16);
+  const cv = h("canvas", "eqc");
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = W_ * dpr; cv.height = ch * dpr; cv.style.height = ch + "px"; cv.style.width = W_ + "px"; cv.style.right = "auto";
+  hold.append(cv);
+  return { cv, W_, ch, dpr, MW: 30, gw: W_ - 34 };
+}
+const RT = {
+  ATK: [0.1, 500], HLD: [1, 2000], REL: [1, 5000],
+  tf: (ms, r) => ms <= r[0] ? 0 : ms >= r[1] ? 1 : Math.log(ms / r[0]) / Math.log(r[1] / r[0]),
+  ft: (f, r) => f <= 0 ? 0 : f >= 1 ? r[1] : r[0] * Math.pow(r[1] / r[0], f),
+  stepAt(es, n) {
+    let best = es[0], bd = 1e9;
+    for (const s of es) { if (n >= s.lo - 1e-6 && n <= s.hi + 1e-6) return s; const d = Math.abs(s.n - n); if (d < bd) { bd = d; best = s; } }
+    return best;
+  },
+  stepNear: (es, f) => es.reduce((b, s) => Math.abs(s.f - f) < Math.abs(b.f - f) ? s : b, es[0]),
+  // how far along (0..1) a time role sits, and the message that sets it to f
+  frac(p, v, k, r) {
+    const es = p.mc.es && p.mc.es[k], ra = (p.mc.ra || {})[k];
+    if (es) return RT.stepAt(es, v.n[k] || 0).f;
+    if (v.u[k] === "ms" && v.v[k] != null) return RT.tf(v.v[k], r);
+    return ra ? 1 - (v.n[k] || 0) : (v.n[k] || 0);
+  },
+  setFrac(p, v, k, r, f) {
+    const es = p.mc.es && p.mc.es[k], ra = (p.mc.ra || {})[k];
+    if (es) { const s_ = RT.stepNear(es, f); if (Math.abs(s_.n - (v.n[k] || 0)) > 1e-6) send("mcn", p.g, k, s_.n.toFixed(5)); }
+    else if (v.u[k] === "ms" && v.v[k] != null) send("mcv", p.g, k, RT.ft(f, r).toFixed(3));
+    else send("mcn", p.g, k, (ra ? 1 - f : f).toFixed(5));
+  },
+  meter(c, g, v) {
+    const gr = v.g || 0, mx = g.gw + 4;
+    c.fillStyle = "rgba(0,0,0,0.3)"; c.fillRect(mx, 0, g.MW, g.ch);
+    c.fillStyle = css("--fill-bi") || "#d9a33a"; c.fillRect(mx + 4, 0, g.MW - 8, Math.min(g.ch, gr / 18 * g.ch));
+    c.fillStyle = css("--value"); c.fillText(gr >= 0.05 ? gr.toFixed(1) : "–", mx + 2, g.ch - 6);
+  },
+  pill(c, x, y, col) { c.fillStyle = col; c.fillRect(x - 18, y - 4, 36, 8); },
+  hline(c, y, w, col, dash) { c.strokeStyle = col; c.lineWidth = dash ? 1.3 : 1.6; c.setLineDash(dash ? [6, 4] : []); c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); c.setLineDash([]); },
+  isDb: (v, k) => v.v[k] != null && (v.u[k] === "db" || v.u[k] === ""),
+};
+
+function mapGateCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {}, PA = p.mc.pa || {};
+  if (!Object.keys(I).length) { mapSetupNote(hold, "This gate layout has no roles yet. Set it up in ChannelView on the desktop."); return; }
+  const g = roleCanvas(hold, CW, bodyH), { cv, W_, ch, dpr, gw } = g;
+  const TR = p.mc.tr, TD = !!p.mc.td;
+  const TOP = (TD && TR) ? Math.max(6, TR[1] + 3) : 6, BOT = (TD && TR) ? Math.min(-84, TR[0] - 6) : -84, SPAN = TOP - BOT;
+  const X = db => (db - BOT) / SPAN * gw, Y = db => (TOP - db) / SPAN * ch;
+  const st = { v: null, drag: null };
+  // the levels, as the desktop works them out
+  function lv(v) {
+    let thr = null, close = null, att = -120, ratio = 1000;
+    if (I.t != null) thr = RT.isDb(v, "t") ? Math.max(BOT, v.v.t) : BOT + 6 + (v.n.t || 0) * (SPAN - 12);
+    if (thr != null && I.cl != null) close = RT.isDb(v, "cl") ? v.v.cl : BOT + 6 + (v.n.cl || 0) * (SPAN - 12);
+    else if (thr != null && I.hy != null) close = RT.isDb(v, "hy") ? thr - Math.abs(v.v.hy) : thr - (v.n.hy || 0) * 20;
+    if (I.rg != null) att = RT.isDb(v, "rg") ? (Math.abs(v.v.rg) >= 150 ? -120 : -Math.abs(v.v.rg)) : -(v.n.rg || 0) * 80;
+    // (an expander's ratio reads the same either way round: the larger)
+    { const rr = (v.v.r > 0 && v.v.r < 1) ? 1 / v.v.r : v.v.r; if (rr != null && rr >= 1 && rr < 1000) ratio = rr; }
+    return { thr, close, att, ratio };
+  }
+  const out = (db, t, L) => db >= t ? db : Math.max(t + (db - t) * L.ratio, db + L.att);
+  function ratioNode(L) {
+    const rd = Math.min(L.ratio, 12);
+    const d = rd > 1.01 ? Math.max(1.5, Math.min(8, -L.att / (rd - 1) * 0.5)) : 8;
+    return { d, rd, x: L.ratio >= 999 ? X(L.thr) - 1 : X(L.thr - d), y: Y(Math.max(L.thr - d * rd, L.thr - d + L.att)) };
+  }
+  function rangeNode(L) {
+    const xj = L.ratio > 1.01 ? L.thr + L.att / (L.ratio - 1) : L.thr;
+    const xdb = Math.max(BOT + 3, xj - 6);
+    return { x: X(xdb), y: Math.min(ch - 8, Y(xdb + L.att)), below: Y(xdb + L.att) > ch - 8 };
+  }
+  function envGeom() {
+    const ex = 8, ey = 8, ew = Math.min(220, gw * 0.5), eh = 82, inner = ew - 20, hasH = I.h != null;
+    const HW = hasH ? inner * 0.22 : 0, AW = inner * (hasH ? 0.28 : 0.34), RW = inner - AW - HW - 4;
+    return { ex, ey, ew, eh, on: ex + 10, base: ey + eh - 24, peak: ey + 14, AW, HW, RW };
+  }
+  function draw() {
+    const v = st.v, c = cv.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W_, ch);
+    c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(0, 0, W_, ch);
+    if (!v) return;
+    c.font = "11px -apple-system, system-ui, sans-serif";
+    c.strokeStyle = css("--ring"); c.globalAlpha = 0.4;
+    for (let d = 0; d >= -84; d -= 12) { const y = Math.round(Y(d)) + 0.5; c.beginPath(); c.moveTo(0, y); c.lineTo(gw, y); c.stroke(); }
+    c.globalAlpha = 1;
+    c.setLineDash([3, 4]); c.strokeStyle = withA(css("--label"), 0.5); c.lineWidth = 1;
+    c.beginPath(); c.moveTo(X(BOT), Y(BOT)); c.lineTo(X(TOP), Y(TOP)); c.stroke(); c.setLineDash([]);
+    const L = lv(v); st.L = L;
+    if (L.thr != null) {
+      const curve = (t, dashOnly) => {
+        const dbs = []; for (let i = 0; i <= 200; i++) dbs.push(BOT + SPAN * i / 200);
+        dbs.push(t); if (L.ratio > 1.001) dbs.push(t + L.att / (L.ratio - 1)); dbs.sort((a, b) => a - b);
+        c.beginPath(); let first = true;
+        for (const db of dbs) { if (db < BOT || db > TOP || (dashOnly && db > L.thr)) continue; const x = X(db), y = Y(out(db, t, L)); first ? c.moveTo(x, y) : c.lineTo(x, y); first = false; }
+        c.stroke();
+      };
+      if (L.close != null && L.close < L.thr) { c.setLineDash([4, 3]); c.strokeStyle = withA(css("--value"), 0.45); c.lineWidth = 1.4; curve(L.close, true); c.setLineDash([]); }
+      c.strokeStyle = css("--value"); c.lineWidth = 2.2; curve(L.thr, false);
+      RT.hline(c, Y(L.thr), gw, css("--accent"), false); RT.pill(c, gw - 40, Y(L.thr), css("--accent"));
+      c.fillStyle = css("--value"); c.fillText((v.x.t || "") + "  Opens", 8, Y(L.thr) - 6);
+      if (L.close != null) {
+        RT.hline(c, Y(L.close), gw, withA(css("--accent"), 0.75), true); RT.pill(c, gw - 40, Y(L.close), withA(css("--accent"), 0.75));
+        c.fillStyle = css("--dim"); c.fillText(I.cl != null ? "Closes " + (v.x.cl || "") : "Closes (hysteresis " + (v.x.hy || "") + ")", 8, Y(L.close) + 14);
+      }
+      if (I.r != null) {
+        const n = ratioNode(L); st.rn = n;
+        c.fillStyle = css("--value"); c.beginPath(); c.arc(n.x, n.y, 7, 0, Math.PI * 2); c.fill();
+        c.textAlign = "right"; c.fillText("Ratio " + (v.x.r || ""), n.x - 11, n.y - 8); c.textAlign = "left";
+      }
+      if (I.rg != null) {
+        const n = rangeNode(L); st.gn = n;
+        c.fillStyle = css("--value"); c.beginPath(); c.arc(n.x, n.y, 7, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = css("--accent"); c.lineWidth = 1.5; c.stroke();
+        c.fillText("Range " + (v.x.rg || "") + (n.below ? "  ↓" : ""), n.x + 11, n.y + 4);
+      }
+    } else {
+      c.fillStyle = css("--dim"); c.textAlign = "center"; c.fillText("no threshold: no curve", gw / 2, ch * 0.42); c.textAlign = "left";
+    }
+    st.nodes = [];
+    if (I.a != null || I.h != null || I.l != null) {
+      const e = envGeom(); st.env = e;
+      const ak = e.on + RT.frac(p, v, "a", RT.ATK) * e.AW, hk = ak + (I.h != null ? RT.frac(p, v, "h", RT.HLD) * e.HW : 0), re = hk + RT.frac(p, v, "l", RT.REL) * e.RW;
+      c.fillStyle = withA(css("--panel") || "#202327", 0.85); c.fillRect(e.ex, e.ey, e.ew, e.eh);
+      c.strokeStyle = css("--ring"); c.lineWidth = 1; c.strokeRect(e.ex + 0.5, e.ey + 0.5, e.ew, e.eh);
+      c.beginPath(); c.moveTo(e.on, e.base); c.lineTo(ak, e.peak); c.lineTo(hk, e.peak);
+      c.quadraticCurveTo(hk + (re - hk) * 0.2, e.base, re, e.base); c.lineTo(e.ex + e.ew - 10, e.base);
+      c.strokeStyle = css("--accent"); c.lineWidth = 2; c.stroke();
+      st.nodes = [["a", ak, e.peak, RT.ATK, e.AW], ["h", hk, e.peak, RT.HLD, e.HW], ["l", re, e.base, RT.REL, e.RW]].filter(n => I[n[0]] != null);
+      for (const n of st.nodes) { c.fillStyle = css("--text"); c.beginPath(); c.arc(n[1], n[2], 6, 0, Math.PI * 2); c.fill(); }
+      c.fillStyle = css("--value");
+      c.fillText([I.a != null ? "Atk " + (v.x.a || "") : null, I.h != null ? "Hold " + (v.x.h || "") : null, I.l != null ? "Rel " + (v.x.l || "") : null].filter(Boolean).join("   "), e.ex + 6, e.ey + e.eh - 6);
+    }
+    RT.meter(c, g, v);
+  }
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener("pointerdown", e => {
+    const v = st.v, L = st.L; if (!v || !L) return;
+    const [x, y] = pos(e);
+    const grab = d => { e.preventDefault(); cv.setPointerCapture(e.pointerId); st.drag = Object.assign({ x0: x, y0: y }, d); };
+    for (const n of st.nodes || []) if (Math.hypot(n[1] - x, n[2] - y) < 22) return grab({ k: n[0], f0: RT.frac(p, v, n[0], n[3]), w: n[4], r: n[3] });
+    if (L.thr == null) return;
+    if (st.rn && I.r != null && Math.hypot(st.rn.x - x, st.rn.y - y) < 22) return grab({ k: "r", v0: L.thr - st.rn.d * st.rn.rd, d: st.rn.d, thr: L.thr });
+    if (st.gn && I.rg != null && Math.hypot(st.gn.x - x, st.gn.y - y) < 22) return grab({ k: "rg", a0: L.att });
+    if (x < gw && Math.abs(Y(L.thr) - y) < 16) return grab({ k: "t", t0: L.thr, n0: v.n.t });
+    if (x < gw && L.close != null && Math.abs(Y(L.close) - y) < 16) return grab({ k: "c", c0: L.close, thr: L.thr, n0: v.n[I.cl != null ? "cl" : "hy"] });
+  });
+  cv.addEventListener("pointermove", e => {
+    const d = st.drag, v = st.v; if (!d || !cv.hasPointerCapture(e.pointerId)) return;
+    const [x, y] = pos(e), dv = -(y - d.y0) / ch * SPAN;
+    if (d.k === "t") {
+      if (RT.isDb(v, "t")) send("mcv", p.g, "t", Math.max(BOT, Math.min(TOP, d.t0 + dv)).toFixed(2));
+      else send("mcn", p.g, "t", Math.max(0, Math.min(1, d.n0 + dv / (SPAN - 12))).toFixed(5));
+    } else if (d.k === "c") {
+      const c0 = Math.min(d.thr, d.c0 + dv);
+      if (I.cl != null) {
+        if (RT.isDb(v, "cl")) send("mcv", p.g, "cl", c0.toFixed(2));
+        else send("mcn", p.g, "cl", Math.max(0, Math.min(1, d.n0 + dv / (SPAN - 12))).toFixed(5));
+      } else if (RT.isDb(v, "hy")) { const amt = d.thr - c0; send("mcv", p.g, "hy", (PA.hy ? amt : -amt).toFixed(2)); }
+      else send("mcn", p.g, "hy", Math.max(0, Math.min(1, (d.thr - c0) / 20)).toFixed(5));
+    } else if (d.k === "rg") {
+      const a = Math.max(-120, Math.min(0, d.a0 + dv));
+      if (RT.isDb(v, "rg")) send("mcv", p.g, "rg", (PA.rg ? -a : a).toFixed(2));
+      else send("mcn", p.g, "rg", Math.min(1, -a / 80).toFixed(5));
+    } else if (d.k === "r") {
+      const r = Math.max(1, (d.thr - (d.v0 + dv)) / d.d);
+      if (p.mc.rs) {
+        let top = 1; const val = ps => { const m = String(ps.t || "").match(/([\d.]+)\s*:\s*([\d.]+)/); return m ? Math.max(+m[1] / +m[2], +m[2] / +m[1]) : null; };
+        for (const ps of p.mc.rs) { const x_ = val(ps); if (x_ && x_ < 1000) top = Math.max(top, x_); }
+        let best = null, bd = 1e9;
+        for (const ps of p.mc.rs) { const x_ = val(ps) || top * 2.5; const dd = Math.abs(Math.log(x_) - Math.log(r)); if (dd < bd) { bd = dd; best = ps.n; } }
+        if (best != null && Math.abs(best - (v.n.r || 0)) > 1e-6) send("mcn", p.g, "r", best.toFixed(5));
+      } else send("mcv", p.g, "r", (p.mc.rf ? 1 / Math.min(100, r) : Math.min(100, r)).toFixed(3));
+    } else {
+      RT.setFrac(p, v, d.k, d.r, Math.max(0, Math.min(1, d.f0 + (x - d.x0) / Math.max(1, d.w))));
+    }
+  });
+  cv.addEventListener("pointerup", () => { st.drag = null; });
+  P.mc = ev => { if (!ev) return; st.v = ev; draw(); };
+}
+
+// between measured points {x, dBFS}, on past the ends (i0/i1: which way)
+function calLerp(pts, x, i0, i1) {
+  let i = 0; const up = pts[pts.length - 1][i1] >= pts[0][i1];
+  while (i < pts.length - 2 && (i0 === 0 ? x > pts[i + 1][0] : (up ? x > pts[i + 1][1] : x < pts[i + 1][1]))) i++;
+  const a = pts[i], b = pts[i + 1];
+  return b[i0] === a[i0] ? a[i1] : a[i1] + (x - a[i0]) * (b[i1] - a[i1]) / (b[i0] - a[i0]);
+}
+// An input-driven compressor or limiter (as the desktop's drive_of): no
+// threshold control, a gain into a threshold that stays put. Drawn after
+// the gain: the threshold fixed (line: a limiter's ceiling; else measured
+// or guessed), the gain a bar -- where a signal at its 0 dB (r0, -18 dBFS)
+// lands once it's through. S(verb, key, value) sets the input.
+function driveLine(p, kind) {
+  const TC = kind !== "limit" && p.mc.tc && p.mc.tc.p && p.mc.tc.p.length >= 2 ? p.mc.tc : null;
+  if (!TC) return -10;
+  return TC.n ? calLerp(TC.p, 0.5, 0, 1) : TC.p.reduce((s, q) => s + q[0] + q[1], 0) / TC.p.length;
+}
+function driveOf(p, v, line, kind, S) {
+  const ref = p.mc.r0 != null ? p.mc.r0 : -18, rev = !!p.mc.ri;
+  const db = !rev && (v.u.in === "db" || !!p.mc.td) && v.v.in != null && Math.abs(v.v.in) < 1e9;
+  const span = kind === "limit" ? 30 : 48, base = kind === "limit" ? 0 : -0.5;
+  const TC = kind !== "limit" && p.mc.tc && p.mc.tc.p && p.mc.tc.p.length >= 2 ? p.mc.tc : null;
+  const d = { ref, line, measured: false, bar: null };
+  if (TC) {
+    const x = TC.n ? (v.n.in || 0) : (v.v.in != null && Math.abs(v.v.in) < 1e9 ? v.v.in : null);
+    if (x != null) {
+      d.line = driveLine(p, kind); d.measured = true;
+      d.bar = d.line - calLerp(TC.p, x, 0, 1) + ref;
+      d.set = bar => {
+        const nx = calLerp(TC.p, d.line - bar + ref, 1, 0);
+        if (TC.n) S("mcn", "in", Math.max(0, Math.min(1, nx)).toFixed(5)); else S("mcv", "in", nx.toFixed(2));
+      };
+    }
+  }
+  if (d.bar == null) {
+    if (d.line == null) d.line = -10;
+    const n = rev ? 1 - (v.n.in || 0) : (v.n.in || 0);
+    d.bar = ref + (db ? v.v.in : (n + base) * span);
+    d.set = bar => {
+      const g = bar - ref;
+      if (db) S("mcv", "in", g.toFixed(2));
+      else { const nn = Math.max(0, Math.min(1, g / span - base)); S("mcn", "in", (rev ? 1 - nn : nn).toFixed(5)); }
+    };
+  }
+  d.gain = d.bar - ref;
+  return d;
+}
+// the gain's bar, its words on the side away from the threshold
+function driveBar(c, d, Y, gw, ch, txt, what) {
+  const col = css("--fill-bi") || "#d9a33a", y = Math.max(1, Math.min(ch - 1, Y(d.bar)));
+  c.strokeStyle = col; c.lineWidth = 1.8; c.beginPath(); c.moveTo(0, y); c.lineTo(gw, y); c.stroke();
+  c.fillStyle = col; c.beginPath(); c.roundRect ? c.roundRect(gw * 0.45 - 24, y - 5, 48, 10, 5) : c.rect(gw * 0.45 - 24, y - 5, 48, 10); c.fill();
+  const over = d.bar - d.line, up = over > 0 && y - 34 > 2, wy = up ? y - 26 : y + 18;
+  c.fillText("Input " + (txt || ((d.gain >= 0 ? "+" : "") + d.gain.toFixed(1) + " dB")), 8, wy);
+  c.globalAlpha = 0.8;
+  c.fillText(d.ref.toFixed(0) + " dBFS in lands at " + d.bar.toFixed(1) + "  ·  " + Math.abs(over).toFixed(1) + " dB " + (over > 0 ? "over" : "under") + " the " + what, 8, wy + 14);
+  c.globalAlpha = 1;
+  return y;
+}
+
+function mapLimitCanvas(p, P, hold, CW, bodyH) {
   const I = p.mc.i || {};
+  if (!Object.keys(I).length) { mapSetupNote(hold, "This limiter layout has no roles yet. Set it up in ChannelView on the desktop."); return; }
+  const g = roleCanvas(hold, CW, bodyH), { cv, W_, ch, dpr, gw } = g;
+  const VIA_IN = I.t == null && I.in != null;
+  const st = { v: null, drag: null };
+  function lv(v) {
+    let ceil = 0, thr = null;
+    if (I.ce != null) ceil = RT.isDb(v, "ce") ? v.v.ce : -12 + (v.n.ce || 0) * 12;
+    if (I.t != null) thr = RT.isDb(v, "t") ? v.v.t : -30 + (v.n.t || 0) * 30;
+    // a gain into the ceiling (no threshold): the ceiling its threshold,
+    // the gain a bar of its own
+    const D = VIA_IN ? driveOf(p, v, ceil, "limit", (verb, k, val) => send(verb, p.g, k, val)) : null;
+    const TOP = Math.max(3, ceil + 3), BOT = D ? Math.max(-72, Math.min(-30, ceil - 36))
+      : Math.max(-72, Math.min(-30, (thr == null ? -12 : thr) - 18));
+    return { ceil, thr, D, TOP, BOT, Y: db => (TOP - db) / (TOP - BOT) * ch };
+  }
+  function draw() {
+    const v = st.v, c = cv.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W_, ch);
+    c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(0, 0, W_, ch);
+    if (!v) return;
+    const L = lv(v); st.L = L;
+    c.font = "11px -apple-system, system-ui, sans-serif";
+    c.strokeStyle = css("--ring"); c.globalAlpha = 0.4;
+    for (let d = 0; d >= -72; d -= 6) { const y = Math.round(L.Y(d)) + 0.5; if (y > ch) break; c.beginPath(); c.moveTo(0, y); c.lineTo(gw, y); c.stroke(); }
+    c.globalAlpha = 1;
+    // the reduction now, hanging from the top
+    const gr = v.g || 0;
+    if (gr > 0.05) { c.fillStyle = withA(css("--fill-bi") || "#d9a33a", 0.2); c.fillRect(0, 0, gw, Math.min(ch * 0.4, gr / 18 * ch)); }
+    const red = "#e05a5a";
+    RT.hline(c, L.Y(L.ceil), gw, red, true); if (I.ce != null) RT.pill(c, gw - 40, L.Y(L.ceil), red);
+    c.fillStyle = red; c.fillText("Ceiling " + (I.ce != null ? (v.x.ce || "") : "0 dB"), 8, L.Y(L.ceil) + 14);
+    if (L.D) {
+      L.barY = driveBar(c, L.D, L.Y, gw, ch, v.x.in, "ceiling");
+    } else if (L.thr != null) {
+      RT.hline(c, L.Y(L.thr), gw, css("--accent"), false); RT.pill(c, gw - 40, L.Y(L.thr), css("--accent"));
+      c.fillStyle = css("--value");
+      c.fillText((v.x.t || "") + "  Threshold  ·  gain " + ((L.ceil - L.thr) >= 0 ? "+" : "") + (L.ceil - L.thr).toFixed(1) + " dB", 8, L.Y(L.thr) - 6);
+    }
+    st.rel = null;
+    if (I.l != null) {
+      const bx = 8, bw = 176, bh = 44, by = ch - bh - 8;
+      c.fillStyle = withA(css("--panel") || "#202327", 0.85); c.fillRect(bx, by, bw, bh);
+      c.strokeStyle = css("--ring"); c.lineWidth = 1; c.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+      c.fillStyle = css("--dim"); c.fillText("Release", bx + 8, by + 15);
+      c.fillStyle = css("--value"); c.textAlign = "right"; c.fillText(v.x.l || "", bx + bw - 8, by + 15); c.textAlign = "left";
+      const t0 = bx + 10, t1 = bx + bw - 10, ty = by + bh - 13, f = RT.frac(p, v, "l", RT.REL);
+      c.lineWidth = 4; c.strokeStyle = css("--ring"); c.beginPath(); c.moveTo(t0, ty); c.lineTo(t1, ty); c.stroke();
+      c.strokeStyle = css("--accent"); c.beginPath(); c.moveTo(t0, ty); c.lineTo(t0 + (t1 - t0) * f, ty); c.stroke();
+      c.fillStyle = css("--text"); c.beginPath(); c.arc(t0 + (t1 - t0) * f, ty, 7, 0, Math.PI * 2); c.fill();
+      st.rel = { t0, t1, ty, f };
+    }
+    RT.meter(c, g, v);
+  }
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener("pointerdown", e => {
+    const v = st.v, L = st.L; if (!v || !L) return;
+    const [x, y] = pos(e);
+    const grab = d => { e.preventDefault(); cv.setPointerCapture(e.pointerId); st.drag = Object.assign({ x0: x, y0: y }, d); };
+    if (st.rel && y > st.rel.ty - 16 && y < st.rel.ty + 16 && x > st.rel.t0 - 10 && x < st.rel.t1 + 10) return grab({ k: "l", f0: st.rel.f, w: st.rel.t1 - st.rel.t0 });
+    if (x < gw && I.ce != null && Math.abs(L.Y(L.ceil) - y) < 14) return grab({ k: "ce", v0: L.ceil, n0: v.n.ce, span: L.TOP - L.BOT });
+    if (x < gw && L.D && Math.abs(L.barY - y) < 16) return grab({ k: "g", v0: Math.max(L.BOT, Math.min(L.TOP, L.D.bar)), D: L.D, span: L.TOP - L.BOT });
+    if (x < gw && L.thr != null && Math.abs(L.Y(L.thr) - y) < 16) return grab({ k: "t", v0: L.thr, n0: v.n.t, span: L.TOP - L.BOT, ceil: L.ceil });
+  });
+  cv.addEventListener("pointermove", e => {
+    const d = st.drag, v = st.v; if (!d || !cv.hasPointerCapture(e.pointerId)) return;
+    const [x, y] = pos(e);
+    if (d.k === "l") return RT.setFrac(p, v, "l", RT.REL, Math.max(0, Math.min(1, d.f0 + (x - d.x0) / Math.max(1, d.w))));
+    const dv = -(y - d.y0) / ch * d.span, nv = d.v0 + dv;
+    if (d.k === "ce") {
+      if (RT.isDb(v, "ce")) send("mcv", p.g, "ce", Math.min(3, nv).toFixed(2));
+      else send("mcn", p.g, "ce", Math.max(0, Math.min(1, d.n0 + dv / 12)).toFixed(5));
+    } else if (d.k === "g") {
+      d.D.set(nv);
+    } else {
+      if (RT.isDb(v, "t")) send("mcv", p.g, "t", Math.min(d.ceil, nv).toFixed(2));
+      else send("mcn", p.g, "t", Math.max(0, Math.min(1, d.n0 + dv / 30)).toFixed(5));
+    }
+  });
+  cv.addEventListener("pointerup", () => { st.drag = null; });
+  P.mc = ev => { if (!ev) return; st.v = ev; draw(); };
+}
+
+// ---------------------------------------------------------------------------
+// De-esser, Delay, Reverb, Envelope and Modulation layouts (as the desktop
+// draws them, TS_CV_RolePanel.lua). Each draw registers its handles; a
+// press takes the handle under it with the values it was drawn from, so a
+// drag works from where it started.
+// ---------------------------------------------------------------------------
+const RR = {
+  noteBeats(t) {
+    const s = String(t || "").trim().toLowerCase();
+    let m = s.match(/^(\d+)\s*bars?\b/); if (m) return +m[1] * 4;
+    m = s.match(/^(\d+)\s*\/\s*(\d+)(.*)$/) || s.match(/^(\d+)-(\d+\.?\d*)(.*)$/); if (!m || +m[2] === 0) return null;
+    let b = 4 * +m[1] / +m[2]; const rest = m[3] || "";
+    if (/^\s*\./.test(rest) || /^\s*d\b/.test(rest) || /dot/.test(rest)) b *= 1.5;
+    else if (/^\s*t\b/.test(rest) || /trip/.test(rest)) b *= 2 / 3;
+    return b;
+  },
+  timeMs(v, k, bpm) {
+    if (v.u[k] === "ms" && v.v[k] != null) return v.v[k];
+    const b = RR.noteBeats(v.x[k]); return b == null ? null : b * 60000 / (bpm > 1 ? bpm : 120);
+  },
+  // a value in its unit, or along its range; { val, along }
+  val(p, v, k, unit, lo, hi, log) {
+    if (v.v[k] != null && v.u[k] === unit && Math.abs(v.v[k]) < 1e9) return { val: v.v[k], along: false };
+    let n = v.n[k] || 0; if ((p.mc.rr || {})[k]) n = 1 - n;
+    return { val: log ? lo * Math.pow(hi / lo, n) : lo + n * (hi - lo), along: true };
+  },
+  set(p, k, x, along, lo, hi, log) {
+    if (!along) return send("mcv", p.g, k, (+x).toFixed(4));
+    let n = log ? Math.log(Math.max(lo, x) / lo) / Math.log(hi / lo) : (x - lo) / (hi - lo);
+    n = Math.max(0, Math.min(1, n)); if ((p.mc.rr || {})[k]) n = 1 - n;
+    send("mcn", p.g, k, n.toFixed(5));
+  },
+  nearest(list, fn, target, log) {
+    let best = null, bd = 1e18;
+    for (const s of list || []) { const x = fn(s.t); if (x == null) continue; const d = log ? Math.abs(Math.log(Math.max(1e-6, x)) - Math.log(Math.max(1e-6, target))) : Math.abs(x - target); if (d < bd) { bd = d; best = s.n; } }
+    return best;
+  },
+  on: (v, k) => (v.n[k] || 0) >= 0.5,
+  pct(v, k, p) { if (v.u[k] === "pct" && v.v[k] != null) return Math.max(0, Math.min(1.2, v.v[k] / 100)); let n = v.n[k] || 0; return (p.mc.rr || {})[k] ? 1 - n : n; },
+};
+
+function roleFrame(p, P, hold, CW, bodyH, drawFn, opts) {
+  if (!Object.keys(p.mc.i || {}).length) { mapSetupNote(hold, "This layout has no roles yet. Set it up in ChannelView on the desktop."); return; }
+  const g = roleCanvas(hold, CW, bodyH);
+  if (!(opts && opts.meter)) g.gw = g.W_;
+  const { cv, W_, ch, dpr } = g;
+  const st = { v: null, drag: null, hits: [] };
+  const api = {
+    node(x, y, onDrag, r, onTap) { st.hits.push({ kind: "node", x, y, r: r || 22, onDrag, onTap }); },
+    // a press on nothing at all
+    empty(onTap) { st.empty = onTap; },
+    redraw() { draw(); },
+    hline(y, x0, x1, onDrag) { st.hits.push({ kind: "line", y, x0, x1, onDrag }); },
+    chip(x, y, w, h, onClick) { st.hits.push({ kind: "chip", x, y, w, h, onClick }); },
+  };
+  function draw() {
+    const v = st.v, c = cv.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W_, ch);
+    c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(0, 0, W_, ch);
+    if (!v) return;
+    c.font = "11px -apple-system, system-ui, sans-serif"; c.textAlign = "left";
+    st.hits = []; st.empty = null;
+    drawFn(c, v, api, g);
+    if (opts && opts.meter) RT.meter(c, g, v);
+  }
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener("pointerdown", e => {
+    if (!st.v) return;
+    const [x, y] = pos(e);
+    for (const h_ of st.hits) if (h_.kind === "chip" && x >= h_.x && x <= h_.x + h_.w && y >= h_.y && y <= h_.y + h_.h) { e.preventDefault(); h_.onClick(); return; }
+    let best = null, bd = 1e9;
+    for (const h_ of st.hits) if (h_.kind === "node") { const d = Math.hypot(h_.x - x, h_.y - y); if (d < h_.r && d < bd) { bd = d; best = h_; } }
+    if (!best) for (const h_ of st.hits) if (h_.kind === "line" && x >= h_.x0 && x <= h_.x1 && Math.abs(h_.y - y) < 16) { best = h_; break; }
+    if (!best) { if (st.empty) st.empty(x, y); return; }
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    st.drag = { h: best, x0: x, y0: y, moved: false };
+  });
+  cv.addEventListener("pointermove", e => {
+    const d = st.drag; if (!d || !cv.hasPointerCapture(e.pointerId)) return;
+    const [x, y] = pos(e);
+    if (Math.hypot(x - d.x0, y - d.y0) > 3) d.moved = true;
+    if (d.moved) d.h.onDrag(x - d.x0, y - d.y0);
+  });
+  cv.addEventListener("pointerup", () => { const d = st.drag; st.drag = null; if (d && !d.moved && d.h.onTap) d.h.onTap(); });
+  P.mc = ev => { if (!ev) return; st.v = ev; draw(); };
+}
+
+// small drawing helpers on a 2d context
+const RD = {
+  dot(c, x, y, r, fill, ring) { c.fillStyle = fill; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); if (ring) { c.strokeStyle = ring; c.lineWidth = 1.5; c.stroke(); } },
+  text(c, s, x, y, col, align) { c.fillStyle = col || css("--value"); c.textAlign = align || "left"; c.fillText(s, x, y); c.textAlign = "left"; },
+  vgrid(c, x, y0, y1) { c.strokeStyle = css("--ring"); c.globalAlpha = 0.35; c.lineWidth = 1; c.beginPath(); c.moveTo(Math.round(x) + 0.5, y0); c.lineTo(Math.round(x) + 0.5, y1); c.stroke(); c.globalAlpha = 1; },
+  hgrid(c, y, x0, x1) { c.strokeStyle = css("--ring"); c.globalAlpha = 0.35; c.lineWidth = 1; c.beginPath(); c.moveTo(x0, Math.round(y) + 0.5); c.lineTo(x1, Math.round(y) + 0.5); c.stroke(); c.globalAlpha = 1; },
+  chips(c, api, list, cur, x, y, wMax, onPick) {
+    let cx = x;
+    for (const s of list) {
+      const w = c.measureText(s.t).width + 14; if (cx + w > x + wMax) break;
+      const on = cur >= s.lo - 1e-6 && cur <= s.hi + 1e-6;
+      c.fillStyle = on ? css("--accent") : "rgba(255,255,255,0.08)"; c.fillRect(cx, y, w, 22);
+      RD.text(c, s.t, cx + 7, y + 15, on ? "#fff" : css("--value"));
+      const n = s.n; api.chip(cx, y, w, 22, () => onPick(n));
+      cx += w + 4;
+    }
+    return cx;
+  },
+  toggle(c, api, label, on, x, y, onClick) {
+    const w = c.measureText(label).width + 16;
+    c.fillStyle = on ? css("--accent") : "rgba(255,255,255,0.08)"; c.fillRect(x, y, w, 22);
+    RD.text(c, label, x + 8, y + 15, on ? "#fff" : css("--value")); api.chip(x, y, w, 22, onClick);
+    return x + w + 4;
+  },
+};
+const F_LO = 20, F_HI = 20000;
+const niceStep = span => { for (const s of [50, 100, 250, 500, 1000, 2000]) if (span / s <= 8) return s; return 5000; };
+const msLabel = t => t === 0 ? "0" : t >= 1000 ? (t / 1000) + " s" : t + " ms";
+
+
+// What a de-esser is reducing, over its band: one depth (its gain
+// reduction) across the band, soft at the edges -- drawn as roughly as
+// it's known. Swells at once, settles over half a second; the scale steps
+// 6 / 12 / 24 dB, shallower after three quiet seconds.
+const DEESS = {
+  st: new Map(),
+  fill(c, key, X, gw, y0, y1, lo, hi, gr) {
+    const now = performance.now() / 1000;
+    let s = DEESS.st.get(key); if (!s) { s = { g: 0, t: now, rng: 6, rt: now }; DEESS.st.set(key, s); }
+    const dt = Math.max(0, Math.min(0.2, now - s.t)); s.t = now;
+    s.g += (gr - s.g) * Math.min(1, dt * (gr > s.g ? 30 : 5)); if (s.g < 0.05) s.g = 0;
+    let want = 6; while (want < s.g * 1.15 && want < 48) want *= 2;
+    if (want > s.rng) { s.rng = want; s.rt = now; } else if (want === s.rng) s.rt = now; else if (now - s.rt > 3) { s.rng = want; s.rt = now; }
+    const rng = s.rng;
+    RD.text(c, "0 dB", 4, y0 + 10, css("--dim")); RD.text(c, "−" + rng + " dB", 11, y1 - 2, css("--dim"));
+    c.strokeStyle = "rgba(230,207,121,0.5)"; c.lineWidth = 1; c.beginPath(); c.moveTo(0, y1); c.lineTo(8, y1); c.stroke();
+    if (s.g < 0.3 || !(lo && hi)) return;
+    const yy = y0 + Math.min(rng, s.g) * (y1 - y0) / rng;
+    const a = X(lo), open = hi >= F_HI, b = gw + 2, ew = Math.max(6, gw / 30);
+    const Y = "230,207,121", ia = a + ew, ib = open ? b : Math.max(ia, X(hi) - ew);
+    const vg = c.createLinearGradient(0, y0, 0, yy);
+    vg.addColorStop(0, `rgba(${Y},0.44)`); vg.addColorStop(1, `rgba(${Y},0.12)`);
+    c.fillStyle = vg; c.fillRect(ia, y0, ib - ia, yy - y0);
+    // soft edges, a fade either side of each edge
+    const edge = (x0, x1) => { const hg = c.createLinearGradient(x0, 0, x1, 0); hg.addColorStop(0, `rgba(${Y},0)`); hg.addColorStop(1, `rgba(${Y},0.3)`); c.fillStyle = hg; c.fillRect(Math.min(x0, x1), y0, Math.abs(x1 - x0), yy - y0); };
+    edge(a - ew, ia);
+    if (!open) edge(X(hi) + ew, ib);
+    c.strokeStyle = `rgba(${Y},0.7)`; c.lineWidth = 1.6; c.beginPath(); c.moveTo(a, yy); c.lineTo(open ? gw : X(hi), yy); c.stroke();
+  },
+};
+
+function mapDeessCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {};
+  roleFrame(p, P, hold, CW, bodyH, (c, v, api, g) => {
+    const gw = g.gw, ch = g.ch, sh = Math.max(64, Math.floor(ch * 0.5));
+    const X = f => Math.log(Math.max(F_LO, Math.min(F_HI, f)) / F_LO) / Math.log(F_HI / F_LO) * gw;
+    for (const f of [100, 1000, 10000]) { RD.vgrid(c, X(f), 0, sh); RD.text(c, f >= 1000 ? f / 1000 + "k" : String(f), X(f) + 3, sh - 4, css("--dim")); }
+    const F = I.fq != null ? RR.val(p, v, "fq", "hz", 1000, 16000, true) : null;
+    const LO = I.lo != null ? RR.val(p, v, "lo", "hz", 1000, 16000, true) : null;
+    const HI = I.hi != null ? RR.val(p, v, "hi", "hz", 2000, 20000, true) : null;
+    let lo = LO && LO.val, hi = HI && HI.val;
+    if (!(lo && hi) && F) {
+      if (I.wd == null && p.mc.ds !== "around") { lo = F.val; hi = F_HI; }   // split-band: everything above it
+      else if (I.wd != null && v.u.wd === "hz" && v.v.wd != null) { lo = Math.max(F_LO, F.val - v.v.wd / 2); hi = F.val + v.v.wd / 2; }
+      else { let oct = 1; if (I.wd != null) oct = (v.u.wd === "" && v.v.wd > 0 && v.v.wd < 8) ? v.v.wd : 0.3 + RR.pct(v, "wd", p) * 2.7; lo = F.val / Math.pow(2, oct / 2); hi = F.val * Math.pow(2, oct / 2); }
+    } else if (lo && !hi) hi = F_HI; else if (hi && !lo) lo = F_LO;
+    const grc = css("--fill-bi") || "#d9a33a";
+    if (lo && hi) { c.fillStyle = withA(grc, 0.16); c.fillRect(X(lo), 0, X(hi) - X(lo), sh); c.strokeStyle = grc; c.lineWidth = 1.2; c.strokeRect(X(lo) + 0.5, 0.5, X(hi) - X(lo), sh - 1); }
+    DEESS.fill(c, p.g, X, gw, 2, sh - 4, lo, hi, v.g || 0);
+    const fdrag = (k, o, lo_, hi_) => (dx) => RR.set(p, k, o.val * Math.pow(F_HI / F_LO, dx / gw), o.along, lo_, hi_, true);
+    if (F) { const nx = X(F.val), ny = sh * 0.38; RD.dot(c, nx, ny, 7, grc, "#fff"); RD.text(c, v.x.fq || "", (lo ? X(lo) : nx) - 6, 14, css("--value"), "right"); if (I.wd != null) RD.text(c, "width " + (v.x.wd || ""), (lo ? X(lo) : nx) - 6, 28, css("--dim"), "right"); api.node(nx, ny, fdrag("fq", F, 1000, 16000)); }
+    if (LO) { RD.dot(c, X(LO.val), sh - 10, 5, grc); api.node(X(LO.val), sh - 10, fdrag("lo", LO, 1000, 16000)); }
+    if (HI) { RD.dot(c, X(HI.val), sh - 10, 5, grc); api.node(X(HI.val), sh - 10, fdrag("hi", HI, 2000, 20000)); }
+    // under it: the reduction now, and the threshold on a level scale
+    const wy0 = sh + 4, wh = ch - wy0, mid = wy0 + wh / 2, half = wh / 2 - 4;
+    c.fillStyle = "rgba(0,0,0,0.15)"; c.fillRect(0, wy0, gw, wh);
+    const gr = v.g || 0;
+    if (I.t != null) {
+      const T = RR.val(p, v, "t", "db", -60, 0, false), thr = Math.max(-60, T.val), a = (thr + 60) / 60;
+      const ty = mid - a * half, by = mid + a * half;
+      c.setLineDash([5, 3]); c.strokeStyle = css("--accent"); c.lineWidth = 1.3;
+      c.beginPath(); c.moveTo(0, ty); c.lineTo(gw, ty); c.moveTo(0, by); c.lineTo(gw, by); c.stroke(); c.setLineDash([]);
+      RT.pill(c, gw - 92, ty, css("--accent")); RD.text(c, "Threshold " + (v.x.t || ""), 8, ty - 6);
+      api.hline(ty, 0, gw, (dx, dy) => RR.set(p, "t", Math.max(-60, Math.min(0, thr - dy * 60 / half)), T.along, -60, 0, false));
+    }
+    if (I.rg != null) RD.text(c, "Range " + (v.x.rg || ""), 8, ch - 8, css("--value"));
+  });   // no reduction meter: the band's fill and the line above show it
+}
+
+const DLSEL = new Map();   // a delay canvas's selected tap, by plugin
+// The echoes along a timeline, left above the line and right below (a mono
+// delay's even both ways), as the bridge works them out (TS_CV_Delay, the
+// same model the desktop draws): one or two lines, or a multi-tap's taps
+// (numbered, the pattern repeating at the faint yellow lines). With sync
+// on the timeline is in note values. A drag hands its handle and the time
+// or value it's reached back to the bridge (dla), which sets whichever of
+// the plugin's controls that is, snapping while synced.
+const DL = {
+  noteLabel(beats) {
+    if (!(beats > 0)) return null;
+    const w = beats / 4;
+    if (w >= 1 && Math.abs(w - Math.round(w)) < 1e-3) { const n = Math.round(w); return n === 1 ? "1 bar" : n + " bars"; }
+    for (const d of [1, 2, 4, 8, 16, 32, 64]) { const a = w * d; if (Math.abs(a - Math.round(a)) < 1e-3) return Math.round(a) + "/" + d; }
+    return null;
+  },
+  beatStep(spanBeats) { for (const s of [0.25, 0.5, 1, 2, 4, 8, 16]) if (spanBeats / s <= 8) return s; return 32; },
+  dragValue(h, dpx, scale) {
+    const per = Math.max(1e-6, (h.k || 1) * scale), d = (h.s === "R" ? 1 : -1) * dpx / per;
+    return h.pw === 2 ? Math.sqrt(Math.max(0, (h.v0 || 0) * (h.v0 || 0) + d)) : Math.max(0, (h.v0 || 0) + d);
+  },
+};
+function mapDelayCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {};
+  roleFrame(p, P, hold, CW, bodyH, (c, v, api, g) => {
+    const d = v.dl; if (!d) return;
+    const on = k => { const t = " " + String(v.x[k] || "").toLowerCase() + " ";
+      if (/disabl|bypass| off | out | no |inactive|mute/.test(t)) return false; if (/ on |enabl| in | yes |active/.test(t)) return true; return (v.n[k] || 0) >= 0.5; };
+    const gw = g.gw, ch = g.ch, by0 = ch - 30, SW = p.mc.sw || {};
+    // its filters under the echoes: the plugin's own, or the selected tap's
+    // (else the first's), the other taps' faint
+    const sel0 = DLSEL.get(p.g) || null;
+    const tone = d.tn || (d.tns ? (d.tns[String(sel0 || ((d.tp || [])[0] || {}).k)] || null) : null);
+    const toneH = (tone && ch > 260) ? 58 : 0, by = by0 - toneH;
+    const span = d.sp || 2000, beat = d.bt || 500, t0 = 16, t1 = gw - 10;
+    const X = t => t0 + t / span * (t1 - t0);
+    if (d.bg) { const sb = DL.beatStep(span / beat);
+      for (let b = 0; b * beat <= span + 1e-6; b += sb) { RD.vgrid(c, X(b * beat), 0, by - 14); RD.text(c, b === 0 ? "0" : (DL.noteLabel(b) || String(b)), X(b * beat) + 2, by - 2, css("--dim")); } }
+    else { const step = niceStep(span); for (let t = 0; t <= span; t += step) { RD.vgrid(c, X(t), 0, by - 14); RD.text(c, msLabel(t), X(t) + 2, by - 2, css("--dim")); } }
+    const mid = (by - 14) / 2, amp = mid - 14, scale = amp * 0.85;
+    RD.hgrid(c, mid, 0, gw);
+    if (d.st) { RD.text(c, "L", 4, 14, css("--dim")); RD.text(c, "R", 4, by - 18, css("--dim")); }
+    if (d.tp && d.pr) { c.setLineDash([4, 4]); c.strokeStyle = "rgba(230,207,121,0.32)"; c.lineWidth = 1;
+      for (let r = 1; r * d.pr <= span && r < 40; r++) { const x = X(r * d.pr); c.beginPath(); c.moveTo(x, 0); c.lineTo(x, by - 14); c.stroke(); }
+      c.setLineDash([]); }
+    c.strokeStyle = withA(css("--label"), 0.6); c.lineWidth = 3; c.beginPath(); c.moveTo(X(0), mid - amp); c.lineTo(X(0), mid + amp); c.stroke();
+    (d.e || []).forEach((e, i) => { const x = X(e[0]), al = e[3] >= 0 ? (e[3] === 0 ? 1 : Math.max(0.3, 0.8 - e[3] * 0.1)) : Math.max(0.3, 1 - i * 0.08);
+      c.strokeStyle = withA(css("--accent"), al); c.lineWidth = 4; c.beginPath();
+      if (e[1] * scale > 0.5) { c.moveTo(x, mid); c.lineTo(x, mid - e[1] * scale); }
+      if (e[2] * scale > 0.5) { c.moveTo(x, mid); c.lineTo(x, mid + e[2] * scale); }
+      c.stroke(); });
+    c.setLineDash([3, 3]); c.strokeStyle = withA(css("--accent"), 0.55); c.lineWidth = 1;
+    for (const ch_ of d.ch || []) { c.beginPath(); ch_.forEach((q, i) => { const y = mid - q[1] * scale; i ? c.lineTo(X(q[0]), y) : c.moveTo(X(q[0]), y); }); c.stroke(); }
+    for (const sd of ["L", "R"]) { const pts = (d.dc || {})[sd]; if (!pts || pts.length < 2) continue; c.beginPath();
+      pts.forEach((q, i) => { const y = sd === "L" ? mid - q[1] * scale : mid + q[1] * scale; i ? c.lineTo(X(q[0]), y) : c.moveTo(X(q[0]), y); }); c.stroke(); }
+    c.setLineDash([]);
+    // a tap tapped is selected: its own controls top right, its own
+    // feedback's dot; a tap on nothing lets it go
+    let sel = DLSEL.get(p.g) || null;
+    if (sel && !(d.tp || []).some(t => t.k === sel)) { sel = null; DLSEL.delete(p.g); }
+    api.empty((x, y) => { if (DLSEL.has(p.g) && y < by && !(x > gw - 230 && y < 70)) { DLSEL.delete(p.g); api.redraw(); } });
+    for (const h of d.h || []) {
+      const x = X(h.t), y = h.s === "top" ? 12 : (h.s === "L" ? mid - h.hh * scale : mid + h.hh * scale);
+      if (x > t1 + 4 || (h.only && h.only !== sel) || y > by) continue;
+      if (h.n && h.n === sel) { c.strokeStyle = "#e6cf79"; c.lineWidth = 2; c.beginPath(); c.arc(x, y, 13, 0, 7); c.stroke(); }
+      RD.dot(c, x, y, h.n ? 9 : (h.own ? 5 : 7), css("--text"), css("--accent"));
+      if (h.n) RD.text(c, String(h.n), x, y + 4, "#1d2026", "center");
+      else if (h.lb && !(h.own && h.own !== sel)) RD.text(c, h.lb, x + 11, (h.s === "R" || h.s === "top") ? y + 16 : y - 6);
+      const st = { axis: null };
+      api.node(x, y, (dx, dy) => {
+        if (!st.axis && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) st.axis = (h.ax && h.ud) ? (Math.abs(dx) >= Math.abs(dy) ? "x" : "y") : (h.ax ? "x" : "y");
+        if (st.axis === "x" && h.ax) send("dla", p.g, h.id, "t", Math.max(1, (h.tq != null ? h.tq : h.t) + dx / (t1 - t0) * span).toFixed(2));
+        else if (st.axis === "y" && h.ud) send("dla", p.g, h.id, "v", DL.dragValue(h, dy, scale).toFixed(4));
+      }, null, h.n ? () => { if (DLSEL.get(p.g) === h.n) DLSEL.delete(p.g); else DLSEL.set(p.g, h.n); api.redraw(); } : null);
+    }
+    // the selected tap's own controls: its pan stepped either way, its
+    // level and feedback as they read, its switches
+    if (sel) {
+      const k = "k" + sel, hd = (d.h || []).find(h => h.n === sel);
+      const parts = [I[k + "pn"] != null ? "Pan " + (v.x[k + "pn"] || "") : null, I[k + "lv"] != null ? "Level " + (v.x[k + "lv"] || "") : null,
+                     I[k + "fb"] != null ? "Feedback " + (v.x[k + "fb"] || "") : null,
+                     I[k + "lc"] != null ? "Low cut " + (v.x[k + "lc"] || "") : null, I[k + "hc"] != null ? "High cut " + (v.x[k + "hc"] || "") : null].filter(Boolean).join("   ");
+      RD.text(c, "Tap " + sel + (parts ? "   " + parts : ""), gw - 8, 36, "#e6cf79", "right");
+      let rx = gw - 8;
+      const chip = (label, on_, fn) => { const w = c.measureText(label).width + 16; rx -= w; RD.toggle(c, api, label, on_, rx, 44, fn); rx -= 4; };
+      if (d.rd) { const tp = (d.tp || []).find(t => t.k === sel); if (tp && tp.rm) chip("REMOVE", false, () => { send("rbt", p.g, "rm", String(sel)); DLSEL.delete(p.g); }); }
+      if (I[k + "pp"] != null) { const o_ = on(k + "pp"); chip("PING-PONG", o_, () => send("mcn", p.g, k + "pp", o_ ? "0" : "1")); }
+      if (I[k + "on"] != null) { const o_ = on(k + "on"); chip("ON", o_, () => send("mcn", p.g, k + "on", o_ ? "0" : "1")); }
+      if (I[k + "pn"] != null && hd) {
+        const pan = hd.pn || 0;
+        chip("PAN \u25B8", false, () => send("dla", p.g, "p" + sel, "v", Math.min(1, pan + 0.1).toFixed(3)));
+        chip("\u25C2 PAN", false, () => send("dla", p.g, "p" + sel, "v", Math.max(-1, pan - 0.1).toFixed(3)));
+      }
+    }
+    if (toneH) {
+      const sy0 = by + 6, sy1 = by0 - 2, fx0 = 10, fx1 = gw - 10, fy0 = sy0 + 16, fy1 = sy1 - 6;
+      const FX = q => fx0 + Math.log(Math.max(20, Math.min(20000, q)) / 20) / Math.log(1000) * (fx1 - fx0);
+      c.fillStyle = "rgba(0,0,0,0.15)"; c.fillRect(0, sy0, gw, sy1 - sy0);
+      for (const gq of [100, 1000, 10000]) { RD.vgrid(c, FX(gq), fy0 - 2, fy1); RD.text(c, gq >= 1000 ? (gq / 1000) + "k" : String(gq), FX(gq) + 2, sy1 - 2, css("--dim")); }
+      RD.text(c, (tone.k ? "Tap " + tone.k + "  " : "") + "Filters", 6, sy0 + 12, css("--dim"));
+      const respY = (t, q) => { let db = 0; if (t.lc && t.lc > 21 && q < t.lc) db -= 12 * Math.log2(t.lc / q); if (t.hc && t.hc < 19900 && q > t.hc) db -= 12 * Math.log2(q / t.hc); return fy0 + Math.min(1, -db / 24) * (fy1 - fy0); };
+      const curve = (t, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); for (let i = 0; i <= 90; i++) { const q = 20 * Math.pow(1000, i / 90); i ? c.lineTo(FX(q), respY(t, q)) : c.moveTo(FX(q), respY(t, q)); } c.stroke(); };
+      if (d.tns && !d.tn) for (const kk in d.tns) if (+kk !== tone.k) curve(d.tns[kk], withA(css("--accent"), 0.25), 1);
+      const a_ = tone.lc ? Math.max(fx0, FX(tone.lc)) : fx0, b_ = tone.hc ? Math.min(fx1, FX(tone.hc)) : fx1;
+      c.fillStyle = withA(css("--accent"), 0.1); c.fillRect(a_, fy0, b_ - a_, fy1 - fy0);
+      curve(tone, css("--accent"), 1.8);
+      // labels inwards; outwards when they'd meet; the high cut's a line down when even that won't do
+      const lt = tone.lc != null ? "Low cut " + (tone.lt || "") : "", ht = tone.hc != null ? "High cut " + (tone.ht || "") : "";
+      const lw = c.measureText(lt).width, hw = c.measureText(ht).width;
+      let LX = [a_ + 10, "left"], HX = [b_ - 10, "right"], hdy = 0;
+      if (lt && ht && a_ + 10 + lw + 6 > b_ - 10 - hw) {
+        LX = [a_ - 10, "right"]; HX = [b_ + 10, "left"];
+        if (a_ - 10 - lw < fx0 - 6 || b_ + 10 + hw > fx1 + 6) { LX = [a_ + 10, "left"]; HX = [b_ - 10, "right"]; hdy = 13;
+          if (b_ - 10 - hw < fx0) HX = [b_ + 10, "left"]; if (a_ + 10 + lw > fx1) LX = [a_ - 10, "right"]; }
+      }
+      for (const [wh, hz, txt, name] of [["lc", tone.lc, tone.lt, "Low cut"], ["hc", tone.hc, tone.ht, "High cut"]]) {
+        if (hz == null) continue;
+        const nx = wh === "lc" ? a_ : b_, id = wh + (tone.k ? String(tone.k) : ""), f0 = Math.max(20, Math.min(20000, hz));
+        RD.dot(c, nx, fy0, 7, css("--text"), css("--accent"));
+        const P_ = wh === "lc" ? LX : HX;
+        RD.text(c, name + " " + (txt || ""), P_[0], fy0 + 4 + (wh === "hc" ? hdy : 0), css("--value"), P_[1]);
+        api.node(nx, fy0, dx => send("dla", p.g, id, "f", (f0 * Math.pow(1000, dx / (fx1 - fx0))).toFixed(1)));
+      }
+    }
+    // the foot: sync, link, ping-pong, its mode, the taps' switches, the notes
+    let cx = 4;
+    const chipRow = (k, x, room, upper) => {
+      const sw = SW[k]; if (!sw) return x;
+      const L_ = sw.map(s => Object.assign({}, s, { t: upper ? String(s.t).toUpperCase() : String(s.t) })), cur = v.n[k] || 0;
+      const need = L_.reduce((t, s) => t + c.measureText(s.t).width + 18, 0);
+      if (need <= room) return RD.chips(c, api, L_, cur, x, by0 + 6, room, n => send("mcn", p.g, k, n.toFixed(5)));
+      const i = Math.max(0, L_.findIndex(s => cur >= s.lo - 1e-6 && cur <= s.hi + 1e-6)), nx = L_[(i + 1) % L_.length];
+      return RD.chips(c, api, [Object.assign({}, L_[i], { t: L_[i].t + "  ›" })], cur, x, by0 + 6, room, () => send("mcn", p.g, k, nx.n.toFixed(5)));
+    };
+    if (I.sy != null) { if (SW.sy && SW.sy.length > 2) cx = chipRow("sy", cx, (gw - cx) * 0.4, true) + 4;
+      else { const sy = !!d.sy; cx = RD.toggle(c, api, "SYNC", sy, cx, by0 + 6, () => send("mcn", p.g, "sy", sy ? "0" : "1")); } }
+    if (I.lk != null) { const lk = on("lk"); cx = RD.toggle(c, api, "LINK", lk, cx, by0 + 6, () => send("mcn", p.g, "lk", lk ? "0" : "1")); }
+    if (I.pp != null) { const pp = on("pp"); cx = RD.toggle(c, api, "PING-PONG", pp, cx, by0 + 6, () => send("mcn", p.g, "pp", pp ? "0" : "1")); }
+    if (I.md != null) cx = chipRow("md", cx + 4, (gw - cx) * 0.5, true);
+    for (const tp of d.tp || []) { const k = "k" + tp.k + "on"; if (I[k] == null || cx + 30 > gw) continue;
+      const lit = !!tp.on; cx = RD.toggle(c, api, String(tp.k), lit, cx, by0 + 6, () => send("mcn", p.g, k, lit ? "0" : "1")); }
+    if (d.rd && (d.tp || []).length < (d.mx || 10) && cx + 30 <= gw) cx = RD.toggle(c, api, "+", false, cx, by0 + 6, () => send("rbt", p.g, "add"));
+    const nk = I.nt != null ? "nt" : (I.tm != null && RR.noteBeats(v.x.tm) != null ? "tm" : null);
+    if (nk) cx = chipRow(nk, cx + 4, gw - cx - 8, false);
+    if (I.rh != null) chipRow("rh", cx + 4, gw - cx - 8, true);
+    const kn = [I.cx != null ? "Cross " + (v.x.cx || "") : null, I.wd != null ? "Width " + (v.x.wd || "") : null,
+                I.mx != null ? (I.dy != null ? "Wet " : "Mix ") + (v.x.mx || "") : null, I.dy != null ? "Dry " + (v.x.dy || "") : null].filter(Boolean).join("   ");
+    if (kn && !sel) RD.text(c, kn, gw - 8, 16, css("--value"), "right");
+  });
+}
+
+function mapReverbCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {};
+  roleFrame(p, P, hold, CW, bodyH, (c, v, api, g) => {
+    const gw = g.gw, ch = g.ch;
+    const PD = I.pd != null ? RR.val(p, v, "pd", "ms", 0, 250, false) : { val: 0 };
+    const DC = I.dc != null ? RR.val(p, v, "dc", "ms", 100, 20000, true) : { val: 2000 };
+    // measured: a decay that reads in a scale of its own, timed (ms at
+    // positions of its decay, by size)
+    const DCAL = p.mc.dcal || null;
+    const rowMs = (row, dn) => { let i = 0; while (i < row.length - 2 && dn > row[i + 1][0]) i++; const a = row[i], b = row[i + 1];
+      if (!b || b[0] === a[0]) return a[1]; const la = Math.log(Math.max(1, a[1])), lb = Math.log(Math.max(1, b[1])); return Math.exp(la + (dn - a[0]) * (lb - la) / (b[0] - a[0])); };
+    const decayMs = (dn, sn) => {
+      const rows = new Map(); for (const q of DCAL) { if (!rows.has(q[0])) rows.set(q[0], []); rows.get(q[0]).push([q[1], q[2]]); }
+      const keys = [...rows.keys()].sort((a, b) => a - b); for (const k of keys) rows.get(k).sort((a, b) => a[0] - b[0]);
+      if (keys.length === 1 || sn == null || sn < 0) return rowMs(rows.get(keys[0]), dn);
+      let i = 0; while (i < keys.length - 2 && sn > keys[i + 1]) i++;
+      const ka = keys[i], kb = keys[i + 1], ma = Math.log(rowMs(rows.get(ka), dn)), mb = Math.log(rowMs(rows.get(kb), dn));
+      return Math.exp(ma + (kb === ka ? 0 : (sn - ka) / (kb - ka)) * (mb - ma));
+    };
+    const decayPos = (ms, sn) => { const up = decayMs(1, sn) >= decayMs(0, sn); let lo = 0, hi = 1;
+      for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if ((decayMs(mid, sn) < ms) === up) lo = mid; else hi = mid; } return (lo + hi) / 2; };
+    const SN = I.sz != null ? (v.n.sz || 0) : null;
+    if (DCAL && I.dc != null) DC.val = decayMs(v.n.dc || 0, SN);
+    // held: its freeze on, or a decay reading "Infinite"; a decay reading plain seconds (SuperPlate's)
+    const onTxt = k => { const s_ = " " + String(v.x[k] || "").toLowerCase() + " ";
+      if (/disabl|bypass| off | out | no |inactive|mute/.test(s_)) return false; if (/ on |enabl| in | yes |active/.test(s_)) return true; return (v.n[k] || 0) >= 0.5; };
+    let frozen = I.fz != null && onTxt("fz"), dSecs = false;
+    if (I.dc != null && !DCAL && (v.u.dc === "" || v.u.dc == null)) {
+      if (/inf/i.test(String(v.x.dc || ""))) frozen = true;
+      else if (p.mc.dsec && v.v.dc != null) { DC.val = v.v.dc * 1000; DC.along = false; dSecs = true; } }
+    const pre = PD.val, dec = DC.val;
+    let early = -6, eAlong = false;
+    if (I.er != null) { if ((v.u.er === "db" || v.u.er === "") && v.v.er != null) early = Math.max(-60, v.v.er); else if (v.u.er === "pct" && v.v.er > 0) early = 20 * Math.log10(v.v.er / 100); else { early = -36 + RR.pct(v, "er", p) * 36; eAlong = true; } }
+    // the early reflections against the late reverb (Balance): early's level over late's, dB
+    let late0 = early, bal = null;
+    const BT = p.mc.bt || null;
+    const balAt = n => { if (n <= BT[0][0]) return BT[0][1]; for (let i = 0; i < BT.length - 1; i++) { const a = BT[i], b = BT[i + 1]; if (n <= b[0]) return a[1] + (b[1] - a[1]) * (n - a[0]) / Math.max(1e-9, b[0] - a[0]); } return BT[BT.length - 1][1]; };
+    const balNorm = db => { let best = BT[0][0], bd = 1e9; for (let i = 0; i < BT.length - 1; i++) { const a = BT[i], b = BT[i + 1], lo = Math.min(a[1], b[1]), hi = Math.max(a[1], b[1]);
+      if (db >= lo && db <= hi && hi > lo) return a[0] + (b[0] - a[0]) * (db - a[1]) / (b[1] - a[1]); for (const q of [a, b]) { const d = Math.abs(q[1] - db); if (d < bd) { bd = d; best = q[0]; } } } return best; };
+    const balAlong = n => { const f = Math.max(0.001, Math.min(0.999, n)); return Math.max(-60, Math.min(24, 20 * Math.log10((1 - f) / f))); };
+    if (I.bl != null) {
+      bal = BT ? balAt(v.n.bl || 0) : balAlong((p.mc.rr || {}).bl ? 1 - (v.n.bl || 0) : (v.n.bl || 0));
+      if (I.er == null) early = Math.min(0, bal) - 2;
+      late0 = Math.min(0, -bal);
+    }
+    const size = I.sz != null ? RR.pct(v, "sz", p) : 0.5;
+    const strip = ["dm", "bs", "lf", "hf", "lc", "hc", "tn", "le", "he"].some(k => I[k] != null) ? 116 : 0, topH = ch - strip - (strip ? 6 : 0);
+    const diff = I.df == null ? null : (v.u.df === "pct" && v.v.df != null) ? Math.max(0, Math.min(1, v.v.df / 100)) : RR.pct(v, "df", p);
+    const topRow = (I.st != null || I.fz != null) ? 26 : 0;
+    const span = Math.max(1000, Math.ceil((pre + dec) * 1.2 / 500) * 500), t0 = 22, t1 = gw - 12, y0 = 22 + topRow, y1 = topH - 18;
+    const X = t => t0 + t / span * (t1 - t0), Y = db => y0 + (-db) / 66 * (y1 - y0);
+    const step = niceStep(span);
+    for (let t = 0; t <= span; t += step) { RD.vgrid(c, X(t), y0 - 10, y1); RD.text(c, msLabel(t), X(t) + 2, y1 + 13, css("--dim")); }
+    for (const db of [0, -20, -40, -60]) { RD.hgrid(c, Y(db), 0, gw); RD.text(c, String(db), 3, Y(db) - 3, css("--dim")); }
+    c.fillStyle = "rgba(255,255,255,0.04)"; c.fillRect(X(0) + 2, y0 - 10, X(pre) - X(0), y1 - y0 + 10);
+    c.strokeStyle = withA(css("--label"), 0.6); c.lineWidth = 3; c.beginPath(); c.moveTo(X(0), Y(0)); c.lineTo(X(0), y1); c.stroke();
+    const spread = 20 + size * 90;
+    c.strokeStyle = "rgba(224,163,58,0.8)"; c.lineWidth = diff > 0.6 ? 1.1 : 1.6;
+    const ner = diff == null ? 14 : Math.floor(8 + diff * 22);
+    for (let i = 0; i < ner; i++) { const t = pre + i * spread / ner + ((i * 37) % 7) * (1 - (diff || 0) * 0.6), db = early - i * 1.4 * 13 / ner - ((i * 53) % 5); c.beginPath(); c.moveTo(X(t), y1); c.lineTo(X(t), Y(db)); c.stroke(); }
+    const tDec = pre + dec * 52 / 60, tEnd = frozen ? span : tDec, ts = pre + spread / 2;
+    const tailDb = t => frozen ? late0 - 2 : Math.max(-66, late0 - 2 - 60 * (t - pre) / dec);
+    if (diff != null && diff < 0.85) {
+      // separate echoes, not a wash, when it isn't diffuse
+      const nsp = Math.floor(30 + diff * 90), grain = (1 - diff) * 14;
+      c.strokeStyle = withA(css("--accent"), 0.25 + 0.4 * (1 - diff)); c.lineWidth = 1;
+      for (let i = 0; i < nsp; i++) { const t = ts + (tEnd - ts) * (i + 0.5) / nsp, db = tailDb(t) - grain * (((i * 7919) % 13) / 13); c.beginPath(); c.moveTo(X(t), y1); c.lineTo(X(t), Y(db)); c.stroke(); }
+    }
+    c.beginPath(); for (let i = 0; i <= 40; i++) { const t = ts + (tEnd - ts) * i / 40, y = Y(tailDb(t)); i ? c.lineTo(X(t), y) : c.moveTo(X(t), y); }
+    const endY = Y(-60), decX = X(Math.min(span, tDec));
+    c.strokeStyle = css("--accent"); c.lineWidth = 2; c.stroke();
+    c.lineTo(X(tEnd), y1); c.lineTo(X(ts), y1); c.closePath(); c.fillStyle = withA(css("--accent"), 0.18); c.fill();
+    if (I.pd != null) { RD.dot(c, X(pre), Y(-2), 7, css("--text"), css("--accent")); RD.text(c, "Pre-delay " + (v.x.pd || ""), X(pre) + 10, Y(-2) - 8);
+      api.node(X(pre), Y(-2), dx => { const nv = Math.max(0, pre + dx / (t1 - t0) * span); const sw = (p.mc.sw || {}).pd;
+        if (sw) { const n = RR.nearest(sw, t => { const m_ = String(t).match(/([\d.]+)\s*(ms|s)\b/i); return m_ ? (+m_[1]) * (m_[2].toLowerCase() === "s" ? 1000 : 1) : null; }, Math.max(0.1, nv), false); if (n != null) send("mcn", p.g, "pd", n.toFixed(5)); }
+        else RR.set(p, "pd", nv, PD.along, 0, 250, false); }); }
+    if (I.dc != null) { RD.dot(c, decX, endY, 7, css("--text"), css("--accent")); RD.text(c, "Decay " + (v.x.dc || "") + (DCAL ? "  \u00b7  " + (dec / 1000).toFixed(2) + " s" : dSecs ? " s" : "") + (frozen ? "  \u00b7  frozen" : ""), Math.min(decX + 10, gw - (DCAL ? 150 : 110)), endY - 10);
+      api.node(decX, endY, dx => { const nv = Math.max(50, dec + dx / (t1 - t0) * span / (52 / 60)); const sw = (p.mc.sw || {}).dc;
+        if (DCAL) { send("mcn", p.g, "dc", Math.max(0, Math.min(1, decayPos(nv, SN))).toFixed(5)); return; }
+        if (dSecs) { send("mcv", p.g, "dc", (nv / 1000).toFixed(3)); return; }
+        if (sw) { const n = RR.nearest(sw, t => { const m_ = String(t).match(/([\d.]+)\s*(ms|s)\b/i); return m_ ? (+m_[1]) * (m_[2].toLowerCase() === "s" ? 1000 : 1) : null; }, nv, true); if (n != null) send("mcn", p.g, "dc", n.toFixed(5)); }
+        else RR.set(p, "dc", nv, DC.along, 100, 20000, true); }); }
+    if (I.er != null) { const ex = X(pre + 6), ey = Y(early); RD.dot(c, ex, ey, 5, "rgba(224,163,58,1)", "#fff"); RD.text(c, "Early " + (v.x.er || ""), ex + 9, ey + 14, "#e6cf79");
+      api.node(ex, ey, (dx, dy) => { const nv = Math.max(-60, Math.min(0, early - dy * 66 / (y1 - y0)));
+        if (eAlong) { let n = (nv + 36) / 36; n = Math.max(0, Math.min(1, n)); send("mcn", p.g, "er", ((p.mc.rr || {}).er ? 1 - n : n).toFixed(5)); }
+        else if (v.u.er === "pct") send("mcv", p.g, "er", (100 * Math.pow(10, nv / 20)).toFixed(2)); else send("mcv", p.g, "er", nv.toFixed(2)); }); }
+    // the balance, when there's no early level of its own: up, the early reflections over the late reverb
+    if (I.er == null && I.bl != null) { const ex = X(pre + 6), ey = Y(early), b0 = bal; RD.dot(c, ex, ey, 5, "rgba(224,163,58,1)", "#fff"); RD.text(c, "Early / late " + (v.x.bl || ""), ex + 9, ey + 14, "#e6cf79");
+      api.node(ex, ey, (dx, dy) => { const nv = Math.max(-60, Math.min(24, b0 - dy * 66 / (y1 - y0)));
+        let n = BT ? balNorm(nv) : 1 / (1 + Math.pow(10, nv / 20)); if (!BT && (p.mc.rr || {}).bl) n = 1 - n;
+        send("mcn", p.g, "bl", Math.max(0, Math.min(1, n)).toFixed(5)); }); }
+    // along the top: its character, and its freeze
+    if (topRow) { let cx = 4;
+      const sw = (p.mc.sw || {}).st;
+      if (I.st != null && sw) {
+        const up = sw.map(x => Object.assign({}, x, { t: String(x.t).toUpperCase() })), cur = v.n.st || 0, room = gw * 0.6;
+        const need = up.reduce((t, x) => t + c.measureText(x.t).width + 18, 0);
+        if (need <= room) cx = RD.chips(c, api, up, cur, cx, 2, room, n => send("mcn", p.g, "st", n.toFixed(5)));
+        else { const i = Math.max(0, up.findIndex(x => cur >= x.lo - 1e-6 && cur <= x.hi + 1e-6)), nx = up[(i + 1) % up.length];
+          cx = RD.chips(c, api, [Object.assign({}, up[i], { t: up[i].t + "  \u203a" })], cur, cx, 2, room, () => send("mcn", p.g, "st", nx.n.toFixed(5))); }
+        cx += 8; }
+      if (I.fz != null) { const on = onTxt("fz"); RD.toggle(c, api, "FREEZE", on, cx, 2, () => send("mcn", p.g, "fz", on ? "0" : "1")); } }
+    const kn = [I.sz != null ? "Size " + (v.x.sz || "") : null, I.df != null ? "Diffusion " + (v.x.df || "") : null, I.mx != null ? "Mix " + (v.x.mx || "") : null].filter(Boolean).join("   ");
+    if (kn) RD.text(c, kn, gw - 8, 16 + topRow, css("--value"), "right");
+    if (strip) {
+      const sy0 = topH + 6; c.fillStyle = "rgba(0,0,0,0.15)"; c.fillRect(0, sy0, gw, strip);
+      RD.text(c, "Decay by frequency", 6, sy0 + 13, css("--dim"));
+      // the cuts' own switches, at its top right
+      const lcOn = I.lcn == null || onTxt("lcn"), hcOn = I.hcn == null || onTxt("hcn");
+      { let bx = gw - 6; for (const [k, on, lab] of [["hcn", hcOn, "HIGH CUT"], ["lcn", lcOn, "LOW CUT"]]) { if (I[k] == null) continue; bx -= c.measureText(lab).width + 20; RD.toggle(c, api, lab, on, bx, sy0 - 2, () => send("mcn", p.g, k, on ? "0" : "1")); bx -= 4; } }
+      const fx0 = 10, fx1 = gw - 10, FX = f => fx0 + Math.log(f / F_LO) / Math.log(F_HI / F_LO) * (fx1 - fx0);
+      // a multiplier on the decay time: the lows' below their crossover, the
+      // highs' (damping) above theirs; the cuts on the wet sound shaded
+      const ML = 0.25, MH = 4, my0 = sy0 + 18, my1 = sy0 + strip - 8;
+      const MY = m => my1 - Math.log(Math.max(ML, Math.min(MH, m)) / ML) / Math.log(MH / ML) * (my1 - my0);
+      const MUL = y => ML * Math.pow(MH / ML, (my1 - y) / (my1 - my0));
+      const rr = p.mc.rr || {};
+      const LF = I.lf != null ? RR.val(p, v, "lf", "hz", 50, 1000, true) : null;
+      const HF0 = I.hf != null ? RR.val(p, v, "hf", "hz", 1000, 20000, true) : null;
+      const dmHz = I.dm != null && v.u.dm === "hz" && v.v.dm != null && I.hf == null;
+      const HF = HF0 || (dmHz ? { val: v.v.dm, along: false, k: "dm" } : null);
+      const lf = LF ? LF.val : 250, hf = HF ? HF.val : 4000;
+      const at = (k, n) => rr[k] ? 1 - n : n;
+      let bass = 1;
+      if (I.bs != null) {
+        const bv = v.v.bs, bu = v.u.bs;
+        if (bv != null && bu === "" && bv > 0 && bv < 10) bass = bv;
+        else if (bv != null && bu === "ms" && dec > 0) bass = Math.max(0.1, Math.min(4, bv / dec));
+        else if (bv != null && bu === "pct" && bv > 0) bass = bv / 100;
+        else bass = 0.5 * Math.pow(4, at("bs", v.n.bs || 0));
+      }
+      // damping: a time or a multiplier as it reads; anything else along its
+      // range, the end reading more damping the most (x1 none .. x0.25 all)
+      const de = p.mc.de || null;
+      const dUp = (() => { let up = true; if (de && de[0] !== de[1]) up = Math.abs(de[1]) > Math.abs(de[0]); return rr.dm ? !up : up; })();
+      const dIsMul = de && Math.min(de[0], de[1]) >= 0 && Math.max(de[0], de[1]) <= 2 && Math.max(de[0], de[1]) > 0;
+      let dmul = dmHz ? 0.5 : 1;
+      if (I.dm != null && !dmHz) {
+        const dv = v.v.dm, du = v.u.dm;
+        if (dv != null && du === "ms" && dec > 0) dmul = Math.max(0.05, Math.min(4, dv / dec));
+        else if (dv != null && du === "" && dv > 0 && dIsMul) dmul = dv;
+        else { const n = v.n.dm || 0; dmul = Math.pow(0.25, dUp ? n : 1 - n); }
+      }
+      const setBass = m => {
+        const bv = v.v.bs, bu = v.u.bs;
+        if (bv != null && bu === "" && bv > 0 && bv < 10) send("mcv", p.g, "bs", m.toFixed(3));
+        else if (bv != null && bu === "ms" && dec > 0) send("mcv", p.g, "bs", (m * dec).toFixed(1));
+        else if (bv != null && bu === "pct" && bv > 0) send("mcv", p.g, "bs", (m * 100).toFixed(1));
+        else { const n = Math.max(0, Math.min(1, Math.log(Math.max(0.5, Math.min(2, m)) / 0.5) / Math.log(4))); send("mcn", p.g, "bs", at("bs", n).toFixed(5)); }
+      };
+      const setDamp = m => {
+        const dv = v.v.dm, du = v.u.dm;
+        if (dv != null && du === "ms" && dec > 0) send("mcv", p.g, "dm", (Math.max(0.05, m) * dec).toFixed(1));
+        else if (dv != null && du === "" && dv > 0 && dIsMul) send("mcv", p.g, "dm", Math.max(0.05, Math.min(2, m)).toFixed(3));
+        else { const f = Math.max(0, Math.min(1, Math.log(Math.max(0.25, Math.min(1, m))) / Math.log(0.25))); send("mcn", p.g, "dm", (dUp ? f : 1 - f).toFixed(5)); }
+      };
+      // a tone control tilts it (x4 brighter at 20 kHz at the top of it)
+      const tilt = I.tn != null ? (rr.tn ? 1 - (v.n.tn || 0) : (v.n.tn || 0)) * 2 - 1 : 0;
+      const tf = f => Math.pow(4, tilt * Math.log2(f / 1000) / Math.log2(20));
+      const mult0 = f => { const wl = 1 / (1 + Math.pow(f / lf, 2)), wh = 1 / (1 + Math.pow(hf / f, 2)); return Math.exp(wl * Math.log(Math.max(0.01, bass)) + wh * Math.log(Math.max(0.01, dmul))); };
+      const mult = f => mult0(f) * tf(f);
+      for (const gm of [0.5, 2]) { RD.hgrid(c, MY(gm), fx0, fx1); RD.text(c, "×" + gm, fx1 - 2, MY(gm) - 3, css("--dim"), "right"); }
+      c.setLineDash([2, 3]); c.strokeStyle = css("--ring"); c.lineWidth = 1; c.beginPath(); c.moveTo(fx0, MY(1)); c.lineTo(fx1, MY(1)); c.stroke(); c.setLineDash([]);
+      const LC = I.lc != null ? RR.val(p, v, "lc", "hz", 20, 1000, true) : null, HC = I.hc != null ? RR.val(p, v, "hc", "hz", 1000, 20000, true) : null;
+      c.fillStyle = "rgba(255,255,255,0.06)";
+      if (LC && lcOn) c.fillRect(fx0, my0 - 4, FX(LC.val) - fx0, my1 - my0 + 4);
+      if (HC && hcOn) c.fillRect(FX(HC.val), my0 - 4, fx1 - FX(HC.val), my1 - my0 + 4);
+      c.beginPath();
+      for (let i = 0; i <= 80; i++) { const f = F_LO * Math.pow(F_HI / F_LO, i / 80); i ? c.lineTo(FX(f), MY(mult(f))) : c.moveTo(FX(f), MY(mult(f))); }
+      c.strokeStyle = css("--accent"); c.lineWidth = 1.8; c.stroke();
+      // a node a side: across its crossover, up and down its amount
+      const side = (F, f, m, amt, set, name) => {
+        if (!F && !amt) return;
+        const k_ = tf(f), nx = FX(f), ny = MY(m * k_), rt_ = nx > fx1 - 130;
+        RD.dot(c, nx, ny, 6, css("--text"), css("--accent"));
+        RD.text(c, name + " " + (amt ? (v.x[amt] || "") : "") + (F && amt ? " @ " : "") + (F ? (v.x[F.k] || "") : ""), nx + (rt_ ? -9 : 9), ny - 8, css("--value"), rt_ ? "right" : "left");
+        api.node(nx, ny, (dx, dy) => {
+          if (F && Math.abs(dx) > 0.5) RR.set(p, F.k, Math.max(F.lo, Math.min(F.hi, f * Math.pow(F_HI / F_LO, dx / (fx1 - fx0)))), F.along, F.lo, F.hi, true);
+          if (amt && Math.abs(dy) > 0.5) set(MUL(ny + dy) / k_);
+        });
+      };
+      // shelves on the wet sound: dashed, in dB about the x1 line
+      if (I.le != null || I.he != null) {
+        const gain = k => I[k] == null ? 0 : (v.u[k] === "db" && v.v[k] != null) ? Math.max(-36, Math.min(18, v.v[k])) : -12 + 24 * (v.n[k] || 0);
+        const glo = gain("le"), ghi = gain("he"), half = (my1 - my0) / 2, ymid = MY(1);
+        const GY = db => ymid - Math.max(-18, Math.min(18, db)) / 18 * half;
+        const shel = (lo, hi, f) => lo / (1 + Math.pow(f / 150, 2)) + hi / (1 + Math.pow(6000 / f, 2));
+        c.setLineDash([5, 4]); c.strokeStyle = "rgba(224,163,58,0.85)"; c.lineWidth = 1.4; c.beginPath();
+        for (let i = 0; i <= 60; i++) { const f = F_LO * Math.pow(F_HI / F_LO, i / 60); i ? c.lineTo(FX(f), GY(shel(glo, ghi, f))) : c.moveTo(FX(f), GY(shel(glo, ghi, f))); }
+        c.stroke(); c.setLineDash([]);
+        for (const [k, g0, f, name] of [["le", glo, 60, "Low"], ["he", ghi, 14000, "High"]]) {
+          if (I[k] == null) continue;
+          const nx = FX(f), ny = GY(shel(k === "le" ? glo : 0, k === "he" ? ghi : 0, f)), rt_ = nx > fx1 - 100;
+          RD.dot(c, nx, ny, 5, "rgba(224,163,58,1)", "#fff"); RD.text(c, name + " " + (v.x[k] || ""), nx + (rt_ ? -9 : 9), ny + 14, "#e6cf79", rt_ ? "right" : "left");
+          api.node(nx, ny, (dx, dy) => { const nv = Math.max(-36, Math.min(18, g0 - dy / half * 18));
+            if (v.u[k] === "db" && v.v[k] != null) send("mcv", p.g, k, nv.toFixed(2)); else send("mcn", p.g, k, Math.max(0, Math.min(1, (nv + 12) / 24)).toFixed(5)); });
+        }
+      }
+      // the tone's own handle, up or down, at 5 kHz
+      if (I.tn != null) { const ft = 5000, nx = FX(ft), ny = MY(mult(ft)), base = mult0(ft);
+        c.fillStyle = css("--text"); c.beginPath(); c.moveTo(nx, ny - 6); c.lineTo(nx + 6, ny); c.lineTo(nx, ny + 6); c.lineTo(nx - 6, ny); c.closePath(); c.fill(); c.strokeStyle = css("--accent"); c.lineWidth = 1.5; c.stroke();
+        RD.text(c, "Tone " + (v.x.tn || ""), nx - 9, ny - 8, css("--value"), "right");
+        api.node(nx, ny, (dx, dy) => { let t = Math.log(MUL(ny + dy) / base) / Math.log(4) / (Math.log2(ft / 1000) / Math.log2(20)); t = Math.max(-1, Math.min(1, t));
+          const n = (t + 1) / 2; send("mcn", p.g, "tn", (rr.tn ? 1 - n : n).toFixed(5)); }); }
+      if (LF) Object.assign(LF, { k: "lf", lo: 50, hi: 1000 });
+      if (HF) Object.assign(HF, { k: HF.k || "hf", lo: 1000, hi: 20000 });
+      side(LF, lf, bass, I.bs != null ? "bs" : null, setBass, "Lows");
+      side(HF, hf, dmul, (I.dm != null && !dmHz) ? "dm" : null, setDamp, "Highs");
+      // the cuts' labels inwards; outwards when they'd meet; the high cut's a line up when even that won't do
+      const lt_ = LC ? "Low cut " + (v.x.lc || "") : "", ht_ = HC ? "High cut " + (v.x.hc || "") : "";
+      const lxw = c.measureText(lt_).width, hxw = c.measureText(ht_).width, lcx = LC ? FX(LC.val) : 0, hcx = HC ? FX(HC.val) : 0;
+      const LP = { lc: [lcx + 9, "left"], hc: [hcx - 9, "right"] }; let hdy = 0;
+      if (LC && HC && lcx + 9 + lxw + 6 > hcx - 9 - hxw) {
+        LP.lc = [lcx - 9, "right"]; LP.hc = [hcx + 9, "left"];
+        if (lcx - 9 - lxw < fx0 - 6 || hcx + 9 + hxw > fx1 + 6) {
+          // both to one side of the pair, one over the other
+          if (lcx > (fx0 + fx1) / 2) { const ax = Math.min(lcx, hcx) - 10; LP.lc = [ax, "right"]; LP.hc = [ax, "right"]; }
+          else { const ax = Math.max(lcx, hcx) + 10; LP.lc = [ax, "left"]; LP.hc = [ax, "left"]; }
+          hdy = 12; }
+      }
+      for (const [C_, k, lo, hi] of [[LC, "lc", 20, 1000], [HC, "hc", 1000, 20000]]) {
+        if (!C_) continue;
+        const cx = FX(C_.val), on_ = k === "lc" ? lcOn : hcOn;
+        c.strokeStyle = withA(css("--accent"), on_ ? 0.6 : 0.2); c.lineWidth = 1.2; c.beginPath(); c.moveTo(cx, my0 - 4); c.lineTo(cx, my1); c.stroke();
+        RD.dot(c, cx, my1 - 4, 6, css("--text"), css("--accent"));
+        RD.text(c, k === "lc" ? lt_ : ht_, LP[k][0], my1 - 12 + (k === "hc" ? hdy : 0), css("--value"), LP[k][1]);
+        api.node(cx, my1 - 4, dx => RR.set(p, k, Math.max(lo, Math.min(hi, C_.val * Math.pow(F_HI / F_LO, dx / (fx1 - fx0)))), C_.along, lo, hi, true));
+      }
+    }
+  });
+}
+
+function mapEnvCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {};
+  const SEG = [["dl", 0.10, 1, 5000], ["a", 0.18, 0.5, 10000], ["h", 0.08, 1, 5000], ["dc", 0.24, 1, 20000], ["l", 0.26, 1, 20000]];
+  const bend = (t, c_) => { const k = Math.pow(4, Math.abs(c_)); return c_ >= 0 ? Math.pow(t, k) : 1 - Math.pow(1 - t, k); };
+  roleFrame(p, P, hold, CW, bodyH, (c, v, api, g) => {
+    const gw = g.gw, ch = g.ch, base = ch - 34, peak = 34, t0 = 14, t1 = gw - 14, inner = (t1 - t0) * 0.86;
+    for (let i = 0; i <= 4; i++) RD.hgrid(c, peak + i * (base - peak) / 4, 0, gw);
+    const fr = {}, along = {};
+    for (const [k, , lo, hi] of SEG) if (I[k] != null) {
+      if (v.u[k] === "ms" && v.v[k] != null) fr[k] = Math.max(0.02, Math.log(Math.max(lo, v.v[k]) / lo) / Math.log(hi / lo));
+      else { fr[k] = RR.pct(v, k, p); along[k] = true; }
+    }
+    let sus = 0;
+    if (I.su != null) { if ((v.u.su === "db" || (v.u.su === "" && v.v.su <= 0)) && v.v.su != null) sus = v.v.su <= -150 ? 0 : Math.min(1, Math.pow(10, v.v.su / 20)); else if (v.u.su === "pct" && v.v.su != null) sus = Math.max(0, Math.min(1, v.v.su / 100)); else sus = RR.pct(v, "su", p); }
+    let raw = 0.14 * (t1 - t0); for (const s of SEG) if (I[s[0]] != null) raw += (fr[s[0]] || 0) * s[1] * inner;
+    const stretch = Math.max(1, Math.min(3, (t1 - t0) * 0.96 / Math.max(1, raw)));
+    const sw = k => { for (const s of SEG) if (s[0] === k) return I[k] != null ? s[1] * inner * stretch : 0; return 0; };
+    const xd = t0 + (fr.dl || 0) * sw("dl"), xa = xd + (I.a != null ? Math.max(0.03, fr.a) : 0.03) * sw("a"), xh = xa + (fr.h || 0) * sw("h");
+    const xdc = xh + (I.dc != null ? fr.dc : 0) * sw("dc"), xe = xdc + 0.14 * (t1 - t0) * stretch, xr = xe + (I.l != null ? fr.l : 0) * sw("l");
+    const sy = base - (base - peak) * sus;
+    const cv_ = k => I[k] == null ? 0 : (((p.mc.rr || {})[k] ? 1 - (v.n[k] || 0) : (v.n[k] || 0)) - 0.5) * 2;
+    const pts = [[t0, base], [xd, base]], mids = {};
+    const seg = (x0, y0, x1, y1, c_, key) => { for (let i = 1; i <= 24; i++) { const t = i / 24; pts.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * bend(t, c_)]); if (i === 12) mids[key] = pts[pts.length - 1]; } };
+    seg(xd, base, xa, peak, cv_("ac"), "a"); pts.push([xh, peak]);
+    if (I.dc != null) seg(xh, peak, xdc, sy, cv_("dcc"), "dc"); else pts.push([xh, sy]);
+    pts.push([xe, sy]);
+    if (I.l != null) seg(xe, sy, xr, base, cv_("rcc"), "l"); else pts.push([xe, base]);
+    c.beginPath(); pts.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]));
+    c.strokeStyle = css("--accent"); c.lineWidth = 2.2; c.stroke();
+    c.lineTo(pts[pts.length - 1][0], base); c.lineTo(t0, base); c.closePath(); c.fillStyle = withA(css("--accent"), 0.18); c.fill();
+    c.setLineDash([3, 3]); c.strokeStyle = css("--dim"); c.lineWidth = 1; c.beginPath(); c.moveTo(xe, peak - 16); c.lineTo(xe, base + 4); c.stroke(); c.setLineDash([]);
+    RD.text(c, "note off", xe + 4, peak - 8, css("--dim"));
+    const tnode = (k, x, y, label, lx, ly, al) => {
+      if (I[k] == null) return; const s = SEG.find(q => q[0] === k), w_ = sw(k), f0 = fr[k];
+      RD.dot(c, x, y, 7, css("--text"), css("--accent")); RD.text(c, label + (v.x[k] || ""), x + lx, y + ly, css("--value"), al);
+      api.node(x, y, dx => { const f = Math.max(0, Math.min(1, f0 + dx / Math.max(1, w_)));
+        if (along[k]) send("mcn", p.g, k, ((p.mc.rr || {})[k] ? 1 - f : f).toFixed(5)); else send("mcv", p.g, k, (s[2] * Math.pow(s[3] / s[2], f)).toFixed(3)); });
+    };
+    tnode("dl", xd, base, "Delay ", 0, 18, "center"); tnode("a", xa, peak, "A ", 0, -12, "center"); tnode("h", xh, peak, "H ", 10, 4);
+    tnode("dc", xdc, sy, "D ", 8, -8); tnode("l", xr, base, "R ", 0, 18, "center");
+    if (I.su != null) { const nx = (xdc + xe) / 2, s0 = sus; RD.dot(c, nx, sy, 7, css("--text"), css("--accent")); RD.text(c, "S " + (v.x.su || ""), nx, sy + 20, css("--value"), "center");
+      api.node(nx, sy, (dx, dy) => { const nv = Math.max(0, Math.min(1, s0 - dy / (base - peak)));
+        if ((v.u.su === "db" || (v.u.su === "" && v.v.su <= 0)) && v.v.su != null) send("mcv", p.g, "su", (nv > 0.0001 ? 20 * Math.log10(nv) : -150).toFixed(2));
+        else if (v.u.su === "pct" && v.v.su != null) send("mcv", p.g, "su", (nv * 100).toFixed(2)); else send("mcn", p.g, "su", ((p.mc.rr || {}).su ? 1 - nv : nv).toFixed(5)); }); }
+    for (const [ck, sk] of [["ac", "a"], ["dcc", "dc"], ["rcc", "l"]]) {
+      const m = mids[sk]; if (I[ck] == null || !m) continue;
+      c.fillStyle = "#e0a33a"; c.beginPath(); c.moveTo(m[0], m[1] - 6); c.lineTo(m[0] + 6, m[1]); c.lineTo(m[0], m[1] + 6); c.lineTo(m[0] - 6, m[1]); c.closePath(); c.fill();
+      RD.text(c, "curve " + (v.x[ck] || ""), m[0] + 10, m[1] + 4, "#e6cf79");
+      const n0 = v.n[ck] || 0, rr = (p.mc.rr || {})[ck];
+      api.node(m[0], m[1], (dx, dy) => send("mcn", p.g, ck, Math.max(0, Math.min(1, n0 + (rr ? dy : -dy) / 120)).toFixed(5)));
+    }
+  });
+}
+
+// A modulation, as the desktop draws it (TS_CV_RolePanel draw_mod): its LFO
+// (or each of its voices, in their colours) over a scope's timebase. Drag
+// the depth at a peak, the rate across (one cycle's length), a phase across.
+// Voices of its own: pick one by its chip, the others fainter; their pans
+// on a strip along the top.
+const MODW = new Map();
+const VOICE_COL = ["", "#e0a33a", "#8a63e6"];
+function mapModCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {}, RV = p.mc.rr || {}, SW = p.mc.sw || {};
+  const shapeOf = t => { t = String(t || "").toLowerCase(); if (/tri/.test(t)) return "tri"; if (/squ|sqr|pulse/.test(t)) return "square"; if (/saw|ramp/.test(t)) return /down|-/.test(t) ? "sawdown" : "saw"; if (/s&h|s\/h|sample|rand/.test(t)) return "sh"; return "sine"; };
+  const lfo = (s, ph) => { const q = ((ph % 1) + 1) % 1; if (s === "tri") return 1 - 4 * Math.abs(((q + 0.25) % 1) - 0.5); if (s === "square") return q < 0.5 ? 1 : -1; if (s === "saw") return 2 * q - 1; if (s === "sawdown") return 1 - 2 * q; if (s === "sh") { const k = Math.floor(ph); return ((Math.sin(k * 12.9898 + 78.233) % 1) + 1) % 1 * 2 - 1; } return Math.sin(q * 2 * Math.PI); };
+  roleFrame(p, P, hold, CW, bodyH, (c, v, api, g) => {
+    const gw = g.gw, ch = g.ch, bpm = v.bpm || 120, beatHz = bpm / 60;
+    const ms = MODW.get(p.g) || {}; MODW.set(p.g, ms);
+    const onOf = k => { const s = " " + String(v.x[k] || "").toLowerCase() + " ";
+      if (/disabl|bypass| off | out | no |inactive|mute/.test(s)) return false; if (/ on |enabl| in | yes |active/.test(s)) return true; return (v.n[k] || 0) >= 0.5; };
+    const depthOf = k => I[k] == null ? null : (v.u[k] === "pct" && v.v[k] != null) ? Math.max(0, Math.min(1, v.v[k] / 100)) : (RV[k] ? 1 - (v.n[k] || 0) : (v.n[k] || 0));
+    // a rate, Hz: its note while synced, else Hz, a note, ms or along its range; [rate, along, short set, synced]
+    const rateOf = (rk, nk, sk) => {
+      if (nk && I[nk] != null && ((sk && I[sk] != null && onOf(sk)) || (!(sk && I[sk] != null) && I[rk] == null))) { const nb = RR.noteBeats(v.x[nk]); if (nb) return [beatHz / nb, false, nk, true]; }
+      if (I[rk] != null) { const nb = RR.noteBeats(v.x[rk]);
+        if (v.u[rk] === "hz" && v.v[rk] > 0) return [v.v[rk], false, rk]; if (nb) return [beatHz / nb, false, rk];
+        if (v.u[rk] === "ms" && v.v[rk] > 0) return [1000 / v.v[rk], false, rk];
+        return [0.02 * Math.pow(1000, RV[rk] ? 1 - (v.n[rk] || 0) : (v.n[rk] || 0)), true, rk]; }
+      return null;
+    };
+    const main = rateOf("rt", null, null), depth0 = depthOf("dp") ?? 0.8, shape = I.sh != null ? shapeOf(v.x.sh) : "sine";
+    // its voices
+    const V = []; let anyPan = false, ownMore = false;
+    for (let k = 1; k <= 3; k++) {
+      const pre = "v" + k; if (!["dp", "rt", "nt", "sy", "ph", "pn", "on"].some(s => I[pre + s] != null)) continue;
+      const o = { k, col: k === 1 ? css("--accent") : VOICE_COL[k - 1] };
+      const r = rateOf(pre + "rt", pre + "nt", pre + "sy");
+      if (r) [o.rate, o.along, o.src, o.synced] = r; else { o.shared = true; if (main) [o.rate, o.along, o.src] = main; }
+      o.rate = o.rate || 0.5;
+      o.dk = I[pre + "dp"] != null ? pre + "dp" : (I.dp != null ? "dp" : null); o.depth = depthOf(o.dk || "") ?? depth0;
+      if (I[pre + "ph"] != null) { o.pk = pre + "ph"; if (v.v[o.pk] != null && v.u[o.pk] === "") { o.ph = v.v[o.pk]; o.phAlong = false; } else { o.ph = (RV[o.pk] ? 1 - (v.n[o.pk] || 0) : (v.n[o.pk] || 0)) * 360; o.phAlong = true; } }
+      if (I[pre + "pn"] != null) { anyPan = true; o.pnk = pre + "pn"; o.pan = (RV[o.pnk] ? 1 - (v.n[o.pnk] || 0) : (v.n[o.pnk] || 0)) * 2 - 1; }
+      o.onk = I[pre + "on"] != null ? pre + "on" : null; o.on = !o.onk || onOf(o.onk);
+      o.syk = I[pre + "sy"] != null ? pre + "sy" : null; o.ntk = I[pre + "nt"] != null ? pre + "nt" : null;
+      if (I[pre + "rt"] != null || I[pre + "nt"] != null || I[pre + "ph"] != null || I[pre + "pn"] != null || I[pre + "on"] != null) ownMore = true;
+      V.push(o);
+    }
+    const depthOnly = V.length > 0 && !ownMore;
+    if (V.length && !anyPan) { const fx = { 1: [0], 2: [-1, 1], 3: [-1, 0, 1] }[V.length]; V.forEach((o, i) => { o.pan = fx[i]; o.panFixed = true; }); }
+    V.forEach((o, i) => { if (o.ph == null && o.shared) o.ph = i / V.length * 360; });
+    let sel = null;
+    if (V.length && !depthOnly) { sel = V.find(o => o.k === ms.sel) || V.find(o => o.on) || V[0]; ms.sel = sel.k; }
+    const rate = sel ? sel.rate : (main ? main[0] : 0.5), rAlong = sel ? !!sel.along : !!(main && main[1]);
+    const depth = sel ? sel.depth : depth0, mainCol = sel ? sel.col : css("--accent");
+    let phase = 0, phAlong = false;
+    if (!V.length && I.ph != null) { if (v.v.ph != null && v.u.ph === "") phase = v.v.ph; else { phase = RR.pct(v, "ph", p) * 180; phAlong = true; } }
+    let count = null; if (I.vc != null && v.v.vc != null) { count = Math.round(v.v.vc); if (count < 1 || count > 16) count = null; }
+    // the layout: a pan strip along the top, chips along the foot
+    const strip = V.length > 0, foot = (I.sh != null || (V.length && !depthOnly) || SW.vc) ? 30 : 0;
+    const noteRow = sel && sel.synced && sel.ntk && SW[sel.ntk] ? 28 : 0;
+    const by = ch - foot - noteRow, top = strip ? 30 : 0;
+    // a scope's timebase: ranged to the rate (a cycle a quarter to half of it), kept while the cycle's on screen, held while dragged
+    const perS = 1 / Math.max(1e-4, rate), held = performance.now() - (ms.t || 0) < 1500;
+    if (!held && (!ms.win || perS > 0.95 * ms.win || perS < 0.1 * ms.win)) ms.win = Math.pow(2, Math.ceil(Math.log2(2 * perS)));
+    const win = ms.win, cycles = rate * win;
+    const t0 = 12, t1 = gw - 12, mid = top + (by - top) / 2 - 8, amp = (by - top) / 2 - 30;
+    for (let i = -2; i <= 2; i++) RD.hgrid(c, mid + i * amp / 2, 0, gw);
+    const wave = (r, dep, off, col, w, dash) => { const cyc = r * win; c.beginPath(); const ns = Math.min(1600, Math.max(240, Math.floor(cyc * 24))); for (let i = 0; i <= ns; i++) { const t = i / ns, x = t0 + (t1 - t0) * t, y = mid - amp * dep * lfo(shape, t * cyc - off); i ? c.lineTo(x, y) : c.moveTo(x, y); } c.setLineDash(dash ? [5, 4] : []); c.strokeStyle = col; c.lineWidth = w; c.stroke(); c.setLineDash([]); };
+    if (!V.length) {
+      if (count > 1) for (let j = 1; j < count; j++) wave(rate, depth, j / count, withA(css("--accent"), 0.3), 1.2);
+      if (I.ph != null && phase) wave(rate, depth, -phase / 360, "rgba(138,99,230,0.85)", 1.6, true);
+      wave(rate, depth, 0, css("--accent"), 2.2);
+    } else {
+      for (const o of V) if (o !== sel) wave(o.rate, o.depth, (o.ph || 0) / 360, withA(o.col, o.on ? (depthOnly ? 0.88 : 0.47) : 0.22), o.on ? (depthOnly ? 1.8 : 1.4) : 1);
+      if (sel) wave(sel.rate, sel.depth, (sel.ph || 0) / 360, sel.on ? sel.col : withA(sel.col, 0.45), sel.on ? 2.4 : 1.6);
+    }
+    RD.text(c, (Math.round(win * 100) / 100) + " s", t1, by - 4, css("--dim"), "right");
+    const per = (t1 - t0) / Math.max(0.0001, cycles);
+    const firstPeak = (ph, pr) => { const pk = shape === "saw" ? 0.999 : (shape === "square" || shape === "sawdown") ? 0.02 : 0.25; return [t0 + ((pk + (ph || 0) / 360) % 1) * pr, pk]; };
+    const depthNode = (k, dep, ph, pr, col, label, right) => { const [x, pk] = firstPeak(ph, pr), y = mid - amp * dep * lfo(shape, pk), d0 = dep;
+      RD.dot(c, x, y, 7, css("--text"), col); RD.text(c, label, right ? x - 10 : x + 10, y - 6, css("--value"), right ? "right" : "left");
+      api.node(x, y, (dx, dy) => { const nv = Math.max(0, Math.min(1, d0 - dy / amp)); if (v.u[k] === "pct" && v.v[k] != null) send("mcv", p.g, k, (nv * 100).toFixed(2)); else send("mcn", p.g, k, (RV[k] ? 1 - nv : nv).toFixed(5)); }); };
+    if (depthOnly) { const nm = V.length === 3 && !anyPan ? ["L", "C", "R"] : null;
+      V.forEach((o, i) => { if (o.dk) depthNode(o.dk, o.depth, o.ph, (t1 - t0) / Math.max(0.0001, o.rate * win), o.col, (nm ? nm[i] + " " : o.k + ": ") + (v.x[o.dk] || "")); }); }
+    else if (sel && sel.dk) { const [x] = firstPeak(sel.ph, per); depthNode(sel.dk, sel.depth, sel.ph, per, sel.col, "Depth " + (v.x[sel.dk] || ""), x > gw - 260); }
+    else if (!sel && I.dp != null) depthNode("dp", depth, 0, per, css("--accent"), "Depth " + (v.x.dp || ""));
+    // the rate: one cycle's length, across
+    const rk = sel ? sel.src : (main ? main[2] : null);
+    if (rk) { const ry = mid + amp + 14, rx = t0 + Math.min(t1 - t0, per), w0 = rx - t0, win0 = win, tw = t1 - t0, isNote = !!(sel && sel.synced);
+      c.strokeStyle = mainCol; c.lineWidth = 1.4; c.beginPath(); c.moveTo(t0, ry); c.lineTo(rx, ry); c.stroke();
+      RD.dot(c, rx, ry, 7, css("--text"), mainCol); RD.text(c, "Rate " + (v.x[rk] || ""), (t0 + rx) / 2, ry - 6, css("--value"), "center");
+      // past the right edge the timebase opens out (twice as long each 60 px), for the slow end
+      api.node(rx, ry, dx => { const px = Math.max(4, w0 + dx), over = Math.max(0, Math.min(360, px - tw)); ms.t = performance.now(); ms.win = win0 * Math.pow(2, over / 60); const nr = 1 / (Math.min(px, tw) / tw * ms.win); const sw = SW[rk];
+        if (sw) { const n = RR.nearest(sw, t => { const m_ = String(t).match(/([\d.]+)\s*hz/i); if (m_ && !isNote) return +m_[1]; const b = RR.noteBeats(t); return b ? beatHz / b : null; }, nr, true); if (n != null) send("mcn", p.g, rk, n.toFixed(5)); }
+        else if (rAlong) RR.set(p, rk, nr, true, 0.02, 20, true); else if (v.u[rk] === "ms") send("mcv", p.g, rk, (1000 / nr).toFixed(3)); else send("mcv", p.g, rk, nr.toFixed(4)); }); }
+    // the right side's phase: its first peak, across
+    if (!V.length && I.ph != null) { let x = t0 + (((0.25 - phase / 360) % 1) + 1) % 1 * per; if (x < t0 + 4) x += per; const y = mid - amp * depth, ph0 = phase;
+      RD.dot(c, x, y, 5, "rgba(138,99,230,1)", "#fff"); RD.text(c, "R " + (v.x.ph || ""), gw - 8, top + 64, "#b59bf2", "right");
+      api.node(x, y, dx => { const nv = Math.max(0, Math.min(360, ph0 - dx / per * 360)); if (phAlong) { const n = Math.max(0, Math.min(1, nv / 180)); send("mcn", p.g, "ph", (RV.ph ? 1 - n : n).toFixed(5)); } else send("mcv", p.g, "ph", nv.toFixed(2)); }); }
+    // the picked voice's phase: where its wave starts up, across
+    if (sel && sel.pk) { const ph0 = sel.ph || 0, x = t0 + ((ph0 / 360) % 1) * per, k = sel.pk, along = sel.phAlong;
+      RD.dot(c, x, mid, 5, "rgba(138,99,230,1)", "#fff"); RD.text(c, "Phase " + (v.x[k] || ""), x + 9, mid + 16, "#b59bf2");
+      api.node(x, mid, dx => { const nv = Math.max(0, Math.min(360, ph0 + dx / per * 360)); if (along) { const n = nv / 360; send("mcn", p.g, k, (RV[k] ? 1 - n : n).toFixed(5)); } else send("mcv", p.g, k, nv.toFixed(2)); }); }
+    // the voices' pans: a strip along the top
+    if (strip) { const px0 = 28, px1 = Math.min(gw * 0.5, 340), py = 15;
+      RD.text(c, "L", px0 - 8, py + 4, css("--dim"), "right"); RD.text(c, "R", px1 + 8, py + 4, css("--dim"));
+      c.strokeStyle = css("--ring"); c.lineWidth = 2; c.beginPath(); c.moveTo(px0, py); c.lineTo(px1, py); c.stroke();
+      c.lineWidth = 1; c.beginPath(); c.moveTo((px0 + px1) / 2, py - 4); c.lineTo((px0 + px1) / 2, py + 4); c.stroke();
+      for (const o of V) { if (o.pan == null) continue; const x = px0 + (o.pan + 1) / 2 * (px1 - px0);
+        if (o.panFixed) { c.fillStyle = o.col; c.fillRect(x - 1.5, py - 6, 3, 12); continue; }
+        const p0 = o.pan, k = o.pnk; RD.dot(c, x, py, o === sel ? 6 : 5, o.on ? o.col : withA(o.col, 0.4), o === sel ? css("--text") : null);
+        api.node(x, py, dx => { const nv = Math.max(-1, Math.min(1, p0 + dx / (px1 - px0) * 2)), n = (nv + 1) / 2; ms.sel = o.k; send("mcn", p.g, k, (RV[k] ? 1 - n : n).toFixed(5)); }, 16, () => { ms.sel = o.k; api.redraw(); }); } }
+    // along the foot: the voices (tap one to pick it; lit when on), the count of voices, its shape
+    let cx = 4; const fy = ch - foot + 4;
+    const chipRow = (k, x, y, room) => { const sw = SW[k]; if (!sw) return x; const L_ = sw.map(s => Object.assign({}, s, { t: String(s.t) })), cur = v.n[k] || 0;
+      const need = L_.reduce((t, s) => t + c.measureText(s.t).width + 18, 0);
+      if (need <= room) return RD.chips(c, api, L_, cur, x, y, room, n => send("mcn", p.g, k, n.toFixed(5)));
+      const i = Math.max(0, L_.findIndex(s => cur >= s.lo - 1e-6 && cur <= s.hi + 1e-6)), nx = L_[(i + 1) % L_.length];
+      return RD.chips(c, api, [Object.assign({}, L_[i], { t: L_[i].t + "  ›" })], cur, x, y, room, () => send("mcn", p.g, k, nx.n.toFixed(5))); };
+    if (V.length && !depthOnly) { RD.text(c, "VOICE", cx, fy + 15, css("--dim")); cx += 44;
+      for (const o of V) { c.fillStyle = o.on ? o.col : "rgba(255,255,255,0.08)"; c.fillRect(cx, fy, 28, 22);
+        if (o === sel) { c.strokeStyle = css("--text"); c.lineWidth = 1.6; c.strokeRect(cx + 0.5, fy + 0.5, 27, 21); }
+        RD.text(c, String(o.k), cx + 14, fy + 15, o.on ? "#fff" : css("--value"), "center"); api.chip(cx, fy, 28, 22, () => { ms.sel = o.k; api.redraw(); }); cx += 32; }
+      cx += 10; }
+    if (SW.vc) { RD.text(c, "VOICES", cx, fy + 15, css("--dim")); cx = chipRow("vc", cx + 52, fy, gw - cx - 60) + 10; }
+    if (I.sh != null) { if (SW.sh) chipRow("sh", cx, fy, gw - cx - 4); else RD.text(c, "Shape " + (v.x.sh || ""), cx + 2, fy + 15); }
+    if (noteRow) chipRow(sel.ntk, 4, by + 4, gw - 8);
+    // top right: the picked voice (its pan, on, sync), then delay, feedback, mix
+    const kn = [I.dl != null ? "Delay " + (v.x.dl || "") : null, I.fb != null ? "Feedback " + (v.x.fb || "") : null, I.mx != null ? "Mix " + (v.x.mx || "") : null].filter(Boolean).join("   ");
+    if (kn) RD.text(c, kn, gw - 8, 16, css("--value"), "right");
+    if (sel) { let tx = gw - 8; const ty = 26;
+      for (const [k, lab] of [[sel.onk, "ON"], [sel.syk, "SYNC"]]) { if (!k) continue; const lit = onOf(k), w = c.measureText(lab).width + 16; tx -= w;
+        RD.toggle(c, api, lab, lit, tx, ty, () => send("mcn", p.g, k, lit ? "0" : "1")); tx -= 4; }
+      RD.text(c, "Voice " + sel.k + (sel.pnk ? "  ·  Pan " + (v.x[sel.pnk] || "") : ""), tx - 6, ty + 15, sel.col, "right"); }
+  });
+}
+
+// A multiband: all bands (the crossovers, a strip per band), or one band on
+// the compressor's canvas -- tabs to switch.
+// A saturator, as the desktop draws it (TS_CV_RolePanel draw_sat): its
+// learned curve (the pill drags Drive), the music's peak riding it, where
+// it bites; its harmonics; and the drive meter -- how far the peaks are
+// being shaved -- in the canvases' own colours.
+const SATM = new Map();
+function mapSatCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {};
+  roleFrame(p, P, hold, CW, bodyH, (c, v, api, g) => {
+    const gw = g.gw, ch = g.ch, s = v.sat || {}, Y_ = "230,207,121";
+    // the style's settings along the top (the one it's on, tap for the next, when they don't all fit)
+    const sw = (p.mc.sw || {}).st;
+    if (I.st != null && sw) {
+      c.font = "11px -apple-system, system-ui, sans-serif";
+      const up = sw.map(x => Object.assign({}, x, { t: String(x.t).toUpperCase() }));
+      const need = up.reduce((t, x) => t + c.measureText(x.t).width + 18, 0), cur = v.n.st || 0;
+      if (need <= gw * 0.72) RD.chips(c, api, up, cur, 4, 2, gw * 0.72, n => send("mcn", p.g, "st", n.toFixed(5)));
+      else { const i = Math.max(0, up.findIndex(x => cur >= x.lo - 1e-6 && cur <= x.hi + 1e-6)), nx = up[(i + 1) % up.length];
+        RD.chips(c, api, [Object.assign({}, up[i], { t: up[i].t + "  ›" })], cur, 4, 2, gw * 0.72, () => send("mcn", p.g, "st", nx.n.toFixed(5))); }
+    }
+    RD.text(c, s.l ? "learned" : "not learned yet", gw - 4, 16, css("--accent"), "right");
+    const cy0 = 30, chh = ch - cy0 - 2, cw = Math.floor(gw * 0.56);
+    c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(0, cy0, gw, chh);        // one ground for all of it
+    // the curve, scaled to fit what comes out
+    let ym = 0.05; if (s.up) for (const q of s.up.concat(s.dn)) ym = Math.max(ym, Math.abs(q)); ym = s.up ? ym * 1.06 : 1;
+    const X = x => (x + 1) / 2 * cw, Y = y => cy0 + chh - (y / ym + 1) / 2 * chh;
+    for (const q of [-1, -0.5, 0, 0.5, 1]) { RD.vgrid(c, X(q), cy0, cy0 + chh); RD.hgrid(c, cy0 + chh - (q + 1) / 2 * chh, 0, cw); }
+    RD.vgrid(c, cw, cy0, cy0 + chh);
+    const curve = x => { if (!s.up) return null; const f = (x + 1) * 24, i = Math.max(0, Math.min(47, Math.floor(f))), t = f - i; const a = (s.up[i] + s.dn[i]) / 2, b = (s.up[i + 1] + s.dn[i + 1]) / 2; return a + (b - a) * t; };
+    // what it would be if it stayed clean: its small-signal slope, dashed
+    const g0 = s.up ? (curve(1 / 24) - curve(-1 / 24)) * 12 : 1, xe = Math.min(1, ym / Math.max(1e-6, Math.abs(g0)));
+    c.setLineDash([3, 4]); c.strokeStyle = withA(css("--label"), 0.4); c.lineWidth = 1; c.beginPath(); c.moveTo(X(-xe), Y(-xe * g0)); c.lineTo(X(xe), Y(xe * g0)); c.stroke(); c.setLineDash([]);
+    RD.text(c, "in →", cw - 4, cy0 + chh - 4, css("--dim"), "right"); RD.text(c, "out", 4, cy0 + chh / 2 - 4, css("--dim"));
+    if (s.up) {
+      const line = arr => { c.beginPath(); arr.forEach((q, i) => { const x = X(-1 + i / 24), y = Y(q); i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.stroke(); };
+      c.strokeStyle = css("--value"); c.lineWidth = 2;
+      if (s.lp) { c.fillStyle = withA(css("--accent"), 0.14); c.beginPath(); s.up.forEach((q, i) => { const x = X(-1 + i / 24); i ? c.lineTo(x, Y(q)) : c.moveTo(x, Y(q)); }); for (let i = s.dn.length - 1; i >= 0; i--) c.lineTo(X(-1 + i / 24), Y(s.dn[i])); c.closePath(); c.fill(); line(s.up); line(s.dn); }
+      else line(s.up.map((q, i) => (q + s.dn[i]) / 2));
+      if (s.bt != null) { const bx = X(Math.min(1, Math.pow(10, s.bt / 20))); c.fillStyle = "#e6cf79"; c.fillRect(bx - 1, cy0 + chh - 10, 2, 10); RD.text(c, "bites", bx, cy0 + chh - 14, "#e6cf79", "center"); }
+      if (s.live && s.ip != null) { const xi = Math.min(1, Math.pow(10, s.ip / 20)), yi = curve(xi); if (yi != null) {
+        c.fillStyle = `rgba(${Y_},0.25)`; c.beginPath(); c.arc(X(xi), Y(yi), 8, 0, 7); c.fill();
+        c.fillStyle = "#ffd8b0"; c.strokeStyle = "#e0a33a"; c.lineWidth = 1.4; c.beginPath(); c.arc(X(xi), Y(yi), 4, 0, 7); c.fill(); c.stroke(); } }
+    } else { RD.text(c, "Learn its curve in ChannelView's canvas setup", cw / 2, cy0 + chh * 0.62, css("--dim"), "center"); }
+    // the drive: a pill on the curve where Drive is along its range; it follows the finger
+    if (I.dr != null) {
+      const rv = !!((p.mc.rr || {}).dr), f = rv ? 1 - (v.n.dr || 0) : (v.n.dr || 0);
+      const px = -0.9 + 1.8 * f, py = curve(px) ?? px, hx = X(px), hy = Y(py);
+      c.fillStyle = css("--accent"); c.beginPath(); c.roundRect ? c.roundRect(hx - 18, hy - 4, 36, 8, 4) : c.rect(hx - 18, hy - 4, 36, 8); c.fill();
+      RD.text(c, "Drive " + (v.x.dr || ""), 8, cy0 + 16, css("--value")); RD.text(c, "drag across", 8, cy0 + 30, css("--dim"));
+      api.node(hx, hy, dx => { const nf = Math.max(0, Math.min(1, f + dx / (cw * 0.9))); send("mcn", p.g, "dr", (rv ? 1 - nf : nf).toFixed(5)); }, 24);
+    }
+    // the harmonics against the fundamental, on a dB scale
+    const rx = cw + 1, rw = gw - rx, hh = Math.floor((chh - 6) * 0.54), sx0 = rx + 34, b0 = cy0 + 24, b1 = cy0 + hh - 16;
+    const hy_ = d => b1 - Math.max(0, Math.min(1, (d + 80) / 80)) * (b1 - b0);
+    RD.text(c, "Harmonics", rx + 8, cy0 + 16, css("--value")); RD.text(c, "dB", rx + rw - 8, cy0 + 16, css("--dim"), "right");
+    for (const d of [0, -20, -40, -60]) { RD.hgrid(c, hy_(d), sx0 - 2, rx + rw - 8); RD.text(c, d === 0 ? "0" : "−" + (-d), sx0 - 6, hy_(d) + 4, css("--dim"), "right"); }
+    const bw = (rx + rw - 8 - sx0) / 8;
+    for (let k = 2; k <= 9; k++) { const bx = sx0 + (k - 2) * bw, d = s.h ? s.h[k - 2] : -999;
+      if (d > -900) { c.fillStyle = k % 2 ? withA(css("--accent"), 0.85) : "rgba(224,163,58,0.85)"; c.fillRect(bx + bw * 0.2, hy_(d), bw * 0.6, b1 - hy_(d)); }
+      RD.text(c, String(k), bx + bw / 2, b1 + 13, css("--dim"), "center"); }
+    // the drive meter
+    const my = cy0 + hh + 4, mh = chh - hh - 4;
+    RD.hgrid(c, my - 2, rx, rx + rw);
+    // VU-like: the music's peaks against where the curve starts to bite
+    // (TS_CV_Mappings sat_vu_pos), -20..+6, 0 at 0.7 along; no figures
+    const LO = -20, HI = 6, learned = s.l != null && s.l !== 0 && s.up != null;
+    const vuPos = d => { d = Math.max(LO, Math.min(HI, d)); const a0 = Math.pow(10, LO / 20);
+      return d <= 0 ? 0.7 * (Math.pow(10, d / 20) - a0) / (1 - a0) : 0.7 + 0.3 * d / HI; };
+    const live = !!(s.live && learned && s.ip != null);
+    const target = live ? s.ip - (s.bt != null ? s.bt : 0) : LO;
+    const st = SATM.get(p.g) || { v: target, pk: target, pt: 0, t: performance.now() / 1000 }; SATM.set(p.g, st);
+    const now = performance.now() / 1000, dt = Math.max(0, Math.min(0.2, now - st.t)); st.t = now;
+    st.v += (target - st.v) * Math.min(1, dt * (target > st.v ? 12 : 3));
+    if (st.v >= st.pk) { st.pk = st.v; st.pt = now; } else if (now - st.pt > 2) st.pk = Math.max(st.v, st.pk - dt * 6);
+    RD.text(c, "Drive", rx + 8, my + 16, css("--value"));
+    RD.text(c, learned ? "0: where it starts to bite" : "learn it to read the knee", rx + 8, my + mh - 6, css("--dim"));
+    const R = Math.max(20, Math.min(mh - 56, rw * 0.4)), top = my + 20, bot = my + mh - 18;
+    const pcx = rx + rw / 2, pcy = Math.floor((top + bot) / 2 + (R + 10) / 2);
+    const th = q => (-58 + 116 * vuPos(q)) * Math.PI / 180;
+    const Pt = (q, r) => [pcx + r * Math.sin(th(q)), pcy - r * Math.cos(th(q))];
+    const arc = (a, b, r, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.arc(pcx, pcy, r, th(a) - Math.PI / 2, th(b) - Math.PI / 2); c.stroke(); };
+    arc(LO, 0, R - 6, withA(css("--ring"), 0.7), 6);
+    arc(0, HI, R - 6, "rgba(224,163,58,0.3)", 6);
+    if (live && st.v > 0.05) arc(0, st.v, R - 6, "rgba(224,163,58,0.85)", 6);
+    for (const q of [-20, -10, -6, -3, 0, 3, 6]) { const [x1, y1] = Pt(q, R - 11), [x2, y2] = Pt(q, R); c.strokeStyle = withA(css("--label"), q === 0 ? 0.9 : 0.55); c.lineWidth = q === 0 ? 1.6 : 1; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+      const [tx, ty] = Pt(q, R + 9); RD.text(c, q === 0 ? "0" : (q > 0 ? "+" + q : "\u2212" + (-q)), tx, ty + 4, css("--dim"), "center"); }
+    for (const q of [-5, -4, -2, -1, 1, 2, 4, 5]) { const [x1, y1] = Pt(q, R - 7), [x2, y2] = Pt(q, R); c.strokeStyle = withA(css("--label"), 0.35); c.lineWidth = 1; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke(); }
+    if (live && st.pk > LO + 0.5) { const [x1, y1] = Pt(st.pk, R - 11), [x2, y2] = Pt(st.pk, R); c.strokeStyle = "#e6cf79"; c.lineWidth = 2.2; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke(); }
+    const [nx, ny] = Pt(live ? st.v : LO, R + 1); c.strokeStyle = css("--text"); c.lineWidth = 1.6; c.beginPath(); c.moveTo(pcx, pcy); c.lineTo(nx, ny); c.stroke();
+    c.fillStyle = css("--ring"); c.beginPath(); c.arc(pcx, pcy, 4.5, 0, 7); c.fill();
+  });
+}
+
+// What a band's "in use" control says, from its words (as TS_CV_Taps
+// TP.mb_state_of): "off" no band there, "byp" a band switched off, "on".
+function mbState(t, n) {
+  t = String(t || "").toLowerCase();
+  if (/unused|not used|none|empty/.test(t)) return "off";
+  if (/disabled?|bypass|inactive|mute/.test(t)) return "byp";
+  if (/^\s*off\s*$/.test(t)) return "off";
+  if (/enabled|used|active|on/.test(t)) return "on";
+  return (n || 0) >= 0.5 ? "on" : "off";
+}
+
+// A multiband: each band's level going in against its threshold (measured
+// on the way in only), and ONE reduction -- the plugin's as a whole -- down
+// the side, as the desktop draws it. With bands of their own edges, only
+// those in use, numbered low to high.
+function mapMultiCanvas(p, P, hold, CW, bodyH) {
+  const I = p.mc.i || {};
+  if (!Object.keys(I).length) { mapSetupNote(hold, "This multiband layout has no roles yet. Set it up in ChannelView on the desktop."); return; }
+  const nb = p.mc.nb || 3;
+  const NAMES = nb === 2 ? ["Low", "High"] : nb === 3 ? ["Low", "Mid", "High"] : ["Low", "Low mid", "High mid", "High"];
+  const ui_ = { focus: 0, fwd: null, last: null, sig: "" };
+  const tabs = h("div", "mbtabs"), body = h("div");
+  tabs.style.cssText = "position:absolute;left:8px;right:8px;top:4px;height:28px;display:flex;gap:6px";
+  body.style.cssText = "position:absolute;left:0;right:0;top:34px;bottom:0";
+  hold.append(tabs, body);
+  const subH = bodyH - 34;
+  const bandOf = (v, k) => ((v && v.mb && v.mb.b) || [])[k - 1] || null;
+  // the bands shown, low to high, and their names
+  const shownOf = v => {
+    const own = !!(v && v.mb && v.mb.o);
+    let spare = 0; for (let k = 1; k <= nb && !spare; k++) { const b = bandOf(v, k); if (b && !b.u && I["b" + k + "u"] != null) spare = k; }
+    if (!own) return { own, spare, order: NAMES.map((_, i) => i + 1), name: k => NAMES[k - 1] };
+    const order = []; for (let k = 1; k <= nb; k++) { const b = bandOf(v, k); if (b && b.u) order.push(k); }
+    order.sort((a, b) => bandOf(v, a).lo - bandOf(v, b).lo);
+    const nm = {}; order.forEach((k, i) => { nm[k] = "Band " + (i + 1); });
+    return { own, spare, order, name: k => nm[k] || ("Band " + k) };
+  };
+  let S = shownOf(null);
+  function build() {
+    tabs.innerHTML = ""; body.innerHTML = "";
+    if (ui_.focus && !S.order.includes(ui_.focus)) ui_.focus = 0;
+    [0].concat(S.order).forEach(k => {
+      const b = h("button", "mbtab" + (k === ui_.focus ? " on" : ""), k ? S.name(k) : "All bands");
+      if (k) b.style.borderBottom = "3px solid " + bandCol(k - 1);
+      b.addEventListener("click", () => { ui_.focus = k; build(); if (ui_.last) P.mc(ui_.last); });
+      tabs.append(b);
+    });
+    // one band's view: its switches on the tab row's right -- solo,
+    // bypass, and its "in use" setting (the plugin's own list)
+    ui_.sw = [];
+    if (ui_.focus) {
+      const k = ui_.focus, gap = h("div"); gap.style.flex = "1"; tabs.append(gap);
+      for (const [r, lab] of [["s", "S"], ["b", "BYP"]]) {
+        const key = "b" + k + r; if (I[key] == null) continue;
+        const b = h("button", "mbtab", lab);
+        b.addEventListener("click", () => { const on = ui_.last && RR.on(ui_.last, key); send("mcn", p.g, key, on ? "0" : "1"); });
+        tabs.append(b); ui_.sw.push({ el: b, key, kind: "t" });
+      }
+      const key = "b" + k + "u", sw = (p.mc.sw || {})[key];
+      if (I[key] != null && sw) {
+        const sel = h("select", "mbtab");
+        sw.forEach((s, i) => { const o = h("option", "", s.t); o.value = i; sel.append(o); });
+        sel.addEventListener("change", () => send("mcn", p.g, key, sw[+sel.value].n.toFixed(5)));
+        tabs.append(sel); ui_.sw.push({ el: sel, key, kind: "s", sw });
+      } else if (I[key] != null) {
+        const b = h("button", "mbtab", "In use");
+        b.addEventListener("click", () => { const on = ui_.last && RR.on(ui_.last, key); send("mcn", p.g, key, on ? "0" : "1"); });
+        tabs.append(b); ui_.sw.push({ el: b, key, kind: "t" });
+      }
+    }
+    // a band slot not in use, when its "in use" control is mapped: + Band
+    // takes the first into use (its "on" setting)
+    if (!ui_.focus && S.spare) {
+      const k = S.spare, sw = (p.mc.sw || {})["b" + k + "u"], on = (sw || []).find(s => mbState(s.t, s.n) === "on");
+      const b = h("button", "mbtab", "+ Band");
+      b.addEventListener("click", () => send("mcn", p.g, "b" + k + "u", (on ? on.n : 1).toFixed(5)));
+      tabs.append(b);
+    }
+    const Q = { p, ctl: [] };
+    if (ui_.focus === 0) {
+      allBands(Q);
+    } else {
+      const k = ui_.focus, bd = (p.mc.bd || [])[k - 1] || {};
+      const km = { t: "b" + k + "t", r: "b" + k + "r", k: "b" + k + "k", a: "b" + k + "a", l: "b" + k + "l", mk: "b" + k + "g" };
+      const i = {}; for (const c in km) if (I[km[c]] != null) i[c] = I[km[c]];
+      const sp = Object.assign({}, p, { mc: { i, km, tr: bd.tr, td: bd.td, rs: bd.rs, es: bd.es, ra: bd.ra, ks: bd.ks, kr: bd.kr } });
+      const Pi = {};
+      mapCompCanvas(sp, Pi, body, CW, subH);
+      ui_.fwd = ev => {
+        const out = { v: {}, u: {}, n: {}, x: {}, g: ev.g };
+        for (const c in km) for (const f of ["v", "u", "n", "x"]) if (ev[f] && ev[f][km[c]] !== undefined) out[f][c] = ev[f][km[c]];
+        if (Pi.mc) Pi.mc(out);
+      };
+    }
+  }
+  function allBands() {
+    const Pa = {};
+    roleFrame(p, Pa, body, CW, subH, (c, v, api, g) => {
+      const gw = g.gw, ch = g.ch, sh = Math.max(70, Math.floor(ch * 0.4));
+      const X = f => Math.log(Math.max(F_LO, Math.min(F_HI, f)) / F_LO) / Math.log(F_HI / F_LO) * gw;
+      for (const f of [100, 1000, 10000]) { RD.vgrid(c, X(f), 0, sh); RD.text(c, f >= 1000 ? f / 1000 + "k" : String(f), X(f) + 3, sh - 4, css("--dim")); }
+      const own = S.own, order = S.order;
+      const def = [120, 1000, 5000], xo = [], xa = [];
+      for (let k = 1; k < nb; k++) { const b = bandOf(v, k); if (I["x" + k] != null) { const o = RR.val(p, v, "x" + k, "hz", F_LO, F_HI, true); xo[k] = b ? b.hi : o.val; xa[k] = o.along; } else xo[k] = b ? b.hi : def[k - 1]; }
+      const rng = k => { const b = bandOf(v, k); return b ? [b.lo, b.hi] : [k === 1 ? F_LO : xo[k - 1], k === nb ? F_HI : xo[k]]; };
+      for (const k of order) {
+        const [lo, hi] = rng(k), bb = bandOf(v, k);
+        c.fillStyle = bandCol(k - 1, (bb && (!bb.u || bb.bp)) ? 0.05 : 0.14); c.fillRect(X(lo), 0, X(hi) - X(lo), sh);
+        if (own) { c.strokeStyle = bandCol(k - 1, 0.6); c.lineWidth = 1; c.strokeRect(X(lo) + 0.5, 0.5, X(hi) - X(lo) - 1, sh - 1); if (X(hi) - X(lo) > 30) RD.text(c, S.name(k), (X(lo) + X(hi)) / 2, sh * 0.45 + 10, bandCol(k - 1), "center"); }
+      }
+      if (v.mb && v.mb.old) RD.text(c, "Reopen the project for the bands' levels (a newer probe)", gw / 2, sh / 2, css("--dim"), "center");
+      else if (!order.length) RD.text(c, S.spare ? "No bands in use — + Band adds one" : "No bands in use", gw / 2, sh / 2, css("--dim"), "center");
+      // a band's own edges: drag them (a low edge on another band's high one moves with it)
+      if (own) for (const k of order) {
+        const [lo, hi] = rng(k);
+        for (const [r, f] of [["lo", lo], ["hi", hi]]) {
+          const key = "b" + k + r; if (I[key] == null) continue;
+          if (r === "lo" && order.some(j => j !== k && I["b" + j + "hi"] != null && Math.abs(Math.log(rng(j)[1] / lo)) < 0.02)) continue;
+          const x = X(f), o = RR.val(p, v, key, "hz", F_LO, F_HI, true);
+          c.strokeStyle = css("--accent"); c.lineWidth = 1.6; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, sh); c.stroke();
+          c.fillStyle = css("--accent"); c.fillRect(x - 3, sh - 26, 6, 18);
+          const v0 = f; api.node(x, sh - 17, dx => RR.set(p, key, Math.max(F_LO, Math.min(F_HI, v0 * Math.pow(F_HI / F_LO, dx / gw))), o.along, F_LO, F_HI, true), 26);
+        }
+      }
+      if (!own) for (let k = 1; k < nb; k++) {
+        const x = X(xo[k]);
+        c.strokeStyle = I["x" + k] != null ? css("--accent") : css("--dim"); c.lineWidth = 1.6; c.setLineDash(I["x" + k] != null ? [] : [3, 3]);
+        c.beginPath(); c.moveTo(x, 0); c.lineTo(x, sh); c.stroke(); c.setLineDash([]);
+        if (I["x" + k] != null) {
+          c.fillStyle = css("--accent"); c.fillRect(x - 3, sh - 26, 6, 18);
+          RD.text(c, v.x["x" + k] || "", x, sh + 13, css("--value"), "center");
+          const v0 = xo[k], lo = k > 1 ? xo[k - 1] * 1.1 : F_LO, hi = k < nb - 1 ? xo[k + 1] / 1.1 : F_HI, along = xa[k];
+          api.node(x, sh - 17, dx => RR.set(p, "x" + k, Math.max(lo, Math.min(hi, v0 * Math.pow(F_HI / F_LO, dx / gw))), along, F_LO, F_HI, true), 26);
+        }
+      }
+      if (I.out != null || I.mx != null) RD.text(c, [I.out != null ? "Output " + (v.x.out || "") : null, I.mx != null ? "Mix " + (v.x.mx || "") : null].filter(Boolean).join("   "), gw - 8, 16, css("--value"), "right");
+      // a strip per band: its curve with its level riding it, its level against its threshold
+      const ty0 = sh + 22, th = ch - ty0, n = Math.max(1, order.length), cw = (gw - (n - 1) * 6) / n;
+      const hz = f => f >= 10000 ? (f / 1000).toFixed(0) + "k" : f >= 1000 ? (f / 1000).toFixed(1) + "k" : f.toFixed(0);
+      // a small slider for one of the band's controls, along its range
+      const slider = (key, label, x, y, w, hh, horiz) => {
+        const n = v.n[key] || 0, rv = !!((p.mc.rr || {})[key]), f = rv ? 1 - n : n, txt = v.x[key] || "";
+        c.fillStyle = "rgba(0,0,0,0.35)";
+        let kx, ky;
+        if (horiz) {
+          c.fillRect(x, y + 16, w, 8); c.fillStyle = withA(css("--accent"), 0.55); c.fillRect(x, y + 16, w * f, 8);
+          kx = x + w * f; ky = y + 20; c.fillStyle = css("--accent"); c.fillRect(kx - 2, y + 12, 4, 16);
+          RD.text(c, label, x, y + 10, css("--label")); RD.text(c, txt, x + w, y + 10, css("--value"), "right");
+          api.node(kx, ky, dx => send("mcn", p.g, key, Math.max(0, Math.min(1, n + (rv ? -1 : 1) * dx / w)).toFixed(5)), 18);
+        } else {
+          const mx = x + w / 2, y0 = y + 14, y1 = y + 14 + hh;
+          c.fillRect(mx - 3, y0, 6, hh); c.fillStyle = withA(css("--accent"), 0.55); c.fillRect(mx - 3, y1 - hh * f, 6, hh * f);
+          kx = mx; ky = y1 - hh * f; c.fillStyle = css("--accent"); c.fillRect(mx - 8, ky - 2, 16, 4);
+          RD.text(c, label, mx, y + 10, css("--label"), "center");
+          let t = txt; c.font = "11px -apple-system, system-ui, sans-serif";
+          while (t.length > 2 && c.measureText(t).width > w - 2) { const s = t.replace(/\s*[A-Za-z]+$/, ""); t = s === t ? t.slice(0, -1) : s; }
+          RD.text(c, t, mx, y1 + 14, css("--value"), "center");
+          api.node(kx, ky, (dx, dy) => send("mcn", p.g, key, Math.max(0, Math.min(1, n + (rv ? 1 : -1) * dy / hh)).toFixed(5)), Math.max(14, w / 2));
+        }
+      };
+      order.forEach((k, idx) => {
+        const cx = idx * (cw + 6), key = r => "b" + k + r, b = bandOf(v, k), lv = b && b.lv != null ? b.lv : null;
+        c.fillStyle = "rgba(0,0,0,0.25)"; c.fillRect(cx, ty0, cw, th);
+        c.fillStyle = bandCol(k - 1); c.fillRect(cx, ty0, cw, 3);
+        RD.text(c, S.name(k) + "  ›", cx + 6, ty0 + 17, css("--value"));
+        const kk = k; api.chip(cx, ty0, cw, 22, () => { ui_.focus = kk; build(); if (ui_.last) P.mc(ui_.last); });
+        // its switches along the foot: solo, bypass, and its "in use" setting
+        let bx = cx + 6;
+        if (!b || b.u) for (const [r, lab] of [["s", "S"], ["b", "BYP"]]) if (I[key(r)] != null) { const on = RR.on(v, key(r)); bx = RD.toggle(c, api, lab, on, bx, ty0 + th - 28, () => send("mcn", p.g, key(r), on ? "0" : "1")); }
+        const usw = (p.mc.sw || {})[key("u")];
+        if (usw) {
+          // all its settings as chips when they fit, else the one it's on (tap: the next)
+          const room = cx + cw - bx - 10, cur = v.n[key("u")] || 0;
+          const need = usw.reduce((t, s_) => t + c.measureText(s_.t).width + 18, 0);
+          if (need <= room) RD.chips(c, api, usw, cur, bx + 4, ty0 + th - 28, room, n => send("mcn", p.g, key("u"), n.toFixed(5)));
+          else {
+            const i = Math.max(0, usw.findIndex(s_ => cur >= s_.lo - 1e-6 && cur <= s_.hi + 1e-6)), nx = usw[(i + 1) % usw.length];
+            RD.chips(c, api, [usw[i]], cur, bx + 4, ty0 + th - 28, room, () => send("mcn", p.g, key("u"), nx.n.toFixed(5)));
+          }
+        }
+        else if (I[key("u")] != null) { const on = RR.on(v, key("u")); RD.toggle(c, api, on ? "In use" : "Not used", on, bx + 4, ty0 + th - 28, () => send("mcn", p.g, key("u"), on ? "0" : "1")); }
+        if (b && !b.u) { RD.text(c, "not in use", cx + cw / 2, ty0 + 50, css("--dim"), "center"); return; }
+        const hz = f => f >= 10000 ? (f / 1000).toFixed(0) + "k" : f >= 1000 ? (f / 1000).toFixed(1) + "k" : f.toFixed(0);
+        if (b && b.bp) RD.text(c, cw < 160 ? "off" : "switched off", cx + cw - 6, ty0 + 17, css("--dim"), "right");
+        else if (own && b) RD.text(c, hz(b.lo) + "–" + hz(b.hi), cx + cw - 6, ty0 + 17, css("--dim"), "right");
+        // room: the curve as big as fits over the sliders
+        let sl = [["r", "Ratio"], ["a", "Atk"], ["l", "Rel"], ["g", "Gain"]].filter(s => I[key(s[0])] != null);
+        let hg = false; if (sl.length === 4 && (cw - 12) / 4 < 28) { hg = true; sl = sl.slice(0, 3); }
+        const avail = th - 26 - 34 - 8, slh = sl.length ? Math.max(40, Math.min(100, Math.floor(avail * 0.34))) : 0;
+        const sbh = (sl.length ? slh + 30 : 0) + (hg ? 34 : 0);
+        let cs = Math.min(cw - 12, avail - sbh - 6); if (cs < 30) cs = 0;
+        let thr = null;
+        if (I[key("t")] != null) { const o = RR.val(p, v, key("t"), "db", -60, 0, false); thr = Math.max(-60, o.val); if (v.u[key("t")] === "" && v.v[key("t")] != null && v.v[key("t")] < 0) thr = v.v[key("t")]; }
+        let ratio = 2; if (v.v[key("r")] != null && v.v[key("r")] >= 1) ratio = v.v[key("r")]; else if (I[key("r")] != null && v.v[key("r")] == null) ratio = 1000;
+        const out = d => (thr == null || d <= thr) ? d : thr + (d - thr) / ratio;
+        const py = ty0 + 26;
+        if (cs > 0) {
+          const px = cx + (cw - cs) / 2, cl = d => Math.max(-60, Math.min(6, d));
+          const X_ = d => px + (cl(d) + 60) / 66 * cs, Y_ = d => py + cs - (cl(d) + 60) / 66 * cs;
+          c.strokeStyle = css("--ring"); c.lineWidth = 1; c.strokeRect(px + 0.5, py + 0.5, cs, cs);
+          if (thr != null) {
+            c.beginPath(); for (let i = 0; i <= 40; i++) { const d = -60 + 66 * i / 40; i ? c.lineTo(X_(d), Y_(out(d))) : c.moveTo(X_(d), Y_(out(d))); }
+            c.strokeStyle = css("--value"); c.lineWidth = 1.6; c.stroke();
+            c.strokeStyle = css("--accent"); c.beginPath(); c.moveTo(px, Y_(thr)); c.lineTo(px + cs, Y_(thr)); c.stroke();
+            RD.text(c, v.x[key("t")] || "", px + 4, py + 13, css("--dim"));
+            const t0 = thr, db = v.u[key("t")] === "db" || (v.u[key("t")] === "" && v.v[key("t")] < 0);
+            api.hline(Y_(thr), px, px + cs, (dx, dy) => { const nv = Math.max(-60, Math.min(0, t0 - dy * 66 / cs)); if (db) send("mcv", p.g, key("t"), nv.toFixed(2)); else RR.set(p, key("t"), nv, true, -60, 0, false); });
+          }
+          // the band going in, riding its curve
+          if (lv != null && lv > -60) {
+            const hx = X_(lv), hy = Y_(out(lv));
+            c.fillStyle = "rgba(230,207,121,0.25)"; c.beginPath(); c.arc(hx, hy, 7, 0, 7); c.fill();
+            c.fillStyle = "#ffd8b0"; c.strokeStyle = "#e6cf79"; c.lineWidth = 1.2; c.beginPath(); c.arc(hx, hy, 3.5, 0, 7); c.fill(); c.stroke();
+          }
+        }
+        // its controls as small sliders (gain across, when they'd be too narrow)
+        let sy = py + cs + 10;
+        if (sl.length) { const sw = (cw - 12) / sl.length; sl.forEach((s, j) => slider(key(s[0]), s[1], cx + 6 + j * sw, sy, sw, slh, false)); sy += slh + 30; }
+        if (hg) slider(key("g"), "Gain", cx + 6, sy, cw - 12, 30, true);
+      });
+    }, { meter: true });
+    ui_.fwd = ev => { if (Pa.mc) Pa.mc(ev); };
+  }
+  P.mc = ev => {
+    if (!ev) return; ui_.last = ev;
+    // the bands shown can change (one taken into use): build again then
+    const s2 = shownOf(ev), sig = (s2.own ? "o" : "") + s2.order.join(",") + "+" + s2.spare;
+    if (sig !== ui_.sig) { ui_.sig = sig; S = s2; build(); }
+    if (ui_.fwd) ui_.fwd(ev);
+    // the focused band's switches, as they read
+    for (const s of ui_.sw || []) {
+      const n = (ev.n || {})[s.key] || 0;
+      if (s.kind === "t") s.el.classList.toggle("on", RR.on(ev, s.key));
+      else { const i = s.sw.findIndex(x => n >= x.lo - 1e-6 && n <= x.hi + 1e-6); if (i >= 0 && +s.el.value !== i && document.activeElement !== s.el) s.el.value = i; }
+    }
+  };
+  build();
+}
+
+function mapCompCanvas(p, P, hold, CW, bodyH) {
+  // a multiband's band uses this canvas with its own roles (p.mc.km maps
+  // the compressor's role names onto the band's)
+  const S_ = (verb, g, k, val) => send(verb, g, (p.mc.km && p.mc.km[k]) || k, val);
+  const I = p.mc.i || {};
+  if (p.mc.k === "gate") return mapGateCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "limit") return mapLimitCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "deess") return mapDeessCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "delay") return mapDelayCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "reverb") return mapReverbCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "env") return mapEnvCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "mod") return mapModCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "multi") return mapMultiCanvas(p, P, hold, CW, bodyH);
+  if (p.mc.k === "sat") return mapSatCanvas(p, P, hold, CW, bodyH);
   if (!Object.keys(I).length) { mapSetupNote(hold, "This compressor layout has no roles yet. Set it up in ChannelView on the desktop."); return; }
   const W_ = CW - 16, ch = Math.max(140, bodyH - 16);
   const cv = h("canvas", "eqc");
@@ -4947,12 +6489,15 @@ function mapCompCanvas(p, P, hold, CW, bodyH) {
   cv.width = W_ * dpr; cv.height = ch * dpr; cv.style.height = ch + "px"; cv.style.width = W_ + "px"; cv.style.right = "auto";
   hold.append(cv);
   // the level scale: wide enough for the threshold's whole range
-  // no threshold but an input (1176-style): the input drives the signal
-  // into a fixed threshold, drawn as the threshold moving the other way
-  const VIA_IN = I.t == null && I.in != null, FIXED = -10, TK = VIA_IN ? "in" : "t";
+  // no threshold but an input (1176-style): drawn after the input's gain,
+  // the threshold fixed and the gain a bar of its own (driveOf)
+  const VIA_IN = I.t == null && I.in != null, TK = VIA_IN ? "in" : "t";
   const TR0 = p.mc.tr, TD = !!p.mc.td && (VIA_IN || !p.mc.rv);
-  const TR = (TR0 && VIA_IN) ? [FIXED - TR0[1], FIXED - TR0[0]] : TR0;
-  const TOP = (TD && TR) ? Math.max(6, TR[1] + 3) : 6, BOT = (TD && TR) ? Math.min(-60, TR[0] - 6) : -60, MW = 30;
+  const HAS_TC = !!(p.mc.tc && p.mc.tc.p && p.mc.tc.p.length >= 2);
+  const LINE0 = VIA_IN ? driveLine(p, "comp") : null;
+  const TR = VIA_IN ? null : TR0;
+  const TOP = VIA_IN ? Math.max(6, Math.min(24, LINE0 + 12)) : (TD && TR) ? Math.max(6, TR[1] + 3) : 6;
+  const BOT = VIA_IN ? Math.min(-60, Math.max(-96, LINE0 - 50)) : (TD && TR) ? Math.min(-60, TR[0] - 6) : -60, MW = 30;
   const gw = W_ - MW - 4;
   const X = db => (db - BOT) / (TOP - BOT) * gw;
   const Y = db => (TOP - db) / (TOP - BOT) * ch;
@@ -4960,7 +6505,8 @@ function mapCompCanvas(p, P, hold, CW, bodyH) {
   const ATK = [0.1, 500], HLD = [1, 2000], REL = [1, 5000];
   const tf = (ms, r) => ms <= r[0] ? 0 : ms >= r[1] ? 1 : Math.log(ms / r[0]) / Math.log(r[1] / r[0]);
   const ft = (f, r) => f <= 0 ? 0 : f >= 1 ? r[1] : r[0] * Math.pow(r[1] / r[0], f);
-  const rv = VIA_IN || !!p.mc.rv;
+  const rv = !VIA_IN && !!p.mc.rv;
+  const driveNow = v => driveOf(p, v, null, "comp", (verb, k, val) => S_(verb, p.g, k, val));
   // attack / hold / release: reversed ones, and a switch's settings along
   // the envelope (ES[k]: {n, lo, hi, f}), as the desktop draws them
   const RA = p.mc.ra || {};
@@ -4973,9 +6519,21 @@ function mapCompCanvas(p, P, hold, CW, bodyH) {
     return best;
   };
   const stepNear = (es, f) => es.reduce((b, s) => Math.abs(s.f - f) < Math.abs(b.f - f) ? s : b, es[0]);
+  // measured: where the threshold really is in dBFS, against its reading
+  // (or position): between the points, on past the ends
+  const TC = (HAS_TC && !VIA_IN) ? p.mc.tc : null;
+  const calInterp = (pts, x, i0, i1) => {
+    let i = 0; const up = pts[pts.length - 1][i1] >= pts[0][i1];
+    while (i < pts.length - 2 && (i0 === 0 ? x > pts[i + 1][0] : (up ? x > pts[i + 1][1] : x < pts[i + 1][1]))) i++;
+    const a = pts[i], b = pts[i + 1];
+    return b[i0] === a[i0] ? a[i1] : a[i1] + (x - a[i0]) * (b[i1] - a[i1]) / (b[i0] - a[i0]);
+  };
+  const calDb = x => calInterp(TC.p, x, 0, 1), calFrom = db => calInterp(TC.p, db, 1, 0);
+  const calX = v => TC.n ? (v.n[TK] || 0) : (v.v[TK] != null && Math.abs(v.v[TK]) < 1e9 ? v.v[TK] : null);
   function thrNow(v) {
     if (I[TK] == null) return null;
-    if (VIA_IN && (v.u[TK] === "db" || TD) && v.v[TK] != null) return Math.max(BOT, FIXED - v.v[TK]);
+    if (VIA_IN) return driveNow(v).line;
+    if (TC) { const x = calX(v); if (x != null) return Math.max(BOT, calDb(x)); }
     if ((v.u[TK] === "db" || TD) && v.v[TK] != null && !rv) return Math.max(BOT, v.v[TK]);
     const n = rv ? 1 - (v.n[TK] || 0) : (v.n[TK] || 0);
     return BOT + 6 + n * (TOP - BOT - 12);
@@ -5009,26 +6567,49 @@ function mapCompCanvas(p, P, hold, CW, bodyH) {
     for (const g of [0, -12, -24, -36, -48]) { const y = Math.round(Y(g)) + 0.5; c.beginPath(); c.moveTo(0, y); c.lineTo(gw, y); c.stroke(); }
     c.globalAlpha = 1;
     const thr = thrNow(v);
-    let ratio = 4; if (v.v.r != null && v.v.r >= 1) ratio = v.v.r; else if (I.r != null && v.v.r == null) ratio = 1000;
-    const knee = (v.v.k != null && v.v.k > 0 && v.v.k < 60) ? v.v.k : 0;
+    let ratio = 4; if (v.v.r != null && (v.u.r === "ratio" ? v.v.r > 0 : v.v.r >= 1)) ratio = (p.mc.rf && v.v.r > 0) ? 1 / v.v.r : v.v.r; else if (I.r != null && v.v.r == null) ratio = 1000;
+    // the knee: as it reads in dB; or a share of twice the threshold's
+    // distance from 0 dBFS (as the desktop)
+    const kShare = (p.mc.ks && thr != null) ? 2 * Math.max(6, Math.abs(Math.min(0, thr))) : null;
+    const knee = kShare ? Math.min(60, (p.mc.kr ? 1 - (v.n.k || 0) : (v.n.k || 0)) * kShare)
+      : (v.v.k != null && v.v.k > 0 && v.v.k < 60) ? v.v.k : 0;
     if (thr != null) {
-      const ty = Y(thr);
-      c.strokeStyle = css("--accent"); c.lineWidth = 1.6; c.beginPath(); c.moveTo(0, ty); c.lineTo(gw, ty); c.stroke();
+      const ty = Y(thr), D = VIA_IN ? driveNow(v) : null;
+      c.strokeStyle = css("--accent"); c.lineWidth = D ? 1.4 : 1.6; if (D) c.setLineDash([7, 4]);
+      c.beginPath(); c.moveTo(0, ty); c.lineTo(gw, ty); c.stroke(); c.setLineDash([]);
       c.setLineDash([3, 4]); c.strokeStyle = withA(css("--label"), 0.6); c.lineWidth = 1;
       c.beginPath(); c.moveTo(X(thr), Y(thr)); c.lineTo(X(TOP), Y(TOP)); c.stroke(); c.setLineDash([]);
       c.beginPath();
       for (let i = 0; i <= 120; i++) { const db = BOT + (TOP - BOT) * i / 120, y = Y(transfer(db, thr, ratio, knee)); i ? c.lineTo(X(db), y) : c.moveTo(X(db), y); }
       c.strokeStyle = css("--value"); c.lineWidth = 2.2; c.stroke();
-      c.fillStyle = css("--accent"); c.fillRect(X(thr) - 20, ty - 4, 40, 8);
-      c.fillStyle = css("--value"); c.fillText((v.x[TK] || "") + "  " + (VIA_IN ? "Input" : rv ? "Compression" : "Threshold"), 8, ty - 8);
+      if (D) {
+        // fixed: no handle; its words on the side away from the gain's bar
+        c.fillStyle = css("--value");
+        c.fillText(thr.toFixed(1) + " dBFS  \u00b7  Threshold, fixed" + (D.measured ? " (measured)" : ", guessed: measure it in Set up"),
+          8, D.bar > thr ? ty + 16 : ty - 8);
+        st.barY = driveBar(c, D, Y, gw, ch, v.x.in, "threshold"); st.D = D;
+      } else {
+        c.fillStyle = css("--accent"); c.fillRect(X(thr) - 20, ty - 4, 40, 8);
+        c.fillStyle = css("--value"); c.fillText((v.x[TK] || "") + "  " + (rv ? "Compression" : "Threshold")
+          + (TC ? "  \u00b7  " + thr.toFixed(1) + " dBFS (measured)" : ""), 8, ty - 8);
+      }
     } else {
       c.fillStyle = css("--dim"); c.textAlign = "center"; c.fillText("no threshold: no transfer curve", gw / 2, ch * 0.42); c.textAlign = "left";
     }
-    st.rend = null;
+    st.rend = null; st.knee = null;
+    if (I.k != null && thr != null) {
+      // the knee's grips, on the band's edges
+      const gx = Math.max(70, X(thr) - 80), y1 = Y(thr + knee / 2) - 3, y2 = Y(thr - knee / 2) + 3;
+      c.fillStyle = withA(css("--accent"), 0.85); c.fillRect(gx, y1 - 2, 14, 4); c.fillRect(gx, y2 - 2, 14, 4);
+      c.fillStyle = css("--label") || css("--dim"); c.textAlign = "right"; c.fillText("Knee " + (v.x.k || ""), gx - 5, y1 - 4); c.textAlign = "left";
+      st.knee = { x: gx + 7, y1, y2, knee, share: kShare };
+    }
     if (I.r != null && thr != null) {
-      const ex = gw - 6, ey = Y(transfer(TOP, thr, ratio, knee));
+      let ex = gw - 6, ey = Y(transfer(TOP, thr, ratio, knee));
+      // an expander's (under 1:1) leaves through the top: its end is there
+      if (transfer(TOP, thr, ratio, knee) > TOP && ratio > 0) { ex = Math.max(7, Math.min(gw - 6, X(thr + (TOP - thr) * ratio))); ey = 7; }
       c.fillStyle = css("--value"); c.beginPath(); c.arc(ex, ey, 7, 0, Math.PI * 2); c.fill();
-      c.textAlign = "right"; c.fillText((v.x.r || "") + "  Ratio", ex - 12, ey - 10); c.textAlign = "left";
+      c.textAlign = "right"; c.fillText((v.x.r || "") + "  Ratio", ex - 12, ey < 24 ? ey + 20 : ey - 10); c.textAlign = "left";
       st.rend = { x: ex, y: ey, thr };
     }
     if (I.a != null || I.h != null || I.l != null) {
@@ -5061,9 +6642,22 @@ function mapCompCanvas(p, P, hold, CW, bodyH) {
       e.preventDefault(); cv.setPointerCapture(e.pointerId);
       st.drag = { k: "r", y0: y, ey: st.rend.y, thr: st.rend.thr }; return;
     }
+    if (st.knee && Math.abs(st.knee.x - x) < 20) for (const s of [1, 2]) {
+      if (Math.abs((s === 1 ? st.knee.y1 : st.knee.y2) - y) < 12) {
+        e.preventDefault(); cv.setPointerCapture(e.pointerId);
+        st.drag = { k: "kn", s, y0: y, k0: st.knee.knee, share: st.knee.share }; return;
+      }
+    }
     for (const n of st.nodes || []) if (Math.hypot(n[1] - x, n[2] - y) < 22) {
       e.preventDefault(); cv.setPointerCapture(e.pointerId);
       st.drag = { k: n[0], x0: x, f0: st.env.fr(n[0], n[0] === "a" ? ATK : n[0] === "h" ? HLD : REL) }; return;
+    }
+    if (VIA_IN) {
+      if (st.D && st.barY != null && Math.abs(st.barY - y) < 18 && x < gw) {
+        e.preventDefault(); cv.setPointerCapture(e.pointerId);
+        st.drag = { k: "g", y0: y, b0: Math.max(BOT, Math.min(TOP, st.D.bar)), D: st.D };
+      }
+      return;
     }
     const thr = thrNow(st.v);
     if (thr != null && Math.abs(Y(thr) - y) < 18 && x < gw) {
@@ -5075,34 +6669,47 @@ function mapCompCanvas(p, P, hold, CW, bodyH) {
     const d = st.drag; if (!d || !cv.hasPointerCapture(e.pointerId)) return;
     const [x, y] = pos(e), v = st.v;
     if (d.k === "r") {
-      // the curve's end: the ratio it makes, snapped to a switch's settings
-      const endDb = TOP - (d.ey + (y - d.y0)) / ch * (TOP - BOT), rise = TOP - d.thr;
-      if (rise <= 0.01) return;
-      const r = rise / Math.max(0.0001, endDb - d.thr);
+      // the curve's end, where the pointer is: the ratio it makes with the
+      // corner (across over up), snapped to a switch's settings
+      const xdb = BOT + Math.min(gw, x) / gw * (TOP - BOT), ydb = TOP - y / ch * (TOP - BOT);
+      if (xdb - d.thr <= 0.5) return;
+      const r = (ydb - d.thr > 0.05) ? (xdb - d.thr) / (ydb - d.thr) : Infinity;
+      const flip = x_ => (p.mc.rf && x_ > 0) ? 1 / x_ : x_;
       if (p.mc.rs) {
         let best = null, bd = 1e9;
         for (const ps of p.mc.rs) {
           const m = String(ps.t || "").match(/([\d.]+)\s*:\s*([\d.]+)/);
-          let val = m ? Math.max(+m[1] / +m[2], +m[2] / +m[1]) : 1000;
-          const dd = Math.abs(Math.log(val) - Math.log(Math.max(1, r)));
+          let val = m ? flip(+m[1] / +m[2]) : 1000;
+          if (!(val > 0) || !isFinite(val)) val = 1000;
+          const dd = Math.abs(Math.log(val) - Math.log(Math.max(0.05, Math.min(1000, r))));
           if (dd < bd) { bd = dd; best = ps.n; }
         }
-        if (best != null && Math.abs(best - (v.n.r || 0)) > 1e-6) send("mcn", p.g, "r", best.toFixed(5));
-      } else send("mcv", p.g, "r", Math.max(1, Math.min(100, r)).toFixed(3));
+        if (best != null && Math.abs(best - (v.n.r || 0)) > 1e-6) S_("mcn", p.g, "r", best.toFixed(5));
+      } else {
+        const lo = p.mc.rl || 1, hi = p.mc.rh || 100;
+        if (p.mc.ru != null && r >= 100) S_("mcn", p.g, "r", String(p.mc.ru));
+        else { const want = Math.max(lo, Math.min(Math.min(hi, 100), r)); S_("mcv", p.g, "r", (p.mc.rf ? 1 / want : want).toFixed(3)); }
+      }
+    } else if (d.k === "kn") {
+      const nk = Math.max(0, d.k0 + (d.s === 1 ? -(y - d.y0) : (y - d.y0)) * 2 * (TOP - BOT) / ch);
+      if (d.share) { const n = Math.max(0, Math.min(1, nk / d.share)); S_("mcn", p.g, "k", (p.mc.kr ? 1 - n : n).toFixed(5)); }
+      else S_("mcv", p.g, "k", nk.toFixed(2));
+    } else if (d.k === "g") {
+      d.D.set(d.b0 - (y - d.y0) / ch * (TOP - BOT));
     } else if (d.k === "t") {
       const tgt = d.t0 - (y - d.y0) / ch * (TOP - BOT);
-      if (VIA_IN && (v.u[TK] === "db" || TD)) send("mcv", p.g, TK, (FIXED - tgt).toFixed(2));
-      else if ((v.u[TK] === "db" || TD) && !rv) send("mcv", p.g, TK, tgt.toFixed(2));
-      else { const dn = (y - d.y0) / (ch * (TOP - BOT - 12) / (TOP - BOT)); send("mcn", p.g, TK, Math.max(0, Math.min(1, d.n0 + (rv ? dn : -dn))).toFixed(5)); }
+      if (TC) { const x = calFrom(tgt); S_(TC.n ? "mcn" : "mcv", p.g, TK, TC.n ? Math.max(0, Math.min(1, x)).toFixed(5) : x.toFixed(2)); }
+      else if ((v.u[TK] === "db" || TD) && !rv) S_("mcv", p.g, TK, tgt.toFixed(2));
+      else { const dn = (y - d.y0) / (ch * (TOP - BOT - 12) / (TOP - BOT)); S_("mcn", p.g, TK, Math.max(0, Math.min(1, d.n0 + (rv ? dn : -dn))).toFixed(5)); }
     } else {
       const e2 = st.env, w = d.k === "a" ? e2.AW : d.k === "h" ? e2.HW : e2.RW, r = d.k === "a" ? ATK : d.k === "h" ? HLD : REL;
       const f = Math.max(0, Math.min(1, d.f0 + (x - d.x0) / Math.max(1, w)));
       const es = p.mc.es && p.mc.es[d.k];
       if (es) {
         const s_ = stepNear(es, f);
-        if (Math.abs(s_.n - (v.n[d.k] || 0)) > 1e-6) send("mcn", p.g, d.k, s_.n.toFixed(5));
-      } else if (v.u[d.k] === "ms" && v.v[d.k] != null) send("mcv", p.g, d.k, ft(f, r).toFixed(3));
-      else send("mcn", p.g, d.k, (RA[d.k] ? 1 - f : f).toFixed(5));
+        if (Math.abs(s_.n - (v.n[d.k] || 0)) > 1e-6) S_("mcn", p.g, d.k, s_.n.toFixed(5));
+      } else if (v.u[d.k] === "ms" && v.v[d.k] != null) S_("mcv", p.g, d.k, ft(f, r).toFixed(3));
+      else S_("mcn", p.g, d.k, (RA[d.k] ? 1 - f : f).toFixed(5));
     }
   });
   cv.addEventListener("pointerup", () => { st.drag = null; });

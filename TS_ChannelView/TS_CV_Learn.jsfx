@@ -8,7 +8,21 @@ noindex: true
   learning makes, and removed with it.
 
   Source (Role 0), before the plugin: quiet white noise on channels 1/2,
-  and the same noise on channel 7, which the plugin leaves alone.
+  and the same noise on channel 7, which the plugin leaves alone. Or, with
+  Signal at Sine, a 1 kHz sine at Level dBFS (its peak) instead: for
+  finding where a compressor's threshold really is. The sine goes to
+  channels 3 to 6 too (with Sidechain on), so a compressor listening to
+  its sidechain hears it. Or, with Signal at Burst, a third of a second
+  of noise at Level each time Burst changes, then silence: for timing a
+  reverb's tail.
+
+  With Envelope on, the analyser instead records what comes out (1 and
+  2, the octave around 1 kHz: where a reverb's decay time is meant, the
+  lows and highs having their own), its level every 10 ms from the moment
+  Measurement changes, to gmem
+  LB+200 on (dB), until it has fallen 35 dB below its loudest (enough to
+  time it: the fall is run on to 60 dB) or 15 s have passed; LB+1 is then
+  how many it recorded.
 
   Analyser (Role 1), after the plugin: compares channel 1 (what came out
   of the plugin) with channel 7 (what went in, delayed by the plugin's
@@ -17,6 +31,19 @@ noindex: true
 
   A new Measurement number starts a measurement: settle for Settle
   seconds (plus the latency), then average Frames FFT frames.
+
+  With Curve on (the sine at Freq Hz and Level going in), the analyser
+  also bins what comes out against what went in -- the plugin's transfer
+  curve, 24 steps of the input from -1 to 1 of its peak, on the way up
+  and on the way down separately (a tape loop's two sides) -- and reads
+  the output's harmonics off the FFT: for learning a saturator. The input
+  is first lined up with the output at the sine's own frequency (the
+  fundamental's phase, out against in): a plugin's filters, or a latency
+  it reports wrongly, would otherwise turn any curve into an ellipse.
+    LB+300 + b   on the way up, step b: the output (linear), -999 unfilled
+    LB+330 + b   on the way down
+    LB+361       the fundamental's gain, out against in (dB)
+    LB+360 + h   harmonic h (2..9) against the fundamental (dB)
 
   gmem (namespace TS_TA_Mem, shared with TS_TrackProbe, clear of it):
     LB+0   the Measurement number last finished
@@ -35,6 +62,13 @@ slider2:meas=0<0,10000000,1>-Measurement
 slider3:lat=0<0,200000,1>-Latency
 slider4:frames=4<1,16,1>-Frames
 slider5:settle=0.2<0,2,0.01>-Settle
+slider6:signal=0<0,2,1{Noise,Sine,Burst}>-Signal
+slider7:level=-40<-90,6,0.1>-Level
+slider8:scfeed=1<0,1,1{Off,On}>-Sidechain too
+slider9:burst=0<0,10000000,1>-Burst
+slider10:envmode=0<0,1,1{Off,On}>-Envelope
+slider11:freq=1000<20,10000,1>-Sine frequency
+slider12:wavemode=0<0,1,1{Off,On}>-Curve
 
 in_pin:1
 in_pin:2
@@ -70,7 +104,78 @@ DMAX  = 262144;
 
 i = 0;
 loop(N, WIN[i] = 0.5 - 0.5 * cos(2 * $pi * i / N); i += 1;);
-cur = -1; state = 0; pos = 0; nfr = 0; dpos = 0; count = 0;
+cur = -1; state = 0; pos = 0; nfr = 0; dpos = 0; count = 0; ph = 0;
+lastburst = burst; bleft = 0;
+ENVB = LB + 200; ENVN = 1500;
+WV = 330000; CB = 24;   // the curve: up sums, up counts, down sums, down counts
+
+// one side of the curve out to gmem: each step's mean output, moved to the
+// step's centre along the slope between its neighbours (a steep part has
+// only a few samples a step, not spread evenly across it)
+function curveSide(sy, sn, sx, dst) local(b, m, xm, xc, sl, bl, br) (
+  b = 0;
+  loop(CB,
+    sn[b] > 0 ? ( WV[6 * CB + b] = sy[b] / sn[b]; WV[7 * CB + b] = sx[b] / sn[b]; ) : ( WV[6 * CB + b] = -999; );
+    b += 1;
+  );
+  b = 0;
+  loop(CB,
+    m = WV[6 * CB + b];
+    m > -900 ? (
+      xm = WV[7 * CB + b]; xc = -1 + (b + 0.5) * 2 / CB;
+      bl = max(0, b - 1); br = min(CB - 1, b + 1);
+      sl = (WV[6 * CB + bl] > -900 && WV[6 * CB + br] > -900 && WV[7 * CB + br] > WV[7 * CB + bl])
+        ? (WV[6 * CB + br] - WV[6 * CB + bl]) / (WV[7 * CB + br] - WV[7 * CB + bl]) : 0;
+      gmem[dst + b] = m + sl * (xc - xm);
+    ) : ( gmem[dst + b] = -999; );
+    b += 1;
+  );
+);
+
+// the curve and the harmonics, once the frames are in (Curve mode)
+function curveOut() local(b, a, h, c, k, k0, py, p1, px, kb, mb, ph, d, i, t, xi, xa, prev) (
+  // how far the output lags at the fundamental, in samples: the phase of
+  // the strongest bin near it, out against in, wrapped to half a cycle
+  c = freq * N / srate;
+  kb = floor(c + 0.5); mb = 0; k = kb - 1;
+  loop(3, a = sqr(BUF_Y[2 * k]) + sqr(BUF_Y[2 * k + 1]); a > mb ? (mb = a; kb = k); k += 1; );
+  ph = atan2(BUF_Y[2 * kb + 1], BUF_Y[2 * kb]) - atan2(BUF_X[2 * kb + 1], BUF_X[2 * kb]);
+  while (ph > $pi) ( ph -= 2 * $pi; );
+  while (ph < -$pi) ( ph += 2 * $pi; );
+  d = -ph / (2 * $pi * freq) * srate;
+  // the curve, from the frame: the output against the input as it was d
+  // samples earlier, rising or falling
+  memset(WV, 0, 6 * CB);
+  prev = 0; i = 2 + ceil(abs(d));
+  loop(N - 2 * (2 + ceil(abs(d))),
+    t = i - d; xi = floor(t); a = t - xi;
+    xa = FX[xi] + (FX[xi + 1] - FX[xi]) * a;
+    b = max(0, min(CB - 1, floor((xa / wamp + 1) * 0.5 * CB)));
+    xa >= prev ? ( WV[b] += FY[i]; WV[CB + b] += 1; WV[4 * CB + b] += xa / wamp; )
+               : ( WV[2 * CB + b] += FY[i]; WV[3 * CB + b] += 1; WV[5 * CB + b] += xa / wamp; );
+    prev = xa;
+    i += 1;
+  );
+  gmem[LB + 370] = d;
+  curveSide(WV, WV + CB, WV + 4 * CB, LB + 300);
+  curveSide(WV + 2 * CB, WV + 3 * CB, WV + 5 * CB, LB + 330);
+  h = 1;
+  loop(9,
+    c = h * freq * N / srate;
+    py = 0; px = 0;
+    c < N / 2 - 4 ? (
+      k0 = floor(c + 0.5) - 3; k = k0;
+      loop(7, k > 0 ? ( py += ACC_Y[k]; px += ACC_X[k]; ); k += 1; );
+    );
+    h == 1 ? (
+      p1 = max(py, 0.0000000001);
+      gmem[LB + 361] = 10 * log10(p1 / max(px, 0.0000000001));
+    ) : (
+      gmem[LB + 360 + h] = 10 * log10(max(py, 0.0000000000001) / p1);
+    );
+    h += 1;
+  );
+);
 
 function bands() local(b, flo, fhi, k0, k1, k, py, px, sumx, nx) (
   b = 0; sumx = 0; nx = 0;
@@ -103,19 +208,54 @@ function bands() local(b, flo, fhi, k0, k1, k, py, px, sumx, nx) (
 role == 1 ? gmem[LB + 4] += 1;
 role == 1 && meas != cur ? (
   cur = meas;
-  state = 1;
-  count = floor(settle * srate) + lat;
-  pos = 0; nfr = 0;
-  memset(ACC_Y, 0, N / 2);
-  memset(ACC_X, 0, N / 2);
+  envmode >= 0.5 ? (
+    // a reverb's tail: its level every 10 ms from now
+    state = 3; eb = 0; eacc = 0; ecnt = 0; epk = -999;
+    eblk = max(1, floor(srate / 100));
+    // the octave around 1 kHz (a band-pass, 0 dB at its middle)
+    bw0 = 2 * $pi * 1000 / srate; bal = sin(bw0) / (2 * 1.414);
+    ba0 = 1 + bal; bb0 = bal / ba0; bb2 = -bal / ba0;
+    ba1 = -2 * cos(bw0) / ba0; ba2 = (1 - bal) / ba0;
+    bx1 = 0; bx2 = 0; by1 = 0; by2 = 0;
+  ) : (
+    state = 1;
+    count = floor(settle * srate) + lat;
+    pos = 0; nfr = 0;
+    memset(WV, 0, 6 * CB); wamp = 10 ^ (level / 20); wprev = 0;
+    memset(ACC_Y, 0, N / 2);
+    memset(ACC_X, 0, N / 2);
+  );
+);
+// the source: a burst each time Burst changes
+role == 0 && burst != lastburst ? (
+  lastburst = burst;
+  bleft = floor(0.33 * srate);
 );
 
 @sample
 role == 0 ? (
-  n = (rand(2) - 1) * 0.1;
-  spl0 = n; spl1 = n;
-  spl2 = 0; spl3 = 0; spl4 = 0; spl5 = 0;
-  spl6 = n; spl7 = 0;
+  // (not "n": EEL2 names ignore case, and N is the FFT size)
+  signal >= 1.5 ? (
+    // noise at Level (its RMS), for a third of a second, then silence
+    bleft > 0 ? (
+      sv = (rand(2) - 1) * 1.732 * 10 ^ (level / 20);
+      bleft -= 1;
+    ) : (
+      sv = 0;
+    );
+  ) : ( signal >= 0.5 ? (
+    sv = 10 ^ (level / 20) * sin(ph);
+    ph += 2 * $pi * freq / srate; ph > 2 * $pi ? (ph -= 2 * $pi);
+  ) : (
+    sv = (rand(2) - 1) * 0.1;
+  ); );
+  spl0 = sv; spl1 = sv;
+  (signal >= 0.5 && scfeed >= 0.5) ? (
+    spl2 = sv; spl3 = sv; spl4 = sv; spl5 = sv;
+  ) : (
+    spl2 = 0; spl3 = 0; spl4 = 0; spl5 = 0;
+  );
+  spl6 = sv; spl7 = 0;
 ) : (
   y = spl0;
   DLY[dpos] = spl6;
@@ -124,11 +264,28 @@ role == 0 ? (
   xd = DLY[rp];
   dpos += 1;
   dpos >= DMAX ? dpos = 0;
-  state == 1 ? (
+  state == 3 ? (
+    bxi = (y + spl1) * 0.5;
+    byo = bb0 * bxi + bb2 * bx2 - ba1 * by1 - ba2 * by2;
+    bx2 = bx1; bx1 = bxi; by2 = by1; by1 = byo;
+    eacc += 2 * byo * byo; ecnt += 1;
+    ecnt >= eblk ? (
+      edb = 10 * log10(eacc / (2 * ecnt) + 0.00000000000000000001);
+      gmem[ENVB + eb] = edb;
+      edb > epk ? (epk = edb);
+      eb += 1; eacc = 0; ecnt = 0;
+      (eb >= ENVN || (eb > 40 && edb < epk - 35)) ? (
+        gmem[LB + 1] = eb;
+        gmem[LB] = cur;
+        state = 0;
+      );
+    );
+  ) : ( state == 1 ? (
     count -= 1;
     count <= 0 ? state = 2;
   ) : ( state == 2 ? (
     FY[pos] = y; FX[pos] = xd; pos += 1;
+
     pos >= N ? (
       i = 0;
       loop(N,
@@ -147,10 +304,11 @@ role == 0 ? (
       pos = 0; nfr += 1;
       nfr >= frames ? (
         bands();
+        wavemode >= 0.5 ? curveOut();
         gmem[LB] = cur;
         state = 0;
       );
     );
-  ); );
+  ); ); );
   spl0 = 0; spl1 = 0; spl2 = 0; spl3 = 0; spl4 = 0; spl5 = 0; spl6 = 0; spl7 = 0;
 );

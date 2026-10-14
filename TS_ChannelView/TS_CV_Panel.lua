@@ -23,6 +23,7 @@ local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
 local RC  = require("TS_CV_ReaComp")
 local CP  = require("TS_CV_CompPanel")
+local RP  = require("TS_CV_RolePanel")
 local MP  = require("TS_CV_MapPanel")
 local CK  = require("TS_CV_ColourPick")
 local TP  = require("TS_CV_Taps")
@@ -35,7 +36,7 @@ local P   = {}
 local ImGui
 local panel_at = {}
 
-function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui) end
+function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui); RP.attach(imgui) end
 
 -- An expanded panel's foot: the layout lock at its left, and the preset
 -- bar (TS_CV_PresetUI, View > Preset bar) when that's on. It's always
@@ -608,10 +609,55 @@ function P.visible(controls, track, fx)
   local any = false
   for _, c in ipairs(controls or {}) do if c.show then any = true break end end
   if not any then return controls or {} end
-  local shown = M.visible(controls, function(p)
+  local base = U.plugin_key(fx.name or "")
+  local shown = M.visible(controls, function(p, vname)
+    if vname then return St.vvalue(fx.guid, vname, base, controls) end
     return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
   end)
   return shown
+end
+
+-- A virtual control's colour (TS_CV_Mappings Virt<n>): violet, the
+-- canvases' second colour, so it reads as the layout's and not the plugin's
+P.VIRT_COL = 0x8a63e6ff
+
+-- A virtual control: a button, a selector (chips or a dropdown) or a
+-- knob with no parameter behind it; its setting is the instance's own
+-- (TS_CV_State St.vget). Returns its act (for the right-click).
+local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
+  local name = M.vname_of(ctl)
+  local base = M.split_variant(key)
+  local v = St.vvalue(fx.guid, name, base, controls)
+  local shown = M.vtext(ctl, v)
+  local changed, nv, act
+  local size = P.item_size(item)
+  if ctl.type == "toggle" then
+    changed, nv, act = W.toggle(ctx, id, name, v, shown,
+      { tooltip = name .. ": " .. shown .. "\n(the layout's own)", text = shown,
+        on_col = P.VIRT_COL, size = size, style = ctl.style })
+  elseif ctl.type == "combo" and item.kind == "buttons" then
+    local list = {}
+    for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
+    changed, nv, act = W.button_row(ctx, id, name, v, list,
+      { dir = ctl.buttons, n = #list, w = hx(item.w), h = hy(item.h),
+        tooltip = name .. ": " .. shown, on_col = P.VIRT_COL, style = ctl.style })
+  elseif ctl.type == "combo" then
+    local list = {}
+    for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
+    local n = #list
+    changed, nv, act = W.combo(ctx, id, name, v, shown, (n >= 2) and (1 / (n - 1)) or nil,
+      { tooltip = name .. ": " .. shown, steps = list })
+  else
+    changed, nv, act = W.knob(ctx, id, name, v, shown,
+      { tooltip = name .. ": " .. shown .. "\n(the layout's own)", cap = P.VIRT_COL,
+        style = ctl.style, size = size })
+  end
+  if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
+  if changed and nv then
+    if ctl.type ~= "knob" then nv = M.vnorm(ctl, M.vindex(ctl, nv)) end
+    St.vset(fx.guid, name, nv)
+  end
+  return act
 end
 
 -- The page a panel is open at, clamped to what it has.
@@ -636,13 +682,14 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
     if n > 0 then
       side = P.width(n_or_controls, avail_h, false, false, nil, false, false, lock) - C.PANEL_PAD
     end
-    return MP.width(canvas.kind) + side
+    -- with input/output meters: on the panel's two outside edges
+    return MP.width(canvas.kind) + side + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
   if key and RQ.is_eq(key) then
     return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
   -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
-  if key and RC.is_comp(key) then return C.RC_PANEL_W end
+  if key and RC.is_comp(key) then return C.RC_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0) end
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -726,8 +773,9 @@ function P.knob_scale(track, fx, p, key, ctl, size, rev, st)
   local kind = M.scale_kind(ctl)
   if not kind or size == "small" then return nil end
   local now = reaper.time_precise()
+  local rg = U.range_of(p)
   local ck = table.concat({ fx.guid or key or "", p, kind, size or "medium",
-                            rev and "r" or "", st and "s" or "" }, "|")
+                            rev and "r" or "", st and "s" or "", rg and M.range_line(rg) or "" }, "|")
   local sc = scale_cache[ck]
   if not sc or now > sc.until_t then
     local n = st and (math.floor(1 / st + 0.5) + 1) or nil
@@ -1217,11 +1265,37 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
       full = full .. (where and "\n" or "\n\n") .. "Runs in parallel with the one before it" ..
         (fx.parallel == 2 and ", MIDI merged" or "")
     end
+    local rn = St.switch_rule(fx.guid)
+    if rn then full = full .. ("\n\nIts layout is put up by switching rule %d"):format(rn) end
     W.tip(ctx, "hdr##" .. fx.guid, full, true, false)
   end
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then req.open_menu = true end
   if hdr_hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
     req.toggle_collapse = true
+  end
+
+  -- put up by a layout switching rule (TS_CV_Mappings Switch<n>): that
+  -- layout's name in a pill after the plugin's
+  local rule = St.switch_rule(fx.guid)
+  if rule then
+    local base = U.plugin_key(fx.name or "")
+    local rr = (M.switch_rules(base) or {})[rule]
+    local bt = rr and (rr.layout or "Standard") or nil
+    if bt then
+      W.push_small(ctx)
+      local bw, bh = ImGui.CalcTextSize(ctx, bt)
+      local pw = math.min(bw + 10, name_w * 0.45)
+      if pw >= 24 then
+        local bx = name_x + name_w - pw
+        local by_ = y + (h - bh - 4) * 0.5
+        ImGui.DrawList_AddRectFilled(dl, bx, by_, bx + pw, by_ + bh + 4, U.with_alpha(C.COL.accent, 0x40), 3.0)
+        ImGui.DrawList_PushClipRect(dl, bx, by_, bx + pw - 4, by_ + bh + 4, true)
+        ImGui.DrawList_AddText(dl, bx + 5, by_ + 2, C.COL.header_text, bt)
+        ImGui.DrawList_PopClipRect(dl)
+        name_w = name_w - pw - 4
+      end
+      W.pop_small(ctx)
+    end
   end
 
   local name = U.fx_label(fx)
@@ -1976,6 +2050,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       local _, _, act = W.blank(ctx, id)
       if act.right_click then req.ctx_control = i end
 
+    elseif M.is_virtual(ctl) then
+      local act = draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
+      if act and act.right_click then req.ctx_control = i end
+
     elseif not ctl.param or ctl.param < 0 or ctl.param >= nparams then
       -- The layout refers to a parameter this instance doesn't have --
       -- a plugin updated, or two different plugins sharing a name.
@@ -2181,9 +2259,18 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- step SIZE is a cheap, un-cached native read, and the readout
         -- text above is already the plugin's own formatted value for any
         -- control type, choice name included.
+        -- The plugin's own choices, once they've been read (the same list
+        -- a dropdown shows): the knob lands only on those. Until then, or
+        -- when the plugin can't be swept, the even step grid.
+        local snaps
+        local list = combo_steps(track, fx.addr, p, key)
+        if type(list) == "table" and #list > 1 then
+          snaps = {}
+          for i = 1, #list do snaps[i] = rev and (1 - list[i].norm) or list[i].norm end
+        end
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            step_norm = st, mod = modded, ring = ring,
+            step_norm = st, snaps = snaps, mod = modded, ring = ring,
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
@@ -2572,7 +2659,50 @@ function P.panel_at(guid) return panel_at[guid] end
 -- Draws one panel at the current cursor position and advances past it.
 -- Returns a `req` table of things the caller should act on this frame:
 --   toggle_bypass, toggle_float, open_menu, open_editor, ctx_control
+-- ReaComp's canvas, with input/output meters on the panel's outside
+-- edges when asked for: false when it can't draw (the grid instead)
+-- A canvas is a screen set into the faceplate. On a light faceplate
+-- (aluminium, cream, stone, amber, gold) it gets a dark screen of the
+-- theme's and the theme's inks for the length of its draw -- the plate's
+-- dark inks vanish on a canvas's dark grounds, and its translucent
+-- grounds wash out over a light plate. A dark faceplate shows through as
+-- before. `plate` and `saved` are the panel's (push_plate).
+local function plate_light(pl)
+  local c = pl and pl.bg
+  if not c then return false end
+  local r, g, b = (c >> 24) & 0xff, (c >> 16) & 0xff, (c >> 8) & 0xff
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5
+end
+local function on_screen(plate, saved, dl, x, y, w, h, fn, ...)
+  if not (saved and plate_light(plate)) then return fn(...) end
+  pop_plate(saved)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.panel_bg, 3.0)
+  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, U.with_alpha(0x000000ff, 0x60), 3.0, 0, 1.0)
+  local r = fn(...)
+  push_plate(plate)
+  return r
+end
+
+local function rc_body(ctx, dl, x, y, ww, bh, track, fx, req, io, enabled, plate, saved)
+  local ex, ew = x, ww
+  if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
+                    y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
+    ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
+  end
+  return on_screen(plate, saved, dl, ex + 1, y + C.HEADER_H + 1, ew - 2, bh - 2,
+    CP.draw, ctx, dl, ex, y + C.HEADER_H, ew, bh, track, fx, req)
+end
+
+local draw_panel
+-- (your own ranges for its parameters in force while it's drawn: TS_CV_Util
+-- U.with_ranges -- the values, scales, tooltips and canvases read them)
 function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
+  local was = U.with_ranges(layout and layout.ranges)
+  local a, b, c, d = draw_panel(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
+  U.with_ranges(was)
+  return a, b, c, d
+end
+draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local req = { is_drag_source = is_drag_source }
   local collapsed = St.is_collapsed(fx.guid)
   local is_eq = RQ.is_eq(key)
@@ -2583,9 +2713,11 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   -- for the one plugin type that's never going to answer yes.
   local meter = (not is_eq and not is_rc) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
-  local io = (not is_rc) and P.has_io(track, fx, layout)
+  -- input/output meters: on any panel, a canvas's or ReaComp's included
+  -- (their own strip beside the curve is the reduction only)
+  local io = P.has_io(track, fx, layout)
   local canvas = (not is_eq and not is_rc) and layout.canvas or nil
-  if canvas then meter, io = nil, false end
+  if canvas then meter = nil end
   local w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
                     St.is_gr_open(fx.guid), M.locked(layout), canvas)
 
@@ -2642,21 +2774,37 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
         EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H - fh, track, fx, req)
       elseif canvas then
         -- any plugin's EQ or compressor layout: the canvas, then the
-        -- layout's own controls in columns beside it
+        -- layout's own controls in columns beside it; with input/output
+        -- meters, they take the two outside edges, as on any panel
         local cw = MP.width(canvas.kind)
         local bh = wh - C.HEADER_H - fh
-        if canvas.kind == "comp" then
-          if not CP.draw_mapped(ctx, dl, x, y + C.HEADER_H, cw, bh, track, fx, req, canvas) then
-            MP.draw_setup(ctx, dl, x, y + C.HEADER_H, cw, bh, fx, canvas, req)
+        local ex, ew = x, ww
+        if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
+                          y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
+          ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
+        end
+        -- (a light faceplate gives the canvas a dark screen: on_screen)
+        local todo = M.canvas_todo(canvas) or (canvas.kind ~= "eq" and not next(canvas.roles or {}))
+        local function screen(fn, ...)
+          if todo then return fn(...) end
+          return on_screen(plate, saved, dl, ex + 1, y + C.HEADER_H + 1, cw - 2, bh - 2, fn, ...)
+        end
+        if RP.KINDS[canvas.kind] then
+          if not screen(RP.draw, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, req, canvas) then
+            MP.draw_setup(ctx, dl, ex, y + C.HEADER_H, cw, bh, fx, canvas, req)
+          end
+        elseif canvas.kind ~= "eq" then
+          if not screen(CP.draw_mapped, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, req, canvas) then
+            MP.draw_setup(ctx, dl, ex, y + C.HEADER_H, cw, bh, fx, canvas, req)
           end
         else
-          MP.draw_eq(ctx, dl, x, y + C.HEADER_H, cw, bh, track, fx, layout, req)
+          screen(MP.draw_eq, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, layout, req)
         end
         if #(layout.controls or {}) > 0 then
-          draw_controls(ctx, dl, x + cw - C.PANEL_PAD, y + C.HEADER_H, ww - cw + C.PANEL_PAD, wh, track, fx, layout,
+          draw_controls(ctx, dl, ex + cw - C.PANEL_PAD, y + C.HEADER_H, ew - cw + C.PANEL_PAD, wh, track, fx, layout,
                         key, req, nil, nil)
         end
-      elseif is_rc and CP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx, req) then
+      elseif is_rc and rc_body(ctx, dl, x, y, ww, wh - C.HEADER_H - fh, track, fx, req, io, enabled, plate, saved) then
         -- drawn: the transfer-curve canvas (one missing a parameter it
         -- needs falls through to the ordinary grid below instead)
       else

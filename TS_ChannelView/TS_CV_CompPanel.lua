@@ -209,7 +209,10 @@ local function lin_db(a)
   return 20 * math.log(a, 10)
 end
 
-local function draw_history(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, ymap, range)
+-- lift: dB the input is drawn raised by (an input-driven compressor's
+-- gain: its canvas is drawn after the gain)
+local function draw_history(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, ymap, range, lift)
+  lift = lift or 0
   Tr.want(track)
   TP.panel_open(fx.guid)
   local pw = math.max(1, math.floor(gw))
@@ -231,7 +234,7 @@ local function draw_history(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, ymap, rang
   local gx, gy, n = {}, {}, 0
   for px = 0, pw - 1 do
     local xx = gx0 + px + 0.5
-    local yi = ymap(math.max(DB_BOT, lin_db(d.ip[px + 1] or 0)))
+    local yi = ymap(math.max(DB_BOT, lin_db(d.ip[px + 1] or 0) + lift))
     local op = math.max(-(d.mn[px + 1] or 0), d.mx[px + 1] or 0)
     local yo = ymap(math.max(DB_BOT, lin_db(op)))
     if yo < bot then ImGui.DrawList_AddLine(dl, xx, yo, xx, bot, out_fill, 1.0) end
@@ -395,29 +398,32 @@ end
 -- ---------------------------------------------------------------------
 -- the meters column
 -- ---------------------------------------------------------------------
-CP.METERS_W = 72
+-- the strip beside the curve: the reduction (input and output levels,
+-- when asked for, go on the panel's outside edges, as on any panel)
+CP.METERS_W = 44
+CP.FINE_ON = TP.FINE_ON   -- the reduction by frequency: retired (TS_CV_Taps)
 
-local function draw_meters(ctx, dl, x, y, w, h, track, fx, gr, enabled, peak, range)
+-- fine_btn: a compressor canvas's "Hz" switch at the foot, between its
+-- transfer curve and its reduction by frequency (while it's tapped)
+local function draw_meters(ctx, dl, x, y, w, h, track, fx, gr, enabled, peak, range, fine_btn)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, U.with_alpha(C.COL.win_bg, 0x70))
   ImGui.DrawList_AddLine(dl, x, y, x, y + h, C.COL.panel_border, 1.0)
-  local now = reaper.time_precise()
-  local gw = 36
-  W.gr_meter(ctx, dl, x + 2, y + 4, gw, h - 8, gr or 0, peak, range, false, false)
-  local lv = TP.levels(track, fx.guid)
-  local ox = x + 2 + gw + 2
-  local ow = w - gw - 6
-  if lv and not lv.old then
-    local pk = enabled and lv.out_pk or -150
-    local hold = W.level_peak("rcout" .. fx.guid, pk, now)
-    local txt = (hold and hold > -149) and ("%.1f"):format(hold) or "\u{2013}"
-    W.io_bar(ctx, dl, ox, y + 4, ow, h - 8, "rcout" .. fx.guid, pk, enabled and lv.out_rms or -150, txt, C.COL.value)
-  else
-    W.io_bar(ctx, dl, ox, y + 4, ow, h - 8, "rcout" .. fx.guid, -150, nil, "\u{2013}", C.COL.header_dim)
+  local ok = CP.FINE_ON and fine_btn and h > 120 and TP.fine_ok(track, fx.guid)
+  if ok then
+    local ps = panel_state(fx.guid)
+    if ok ~= true then ps.fine = false end
+    h = h - 20
+    local tip = (ok ~= true) and "By frequency\nReopen the project to load the newer probe (TS_TrackProbe 1.7.0), which measures this"
+      or (ps.fine and "Back to the curve" or "The reduction by frequency, in third-octaves\n(measured by the probe while it shows)")
+    if mini_toggle(ctx, dl, "rcfine##" .. fx.guid, x + 6, y + h + 2, w - 10, 15, ps.fine, "Hz", tip) and ok == true then
+      ps.fine = not ps.fine
+    end
   end
+  W.gr_meter(ctx, dl, x + 4, y + 4, w - 8, h - 8, gr or 0, peak, range, false, false)
   ImGui.SetCursorScreenPos(ctx, x, y)
   ImGui.InvisibleButton(ctx, "rcmet##" .. fx.guid, w, h)
   W.tip(ctx, "rcmet##" .. fx.guid,
-    ("Gain reduction %.1f dB (peak %.1f)\nOutput level, dBFS"):format(gr or 0, peak or 0),
+    ("Gain reduction %.1f dB (peak %.1f)\n\nInput and output levels: the panel's menu \u{25B8} Input/output meters"):format(gr or 0, peak or 0),
     ImGui.IsItemHovered(ctx), false)
 end
 
@@ -478,6 +484,201 @@ end
 -- ---------------------------------------------------------------------
 -- the canvas
 -- ---------------------------------------------------------------------
+-- ---------------------------------------------------------------------
+-- the reduction by frequency, in third-octaves (TS_TrackProbe 1.7.0+)
+-- ---------------------------------------------------------------------
+-- The probe compares the audio either side of a tapped plugin band by
+-- band: how far each third-octave sits below where it sits with no
+-- reduction (its zero, from the calibration's noise, else the music so
+-- far). One plugin a track at a time, and only while a panel asks.
+CP.FINE_COL = 0xe6cf79ff
+
+-- One frame of it, smoothed for drawing: { n, f = { Hz }, g = { reduction
+-- dB, positive; nil no signal }, pk = { held peak }, lv = { level going
+-- in, dBFS }, cal, range = the depth to draw to }; or nil and why
+-- ("old", "busy", "wait", or false when the plugin isn't tapped).
+function CP.fine_frame(track, guid)
+  local ps = panel_state(guid)
+  -- asking lays a tap for it while the panel is open (TS_CV_Taps wants_mb)
+  TP.panel_open(guid)
+  TP.want_fine(guid)
+  local ok = TP.fine_ok(track, guid)
+  if ok ~= true then ps.fsm = nil; return nil, ok end
+  if not TP.set_fine(track, guid) then ps.fsm = nil; return nil, "busy" end
+  local fd = TP.fine(track, guid)
+  if not fd then ps.fsm = nil; return nil, "wait" end
+  local now = reaper.time_precise()
+  local dt = math.max(0, math.min(0.2, now - (ps.fat or now))); ps.fat = now
+  local sm, pk = ps.fsm or {}, ps.fpk or {}
+  local top = 0
+  -- a band with next to nothing in it (a guitar's top octave) compares
+  -- near-silence with near-silence: its ratio swings by tens of dB and
+  -- means nothing. Bands more than 45 dB under the loudest, or under
+  -- -90 dBFS, count as no signal.
+  local lvmax = -math.huge
+  for k = 1, fd.n do
+    local l = fd.lv[k]
+    if l and l > lvmax then lvmax = l end
+  end
+  local floor_ = math.max(-90, lvmax - 45)
+  for k = 1, 31 do
+    local d = k <= fd.n and fd.d[k] or nil
+    if d and (fd.lv[k] or -150) < floor_ then d = nil end
+    if d then
+      local g = -d
+      local s0 = sm[k]
+      local s = s0 and (s0 + (g - s0) * math.min(1, dt * 12)) or g
+      sm[k] = s
+      pk[k] = math.max(s, (pk[k] or s) - dt * 4)
+      top = math.max(top, pk[k])
+    else
+      sm[k], pk[k] = nil, nil
+    end
+  end
+  ps.fsm, ps.fpk = sm, pk
+  -- the depth drawn steps (6, 12, 24, 48 dB) so it doesn't breathe;
+  -- deeper at once, shallower after three quiet seconds
+  local want = 6
+  while want < top * 1.15 and want < 48 do want = want * 2 end
+  if not ps.frng or want > ps.frng then ps.frng, ps.frng_t = want, now
+  elseif want == ps.frng then ps.frng_t = now
+  elseif now - (ps.frng_t or 0) > 3 then ps.frng, ps.frng_t = want, now end
+  return { n = fd.n, f = fd.f, g = sm, pk = pk, lv = fd.lv, cal = fd.cal, range = ps.frng }
+end
+
+-- Why there's nothing to draw, in words.
+function CP.fine_why(why)
+  if why == "old" then return "Reopen the project to load the newer probe", "(TS_TrackProbe 1.7.0 measures this)" end
+  if why == "busy" then return "Another panel on this track is measuring", "by frequency (one plugin a track at a time)" end
+  if why == "wait" then return "Measured while audio plays through it", nil end
+  return "Not measured yet: it needs a probe tap on this track", nil
+end
+
+-- The reduction as a curve hanging from a zero line at y0, `fr.range` dB
+-- down at y1 (a lift above zero shows above it, up to a quarter of that).
+-- xf(Hz) places a band. Breaks where a band has no signal.
+function CP.fine_curve(dl, fr, xf, y0, y1, opts)
+  opts = opts or {}
+  local col = opts.col or CP.FINE_COL
+  local rng = fr.range or 12
+  local per = (y1 - y0) / rng
+  local function y_of(g) return y0 + math.max(-rng * 0.25, math.min(rng, g)) * per end
+  -- the fill, a column a band's width wide, between the zero and the curve
+  local fill = U.with_alpha(col, opts.fill_a or 0x30)
+  local h6 = 2 ^ (1 / 6)
+  for k = 1, fr.n do
+    local g = fr.g[k]
+    if g and math.abs(g) > 0.15 then
+      local a, b = xf(fr.f[k] / h6), xf(fr.f[k] * h6)
+      local yy = y_of(g)
+      ImGui.DrawList_AddRectFilled(dl, a + 0.5, math.min(y0, yy), b - 0.5, math.max(y0, yy), fill)
+    end
+  end
+  -- the held peaks, faint ticks
+  if not opts.no_peak then
+    local pc = U.with_alpha(col, 0x70)
+    for k = 1, fr.n do
+      local p = fr.pk[k]
+      if p and p > 0.3 then
+        local a, b = xf(fr.f[k] / h6), xf(fr.f[k] * h6)
+        local yy = y_of(p)
+        ImGui.DrawList_AddLine(dl, a + 1.5, yy, b - 1.5, yy, pc, 1.0)
+      end
+    end
+  end
+  -- the curve, through the bands' centres
+  local xs, ys, n = {}, {}, 0
+  local function flush()
+    if n >= 2 then polyline(dl, xs, ys, n, col, opts.thick or 2.0) end
+    xs, ys, n = {}, {}, 0
+  end
+  for k = 1, fr.n do
+    local g = fr.g[k]
+    if g then n = n + 1; xs[n], ys[n] = xf(fr.f[k]), y_of(g)
+    else flush() end
+  end
+  flush()
+  -- its scale, at the left-hand edge: the zero and the depth (it steps
+  -- 6 / 12 / 24 / 48 dB with what it has to show)
+  if opts.label then
+    local lx = (opts.lx or xf(20)) + 4
+    local lc = U.with_alpha(C.COL.header_dim, 0xc0)
+    ImGui.DrawList_AddLine(dl, lx - 4, y1, lx + 4, y1, U.with_alpha(col, 0x80), 1.0)
+    small_text(opts.ctx, dl, lx, y0, lc, "0 dB")
+    small_text(opts.ctx, dl, lx + 7, y1 - 12, lc, ("\u{2212}%d dB"):format(rng))
+  end
+end
+
+-- The reduction by frequency in its own view (a compressor canvas's "Hz"):
+-- the level going in, a third-octave a bar, and the reduction hanging
+-- from the top.
+local function draw_fine_view(ctx, dl, gx0, gy0, gw, gh, track, fx)
+  local EQP = require("TS_CV_EQPanel")
+  local function x_of(f) return EQP.util.x_of(math.max(20, math.min(20000, f)), gx0, gw) end
+  ImGui.DrawList_PushClipRect(dl, gx0, gy0, gx0 + gw, gy0 + gh, true)
+  ImGui.DrawList_AddRectFilled(dl, gx0, gy0, gx0 + gw, gy0 + gh, 0x00000030)
+  for _, f in ipairs({ 50, 100, 200, 500, 1000, 2000, 5000, 10000 }) do
+    local xx = math.floor(x_of(f)) + 0.5
+    local major = (f == 100 or f == 1000 or f == 10000)
+    ImGui.DrawList_AddLine(dl, xx, gy0, xx, gy0 + gh, U.with_alpha(C.COL.eq_grid, major and 0xc0 or 0x60), 1.0)
+    if major then
+      small_text(ctx, dl, xx + 3, gy0 + gh - 13, U.with_alpha(C.COL.header_dim, 0xa0), f >= 1000 and (f // 1000) .. "k" or tostring(f))
+    end
+  end
+  local fr, why = CP.fine_frame(track, fx.guid)
+  local y0, y1 = gy0 + math.floor(gh * 0.14), gy0 + math.floor(gh * 0.86)
+  if fr then
+    -- the level going in: bars from the foot, -78 to 0 dBFS up to 0.6 of the height
+    local h6 = 2 ^ (1 / 6)
+    local bar = U.with_alpha(C.COL.eq_spectrum, 0x48)
+    for k = 1, fr.n do
+      local l = fr.lv[k]
+      if l and l > -78 then
+        local a, b = x_of(fr.f[k] / h6), x_of(fr.f[k] * h6)
+        local top = gy0 + gh - math.min(1, (l + 78) / 78) * gh * 0.6
+        ImGui.DrawList_AddRectFilled(dl, a + 1, top, b - 1, gy0 + gh, bar, 1.5)
+      end
+    end
+    -- the scale, on the right
+    for _, part in ipairs({ 0, 0.5, 1 }) do
+      local yy = math.floor(y0 + (y1 - y0) * part) + 0.5
+      ImGui.DrawList_AddLine(dl, gx0, yy, gx0 + gw, yy, U.with_alpha(C.COL.eq_grid, part == 0 and 0xd0 or 0x70), 1.0)
+      local v = fr.range * part
+      small_text(ctx, dl, gx0 + gw - 4, yy - 12, U.with_alpha(C.COL.header_dim, 0xc0),
+        v == 0 and "0 dB" or ("\u{2212}%g"):format(v), "right")
+    end
+    CP.fine_curve(dl, fr, x_of, y0, y1)
+    small_text(ctx, dl, gx0 + 6, gy0 + 4, C.COL.header_dim, "Reduction by frequency")
+    if not fr.cal then
+      small_text(ctx, dl, gx0 + 6, gy0 + 16, U.with_alpha(C.COL.header_dim, 0x90), "zero: the music so far (calibrate for a true one)")
+    end
+  else
+    local m1, m2 = CP.fine_why(why)
+    small_text(ctx, dl, gx0 + gw * 0.5, gy0 + gh * 0.42, C.COL.header_dim, m1, "centre")
+    if m2 then small_text(ctx, dl, gx0 + gw * 0.5, gy0 + gh * 0.42 + 13, C.COL.header_dim, m2, "centre") end
+  end
+  ImGui.DrawList_PopClipRect(dl)
+  -- a hover readout: the band under the mouse
+  if fr and ImGui.IsWindowHovered(ctx) then
+    local mx, my = ImGui.GetMousePos(ctx)
+    if mx >= gx0 and mx < gx0 + gw and my >= gy0 and my < gy0 + gh then
+      local best, bd = nil, math.huge
+      for k = 1, fr.n do
+        local dd = math.abs(x_of(fr.f[k]) - mx)
+        if dd < bd then best, bd = k, dd end
+      end
+      if best then
+        local f = fr.f[best]
+        local ft = f >= 1000 and ("%.3g kHz"):format(f / 1000) or ("%d Hz"):format(math.floor(f + 0.5))
+        local g = fr.g[best]
+        ImGui.SetTooltip(ctx, ("%s\n%s\nin %s dBFS"):format(ft,
+          g and (g >= 0 and ("reduced %.1f dB"):format(g) or ("lifted %.1f dB"):format(-g)) or "no signal",
+          fr.lv[best] and fr.lv[best] > -140 and ("%.0f"):format(fr.lv[best]) or "\u{2013}"))
+      end
+    end
+  end
+end
+
 function CP.draw(ctx, dl, x, y, w, h, track, fx, req)
   local addr, guid = fx.addr, fx.guid
   local ps = panel_state(guid)
@@ -491,6 +692,14 @@ function CP.draw(ctx, dl, x, y, w, h, track, fx, req)
   local gx0, gy0 = x + 1, y
   local gw, gh = w - mw - 1, h - dh
   if gh < 40 then dh = CP.DRAWER_SHUT; gh = h - dh end
+  if CP.FINE_ON and ps.fine and TP.fine_ok(track, guid) == true then
+    local gr = T.gain_reduction(track, addr) or 0
+    draw_fine_view(ctx, dl, gx0, gy0, gw, gh, track, fx)
+    local gr_peak, gr_range = W.gr_state(guid, gr, reaper.time_precise(), 12)
+    draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range, true)
+    draw_drawer(ctx, dl, gx0, gy0 + gh, gw, dh, track, addr, f, ps, guid)
+    return true
+  end
 
   local thr, _, _, mthr = real_of(track, addr, f.thr)
   local ratio, _, rtxt, mratio = real_of(track, addr, f.ratio)
@@ -725,7 +934,7 @@ function CP.draw(ctx, dl, x, y, w, h, track, fx, req)
     draw_output(ctx, dl, ox, py, ow, ph, track, addr, f, ps, guid)
   end
 
-  draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range)
+  draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range, true)
   draw_drawer(ctx, dl, gx0, gy0 + gh, gw, dh, track, addr, f, ps, guid)
   return true
 end
@@ -756,10 +965,15 @@ end
 local pos_cache = {}
 local function switch_positions(track, addr, guid, p)
   local k = guid .. ":" .. p
-  if pos_cache[k] == nil then
-    pos_cache[k] = UN.positions(UN.formatter(track, addr, p), 200, 12) or false
+  local c = pos_cache[k]
+  -- none (yet): asked again now and then (a plugin read by moving it --
+  -- UN.formatter -- isn't read while the transport plays)
+  if c == nil or (c == false and (reaper.time_precise() - (pos_cache[k .. "@"] or 0)) > 2) then
+    c = UN.positions(UN.formatter(track, addr, p), 200, 12) or false
+    pos_cache[k] = c
+    if c == false then pos_cache[k .. "@"] = reaper.time_precise() end
   end
-  return pos_cache[k] or nil
+  return c or nil
 end
 -- a switched attack / hold / release, as steps along its scale
 local step_cache = {}
@@ -877,6 +1091,562 @@ local function ends_of(track, addr, guid, p)
   return e
 end
 
+-- ---------------------------------------------------------------------
+-- a Gate layout and a Limiter layout: the same pieces, other pictures
+-- ---------------------------------------------------------------------
+
+-- A role that reads as a plain number running below zero is in dB,
+-- whatever its text leaves off (as the compressor's threshold).
+local function db_ish(track, addr, guid, m)
+  if m and m.unit == "" and m.v then
+    local e = ends_of(track, addr, guid, m.p)
+    if e.lo and e.lo < 0 then m.unit = "db" end
+  end
+  return m
+end
+
+-- An amount the plugin may write either way round (a range of "80 dB" or
+-- "-80 dB" means the same): true when its own values run upwards from 0.
+local function positive_amount(track, addr, guid, p)
+  local e = ends_of(track, addr, guid, p)
+  return (e.lo or 0) >= 0 and (e.hi or 0) > 0
+end
+
+-- the canvas's level grid, and the history behind it
+local function role_backdrop(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, y_of, guid, lift)
+  ImGui.DrawList_AddRectFilled(dl, gx0, gy0, gx0 + gw, gy0 + gh, 0x00000030)
+  for g = 0, -96, -12 do
+    local yy = math.floor(y_of(g)) + 0.5
+    if yy > gy0 + 4 and yy < gy0 + gh - 2 then
+      ImGui.DrawList_AddLine(dl, gx0, yy, gx0 + gw, yy, U.with_alpha(C.COL.eq_grid, 0xc0), 1.0)
+      small_text(ctx, dl, gx0 + 3, yy - 11, U.with_alpha(C.COL.header_dim, 0xa0), tostring(g))
+    end
+  end
+  local gr_peak, gr_range = W.gr_state(guid, gr, reaper.time_precise(), 12)
+  local m1, m2 = draw_history(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, y_of, gr_range, lift)
+  if m1 then
+    small_text(ctx, dl, gx0 + gw - 4, gy0 + 3, C.COL.header_dim, m1, "right")
+    if m2 then small_text(ctx, dl, gx0 + gw - 4, gy0 + 14, C.COL.header_dim, m2, "right") end
+  end
+  return gr_peak, gr_range
+end
+
+-- A horizontal line you drag up or down, across the canvas. `v` its level
+-- (dB on the canvas's scale); `on_drag(new_v)` when dragged. Returns
+-- hovered, active.
+local function level_line(ctx, dl, ps, id, gx0, gw, gy0, gh, span, v, y_of, col, dashed_line, grip_x, tip, on_drag)
+  local yy = y_of(v)
+  local hov, act, dragging = handle(ctx, id, gx0, yy - 4, gw - 18, 8)
+  if dragging then
+    local nv = drag_real(ctx, ps, id, v, 0, -span / gh)
+    on_drag(nv)
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+  elseif hov then
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+  end
+  if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+  if dashed_line then
+    dashed(dl, gx0, yy, gx0 + gw, yy, col, 6, 4, 1.3)
+  else
+    ImGui.DrawList_AddLine(dl, gx0, yy, gx0 + gw, yy, col, 1.6)
+  end
+  local hot = hov or act
+  ImGui.DrawList_AddRectFilled(dl, grip_x - 18, yy - (dashed_line and 3 or 4), grip_x + 18, yy + (dashed_line and 3 or 4),
+    hot and C.COL.header_text or col, 4.0)
+  W.tip(ctx, id, tip, hov, act)
+  return hov, act
+end
+
+-- a value in dB from a role: as it reads, or along its range between lo
+-- and hi; returns the value and whether it's along the range
+local function level_of(m, lo, hi, rev)
+  if not m then return nil end
+  if m.unit == "db" and m.v and not rev then
+    if m.v == -math.huge then return lo, false end
+    return m.v, false
+  end
+  local n = rev and (1 - m.n) or m.n
+  return lo + n * (hi - lo), true
+end
+-- and back: writes `v` (dB) to the role's control
+local function set_level(track, addr, m, v, along, lo, hi, rev)
+  if along then
+    local n = (v - lo) / (hi - lo)
+    set_norm(track, addr, m.p, rev and (1 - n) or n)
+  else
+    set_to(track, addr, m.p, v)
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- the gate
+-- ---------------------------------------------------------------------
+-- The compressor's picture turned round: input across, output up, 1:1
+-- above the threshold, and under it the curve drops away -- straight down
+-- for a gate, at the ratio for an expander -- to the range's floor, that
+-- many dB under 1:1. The thresholds are horizontal lines, as the
+-- compressor's is: it opens at the solid one, and once open stays open
+-- down to the dashed Close line (the dashed curve).
+local GATE_FULL = -120     -- a range left out, or -inf: shut is silent
+
+-- ---------------------------------------------------------------------
+-- An input-driven compressor or limiter: no threshold control, an input
+-- gain pushing the signal into a threshold that stays put (a 1176's,
+-- fixed; a limiter's, its ceiling). Drawn after the gain: the threshold
+-- where it is, and the gain a bar of its own -- where a signal at its
+-- 0 dB (Ref0: -18 dBFS unless its layout says) lands once it's through
+-- the gain. Raise the bar toward the threshold for more.
+-- ---------------------------------------------------------------------
+CP.GUESS_SPAN = 48     -- an input that doesn't read in dB: its range, guessed
+
+-- m: the Input role, mapped; line: the threshold after the gain when it's
+-- known (a limiter's ceiling), else nil (a compressor's: measured, or
+-- guessed). { line, bar, gain, ref, measured, set(bar) }
+local function drive_of(track, addr, cv, m, line, kind)
+  local ref = M.ref0(cv)
+  local rev = cv.rev and cv.rev.Input
+  local db = (m.unit == "db" and m.v and m.v > -math.huge and m.v < math.huge and not rev)
+  local span = (kind == "limit") and 30 or CP.GUESS_SPAN
+  local base = (kind == "limit") and 0 or -0.5          -- along: the gain at the bottom, in spans
+  local d = { ref = ref, line = line, measured = false }
+  local cal = (kind ~= "limit") and M.thr_cal(cv) or nil
+  if cal then
+    -- measured: where the threshold falls (dBFS going in) at each input
+    -- setting; after the gain, it's where it stays
+    local x = cal.n and m.n or m.v
+    local t = x and x > -math.huge and x < math.huge and M.thr_dbfs(cv, x)
+    if t then
+      if cal.n then
+        d.line = M.thr_dbfs(cv, 0.5)
+      else
+        local s, k = 0, 0
+        for _, q in ipairs(cal.pts) do s = s + q[1] + q[2]; k = k + 1 end
+        d.line = s / k
+      end
+      d.measured = true
+      d.bar = d.line - t + ref
+      d.set = function(bar)
+        local nx = M.thr_from_dbfs(cv, d.line - bar + ref)
+        if not nx then return end
+        if cal.n then set_norm(track, addr, m.p, math.max(0, math.min(1, nx)))
+        else set_to(track, addr, m.p, nx) end
+      end
+    end
+  end
+  if not d.bar then
+    d.line = d.line or CP.FIXED_THR
+    local n = rev and (1 - m.n) or m.n
+    d.bar = ref + (db and m.v or (n + base) * span)
+    d.set = function(bar)
+      local g = bar - ref
+      if db then set_to(track, addr, m.p, g)
+      else
+        local nn = math.max(0, math.min(1, g / span - base))
+        set_norm(track, addr, m.p, rev and (1 - nn) or nn)
+      end
+    end
+  end
+  d.gain = d.bar - d.ref
+  return d
+end
+
+-- the gain's bar: drag it up for more. what: the threshold's name, for
+-- its words ("threshold", "ceiling")
+local function draw_gain_bar(ctx, dl, ps, id, gx0, gw, gy0, gh, lo, hi, y_of, d, m, what)
+  local col = W.gr_fill_col(false, false)
+  local v = math.max(lo, math.min(hi, d.bar))
+  local yy = y_of(v)
+  local hov, act, dragging = handle(ctx, id, gx0, yy - 5, gw - 18, 10)
+  if dragging then
+    d.set(drag_real(ctx, ps, id, v, 0, -(hi - lo) / gh))
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+  elseif hov then
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+  end
+  if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+  ImGui.DrawList_AddLine(dl, gx0, yy, gx0 + gw, yy, col, 1.8)
+  local gx = gx0 + gw * 0.45
+  ImGui.DrawList_AddRectFilled(dl, gx - 24, yy - 5, gx + 24, yy + 5, (hov or act) and C.COL.header_text or col, 5.0)
+  -- its words on the side away from the threshold (whose own go on the
+  -- side away from it), so the two never meet
+  local over = d.bar - d.line
+  local wy = (over > 0 and yy - 33 >= gy0 + 2) and (yy - 33) or (yy + 5)
+  ImGui.DrawList_AddText(dl, gx0 + 8, wy, col, "Input " .. (m.text or ("%+.1f dB"):format(d.gain)))
+  small_text(ctx, dl, gx0 + 8, wy + 16, U.with_alpha(col, 0xc0),
+    ("%.0f dBFS in lands at %.1f  \u{00B7}  %.1f dB %s the %s"):format(d.ref, d.bar, math.abs(over),
+      over > 0 and "over" or "under", what))
+  W.tip(ctx, id, ("Input %s\nDrag up for more gain (Shift: fine)\n\nThe bar is where a %.0f dBFS signal lands after the gain\n" ..
+    "(the level its 0 dB stands for: Set up)."):format(m.text or "", d.ref), hov, act)
+  return hov, act
+end
+
+-- The live dot: where the signal is on the curve right now -- its input
+-- level across (raised by lift: drawn after an input's gain), less the
+-- reduction, up -- with a short tail.
+-- band: a multiband's band shown on this canvas, { lv = its input level,
+-- dBFS }: the dot rides the curve at that level (each band's own reduction
+-- isn't measured, only the plugin's as a whole)
+local function live_dot(dl, ps, track, guid, enabled, gr, x_of, y_of, out, lo, hi, lift, band)
+  lift = lift or 0
+  local lv = TP.levels(track, guid)
+  if band then lv = band.lv and { in_pk = band.lv } or nil end
+  ps.trail = ps.trail or {}
+  local tr = ps.trail
+  if lv and not lv.old and enabled and lv.in_pk and lv.in_pk + lift > lo then
+    local ind = math.min(hi, lv.in_pk + lift)
+    tr[#tr + 1] = { ind, band and out(ind) or (ind - (gr or 0)) }
+  else
+    tr[#tr + 1] = false
+  end
+  while #tr > 14 do table.remove(tr, 1) end
+  local grc = W.gr_fill_col(false, false)
+  for i = 1, #tr - 1 do
+    local p = tr[i]
+    if p then
+      ImGui.DrawList_AddCircleFilled(dl, x_of(p[1]), y_of(p[2]), 1.4 + i * 0.18,
+        U.with_alpha(grc, math.floor(0x20 + i * 0x0c)))
+    end
+  end
+  local head = tr[#tr]
+  if head then
+    local hx, hy = x_of(head[1]), y_of(head[2])
+    local cy_ = y_of(out(head[1]))
+    if cy_ - hy > 2 then dashed(dl, hx, hy + 5, hx, cy_ - 1, U.with_alpha(grc, 0xb0), 2, 2, 1.0) end
+    ImGui.DrawList_AddCircleFilled(dl, hx, hy, 9, U.with_alpha(grc, 0x30))
+    ImGui.DrawList_AddCircleFilled(dl, hx, hy, 4.5, 0xffd8b0ff)
+    ImGui.DrawList_AddCircle(dl, hx, hy, 4.5, grc, 0, 1.5)
+  end
+end
+
+local function draw_gate(ctx, dl, x, y, w, h, track, fx, req, cv, R)
+  local addr, guid = fx.addr, fx.guid
+  local ps = panel_state(guid)
+  local enabled = T.get_enabled(track, addr)
+  for _, k in ipairs({ "Threshold", "Close", "Hysteresis", "Range" }) do db_ish(track, addr, guid, R[k]) end
+  local rev = cv.rev or {}
+
+  local TOP, BOT = 6, -84
+  if R.Threshold and R.Threshold.unit == "db" then
+    local e = ends_of(track, addr, guid, R.Threshold.p)
+    if e.hi and e.hi < math.huge then TOP = math.max(TOP, e.hi + 3) end
+    if e.lo and e.lo > -math.huge then BOT = math.min(BOT, e.lo - 6) end
+  end
+  local mw = CP.METERS_W
+  local gx0, gy0 = x + 1, y
+  local gw, gh = w - mw - 1, h
+  local span = TOP - BOT
+  local function x_of(db) return gx0 + (db - BOT) / span * gw end
+  local function y_of(db) return gy0 + (TOP - db) / span * gh end
+  local gr = T.gain_reduction(track, addr) or 0
+
+  -- the levels
+  local thr, thr_along = level_of(R.Threshold, BOT + 6, TOP - 6, rev.Threshold)
+  local close, close_along
+  if thr and R.Close then
+    close, close_along = level_of(R.Close, BOT + 6, TOP - 6, rev.Close)
+  elseif thr and R.Hysteresis then
+    local m = R.Hysteresis
+    if m.unit == "db" and m.v then
+      close = thr - math.abs(m.v)
+    else
+      close, close_along = thr - (rev.Hysteresis and (1 - m.n) or m.n) * 20, true
+    end
+  end
+  local att, att_along = GATE_FULL, false
+  if R.Range then
+    local m = R.Range
+    if m.unit == "db" and m.v then
+      att = (m.v == -math.huge or m.v == math.huge) and GATE_FULL or -math.abs(m.v)
+    else
+      att, att_along = -(rev.Range and (1 - m.n) or m.n) * 80, true
+    end
+  end
+  -- an expander's ratio reads the same written either way round ("1:4",
+  -- "4:1"): the larger. One whose every setting reads under 1:1 is set
+  -- that way round too (gflip).
+  local function either(v) return (v and v > 0 and v < 1) and (1 / v) or v end
+  local gends = R.Ratio and ends_of(track, addr, guid, R.Ratio.p) or {}
+  local gflip = gends.hi and gends.hi <= 1 and gends.lo and gends.lo < 1
+  local ratio = 1000
+  if R.Ratio and R.Ratio.v and either(R.Ratio.v) >= 1 then ratio = either(R.Ratio.v) end
+  local function out(db, t)
+    if db >= t then return db end
+    return math.max(t + (db - t) * ratio, db + att)
+  end
+
+  ImGui.DrawList_PushClipRect(dl, gx0, gy0, gx0 + gw, gy0 + gh, true)
+  local gr_peak, gr_range = role_backdrop(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, y_of, guid)
+  dashed(dl, x_of(BOT), y_of(BOT), x_of(TOP), y_of(TOP), U.with_alpha(C.COL.label, 0x70), 3, 4, 1.0)
+  if thr then
+    local function curve(t, col, thick, dash)
+      -- the corners exactly (the threshold, and where the drop meets the
+      -- floor), between even steps
+      local dbs = {}
+      for i = 0, 200 do dbs[#dbs + 1] = BOT + span * i / 200 end
+      dbs[#dbs + 1] = t
+      if ratio > 1.001 then dbs[#dbs + 1] = t + att / (ratio - 1) end
+      table.sort(dbs)
+      local xs, ys, n = {}, {}, 0
+      for _, db in ipairs(dbs) do
+        if db >= BOT and db <= TOP and (not dash or db <= thr) then
+          n = n + 1; xs[n], ys[n] = x_of(db), y_of(out(db, t))
+        end
+      end
+      if dash then
+        for i = 1, n - 1, 2 do ImGui.DrawList_AddLine(dl, xs[i], ys[i], xs[i + 1], ys[i + 1], col, thick) end
+      else
+        polyline(dl, xs, ys, n, col, thick)
+      end
+    end
+    if close and close < thr then curve(close, U.with_alpha(C.COL.fader_cap, 0x70), 1.4, true) end
+    curve(thr, C.COL.fader_cap, 2.2)
+    -- the range's floor, under 1:1
+    dashed(dl, x_of(BOT), y_of(BOT + att), x_of(thr), y_of(thr + att), U.with_alpha(C.COL.accent, 0x90), 2, 3, 1.0)
+    live_dot(dl, ps, track, guid, enabled, gr, x_of, y_of, function(db) return out(db, thr) end, BOT, TOP)
+  else
+    small_text(ctx, dl, gx0 + gw * 0.5, gy0 + gh * 0.42, U.with_alpha(C.COL.header_dim, 0xa0),
+      "no threshold: no curve", "centre")
+  end
+  ImGui.DrawList_PopClipRect(dl)
+
+  if thr then
+    -- the threshold it opens at
+    local lo, hi = BOT + 6, TOP - 6
+    level_line(ctx, dl, ps, "mgthr##" .. guid, gx0, gw, gy0, gh, span, thr, y_of, C.COL.accent, false,
+      gx0 + gw - 40, ("Opens at %s\nDrag up or down (Shift: fine)"):format(R.Threshold.text or ""),
+      function(v) set_level(track, addr, R.Threshold, math.max(BOT, math.min(TOP, v)), thr_along, lo, hi, rev.Threshold) end)
+    -- its value on the left, where the curve leaves room (as the compressor's)
+    ImGui.DrawList_AddText(dl, gx0 + 8, y_of(thr) - 17, C.COL.value, R.Threshold.text or "")
+    small_text(ctx, dl, gx0 + 8, y_of(thr) + 3, C.COL.header_dim, "Opens")
+    -- where it closes
+    if close then
+      local m = R.Close or R.Hysteresis
+      level_line(ctx, dl, ps, "mgcls##" .. guid, gx0, gw, gy0, gh, span, close, y_of, U.with_alpha(C.COL.accent, 0xc0), true,
+        gx0 + gw - 40, ("Closes at %s\nDrag up or down (Shift: fine)"):format(R.Close and (m.text or "")
+          or (("%.1f dB (hysteresis %s)"):format(close, m.text or ""))),
+        function(v)
+          v = math.min(thr, v)
+          if R.Close then
+            set_level(track, addr, m, math.max(BOT, v), close_along, lo, hi, rev.Close)
+          elseif m.unit == "db" and m.v then
+            local amt = thr - v
+            set_to(track, addr, m.p, positive_amount(track, addr, guid, m.p) and amt or -amt)
+          else
+            local n = math.max(0, math.min(1, (thr - v) / 20))
+            set_norm(track, addr, m.p, rev.Hysteresis and (1 - n) or n)
+          end
+        end)
+      small_text(ctx, dl, gx0 + 8, y_of(close) + 3, C.COL.header_dim,
+        R.Close and ("Closes " .. (m.text or "")) or ("Closes  (hysteresis " .. (m.text or "") .. ")"))
+    end
+
+    -- an expander's ratio: a node on the slope
+    if R.Ratio then
+      -- on the slope; a gate's drop is straight down, so its node sits on
+      -- that line, as far down as a steep ratio would put it
+      local rd = math.min(ratio, 12)
+      local d = (rd > 1.01) and math.max(1.5, math.min(8, (-att) / (rd - 1) * 0.5)) or 8
+      local rx, ry = x_of(thr - d), y_of(math.max(thr - d * rd, thr - d + att))
+      if ratio >= 999 then rx = x_of(thr) - 1 end
+      local id = "mgrat##" .. guid
+      local hov, act, dragging = handle(ctx, id, rx - 7, ry - 7, 14, 14)
+      if dragging then
+        local v = drag_real(ctx, ps, id, thr - d * rd, 0, -span / gh)
+        local r = math.max(1, (thr - v) / d)
+        local sw = switch_positions(track, addr, guid, R.Ratio.p)
+        if sw then
+          -- a setting that isn't a ratio ("Gate") is one step past the
+          -- steepest, so it can be reached
+          local top = 1
+          for _, s_ in ipairs(sw) do
+            local sv = either(UN.parse(s_.text))
+            if sv and sv >= 1 and sv < 1000 then top = math.max(top, sv) end
+          end
+          local best, bd = nil, math.huge
+          for _, s_ in ipairs(sw) do
+            local sv = either(UN.parse(s_.text))
+            if not (sv and sv >= 1) then sv = top * 2.5 end
+            local dd = math.abs(math.log(sv) - math.log(r))
+            if dd < bd then best, bd = s_.norm, dd end
+          end
+          if best and math.abs(best - R.Ratio.n) > 1e-6 then set_norm(track, addr, R.Ratio.p, best) end
+        else
+          set_to(track, addr, R.Ratio.p, gflip and (1 / math.min(100, r)) or math.min(100, r))
+        end
+        ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+      end
+      if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+      ImGui.DrawList_AddCircleFilled(dl, rx, ry, 5, (hov or act) and C.COL.header_text or C.COL.fader_cap)
+      small_text(ctx, dl, rx - 9, ry - 6, C.COL.value, "Ratio " .. (R.Ratio.text or ""), "right")
+      W.tip(ctx, id, ("Ratio %s\nDrag up or down"):format(R.Ratio.text or ""), hov, act)
+    end
+
+    -- the range: a node on the floor (at the foot when the floor is
+    -- under the canvas)
+    if R.Range then
+      local xj = (ratio > 1.01) and (thr + att / (ratio - 1)) or thr
+      local nxdb = math.max(BOT + 3, xj - 6)
+      local ny = y_of(nxdb + att)
+      local below = ny > gy0 + gh - 8
+      if below then ny = gy0 + gh - 8 end
+      local nx = x_of(nxdb)
+      local id = "mgrng##" .. guid
+      local hov, act, dragging = handle(ctx, id, nx - 7, ny - 7, 14, 14)
+      if dragging then
+        local v = math.max(GATE_FULL, math.min(0, drag_real(ctx, ps, id, att, 0, -span / gh)))
+        if att_along then
+          local n = math.min(1, -v / 80)
+          set_norm(track, addr, R.Range.p, rev.Range and (1 - n) or n)
+        else
+          set_to(track, addr, R.Range.p, positive_amount(track, addr, guid, R.Range.p) and -v or v)
+        end
+        ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+      end
+      if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+      ImGui.DrawList_AddCircleFilled(dl, nx, ny, 5, (hov or act) and C.COL.header_text or C.COL.fader_cap)
+      ImGui.DrawList_AddCircle(dl, nx, ny, 5, C.COL.accent, 0, 1.4)
+      small_text(ctx, dl, nx + 9, ny - 6, C.COL.value, "Range " .. (R.Range.text or "") .. (below and "  \u{2193}" or ""))
+      W.tip(ctx, id, ("Range %s: how far down it turns the signal when shut\nDrag up or down"):format(R.Range.text or ""),
+        hov, act)
+    end
+
+    -- open or shut, from the track's level (with the hysteresis)
+    local lv = TP.levels(track, guid)
+    if lv and not lv.old and lv.in_pk then
+      if lv.in_pk >= thr then ps.gate_open = true
+      elseif lv.in_pk < (close or thr) then ps.gate_open = false end
+      local open = enabled and ps.gate_open
+      local lx, ly = gx0 + gw - 52, gy0 + gh - 18
+      ImGui.DrawList_AddCircleFilled(dl, lx, ly + 5, 4.5, open and C.COL.accent or U.with_alpha(C.COL.header_dim, 0x80))
+      small_text(ctx, dl, lx + 9, ly, open and C.COL.value or C.COL.header_dim, open and "open" or "shut")
+    end
+  end
+
+  -- the envelope, top left: above 1:1, where a gate's curve never goes
+  local ph, ew = 82, 196
+  if (R.Attack or R.Hold or R.Release) and gh > ph + 120 and gw > ew + 60 then
+    draw_env_mapped(ctx, dl, gx0 + 8, gy0 + 8, ew, ph, track, addr, R, ps, guid, cv.rev)
+  end
+  draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range, true)
+  return true
+end
+
+-- ---------------------------------------------------------------------
+-- the limiter
+-- ---------------------------------------------------------------------
+-- No curve to speak of: a limiter is all ceiling. Its level over the
+-- last few seconds instead, as the compressor's canvas has behind its
+-- curve -- the input, what came out, the reduction hanging from the top
+-- -- with the threshold and the ceiling across it. A limiter with a gain
+-- control instead of a threshold pushes the signal into the ceiling,
+-- which is the same as the threshold coming down: drawn so.
+local function draw_limiter(ctx, dl, x, y, w, h, track, fx, req, cv, R)
+  local addr, guid = fx.addr, fx.guid
+  local ps = panel_state(guid)
+  local enabled = T.get_enabled(track, addr)
+  for _, k in ipairs({ "Threshold", "Input", "Ceiling" }) do db_ish(track, addr, guid, R[k]) end
+  local rev = cv.rev or {}
+
+  local ceil, ceil_along = 0, false
+  if R.Ceiling then ceil, ceil_along = level_of(R.Ceiling, -12, 0, rev.Ceiling) end
+  local via_in = (R.Threshold == nil) and (R.Input ~= nil)
+  local thr, thr_along
+  if R.Threshold then
+    thr, thr_along = level_of(R.Threshold, -30, 0, rev.Threshold)
+  end
+  -- a gain into the ceiling (no threshold): drawn after the gain, the
+  -- ceiling its threshold and the gain a bar of its own (drive_of)
+  local drive = via_in and drive_of(track, addr, cv, R.Input, ceil, "limit") or nil
+
+  local TOP = math.max(3, ceil + 3)
+  local BOT = drive and math.max(-72, math.min(-30, ceil - 36))
+              or math.max(-72, math.min(-30, (thr or -12) - 18))
+  local mw = CP.METERS_W
+  local gx0, gy0 = x + 1, y
+  local gw, gh = w - mw - 1, h
+  local span = TOP - BOT
+  local function y_of(db) return gy0 + (TOP - db) / span * gh end
+  local gr = T.gain_reduction(track, addr) or 0
+
+  ImGui.DrawList_PushClipRect(dl, gx0, gy0, gx0 + gw, gy0 + gh, true)
+  local gr_peak, gr_range = role_backdrop(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, y_of, guid, drive and drive.gain)
+  ImGui.DrawList_PopClipRect(dl)
+
+  -- the ceiling
+  local clip = C.COL.level_clip or C.COL.warn
+  if R.Ceiling then
+    level_line(ctx, dl, ps, "mlcl##" .. guid, gx0, gw, gy0, gh, span, ceil, y_of, clip, true, gx0 + gw - 40,
+      ("Ceiling %s\nDrag up or down (Shift: fine)"):format(R.Ceiling.text or ""),
+      function(v) set_level(track, addr, R.Ceiling, math.min(TOP, v), ceil_along, -12, 0, rev.Ceiling) end)
+  else
+    dashed(dl, gx0, y_of(ceil), gx0 + gw, y_of(ceil), U.with_alpha(clip, 0x90), 6, 4, 1.0)
+  end
+  small_text(ctx, dl, gx0 + 8, y_of(ceil) + 3, clip, "Ceiling " .. (R.Ceiling and (R.Ceiling.text or "") or "0 dB"))
+
+  -- the threshold; or, with none, the input's gain: its bar
+  if drive then
+    draw_gain_bar(ctx, dl, ps, "mlgain##" .. guid, gx0, gw, gy0, gh, BOT, TOP, y_of, drive, R.Input, "ceiling")
+  elseif thr then
+    local m = R.Threshold
+    level_line(ctx, dl, ps, "mlth##" .. guid, gx0, gw, gy0, gh, span, thr, y_of, C.COL.accent, false, gx0 + gw - 40,
+      ("Threshold %s\nDrag up or down (Shift: fine)"):format(m.text or ""),
+      function(v)
+        v = math.max(BOT, math.min(ceil, v))
+        set_level(track, addr, m, v, thr_along, -30, 0, rev.Threshold)
+      end)
+    ImGui.DrawList_AddText(dl, gx0 + 8, y_of(thr) - 17, C.COL.value, m.text or "")
+    small_text(ctx, dl, gx0 + 8, y_of(thr) + 3, C.COL.header_dim,
+      ("Threshold  \u{00B7}  gain %+.1f dB"):format(ceil - thr))
+  end
+
+  -- the release: a slider at the foot, on the envelope's time scale
+  if R.Release then
+    local m = R.Release
+    m.rev = rev.Release
+    local st = time_steps(track, addr, guid, m.p, REL_LO, REL_HI, m.rev)
+    local function frac()
+      if st then return UN.step_at(st, m.n).f end
+      if m.unit == "ms" and m.v then return RC.time_frac(m.v, REL_LO, REL_HI) end
+      return m.rev and (1 - m.n) or m.n
+    end
+    local bx, bw_, bh = gx0 + 8, 176, 44
+    local by = gy0 + gh - bh - 8
+    ImGui.DrawList_AddRectFilled(dl, bx, by, bx + bw_, by + bh, U.with_alpha(C.COL.win_bg, 0xc8), 5.0)
+    ImGui.DrawList_AddRect(dl, bx, by, bx + bw_, by + bh, C.COL.knob_ring, 5.0, 0, 1.0)
+    small_text(ctx, dl, bx + 8, by + 5, C.COL.header_dim, "Release")
+    small_text(ctx, dl, bx + bw_ - 8, by + 5, C.COL.value, m.text or "", "right")
+    local tx0, tx1, ty = bx + 10, bx + bw_ - 10, by + bh - 13
+    local f = frac()
+    ImGui.DrawList_AddLine(dl, tx0, ty, tx1, ty, C.COL.knob_ring, 4.0)
+    ImGui.DrawList_AddLine(dl, tx0, ty, tx0 + (tx1 - tx0) * f, ty, C.COL.accent, 4.0)
+    if st then
+      for _, s_ in ipairs(st) do
+        local sx = tx0 + (tx1 - tx0) * s_.f
+        ImGui.DrawList_AddLine(dl, sx, ty + 4, sx, ty + 7, C.COL.header_dim, 1.0)
+      end
+    end
+    local nx = tx0 + (tx1 - tx0) * f
+    local id = "mlrel##" .. guid
+    local hov, act, dragging = handle(ctx, id, tx0 - 6, ty - 8, tx1 - tx0 + 12, 16)
+    if dragging then
+      local fr = math.max(0, math.min(1, drag_real(ctx, ps, id, f, 1 / (tx1 - tx0), 0)))
+      if st then
+        local s_ = UN.step_near(st, fr)
+        if s_ and math.abs(s_.norm - m.n) > 1e-6 then set_norm(track, addr, m.p, s_.norm) end
+      elseif m.unit == "ms" and m.v then set_to(track, addr, m.p, RC.frac_time(fr, REL_LO, REL_HI))
+      else set_norm(track, addr, m.p, m.rev and (1 - fr) or fr) end
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
+    end
+    if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+    ImGui.DrawList_AddCircleFilled(dl, nx, ty, 5, C.COL.header_text)
+    ImGui.DrawList_AddCircle(dl, nx, ty, 5, (hov or act) and C.COL.header_text or C.COL.accent, 0, 1.6)
+    W.tip(ctx, id, ("Release %s\nDrag left or right"):format(m.text or ""), hov, act)
+  end
+
+  draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range, true)
+  return true
+end
+
 function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
   local roles = cv.roles or {}
   if not next(roles) then return false end
@@ -884,8 +1654,18 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
   local ps = panel_state(guid)
   if w < 120 or h < 80 then return true end
   local enabled = T.get_enabled(track, addr)
+  if CP.FINE_ON and ps.fine and TP.fine_ok(track, guid) == true then
+    local mw = CP.METERS_W
+    local gr = T.gain_reduction(track, addr) or 0
+    draw_fine_view(ctx, dl, x + 1, y, w - mw - 1, h, track, fx)
+    local gr_peak, gr_range = W.gr_state(guid, gr, reaper.time_precise(), 12)
+    draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range, true)
+    return true
+  end
   local R = {}
   for name, p in pairs(roles) do R[name] = mapped(track, addr, p) end
+  if cv.kind == "gate" then return draw_gate(ctx, dl, x, y, w, h, track, fx, req, cv, R) end
+  if cv.kind == "limit" then return draw_limiter(ctx, dl, x, y, w, h, track, fx, req, cv, R) end
   -- a threshold, knee or make-up that reads as a plain number running
   -- below zero is in dB, whatever its text leaves off
   for _, name in ipairs({ "Threshold", "Knee", "Makeup", "Input" }) do
@@ -897,17 +1677,33 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
   end
   -- the level scale: wide enough for the whole of the threshold's range
   -- A compressor driven by its input (1176-style, no threshold control):
-  -- its input pushes the signal against a fixed threshold, which is the
-  -- same as the threshold moving down as the input goes up. Drawn so.
+  -- drawn after its input's gain, the threshold fixed and the gain a bar
+  -- of its own (drive_of)
   local via_in = (R.Threshold == nil) and (R.Input ~= nil)
-  local rev = via_in or (cv.rev and cv.rev.Threshold) or false
-  local thr_name = via_in and "Input" or (rev and "Compression" or "Threshold")
+  local rev = (not via_in) and (cv.rev and cv.rev.Threshold) or false
+  local thr_name = via_in and "Threshold" or (rev and "Compression" or "Threshold")
   local DB_TOP, DB_BOT = DB_TOP, DB_BOT
   local tsrc = R.Threshold or R.Input
-  if tsrc and tsrc.unit == "db" and not (rev and not via_in) then
+  local drive = via_in and drive_of(track, addr, cv, R.Input, nil, "comp") or nil
+  -- measured: where its threshold really is, in dBFS (its own dB is often
+  -- some calibrated level of its own -- an SSL's, an API's)
+  local cal = M.thr_cal(cv)
+  if drive then
+    DB_TOP = math.max(DB_TOP, math.min(24, drive.line + 12))
+    DB_BOT = math.min(DB_BOT, math.max(-96, drive.line - 50))
+  elseif cal then
+    local xa, xb
+    if cal.n then xa, xb = 0, 1
+    else local e = ends_of(track, addr, guid, tsrc.p); xa, xb = e.lo, e.hi end
+    local a = xa and xa > -math.huge and M.thr_dbfs(cv, xa)
+    local b = xb and xb < math.huge and M.thr_dbfs(cv, xb)
+    if a and b then
+      DB_TOP = math.max(DB_TOP, math.min(24, math.max(a, b) + 3))
+      DB_BOT = math.min(DB_BOT, math.max(-96, math.min(a, b) - 6))
+    end
+  elseif tsrc and tsrc.unit == "db" and not rev then
     local e = ends_of(track, addr, guid, tsrc.p)
     local lo, hi = e.lo, e.hi
-    if via_in and lo and hi then lo, hi = CP.FIXED_THR - hi, CP.FIXED_THR - lo end
     if hi and hi > -math.huge and hi < math.huge then DB_TOP = math.max(DB_TOP, hi + 3) end
     if lo and lo > -math.huge and lo < math.huge then DB_BOT = math.min(DB_BOT, lo - 6) end
   end
@@ -923,11 +1719,16 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
   -- the threshold in dB: as the plugin says, or along the control's range
   -- (reversed: more compression is a lower line)
   local T_ = tsrc
-  local thr, thr_pos
-  if T_ then
-    if T_.unit == "db" and T_.v and via_in then
-      thr = CP.FIXED_THR - ((T_.v == -math.huge) and -60 or T_.v)
-    elseif T_.unit == "db" and T_.v and not rev then
+  local thr, thr_pos, thr_cal
+  if drive then
+    thr, thr_cal = drive.line, drive.measured
+  elseif T_ and cal then
+    local x = cal.n and T_.n or ((T_.unit == "db") and T_.v or nil)
+    if x and x > -math.huge and x < math.huge then thr = M.thr_dbfs(cv, x) end
+    thr_cal = thr ~= nil
+  end
+  if T_ and not thr then
+    if T_.unit == "db" and T_.v and not rev then
       thr = (T_.v == -math.huge) and DB_BOT or T_.v
     else
       thr_pos = true
@@ -936,10 +1737,30 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
     end
   end
   local ratio = 4
-  if R.Ratio and R.Ratio.unit == "ratio" and R.Ratio.v then ratio = R.Ratio.v
+  -- a ratio control whose every setting reads under 1:1 writes its
+  -- compression the other way round ("1:4"): turned round (rflip)
+  local rends = R.Ratio and ends_of(track, addr, guid, R.Ratio.p) or {}
+  local rflip = R.Ratio and R.Ratio.unit == "ratio" and rends.hi and rends.hi <= 1 and rends.lo and rends.lo < 1
+  local function rv_of(v) return (rflip and v and v > 0) and (1 / v) or v end
+  if R.Ratio and R.Ratio.unit == "ratio" and R.Ratio.v and R.Ratio.v > 0 then ratio = rv_of(R.Ratio.v)
   elseif R.Ratio and R.Ratio.v and R.Ratio.v >= 1 then ratio = R.Ratio.v
   elseif R.Ratio and not R.Ratio.v then ratio = 1000 end
-  local knee = (R.Knee and R.Knee.v and R.Knee.v > 0 and R.Knee.v < 60) and R.Knee.v or 0
+  -- the knee, dB wide: as it reads; or, a knee that reads as a share of
+  -- its range (0..1, %), that share of twice the threshold's distance from
+  -- 0 dBFS (all of it: from 0 dBFS down to twice the threshold, as a
+  -- Weiss's)
+  local knee, knee_share = 0, nil
+  if R.Knee and thr then
+    local m = R.Knee
+    local e = ends_of(track, addr, guid, m.p)
+    local as_db = m.unit == "db" or (m.unit == "" and e.hi and e.hi > 1.5 and e.hi < math.huge and m.unit ~= "pct")
+    if as_db and m.v and m.v > -math.huge then
+      knee = math.max(0, math.min(60, m.v))
+    else
+      knee_share = 2 * math.max(6, math.abs(math.min(0, thr)))
+      knee = math.min(60, ((cv.rev and cv.rev.Knee) and (1 - m.n) or m.n) * knee_share)
+    end
+  end
   local function out(db) return RC.transfer(db, thr, ratio, knee) end
 
   ImGui.DrawList_PushClipRect(dl, gx0, gy0, gx0 + gw, gy0 + gh, true)
@@ -950,7 +1771,7 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
     small_text(ctx, dl, gx0 + 3, yy - 11, U.with_alpha(C.COL.header_dim, 0xa0), tostring(g))
   end
   local gr_peak, gr_range = W.gr_state(guid, gr, reaper.time_precise(), 12)
-  local m1, m2 = draw_history(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, y_of, gr_range)
+  local m1, m2 = draw_history(ctx, dl, gx0, gy0, gw, gh, track, fx, gr, y_of, gr_range, drive and drive.gain)
   if m1 then
     small_text(ctx, dl, gx0 + gw - 4, gy0 + 3, C.COL.header_dim, m1, "right")
     if m2 then small_text(ctx, dl, gx0 + gw - 4, gy0 + 14, C.COL.header_dim, m2, "right") end
@@ -963,7 +1784,12 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
       vgrad(dl, gx0, y_of(thr + knee * 0.5), gx0 + gw, ty, clear, mid)
       vgrad(dl, gx0, ty, gx0 + gw, y_of(thr - knee * 0.5), mid, clear)
     end
-    ImGui.DrawList_AddLine(dl, gx0, ty, gx0 + gw, ty, C.COL.accent, 1.6)
+    if drive then
+      -- fixed: dashed, nothing to hold
+      dashed(dl, gx0, ty, gx0 + gw, ty, C.COL.accent, 7, 4, 1.4)
+    else
+      ImGui.DrawList_AddLine(dl, gx0, ty, gx0 + gw, ty, C.COL.accent, 1.6)
+    end
     local k0 = thr - knee * 0.5
     dashed(dl, x_of(k0), y_of(k0), x_of(DB_TOP), y_of(DB_TOP), U.with_alpha(C.COL.label, 0xa0), 3, 4, 1.0)
     local xs, ys, n = {}, {}, 0
@@ -972,28 +1798,57 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
       n = n + 1; xs[n], ys[n] = x_of(db), y_of(out(db))
     end
     polyline(dl, xs, ys, n, C.COL.fader_cap, 2.2)
-    ImGui.DrawList_AddText(dl, gx0 + 8, ty - 17, C.COL.value, T_.text or "")
-    small_text(ctx, dl, gx0 + 8, ty + 3, C.COL.header_dim,
-      thr_name)
+    live_dot(dl, ps, track, guid, enabled, gr, x_of, y_of, out, DB_BOT, DB_TOP, drive and drive.gain, cv.band)
+    -- a fixed threshold's words: on the side away from the gain's bar
+    local wy = (drive and drive.bar > thr) and (ty + 3) or (ty - 17)
+    ImGui.DrawList_AddText(dl, gx0 + 8, wy, C.COL.value,
+      drive and ("%.1f dBFS"):format(thr) or (T_.text or ""))
+    local sub = thr_name
+    if drive then
+      sub = drive.measured and "Threshold  \u{00B7}  fixed (measured), after the input's gain"
+        or "Threshold  \u{00B7}  fixed, guessed: Set up \u{25B8} Measure threshold"
+      small_text(ctx, dl, gx0 + gw - 8, wy + 4, C.COL.header_dim, sub, "right")
+      sub = nil
+    elseif thr_cal then sub = ("%s  \u{00B7}  %.1f dBFS (measured)"):format(thr_name, thr)
+    elseif R.Threshold and T_.unit == "db" and not rev then
+      -- a threshold that goes well over 0 dB is likely its own dB
+      local e = ends_of(track, addr, guid, T_.p)
+      if e.hi and e.hi > 3 and e.hi < math.huge then
+        sub = thr_name .. "  \u{00B7}  its dB may not be dBFS: Set up \u{25B8} Measure threshold"
+      end
+    end
+    if sub then small_text(ctx, dl, gx0 + 8, ty + 3, C.COL.header_dim, sub) end
   else
     small_text(ctx, dl, gx0 + gw * 0.5, gy0 + gh * 0.42, U.with_alpha(C.COL.header_dim, 0xa0),
       "no threshold: no transfer curve", "centre")
   end
   ImGui.DrawList_PopClipRect(dl)
 
+  -- an input driving it: its gain's bar (the threshold has no handle)
+  if drive then
+    draw_gain_bar(ctx, dl, ps, "mcgain##" .. guid, gx0, gw, gy0, gh, DB_BOT, DB_TOP, y_of, drive, R.Input, "threshold")
+  end
+
   -- the threshold's handle: the whole line
-  if thr then
+  if thr and not drive then
     local ty = y_of(thr)
     local id = "mcthr##" .. guid
     local hov, act, dragging = handle(ctx, id, gx0, ty - 4, gw - 18, 8)
-    if dragging then
+    if dragging and thr_cal then
+      local v = drag_real(ctx, ps, id, thr, 0, -(DB_TOP - DB_BOT) / gh)
+      local x = M.thr_from_dbfs(cv, v)
+      if x then
+        if cal.n then set_norm(track, addr, T_.p, x) else set_to(track, addr, T_.p, x) end
+      end
+      ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+    elseif dragging then
       if thr_pos then
         local per = 1 / (gh * (DB_TOP - DB_BOT - 12) / (DB_TOP - DB_BOT))
         local v = drag_real(ctx, ps, id, T_.n, 0, rev and per or -per)
         set_norm(track, addr, T_.p, math.max(0, math.min(1, v)))
       else
         local v = drag_real(ctx, ps, id, thr, 0, -(DB_TOP - DB_BOT) / gh)
-        set_to(track, addr, T_.p, via_in and (CP.FIXED_THR - v) or v)
+        set_to(track, addr, T_.p, v)
       end
       ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
     elseif hov then
@@ -1003,42 +1858,86 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
     local kx = x_of(thr)
     ImGui.DrawList_AddRectFilled(dl, kx - 20, ty - 4, kx + 20, ty + 4,
       (hov or act) and C.COL.header_text or C.COL.accent, 4.0)
-    W.tip(ctx, id, ("%s %s\nDrag up or down (Shift: fine)%s"):format(thr_name, T_.text or "",
-      via_in and "\n(no threshold: the input drives it into a fixed one)" or ""), hov, act)
+    W.tip(ctx, id, ("%s %s\nDrag up or down (Shift: fine)"):format(thr_name, T_.text or ""), hov, act)
   end
 
-  -- the ratio: the curve's end, dragged up or down; a switch snaps to
-  -- its positions (a position that isn't a ratio, such as a limit
-  -- setting, is the far end)
+  -- the knee: grips on the band's edges, dragged away from the threshold
+  -- to soften it
+  if R.Knee and thr then
+    local m = R.Knee
+    local dbpp = (DB_TOP - DB_BOT) / gh
+    local gxk = math.max(gx0 + 70, x_of(thr) - 80)
+    for s = 1, 2 do
+      local edge = (s == 1) and (thr + knee * 0.5) or (thr - knee * 0.5)
+      local ey_ = y_of(edge) + ((s == 1) and -3 or 3)
+      local id = "mcknee" .. s .. "##" .. guid
+      local hov, act, dragging = handle(ctx, id, gxk - 2, ey_ - 4, 18, 8)
+      if dragging then
+        local v = math.max(0, drag_real(ctx, ps, id, knee, 0, ((s == 1) and -1 or 1) * 2 * dbpp))
+        if knee_share then
+          local n = math.max(0, math.min(1, v / knee_share))
+          set_norm(track, addr, m.p, (cv.rev and cv.rev.Knee) and (1 - n) or n)
+        else
+          set_to(track, addr, m.p, v)
+        end
+        ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+      elseif hov then
+        ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
+      end
+      if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
+      ImGui.DrawList_AddRectFilled(dl, gxk, ey_ - 2, gxk + 14, ey_ + 2,
+        (hov or act) and C.COL.header_text or U.with_alpha(C.COL.accent, 0xd8), 2.0)
+      W.tip(ctx, id, ("Knee %s (%.1f dB wide)\nDrag away from the threshold to soften it"):format(m.text or "", knee), hov, act)
+      if s == 1 then
+        small_text(ctx, dl, gxk - 5, ey_ - 6, C.COL.label, "Knee " .. (m.text or ""), "right")
+      end
+    end
+  end
+
+  -- the ratio: the curve's end, dragged where you want it (an expander's,
+  -- under 1:1, leaves through the top: its end is where it does); a switch
+  -- snaps to its positions (a position that isn't a ratio, such as a
+  -- limit setting, is the far end)
   if R.Ratio and thr then
     local sw = switch_positions(track, addr, guid, R.Ratio.p)
     local ex, ey = gx0 + gw - 7, y_of(out(DB_TOP))
+    if out(DB_TOP) > DB_TOP and ratio > 0 then
+      -- where it leaves the top
+      ex = math.max(gx0 + 7, math.min(gx0 + gw - 7, x_of(thr + (DB_TOP - thr) * ratio)))
+      ey = gy0 + 7
+    end
     local id = "mcratio##" .. guid
     local hov, act, dragging = handle(ctx, id, ex - 7, ey - 7, 14, 14)
     if dragging then
-      local d = ps.drag
-      if not d or d.id ~= id then
-        local _, my = ImGui.GetMousePos(ctx)
-        ps.drag = { id = id, my = my, y0 = ey }
-        d = ps.drag
-      end
-      local _, my = ImGui.GetMousePos(ctx)
-      local fine = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0 and 0.25 or 1
-      local end_db = DB_TOP - ((d.y0 + (my - d.my) * fine) - gy0) / gh * (DB_TOP - DB_BOT)
-      local rise = DB_TOP - thr
-      if rise > 0.01 then
-        local r = rise / math.max(0.0001, end_db - thr)
+      -- the ratio the pointer makes with the corner: across over up
+      local mx_, my_ = ImGui.GetMousePos(ctx)
+      local xdb = DB_BOT + (math.min(gx0 + gw, mx_) - gx0) / gw * (DB_TOP - DB_BOT)
+      local ydb = DB_TOP - (my_ - gy0) / gh * (DB_TOP - DB_BOT)
+      -- the control's own range, as drawn (turned round when it's written
+      -- the other way)
+      local lo_, hi_ = rv_of(rends.lo), rv_of(rends.hi)
+      if lo_ and hi_ and lo_ > hi_ then lo_, hi_ = hi_, lo_ end
+      local rlo = (lo_ and lo_ > 0) and lo_ or 1
+      local rhi = (hi_ and hi_ > rlo) and hi_ or 100
+      if xdb - thr > 0.5 then
+        local r = (ydb - thr > 0.05) and ((xdb - thr) / (ydb - thr)) or math.huge
         if sw then
           local best, bd = nil, math.huge
           for _, ps_ in ipairs(sw) do
-            local v = UN.parse(ps_.text)
-            if not (v and v >= 1) then v = 1000 end
-            local dd = math.abs(math.log(v) - math.log(math.max(1, r)))
+            local v = rv_of(UN.parse(ps_.text))
+            if not (v and v > 0) or v == math.huge then v = 1000 end
+            local dd = math.abs(math.log(v) - math.log(math.max(0.05, math.min(1000, r))))
             if dd < bd then best, bd = ps_.norm, dd end
           end
           if best and math.abs(best - R.Ratio.n) > 1e-6 then set_norm(track, addr, R.Ratio.p, best) end
+        elseif r >= math.min(rhi, 100) and rhi == math.huge then
+          -- past what a number says: the end that reads infinite
+          local fmt = UN.formatter(track, addr, R.Ratio.p)
+          local top = UN.at(fmt, 1)
+          set_norm(track, addr, R.Ratio.p, (rv_of(top) == math.huge) and 1 or 0)
         else
-          set_to(track, addr, R.Ratio.p, math.max(1, math.min(100, r)))
+          local want = math.max(rlo, math.min(math.min(rhi, 100), r))
+          set_to(track, addr, R.Ratio.p, rflip and (1 / want) or want)
         end
       end
       ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
@@ -1047,11 +1946,16 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
     end
     if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
     ImGui.DrawList_AddCircleFilled(dl, ex, ey, 5, (hov or act) and C.COL.header_text or C.COL.fader_cap)
+    -- the plugin's own words: "4.72:1", "1:5" spaced out; a bare number
+    -- gets its ": 1"
     local rl = R.Ratio.text or ""
-    if R.Ratio.unit == "ratio" then rl = (rl:gsub("%s*:%s*1%s*$", "")) .. " : 1" end
+    if rl:find(":") then rl = rl:gsub("%s*:%s*", " : ")
+    elseif R.Ratio.unit == "ratio" or (R.Ratio.v and R.Ratio.v >= 1) then rl = rl .. " : 1" end
     local rw = ImGui.CalcTextSize(ctx, rl)
-    ImGui.DrawList_AddText(dl, ex - 10 - rw, ey - 19, C.COL.value, rl)
-    small_text(ctx, dl, ex - 10, ey + 6, C.COL.header_dim, "Ratio", "right")
+    -- (at the top edge, an expander's: its words below, inside)
+    local ly = (ey < gy0 + 24) and (ey + 6) or (ey - 19)
+    ImGui.DrawList_AddText(dl, ex - 10 - rw, ly, C.COL.value, rl)
+    small_text(ctx, dl, ex - 10, ly + 25, C.COL.header_dim, "Ratio", "right")
     W.tip(ctx, id, ("Ratio %s\nDrag up or down%s"):format(R.Ratio.text or "",
       sw and " (it steps through the plugin's settings)" or ""), hov, act)
   elseif R.Ratio then
@@ -1073,8 +1977,20 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
     if R.Mix then mini_knob(ctx, dl, "mcmix##" .. guid, ox + ow - 26, py + 22, 10, track, addr, R.Mix.p, "Mix", ps) end
   end
 
-  draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range)
+  draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range, true)
   return true
 end
+
+-- The pieces, for the other role canvases (TS_CV_RolePanel: de-esser,
+-- delay, reverb, envelope, modulation), so they look and handle the same.
+CP.util = {
+  panel_state = panel_state, polyline = polyline, dashed = dashed, vgrad = vgrad,
+  small_text = small_text, handle = handle, drag_real = drag_real, set_norm = set_norm,
+  mini_knob = mini_knob, mini_toggle = mini_toggle, is_on = is_on, flip = flip, lin_db = lin_db,
+  draw_history = draw_history, draw_meters = draw_meters,
+  mapped = mapped, set_to = set_to, ends_of = ends_of, switch_positions = switch_positions,
+  time_steps = time_steps, db_ish = db_ish, positive_amount = positive_amount,
+  level_line = level_line, draw_env_mapped = draw_env_mapped,
+}
 
 return CP

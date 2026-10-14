@@ -73,6 +73,14 @@ local TP = {}
 TP.PROBE_NAME = "TS_TrackProbe"
 TP.MAX_TAPS   = 4
 TP.EXT_KEY    = "P_EXT:TS_CV_TAPS"
+
+-- A tapped plugin's delay from input to output, samples, as the trace
+-- measured it from the audio (TS_CV_Trace): used for its tap in place of
+-- its reported latency. { [guid] = samples }
+TP.measured_lag = {}
+function TP.set_measured_lag(guid, n)
+  if TP.measured_lag[guid] ~= n then TP.measured_lag[guid] = n end
+end
 TP.GMEM_NS    = "TS_TA_Mem"
 TP.HB_SLOT    = 73
 TP.WAVE_SLOT  = 74   -- which track's post probe writes the per-tap waveforms
@@ -91,6 +99,17 @@ TP.P_INPK  = 25     -- 25..28  input peak, dBFS
 TP.P_OUTPK = 29     -- 29..32  output peak
 TP.P_INRMS = 33     -- 33..36  input RMS
 TP.P_OUTRMS = 37    -- 37..40  output RMS
+TP.P_MB    = 41     -- the multiband tap, 1..4 (0 none)
+TP.P_MBX   = 42     -- 42..44  its crossovers, Hz (0 unused)
+TP.P_MBGR  = 45     -- 45..48  each of its bands' reduction, dB
+TP.P_FINE  = 49     -- the tap measured in third-octaves, 1..4 (0 none; no longer asked for)
+TP.P_MBL   = 50     -- 50..53  each multiband band's input level, dBFS (1.8.0)
+-- The reduction by frequency (third-octaves, before against after) is
+-- retired: comparing before with after held up for one number, not for
+-- thirty. Its code stays, switched off here.
+TP.FINE_ON = false
+TP.FINE_GM = 0x70000   -- its results, + track index * TP.FINE_GSTR (see the probe)
+TP.FINE_GSTR = 128
 
 TP.ZERO_KEY = "tap_zero"   -- ExtState, "0" turns the stop-time zero off
 
@@ -334,7 +353,7 @@ end
 -- curve's effect on the programme, which swings with every note. (Older
 -- layouts can still carry Measure=1 for it; it is ignored.)
 local function wants_measure(tr, addr)
-  local key = St.layout_key(fx_name(tr, addr), fx_guid(tr, addr))
+  local key = St.layout_key(fx_name(tr, addr), fx_guid(tr, addr), tr, addr)
   if RQ.is_eq(key) then return false end
   local layout = M.get(key)
   if not (layout and layout.measure == true) then return false end
@@ -343,7 +362,7 @@ end
 
 -- Whether a plugin's input and output levels are wanted (Levels=1).
 local function wants_levels(tr, addr)
-  local layout = M.get(St.layout_key(fx_name(tr, addr), fx_guid(tr, addr)))
+  local layout = M.get(St.layout_key(fx_name(tr, addr), fx_guid(tr, addr), tr, addr))
   return layout ~= nil and layout.levels == true
 end
 
@@ -425,11 +444,32 @@ local function wants_wave(tr, addr)
   local guid = fx_guid(tr, addr)
   if panel_open(guid) then return true end
   if not (St.is_gr_open(guid) or web_open(guid)) then return false end
-  local key = St.layout_key(fx_name(tr, addr), guid)
+  local key = St.layout_key(fx_name(tr, addr), guid, tr, addr)
   -- the web page's ReaComp canvas, open on some device
   if RC.is_comp(key) then return true end
   local layout = M.get(key)
   return layout ~= nil and M.meter_of(layout) ~= nil
+end
+
+-- Whether this instance's panel wants its reduction split by frequency:
+-- a multiband or de-esser layout's (its bands), or any panel showing
+-- its reduction by frequency (TP.want_fine). It is measured then even
+-- when the plugin reports a reduction of its own.
+local fine_asked = {}
+function TP.want_fine(guid) fine_asked[guid] = reaper.time_precise() end
+local function wants_mb(tr, addr)
+  local guid = fx_guid(tr, addr)
+  if not panel_open(guid) then return false end
+  if fine_asked[guid] and reaper.time_precise() - fine_asked[guid] < 1.0 then return true end
+  local layout = M.get(St.layout_key(fx_name(tr, addr), guid, tr, addr))
+  local cv = layout and layout.canvas
+  local k = cv and cv.kind
+  if k == "eq" then
+    -- a dynamic EQ: what its bands are doing
+    for _, b in ipairs(cv.bands or {}) do if M.band_dynamic(b) then return true end end
+    return false
+  end
+  return k == "multi" or k == "deess"
 end
 
 -- Whether a probe is new enough to measure levels (TS_TrackProbe 1.4.0+).
@@ -547,7 +587,7 @@ function TP.desired(tr)
   for _, c in ipairs(candidates(tr, lv)) do
     if #r.taps >= TP.MAX_TAPS then break end
     local a = c.addr
-    local gr = not c.parallel and wants_measure(tr, a)
+    local gr = not c.parallel and (wants_measure(tr, a) or wants_mb(tr, a))
     local lvl = not c.parallel
                 and (wants_levels(tr, a) or (not gr and wants_wave(tr, a)))
     if gr or lvl then
@@ -558,7 +598,12 @@ function TP.desired(tr)
       r.taps[#r.taps + 1] = {
         guid = fx_guid(tr, a), prev = table.concat(gs, "+"),
         addr = a, writers = c.writers, path = c.path, pathg = table.concat(pg, "+"),
-        lag = math.floor(tonumber(ok and pdc or 0) or 0),
+        -- how long the input is held back to sit on the output: as measured
+        -- from the audio when the trace has found it (a plugin's reported
+        -- latency can be wrong: a de-esser reporting none was 2048 samples
+        -- out, which reads as 9 dB of reduction it wasn't doing), else as
+        -- the plugin reports
+        lag = TP.measured_lag[fx_guid(tr, a)] or math.floor(tonumber(ok and pdc or 0) or 0),
         what = (gr and "g" or "") .. (lvl and "l" or ""),
       }
     end
@@ -1255,6 +1300,259 @@ function TP.reading(tr, guid)
   return math.max(0, v or 0)
 end
 
+-- Whether a probe is new enough to split a multiband's bands
+-- (TS_TrackProbe 1.6.0+): as with levels, a project keeps running the probe
+-- it opened with.
+local mb_ok = {}
+function TP.probe_has_mb(tr, probe)
+  if not tr or not probe then return false end
+  local key = tostring(tr) .. ":" .. (reaper.TrackFX_GetFXGUID(tr, probe) or tostring(probe))
+  local v = mb_ok[key]
+  if v == nil then
+    local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_MB, "")
+    v = (ok and nm and nm:lower():find("multiband", 1, true)) ~= nil
+    mb_ok[key] = v
+  end
+  return v
+end
+
+-- Asks the probe to split this plugin's measured audio at its crossovers
+-- (Hz, ascending, 1 to 3 of them). One multiband tap per probe: the last
+-- open panel to ask has it. Writes only what changed. Returns whether the
+-- plugin is measured that way.
+function TP.set_mb(tr, guid, xos)
+  local i, rd = tap_for(tr, guid, "g")
+  if not i or not rd.probe or not TP.probe_has_mb(tr, rd.probe) then return false end
+  local function put(p, v)
+    if math.abs((reaper.TrackFX_GetParam(tr, rd.probe, p) or 0) - v) > 0.5 then
+      reaper.TrackFX_SetParam(tr, rd.probe, p, v)
+    end
+  end
+  put(TP.P_MB, i)
+  for k = 1, 3 do put(TP.P_MBX + k - 1, xos[k] and math.floor(xos[k] + 0.5) or 0) end
+  return true
+end
+
+-- Asks the probe to measure this plugin in third-octaves. One tap per
+-- probe: an instance asking keeps it while it goes on asking (half a
+-- second), so two open panels don't take it in turns. Returns whether it
+-- has it.
+local fine_owner = {}
+-- Whether this plugin can be measured in third-octaves: true; "old" when
+-- it's tapped but the project still runs a probe from before 1.7.0 (a
+-- project keeps the JSFX it opened with); false when it isn't tapped.
+function TP.fine_ok(tr, guid)
+  local i, rd = tap_for(tr, guid, "g")
+  if not i or not rd.probe then return false end
+  local ok, nm = reaper.TrackFX_GetParamName(tr, rd.probe, TP.P_FINE, "")
+  return (ok and nm and nm:lower():find("third", 1, true)) and true or "old"
+end
+function TP.set_fine(tr, guid, polite)
+  local i, rd = tap_for(tr, guid, "g")
+  if not i or not rd.probe then return false end
+  local ok, nm = reaper.TrackFX_GetParamName(tr, rd.probe, TP.P_FINE, "")
+  if not (ok and nm and nm:lower():find("third", 1, true)) then return false end
+  local now = reaper.time_precise()
+  local key = tostring(tr)
+  local o = fine_owner[key]
+  if o and o.guid ~= guid and now - o.t < 0.5 then return false end
+  -- polite (the web bridge): only when no other tap has it, so it never
+  -- takes the measurement from a window's panel
+  local cur = math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_FINE) or 0) + 0.5)
+  if polite and cur ~= 0 and cur ~= i then return false end
+  fine_owner[key] = { guid = guid, t = now, tr = tr, probe = rd.probe, i = i,
+                      pguid = reaper.TrackFX_GetFXGUID(tr, rd.probe) }
+  if math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_FINE) or 0) + 0.5) ~= i then
+    reaper.TrackFX_SetParam(tr, rd.probe, TP.P_FINE, i)
+  end
+  return true
+end
+
+-- Lets go of a measurement nobody has asked for in a while: the probe
+-- stops paying for it, and another panel (or the web page) can have it.
+function TP.fine_tidy(now)
+  for key, o in pairs(fine_owner) do
+    if now - o.t > 1.5 then
+      fine_owner[key] = nil
+      if reaper.ValidatePtr(o.tr, "MediaTrack*") and o.probe
+         and reaper.TrackFX_GetFXGUID(o.tr, o.probe) == o.pguid
+         and math.floor((reaper.TrackFX_GetParam(o.tr, o.probe, TP.P_FINE) or 0) + 0.5) == o.i then
+        reaper.TrackFX_SetParam(o.tr, o.probe, TP.P_FINE, 0)
+      end
+    end
+  end
+end
+
+-- This plugin's reduction in third-octaves, when the probe is measuring
+-- it that way: { n, f = { centre Hz }, d = { dB from its zero, below 0
+-- reduced, nil no signal }, lv = { level going in, dBFS }, cal = the zero
+-- measured }, or nil.
+local fine_seen = {}
+function TP.fine(tr, guid)
+  local i, rd = tap_for(tr, guid, "g")
+  if not i or not rd.probe then return nil end
+  local idx = math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0) - 1
+  if idx < 0 then return nil end
+  local b = TP.FINE_GM + idx * TP.FINE_GSTR
+  if not TP._fine_gm then reaper.gmem_attach(TP.GMEM_NS); TP._fine_gm = true end
+  if math.floor(reaper.gmem_read(b + 2) + 0.5) ~= i then return nil end
+  -- a frame every 20 ms or so while it runs: a count that stops is old
+  local seq, now = reaper.gmem_read(b), reaper.time_precise()
+  local fs = fine_seen[guid]
+  if not fs or fs.seq ~= seq then fine_seen[guid] = { seq = seq, t = now }
+  elseif now - fs.t > 0.6 then return nil end
+  local n = math.floor(reaper.gmem_read(b + 1) + 0.5)
+  if n < 1 or n > 31 then return nil end
+  local out = { n = n, f = {}, d = {}, lv = {}, cal = reaper.gmem_read(b + 3) > 0.5 }
+  for k = 1, n do
+    out.f[k] = 1000 * 2 ^ ((k - 17) / 3)
+    local d = reaper.gmem_read(b + 8 + k - 1)
+    out.d[k] = (d > -900) and d or nil
+    out.lv[k] = reaper.gmem_read(b + 72 + k - 1)
+  end
+  return out
+end
+
+-- A multiband plugin's band k reduction, positive dB, or nil when its
+-- bands aren't being measured.
+function TP.band_gr(tr, guid, k)
+  local i, rd = tap_for(tr, guid, "g")
+  if not i or not rd.probe or not TP.probe_has_mb(tr, rd.probe) then return nil end
+  if math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MB) or 0) + 0.5) ~= i then return nil end
+  return math.max(0, reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MBGR + k - 1) or 0)
+end
+
+-- A multiband's bands, where they are: { nb, own (each band has its own
+-- edges, as FabFilter Pro-MB's do, rather than shared crossovers), [k] =
+-- { lo, hi (Hz), used } , xs (the crossovers to split the measured audio
+-- at, ascending, for TP.set_mb), at[k] (band k's place among the split
+-- bands, nil when it isn't one) }. Crossovers out of order are put in
+-- order; a band's missing edge is its neighbour's.
+TP.MB_LO, TP.MB_HI = 20, 20000
+local MB_DEFAULT_XO = { 120, 1000, 5000 }
+local function hz_of(tr, addr, p, rev)
+  if not p then return nil end
+  local UN = require("TS_CV_Units")
+  local nv = reaper.TrackFX_GetParamNormalized(tr, addr, p) or 0
+  local v, unit = UN.parse(RC.text(tr, addr, p, nv))
+  if v and unit == "hz" and v > 0 and v < math.huge then return v end
+  local n = rev and (1 - nv) or nv
+  return TP.MB_LO * (TP.MB_HI / TP.MB_LO) ^ n
+end
+-- What a band's "in use" control says, from its words: "off" (no band
+-- in that slot: unused, none), "byp" (a band, switched off: disabled,
+-- bypassed -- FabFilter Pro-MB's State reads Disabled / Enabled / Unused),
+-- or "on"; a plain switch, by its position.
+function TP.mb_state_of(text, nv)
+  local t = (text or ""):lower()
+  for _, w in ipairs({ "unused", "not used", "none", "empty" }) do if t:find(w, 1, true) then return "off" end end
+  for _, w in ipairs({ "disabled", "disable", "bypass", "inactive", "mute" }) do if t:find(w, 1, true) then return "byp" end end
+  if t:match("^%s*off%s*$") then return "off" end
+  for _, w in ipairs({ "enabled", "used", "active", "on" }) do if t:find(w, 1, true) then return "on" end end
+  return (nv or 0) >= 0.5 and "on" or "off"
+end
+function TP.mb_state(tr, addr, p)
+  if not p then return "on" end
+  local nv = reaper.TrackFX_GetParamNormalized(tr, addr, p) or 0
+  return TP.mb_state_of(RC.text(tr, addr, p, nv), nv)
+end
+-- whether a band's "in use" control says there's a band there (bypassed
+-- or not)
+function TP.mb_used(tr, addr, p) return TP.mb_state(tr, addr, p) ~= "off" end
+function TP.mb_plan(tr, addr, cv)
+  local nb = cv.nb or 3
+  local R, rev = cv.roles or {}, cv.rev or {}
+  local plan = { nb = nb, own = false, xs = {}, at = {} }
+  for k = 1, nb do if R["B" .. k .. "Low"] or R["B" .. k .. "High"] then plan.own = true end end
+  if not plan.own then
+    local prev = TP.MB_LO
+    for k = 1, nb - 1 do
+      local x = hz_of(tr, addr, R["Crossover" .. k], rev["Crossover" .. k]) or MB_DEFAULT_XO[k] or 1000
+      x = math.max(x, prev * 1.02)
+      plan.xs[k] = x
+      prev = x
+    end
+    for k = 1, nb do
+      local st = TP.mb_state(tr, addr, R["B" .. k .. "Used"])
+      plan[k] = { lo = (k == 1) and TP.MB_LO or plan.xs[k - 1], hi = (k == nb) and TP.MB_HI or plan.xs[k],
+                  used = st ~= "off", byp = st == "byp" }
+      plan.at[k] = k
+    end
+    return plan
+  end
+  -- each band its own edges; one missing is its neighbour's
+  local lo, hi = {}, {}
+  for k = 1, nb do
+    lo[k] = hz_of(tr, addr, R["B" .. k .. "Low"], rev["B" .. k .. "Low"])
+    hi[k] = hz_of(tr, addr, R["B" .. k .. "High"], rev["B" .. k .. "High"])
+  end
+  for k = 1, nb do
+    local l = lo[k] or (k > 1 and hi[k - 1]) or TP.MB_LO
+    local h = hi[k] or (k < nb and lo[k + 1]) or TP.MB_HI
+    if h < l then l, h = h, l end
+    local st = TP.mb_state(tr, addr, R["B" .. k .. "Used"])
+    plan[k] = { lo = math.max(TP.MB_LO, l), hi = math.min(TP.MB_HI, math.max(h, l * 1.01)),
+                used = st ~= "off", byp = st == "byp" }
+  end
+  -- the measured audio split between the bands in use, low to high
+  local order = {}
+  for k = 1, nb do if plan[k].used then order[#order + 1] = k end end
+  table.sort(order, function(a, b) return plan[a].lo < plan[b].lo end)
+  while #order > 4 do table.remove(order) end
+  local prev = TP.MB_LO
+  for j = 1, #order do
+    plan.at[order[j]] = j
+    if j < #order then
+      local a, b = plan[order[j]], plan[order[j + 1]]
+      local x = math.max(math.sqrt(a.hi * b.lo), prev * 1.02)
+      plan.xs[j] = x
+      prev = x
+    end
+  end
+  return plan
+end
+-- Band k's reduction from the split (positive dB), or nil: not measured,
+-- not in use, or too narrow (under half an octave, or all under 40 Hz) to
+-- hold enough of the music to say -- a near-empty band compares next to
+-- nothing with next to nothing.
+function TP.mb_reading(tr, guid, plan, k)
+  local b, j = plan[k], plan.at[k]
+  if not b or not j or not b.used then return nil end
+  if b.hi / b.lo < 1.41 or b.hi <= 40 then return nil end
+  return TP.band_gr(tr, guid, j)
+end
+
+-- Whether a probe publishes the multiband bands' input levels
+-- (TS_TrackProbe 1.8.0+). Asked by name, cached per instance.
+local mbl_ok = {}
+function TP.probe_has_mbl(tr, probe)
+  if not tr or not probe then return false end
+  local key = tostring(tr) .. ":" .. (reaper.TrackFX_GetFXGUID(tr, probe) or tostring(probe))
+  local v = mbl_ok[key]
+  if v == nil then
+    local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_MBL, "")
+    v = (ok and nm and nm:lower():find("input level", 1, true)) ~= nil
+    mbl_ok[key] = v
+  end
+  return v
+end
+
+-- Band k's input level, dBFS (a 2 ms mean square scaled so a sine reads
+-- its peak, falling 20 dB/s): measured on the way in only, so it needs no
+-- zero and no alignment. nil when the band isn't in use or split, or the
+-- probe is older; "old" when the probe predates it.
+function TP.mb_level(tr, guid, plan, k)
+  local b, j = plan[k], plan.at[k]
+  if not b or not j or not b.used then return nil end
+  local i, rd = tap_for(tr, guid, "g")
+  if not i or not rd.probe or not TP.probe_has_mb(tr, rd.probe) then return nil end
+  if not TP.probe_has_mbl(tr, rd.probe) then return "old" end
+  if math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MB) or 0) + 0.5) ~= i then return nil end
+  local v = reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MBL + j - 1)
+  if not v or v <= -149 then return nil end
+  return v
+end
+
 -- Where a measured plugin's zero stands: 0 never measured (the probe is
 -- still using the zero it learnt from the music), 1 measured, 2 measured
 -- but the plugin was level-dependent even at the test level, 3 measured
@@ -1405,6 +1703,7 @@ end
 -- frame rather than a lot at once.
 function TP.update(now)
   now = now or reaper.time_precise()
+  TP.fine_tidy(now)
   if now >= any_until then
     TP.active = anything_to_do()
     any_until = now + 2

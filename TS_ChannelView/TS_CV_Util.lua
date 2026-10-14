@@ -384,7 +384,73 @@ function U.guess_bipolar(name, track, addr, param)
   return false
 end
 
+-- ---------------------------------------------------------------------
+-- your own range for a parameter (TS_CV_Mappings Range<p>): what it reads
+-- as when the plugin won't say (Acustica's, which give the host only
+-- their own internal numbers). { lo, hi, unit, curve }: curve "lin",
+-- "log" (lo and hi the same sign, neither 0) or "sq" (squared: times).
+-- ---------------------------------------------------------------------
+U.RANGE_UNITS = { "", "Hz", "kHz", "ms", "s", "dB", "%", ":1" }
+U.RANGE_CURVES = { "lin", "log", "sq" }
+-- The ranges in force while one plugin's panel (or values) is worked out:
+-- param -> range. Set round each plugin by its drawer (U.with_ranges).
+U.ranges_now = nil
+function U.with_ranges(r)
+  local was = U.ranges_now
+  U.ranges_now = (r and next(r)) and r or nil
+  return was
+end
+function U.range_of(p) return U.ranges_now and p and U.ranges_now[p] or nil end
+local function range_log(r) return r.curve == "log" and r.lo and r.hi and r.lo * r.hi > 0 end
+function U.range_value(r, n)
+  n = math.max(0, math.min(1, n or 0))
+  local lo, hi = r.lo or 0, r.hi or 1
+  if range_log(r) then return lo * (hi / lo) ^ n end
+  if r.curve == "sq" then return lo + (hi - lo) * n * n end
+  return lo + (hi - lo) * n
+end
+function U.range_norm(r, v)
+  local lo, hi = r.lo or 0, r.hi or 1
+  if hi == lo then return 0 end
+  local n
+  if range_log(r) then
+    if v * lo <= 0 then return 0 end
+    n = math.log(v / lo) / math.log(hi / lo)
+  elseif r.curve == "sq" then
+    local f = (v - lo) / (hi - lo)
+    n = (f > 0) and math.sqrt(f) or 0
+  else
+    n = (v - lo) / (hi - lo)
+  end
+  return math.max(0, math.min(1, n))
+end
+-- a number as the unit wants it shown
+function U.range_say(r, v)
+  local unit = r.unit or ""
+  local function num(x)
+    local a = math.abs(x)
+    if a >= 100 then return ("%.0f"):format(x) elseif a >= 10 then return ("%.1f"):format(x) end
+    return ("%.2f"):format(x)
+  end
+  if unit == "Hz" then
+    if math.abs(v) >= 1000 then return num(v / 1000) .. " kHz" end
+    return num(v) .. " Hz"
+  end
+  if unit == "ms" then
+    if math.abs(v) >= 1000 then return num(v / 1000) .. " s" end
+    return num(v) .. " ms"
+  end
+  if unit == "dB" then return ("%.1f dB"):format(v) end
+  if unit == "%" then return ("%.0f %%"):format(v) end
+  if unit == ":1" then return ("%.1f:1"):format(v) end
+  if unit == "" then return num(v) end
+  return num(v) .. " " .. unit
+end
+function U.range_text(r, n) return U.range_say(r, U.range_value(r, n)) end
+
 function U.fmt_value(track, addr, param)
+  local rg = U.range_of(param)
+  if rg then return U.range_text(rg, reaper.TrackFX_GetParamNormalized(track, addr, param) or 0) end
   local ok, s = reaper.TrackFX_GetFormattedParamValue(track, addr, param, "")
   if ok and s and s ~= "" then return s end
   local v = reaper.TrackFX_GetParamNormalized(track, addr, param)
@@ -640,6 +706,11 @@ end
 -- it isn't set to). When the plugin can't say, it falls back to 0-10.
 function U.scale_labels(track, addr, param, kind, marks)
   local out = {}
+  local rg = U.range_of(param)
+  if kind == "values" and rg then
+    for i, m in ipairs(marks) do out[i] = U.short_value(U.range_text(rg, m)) end
+    return out
+  end
   if kind == "values" and reaper.TrackFX_FormatParamValueNormalized then
     for i, m in ipairs(marks) do
       local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, m, "")

@@ -23,6 +23,7 @@
   without a REAPER: UN.formatter(track, addr, p) makes one.
 --]]
 
+local U = require("TS_CV_Util")
 local UN = {}
 
 local function trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
@@ -56,11 +57,14 @@ function UN.parse(text)
   local s = trim(text):gsub("\u{2212}", "-")
   if s == "" then return nil end
   local low = s:lower()
-  -- ratios first: "4:1", "4.0 : 1", "1:4" (written the other way round)
+  -- ratios first, as written, in over out: "4:1", "4.0 : 1" -- and under
+  -- 1:1, an expander's (upward, above the threshold): "1:5", "0.50:1".
+  -- (A plugin that writes its compression the other way round, "1:4",
+  -- every setting under 1:1, is turned round where it's drawn.)
   local a, b = low:match("([%d%.]+)%s*:%s*([%d%.]+)")
   if a and b then
     local x, y = tonumber(a), tonumber(b)
-    if x and y and x > 0 and y > 0 then return math.max(x / y, y / x), "ratio" end
+    if x and y and x > 0 and y > 0 then return x / y, "ratio" end
   end
   if low:match("inf%s*:") or low:match("^%s*limit") or low:match("∞%s*:")
      or low:match("^∞") and low:match(":") then
@@ -91,13 +95,84 @@ end
 
 -- A text-for-a-value function for one parameter. Nil text when the
 -- plugin can't say (an old REAPER without FormatParamValueNormalized).
-function UN.formatter(track, addr, p)
+--
+-- Some plugins (Valhalla's) answer "what would this read at x?" with what
+-- it reads now, whatever x. Such a parameter -- the same text at both ends
+-- and the middle, and that text what it shows now -- is read once by
+-- moving it through its range and reading it back (128 steps, then put
+-- back where it was), and those readings kept for the session: numbers
+-- between two steps are drawn in between, anything else is the nearer
+-- step. Not while its track is writing automation (that would record the
+-- sweep) or the transport is playing (it would be heard): it reads as
+-- nothing until then.
+local function raw_formatter(track, addr, p)
   return function(norm)
     if not reaper.TrackFX_FormatParamValueNormalized then return nil end
     local ok, s = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, norm, "")
     if ok and s and trim(s) ~= "" then return trim(s) end
     return nil
   end
+end
+UN.SWEEP_N = 128
+local swept = {}        -- fx GUID:param -> false (answers fine) | its readings, 0..SWEEP_N
+local function sweep(track, addr, p)
+  local cur = reaper.TrackFX_GetParamNormalized(track, addr, p)
+  local t, first, varied = {}, nil, false
+  for i = 0, UN.SWEEP_N do
+    reaper.TrackFX_SetParamNormalized(track, addr, p, i / UN.SWEEP_N)
+    local _, s = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+    t[i] = trim(s)
+    if first == nil then first = t[i] elseif t[i] ~= first then varied = true end
+  end
+  reaper.TrackFX_SetParamNormalized(track, addr, p, cur)
+  return varied and t or false
+end
+local SUF = { ms = " ms", pct = " %", hz = " Hz", db = " dB", [""] = "" }
+-- a reading between two kept steps
+function UN.from_sweep(t, norm)
+  local x = math.max(0, math.min(1, norm or 0)) * UN.SWEEP_N
+  local i = math.floor(x)
+  local f = x - i
+  local a, b = t[i], t[math.min(UN.SWEEP_N, i + 1)]
+  if f < 1e-9 or a == b or not b then return a ~= "" and a or nil end
+  if not (a:find("/", 1, true) or b:find("/", 1, true)) then
+    local va, ua = UN.parse(a)
+    local vb, ub = UN.parse(b)
+    if va and vb and ua == ub and ua ~= "ratio" and math.abs(va) < 1e9 and math.abs(vb) < 1e9 then
+      return ("%.4f%s"):format(va + (vb - va) * f, SUF[ua] or "")
+    end
+  end
+  local r = (f < 0.5) and a or b
+  return r ~= "" and r or nil
+end
+function UN.formatter(track, addr, p)
+  -- your own range for it (U.ranges_now): read off that
+  local rg = U.range_of and U.range_of(p)
+  if rg then return function(norm) return U.range_text(rg, norm) end end
+  local raw = raw_formatter(track, addr, p)
+  if not (reaper.TrackFX_GetFXGUID and reaper.TrackFX_SetParamNormalized and reaper.TrackFX_GetFormattedParamValue) then
+    return raw
+  end
+  local k = tostring(reaper.TrackFX_GetFXGUID(track, addr) or addr) .. ":" .. tostring(p)
+  local t = swept[k]
+  if t == nil then
+    t = false
+    local f0, f1 = raw(0), raw(1)
+    if f0 and f0 == f1 and raw(0.5) == f0 then
+      local _, now = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+      if trim(now) == f0 then
+        local am = reaper.GetTrackAutomationMode and reaper.GetTrackAutomationMode(track) or 0
+        local playing = reaper.GetPlayState and ((reaper.GetPlayState() or 0) & 5) ~= 0
+        -- writing automation (it would record the sweep) or playing (it
+        -- would be heard): not now, and asked again later
+        if am >= 2 or playing then return function() return nil end end
+        t = sweep(track, addr, p)
+      end
+    end
+    swept[k] = t
+  end
+  if t then return function(norm) return UN.from_sweep(t, norm) end end
+  return raw
 end
 
 -- The value at a normalised position, in real units, or nil.
@@ -235,6 +310,40 @@ function UN.short(v, unit)
   return string.format("%g", v)
 end
 
+-- A note value as beats (a quarter note is 1): "1/8" 0.5, "1/8 D" or
+-- "1/8." (dotted) 0.75, "1/8T" or "1/8 triplet" 1/3, "1 bar" 4, "2 bars"
+-- 8. Nil when the text isn't one.
+function UN.note_beats(text)
+  local s = trim(text or ""):lower()
+  if s == "" then return nil end
+  local n = s:match("^(%d+)%s*bars?%f[%A]")
+  if n then return tonumber(n) * 4 end
+  local a, b, rest = s:match("^(%d+)%s*/%s*(%d+)(.*)$")
+  if not a then a, b, rest = s:match("^(%d+)%-(%d+%.?%d*)(.*)$") end   -- "1-8" (SSL)
+  if not a then return nil end
+  a, b = tonumber(a), tonumber(b)
+  if not (a and b and b > 0) then return nil end
+  local beats = 4 * a / b
+  rest = rest or ""
+  if rest:match("^%s*%.") or rest:match("^%s*d%f[%A]") or rest:match("dot") then
+    beats = beats * 1.5
+  elseif rest:match("^%s*t%f[%A]") or rest:match("trip") then
+    beats = beats * 2 / 3
+  end
+  return beats
+end
+
+-- A time in ms from a control's text: a time ("375 ms", "1.2 s") or a note
+-- value at the tempo given (beats a minute, 120 when not given). Nil when
+-- it's neither.
+function UN.time_ms(text, bpm)
+  local v, u = UN.parse(text or "")
+  if u == "ms" and v then return v end
+  local beats = UN.note_beats(text)
+  if beats then return beats * 60000 / ((bpm and bpm > 1) and bpm or 120) end
+  return nil
+end
+
 -- A switched time control (a compressor's attack, hold or release) as
 -- steps along a log scale of lo..hi ms: { {norm, lo, hi, text, f}, ... },
 -- f how far along (0..1) that setting sits, or nil for a continuous
@@ -294,6 +403,67 @@ function UN.step_near(steps, f)
   for _, s in ipairs(steps) do
     local d = math.abs(s.f - f)
     if d < bd then best, bd = s, d end
+  end
+  return best
+end
+
+-- ---------------------------------------------------------------------
+-- a reverb's early / late balance (TS_CV_RolePanel's reverb canvas)
+-- ---------------------------------------------------------------------
+-- An early/late balance from its reading: the early reflections' level
+-- against the late reverb's, dB. A crossfade's "0 dB / -16 dB" (early's
+-- first), "Equal", its ends ("Reflections", "Late Reverb"), or a % (0 all
+-- early, 100 all late). nil when it says none of those.
+function UN.balance_text(t)
+  local s = (t or ""):lower()
+  local a, b = s:match("(%-?[%d%.]+)%s*d?b?%s*/%s*(%-?[%d%.]+)")
+  if a and b and tonumber(a) and tonumber(b) then return math.max(-60, math.min(24, tonumber(a) - tonumber(b))) end
+  if s:find("equal", 1, true) then return 0 end
+  local v, un = UN.parse(t or "")
+  if v and un == "pct" then
+    local f = math.max(0.001, math.min(0.999, v / 100))
+    return math.max(-60, math.min(24, 20 * math.log((1 - f) / f, 10)))
+  end
+  if s:find("reflect", 1, true) or s:find("early", 1, true) then return 24 end
+  if s:find("late", 1, true) or s:find("reverb", 1, true) or s:find("tail", 1, true) then return -60 end
+  return nil
+end
+-- along its range, nothing read: 0 all early .. 1 all late
+function UN.balance_along(n)
+  local f = math.max(0.001, math.min(0.999, n))
+  return math.max(-60, math.min(24, 20 * math.log((1 - f) / f, 10)))
+end
+-- its balance along its range, read once: { {n, dB}, ... } (nil: none)
+function UN.balance_table(fm)
+  local t = {}
+  for i = 0, 40 do
+    local txt = fm(i / 40)
+    local db = txt and UN.balance_text(txt)
+    if db then t[#t + 1] = { i / 40, db } end
+  end
+  return (#t >= 2) and t or nil
+end
+function UN.balance_at(tab, n)
+  if n <= tab[1][1] then return tab[1][2] end
+  for i = 1, #tab - 1 do
+    local a, b = tab[i], tab[i + 1]
+    if n <= b[1] then return a[2] + (b[2] - a[2]) * (n - a[1]) / math.max(1e-9, b[1] - a[1]) end
+  end
+  return tab[#tab][2]
+end
+-- the position along it nearest a balance
+function UN.balance_norm(tab, db)
+  local best, bd = tab[1][1], math.huge
+  for i = 1, #tab - 1 do
+    local a, b = tab[i], tab[i + 1]
+    local lo, hi = math.min(a[2], b[2]), math.max(a[2], b[2])
+    if db >= lo and db <= hi and hi > lo then
+      return a[1] + (b[1] - a[1]) * (db - a[2]) / (b[2] - a[2])
+    end
+    for _, q in ipairs({ a, b }) do
+      local d = math.abs(q[2] - db)
+      if d < bd then best, bd = q[1], d end
+    end
   end
   return best
 end

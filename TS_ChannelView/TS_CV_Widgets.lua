@@ -347,6 +347,58 @@ local function drag_value(ctx, value)
 end
 W.drag_value = drag_value
 
+-- A drag's own running position, kept between frames for as long as the
+-- button is held. Each frame used to start again from the value read back
+-- from the plugin, so anything that lands the value on a grid -- a stepped
+-- knob's snapping, or a plugin that rounds its own stepped parameter --
+-- threw away every move smaller than half a step: a slow drag never got
+-- anywhere and a quick one leapt. Now the pointer's travel adds up, and
+-- only what's sent is snapped. `key` is the control's id (plus a part, for
+-- a control with two). W.drag_done forgets it when the button lets go.
+local drag_raw = {}
+function W.drag_from(ctx, key, value)
+  local raw = drag_raw[key]
+  if raw == nil then raw = value end
+  local nv = drag_value(ctx, raw)
+  drag_raw[key] = nv or raw
+  return nv
+end
+function W.drag_done(key) drag_raw[key] = nil end
+
+-- A stepped value's nearest position: the plugin's own choices when they're
+-- known (`snaps`, their places 0..1, any order), else the even grid of
+-- `st`, else the value as it is.
+local function snap_to(v, st, snaps)
+  if snaps and #snaps > 1 then
+    local best, bd = v, math.huge
+    for i = 1, #snaps do
+      local d = math.abs(snaps[i] - v)
+      if d < bd then best, bd = snaps[i], d end
+    end
+    return best
+  end
+  if st then return math.max(0, math.min(1, math.floor(v / st + 0.5) * st)) end
+  return v
+end
+W.snap_to = snap_to
+
+-- One notch of the wheel on a stepped value: the next position up or down.
+local function snap_bump(v, st, snaps, dir)
+  if snaps and #snaps > 1 then
+    local list = {}
+    for i = 1, #snaps do list[i] = snaps[i] end
+    table.sort(list)
+    local at, bd = 1, math.huge
+    for i = 1, #list do
+      local d = math.abs(list[i] - v)
+      if d < bd then at, bd = i, d end
+    end
+    return list[math.max(1, math.min(#list, at + dir))]
+  end
+  local k = math.floor(v / st + 0.5) + dir
+  return math.max(0, math.min(1, k * st))
+end
+
 -- A modulator's ring round a knob (TS_CV_Mod / TS_CV_ModRack): the arc
 -- the value can swing over, in the modulator's colour, and a dot where it
 -- is right now. `ring` = { col, lo, hi, live (0..1, or nil), hot }.
@@ -1005,7 +1057,7 @@ end
 -- label     : short name drawn above the knob
 -- value     : 0..1
 -- formatted : the plugin's own value string, drawn below
--- opts      : { bipolar, tooltip, dim, step_norm, style, cap, size, scale }
+-- opts      : { bipolar, tooltip, dim, step_norm, snaps, style, cap, size, scale }
 --             style/cap: the face (see W.knob_face); nil is the theme's arc
 --             size: "small" or "large" (C.SIZES), nil for the ordinary
 --             cell. A small knob is its name in small type over a small
@@ -1024,6 +1076,9 @@ end
 -- For a plugin with a handful of named choices (a slope, a mode) where a
 -- full combo list feels heavier than the panel needs. Falsy/nil (the
 -- default) behaves exactly as before -- a plain continuous knob.
+-- opts.snaps -- the plugin's own choices' places (0..1), when they're
+-- known: the knob lands only on those, which matters when a plugin reports
+-- a fine step but names only a few positions along it.
 function W.knob(ctx, id, label, value, formatted, opts)
   opts = opts or {}
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -1046,29 +1101,32 @@ function W.knob(ctx, id, label, value, formatted, opts)
   }
 
   local st = (opts.step_norm and opts.step_norm > 0) and opts.step_norm or nil
+  local snaps = (opts.snaps and #opts.snaps > 1) and opts.snaps or nil
+  local stepped = st or snaps
 
   local changed = false
   -- The cell accepts right-clicks so it can raise its context menu, which
   -- also makes IsItemActive true during a right-drag. Only a LEFT drag may
   -- move the value.
   if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
-    local nv = drag_value(ctx, value)
-    -- Same continuous drag as always, just snapped to the step grid before
-    -- it's compared against the current value -- so it only reports
-    -- "changed" once the drag has actually crossed into the next position,
-    -- the same way turning a hardware detented knob feels.
-    if nv and st then nv = math.max(0, math.min(1, math.floor(nv / st + 0.5) * st)) end
+    local nv = W.drag_from(ctx, id, value)
+    -- The drag's own running position (W.drag_from), snapped to the
+    -- nearest position before it's compared against the current value --
+    -- so it only reports "changed" once the drag has crossed into the next
+    -- position, the way a hardware detented knob feels.
+    if nv and stepped then nv = snap_to(nv, st, snaps) end
     if nv and nv ~= value then value, changed = nv, true end
     ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
-  elseif hovered then
+  else
+    W.drag_done(id)
+  end
+  if not (active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)) and hovered then
     local wheel = W.control_wheel(ctx)
     if wheel ~= 0 then
-      if st then
-        -- One position per notch, snapping to the grid first so repeated
-        -- notches can't drift off it -- same bump this file's W.combo
-        -- already does for its own wheel handling.
-        local k = math.floor(value / st + 0.5) + (wheel > 0 and 1 or -1)
-        value = math.max(0, math.min(1, k * st))
+      if stepped then
+        -- One position per notch, from the nearest position so repeated
+        -- notches can't drift off it.
+        value = snap_bump(value, st, snaps, wheel > 0 and 1 or -1)
       else
         local mods = ImGui.GetKeyMods(ctx)
         local step = C.WHEEL_STEP
@@ -1304,14 +1362,17 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
   if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     turning = dual_grab[id] or "outer"
     if turning == "inner" then
-      local nv = drag_value(ctx, v2)
+      local nv = W.drag_from(ctx, id .. ":in", v2)
       if nv and nv ~= v2 then v2, c2 = nv, true end
     else
-      local nv = drag_value(ctx, v1)
+      local nv = W.drag_from(ctx, id .. ":out", v1)
       if nv and nv ~= v1 then v1, c1 = nv, true end
     end
     ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS)
-  elseif hovered then
+  else
+    W.drag_done(id .. ":in"); W.drag_done(id .. ":out")
+  end
+  if not turning and hovered then
     local wheel = W.control_wheel(ctx)
     if wheel ~= 0 then
       local outer = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0

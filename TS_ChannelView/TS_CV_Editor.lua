@@ -39,6 +39,11 @@ local TYPES       = { "knob", "toggle", "combo", "stepped", "fader", "xy", "dual
 local TYPE_NAMES = { knob = "Knob", toggle = "Button", combo = "Dropdown", stepped = "Stepped knob",
                      fader = "Fader", xy = "XY pad", dual = "Concentric knob", blank = "Gap",
                      half_gap = "Half gap", divider = "Divider", page = "Page" }
+-- the virtual controls (TS_CV_Mappings Virt<n>): no parameter behind
+-- them, drawn as the type they're kept as
+local VIRT_KINDS = { "toggle", "combo", "knob" }
+local VIRT_NAMES = { toggle = "Virtual button", combo = "Virtual selector", knob = "Virtual knob" }
+local VIRT_DEFAULT = { toggle = "More", combo = "View", knob = "Amount" }
 local SIZES_COMBO = ""
 for _, k in ipairs(C.SIZE_LIST) do SIZES_COMBO = SIZES_COMBO .. C.SIZES[k].label .. "\0" end
 local TOGGLE_SIZES_COMBO = C.SIZES.small.label .. "\0" .. C.SIZES.medium.label .. "\0"
@@ -103,24 +108,6 @@ local function pick_custom(c, what)
   end
 end
 
-local function brush_box(ctx, c, kind, pl, id)
-  if not kind then return end
-  local on = M.part_brushed(kind, pl, c.brush)
-  local ch, v = ImGui.Checkbox(ctx, "Brushed##" .. id, on)
-  if ch then
-    if v == M.part_brushed(kind, pl, nil) then c.brush = nil else c.brush = v end
-  end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "A fine brushed grain across it.")
-  end
-  ImGui.SameLine(ctx)
-  local mch, mv = ImGui.Checkbox(ctx, "Metallic##" .. id, M.part_metal(kind, c.metal))
-  if mch then c.metal = mv or nil end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "A fine metallic flake across it, like metallic paint.")
-  end
-end
-
 function E.is_open() return st.open end
 function E.key() return st.key end
 
@@ -141,7 +128,7 @@ local function load_params(track, fx)
   return list
 end
 
-function E.open(track, fx, key, layout)
+function E.open(track, fx, key, layout, focus)
   -- a locked layout takes no edits (unlocked from the panel's padlock)
   if M.locked(layout) then return end
   st.open      = true
@@ -151,6 +138,8 @@ function E.open(track, fx, key, layout)
   st.scratch   = M.copy(layout or { controls = {}, aliases = {} })
   st.scratch.aliases = st.scratch.aliases or {}
   st.sel_asg   = math.min(1, #st.scratch.controls)
+  -- opened from a control's right-click: that control, scrolled to
+  if focus and st.scratch.controls[focus] then st.sel_asg, st.scroll_sel = focus, true end
   st.sel_avail = 0
   st.filter    = ""
   st.learn     = false
@@ -246,6 +235,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
         label = ("%2d  \u{2014} blank \u{2014}"):format(i)
       elseif c.type == "half_gap" then
         label = ("%2d  \u{2044} half gap"):format(i)
+      elseif M.is_virtual(c) then
+        label = ("%2d  \u{25C6} %-14s  %s"):format(i, U.truncate(M.vname_of(c), 14), VIRT_NAMES[c.type] or "Virtual")
       else
         local shown = c.label
         if c.live or st.scratch.live then shown = pname end
@@ -259,6 +250,7 @@ local function draw_assigned(ctx, track, list_w, list_h)
       if ImGui.Selectable(ctx, label .. "##asg" .. i, st.sel_asg == i) then
         st.sel_asg = i
       end
+      if st.scroll_sel and st.sel_asg == i then ImGui.SetScrollHereY(ctx, 0.5); st.scroll_sel = nil end
 
       -- Which row is the pointer over? Measured from each row's actual
       -- rectangle, so it doesn't depend on guessing a line height.
@@ -358,6 +350,19 @@ local function draw_assigned(ctx, track, list_w, list_h)
       "with a tab strip under the header to switch between them.\n" ..
       "Select it below to name the tab and pick its colour.")
   end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Virtual", 60) then
+    local at = (sel >= 1 and sel < n) and (sel + 1) or (n + 1)
+    table.insert(st.scratch.controls, at, E.new_virtual("toggle", st.scratch.controls))
+    st.sel_asg = at
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx,
+      "A control of the layout's own, with no parameter behind it: a\n" ..
+      "button, a selector or a knob (choose which under Type). Other\n" ..
+      "controls' Show when, and the plugin's layout switching, can\n" ..
+      "follow it. Each instance keeps its own setting.")
+  end
 end
 
 local function draw_available(ctx, track, list_w, list_h)
@@ -416,11 +421,272 @@ local function draw_available(ctx, track, list_w, list_h)
   end
 end
 
+-- ---------------------------------------------------------------------
+-- rules: a control's Show when, and the plugin's layout switching
+-- ---------------------------------------------------------------------
+-- A rule reads a source: one of the plugin's parameters, or a virtual
+-- control (TS_CV_Mappings Virt<n>) by its name.
+
+-- A parameter's choices when it has a few (a switch, a dropdown, a
+-- stepped knob), else nil: it's continuous, and takes a slider. Also the
+-- tolerance a rule on one of them wants. `controls`: the layout's, where
+-- one placed as a button counts as a switch.
+local function param_choices(tr, addr, p, controls, key)
+  local P = require("TS_CV_Panel")
+  local list = P.button_choices(tr, addr, p, key or st.key, nil)
+  if #list >= 2 and #list <= 64 then
+    local step = list[2].norm - list[1].norm
+    return list, math.max(0.0005, step * 0.5 - 0.0005)
+  end
+  -- a two-state switch: the plugin reports a step as big as the whole
+  -- range (or says it's a toggle), which reads as "no steps" above;
+  -- one placed on the panel as a button counts too
+  local ok, step, _, _, istog = reaper.TrackFX_GetParameterStepSizes(tr, addr, p)
+  local switch = ok and (istog or (step and step >= 1))
+  if not switch then
+    for _, o in ipairs(controls or {}) do
+      if o.param == p and o.type == "toggle" then switch = true break end
+    end
+  end
+  if not switch then return nil end
+  local function say(n, dflt)
+    if reaper.TrackFX_FormatParamValueNormalized then
+      local fok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, n, "")
+      if fok and U.trim(sv or "") ~= "" then return U.trim(sv) end
+    end
+    return dflt
+  end
+  local off, on = say(0, "Off"), say(1, "On")
+  if off == on then off, on = "Off", "On" end
+  return { { norm = 0, text = off }, { norm = 1, text = on } }, 0.499
+end
+
+-- A virtual control's choices, by the control: its button states or its
+-- selector's list (half a step's tolerance), nil for a knob.
+local function virt_choices(vc)
+  local names = vc and M.vchoices(vc)
+  if not names then return nil end
+  local list = {}
+  for i, t in ipairs(names) do list[i] = { norm = M.vnorm(vc, i), text = t } end
+  local n = #list
+  return list, (n >= 2) and math.max(0.0005, 0.5 / (n - 1) - 0.0005) or 0.499
+end
+
+-- The plugin's virtual controls, by name: those in `controls` (the
+-- layout being edited) first, then those in its other layouts. { name, c }
+local function virt_sources(controls, key)
+  local out, seen = {}, {}
+  local function add(list)
+    for _, c in ipairs(list or {}) do
+      if M.is_virtual(c) then
+        local nm = M.vname_of(c)
+        if not seen[nm] then seen[nm] = true; out[#out + 1] = { name = nm, c = c } end
+      end
+    end
+  end
+  add(controls)
+  local base = M.split_variant(key or st.key or "")
+  if base then
+    local l = M.get(base); add(l and l.controls)
+    for _, v in ipairs(M.variants(base)) do
+      local lv = M.get(M.variant_key(base, v)); add(lv and lv.controls)
+    end
+  end
+  return out
+end
+
+-- The list a source combo offers: virtual controls (◆) then parameters;
+-- each { label, param, vname }. `skip`: a virtual control not to offer
+-- (the one the rule is on).
+local function source_list(tr, addr, controls, skip, first)
+  local out = {}
+  if first then out[1] = { label = first } end
+  for _, vs in ipairs(virt_sources(controls)) do
+    if vs.c ~= skip then out[#out + 1] = { label = "\u{25C6} " .. vs.name, param = -1, vname = vs.name, vc = vs.c } end
+  end
+  local n = reaper.TrackFX_GetNumParams(tr, addr)
+  for p = 0, n - 1 do
+    local _, pn = reaper.TrackFX_GetParamName(tr, addr, p, "")
+    out[#out + 1] = { label = ("%d  %s"):format(p, (M.display_name(st.key, p, nil, pn, false):gsub("%z", ""))), param = p }
+  end
+  return out
+end
+local function source_index(list, r)
+  if not r then return 0 end
+  for i, e in ipairs(list) do
+    if (r.vname and e.vname == r.vname) or (not r.vname and e.param ~= nil and e.vname == nil and e.param == r.param) then
+      return i - 1
+    end
+  end
+  return 0
+end
+local function source_names(list)
+  local t = {}
+  for i, e in ipairs(list) do t[i] = (e.label or ""):gsub("%z", "") end
+  return table.concat(t, "\0") .. "\0"
+end
+-- a rule's source's choices and tolerance
+local function rule_choices(tr, addr, r, controls)
+  if r.vname then
+    local vc
+    for _, vs in ipairs(virt_sources(controls)) do if vs.name == r.vname then vc = vs.c end end
+    return virt_choices(vc)
+  end
+  return param_choices(tr, addr, r.param, controls)
+end
+-- The sources the panel's right-click offers under Show when: the
+-- layout's virtual controls with choices, then the parameters placed on
+-- it as a button, dropdown or stepped knob -- each with its choices
+-- ({ norm, text }) and tolerance. Anything else takes the editor.
+-- { label, param, vname, choices, tol }
+function E.show_sources(tr, addr, key, controls, skip)
+  local out, seen = {}, {}
+  for _, vs in ipairs(virt_sources(controls, key)) do
+    if vs.c ~= skip then
+      local list, tol = virt_choices(vs.c)
+      if list then out[#out + 1] = { label = "\u{25C6} " .. vs.name, param = -1, vname = vs.name, choices = list, tol = tol } end
+    end
+  end
+  for _, o in ipairs(controls or {}) do
+    local p = o.param
+    if o ~= skip and p and p >= 0 and not seen[p] and not M.is_virtual(o)
+       and (o.type == "toggle" or o.type == "combo" or o.type == "stepped") then
+      seen[p] = true
+      local list, tol = param_choices(tr, addr, p, controls, key)
+      if list and #list >= 2 and #list <= 24 then
+        local _, pn = reaper.TrackFX_GetParamName(tr, addr, p, "")
+        out[#out + 1] = { label = M.display_name(key, p, o.label, pn, false), param = p, choices = list, tol = tol }
+      end
+    end
+  end
+  return out
+end
+
+-- A rule as it starts on a source: a switch or dropdown at "is <its last
+-- choice>", a knob at "above halfway"
+local function rule_start(tr, addr, e, controls)
+  local r = { param = e.param, vname = e.vname }
+  local list, tol = rule_choices(tr, addr, r, controls)
+  if list then r.op, r.norm, r.tol = "is", list[#list].norm, tol
+  else r.op, r.norm, r.tol = "above", 0.5, 0.005 end
+  return r
+end
+
+local OP_LABEL = { is = "is", ["not"] = "is not", above = "is above", below = "is below", between = "is between" }
+-- The rule's operator and value(s): a dropdown of the source's choices,
+-- or a slider showing what it reads as there. `row(text)` starts a row
+-- for the "and" value of a between. Changes r.
+local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row)
+  r.op = M.show_op(r); r.inv = nil
+  local list, ctol = rule_choices(tr, addr, r, controls)
+  local function value_field(fid, norm, w)
+    ImGui.SetNextItemWidth(ctx, w)
+    if list then
+      local cur, best = 0, math.huge
+      for k, e in ipairs(list) do
+        local d = math.abs(e.norm - (norm or 0))
+        if d < best then best, cur = d, k - 1 end
+      end
+      local opts = {}
+      for k, e in ipairs(list) do opts[k] = (e.text or tostring(k)):gsub("%z", "") end
+      local ch, i = ImGui.Combo(ctx, fid, cur, table.concat(opts, "\0") .. "\0")
+      if ch then return list[i + 1].norm end
+      return nil
+    end
+    local txt = ""
+    if r.vname then txt = ("%d %%"):format(math.floor((norm or 0) * 100 + 0.5))
+    elseif reaper.TrackFX_FormatParamValueNormalized then
+      local ok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, r.param, norm or 0, "")
+      if ok then txt = U.trim(sv or "") end
+    end
+    if txt == "" then txt = ("%.0f%%"):format((norm or 0) * 100) end
+    local ch, v = ImGui.SliderDouble(ctx, fid, norm or 0, 0, 1, (txt:gsub("%%", "%%%%")))
+    if ch then return v end
+    return nil
+  end
+  local labels, cur_op = {}, 0
+  for i, k in ipairs(M.SHOW_OPS) do
+    labels[i] = OP_LABEL[k]
+    if k == r.op then cur_op = i - 1 end
+  end
+  ImGui.SetNextItemWidth(ctx, op_w)
+  local och, oi = ImGui.Combo(ctx, id .. "op", cur_op, table.concat(labels, "\0") .. "\0")
+  local changed = false
+  if och then
+    r.op = M.SHOW_OPS[oi + 1]; changed = true
+    if r.op == "between" and not r.norm2 then r.norm2 = list and list[#list].norm or 1 end
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "is / is not: that value (a knob within a hair of it).\n" ..
+      "is above / is below: past it, not including it.\n" ..
+      "is between: from one value to the other, both included.")
+  end
+  ImGui.SameLine(ctx, 0, 4)
+  local v = value_field(id .. "v", r.norm, val_w)
+  if v then r.norm = v; changed = true end
+  local tol = list and ctol or 0.005
+  if r.tol ~= tol then r.tol = tol end
+  if r.op == "between" then
+    row("and")
+    local v2 = value_field(id .. "v2", r.norm2, val_w)
+    if v2 then r.norm2 = v2; changed = true end
+  else
+    r.norm2 = nil
+  end
+  return changed
+end
+
 -- The selected control's settings, as a column: each on a row of its own,
 -- its name on the left, and only the rows that apply to its type.
 local COL_W   = 330          -- the column's width
 local KEY_W   = 86           -- the names' width
 local FIELD_W = COL_W - KEY_W - 8
+
+-- A number as typed; "20k" is 20000.
+function E.parse_num(t)
+  t = U.trim((t or ""):lower())
+  local n, k = t:match("^([%-%+]?%d*%.?%d+)%s*(k?)")
+  n = tonumber(n or "")
+  if not n then return nil end
+  return (k == "k") and n * 1000 or n
+end
+-- The parameter's own range in the layout being edited, made when it has
+-- none: from what the plugin reads at its ends when that's a number,
+-- else 0 to 100.
+-- (also the right-click's Values > Custom range, which starts the same way)
+function E.range_start(track, addr, p)
+  local lo, hi = 0, 100
+  local UN = require("TS_CV_Units")
+  if track and addr and reaper.TrackFX_FormatParamValueNormalized then
+    local _, a = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, 0, "")
+    local _, b = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, 1, "")
+    local va, vb = UN.parse(a or ""), UN.parse(b or "")
+    if va and vb and va ~= vb then lo, hi = va, vb end
+  end
+  return { lo = lo, hi = hi, unit = "", curve = "lin" }
+end
+function E.ensure_range(p)
+  st.scratch.ranges = st.scratch.ranges or {}
+  if st.scratch.ranges[p] then return st.scratch.ranges[p] end
+  st.scratch.ranges[p] = E.range_start(st.track, st.fx and st.fx.addr, p)
+  return st.scratch.ranges[p]
+end
+
+-- A new virtual control of a kind (TS_CV_Mappings Virt<n>), named so it
+-- doesn't clash with one already in `controls`.
+function E.new_virtual(kind, controls)
+  local base, nm, k = VIRT_DEFAULT[kind] or "View", nil, 1
+  repeat
+    nm = (k == 1) and base or (base .. " " .. k)
+    local taken = false
+    for _, o in ipairs(controls or {}) do if M.is_virtual(o) and M.vname_of(o) == nm then taken = true end end
+    k = k + 1
+  until not taken
+  local c = { param = -1, type = kind, bipolar = false, label = nm,
+              virtual = { start = 0, choices = (kind == "combo") and { "Main", "Second" } or {} } }
+  if kind == "combo" then c.buttons, c.nbtn = "across", 2 end
+  return c
+end
 
 local function draw_entry_editor(ctx)
   local c = st.scratch.controls[st.sel_asg]
@@ -445,15 +711,78 @@ local function draw_entry_editor(ctx)
     if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then ImGui.SetTooltip(ctx, text) end
   end
 
+  -- your own range for a parameter (Range<p>): low to high, its unit and
+  -- curve, and Clear; for a plugin that won't say what its values are
+  local function range_row(p)
+    local rg = st.scratch.ranges and st.scratch.ranges[p]
+    if not rg then return end
+    st.rng_buf = st.rng_buf or {}
+    local function num_field(id, v, w)
+      ImGui.SetNextItemWidth(ctx, w)
+      local bk = p .. id
+      local ch, t = ImGui.InputText(ctx, id, st.rng_buf[bk] or ("%g"):format(v))
+      if ch then
+        st.rng_buf[bk] = t
+        local n = E.parse_num(t)
+        if n then return n end
+      end
+      if ImGui.IsItemDeactivated(ctx) then st.rng_buf[bk] = nil end
+      return nil
+    end
+    row_name("Range")
+    local lo = num_field("##rglo", rg.lo, 62)
+    if lo then rg.lo = lo end
+    ImGui.SameLine(ctx, 0, 4); ImGui.Text(ctx, "to"); ImGui.SameLine(ctx, 0, 4)
+    local hi = num_field("##rghi", rg.hi, 62)
+    if hi then rg.hi = hi end
+    ImGui.SameLine(ctx, 0, 4)
+    local ucur = 0
+    for i, u_ in ipairs(U.RANGE_UNITS) do if u_ == (rg.unit or "") then ucur = i - 1 end end
+    local unames = {}
+    for i, u_ in ipairs(U.RANGE_UNITS) do unames[i] = (u_ == "") and "none" or u_ end
+    ImGui.SetNextItemWidth(ctx, 58)
+    local uch, ui = ImGui.Combo(ctx, "##rgunit", ucur, table.concat(unames, "\0") .. "\0")
+    if uch then rg.unit = U.RANGE_UNITS[ui + 1] end
+    row_name("")
+    local ccur = (rg.curve == "log") and 1 or (rg.curve == "sq") and 2 or 0
+    ImGui.SetNextItemWidth(ctx, 92)
+    local cch, ci = ImGui.Combo(ctx, "##rgcurve", ccur, "Linear\0Log\0Squared\0")
+    if cch then rg.curve = U.RANGE_CURVES[ci + 1] end
+    tip("How it runs between its ends: evenly (linear), by ratio (log:\n" ..
+      "frequencies, and most times), or slow then fast (squared). The\n" ..
+      "plugin's own curve may differ a little in the middle.")
+    ImGui.SameLine(ctx, 0, 4)
+    ImGui.TextDisabled(ctx, "now " .. U.range_text(rg, (st.track and st.fx)
+      and reaper.TrackFX_GetParamNormalized(st.track, st.fx.addr, p) or 0))
+    ImGui.SameLine(ctx, 0, 8)
+    if ImGui.Button(ctx, "Clear##rgclr") then st.scratch.ranges[p] = nil end
+    tip("Back to what the plugin says it reads.")
+  end
+  -- a control without a scale of numbers: the plugin's own values, or yours
+  local function values_row(p)
+    if not p or p < 0 then return end
+    row_name("Values")
+    local has = st.scratch.ranges and st.scratch.ranges[p]
+    ImGui.SetNextItemWidth(ctx, 100)
+    local vch, vi = ImGui.Combo(ctx, "##vals", has and 1 or 0, "Plugin's\0Custom\0")
+    if vch then
+      if vi == 1 then E.ensure_range(p) elseif st.scratch.ranges then st.scratch.ranges[p] = nil end
+    end
+    tip("Custom: your own range for it, for a plugin that won't say what\n" ..
+      "its values are -- it reads as that everywhere.")
+    range_row(p)
+  end
+
   local pname = ""
   for _, p in ipairs(st.params or {}) do
     if p.index == c.param then pname = p.name break end
   end
   local is_param = c.type ~= "blank" and c.type ~= "divider" and c.type ~= "half_gap" and c.type ~= "page"
   local two = c.type == "xy" or c.type == "dual"
+  local virt = M.is_virtual(c)
 
   -- what it controls
-  if is_param then
+  if is_param and not virt then
     row_name((c.type == "xy") and "X parameter" or (c.type == "dual") and "Ring" or "Parameter")
     ImGui.Text(ctx, ("%s  %s"):format(tostring(c.param), pname))
   end
@@ -477,12 +806,35 @@ local function draw_entry_editor(ctx)
   row_name("Type")
   local cur = 0
   for i, t in ipairs(TYPES) do if t == c.type then cur = i - 1 break end end
+  if virt then
+    for i, t in ipairs(VIRT_KINDS) do if t == c.type then cur = #TYPES + i - 1 end end
+  end
   local tnames = {}
   for i, t in ipairs(TYPES) do tnames[i] = TYPE_NAMES[t] or t end
+  for _, t in ipairs(VIRT_KINDS) do tnames[#tnames + 1] = VIRT_NAMES[t] end
   ImGui.SetNextItemWidth(ctx, FIELD_W)
   local tch, ti = ImGui.Combo(ctx, "##type", cur, table.concat(tnames, "\0") .. "\0")
-  if tch then
+  if tch and ti >= #TYPES then
+    -- a virtual one: its name and settings kept where they can be
+    local kind = VIRT_KINDS[ti - #TYPES + 1]
+    local nv = E.new_virtual(kind, st.scratch.controls)
+    if virt then
+      nv.label = c.label
+      if kind == "combo" and c.type == "combo" then nv.virtual.choices = c.virtual.choices end
+    end
+    local keep = { show = c.show, back = c.back, brush = c.brush, metal = c.metal }
+    for k in pairs(c) do c[k] = nil end
+    for k, v in pairs(nv) do c[k] = v end
+    for k, v in pairs(keep) do c[k] = v end
+    virt, is_param, two = true, true, false
+  elseif tch then
     local was = c.type
+    if virt then
+      -- a parameter's control again: the parameter chosen on the right
+      c.virtual, c.buttons, c.nbtn = nil, nil, nil
+      c.param = (st.sel_avail and st.sel_avail >= 0) and st.sel_avail or 0
+      virt = false
+    end
     c.type = TYPES[ti + 1] or "knob"
     -- sizes don't carry between an XY pad and anything else; a concentric
     -- knob is never small; a second parameter starts as the next one along
@@ -497,8 +849,88 @@ local function draw_entry_editor(ctx)
 
   -- its names. A live name overrides both; they stay as they are, just
   -- greyed, so turning live off again brings them back.
-  local live = is_param and (c.live or st.scratch.live) or false
-  if is_param then
+  local live = is_param and not virt and (c.live or st.scratch.live) or false
+  if virt then
+    -- its name (what rules find it by), its settings, where it starts
+    row_name("Name")
+    ImGui.SetNextItemWidth(ctx, FIELD_W)
+    local nch, nv = ImGui.InputText(ctx, "##vname", c.label or "")
+    if nch then c.label = nv end
+    local nm = M.vname_of(c)
+    local twice = 0
+    for _, o in ipairs(st.scratch.controls) do if M.is_virtual(o) and M.vname_of(o) == nm then twice = twice + 1 end end
+    tip("Rules (Show when, layout switching) find it by this name, and\n" ..
+      "another layout of this plugin with one of the same name shares\n" ..
+      "its setting." .. (twice > 1 and "\n\nTwo here have this name: give each its own." or ""))
+    if twice > 1 then ImGui.SameLine(ctx); ImGui.TextColored(ctx, C.COL.warn, "!") end
+    if c.type == "toggle" then
+      row_name("States")
+      local ch1, ch2 = c.virtual.choices[1] or "", c.virtual.choices[2] or ""
+      ImGui.SetNextItemWidth(ctx, (FIELD_W - 4) * 0.5)
+      local a1, v1 = ImGui.InputTextWithHint(ctx, "##vs1", "Off", ch1)
+      ImGui.SameLine(ctx, 0, 4)
+      ImGui.SetNextItemWidth(ctx, (FIELD_W - 4) * 0.5)
+      local a2, v2 = ImGui.InputTextWithHint(ctx, "##vs2", "On", ch2)
+      if a1 or a2 then
+        v1, v2 = U.trim(a1 and v1 or ch1), U.trim(a2 and v2 or ch2)
+        c.virtual.choices = (v1 ~= "" or v2 ~= "") and { v1 ~= "" and v1 or "Off", v2 ~= "" and v2 or "On" } or {}
+      end
+      tip("What its two states are called (Basic / Advanced, say).")
+    elseif c.type == "combo" then
+      row_name("Choices")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      st.vchoice_text = st.vchoice_text or {}
+      local key = tostring(c)
+      local now = st.vchoice_text[key] or table.concat(c.virtual.choices or {}, " | ")
+      local cch, cv = ImGui.InputTextWithHint(ctx, "##vchoices", "Main | Sidechain | Advanced", now)
+      if cch then
+        st.vchoice_text[key] = cv
+        local list = {}
+        for part in (cv .. "|"):gmatch("([^|]*)|") do
+          part = U.trim(part:gsub("[;\r\n]", " "))
+          if part ~= "" then list[#list + 1] = part end
+        end
+        if #list >= 1 then c.virtual.choices = list end
+        if c.buttons then c.nbtn = math.max(2, #M.vchoices(c)) end
+      end
+      if ImGui.IsItemDeactivated(ctx) then st.vchoice_text[key] = nil end
+      tip("Its choices, with | between them.")
+      row_name("Shown as")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local cur_b = (c.buttons == "across") and 0 or (c.buttons == "down") and 1 or 2
+      local bch, bi = ImGui.Combo(ctx, "##vshow", cur_b, "Chips across\0Chips down\0Dropdown\0")
+      if bch then
+        c.buttons = (bi == 0) and "across" or (bi == 1) and "down" or nil
+        c.nbtn = c.buttons and math.max(2, #M.vchoices(c)) or nil
+      end
+    elseif c.type == "knob" then
+      row_name("Size")
+      local now = 1
+      for i, k in ipairs(C.SIZE_LIST) do if k == (c.size or "medium") then now = i - 1 end end
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local sch, si = ImGui.Combo(ctx, "##vsize", now, SIZES_COMBO)
+      if sch then
+        local k = C.SIZE_LIST[si + 1]
+        c.size = (k ~= "medium") and k or nil
+      end
+    end
+    row_name("Starts at")
+    ImGui.SetNextItemWidth(ctx, FIELD_W)
+    local names = M.vchoices(c)
+    if names then
+      local opts = {}
+      for i, t in ipairs(names) do opts[i] = t:gsub("%z", "") end
+      local sch, si = ImGui.Combo(ctx, "##vstart", M.vindex(c, c.virtual.start) - 1, table.concat(opts, "\0") .. "\0")
+      if sch then c.virtual.start = M.vnorm(c, si + 1) end
+    else
+      local sch, sv = ImGui.SliderDouble(ctx, "##vstart", c.virtual.start or 0, 0, 1,
+        ("%d %%%%"):format(math.floor((c.virtual.start or 0) * 100 + 0.5)))
+      if sch then c.virtual.start = sv end
+    end
+    tip("Where it is on an instance that's never been set (and where a\n" ..
+      "double-click puts it back).")
+  end
+  if is_param and not virt then
     if live then ImGui.BeginDisabled(ctx, true) end
     row_name("Alias")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
@@ -521,7 +953,14 @@ local function draw_entry_editor(ctx)
   end
 
   -- its size and shape
-  if c.type == "knob" or c.type == "stepped" then
+  if virt then
+    if c.type == "toggle" then
+      row_name("Size")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local sch, si = ImGui.Combo(ctx, "##tsize", (c.size == "small") and 0 or 1, TOGGLE_SIZES_COMBO)
+      if sch then c.size = (si == 0) and "small" or nil end
+    end
+  elseif c.type == "knob" or c.type == "stepped" then
     row_name("Size")
     local now = 1
     for i, k in ipairs(C.SIZE_LIST) do if k == (c.size or "medium") then now = i - 1 end end
@@ -534,24 +973,22 @@ local function draw_entry_editor(ctx)
     tip("Small: half height, a small dial under its name in small type --\n" ..
       "its value moves to the tooltip, and two stack in one ordinary cell.\n" ..
       "Large: half again as big, name and value kept.")
-    -- numbers round the dial (Scale<n>); values unless it says otherwise
+    -- numbers round the dial (Scale<n>; values unless it says otherwise),
+    -- then what the values read as (Range<p>) -- the right-click's Values.
+    -- Their colour is a look: right-click > Style.
     row_name("Scale")
     local kind = M.scale_kind(c)
-    local snow = (kind == "values") and 1 or (kind == "ten") and 2 or 0
     ImGui.SetNextItemWidth(ctx, 100)
-    local scch, sci = ImGui.Combo(ctx, "##scale", snow, "None\0Values\0" .. "0\u{2013}10\0")
+    local scch, sci = ImGui.Combo(ctx, "##scale", (kind == "values") and 1 or (kind == "ten") and 2 or 0,
+      "None\0Values\0" .. "0\u{2013}10\0")
     if scch then
       c.scale = (sci == 0) and "none" or (sci == 2) and "ten" or nil
       if c.scale == "none" then c.scale_ink = nil end
     end
-    tip("Numbers round the dial: the plugin's own values (units left\n" ..
-      "off, thousands as k), or 0 to 10. A medium knob with numbers\n" ..
-      "shows its value in the tooltip; a small one has no room for them.")
-    if M.scale_kind(c) then
-      ImGui.SameLine(ctx)
-      local ich, iv = ImGui.Checkbox(ctx, "in cap colour", c.scale_ink == "cap")
-      if ich then c.scale_ink = iv and "cap" or nil end
-    end
+    tip("Numbers round the dial: the values it reads as (units left off,\n" ..
+      "thousands as k), or 0 to 10. A medium knob with numbers shows its\n" ..
+      "value in the tooltip; a small one has no room for them.")
+    values_row(c.param)
   elseif c.type == "toggle" then
     row_name("Size")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
@@ -583,6 +1020,7 @@ local function draw_entry_editor(ctx)
     tip(ok and "Show the choices as a row, or a column, of buttons, the current one lit."
       or ("Buttons are only for a parameter with 2 to %d choices."):format(C.BUTTONS_MAX))
   elseif c.type == "fader" then
+    values_row(c.param)
     -- a fader's shape (Shape<n>): which way, how long, how thick
     row_name("Direction")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
@@ -609,6 +1047,7 @@ local function draw_entry_editor(ctx)
     if sch then c.size = (si > 0) and list[si + 1] or nil end
     tip("Columns \u{00d7} rows.")
   elseif c.type == "dual" then
+    values_row(c.param)
     row_name("Size")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local sch, si = ImGui.Combo(ctx, "##dsize", (c.size == "large") and 1 or 0, "Medium\0Large\0")
@@ -667,9 +1106,7 @@ local function draw_entry_editor(ctx)
     end
     tip("An inset, or a faceplate of their own, behind the\n" ..
       "controls after this divider, up to the next one.")
-    local spl = (c.style == "plate") and C.plate_of(c.cap) or nil
-    local skind = (c.style == "inset" and "inset") or (spl and "plate") or nil
-    if skind then row_name("Finish"); brush_box(ctx, c, skind, spl, "sec_brush") end
+    -- (its finish, brushed or metallic, is a look: right-click > Section)
   elseif c.type ~= "page" then
     -- its own background (an inset or a faceplate), joined with neighbours'
     -- (a page break draws nothing of its own, so it has none)
@@ -693,130 +1130,35 @@ local function draw_entry_editor(ctx)
     end
     tip("This control's own background. Neighbours with the same one\n" ..
       "join into one shape, across a divider too.")
-    local bpl = (c.back and c.back ~= "inset") and C.plate_of(c.back) or nil
-    local bkind = (c.back == "inset" and "inset") or (bpl and "plate") or nil
-    if bkind then row_name("Finish"); brush_box(ctx, c, bkind, bpl, "back_brush") end
+    -- (its finish is a look: right-click > Background)
   end
 
-  -- shown only while another parameter reads a given way (Show<n>)
+  -- shown only while a parameter, or one of the layout's virtual
+  -- controls, reads a given way (Show<n>)
   if c.type ~= "page" and st.track and st.fx then
-    local P = require("TS_CV_Panel")
     local tr, addr = st.track, st.fx.addr
-    local n = reaper.TrackFX_GetNumParams(tr, addr)
-    local names = { "Always" }
-    for p = 0, n - 1 do
-      local _, pn = reaper.TrackFX_GetParamName(tr, addr, p, "")
-      names[#names + 1] = ("%d  %s"):format(p, (M.display_name(st.key, p, nil, pn, false):gsub("%z", "")))
-    end
-    -- a parameter's choices when it has a few (a switch, a dropdown, a
-    -- stepped knob), else nil: it's continuous, and takes a slider
-    local function choices_of(p)
-      local list = P.button_choices(tr, addr, p, st.key, nil)
-      if #list >= 2 and #list <= 64 then
-        local step = list[2].norm - list[1].norm
-        return list, math.max(0.0005, step * 0.5 - 0.0005)
-      end
-      -- a two-state switch: the plugin reports a step as big as the whole
-      -- range (or says it's a toggle), which reads as "no steps" above;
-      -- one placed on the panel as a button counts too
-      local ok, step, _, _, istog = reaper.TrackFX_GetParameterStepSizes(tr, addr, p)
-      local switch = ok and (istog or (step and step >= 1))
-      if not switch then
-        for _, o in ipairs(st.scratch.controls) do
-          if o.param == p and o.type == "toggle" then switch = true break end
-        end
-      end
-      if not switch then return nil end
-      local function say(n, dflt)
-        if reaper.TrackFX_FormatParamValueNormalized then
-          local fok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, n, "")
-          if fok and U.trim(sv or "") ~= "" then return U.trim(sv) end
-        end
-        return dflt
-      end
-      local off, on = say(0, "Off"), say(1, "On")
-      if off == on then off, on = "Off", "On" end
-      return { { norm = 0, text = off }, { norm = 1, text = on } }, 0.499
-    end
+    local list = source_list(tr, addr, st.scratch.controls, c, "Always")
     row_name("Show when")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
-    local cur_p = c.show and (c.show.param + 1) or 0
-    local sch, si = ImGui.Combo(ctx, "##showp", cur_p, table.concat(names, "\0") .. "\0")
+    local sch, si = ImGui.Combo(ctx, "##showp", source_index(list, c.show), source_names(list))
     if sch then
-      if si == 0 then c.show = nil
-      else
-        -- a switch or dropdown starts at "is <its last choice>", a knob
-        -- at "above halfway"
-        local list, tol = choices_of(si - 1)
-        if list then c.show = { param = si - 1, op = "is", norm = list[#list].norm, tol = tol }
-        else c.show = { param = si - 1, op = "above", norm = 0.5, tol = 0.005 } end
-      end
+      local e = list[si + 1]
+      if not e or (e.param == nil and e.vname == nil) then c.show = nil
+      else c.show = rule_start(tr, addr, e, st.scratch.controls) end
     end
-    tip("Show this control only while the chosen parameter reads a given\n" ..
-      "way -- a delay's \"ms\" knob while sync is off, say. A hidden control\n" ..
+    tip("Show this control only while the chosen parameter (or one of\n" ..
+      "the layout's virtual controls, \u{25C6}) reads a given way -- a\n" ..
+      "delay's \"ms\" knob while sync is off, say. A hidden control\n" ..
       "takes no cell, so two with opposite rules swap in one place.")
     if c.show then
-      local r = c.show
-      r.op = M.show_op(r); r.inv = nil
-      local list, ctol = choices_of(r.param)
-      -- one value: a dropdown of the choices, or a slider showing the
-      -- plugin's own reading of where it is
-      local function value_field(id, norm, w)
-        ImGui.SetNextItemWidth(ctx, w)
-        if list then
-          local cur, best = 0, math.huge
-          for k, e in ipairs(list) do
-            local d = math.abs(e.norm - (norm or 0))
-            if d < best then best, cur = d, k - 1 end
-          end
-          local opts = {}
-          for k, e in ipairs(list) do opts[k] = (e.text or tostring(k)):gsub("%z", "") end
-          local ch, i = ImGui.Combo(ctx, id, cur, table.concat(opts, "\0") .. "\0")
-          if ch then return list[i + 1].norm end
-          return nil
-        end
-        local txt = ""
-        if reaper.TrackFX_FormatParamValueNormalized then
-          local ok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, r.param, norm or 0, "")
-          if ok then txt = U.trim(sv or "") end
-        end
-        if txt == "" then txt = ("%.0f%%"):format((norm or 0) * 100) end
-        local ch, v = ImGui.SliderDouble(ctx, id, norm or 0, 0, 1, (txt:gsub("%%", "%%%%")))
-        if ch then return v end
-        return nil
-      end
-      local OP_LABEL = { is = "is", ["not"] = "is not", above = "is above", below = "is below", between = "is between" }
-      local labels, cur_op = {}, 0
-      for i, k in ipairs(M.SHOW_OPS) do
-        labels[i] = OP_LABEL[k]
-        if k == r.op then cur_op = i - 1 end
-      end
       row_name("")
-      ImGui.SetNextItemWidth(ctx, 92)
-      local och, oi = ImGui.Combo(ctx, "##showop", cur_op, table.concat(labels, "\0") .. "\0")
-      if och then
-        r.op = M.SHOW_OPS[oi + 1]
-        if r.op == "between" and not r.norm2 then r.norm2 = list and list[#list].norm or 1 end
-      end
-      tip("is / is not: that value (a knob within a hair of it).\n" ..
-        "is above / is below: past it, not including it.\n" ..
-        "is between: from one value to the other, both included.")
-      ImGui.SameLine(ctx, 0, 4)
-      local v = value_field("##showv", r.norm, FIELD_W - 96)
-      if v then r.norm = v end
-      r.tol = list and ctol or 0.005
-      if r.op == "between" then
-        row_name("and")
-        local v2 = value_field("##showv2", r.norm2, FIELD_W)
-        if v2 then r.norm2 = v2 end
-      else
-        r.norm2 = nil
-      end
+      rule_value_ui(ctx, "##show", tr, addr, c.show, st.scratch.controls, 92, FIELD_W - 96,
+        function(t) row_name(t) end)
     end
   end
 
   -- the ticks
-  if is_param then
+  if is_param and not virt then
     row_name("Options")
     local any = false
     local function gap() if any then ImGui.SameLine(ctx, 0, 12) end any = true end
@@ -861,6 +1203,34 @@ local function draw_entry_editor(ctx)
       "Show whatever the plugin calls this parameter right now, instead\n" ..
       "of the label or alias -- for plugins that rename their parameters\n" ..
       "as you use them. Currently: " .. (pname ~= "" and pname or "?"))
+  end
+
+  -- a button's own words for its two states, for this plugin everywhere
+  -- (States<p>), as the right-click's Name > State names
+  if is_param and not virt and c.type == "toggle" then
+    st.scratch.states = st.scratch.states or {}
+    local sn = st.scratch.states[c.param] or { "", "" }
+    local function hint(v)
+      if st.track and st.fx and reaper.TrackFX_FormatParamValueNormalized then
+        local ok, t = reaper.TrackFX_FormatParamValueNormalized(st.track, st.fx.addr, c.param, v, "")
+        if ok and t and t ~= "" then return t end
+      end
+      return v < 0.5 and "off" or "on"
+    end
+    row_name("State names")
+    ImGui.SetNextItemWidth(ctx, 96)
+    local c1, v1 = ImGui.InputTextWithHint(ctx, "##snoff", hint(0), sn[1] or "")
+    ImGui.SameLine(ctx, 0, 6)
+    ImGui.SetNextItemWidth(ctx, 96)
+    local c2, v2 = ImGui.InputTextWithHint(ctx, "##snon", hint(1), sn[2] or "")
+    if c1 or c2 then
+      local off, on = U.trim(c1 and v1 or sn[1] or ""), U.trim(c2 and v2 or sn[2] or "")
+      -- (kept untrimmed while typing, so a space can go between words)
+      local raw = { c1 and v1 or sn[1] or "", c2 and v2 or sn[2] or "" }
+      st.scratch.states[c.param] = (off ~= "" or on ~= "") and raw or nil
+    end
+    tip("Off, then on. Leave one empty to keep the plugin's own text;\n" ..
+      "clear both to go back to it entirely. For this plugin everywhere.")
   end
 end
 
@@ -981,6 +1351,78 @@ local function draw_layout_row(ctx, track)
   if not ok then ImGui.EndDisabled(ctx) end
 end
 
+-- The plugin's layout switching (TS_CV_Mappings Switch<n>): an ordered
+-- list of "use <layout> when <source> <op> <value>", the first that
+-- matches winning. The plugin's, not this layout's -- the same whichever
+-- layout is being edited -- so it's saved as it's changed, apart from
+-- the layout's own Save.
+local function draw_switch_rules(ctx, track)
+  if RQ.is_eq(st.key) or RC.is_comp(st.key) or not (track and st.fx) then return end
+  local base = M.split_variant(st.key)
+  local rules = M.copy_rules(M.switch_rules(base)) or {}
+  local label = (st.rules_open and "\u{25BE}" or "\u{25B8}") .. "  Switch layouts automatically"
+    .. ((#rules > 0) and ("  (%d)"):format(#rules) or "")
+  if ImGui.Button(ctx, label .. "##swr") then st.rules_open = not st.rules_open end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Put up another of this plugin's layouts while one of its\n" ..
+      "parameters, or a virtual control, reads a given way: a delay's\n" ..
+      "stereo layout while its mode is Dual, say. The first rule that\n" ..
+      "matches wins; with none, an instance shows the layout it's set to.")
+  end
+  if not st.rules_open then return end
+  local addr = st.fx.addr
+  local changed, drop = false, nil
+  -- the layouts a rule can put up
+  local names = { "Standard" }
+  local lays = { false }
+  for _, nm in ipairs(M.variants(base)) do names[#names + 1] = nm; lays[#lays + 1] = nm end
+  local lay_combo = table.concat(names, "\0") .. "\0"
+  local srcs = source_list(track, addr, st.scratch.controls, nil, nil)
+  local src_combo = source_names(srcs)
+  local active = St.switch_rule(st.fx.guid)
+  for i, r in ipairs(rules) do
+    ImGui.PushID(ctx, "swr" .. i)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.TextColored(ctx, (active == i) and C.COL.accent or C.COL.header_dim, tostring(i))
+    if active == i and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "In charge on this instance now.") end
+    ImGui.SameLine(ctx); ImGui.Text(ctx, "Use"); ImGui.SameLine(ctx)
+    local cur = 0
+    for k, nm in ipairs(lays) do if (nm or nil) == r.layout then cur = k - 1 end end
+    ImGui.SetNextItemWidth(ctx, 130)
+    local lch, li = ImGui.Combo(ctx, "##lay", cur, lay_combo)
+    if lch then r.layout = lays[li + 1] or nil; changed = true end
+    ImGui.SameLine(ctx); ImGui.Text(ctx, "when"); ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 150)
+    local sch, si = ImGui.Combo(ctx, "##src", source_index(srcs, r), src_combo)
+    if sch and srcs[si + 1] then
+      local nr = rule_start(track, addr, srcs[si + 1], st.scratch.controls)
+      nr.layout = r.layout
+      rules[i] = nr; r = nr; changed = true
+    end
+    ImGui.SameLine(ctx)
+    if rule_value_ui(ctx, "##rv", track, addr, r, st.scratch.controls, 84, 110,
+        function(t) ImGui.SameLine(ctx); ImGui.Text(ctx, t); ImGui.SameLine(ctx) end) then changed = true end
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "\u{2715}") then drop = i end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Take this rule away") end
+    ImGui.PopID(ctx)
+  end
+  if drop then table.remove(rules, drop); changed = true end
+  if ImGui.Button(ctx, "+ Add a rule") and #srcs > 0 then
+    local r = rule_start(track, addr, srcs[1], st.scratch.controls)
+    r.layout = lays[2] or nil
+    rules[#rules + 1] = r
+    changed = true
+  end
+  ImGui.SameLine(ctx)
+  ImGui.TextDisabled(ctx, "Otherwise: the layout the instance is set to.")
+  if changed then
+    M.set_switch_rules(base, rules, function()
+      return M.copy(M.get_or_default(base, track, addr, st.fx.guid))
+    end)
+  end
+end
+
 -- Where the plugin being edited is now: its track still there, and the
 -- plugin found by its GUID (it may have moved in the chain). Updates
 -- st.fx.addr; false when either has gone.
@@ -1050,7 +1492,8 @@ function E.draw(ctx, _selected)
     -- an EQ or Compressor layout's canvas: its own setup page
     if st.scratch and st.scratch.canvas then
       ImGui.SameLine(ctx, 0, 16)
-      local kind = st.scratch.canvas.kind == "eq" and "EQ" or "compressor"
+      local kind = st.scratch.canvas.kind == "eq" and "EQ"
+                   or ((M.CANVAS_NAMES[st.scratch.canvas.kind] or "compressor"):lower())
       if ImGui.Button(ctx, "Set up the " .. kind .. " canvas\u{2026}") then
         local go = true
         if edited() then
@@ -1076,6 +1519,7 @@ function E.draw(ctx, _selected)
           (kind == "EQ" and ", and learning its bands." or "."))
       end
     end
+    draw_switch_rules(ctx, track)
 
     -- Panel-level, so it sits above the lists rather than inside them: a
     -- plugin has one gain reduction, not one per parameter. The three

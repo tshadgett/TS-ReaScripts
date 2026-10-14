@@ -658,6 +658,157 @@ function ME.set_gain(track, addr, b, db)
   end
 end
 
+-- ---------------------------------------------------------------------
+-- a dynamic EQ band's dynamics (TS_CV_Mappings Dyn<k>)
+-- ---------------------------------------------------------------------
+-- What doesn't read in its unit runs along its range: a threshold over
+-- -60..0 dB, a range over +/- ME.DYN_SPAN dB (reversed: the other way).
+ME.DYN_SPAN = 18
+
+local function ptext(track, addr, p)
+  local _, t = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+  return ((t or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- The band's dynamics as they read: { thr (dB), thr_along, thr_text,
+-- range (dB, signed: below 0 a cut), range_along, range_text, ratio_text,
+-- atk_text, rel_text, on }; nil when it isn't dynamic.
+function ME.read_dyn(track, addr, b)
+  local d = b.dyn
+  if not d then return nil end
+  local rev = d.rev or {}
+  local out = { on = true }
+  if d.thr then
+    local n, t = norm(track, addr, d.thr), ptext(track, addr, d.thr)
+    local v, u = UN.parse(t)
+    out.thr_text = t
+    if u == "db" and v then out.thr = (v == -math.huge) and -100 or v
+    else out.thr, out.thr_along = -60 + 60 * (rev.thr and (1 - n) or n), true end
+  end
+  if d.range then
+    local n, t = norm(track, addr, d.range), ptext(track, addr, d.range)
+    local v, u = UN.parse(t)
+    out.range_text = t
+    if u == "db" and v and v > -200 and v < 200 then out.range = rev.range and -v or v
+    else
+      out.range = (n * 2 - 1) * ME.DYN_SPAN
+      if rev.range then out.range = -out.range end
+      out.range_along = true
+    end
+  end
+  if d.ratio then out.ratio_text = ptext(track, addr, d.ratio) end
+  if d.atk then out.atk_text = ptext(track, addr, d.atk) end
+  if d.rel then out.rel_text = ptext(track, addr, d.rel) end
+  if d.on then out.on = ME.switch_on(track, addr, d.on) end
+  return out
+end
+
+local function set_n(track, addr, p, v)
+  if v and math.abs(v - norm(track, addr, p)) > 1e-6 then
+    reaper.TrackFX_SetParamNormalized(track, addr, p, math.max(0, math.min(1, v)))
+  end
+end
+
+-- Sets the band's range to `db` (signed: below 0 a cut).
+function ME.set_range(track, addr, b, db)
+  local d = b.dyn
+  if not (d and d.range) then return end
+  local rev = d.rev or {}
+  local fmt = UN.formatter(track, addr, d.range)
+  local _, u = UN.at(fmt, 0.5)
+  if u == "db" then
+    set_n(track, addr, d.range, UN.find_norm(fmt, rev.range and -db or db))
+  else
+    local n = (db / ME.DYN_SPAN + 1) * 0.5
+    set_n(track, addr, d.range, rev.range and (1 - n) or n)
+  end
+end
+
+-- Sets the band's threshold to `db`.
+function ME.set_thr(track, addr, b, db)
+  local d = b.dyn
+  if not (d and d.thr) then return end
+  local rev = d.rev or {}
+  local fmt = UN.formatter(track, addr, d.thr)
+  local _, u = UN.at(fmt, 0.5)
+  if u == "db" then
+    set_n(track, addr, d.thr, UN.find_norm(fmt, db))
+  else
+    local n = (db + 60) / 60
+    set_n(track, addr, d.thr, rev.thr and (1 - n) or n)
+  end
+end
+
+-- The threshold's ends, dB, for its slider: the control's own when it
+-- reads in dB, else -60..0.
+function ME.thr_span(track, addr, b)
+  local d = b.dyn
+  if d and d.thr then
+    local fmt = UN.formatter(track, addr, d.thr)
+    local a, ua = UN.at(fmt, 0)
+    local c, uc = UN.at(fmt, 1)
+    if ua == "db" and uc == "db" and a and c and a > -200 and c > -200 and a < 200 and c < 200 and a ~= c then
+      return math.min(a, c), math.max(a, c)
+    end
+  end
+  return -60, 0
+end
+
+-- Where on the spectrum a band is heard most, for reading what it's doing:
+-- a bell at its frequency, a shelf an octave into its plateau.
+function ME.dyn_focus(rb)
+  if rb.type == "ls" then return rb.f * 0.5 end
+  if rb.type == "hs" then return rb.f * 2 end
+  return rb.f
+end
+
+-- The frequencies a band covers, Hz, for summing its level going in: a
+-- bell its bandwidth, a shelf its plateau.
+function ME.dyn_span(rb)
+  local q = math.max(0.1, rb.q or 0.7071)
+  if rb.type == "ls" then return 20, rb.f * 1.2 end
+  if rb.type == "hs" then return rb.f / 1.2, 20000 end
+  local bw = 2 * math.log(1 / (2 * q) + math.sqrt(1 / (4 * q * q) + 1)) / math.log(2)
+  local h = 2 ^ (math.max(1 / 3, bw) / 2)
+  return rb.f / h, rb.f * h
+end
+
+-- What the probe measures the plugin doing at `f` Hz, dB (below 0 cut),
+-- from a third-octave frame (TS_CV_CompPanel CP.fine_frame: g = reduction,
+-- positive), between the bands' centres; 0 where there's no signal.
+function ME.dev_at(fr, f)
+  if not fr or fr.n < 1 or f <= 0 then return 0 end
+  local x = 17 + 3 * math.log(f / 1000) / math.log(2)
+  x = math.max(1, math.min(fr.n, x))
+  local a = math.floor(x)
+  local b = math.min(fr.n, a + 1)
+  local t = x - a
+  local ga, gb = fr.g[a], fr.g[b]
+  if ga == nil and gb == nil then return 0 end
+  ga, gb = ga or gb, gb or ga
+  return -(ga + (gb - ga) * t)
+end
+
+-- The level going in between lo and hi Hz, dBFS: the third-octaves whose
+-- centres fall there, summed (the nearest one when none do); nil without.
+function ME.level_in(fr, lo, hi)
+  if not fr or not fr.lv then return nil end
+  local p, any = 0, false
+  for k = 1, fr.n do
+    local f, l = fr.f[k], fr.lv[k]
+    if f >= lo and f <= hi and l and l > -140 then p = p + 10 ^ (l / 10); any = true end
+  end
+  if not any then
+    local mid, best, bd = math.sqrt(lo * hi), nil, math.huge
+    for k = 1, fr.n do
+      local dd = math.abs(math.log(fr.f[k] / mid))
+      if fr.lv[k] and fr.lv[k] > -140 and dd < bd then best, bd = fr.lv[k], dd end
+    end
+    return best
+  end
+  return 10 * math.log(p) / LOG10
+end
+
 -- Takes a band out of the sound (a double-click on its node): its gain to
 -- flat, or a cut to its Off position, or its On switch off.
 function ME.reset(track, addr, b)
@@ -747,14 +898,36 @@ local function role_of(nm)
   return nil
 end
 
+-- A dynamic EQ band's dynamics control from its name (checked before the
+-- band's own roles: "Dynamic Range", "Dyn On"), or nil.
+function ME.dyn_role_of(nm)
+  if nm:match("auto") or nm:match("mode") or nm:match("sidechain") or nm:match("listen") then return nil end
+  if nm:match("thresh") or nm:match("%f[%a]thr%f[%A]") then return "thr" end
+  if nm:match("ratio") then return "ratio" end
+  if nm:match("attack") or nm:match("%f[%a]atk%f[%A]") then return "atk" end
+  if nm:match("release") or nm:match("%f[%a]rel%f[%A]") then return "rel" end
+  if nm:match("range") or nm:match("dyn%a* gain") or nm:match("dyn%a* amount") then return "range" end
+  if nm:match("dyn") and (nm:match("%f[%a]on%f[%A]") or nm:match("enable") or nm:match("active")
+     or nm:match("bypass") or nm:match("%f[%a]off%f[%A]")) then return "on" end
+  return nil
+end
+
+local function put_role(b, role, dyn, p)
+  if dyn then
+    b.dyn = b.dyn or { rev = {} }
+    if not b.dyn[dyn] then b.dyn[dyn] = p end
+  elseif not b[role] then b[role] = p end
+end
+
 -- A first go at bands from the parameters' names: { {name, freq, gain,
 -- q, shape, on}, ... }, in band order. `names[p+1]` is parameter p's name.
 function ME.guess(names)
   local bands = {}
   for p0, raw in ipairs(names) do
     local nm = " " .. (raw or ""):lower() .. " "
-    local role = role_of(nm)
-    if role then
+    local dyn = ME.dyn_role_of(nm)
+    local role = (not dyn) and role_of(nm) or nil
+    if role or dyn then
       local which
       -- the longest matching band word wins ("low mid" over "low")
       local best_len = 0
@@ -766,7 +939,7 @@ function ME.guess(names)
       if which and (which == 1 or which == 7) and role ~= "freq" and role ~= "on" then which = nil end
       if which then
         bands[which] = bands[which] or { name = BAND_NAMES[which] }
-        if not bands[which][role] then bands[which][role] = p0 - 1 end
+        put_role(bands[which], role, dyn, p0 - 1)
       end
     end
   end
@@ -780,12 +953,13 @@ function ME.guess(names)
   local num = {}
   for p0, raw in ipairs(names) do
     local nm = " " .. (raw or ""):lower() .. " "
-    local role = role_of(nm)
+    local dyn = ME.dyn_role_of(nm)
+    local role = (not dyn) and role_of(nm) or nil
     local n = nm:match("band%s*(%d+)") or nm:match("%f[%a]b(%d+)%f[%D]") or nm:match("(%d+)")
     n = tonumber(n)
-    if role and n and n >= 1 and n <= 24 then
+    if (role or dyn) and n and n >= 1 and n <= 24 then
       num[n] = num[n] or { name = "Band " .. n }
-      if not num[n][role] then num[n][role] = p0 - 1 end
+      put_role(num[n], role, dyn, p0 - 1)
     end
   end
   local ks = {}

@@ -33,7 +33,7 @@ local variants = {} -- guid -> layout variant an instance shows ("" for the plug
 local SHARED_TTL = 1.0
 local gr_at, var_at = {}, {}   -- guid -> when it was last read
 
-function S.clear_cache() cache = {}; gr_open = {}; pages = {}; variants = {}; gr_at = {}; var_at = {} end
+function S.clear_cache() cache = {}; gr_open = {}; pages = {}; variants = {}; gr_at = {}; var_at = {}; S.clear_virt() end
 
 -- `default` is what an instance nobody has touched shows as -- false
 -- (expanded) unless a caller says otherwise. Only a departure from the
@@ -150,15 +150,72 @@ function S.set_variant(guid, name)
   reaper.SetProjExtState(0, NS, "variant:" .. guid, name or "")
 end
 
+-- A virtual control's setting on an instance (TS_CV_Mappings Virt<n>),
+-- 0..1, by its name; nil when it's never been set (it's at its start).
+-- Shared with the web bridge like the variant, so re-read after VIRT_TTL.
+local vvals, vv_at = {}, {}
+local VIRT_TTL = 0.25
+function S.clear_virt() vvals, vv_at = {}, {} end
+function S.vget(guid, name)
+  if guid == nil or guid == "" or not name then return nil end
+  local k = guid .. ":" .. name
+  local now = reaper.time_precise()
+  local v = vvals[k]
+  if v == nil or now - (vv_at[k] or 0) >= VIRT_TTL then
+    local _, str = reaper.GetProjExtState(0, NS, "virt:" .. k)
+    v = tonumber(str or "") or false
+    vvals[k], vv_at[k] = v, now
+  end
+  return v or nil
+end
+function S.vset(guid, name, v)
+  if guid == nil or guid == "" or not name then return end
+  local k = guid .. ":" .. name
+  v = math.max(0, math.min(1, v or 0))
+  vvals[k], vv_at[k] = v, reaper.time_precise()
+  reaper.SetProjExtState(0, NS, "virt:" .. k, ("%g"):format(math.floor(v * 10000 + 0.5) / 10000))
+end
+-- Its setting, or where it starts (the control's own in `controls`, else
+-- the plugin's first layout with one of that name)
+function S.vvalue(guid, name, base, controls)
+  local v = S.vget(guid, name)
+  if v ~= nil then return v end
+  local M = require("TS_CV_Mappings")
+  return (M.vstart(base, name, controls))
+end
+
+-- The rule (its number) that put up the layout an instance shows, or nil
+-- (TS_CV_Mappings Switch<n>). Each script works it out for itself.
+local rule_on = {}
+function S.switch_rule(guid) return guid and rule_on[guid] or nil end
+-- a range rule that's on stays on until its value is this far back
+S.SWITCH_SLACK = 0.02
+
 -- The library key an instance's layout lives under: its variant's when
 -- it has one the library still holds, else the plugin's own.
 -- An instance never set to one follows the plugin's default layout
 -- (TS_CV_Mappings M.default_variant); S.OWN pins it to the plugin's own.
+-- Given its track and address, the plugin's layout switching comes first:
+-- the first of its rules its values match puts up that rule's layout.
 S.OWN = "*"
-function S.layout_key(fx_name, guid)
+function S.layout_key(fx_name, guid, track, addr)
   local U = require("TS_CV_Util")
   local M = require("TS_CV_Mappings")
   local base = U.plugin_key(fx_name)
+  if track and addr and guid then
+    local rules = M.switch_rules and M.switch_rules(base)
+    local was = rule_on[guid]
+    rule_on[guid] = nil
+    for i, r in ipairs(rules or {}) do
+      local v
+      if r.vname then v = S.vvalue(guid, r.vname, base, nil)
+      else v = reaper.TrackFX_GetParamNormalized(track, addr, r.param) end
+      if v and M.show_match(v, r, (was == i) and S.SWITCH_SLACK or 0) then
+        local k = M.variant_key(base, r.layout)
+        if k == base or M.has(k) then rule_on[guid] = i; return k end
+      end
+    end
+  end
   local v = S.variant(guid)
   if v == S.OWN then return base end
   v = v or (M.default_variant and M.default_variant(base))
@@ -168,5 +225,7 @@ function S.layout_key(fx_name, guid)
   end
   return base
 end
+-- The layout the instance would show with no rule in charge (its own pick)
+function S.chosen_key(fx_name, guid) return S.layout_key(fx_name, guid, nil, nil) end
 
 return S

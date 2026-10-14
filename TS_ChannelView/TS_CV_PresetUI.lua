@@ -73,6 +73,7 @@ function PU.footer(ctx, dl, x, y, w, h, track, fx, inset)
 
   local info = PR.list(track, addr)
   local name, same = PR.current(track, addr)
+  PR.seen(track, addr, name)
   local shown = (name ~= "") and (name .. (same and "" or " *")) or "No preset"
   local btn = C.ICON_SIZE
   local by = y + (h - btn) * 0.5

@@ -80,6 +80,12 @@
   same for one slot. Either way the label and alias are kept, just not
   shown, so turning live off brings them back.
 
+  RANGE<p>=<low>|<high>|<unit>|<curve> is your own range for parameter p,
+  for a plugin that won't say what its values are (Acustica's give the
+  host only their own internal numbers): what it reads as everywhere --
+  the panel, the scale round a knob, tooltips, canvases, the web page.
+  <unit> Hz kHz ms s dB % :1 or empty; <curve> lin, log or sq.
+
   STYLE and PLATE are the hardware look (see "Hardware styles" in
   TS_CV_Config.lua). Style<n> belongs to control n, the same index as its
   Ctl<n> line, and holds the knob or fader style and the cap colour,
@@ -123,21 +129,92 @@
   dropdown's is the choice's value with half a step either side. Page
   breaks have no rule of their own.
 
+  VIRTUAL CONTROLS (Virt<n>) belong to the layout, with no parameter
+  behind them: Ctl<n>=-1|toggle|... (a virtual button), |combo| (a
+  virtual selector: its Buttons<n> line shows it as chips) or |knob| (a
+  virtual knob, 0..100 %), and
+      Virt<n>=<start>|<choice 1>;<choice 2>;...
+  <start> is where a new instance starts (0..1); the choices are a
+  button's two state names or a selector's list (none for a knob). Its
+  label is its NAME: Show rules and layout switching find it by that, and
+  two layouts of a plugin with one of the same name share its setting.
+  The setting is kept per instance, with the project (TS_CV_State
+  St.vget). A Show rule on one: Show<n>=v:<name>|<value>|...
+
+  LAYOUT SWITCHING (the plugin's own section only, not a variant's):
+      Switch<n>=<source>|<value>|<tol>|<op>|<value2>|<layout>
+  puts up <layout> (a variant's name, empty for the plugin's own) while
+  <source> (a parameter's number, or v:<name> for a virtual control)
+  reads that way, ops as Show<n>. Read in order; the first that matches
+  wins, and with none the instance shows the layout it's set to. Kept
+  when the layout itself is saved over (TS_CV_Editor sets them apart).
+
   LOCK freezes the layout: no edits, and the controls keep the arrangement
   they had at <rows> rows however tall the panel is -- a shorter panel
   scrolls instead of reflowing. Meters are not part of it: they can still
   be switched on and off, and the trace opened, while locked.
 
-  CANVAS makes the layout an EQ or a compressor canvas, for any plugin:
-  the canvas fills the panel and the layout's controls (Ctl<n>) sit in
-  columns beside it.
-      Canvas=eq|<all bands' On param, or ->       Canvas=comp
+  CANVAS makes the layout a canvas of its kind (EQ, compressor, gate,
+  limiter, de-esser, delay, reverb, envelope, modulation), for any plugin: the canvas fills the panel and the layout's controls (Ctl<n>)
+  sit in columns beside it.
+      Canvas=eq|<all bands' On param, or ->
+      Canvas=comp | multi|<bands> | gate | limit | deess | delay | reverb | env | mod | sat
       Band<k>=<name>|<freq>|<gain>|<Q>|<shape switch>|<On>   (k 1..8, - for none)
       Learn<k>=<what was learned about band k, see TS_CV_MapEQ>
-      Role<name>=<param>[|rev]   compressor roles: Threshold, Input, Ratio,
-                                 Knee, Attack, Hold, Release, Makeup, Mix
-                                 (Input: a compressor with no threshold,
-                                 driven into a fixed one by its input)
+      Dyn<k>=<threshold>|<range>|<ratio>|<attack>|<release>|<dynamics On>[|<reversed>]
+          band k's dynamics (a dynamic EQ), each a param or -; reversed
+          lists the ones that run the other way (thr,range,ratio,atk,rel).
+          A band with a threshold or a range mapped is dynamic. Not part
+          of what its learning is checked against.
+      ThrCal=<param>|<d or n>|<x>:<dBFS> ...   where a compressor's threshold
+          really is (measured, TS_CV_Learn LN.start_thr): its reading in
+          dB (d) or its position (n) against dBFS, two or more points
+      Ref0=<dBFS>   a compressor or limiter with no threshold, only an input
+          gain: the level its gain's 0 dB stands for (-18 when absent)
+      SatCal=<drive>|<style>|<tone>|<drive norms>|<style norms>|<tone norms>|<levels>|<entries>
+          a saturator's curve and harmonics, learned on a hidden copy
+          (TS_CV_Learn LN.start_sat): per Drive x Style x Tone setting
+          "d.s.t:" its curve on the way up / down (24 steps of the input,
+          output x1000) / its fundamental gain and harmonics 2..9 (dB x10)
+          at each level, levels ";"-separated; "x" for a missing value
+      DeessShape=around   a de-esser with only a frequency: its band is an
+          octave around it (absent: a split-band shelf from it upward)
+      DecayCal=<decay param>|<size param or ->|<size>:<decay>:<ms> ...   a reverb's
+          decay time measured (TS_CV_Learn LN.start_decay) at positions of
+          its decay (and size) control, size -1 when it has none
+      Role<name>=<param>[|rev]   roles, by kind (M.ROLES):
+          comp   Threshold, Input, Ratio, Knee, Attack, Hold, Release,
+                 Makeup, Mix (Input: a compressor with no threshold,
+                 driven into a fixed one by its input)
+          gate   Threshold (opens), Close (its own closing threshold) or
+                 Hysteresis (how far under the threshold it closes),
+                 Range, Ratio (an expander's), Attack, Hold, Release
+          limit  Threshold, or Input (gain into the ceiling), Ceiling,
+                 Release
+          deess  Frequency, Low / High (its band's edges) or Width,
+                 Threshold, Range
+          delay  Time (ms or a note value), Note (a note-value switch),
+                 Sync (when on, Note rules), Feedback, PingPong, Mix;
+                 stereo: TimeR / NoteR (the right's own), or Offset (ms
+                 or % added to the left's) or Ratio (right = left x it),
+                 FeedbackR, Cross (cross-feedback), Width, Link (right
+                 follows left), Mode (its mono / dual / ping-pong switch)
+          reverb Predelay, Decay, Size, Early (level), Balance (early
+                 against late), Diffusion, LowFreq / Bass and HighFreq /
+                 Damping (the decay by frequency), Tone (a tilt), LowEQ /
+                 HighEQ (shelves on the wet), LowCut / HighCut and their
+                 switches LowCutOn / HighCutOn, Style (its character
+                 switch), Freeze, Mix
+          env    Delay, Attack, Hold, Decay, Sustain, Release, and the
+                 Attack / Decay / Release curves
+          mod    Rate, Depth, Shape, Phase (the right side's), Delay,
+                 Feedback, Mix, Voices (a count of voices); and up to
+                 three voices of its own, V<k>Depth, Rate, Note, Sync,
+                 Phase, Pan, On (a voice without a rate or depth of its
+                 own shares the main one)
+          multi  Canvas=multi|<bands, 2..4>: Crossover1..3, and per band
+                 B<k>Threshold, Ratio, Attack, Release, Gain, Solo,
+                 Bypass; Output, Mix
   An EQ band's shape isn't set by hand: it is learned (TS_CV_Learn) from a
   copy of the plugin and kept in Learn<k>, with the mapping it was learned
   for, so changing the mapping asks for it to be learned again.
@@ -338,7 +415,120 @@ end
 
 M.MAX_BANDS = 8
 M.COMP_ROLES = { "Threshold", "Input", "Ratio", "Knee", "Attack", "Hold", "Release", "Makeup", "Mix" }
+-- the roles each kind of role canvas has, in the order setup lists them
+M.ROLES = {
+  comp  = M.COMP_ROLES,
+  gate  = { "Threshold", "Close", "Hysteresis", "Range", "Ratio", "Attack", "Hold", "Release" },
+  limit = { "Threshold", "Input", "Ceiling", "Release" },
+  deess = { "Frequency", "Low", "High", "Width", "Threshold", "Range" },
+  delay = { "Time", "Note", "Rhythm", "Sync", "Multiplier", "Feedback", "Mode", "PingPong", "TimeR", "NoteR",
+            "Offset", "Ratio", "FeedbackR", "Cross", "Width", "Link", "LowCut", "HighCut", "Mix", "Dry" },
+  reverb = { "Predelay", "Decay", "Size", "Balance", "Early", "Diffusion", "LowFreq", "Bass", "HighFreq", "Damping",
+             "Tone", "LowEQ", "HighEQ", "LowCutOn", "HighCutOn", "LowCut", "HighCut", "Style", "Freeze", "Mix" },
+  env = { "Delay", "Attack", "Hold", "Decay", "Sustain", "Release", "AttackCurve", "DecayCurve", "ReleaseCurve" },
+  mod = { "Rate", "Depth", "Shape", "Phase", "Delay", "Feedback", "Mix", "Voices" },
+  sat = { "Drive", "Style", "Tone", "Tone2", "Output", "Mix" },
+}
+-- A multiband compressor: up to M.MB_MAX bands, each with the compressor's
+-- roles (named B<k><role>), the crossovers between them, and its output.
+M.MB_MAX = 4
+-- Low / High: the band's own edges, for a plugin whose bands each have
+-- theirs (FabFilter Pro-MB) rather than crossovers between them; Used:
+-- whether the band is in use (a plugin with more band slots than bands)
+M.MB_BAND_ROLES = { "Low", "High", "Threshold", "Ratio", "Knee", "Attack", "Release", "Gain", "Solo", "Bypass", "Used" }
+do
+  local r = {}
+  for k = 1, M.MB_MAX - 1 do r[#r + 1] = "Crossover" .. k end
+  for k = 1, M.MB_MAX do
+    for _, b in ipairs(M.MB_BAND_ROLES) do r[#r + 1] = "B" .. k .. b end
+  end
+  r[#r + 1] = "Output"; r[#r + 1] = "Mix"
+  M.ROLES.multi = r
+end
+-- A delay's taps (a multi-tap): up to M.DL_TAPS, each with these roles
+-- (named T<k><role>); Canvas=delay|<taps>, 0 for none.
+M.DL_TAPS = 10
+M.DL_TAP_ROLES = { "Time", "Note", "Rhythm", "Sync", "Level", "Pan", "On", "PingPong", "Feedback", "LowCut", "HighCut" }
+M.DL_MAIN = {}
+for i, r in ipairs(M.ROLES.delay) do M.DL_MAIN[i] = r end
+for k = 1, M.DL_TAPS do
+  for _, r in ipairs(M.DL_TAP_ROLES) do M.ROLES.delay[#M.ROLES.delay + 1] = "T" .. k .. r end
+end
+-- A modulation's voices (a chorus with up to three of its own): each with
+-- these roles, named V<k><role>
+M.MOD_VOICES = 3
+M.MOD_VOICE_ROLES = { "Depth", "Rate", "Note", "Sync", "Phase", "Pan", "On" }
+M.MOD_MAIN = {}
+for i, r in ipairs(M.ROLES.mod) do M.MOD_MAIN[i] = r end
+for k = 1, M.MOD_VOICES do
+  for _, r in ipairs(M.MOD_VOICE_ROLES) do M.ROLES.mod[#M.ROLES.mod + 1] = "V" .. k .. r end
+end
+-- A voice role's voice and role ("V2Pan" -> 2, "Pan"), or nil.
+function M.mod_voice_split(name)
+  local k, r = (name or ""):match("^V(%d)(%a+)$")
+  if k then return tonumber(k), r end
+  return nil
+end
+-- The voices a modulation's roles have (in order), each { k, roles };
+-- empty for one without
+function M.mod_voices(roles)
+  local v = {}
+  for k = 1, M.MOD_VOICES do
+    local any = false
+    for _, r in ipairs(M.MOD_VOICE_ROLES) do if roles and roles["V" .. k .. r] then any = true end end
+    if any then v[#v + 1] = k end
+  end
+  return v
+end
+
+-- A tap role's tap and role ("T3Level" -> 3, "Level"), or nil.
+function M.dl_tap_split(name)
+  local k, r = (name or ""):match("^T(%d+)(%a+)$")
+  if k then return tonumber(k), r end
+  return nil
+end
+-- What each of a mode switch's settings means (setup's choice):
+-- DelayModes=<setting>:<mono|dual|pp|none>;...
+function M.dl_modes_parse(s)
+  local t = {}
+  for item in ((s or "") .. ";"):gmatch("([^;]*);") do
+    local k, v = item:match("^(.-):(%a+)%s*$")
+    if k and k ~= "" and (v == "mono" or v == "dual" or v == "pp" or v == "none") then t[k] = v end
+  end
+  return next(t) and t or nil
+end
+function M.dl_modes_write(t)
+  if not t then return nil end
+  local keys = {}
+  for k in pairs(t) do keys[#keys + 1] = k end
+  if #keys == 0 then return nil end
+  table.sort(keys)
+  local o = {}
+  for _, k in ipairs(keys) do o[#o + 1] = (k:gsub("[;:\r\n]", " ")) .. ":" .. t[k] end
+  return table.concat(o, ";")
+end
+
+-- A multiband role's band and role ("B2Ratio" -> 2, "Ratio"), or nil.
+function M.mb_split(name)
+  local k, r = (name or ""):match("^B(%d)(%a+)$")
+  if k then return tonumber(k), r end
+  return nil
+end
+
+-- what each kind is called, and the order the menu offers them
+M.CANVAS_NAMES = { sat = "Saturation", eq = "EQ", comp = "Compressor", gate = "Gate", limit = "Limiter", deess = "De-esser",
+                   delay = "Delay", reverb = "Reverb", env = "Envelope", mod = "Modulation",
+                   multi = "Multiband" }
+M.CANVAS_ORDER = { "eq", "comp", "multi", "gate", "limit", "deess", "sat", "delay", "reverb", "env", "mod" }
 local BAND_FIELDS = { "freq", "gain", "q", "shape", "on" }
+-- a dynamic EQ band's dynamics (b.dyn), in the order Dyn<k> keeps them
+M.DYN_FIELDS = { "thr", "range", "ratio", "atk", "rel", "on" }
+M.DYN_NAMES = { thr = "Threshold", range = "Range", ratio = "Ratio", atk = "Attack", rel = "Release", on = "Dynamics On" }
+-- Whether band b is dynamic: a threshold or a range mapped.
+function M.band_dynamic(b)
+  local d = b and b.dyn
+  return d ~= nil and (d.thr ~= nil or d.range ~= nil)
+end
 
 local function pnum(v)
   v = U.trim(v or "")
@@ -356,7 +546,7 @@ end
 function M.canvas_of(sect)
   local raw = U.trim(sect.Canvas or "")
   local kind, rest = raw:match("^(%a+)%s*|?%s*(.*)$")
-  if kind ~= "eq" and kind ~= "comp" then return nil end
+  if kind ~= "eq" and not M.ROLES[kind] then return nil end
   local cv = { kind = kind }
   if kind == "eq" then
     cv.all_on = pnum(rest)
@@ -373,12 +563,63 @@ function M.canvas_of(sect)
           local sig, data = l:match("^([^~]*)~(.*)$")
           if sig then b.learn_sig, b.learn = sig, data end
         end
+        local dl = sect["Dyn" .. k]
+        if dl and U.trim(dl) ~= "" then
+          local g = {}
+          for v in (dl .. "|"):gmatch("([^|]*)|") do g[#g + 1] = v end
+          local d, any = { rev = {} }, false
+          for i, key in ipairs(M.DYN_FIELDS) do
+            d[key] = pnum(g[i]); if d[key] then any = true end
+          end
+          for w in (g[#M.DYN_FIELDS + 1] or ""):gmatch("%a+") do d.rev[w] = true end
+          if any then b.dyn = d end
+        end
         cv.bands[#cv.bands + 1] = b
       end
     end
   else
+    if kind == "multi" then
+      local nb = tonumber(rest)
+      cv.nb = (nb and nb >= 2 and nb <= M.MB_MAX) and math.floor(nb) or 3
+    end
+    if kind == "delay" then
+      local nt = tonumber(rest)
+      cv.nt = (nt and nt >= 1 and nt <= M.DL_TAPS) and math.floor(nt) or nil
+      cv.dmodes = sect.DelayModes and M.dl_modes_parse(U.trim(sect.DelayModes)) or nil
+    end
     cv.roles, cv.rev = {}, {}
-    for _, r in ipairs(M.COMP_ROLES) do
+    local tc = sect.ThrCal and U.trim(sect.ThrCal)
+    if tc and tc ~= "" then
+      local p, how, rest = tc:match("^(%d+)%s*|%s*(%a)%s*|%s*(.*)$")
+      local pts = {}
+      for x, t in (rest or ""):gmatch("([-%d%.e]+):([-%d%.e]+)") do
+        local a, b = tonumber(x), tonumber(t)
+        if a and b then pts[#pts + 1] = { a, b } end
+      end
+      if p and #pts >= 2 then
+        table.sort(pts, function(a, b) return a[1] < b[1] end)
+        cv.thr_cal = { p = tonumber(p), n = (how == "n"), pts = pts }
+      end
+    end
+    -- a compressor or limiter driven by its input: the level (dBFS) its
+    -- input gain's 0 dB stands for
+    local r0 = tonumber(sect.Ref0 and U.trim(sect.Ref0) or "")
+    if r0 and r0 > -96 and r0 < 24 then cv.ref0 = r0 end
+    -- a saturator's learned curve and harmonics
+    if kind == "sat" and sect.SatCal then cv.sat_cal = M.sat_decode(U.trim(sect.SatCal)) end
+    -- a de-esser with only a frequency: a shelf from it up, or a band around it
+    if kind == "deess" and sect.DeessShape and U.trim(sect.DeessShape):lower() == "around" then cv.dshape = "around" end
+    local dc = sect.DecayCal and U.trim(sect.DecayCal)
+    if dc and dc ~= "" then
+      local p, sz, rest = dc:match("^(%d+)%s*|%s*([%d%-]+)%s*|%s*(.*)$")
+      local pts = {}
+      for a, b, c in (rest or ""):gmatch("([-%d%.e]+):([-%d%.e]+):([-%d%.e]+)") do
+        local x, y, z = tonumber(a), tonumber(b), tonumber(c)
+        if x and y and z then pts[#pts + 1] = { x, y, z } end
+      end
+      if p and #pts >= 2 then cv.dec_cal = { p = tonumber(p), s = tonumber(sz), pts = pts } end
+    end
+    for _, r in ipairs(M.ROLES[kind]) do
       local line = sect["Role" .. r]
       if line then
         local p, flag = U.trim(line):match("^(%d+)%s*|?%s*(%a*)")
@@ -402,10 +643,38 @@ function M.canvas_lines(cv, out)
       for i, key in ipairs(BAND_FIELDS) do f[i + 1] = b[key] and tostring(b[key]) or "-" end
       out["Band" .. k] = table.concat(f, "|")
       if b.learn and b.learn_sig then out["Learn" .. k] = b.learn_sig .. "~" .. b.learn end
+      if b.dyn then
+        local g, any = {}, false
+        for i, key in ipairs(M.DYN_FIELDS) do
+          g[i] = b.dyn[key] and tostring(b.dyn[key]) or "-"
+          if b.dyn[key] then any = true end
+        end
+        local rv = {}
+        for _, key in ipairs(M.DYN_FIELDS) do if b.dyn.rev and b.dyn.rev[key] and b.dyn[key] then rv[#rv + 1] = key end end
+        if #rv > 0 then g[#g + 1] = table.concat(rv, ",") end
+        if any then out["Dyn" .. k] = table.concat(g, "|") end
+      end
     end
-  elseif cv.kind == "comp" then
-    out.Canvas = "comp"
-    for _, r in ipairs(M.COMP_ROLES) do
+  elseif M.ROLES[cv.kind] then
+    out.Canvas = cv.kind .. ((cv.kind == "multi") and ("|" .. (cv.nb or 3)) or "")
+      .. ((cv.kind == "delay" and cv.nt and cv.nt > 0) and ("|" .. cv.nt) or "")
+    if cv.kind == "delay" then out.DelayModes = M.dl_modes_write(cv.dmodes) end
+    local dc = cv.dec_cal
+    if dc and dc.p and dc.pts and #dc.pts >= 2 and not dc.builtin then
+      local t = {}
+      for i, q in ipairs(dc.pts) do t[i] = ("%g:%g:%.5g"):format(q[1], q[2], q[3]) end
+      out.DecayCal = ("%d|%s|%s"):format(dc.p, dc.s and tostring(dc.s) or "-", table.concat(t, " "))
+    end
+    if cv.ref0 and cv.ref0 ~= M.REF0 then out.Ref0 = ("%g"):format(cv.ref0) end
+    if cv.kind == "deess" and cv.dshape == "around" then out.DeessShape = "around" end
+    if cv.kind == "sat" and cv.sat_cal then out.SatCal = M.sat_encode(cv.sat_cal) end
+    local tc = cv.thr_cal
+    if tc and tc.p and tc.pts and #tc.pts >= 2 then
+      local t = {}
+      for i, q in ipairs(tc.pts) do t[i] = ("%.6g:%.4g"):format(q[1], q[2]) end
+      out.ThrCal = ("%d|%s|%s"):format(tc.p, tc.n and "n" or "d", table.concat(t, " "))
+    end
+    for _, r in ipairs(M.ROLES[cv.kind]) do
       local p = cv.roles and cv.roles[r]
       if p then out["Role" .. r] = tostring(p) .. ((cv.rev and cv.rev[r]) and "|rev" or "") end
     end
@@ -414,12 +683,20 @@ end
 
 function M.copy_canvas(cv)
   if not cv then return nil end
-  local out = { kind = cv.kind, all_on = cv.all_on }
+  local out = { kind = cv.kind, all_on = cv.all_on, nb = cv.nb, nt = cv.nt, ref0 = cv.ref0, dshape = cv.dshape,
+                 dmodes = cv.dmodes and M.dl_modes_parse(M.dl_modes_write(cv.dmodes)) or nil,
+                 sat_cal = cv.sat_cal and M.sat_decode(M.sat_encode(cv.sat_cal)) or nil }
   if cv.bands then
     out.bands = {}
     for i, b in ipairs(cv.bands) do
       out.bands[i] = { name = b.name, freq = b.freq, gain = b.gain, q = b.q, shape = b.shape,
                        on = b.on, learn = b.learn, learn_sig = b.learn_sig }
+      if b.dyn then
+        local d = { rev = {} }
+        for _, key in ipairs(M.DYN_FIELDS) do d[key] = b.dyn[key] end
+        for key, v in pairs(b.dyn.rev or {}) do d.rev[key] = v end
+        out.bands[i].dyn = d
+      end
     end
   end
   if cv.roles then
@@ -427,7 +704,450 @@ function M.copy_canvas(cv)
     for k, v in pairs(cv.roles) do out.roles[k] = v end
     for k, v in pairs(cv.rev or {}) do out.rev[k] = v end
   end
+  if cv.dec_cal then
+    local pts = {}
+    for i, q in ipairs(cv.dec_cal.pts or {}) do pts[i] = { q[1], q[2], q[3] } end
+    out.dec_cal = { p = cv.dec_cal.p, s = cv.dec_cal.s, pts = pts }
+  end
+  if cv.thr_cal then
+    local pts = {}
+    for i, q in ipairs(cv.thr_cal.pts or {}) do pts[i] = { q[1], q[2] } end
+    out.thr_cal = { p = cv.thr_cal.p, n = cv.thr_cal.n, pts = pts }
+  end
   return out
+end
+
+-- A compressor layout's measured threshold, when it's for the threshold
+-- mapped now: its points, else nil.
+-- The control a compressor's threshold is set by: its Threshold, or with
+-- none, its Input (1176-style: the input drives it into a fixed threshold).
+-- The parameter, and whether it's the input.
+-- What an input gain's 0 dB stands for, unless a layout says otherwise:
+-- the usual "0 VU" of a plugin modelled on analogue gear.
+-- ---------------------------------------------------------------------
+-- a saturator's learned curve and harmonics (TS_CV_Learn LN.start_sat)
+-- ---------------------------------------------------------------------
+M.SAT_CB = 24            -- steps of the input, -1 to 1 of its peak
+M.SAT_NH = 9             -- the fundamental's gain, then harmonics 2..9
+
+local function nums(s, sep)
+  local t = {}
+  for v in ((s or "") .. sep):gmatch("([^" .. sep .. "]*)" .. sep) do t[#t + 1] = v end
+  return t
+end
+local function norms_of(s)
+  if s == "-" or s == "" then return { false } end
+  local t = {}
+  for _, v in ipairs(nums(s, ",")) do t[#t + 1] = tonumber(v) or 0 end
+  return t
+end
+local function enc_list(t, mul, n)
+  local o = {}
+  for i = 1, n do
+    local v = t[i]
+    o[i] = (v == nil or v ~= v or v <= -900 or v >= 1e9) and "x" or tostring(math.floor(v * mul + 0.5))
+  end
+  return table.concat(o, ",")
+end
+local function dec_list(s, mul, n)
+  local t = {}
+  local raw = nums(s, ",")
+  for i = 1, n do local v = tonumber(raw[i] or "") ; t[i] = v and v / mul or nil end
+  return t
+end
+
+function M.sat_encode(c)
+  local function nl(t) if not t or t[1] == false then return "-" end local o = {} for i, v in ipairs(t) do o[i] = ("%g"):format(v) end return table.concat(o, ",") end
+  local keys = {}
+  for k in pairs(c.e or {}) do keys[#keys + 1] = k end
+  table.sort(keys)
+  local ents = {}
+  for _, k in ipairs(keys) do
+    local e = c.e[k]
+    local hs = {}
+    for li = 1, #c.L do hs[li] = enc_list(e.h[li] or {}, 10, M.SAT_NH) end
+    ents[#ents + 1] = k .. ":" .. enc_list(e.up, 1000, M.SAT_CB) .. "/" .. enc_list(e.dn, 1000, M.SAT_CB) .. "/" .. table.concat(hs, ";")
+  end
+  return table.concat({ tostring(c.d or "-"), tostring(c.s or "-"), tostring(c.t or "-"), nl(c.dn), nl(c.sn), nl(c.tn),
+    nl(c.L), table.concat(ents, " ") }, "|")
+end
+
+function M.sat_decode(line)
+  local f = nums(line or "", "|")
+  if #f < 8 then return nil end
+  local c = { d = tonumber(f[1]), s = tonumber(f[2]), t = tonumber(f[3]),
+              dn = norms_of(f[4]), sn = norms_of(f[5]), tn = norms_of(f[6]), L = norms_of(f[7]), e = {} }
+  if not c.d or c.L[1] == false then return nil end
+  local n = 0
+  for ent in (f[8] or ""):gmatch("%S+") do
+    local k, up, dn, hs = ent:match("^([%d%.]+):([^/]*)/([^/]*)/(.*)$")
+    if k then
+      local e = { up = dec_list(up, 1000, M.SAT_CB), dn = dec_list(dn, 1000, M.SAT_CB), h = {} }
+      local lv = nums(hs, ";")
+      for li = 1, #c.L do e.h[li] = dec_list(lv[li] or "", 10, M.SAT_NH) end
+      c.e[k] = e
+      n = n + 1
+    end
+  end
+  return n > 0 and c or nil
+end
+
+-- where `v` sits among a grid's points: the two either side and how far
+-- between (a grid of one, or none, is that point)
+local function between(grid, v)
+  if not grid or grid[1] == false or #grid <= 1 then return 1, 1, 0 end
+  if v <= grid[1] then return 1, 1, 0 end
+  for i = 1, #grid - 1 do
+    if v <= grid[i + 1] then
+      local a, b = grid[i], grid[i + 1]
+      return i, i + 1, (b > a) and (v - a) / (b - a) or 0
+    end
+  end
+  return #grid, #grid, 0
+end
+local function nearest(grid, v)
+  if not grid or grid[1] == false then return 1 end
+  local best, bd = 1, math.huge
+  for i, g in ipairs(grid) do if math.abs(g - v) < bd then best, bd = i, math.abs(g - v) end end
+  return best
+end
+local function mix(a, b, t)
+  if a == nil then return b end
+  if b == nil then return a end
+  return a + (b - a) * t
+end
+local function mix_list(a, b, t, n)
+  local o = {}
+  for i = 1, n do o[i] = mix(a and a[i], b and b[i], t) end
+  return o
+end
+local function mix_ent(a, b, t, nl)
+  if not a then return b end
+  if not b then return a end
+  local o = { up = mix_list(a.up, b.up, t, M.SAT_CB), dn = mix_list(a.dn, b.dn, t, M.SAT_CB), h = {} }
+  for li = 1, nl do o.h[li] = mix_list(a.h[li], b.h[li], t, M.SAT_NH) end
+  return o
+end
+
+-- The learned curve and harmonics at a Drive / Style / Tone setting
+-- (normalised; style the nearest learned, drive and tone between theirs).
+function M.sat_at(c, dnorm, snorm, tnorm)
+  if not c then return nil end
+  local si = nearest(c.sn, snorm or 0)
+  local d1, d2, dt = between(c.dn, dnorm or 0)
+  local t1, t2, tt = between(c.tn, tnorm or 0)
+  local nl = #c.L
+  local function at(di, ti) return c.e[("%d.%d.%d"):format(di, si, ti)] end
+  local a = mix_ent(at(d1, t1), at(d2, t1), dt, nl)
+  local b = mix_ent(at(d1, t2), at(d2, t2), dt, nl)
+  return mix_ent(a, b, tt, nl)
+end
+
+-- Its harmonics at an input level (dBFS, between the levels learned):
+-- { g = the fundamental's gain dB, [2..9] = dB against the fundamental },
+-- and its THD in %.
+function M.sat_harm(c, at, level)
+  if not (c and at) then return nil end
+  local l1, l2, lt = between(c.L, level or c.L[#c.L])
+  local a, b = at.h[l1], at.h[l2]
+  local o = { g = mix(a and a[1], b and b[1], lt) }
+  local p = 0
+  for h = 2, M.SAT_NH do
+    local v = mix(a and a[h], b and b[h], lt)
+    o[h] = v
+    if v then p = p + 10 ^ (v / 10) end
+  end
+  return o, math.sqrt(p) * 100
+end
+
+-- The curve, both sides averaged: the output at input x (-1..1).
+function M.sat_curve(at, x, side)
+  side = side or "both"
+  if not at then return nil end
+  local n = M.SAT_CB
+  local function v(i)
+    local u, d = at.up[i], at.dn[i]
+    if side == "up" then return u or d elseif side == "dn" then return d or u end
+    if u and d then return (u + d) * 0.5 end
+    return u or d
+  end
+  local fx = (math.max(-1, math.min(1, x)) + 1) * 0.5 * n + 0.5   -- 1-based, at the steps' centres
+  local i = math.max(1, math.min(n - 1, math.floor(fx)))
+  local t = math.max(0, math.min(1, fx - i))
+  local a, b = v(i), v(i + 1)
+  if a == nil or b == nil then return a or b end
+  return a + (b - a) * t
+end
+
+-- Where it starts to bite: the input level (dBFS) at which the curve has
+-- fallen 1 dB under its small-signal slope, or nil when it never does.
+function M.sat_bite(at)
+  if not at then return nil end
+  local n = M.SAT_CB
+  local function xc(i) return -1 + (i - 0.5) * 2 / n end
+  local lo, hi = M.sat_curve(at, xc(n / 2)), M.sat_curve(at, xc(n / 2 + 1))
+  if not (lo and hi) then return nil end
+  local g0 = (hi - lo) / (xc(n / 2 + 1) - xc(n / 2))
+  if math.abs(g0) < 1e-6 then return nil end
+  local best
+  for i = n / 2 + 2, n do
+    for _, sgn in ipairs({ 1, -1 }) do
+      local x = sgn * xc(i)
+      local y = M.sat_curve(at, x)
+      local y0 = M.sat_curve(at, 0) or 0
+      if y and math.abs((y - y0) / (g0 * x)) < 0.891 then
+        local db = 20 * math.log(math.abs(x), 10)
+        if not best or db < best then best = db end
+      end
+    end
+  end
+  return best
+end
+
+-- ---------------------------------------------------------------------
+-- a delay's echoes, left and right
+-- ---------------------------------------------------------------------
+-- How a stereo delay's mode switch reads: "pp" (ping-pong), "dual" (left
+-- and right each their own), "mono" (one delay, the same both sides), or
+-- nil when its text says none of these (an algorithm's name, say).
+function M.dl_mode_of(text)
+  local s = " " .. (text or ""):lower() .. " "
+  if s:find("ping", 1, true) or s:find("pong", 1, true) or s:find("bounce", 1, true) then return "pp" end
+  if s:find("dual", 1, true) or s:find("stereo", 1, true) or s:find("l/r", 1, true) or s:find("l-r", 1, true)
+     or s:find("split", 1, true) or s:find("double", 1, true) or s:find("wide", 1, true) then return "dual" end
+  if s:find("single", 1, true) or s:find("mono", 1, true) then return "mono" end
+  return nil
+end
+
+-- Whether a sync control's setting means it's following the tempo: its
+-- text when that says ("Free", "ms", "Off" no; "Sync", "Straight",
+-- "Dotted", a note value yes), else its switch being on.
+function M.dl_sync_of(text, norm)
+  local s = " " .. (text or ""):lower() .. " "
+  if s:find(" off ", 1, true) or s:find("free", 1, true) or s:match("%Wms%W") or s:find("msec", 1, true) or s:find(" time ", 1, true)
+     or s:find("hz", 1, true) or s:find("unsync", 1, true) then return false end
+  if s:find(" on ", 1, true) or s:find("sync", 1, true) or s:find("straight", 1, true) or s:find("dot", 1, true)
+     or s:find("trip", 1, true) or s:find("note", 1, true) or s:find("tempo", 1, true) or s:find("bpm", 1, true)
+     or s:find("beat", 1, true) or s:find("host", 1, true) or s:match("%d+%s*/%s*%d+") then return true end
+  return (norm or 0) >= 0.5
+end
+
+-- A ratio control's reading (the right's time against the left's): "3:4",
+-- "0.75", "75 %"; nil when it reads in none of these.
+function M.dl_ratio_of(text)
+  local s = (text or ""):lower()
+  local a, b = s:match("(%d+%.?%d*)%s*[:/]%s*(%d+%.?%d*)")
+  if a and tonumber(b) and tonumber(b) > 0 then return tonumber(a) / tonumber(b) end
+  local p = s:match("(%-?%d+%.?%d*)%s*%%")
+  if p then return tonumber(p) / 100 end
+  local v = tonumber(s:match("^%s*x?%s*(%d+%.?%d*)%s*x?%s*$") or "")
+  if v and v > 0 and v <= 8 then return v end
+  return nil
+end
+
+-- The echoes of two delay lines, each feeding itself back (fbL, fbR) and
+-- the other (cross), the dry sound going into the left by inL and the
+-- right by inR: { {t ms, sd "L"/"R", a (the dry sound 1), n (its count on
+-- that side, from 0), x (came from the other side)} ... } by time, up to
+-- `span` ms and down to `floor`.
+function M.dl_taps(o)
+  local T = { L = math.max(1, o.tL or 300), R = math.max(1, o.tR or o.tL or 300) }
+  local FB = { L = math.max(0, math.min(1.2, o.fbL or 0)), R = math.max(0, math.min(1.2, o.fbR or o.fbL or 0)) }
+  local cross = math.max(0, math.min(1.2, o.cross or 0))
+  local span, floor, cap = o.span or 2000, o.floor or 0.02, o.cap or 160
+  local q, out, count = {}, {}, { L = 0, R = 0 }
+  local function push(t, sd, a, x)
+    if t > span + 1e-6 or a < floor then return end
+    q[#q + 1] = { t = t, sd = sd, a = a, x = x }
+  end
+  if (o.inL or 0) > 0 then push(T.L, "L", o.inL, false) end
+  if (o.inR or 0) > 0 then push(T.R, "R", o.inR, false) end
+  while #q > 0 and #out < cap do
+    local bi = 1
+    for i = 2, #q do if q[i].t < q[bi].t then bi = i end end
+    local e = table.remove(q, bi)
+    -- one echo where two land together
+    local same
+    for i = #out, 1, -1 do
+      if out[i].t < e.t - 0.5 then break end
+      if out[i].sd == e.sd then same = out[i] break end
+    end
+    if same then
+      same.a = same.a + e.a
+    else
+      out[#out + 1] = { t = e.t, sd = e.sd, a = e.a, n = count[e.sd], x = e.x }
+      count[e.sd] = count[e.sd] + 1
+      -- its own repeats, then what crosses over (from the whole echo)
+      local ot = e.sd == "L" and "R" or "L"
+      if FB[e.sd] > 0 then push(e.t + T[e.sd], e.sd, e.a * FB[e.sd], false) end
+      if cross > 0 then push(e.t + T[ot], ot, e.a * cross, true) end
+    end
+  end
+  return out
+end
+
+-- The echoes as drawn: those landing together in one, how much is in each
+-- side (l, r) once `width` (0..1) narrows them: { {t, l, r, i} ... };
+-- each tap's .bar its bar's index.
+function M.dl_bars(taps, width)
+  local w = math.max(0, math.min(1, width or 1))
+  local bars = {}
+  for _, e in ipairs(taps) do
+    local b = bars[#bars]
+    if not (b and math.abs(b.t - e.t) < 0.5) then b = { t = e.t, l = 0, r = 0 }; bars[#bars + 1] = b end
+    if e.sd == "L" then b.l = b.l + e.a else b.r = b.r + e.a end
+    e.bar = #bars
+  end
+  for i, b in ipairs(bars) do
+    local m = (b.l + b.r) / 2
+    b.l, b.r, b.i = m + w * (b.l - m), m + w * (b.r - m), i
+  end
+  return bars
+end
+
+-- A time in beats as a note value: a fraction of a bar of 4/4 ("1/8",
+-- "3/8", "1 bar", "5/4"); nil for none within a 1/64.
+function M.dl_note_label(beats)
+  if not beats or beats <= 0 then return nil end
+  local w = beats / 4
+  if w >= 1 and math.abs(w - math.floor(w + 0.5)) < 1e-3 then
+    local n = math.floor(w + 0.5)
+    return n == 1 and "1 bar" or (n .. " bars")
+  end
+  for _, d in ipairs({ 1, 2, 4, 8, 16, 32, 64 }) do
+    local a = w * d
+    if math.abs(a - math.floor(a + 0.5)) < 1e-3 then return ("%d/%d"):format(math.floor(a + 0.5), d) end
+  end
+  return nil
+end
+
+-- The beat grid's step (in beats) for `span_beats`: about eight lines.
+function M.dl_beat_step(span_beats)
+  for _, s in ipairs({ 0.25, 0.5, 1, 2, 4, 8, 16 }) do if span_beats / s <= 8 then return s end end
+  return 32
+end
+
+-- The drive meter's scale, VU-like: how far the music's peaks are over
+-- where the curve starts to bite, -20..+6 dB, 0 at 0.7 of the way along
+-- (amplitude below it, as a VU's, even dB above). 0..1.
+M.SAT_VU_LO, M.SAT_VU_HI = -20, 6
+function M.sat_vu_pos(db)
+  db = math.max(M.SAT_VU_LO, math.min(M.SAT_VU_HI, db or M.SAT_VU_LO))
+  if db <= 0 then
+    local a0 = 10 ^ (M.SAT_VU_LO / 20)
+    return 0.7 * (10 ^ (db / 20) - a0) / (1 - a0)
+  end
+  return 0.7 + 0.3 * db / M.SAT_VU_HI
+end
+M.REF0 = -18
+function M.ref0(cv) return (cv and cv.ref0) or M.REF0 end
+
+function M.thr_param(cv)
+  local r = cv and cv.roles
+  if not r then return nil end
+  if r.Threshold then return r.Threshold, false end
+  if r.Input then return r.Input, true end
+  return nil
+end
+
+function M.thr_cal(cv)
+  local tc = cv and cv.thr_cal
+  if tc and tc.p and tc.p == M.thr_param(cv) and tc.pts and #tc.pts >= 2 then
+    -- one where the threshold never moved measured nothing (an older
+    -- measurement of a copy that passed no sound): set aside
+    local lo, hi = math.huge, -math.huge
+    for _, q in ipairs(tc.pts) do lo = math.min(lo, q[2]); hi = math.max(hi, q[2]) end
+    if hi - lo > 1 then return tc end
+  end
+  return nil
+end
+
+-- Where the threshold is in dBFS at reading (or position) x: between the
+-- measured points, and on past the ends along the nearest two.
+function M.thr_dbfs(cv, x)
+  local tc = M.thr_cal(cv)
+  if not tc or not x then return nil end
+  local p = tc.pts
+  local i = 1
+  while i < #p - 1 and x > p[i + 1][1] do i = i + 1 end
+  local a, b = p[i], p[i + 1]
+  if b[1] == a[1] then return a[2] end
+  return a[2] + (x - a[1]) * (b[2] - a[2]) / (b[1] - a[1])
+end
+
+-- A reverb layout's measured decay, when it's for the decay (and size)
+-- mapped now: its points, else nil.
+function M.dec_cal(cv)
+  local dc = cv and cv.dec_cal
+  if dc and cv.roles and cv.roles.Decay == dc.p and cv.roles.Size == dc.s and dc.pts and #dc.pts >= 2 then
+    -- (one where nothing rang for even 30 ms measured the burst, not a reverb)
+    local most = 0
+    for _, q in ipairs(dc.pts) do most = math.max(most, q[3]) end
+    if most >= 30 then return dc end
+  end
+  return nil
+end
+
+-- along one row of {position, ms}: log time between the points, on past
+-- the ends along the nearest two
+local function row_ms(row, dn)
+  local i = 1
+  while i < #row - 1 and dn > row[i + 1][1] do i = i + 1 end
+  local a, b = row[i], row[i + 1]
+  if not b then return a[2] end
+  if b[1] == a[1] then return a[2] end
+  local la, lb = math.log(math.max(1, a[2])), math.log(math.max(1, b[2]))
+  return math.exp(la + (dn - a[1]) * (lb - la) / (b[1] - a[1]))
+end
+
+-- The decay time, ms, at decay position dn (and size position sn).
+function M.decay_ms(cv, dn, sn)
+  local dc = M.dec_cal(cv)
+  if not dc or not dn then return nil end
+  local rows, keys = {}, {}
+  for _, q in ipairs(dc.pts) do
+    local k = q[1]
+    if not rows[k] then rows[k] = {}; keys[#keys + 1] = k end
+    table.insert(rows[k], { q[2], q[3] })
+  end
+  table.sort(keys)
+  for _, k in ipairs(keys) do table.sort(rows[k], function(a, b) return a[1] < b[1] end) end
+  if #keys == 1 or not sn or sn < 0 then return row_ms(rows[keys[1]], dn) end
+  local i = 1
+  while i < #keys - 1 and sn > keys[i + 1] do i = i + 1 end
+  local ka, kb = keys[i], keys[i + 1]
+  local ma, mb = math.log(row_ms(rows[ka], dn)), math.log(row_ms(rows[kb], dn))
+  local t = (kb == ka) and 0 or (sn - ka) / (kb - ka)
+  return math.exp(ma + t * (mb - ma))
+end
+
+-- The decay position that gives `ms` at size position sn (between 0 and 1).
+function M.decay_pos(cv, ms, sn)
+  local f0, f1 = M.decay_ms(cv, 0, sn), M.decay_ms(cv, 1, sn)
+  if not (f0 and f1) then return nil end
+  local up = f1 >= f0
+  local lo, hi = 0, 1
+  for _ = 1, 30 do
+    local mid = (lo + hi) * 0.5
+    local v = M.decay_ms(cv, mid, sn)
+    if (v < ms) == up then lo = mid else hi = mid end
+  end
+  return (lo + hi) * 0.5
+end
+
+-- The reading (or position) that puts the threshold at `db` dBFS.
+function M.thr_from_dbfs(cv, db)
+  local tc = M.thr_cal(cv)
+  if not tc or not db then return nil end
+  local p = tc.pts
+  -- the measured points run one way or the other (a reversed control)
+  local up = p[#p][2] >= p[1][2]
+  local i = 1
+  local function past(q) if up then return db > q[2] else return db < q[2] end end
+  while i < #p - 1 and past(p[i + 1]) do i = i + 1 end
+  local a, b = p[i], p[i + 1]
+  if b[2] == a[2] then return a[1] end
+  return a[1] + (db - a[2]) * (b[1] - a[1]) / (b[2] - a[2])
 end
 
 -- The parameters a canvas puts on itself: { [param] = true }.
@@ -437,6 +1157,7 @@ function M.canvas_params(cv)
   if cv.all_on then out[cv.all_on] = true end
   for _, b in ipairs(cv.bands or {}) do
     for _, f in ipairs(BAND_FIELDS) do if b[f] then out[b[f]] = true end end
+    for _, f in ipairs(M.DYN_FIELDS) do if b.dyn and b.dyn[f] then out[b.dyn[f]] = true end end
   end
   for _, p in pairs(cv.roles or {}) do out[p] = true end
   return out
@@ -494,7 +1215,7 @@ function M.canvas_todo(cv)
 end
 
 local function parse_section(sect)
-  local controls, aliases, states = {}, {}, {}
+  local controls, aliases, states, ranges = {}, {}, {}, {}
   local meter = nil
   if sect.Meter then
     local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
@@ -511,6 +1232,8 @@ local function parse_section(sect)
       local off, on = v:match("^([^|]*)|(.*)$")
       if off then states[tonumber(sp)] = { U.trim(off), U.trim(on) } end
     end
+    local rp = k:match("^Range(%d+)$")
+    if rp then ranges[tonumber(rp)] = M.range_of_line(v) end
   end
   local i = 0
   while true do
@@ -559,7 +1282,15 @@ local function parse_section(sect)
         scale   = scale_of(sect["Scale" .. i]),
         scale_ink = scale_ink_of(sect["Scale" .. i]),
         show    = (t ~= "page") and M.show_of(sect["Show" .. i]) or nil,
+        virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i]) or nil,
       }
+      -- a virtual selector shown as chips: one for each of its choices
+      do
+        local cc = controls[#controls]
+        if cc.virtual and t == "combo" and cc.buttons then
+          cc.nbtn = math.max(2, #M.vchoices(cc))
+        end
+      end
       if t == "fader" then
         local cc = controls[#controls]
         cc.dir, cc.len, cc.thin = shape_of(sect["Shape" .. i])
@@ -575,8 +1306,8 @@ local function parse_section(sect)
     end
     i = i + 1
   end
-  return { controls = controls, aliases = aliases, states = states, meter = meter,
-           canvas = M.canvas_of(sect),
+  return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
+           canvas = M.canvas_of(sect), switch = M.switch_of(sect),
            live = (U.trim(sect.Live or "") == "1") or nil,
            measure = (U.trim(sect.Measure or "") == "1") or nil,
            levels = (U.trim(sect.Levels or "") == "1") or nil,
@@ -611,6 +1342,10 @@ local function serialize(layout)
     if off ~= "" or on ~= "" then
       out["States" .. p] = off:gsub("[|\r\n]", " ") .. "|" .. on:gsub("[|\r\n]", " ")
     end
+  end
+  for p, rg in pairs(layout.ranges or {}) do
+    local line = M.range_line(rg)
+    if line then out["Range" .. p] = line end
   end
   for i, c in ipairs(layout.controls or {}) do
     -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
@@ -650,7 +1385,9 @@ local function serialize(layout)
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
     if c.show and c.type ~= "page" then out["Show" .. (i - 1)] = M.show_line(c.show) end
+    if c.virtual and (c.param or -1) < 0 then out["Virt" .. (i - 1)] = M.virt_line(c.virtual) end
   end
+  for k, line in ipairs(M.switch_lines(layout.switch)) do out["Switch" .. (k - 1)] = line end
   return out
 end
 
@@ -675,14 +1412,29 @@ local SHOW_OPS  = { [0] = "is", "not", "above", "below", "between" }
 local SHOW_CODE = { is = 0, ["not"] = 1, above = 2, below = 3, between = 4 }
 M.SHOW_OPS = { "is", "not", "above", "below", "between" }
 
+-- A rule's source from its field: a parameter's number, or v:<name> (a
+-- virtual control); param, vname
+local function source_of(f)
+  local vn = (f or ""):match("^v:(.+)$")
+  if vn then vn = M.clean_vname(vn); return vn and -1 or nil, vn end
+  local p = tonumber(f or "")
+  if not p or p < 0 then return nil end
+  return math.floor(p), nil
+end
+local function source_line(r)
+  if r.vname then return "v:" .. r.vname end
+  return tostring(math.floor(r.param or 0))
+end
+
 function M.show_of(line)
   if not line then return nil end
   local f = {}
   for v in (U.trim(line) .. "|"):gmatch("([^|]*)|") do f[#f + 1] = U.trim(v) end
-  local p, v = tonumber(f[1] or ""), tonumber(f[2] or "")
-  if not p or not v or p < 0 then return nil end
+  local p, vn = source_of(f[1])
+  local v = tonumber(f[2] or "")
+  if not p or not v then return nil end
   local op = SHOW_OPS[tonumber(f[4] or "") or 0] or "is"
-  local r = { param = math.floor(p), op = op, norm = math.max(0, math.min(1, v)),
+  local r = { param = p, vname = vn, op = op, norm = math.max(0, math.min(1, v)),
               tol = math.max(0.0005, tonumber(f[3] or "") or 0.499) }
   if op == "between" then
     r.norm2 = math.max(0, math.min(1, tonumber(f[5] or "") or r.norm))
@@ -695,21 +1447,24 @@ function M.show_op(r) return r.op or (r.inv and "not") or "is" end
 
 function M.show_line(r)
   local op = M.show_op(r)
-  local line = ("%d|%.4f|%.4f|%d"):format(r.param or 0, r.norm or 0, r.tol or 0.499, SHOW_CODE[op] or 0)
+  local line = ("%s|%.4f|%.4f|%d"):format(source_line(r), r.norm or 0, r.tol or 0.499, SHOW_CODE[op] or 0)
   if op == "between" then line = line .. ("|%.4f"):format(r.norm2 or r.norm or 0) end
   return line
 end
 
--- Whether a value satisfies a rule.
-function M.show_match(v, r)
+-- Whether a value satisfies a rule. `slack` widens a rule on a range
+-- (above, below, between) -- a layout switch that's on stays on until the
+-- knob is that far back past its line, so one sitting on it can't flicker.
+function M.show_match(v, r, slack)
   v = v or 0
+  slack = slack or 0
   local op, eps = M.show_op(r), 1e-6
-  if op == "above" then return v > r.norm + eps end
-  if op == "below" then return v < r.norm - eps end
+  if op == "above" then return v > r.norm + eps - slack end
+  if op == "below" then return v < r.norm - eps + slack end
   if op == "between" then
     local a, b = r.norm, r.norm2 or r.norm
     if a > b then a, b = b, a end
-    return v >= a - eps and v <= b + eps
+    return v >= a - eps - slack and v <= b + eps + slack
   end
   local hit = math.abs(v - r.norm) <= r.tol
   if op == "not" then return not hit end
@@ -717,7 +1472,8 @@ function M.show_match(v, r)
 end
 
 -- The controls a layout shows right now, given a reader for its
--- parameters' normalised values (`getv(param)`), plus the set of
+-- parameters' normalised values (`getv(param, vname)`: vname for a
+-- virtual control's, param -1 then), plus the set of
 -- indexes (into `controls`) it hides. The list keeps the controls'
 -- own tables, so a caller can still find each one in the full list.
 function M.visible(controls, getv)
@@ -726,13 +1482,149 @@ function M.visible(controls, getv)
     local r = c.show
     if r and c.type ~= "page" then
       any = true
-      if M.show_match(getv(r.param), r) then out[#out + 1] = c else hidden[i] = true end
+      if M.show_match(getv(r.param, r.vname), r) then out[#out + 1] = c else hidden[i] = true end
     else
       out[#out + 1] = c
     end
   end
   if not any then return controls, hidden end
   return out, hidden
+end
+
+-- ---------------------------------------------------------------------
+-- virtual controls (Virt<n>) and layout switching (Switch<n>)
+-- ---------------------------------------------------------------------
+-- A virtual control's name as typed, made safe for the lines it's
+-- written into; nil when nothing's left.
+function M.clean_vname(name)
+  name = U.trim((name or ""):gsub("[|;:~\r\n%[%]=]", " "):gsub("%s+", " "))
+  return name ~= "" and name or nil
+end
+
+function M.virt_of(line)
+  if not line then return nil end
+  local start, rest = U.trim(line):match("^([^|]*)|?(.*)$")
+  local v = { start = math.max(0, math.min(1, tonumber(start or "") or 0)), choices = {} }
+  for ch in ((rest or "") .. ";"):gmatch("([^;]*);") do
+    ch = U.trim(ch)
+    if ch ~= "" then v.choices[#v.choices + 1] = ch end
+  end
+  return v
+end
+function M.virt_line(v)
+  local list = {}
+  for _, ch in ipairs(v.choices or {}) do
+    local c = U.trim((ch or ""):gsub("[|;\r\n]", " "))
+    if c ~= "" then list[#list + 1] = c end
+  end
+  return ("%g|%s"):format(math.floor((v.start or 0) * 10000 + 0.5) / 10000, table.concat(list, ";"))
+end
+
+function M.is_virtual(c) return c ~= nil and c.virtual ~= nil and (c.param or -1) < 0 end
+-- its name: its label (a selector "View", a button "More", a knob "Amount"
+-- when it has none)
+function M.vname_of(c)
+  return M.clean_vname(c.label) or ((c.type == "combo") and "View" or (c.type == "toggle") and "More" or "Amount")
+end
+-- its settings' names: a button's two (Off / On when it has none of its
+-- own), a selector's list; nil for a knob
+function M.vchoices(c)
+  local v = c.virtual or {}
+  if c.type == "toggle" then
+    return { v.choices[1] or "Off", v.choices[2] or "On" }
+  end
+  if c.type == "combo" then
+    if #(v.choices or {}) >= 1 then return v.choices end
+    return { "1", "2" }
+  end
+  return nil
+end
+-- choice i's value (1-based), and the choice a value is on
+function M.vnorm(c, i)
+  local list = M.vchoices(c)
+  if not list or #list < 2 then return 0 end
+  return (math.max(1, math.min(#list, i)) - 1) / (#list - 1)
+end
+function M.vindex(c, v)
+  local list = M.vchoices(c)
+  if not list or #list < 2 then return 1 end
+  return math.max(1, math.min(#list, math.floor((v or 0) * (#list - 1) + 0.5) + 1))
+end
+-- what it reads as at value v
+function M.vtext(c, v)
+  local list = M.vchoices(c)
+  if list then return list[M.vindex(c, v)] or "" end
+  return ("%d %%"):format(math.floor((v or 0) * 100 + 0.5))
+end
+-- A virtual control of that name in a list of controls, or nil.
+function M.vfind(controls, name)
+  for _, c in ipairs(controls or {}) do
+    if M.is_virtual(c) and M.vname_of(c) == name then return c end
+  end
+  return nil
+end
+
+-- A rule list from a section's Switch<n> lines: { source, op, values,
+-- layout } each (layout nil: the plugin's own).
+function M.switch_of(sect)
+  local out, i = {}, 0
+  while sect and sect["Switch" .. i] do
+    local f = {}
+    for v in (U.trim(sect["Switch" .. i]) .. "|"):gmatch("([^|]*)|") do f[#f + 1] = v end
+    local p, vn = source_of(U.trim(f[1] or ""))
+    local v = tonumber(U.trim(f[2] or ""))
+    if p and v then
+      local op = SHOW_OPS[tonumber(U.trim(f[4] or "")) or 0] or "is"
+      local name = U.trim(table.concat(f, "|", 6))
+      local r = { param = p, vname = vn, op = op, norm = math.max(0, math.min(1, v)),
+                  tol = math.max(0.0005, tonumber(U.trim(f[3] or "")) or 0.499),
+                  layout = (name ~= "") and name or nil }
+      if op == "between" then r.norm2 = math.max(0, math.min(1, tonumber(U.trim(f[5] or "")) or r.norm)) end
+      out[#out + 1] = r
+    end
+    i = i + 1
+  end
+  return (#out > 0) and out or nil
+end
+function M.switch_lines(rules)
+  local out = {}
+  for _, r in ipairs(rules or {}) do
+    local op = M.show_op(r)
+    out[#out + 1] = ("%s|%.4f|%.4f|%d|%s|%s"):format(source_line(r), r.norm or 0, r.tol or 0.499,
+      SHOW_CODE[op] or 0, (op == "between") and ("%.4f"):format(r.norm2 or r.norm or 0) or "",
+      ((r.layout or ""):gsub("[\r\n]", " ")))
+  end
+  return out
+end
+-- A rule in words ("Mode is Dual"): `pname(p)` a parameter's name,
+-- `fmt(p, norm)` what it reads as there (nil: a %), `vfind(name)` a
+-- virtual control of that name (for its choices' names).
+local OP_WORDS = { is = "is", ["not"] = "is not", above = "is above", below = "is below", between = "is between" }
+function M.rule_text(r, pname, fmt, vfind)
+  local src, say
+  if r.vname then
+    local vc = vfind and vfind(r.vname)
+    src = "\u{25C6} " .. r.vname
+    say = function(n) return vc and M.vtext(vc, n) or ("%d %%"):format(math.floor(n * 100 + 0.5)) end
+  else
+    src = (pname and pname(r.param)) or ("P" .. tostring(r.param))
+    say = function(n) return (fmt and fmt(r.param, n)) or ("%d %%"):format(math.floor(n * 100 + 0.5)) end
+  end
+  local op = M.show_op(r)
+  local t = src .. " " .. (OP_WORDS[op] or op) .. " " .. say(r.norm or 0)
+  if op == "between" then t = t .. " and " .. say(r.norm2 or r.norm or 0) end
+  return t
+end
+
+-- A copy of a rule list
+function M.copy_rules(rules)
+  if not rules then return nil end
+  local out = {}
+  for i, r in ipairs(rules) do
+    out[i] = { param = r.param, vname = r.vname, op = M.show_op(r), norm = r.norm, norm2 = r.norm2,
+               tol = r.tol, layout = r.layout }
+  end
+  return out
 end
 
 -- ---------------------------------------------------------------------
@@ -798,6 +1690,7 @@ function M.new_variant(base, name, from, empty)
   local k = M.variant_key(base, name)
   if M.has(k) then return nil end
   local l = M.copy(from or { controls = {} })
+  l.switch = nil
   if empty then
     l.controls = {}
     l.lock = nil
@@ -866,16 +1759,23 @@ end
 -- is NOT written to disk until the user actually edits and saves it.
 -- That way an unconfigured plugin still shows something useful without
 -- silently filling the library with machine-made layouts.
+-- ReaDelay and ReaVerbate get their own canvas (TS_CV_ReaFX), and by
+-- default nothing beside it but ReaVerbate's dry and width.
 function M.get_or_default(key, track, addr, cache_id)
+  local RB = require("TS_CV_ReaFX")
   local saved = M.get(key)
-  if saved then return saved, false end
+  if saved then return RB.ensure(track, addr, cache_id, key, saved), false end
   local id = cache_id or (tostring(addr) .. ":" .. key)
   local d = def_cache[id]
   if not d then
-    d = M.build_default(track, addr)
+    local kind = RB.kind(key)
+    if kind == "readelay" then d = { controls = {}, aliases = {} }
+    elseif kind == "reaverbate" then
+      d = { controls = { { param = 1, type = "knob", label = "" }, { param = 4, type = "knob", label = "", bipolar = true } }, aliases = {} }
+    else d = M.build_default(track, addr) end
     def_cache[id] = d
   end
-  return d, true
+  return RB.ensure(track, addr, cache_id, key, d), true
 end
 
 function M.build_default(track, addr)
@@ -963,6 +1863,30 @@ function M.set_states(key, param, off, on)
   M.set(key, l)
 end
 
+-- Your own range for a parameter (RANGE<p>=<low>|<high>|<unit>|<curve>):
+-- what it reads as when the plugin won't say. Per plugin, per parameter,
+-- like a state's names (TS_CV_Util U.range_*).
+function M.range_of_line(line)
+  local f = {}
+  for v in (U.trim(line or "") .. "|"):gmatch("([^|]*)|") do f[#f + 1] = U.trim(v) end
+  local lo, hi = tonumber(f[1] or ""), tonumber(f[2] or "")
+  if not lo or not hi then return nil end
+  local unit = f[3] or ""
+  local ok_u = false
+  for _, u_ in ipairs(U.RANGE_UNITS) do if u_ == unit then ok_u = true end end
+  local curve = f[4] or "lin"
+  if curve ~= "log" and curve ~= "sq" then curve = "lin" end
+  return { lo = lo, hi = hi, unit = ok_u and unit or "", curve = curve }
+end
+function M.range_line(r)
+  if not (r and r.lo and r.hi) then return nil end
+  return ("%g|%g|%s|%s"):format(r.lo, r.hi, r.unit or "", r.curve or "lin")
+end
+function M.get_range(key, param)
+  local l = M.get(key)
+  return l and l.ranges and l.ranges[param] or nil
+end
+
 -- What a toggle shows for the plugin's own value `raw` (0..1, before any
 -- reverse): the state's name if one is set, else the plugin's text `shown`.
 function M.state_text(key, param, raw, shown)
@@ -1011,12 +1935,67 @@ end
 
 function M.set(key, layout)
   def_cache = {}
+  -- the plugin's layout switching isn't the layout's to change: what the
+  -- library has stays (M.set_switch_rules sets it), and a variant has none
+  local base, var = M.split_variant(key)
+  if var then layout.switch = nil
+  else
+    local had = cache[key] or (sections[key] and parse_section(sections[key]))
+    layout.switch = M.copy_rules(had and had.switch)
+  end
   cache[key] = layout
   sections[key] = serialize(layout)
   local found = false
   for _, s in ipairs(order) do if s == key then found = true break end end
   if not found then order[#order + 1] = key end
   dirty = true
+end
+
+-- The plugin's layout switching (its own layout's Switch<n>): a list of
+-- rules, or nil.
+function M.switch_rules(base)
+  local l = M.get(base)
+  return l and l.switch or nil
+end
+-- Sets it. The plugin's own layout is written for it when it has none yet
+-- (`make()` builds it: the generated default it was showing). Saved.
+function M.set_switch_rules(base, rules, make)
+  local l = M.get(base)
+  if not l then
+    if not make then return false end
+    l = make()
+    if not l then return false end
+  end
+  l = M.copy(l)
+  def_cache = {}
+  l.switch = (rules and #rules > 0) and M.copy_rules(rules) or nil
+  cache[base] = l
+  sections[base] = serialize(l)
+  local found = false
+  for _, s_ in ipairs(order) do if s_ == base then found = true break end end
+  if not found then order[#order + 1] = base end
+  dirty = true
+  M.save()
+  return true
+end
+
+-- The value a virtual control of that name starts at, for a plugin:
+-- from `controls` (the layout showing) when it has one, else from the
+-- first of the plugin's layouts that does; 0 when none has.
+function M.vstart(base, name, controls)
+  local c = M.vfind(controls, name)
+  if not c and base then
+    local l = M.get(base)
+    c = l and M.vfind(l.controls, name)
+    if not c then
+      for _, v in ipairs(M.variants(base)) do
+        local lv = M.get(M.variant_key(base, v))
+        c = lv and M.vfind(lv.controls, name)
+        if c then break end
+      end
+    end
+  end
+  return c and c.virtual and c.virtual.start or 0, c
 end
 
 function M.remove(key)
@@ -1074,7 +2053,7 @@ end
 -- ini) isn't offered.
 local function is_layout(t)
   for k in pairs(t) do
-    if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k == "Plate"
+    if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k:match("^Range%d+$") or k == "Plate"
        or k == "Canvas" then
       return true
     end
@@ -1255,14 +2234,20 @@ function M.copy(layout)
                         metal = c.metal, scale = c.scale, scale_ink = c.scale_ink,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
                         invert2 = c.invert2,
-                        show = c.show and { param = c.show.param, op = M.show_op(c.show),
+                        show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),
                                             norm = c.show.norm, norm2 = c.show.norm2,
-                                            tol = c.show.tol } or nil }
+                                            tol = c.show.tol } or nil,
+                        virtual = c.virtual and { start = c.virtual.start, choices = { table.unpack(c.virtual.choices or {}) } } or nil }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.canvas = M.copy_canvas(layout.canvas)
+  out.switch = M.copy_rules(layout.switch)
   out.states = {}
   for p, st in pairs(layout.states or {}) do out.states[p] = { st[1], st[2] } end
+  if layout.ranges then
+    out.ranges = {}
+    for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve } end
+  end
   return out
 end
 

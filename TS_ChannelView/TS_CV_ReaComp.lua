@@ -23,6 +23,7 @@
   that adds a parameter in the middle; numbers wouldn't.
 --]]
 
+local U = require("TS_CV_Util")
 local RC = {}
 
 function RC.is_comp(key) return key == "ReaComp" end
@@ -232,6 +233,8 @@ end
 -- ("3.0", "-inf", "6.85"); the text it would show for a value
 -- (FormatParamValueNormalized) has them ("3.0 ms", "-inf dB", "6.85 :1").
 function RC.text(track, addr, p, nv)
+  local rg = U.range_of and U.range_of(p)
+  if rg then return U.range_text(rg, nv or reaper.TrackFX_GetParamNormalized(track, addr, p)) end
   local fmt = reaper.TrackFX_FormatParamValueNormalized
   if fmt then
     local ok, t = fmt(track, addr, p, nv or reaper.TrackFX_GetParamNormalized(track, addr, p), "")

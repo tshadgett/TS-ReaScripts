@@ -1,28 +1,87 @@
 # ChannelView — changelog
 
-## 2.0.5 — EQ and compressor layouts for any plugin
+## 2.1.0 — canvas layouts for any plugin
 
-- **EQ layouts.** Any EQ can have a canvas like ReaEQ's: *Layout* ▸ *New EQ
-  layout…*. Name up to 8 bands' controls (or Guess them), and ChannelView
-  learns each band's shape by measuring a hidden copy of the plugin — every
-  switch position, boost and cut separately, each shape and the Q; a band
-  that reports its own values needs only a quick check. Drag a node for
-  frequency and gain, wheel for Q, double-click to take the band out,
-  right-click or Alt+wheel for its shape. Needs *Run FX when stopped* on.
-- **Compressor layouts.** Any compressor can have a canvas like ReaComp's:
-  *Layout* ▸ *New compressor layout…*. Map its threshold, ratio, knee,
-  attack, hold, release, make-up and mix; values are the plugin's own.
-  *Reversed* for a Compression control, or an attack or release that's
-  fastest at the top; *Input* for a compressor with no threshold (driven
-  into a fixed one). Switched ratios and times snap to the plugin's
-  settings.
-- The rest of the plugin's controls sit beside the canvas, starting with
-  those of the layout it was made from, faceplate and looks included. Set
-  a canvas up again from the layout menu, the panel, or Edit Parameters.
-- On the web companion too: drag, double-tap, and pick a band's shape.
+2.0.5 was never released; everything in it is here.
+
+- **Canvas layouts for any plugin.** *Layout* ▸ *New canvas layout* ▸ EQ,
+  Compressor, Multiband, Gate, Limiter, De-esser, Saturation, Delay,
+  Reverb, Modulation or Envelope. Name the plugin's controls for each role
+  (or *Guess from names*); the rest of its controls sit beside the canvas,
+  carried over from the layout it was made from, faceplate and looks
+  included. Canvases draw what they measure rather than print it.
+  - **EQ:** up to 8 bands, each band's shape learned from a hidden copy of
+    the plugin (every switch position, boost and cut, each shape and the
+    Q). Drag a node, wheel for Q, double-click to take a band out,
+    right-click or Alt+wheel for its shape. Optional **dynamic EQ** bands:
+    their reach, a range node to drag, and the picked band's level against
+    its threshold. Needs *Run FX when stopped* on.
+  - **Compressor:** threshold (or input), ratio, knee, attack, hold,
+    release, make-up and mix, read from the plugin's own values; reversed
+    controls; switched settings snap. **Measure threshold** finds its real
+    dBFS (an SSL bus compressor's 0 dB is −22 dBFS), for 1176-style
+    compressors driven by their input too, drawn as a fixed threshold with
+    the input as a gain bar. Knees read 0–1, ratios under 1:1, and a live
+    dot riding the curve.
+  - **Gate:** open and close thresholds, range, ratio and a lamp.
+    **Limiter:** level history, threshold or input gain, and the ceiling.
+  - **Multiband:** up to 4 bands, shared crossovers or each band's own
+    edges; per band a small curve with its level riding it and sliders for
+    ratio, attack, release and gain, solo, bypass and its in-use setting
+    (+ BAND); click a band for the full compressor canvas.
+  - **De-esser:** its band filled as it reduces, over the spectrum, and the
+    waveform.
+  - **Saturation:** its curve and harmonics learned on a hidden copy, the
+    music's level riding the curve, and a VU-style drive meter.
+  - **Delay:** every delay as echoes on one timeline — left and right,
+    sync in note values, ping-pong, stereo modes, offsets and ratios, up to
+    10 taps (click one for its pan, level and feedback), and a filter
+    strip.
+  - **Reverb:** pre-delay, early reflections (size, diffusion, balance)
+    and the tail; decay by frequency with crossovers, multipliers, tone
+    tilt, shelves and cuts; style chips and freeze. **Measure decay** finds
+    its time in seconds when its control doesn't say.
+  - **Modulation:** a scope whose timebase follows the rate, shape chips,
+    and up to three voices with their pans. **Envelope:** the ADSR with
+    curve handles.
+  - **ReaDelay and ReaVerbate** set themselves up; ReaDelay's taps are
+    added and removed on the canvas.
+  - On the web companion too.
+- **Virtual controls.** A layout's own buttons, selectors and knobs, drawn
+  in violet and kept per instance, to drive *Show when* rules and layout
+  switching.
+- **Layouts that switch themselves.** Rules in Edit Parameters (*use
+  "Dual" when Mode is Dual*) pick the layout from a parameter or a virtual
+  control; the header shows the one chosen.
 - **A default layout per plugin.** *Make "<name>" the default* in the
-  layout menu: new instances, and any not set to another, show it. The
-  plugin's own layout is now called *Standard*.
+  layout menu. The plugin's own layout is now called *Standard*.
+- **Custom value ranges.** For plugins that report bare numbers (Acustica):
+  right-click ▸ *Values* ▸ *Custom range* — its ends, unit and curve — and
+  it reads as that everywhere. The numbers round a knob's dial are set
+  there too.
+- **Tidier menus.** A control's right-click is in four parts (Control,
+  Look, Automate, Arrange); everything but looks is also in Edit
+  Parameters, which opens at the control you clicked. New there: *Name* ▸
+  label, live name and state names; *Reverse*; *Show when*. Edit
+  Parameters gains *State names*. The panel menu is in three parts
+  (Layout, Plugin, Chain), with *Meters* and *Reset layout* submenus.
+- **Stepped knob** follows a slow drag one position at a time, and lands
+  only on the plugin's own choices.
+- **Factory presets** now move ChannelView's controls on plugins that don't
+  tell REAPER (TDR Slick EQ).
+- **VSL Synchron Player** no longer stalls the window: a plugin slow to say
+  which preset it's on is asked now and then, and *waiting while REAPER is
+  busy* gives up after 15 seconds of slow frames.
+- **Gain-reduction trace** lines itself up with the plugin's output (a
+  Weiss compressor's was drawn 169 ms late).
+- **Input/output meters** now work on canvases, down the panel's edges.
+- **TS_TrackProbe 1.8.0:** reads each multiband band's level; no false
+  offset after a latency change or on kicks. Reopen projects after
+  updating.
+- **Mac and Linux:** the colour picker's eyedropper opens the system
+  colour picker.
+- Plugins that answer every value with their current text (Valhalla) are
+  read correctly.
 
 ## 2.0.1 — hiding plugins, copying a toolbar
 

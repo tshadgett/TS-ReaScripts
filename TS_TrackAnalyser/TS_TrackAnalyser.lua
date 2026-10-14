@@ -2,9 +2,13 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.0.5
+-- @version 2.1.0
 -- @changelog
---  No changes: the version moves to 2.0.5 to match ChannelView.
+--  A plugin's reported gain reduction is lined up with the audio: once a
+--  second it's matched against the reduction measured between the probes,
+--  so a plugin whose meter is already in step with its output (a Weiss
+--  compressor) is no longer drawn late by its own latency.
+--  TS_TrackProbe 1.8.0 (reopen projects after updating).
 -- @about
 --  # Track Analyser
 --
@@ -2672,6 +2676,76 @@ local function drawPanel2(dl, x0, y0, w, h)
         R[k] = held
         repN[k] = haveRep and repSum or nil
       end
+      -- WHERE EACH PLUGIN'S REPORTS REALLY BELONG. A report is drawn late by
+      -- the latency between the plugin and the post probe, and by its own
+      -- latency too on the assumption that its meter runs ahead of its
+      -- output (a lookahead's does). Many plugins already hold their meter
+      -- back to match their output -- a Weiss reporting 169 ms of latency
+      -- drew 169 ms late -- and some hold it back further still. So once a
+      -- second, while the span is measuring, each reporting plugin's reports
+      -- are tried against it at every delay from 0.6 s early to past its own
+      -- latency, and drawn at the one where they agree best (correlation of
+      -- at least 0.4). Until then, the assumption.
+      local tnowA = r.time_precise()
+      for j, src in ipairs(rigSources) do
+        if src.usable and not src.est and tnowA - (src.alignT or 0) > 1 then
+          src.alignT = tnowA
+          local back = math.floor(0.6 * colsPerSec)
+          local hiD = (src.delayCols or 0) + math.floor(0.05 * colsPerSec)
+          -- coarse (every 4th offset over every 3rd column), then fine
+          -- around the best: a few thousand reads, not half a million
+          local function corr_at(d, stride)
+            local n, sx, sy, sxx, syy, sxy = 0, 0, 0, 0, 0, 0
+            for k = 0, total - 1, stride do
+              local x = R[k]
+              if x then
+                local idx = (oldest + k - d) % sc.len
+                -- nothing past the newest reading: the ring holds old ones there
+                if not grLastCol or ((grLastCol - idx) % sc.len) < sc.len / 2 then
+                  local g = grHist[idx]
+                  local y = g and g[j]
+                  if y then
+                    n = n + 1; sx = sx + x; sy = sy + y
+                    sxx = sxx + x * x; syy = syy + y * y; sxy = sxy + x * y
+                  end
+                end
+              end
+            end
+            if n < 80 / stride then return nil end
+            local vx, vy = n * sxx - sx * sx, n * syy - sy * sy
+            if vx <= 1e-9 or vy <= 1e-9 then return nil end
+            return (n * sxy - sx * sy) / math.sqrt(vx * vy)
+          end
+          local best, bestD = -2, nil
+          for d = -back, hiD, 4 do
+            local c = corr_at(d, 3)
+            if c and c > best then best, bestD = c, d end
+          end
+          if bestD then
+            local c0 = bestD
+            best, bestD = -2, nil
+            for d = c0 - 4, c0 + 4 do
+              local c = corr_at(d, 1)
+              if c and c > best then best, bestD = c, d end
+            end
+          end
+          if bestD and best >= 0.4 then src.foundCols, src.foundCorr = bestD, best end
+        end
+      end
+      -- (the reports read again at the delay found, for the fit and the shares)
+      for k = 0, total - 1 do
+        local repSum, haveRep = 0, false
+        for j, src in ipairs(rigSources) do
+          if src.usable and not src.est and src.foundCols then
+            local g = grHist[(oldest + k - src.foundCols) % sc.len]
+            local x = g and g[j]
+            if x then repSum = repSum + x ; haveRep = true ; each[j][k] = x else each[j][k] = nil end
+          elseif src.usable and not src.est and each[j][k] then
+            repSum = repSum + each[j][k] ; haveRep = true
+          end
+        end
+        repN[k] = haveRep and repSum or nil
+      end
       -- the fit, on a 60 ms running mean of the span
       local W = math.max(1, math.floor(0.06 * colsPerSec + 0.5))
       local half = math.floor(W / 2)
@@ -2753,7 +2827,7 @@ local function drawPanel2(dl, x0, y0, w, h)
     -- Drawn late by the latency between where the reading comes from and
     -- the post probe, so it sits on the transient it belongs to (see
     -- sourceDelay).
-    local dly = (rigSources[idx] and rigSources[idx].delayCols) or 0
+    local dly = (rigSources[idx] and (rigSources[idx].foundCols or rigSources[idx].delayCols)) or 0
     local src = rigSources[idx]
     if ok and total >= 4 and not (measuredDrew and src and not src.est) then
       local gx, gy, n = {}, {}, 0

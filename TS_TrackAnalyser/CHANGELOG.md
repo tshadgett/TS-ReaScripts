@@ -1,8 +1,17 @@
 # Track Analyser — changelog
 
-## 2.0.5 — in step with ChannelView
+## 2.1.0 — reported reduction lined up
 
-No changes. The version moves to 2.0.5 to match ChannelView.
+- A plugin's reported gain reduction is lined up with the audio. Once a
+  second it's matched against the reduction measured between the probes
+  and drawn at the delay where they agree, so a plugin whose meter is
+  already in step with its output (a Weiss compressor) is no longer drawn
+  late by its own latency.
+- TS_TrackProbe 1.8.0, shared with ChannelView: no false offset after a
+  latency change or on kicks, and multiband band levels for ChannelView.
+  Reopen projects after updating.
+
+2.0.5 was never released.
 
 ## 2.0.1 — in step with ChannelView
 

@@ -70,10 +70,12 @@ local function F(addr) index(); return amap[addr] end
 extstate = {}
 
 local projext = {}
+local gmem, probe_old = {}, false
+local now_t = 0
 reaper = {
   GetProjExtState = function(_, ns, k) return 0, projext[ns .. k] or "" end,
   SetProjExtState = function(_, ns, k, v) projext[ns .. k] = v end,
-  time_precise = function() return os.clock() end,
+  time_precise = function() return os.clock() + now_t end,
   CountTracks = function() return #project end,
   GetTrack = function(_, i) return project[i + 1] end,
   GetParentTrack = function() return nil end,
@@ -123,6 +125,8 @@ reaper = {
   TrackFX_GetParamName = function(tr, a, p)
     local f = F(a)
     if f and f.name:find("TrackProbe") and p == 25 then return true, "Tap 1 input peak (dBFS)" end
+    if f and f.name:find("TrackProbe") and p == 41 then return true, "Multiband tap (0 none)" end
+    if f and f.name:find("TrackProbe") and p == 49 and not probe_old then return true, "Third-octave tap (0 none)" end
     return true, ""
   end,
   TrackFX_SetParam = function(tr, a, p, v) F(a).params[p] = v; return true end,
@@ -144,11 +148,17 @@ reaper = {
     if set then tr.ext[k] = v; return true, v end
     return tr.ext[k] ~= nil, tr.ext[k] or ""
   end,
-  GetMediaTrackInfo_Value = function(tr, k) if k == "I_NCHAN" then return tr.nch end return 0 end,
+  GetMediaTrackInfo_Value = function(tr, k)
+    if k == "I_NCHAN" then return tr.nch end
+    if k == "IP_TRACKNUMBER" then return 3 end
+    return 0
+  end,
   SetMediaTrackInfo_Value = function(tr, k, v) if k == "I_NCHAN" then tr.nch = v end return true end,
   Undo_BeginBlock = function() end, Undo_EndBlock = function() end,
   PreventUIRefresh = function() end,
-  gmem_attach = function() end, gmem_write = function() end,
+  ValidatePtr = function() return true end,
+  gmem_attach = function() end, gmem_write = function(i, v) gmem[i] = v end,
+  gmem_read = function(i) return gmem[i] or 0 end,
   GetLastTouchedFX = function() return false end,
   GetMasterTrack = function() return nil end,
   GetExtState = function(sec, k) return (extstate[sec .. "/" .. k]) or "" end,
@@ -282,6 +292,54 @@ check("no reading for a levels tap",   TP.reading(track, "{C3}"), nil)
 F(5).params[TP.P_INPK + 1] = -12.5; F(5).params[TP.P_OUTRMS + 1] = -9
 local lv = TP.levels(track, "{C3}")
 check("levels read back",              lv and (lv.in_pk .. "/" .. lv.out_rms), "-12.5/-9")
+-- a multiband: the probe splits the tap's audio at the crossovers asked for
+check("multiband: asked",              TP.set_mb(track, "{C1}", { 200, 2000 }), true)
+check("multiband: tap and crossovers", ("%d %d %d %d"):format(F(5).params[TP.P_MB], F(5).params[TP.P_MBX],
+      F(5).params[TP.P_MBX + 1], F(5).params[TP.P_MBX + 2] or 0), "1 200 2000 0")
+F(5).params[TP.P_MBGR + 1] = 4.5
+check("multiband: a band's reduction", TP.band_gr(track, "{C1}", 2), 4.5)
+check("multiband: a levels-only tap can't", TP.set_mb(track, "{C3}", { 300 }), false)
+F(5).params[TP.P_MB] = 2
+check("multiband: another tap's bands aren't its", TP.band_gr(track, "{C1}", 2), nil)
+F(5).params[TP.P_MB] = 0
+-- third-octaves: one tap a probe, read back from gmem
+check("fine: a gain tap can be",       TP.fine_ok(track, "{C1}"), true)
+check("fine: a levels-only tap can't", TP.fine_ok(track, "{C3}"), false)
+probe_old = true
+check("fine: an older probe says so",  TP.fine_ok(track, "{C1}"), "old")
+check("fine: and isn't asked",         TP.set_fine(track, "{C1}"), false)
+probe_old = false
+check("fine: asked",                   TP.set_fine(track, "{C1}"), true)
+check("fine: the probe's tap",         F(5).params[TP.P_FINE], 1)
+check("fine: nothing published yet",   TP.fine(track, "{C1}"), nil)
+do
+  local b = TP.FINE_GM + 2 * TP.FINE_GSTR   -- the track's index, 2
+  gmem[b], gmem[b + 1], gmem[b + 2], gmem[b + 3] = 7, 30, 1, 1
+  for k = 0, 29 do gmem[b + 8 + k] = -999; gmem[b + 72 + k] = -40 end
+  gmem[b + 8 + 16] = -3.5          -- 1 kHz reduced 3.5 dB
+  gmem[b + 8 + 17] = 0.5
+  local fd = TP.fine(track, "{C1}")
+  check("fine: read back",             fd and ("%d %s %s"):format(fd.n, fd.d[17], tostring(fd.d[1])), "30 -3.5 nil")
+  check("fine: band 17 is 1 kHz",      fd and math.floor(fd.f[17] + 0.5), 1000)
+  check("fine: the zero was measured", fd and fd.cal, true)
+  now_t = now_t + 1                 -- the count hasn't moved in a second: stale
+  check("fine: a stopped count is old", TP.fine(track, "{C1}"), nil)
+  gmem[b] = 8
+  check("fine: a moving one isn't",    TP.fine(track, "{C1}") ~= nil, true)
+  gmem[b + 2] = 2
+  check("fine: another tap's isn't its", TP.fine(track, "{C1}"), nil)
+  gmem[b + 2] = 1
+end
+-- let go when nobody asks; the web bridge asks politely
+now_t = now_t + 2
+TP.fine_tidy(os.clock() + now_t)
+check("fine: let go when nobody asks",  F(5).params[TP.P_FINE], 0)
+F(5).params[TP.P_FINE] = 2
+check("fine: polite doesn't take it",   TP.set_fine(track, "{C1}", true), false)
+check("fine: ...and leaves it",         F(5).params[TP.P_FINE], 2)
+F(5).params[TP.P_FINE] = 0
+check("fine: polite takes a free one",  TP.set_fine(track, "{C1}", true), true)
+F(5).params[TP.P_FINE] = 0
 check("a second sync changes nothing", TP.sync(track), false)
 -- untick levels on the LA-2A: same plugins, but what the tap is for changed
 levels["LA-2A"] = nil

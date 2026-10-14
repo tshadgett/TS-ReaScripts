@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 1.5.0
+version: 1.8.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -194,6 +194,39 @@ author: Tim Shadgett
 //   test tone held at -5 dB read 0). So the baseline is only the
 //   fallback. The real zero is MEASURED, while playback is stopped:
 //
+// A MULTIBAND COMPRESSOR, BAND BY BAND
+//   A multiband plugin reports one reduction to REAPER, if any. Its tap
+//   already measures every filterbank band on its own, so ChannelView can
+//   ask for the bands grouped at the plugin's crossovers: tap_mb names the
+//   tap (1..4, 0 none), tap_mbx1..3 the crossovers in Hz (0 unused, so 2
+//   to 4 bands), and each band's reduction comes out on tap_mbgr1..4 --
+//   the median of the filterbank bands whose centres fall inside it (the
+//   one nearest its middle when none do), with the same zero, smoothing
+//   and fall as the tap's own reading. One multiband tap per probe.
+//   Since 1.8.0 each band's INPUT level comes out too, on tap_mbl1..4:
+//   the filterbank bands' power inside it on the way in, a 2 ms mean
+//   square scaled so a sine reads its peak, falling 20 dB/s. It needs
+//   no zero and no alignment, so it can be trusted where the per-band
+//   reduction can't; ChannelView draws it against each band's threshold.
+//
+// THIRD-OCTAVE REDUCTION, FOR ONE TAP
+//   The ten-band filterbank is for one number, fast. For a picture of
+//   WHERE a plugin reduces -- a bus compressor pulling the lows harder
+//   than the top, a de-esser's band, a dynamic EQ's moving bands -- one
+//   tap at a time can also be measured in third-octaves (25 Hz to 20 kHz,
+//   the standard centres): tap_fine names the tap (1..4, 0 none), and only
+//   that tap pays for it. Both copies go through an 8192-point FFT every
+//   1024 samples (about 170 ms of audio, so the lows answer slower than
+//   the meter -- it's for watching, not for metering), the bins summed
+//   into each third-octave, after/before per band. The zero is the same
+//   idea as the taps': measured while stopped from the same pink noise,
+//   the music's baseline until then. Out on gmem at 0x70000 + track index
+//   * 128: [0] a count that moves with every frame, [1] bands, [2] the
+//   tap, [3] 1 when the zero is measured, [4] sample rate; per band b
+//   (centre 1000 * 2^((b - 16) / 3) Hz): [8 + b] how far it sits from its
+//   zero, dB (below 0 is reduction, -999 no signal), [72 + b] the level
+//   going in, dBFS. A third of the cost of the tap's filterbank.
+//
 // THE ZERO POINT: MEASURED WHILE STOPPED
 //   Every time playback stops, the pre probe feeds a quiet test signal
 //   into the chain -- pink noise, one second at -60 dBFS and one at -50 --
@@ -300,6 +333,24 @@ slider38:tap_outrms1=-150<-150,24,0.1>-Tap 1 output RMS (dBFS)
 slider39:tap_outrms2=-150<-150,24,0.1>-Tap 2 output RMS (dBFS)
 slider40:tap_outrms3=-150<-150,24,0.1>-Tap 3 output RMS (dBFS)
 slider41:tap_outrms4=-150<-150,24,0.1>-Tap 4 output RMS (dBFS)
+// A multiband plugin's bands (A MULTIBAND COMPRESSOR, BAND BY BAND).
+// tap_mb and the crossovers are set by ChannelView; tap_mbgrN are read.
+slider42:tap_mb=0<0,4,1>-Multiband tap (0 none)
+slider43:tap_mbx1=0<0,24000,1>-Multiband crossover 1 (Hz)
+slider44:tap_mbx2=0<0,24000,1>-Multiband crossover 2 (Hz)
+slider45:tap_mbx3=0<0,24000,1>-Multiband crossover 3 (Hz)
+slider46:tap_mbgr1=0<0,60,0.01>-Multiband band 1 gain reduction (dB)
+slider47:tap_mbgr2=0<0,60,0.01>-Multiband band 2 gain reduction (dB)
+slider48:tap_mbgr3=0<0,60,0.01>-Multiband band 3 gain reduction (dB)
+slider49:tap_mbgr4=0<0,60,0.01>-Multiband band 4 gain reduction (dB)
+// THIRD-OCTAVE REDUCTION: the tap measured in third-octaves (set by ChannelView)
+slider50:tap_fine=0<0,4,1>-Third-octave tap (0 none)
+// A multiband tap's bands' input levels (1.8.0): how hard each band is
+// driven, measured on the way in only -- nothing compared with anything.
+slider51:tap_mbl1=-150<-150,24,0.1>-Multiband band 1 input level (dBFS)
+slider52:tap_mbl2=-150<-150,24,0.1>-Multiband band 2 input level (dBFS)
+slider53:tap_mbl3=-150<-150,24,0.1>-Multiband band 3 input level (dBFS)
+slider54:tap_mbl4=-150<-150,24,0.1>-Multiband band 4 input level (dBFS)
 
 in_pin:left
 in_pin:right
@@ -600,6 +651,12 @@ out_pin:right
   TS_NA = 250; TS_NB = 251; TS_HASCAL = 252; TS_CST = 253; TS_STALE = 254;
   // levels: input and output peak (falling), input and output mean square
   TS_LIP = 260; TS_LOP = 261; TS_LIR = 262; TS_LOR = 263;
+  // a multiband tap: each filterbank band's reduction this column (-1
+  // when gated), and each of the plugin's bands' reading
+  TS_MBD = 270; TS_MBG = 280;
+  TS_HOLD = 290;                  // samples until a latency change has flushed through
+  TS_MBP = 300;                   // a multiband tap: each filterbank band's input power this column
+  TS_MBL = 320;                   // ... and each of the plugin's bands' input level (dBFS)
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -655,6 +712,157 @@ out_pin:right
   cal_gen_last = -1; cal_slot = -1;
   kb0 = kb1 = kb2 = 0;
 
+  // third-octaves for one tap (THIRD-OCTAVE REDUCTION)
+  FN_N = 8192; FN_HOP = 1024; FN_MAXB = 30; FN_FL = 16;
+  FN_A  = 420000;                 // before, a ring of FN_N
+  FN_B  = FN_A + FN_N;            // after
+  FN_W  = FN_B + FN_N;            // the window
+  // FFT workspace, 2 * FN_N each: fft() needs a buffer that doesn't cross
+  // a 65536 boundary, so these start on one
+  FN_FA = 458752;
+  FN_FB = FN_FA + 2 * FN_N;
+  FN_S  = FN_W + FN_N;            // per band, FN_FL fields:
+  //   0 first bin  1 last bin  2 power before  3 power after (smoothed)
+  //   4 ratio dB  5 baseline  6 has baseline  7 peak power before
+  //   8 zero  9 zero valid  10..13 the zero's sums (A before/after, B)
+  //   14 published  15 has signal
+  FN_GM = 0x70000; FN_GSTR = 128;
+  fn_sr = 0; fn_pos = 0; fn_cnt = 0; fn_nb = 0; fn_tap = -1; fn_seq = 0;
+  fn_hascal = 0; fn_cna = 0; fn_cnb = 0;
+  // samples to wait before the third-octaves count again: a window still
+  // holding audio from before a change (the "before" delay line cleared
+  // when the tap's latency moves -- silence on one side, music on the
+  // other) reads as a jump the zero then believes for minutes
+  fn_hold = 0;
+  // how fast the zero learnt from the music climbs to a higher ratio, a
+  // frame (the taps' 0.5 let one odd frame lift it halfway)
+  FN_RISE = 0.03;
+
+  function fineSetup() local(i, k, fc, fl, fh, b, lo, hi, j) (
+    i = 0; loop(FN_N, FN_W[i] = 0.5 - 0.5 * cos(2 * $pi * i / FN_N); FN_A[i] = 0; FN_B[i] = 0; i += 1; );
+    fn_nb = 0;
+    k = -16;
+    loop(FN_MAXB,
+      fc = 1000 * 2 ^ (k / 3);
+      fl = fc * 2 ^ (-1 / 6); fh = fc * 2 ^ (1 / 6);
+      fh < srate * 0.48 ? (
+        b = FN_S + fn_nb * FN_FL;
+        lo = ceil(fl * FN_N / srate); hi = floor(fh * FN_N / srate);
+        hi < lo ? ( lo = floor(fc * FN_N / srate + 0.5); hi = lo; );
+        // at least three bins: a low band of one or two swings with every
+        // hit (its neighbours overlap a little -- it's for watching)
+        hi - lo + 1 < 3 ? ( lo = floor(fc * FN_N / srate + 0.5) - 1; hi = lo + 2; );
+        b[0] = max(1, lo); b[1] = max(b[0], hi);
+        j = 2; loop(FN_FL - 2, b[j] = 0; j += 1; );
+        fn_nb += 1;
+      );
+      k += 1;
+    );
+    fn_sr = srate; fn_pos = 0; fn_cnt = 0; fn_hascal = 0; fn_cna = 0; fn_cnb = 0;
+    fn_pkdec = 10 ^ (-6 / 10 * FN_HOP / srate);
+  );
+
+  // what the music taught the bands, gone (the plugin was touched)
+  function fineForget() local(k) (
+    k = 0; loop(fn_nb, (FN_S + k * FN_FL)[6] = 0; k += 1; );
+    fn_hold = FN_N;
+  );
+
+  // a new zero measurement: the sums start again
+  function fineCalClear() local(k, b) (
+    k = 0; loop(fn_nb, b = FN_S + k * FN_FL; b[10] = b[11] = b[12] = b[13] = 0; k += 1; );
+    fn_cna = 0; fn_cnb = 0;
+  );
+
+  // the run finished: each band's zero, the higher of its two levels'
+  // ratios, kept when enough bands had signal
+  function fineCalCommit() local(k, b, va, vb, za, zb, n) (
+    n = 0;
+    k = 0;
+    loop(fn_nb,
+      b = FN_S + k * FN_FL;
+      va = fn_cna >= 8 && b[10] > 0.0000001 * fn_cna && b[11] > 0.000000001 * fn_cna;
+      vb = fn_cnb >= 8 && b[12] > 0.0000001 * fn_cnb && b[13] > 0.000000001 * fn_cnb;
+      va ? (za = 10 * log10(b[11] / b[10]));
+      vb ? (zb = 10 * log10(b[13] / b[12]));
+      (va || vb) ? ( b[8] = (va && vb) ? max(za, zb) : (va ? za : zb); b[9] = 1; n += 1; ) : (b[9] = 0);
+      k += 1;
+    );
+    n >= 10 ? (fn_hascal = 1);
+  );
+
+  function fineFrame() local(i, j, b, k, pa, pb, r, d, dec, rel, gb, lv) (
+    i = 0;
+    loop(FN_N,
+      j = fn_pos + i; j >= FN_N ? (j -= FN_N);
+      FN_FA[2 * i] = FN_A[j] * FN_W[i]; FN_FA[2 * i + 1] = 0;
+      FN_FB[2 * i] = FN_B[j] * FN_W[i]; FN_FB[2 * i + 1] = 0;
+      i += 1;
+    );
+    fft(FN_FA, FN_N); fft_permute(FN_FA, FN_N);
+    fft(FN_FB, FN_N); fft_permute(FN_FB, FN_N);
+    dec = TAP_DEC * FN_HOP / srate;
+    rel = 40 * FN_HOP / srate;      // dB a frame the picture lets go
+    cal_mute ? (
+      cal_acc ? ( cal_ph == 1 ? (fn_cna += 1) : (fn_cnb += 1); );
+    );
+    k = 0;
+    loop(fn_nb,
+      b = FN_S + k * FN_FL;
+      pa = 0; pb = 0; i = b[0];
+      loop(b[1] - b[0] + 1,
+        pa += sqr(FN_FA[2 * i]) + sqr(FN_FA[2 * i + 1]);
+        pb += sqr(FN_FB[2 * i]) + sqr(FN_FB[2 * i + 1]);
+        i += 1;
+      );
+      cal_mute ? (
+        cal_acc ? ( cal_ph == 1 ? ( b[10] += pa; b[11] += pb; ) : ( b[12] += pa; b[13] += pb; ); );
+        b[15] = 0;
+      ) : (
+        b[2] += (pa - b[2]) * 0.6; b[3] += (pb - b[3]) * 0.6;
+        b[7] = max(b[2], b[7] * fn_pkdec);
+        (fn_hold <= 0 && b[2] > max(0.001, b[7] * 0.00001) && b[3] > 0.000000000001) ? (
+          r = 10 * log10(b[3] / b[2]);
+          b[6] < 0.5 ? ( b[4] = r; b[5] = r; b[6] = 1; b[14] = 0; ) : (
+            b[4] = r;
+            b[4] > b[5] ? (b[5] += (b[4] - b[5]) * FN_RISE) : (b[5] -= dec);
+          );
+          d = r - ((fn_hascal && b[9] > 0.5) ? b[8] : b[5]);
+          // as measured: ChannelView smooths it. (Held at its deepest, a
+          // kick landing at a window's edge -- one frame's swing -- read as
+          // reduction that wasn't there.)
+          b[14] = d;
+          b[15] = 1;
+        ) : ( b[15] = 0; b[14] = min(0, b[14] + rel); );
+      );
+      k += 1;
+    );
+    // out to gmem, for this track
+    (cal_pl >= 0 && cal_pl < CAL_SLOTS) ? (
+      gb = FN_GM + cal_pl * FN_GSTR;
+      fn_seq = (fn_seq + 1) % 1000000;
+      gmem[gb + 1] = fn_nb; gmem[gb + 2] = tap_fine; gmem[gb + 3] = fn_hascal; gmem[gb + 4] = srate;
+      k = 0;
+      loop(fn_nb,
+        b = FN_S + k * FN_FL;
+        gmem[gb + 8 + k] = b[15] > 0.5 ? b[14] : -999;
+        lv = b[2] / (FN_N * FN_N / 16);
+        gmem[gb + 72 + k] = lv > 0.000000000000001 ? 10 * log10(lv) : -150;
+        k += 1;
+      );
+      gmem[gb] = fn_seq;
+    );
+  );
+
+  // one sample of the third-octave tap: `a` before (already lined up), `b` after
+  function fineIn(a, b) (
+    fn_hold > 0 ? (fn_hold -= 1);
+    FN_A[fn_pos] = a; FN_B[fn_pos] = b;
+    fn_pos += 1; fn_pos >= FN_N ? (fn_pos = 0);
+    fn_cnt += 1;
+    fn_cnt >= FN_HOP ? ( fn_cnt = 0; fineFrame(); );
+  );
+
   function tapBands() local(i, ratio, lo, hi, f0, q, w0, al, a0, hiC) (
     hiC = min(GRB_HI, srate * 0.45);
     ratio = log(hiC / GRB_LO);
@@ -678,6 +886,7 @@ out_pin:right
     tap_rel   = TAP_REL / tap_cps;
     tap_pkdec = 10 ^ (-6 / 10 / tap_cps);   // band peaks fall 6 dB/s
     tap_lvpk  = 10 ^ (-LV_FALL / 20 / srate);
+    tap_lvcol = LV_FALL / tap_cps;          // dB a column the bands' input levels fall
     tap_lvrk  = 1 - exp(-1 / (srate * LV_RMS));
     tap_lvn   = max(64, floor(srate / LV_RATE));
     tap_sr = srate;
@@ -689,19 +898,30 @@ out_pin:right
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
     i = 0; loop(TS_SORT, s[i] = 0; i += 1; );
     s[TS_DISP] = 0; s[TS_LAST] = 0;
+    i = 0; loop(4, s[TS_MBG + i] = 0; i += 1; );
+    t == tap_fine - 1 ? (fineForget());
   );
 
   function setTapLag(t, n) local(tb, s, i) (
     tb = TAP_BASE + t * TAP_STRIDE;
     s = tb + TAP_S;
     n = max(0, min(DLY_MAX, floor(n)));
-    // Only the delay line is cleared. What the tap has learnt -- each
-    // band's baseline -- is a property of the plugin, not of the
-    // alignment, so a latency change keeps it.
+    // The delay line is cleared -- and the baseline learnt from the music
+    // too: learnt with the two sides out of line, it climbed to the
+    // biggest swings a hit made (a kick 725 samples out left 7 dB of
+    // "reduction" on a plugin doing nothing). The measured zero (THE ZERO
+    // POINT) is the plugin's own and stays.
     n != s[TS_LAGN] ? (
       s[TS_LAGN] = n;
       s[TS_DPOS] = 0;
       i = 0; loop(n + 1, tb[i] = 0; i += 1; );
+      // until the cleared line has refilled, "before" is part silence: a
+      // ratio taken then jumps, and the baseline climbs to it and sinks
+      // back at 0.1 dB/s -- minutes of reduction that isn't there
+      s[TS_HOLD] = n + 2 * max(1, tap_slice);
+      i = 0; loop(GRB_N, s[TS_HB + i] = 0; i += 1; );
+      // the third-octaves' zero, learnt across the jump, would be wrong
+      t == tap_fine - 1 ? ( fineForget(); fn_hold = FN_N + n; );
     );
   );
 
@@ -711,6 +931,7 @@ out_pin:right
     tb = TAP_BASE + t * TAP_STRIDE;
     s = tb + TAP_S;
     n = s[TS_LAGN];
+    s[TS_HOLD] > 0 ? (s[TS_HOLD] -= 1);
     n > 0 ? (
       dp = s[TS_DPOS];
       tb[dp] = a;
@@ -739,6 +960,64 @@ out_pin:right
       s[TS_PB + bi] += z * z;
       bi += 1;
     );
+    t == tap_fine - 1 ? (fineIn(a, b));
+  );
+
+  // A multiband tap's bands: the median reduction of the filterbank bands
+  // whose centres fall between each pair of crossovers (or the one nearest
+  // the band's middle, when none do), with the tap's own fall.
+  function tapMB(s) local(nk, hiC, lr, k, lo, hi, n, bi, f0, d, j, g, fc, pw, lv) (
+    nk = 1 + (tap_mbx1 > 0) + (tap_mbx2 > 0) + (tap_mbx3 > 0);
+    hiC = min(GRB_HI, srate * 0.45);
+    lr = log(hiC / GRB_LO);
+    k = 0;
+    loop(4,
+      k < nk ? (
+        lo = k == 0 ? 0 : (k == 1 ? tap_mbx1 : (k == 2 ? tap_mbx2 : tap_mbx3));
+        hi = k == nk - 1 ? 1000000 : (k == 0 ? tap_mbx1 : (k == 1 ? tap_mbx2 : tap_mbx3));
+        n = 0;
+        pw = 0;
+        bi = 0;
+        loop(GRB_N,
+          f0 = GRB_LO * exp(lr * (bi + 0.5) / GRB_N);
+          (f0 >= lo && f0 < hi) ? pw += s[TS_MBP + bi];
+          d = s[TS_MBD + bi];
+          (f0 >= lo && f0 < hi && d >= 0) ? (
+            j = n;
+            while (j > 0 && s[TS_SORT + j - 1] > d) (
+              s[TS_SORT + j] = s[TS_SORT + j - 1];
+              j -= 1;
+            );
+            s[TS_SORT + j] = d;
+            n += 1;
+          );
+          bi += 1;
+        );
+        // its input level: the power of the filterbank bands inside it
+        // (the nearest one's, for a band too narrow to hold one)
+        pw <= 0 ? (
+          fc = sqrt(max(lo, GRB_LO) * min(hi, hiC));
+          bi = max(0, min(GRB_N - 1, floor(log(fc / GRB_LO) / lr * GRB_N)));
+          pw = s[TS_MBP + bi];
+        );
+        lv = pw > 0.000000000000001 ? 10 * log10(pw * 2) : -150;
+        s[TS_MBL + k] = max(lv, s[TS_MBL + k] - tap_lvcol);
+        n < 1 ? (
+          fc = sqrt(max(lo, GRB_LO) * min(hi, hiC));
+          bi = max(0, min(GRB_N - 1, floor(log(fc / GRB_LO) / lr * GRB_N)));
+          d = s[TS_MBD + bi];
+          g = d >= 0 ? d : 0;
+        ) : (
+          g = (n & 1) ? s[TS_SORT + (n - 1) / 2] : (s[TS_SORT + n / 2 - 1] + s[TS_SORT + n / 2]) * 0.5;
+        );
+        g = min(g, 60);
+        s[TS_MBG + k] = max(g, s[TS_MBG + k] - tap_rel);
+      ) : (
+        s[TS_MBG + k] = 0;
+        s[TS_MBL + k] = -150;
+      );
+      k += 1;
+    );
   );
 
   // A column's worth of one tap: per-band ratio against its baseline,
@@ -766,6 +1045,7 @@ out_pin:right
       bi = 0; loop(GRB_N, s[TS_PA + bi] = 0; s[TS_PB + bi] = 0; bi += 1; );
       s[TS_LAST] = 0;
       s[TS_DISP] = max(0, s[TS_DISP] - tap_rel);
+      bi = 0; loop(4, s[TS_MBG + bi] = max(0, s[TS_MBG + bi] - tap_rel); bi += 1; );
     ) : (
     zo = s[TS_HASCAL] > 0.5;
     bi = 0;
@@ -773,10 +1053,12 @@ out_pin:right
       pa = s[TS_PA + bi] / tap_slice;
       pb = s[TS_PB + bi] / tap_slice;
       s[TS_PA + bi] = 0; s[TS_PB + bi] = 0;
+      s[TS_MBP + bi] = pa;
       pk = max(pa, s[TS_PK + bi] * tap_pkdec);
       s[TS_PK + bi] = pk;
       gate = max(0.000000001, pk * 0.00001);          // -90 dB, and 50 dB under the band's peak
-      (pa > gate && pb > 0.00000000000001) ? (
+      s[TS_MBD + bi] = -1;
+      (s[TS_HOLD] <= 0 && pa > gate && pb > 0.00000000000001) ? (
         r = 10 * log10(pb / pa);
         s[TS_HB + bi] < 0.5 ? (
           s[TS_SM + bi] = r; s[TS_BS + bi] = r; s[TS_HB + bi] = 1;
@@ -788,6 +1070,7 @@ out_pin:right
         );
         // the measured zero where there is one, the music's baseline where not
         d = max(0, ((zo && s[TS_ZV + bi] > 0.5) ? s[TS_ZERO + bi] : s[TS_BS + bi]) - s[TS_SM + bi]);
+        s[TS_MBD + bi] = d;
         // insertion into the sorted scratch
         j = n;
         while (j > 0 && s[TS_SORT + j - 1] > d) (
@@ -804,6 +1087,7 @@ out_pin:right
     g = min(g, 60);
     s[TS_LAST] = g;
     s[TS_DISP] = max(g, s[TS_DISP] - tap_rel);
+    t == tap_mb - 1 ? tapMB(s);
     );
   );
 
@@ -1006,6 +1290,8 @@ out_pin:right
   hb != hb_last ? ( hb_last = hb; hb_age = 0; ) : hb_age += samplesblock;
   tap_cfg  = (role >= 0.5 && role < 1.5) ? max(0, min(TAP_MAX, floor(tap_n))) : 0;
   tap_live = tap_cfg > 0 && hb_age < srate * 3;
+  // the third-octave tap: set up afresh when it's another tap, or a new rate
+  (tap_fine != fn_tap || fn_sr != srate) ? ( fn_tap = tap_fine; fineSetup(); );
   tap_live ? (
     tap_sr != srate ? ( tapBands(); t = 0; loop(TAP_MAX, tapReset(t); t += 1; ); );
     setTapLag(0, tap_lag1); setTapLag(1, tap_lag2);
@@ -1031,6 +1317,26 @@ out_pin:right
     tap_gr1 = g1; tap_gr2 = g2; tap_gr3 = g3; tap_gr4 = g4;
     sliderchange(tap_gr1); sliderchange(tap_gr2);
     sliderchange(tap_gr3); sliderchange(tap_gr4);
+  );
+  // a multiband tap's bands, the same way
+  mbs = (tap_mb >= 1 && tap_mb <= 4 && tap_live && tapIsGR(tap_mb - 1)) ? TAP_BASE + (tap_mb - 1) * TAP_STRIDE + TAP_S : 0;
+  m1 = mbs ? mbs[TS_MBG] : 0;     m2 = mbs ? mbs[TS_MBG + 1] : 0;
+  m3 = mbs ? mbs[TS_MBG + 2] : 0; m4 = mbs ? mbs[TS_MBG + 3] : 0;
+  (m1 != tap_mbgr1 || m2 != tap_mbgr2 || m3 != tap_mbgr3 || m4 != tap_mbgr4) ? (
+    tap_mbgr1 = m1; tap_mbgr2 = m2; tap_mbgr3 = m3; tap_mbgr4 = m4;
+    sliderchange(tap_mbgr1); sliderchange(tap_mbgr2);
+    sliderchange(tap_mbgr3); sliderchange(tap_mbgr4);
+  );
+  // and its bands' input levels, to a tenth of a dB
+  m1 = mbs ? floor(max(-150, mbs[TS_MBL]) * 10 + 0.5) / 10 : -150;
+  m2 = mbs ? floor(max(-150, mbs[TS_MBL + 1]) * 10 + 0.5) / 10 : -150;
+  m3 = mbs ? floor(max(-150, mbs[TS_MBL + 2]) * 10 + 0.5) / 10 : -150;
+  m4 = mbs ? floor(max(-150, mbs[TS_MBL + 3]) * 10 + 0.5) / 10 : -150;
+  // (with the other levels, about thirty times a second)
+  (!mbs || tap_lvc == 0) && (m1 != tap_mbl1 || m2 != tap_mbl2 || m3 != tap_mbl3 || m4 != tap_mbl4) ? (
+    tap_mbl1 = m1; tap_mbl2 = m2; tap_mbl3 = m3; tap_mbl4 = m4;
+    sliderchange(tap_mbl1); sliderchange(tap_mbl2);
+    sliderchange(tap_mbl3); sliderchange(tap_mbl4);
   );
   // The levels, about thirty times a second while a reader is alive;
   // silence once, when it goes away.
@@ -1174,9 +1480,10 @@ out_pin:right
       (cal_ph == 2 && ph == 3) ? (
         cal_ok = 0;
         t = 0; loop(tap_cfg, tapIsGR(t) ? cal_ok += calCommit(t); t += 1; );
+        tap_fine >= 1 ? (fineCalCommit());
         cal_ok > 0 ? (cal_fails = 0) : (cal_fails += 1);
       );
-      ph == 1 ? calClear();
+      ph == 1 ? ( calClear(); fineCalClear(); );
       cal_ph = ph; cal_pt = 0;
     ) : cal_pt += samplesblock;
     cal_mute = ph > 0;

@@ -56,6 +56,8 @@ local BZ = require("TS_CV_Busy")
 local MD = require("TS_CV_Mod")
 local ME = require("TS_CV_MapEQ")
 local UN = require("TS_CV_Units")
+local DLY = require("TS_CV_Delay")
+local RB = require("TS_CV_ReaFX")
 
 local NS = "TS_CV_WEB"
 
@@ -376,6 +378,13 @@ local function mq_layout(fx, layout)
       o.sh = arr()
       for i, sh in ipairs(shs) do o.sh[i] = ME.shape_label(sh) end
     end
+    -- a dynamic band: its threshold's span, and which controls it has
+    if M.band_dynamic(band) then
+      local lo, hi = ME.thr_span(track, fx.addr, band)
+      local d = band.dyn
+      o.dy = { lo = lo, hi = hi, t = d.thr and 1 or nil, r = d.range and 1 or nil, o = d.on and 1 or nil,
+               ra = d.ratio and 1 or nil, a = d.atk and 1 or nil, l = d.rel and 1 or nil }
+    end
     b[#b + 1] = o
   end
   return { r = (M.canvas_todo(cv) == nil) or nil, b = b }
@@ -384,13 +393,70 @@ end
 -- A Compressor layout: which roles it has (short names), which are
 -- reversed, and a switched ratio's positions.
 local MC_SHORT = { Threshold = "t", Input = "in", Ratio = "r", Knee = "k", Attack = "a", Hold = "h",
-                   Release = "l", Makeup = "mk", Mix = "mx" }
+                   Close = "cl", Hysteresis = "hy", Range = "rg", Ceiling = "ce",
+                   Frequency = "fq", Low = "lo", High = "hi", Width = "wd", Time = "tm", Note = "nt",
+                   Sync = "sy", Feedback = "fb", PingPong = "pp", Predelay = "pd", Decay = "dc",
+                   Size = "sz", Early = "er", Damping = "dm", Bass = "bs", Delay = "dl", Sustain = "su",
+                   AttackCurve = "ac", DecayCurve = "dcc", ReleaseCurve = "rcc", Rate = "rt", Depth = "dp",
+                   Shape = "sh", Phase = "ph", Diffusion = "df", LowFreq = "lf", HighFreq = "hf",
+                   LowCut = "lc", HighCut = "hc", Drive = "dr", Style = "st", Tone = "tn", Tone2 = "t2",
+                   Release = "l", Makeup = "mk", Mix = "mx",
+                   TimeR = "tr", NoteR = "nr", Offset = "of", FeedbackR = "fr", Cross = "cx",
+                   Link = "lk", Mode = "md", Rhythm = "rh", Multiplier = "mu", Dry = "dy",
+                   Balance = "bl", LowEQ = "le", HighEQ = "he", LowCutOn = "lcn", HighCutOn = "hcn", Freeze = "fz" }
+-- a delay's taps: T<k><role> -> k<k><short>
+do
+  local SH = { Time = "tm", Note = "nt", Rhythm = "rh", Sync = "sy", Level = "lv", Pan = "pn", On = "on", PingPong = "pp", Feedback = "fb",
+               LowCut = "lc", HighCut = "hc" }
+  for k = 1, M.DL_TAPS do
+    for r, sh in pairs(SH) do MC_SHORT["T" .. k .. r] = "k" .. k .. sh end
+  end
+end
+-- a modulation's voices: V<k><role> -> v<k><short>; its count of voices vc
+do
+  local SH = { Depth = "dp", Rate = "rt", Note = "nt", Sync = "sy", Phase = "ph", Pan = "pn", On = "on" }
+  for k = 1, M.MOD_VOICES do
+    for r, sh in pairs(SH) do MC_SHORT["V" .. k .. r] = "v" .. k .. sh end
+  end
+  MC_SHORT.Voices = "vc"
+end
+-- a multiband's roles: Crossover<k> x<k>, band k's roles b<k><t r a l g s b>
+do
+  local SH = { Threshold = "t", Ratio = "r", Knee = "k", Attack = "a", Release = "l", Gain = "g", Solo = "s", Bypass = "b",
+               Low = "lo", High = "hi", Used = "u" }
+  for k = 1, M.MB_MAX do
+    if k < M.MB_MAX then MC_SHORT["Crossover" .. k] = "x" .. k end
+    for r, sh in pairs(SH) do MC_SHORT["B" .. k .. r] = "b" .. k .. sh end
+  end
+  MC_SHORT.Output = "out"
+end
+
 local function mc_layout(fx, layout)
   local cv = layout and layout.canvas
-  if not cv or cv.kind ~= "comp" then return nil end
+  if not cv or cv.kind == "eq" or not M.ROLES[cv.kind] then return nil end
   local r = {}
   for role, p in pairs(cv.roles or {}) do r[MC_SHORT[role]] = p end
-  local out = { i = r, rv = (cv.rev and cv.rev.Threshold) or nil }
+  local out = { i = r, rv = (cv.rev and cv.rev.Threshold) or nil, k = (cv.kind ~= "comp") and cv.kind or nil }
+  -- an input driving it (no threshold): what its gain's 0 dB stands for,
+  -- and whether its input runs the other way
+  if cv.roles and cv.roles.Input and not cv.roles.Threshold then
+    out.r0 = cv.ref0
+    out.ri = (cv.rev and cv.rev.Input) or nil
+  end
+  -- a de-esser with only a frequency: a band around it, not split-band
+  if cv.kind == "deess" and cv.dshape == "around" then out.ds = "around" end
+  -- a gate's range and hysteresis written as positive amounts (as the
+  -- desktop decides: the plugin's own values run upwards from 0)
+  for _, role in ipairs({ "Range", "Hysteresis" }) do
+    local p = cv.roles and cv.roles[role]
+    if p then
+      local fmt = UN.formatter(track, fx.addr, p)
+      local a, b = UN.at(fmt, 0), UN.at(fmt, 1)
+      if a and b and math.min(a, b) >= 0 and math.max(a, b) > 0 then
+        out.pa = out.pa or {}; out.pa[MC_SHORT[role]] = true
+      end
+    end
+  end
   -- the threshold's ends, for the canvas's level scale; a plain number
   -- running below zero is in dB (as the desktop reads it)
   local tp = cv.roles and (cv.roles.Threshold or cv.roles.Input)
@@ -401,6 +467,84 @@ local function mc_layout(fx, layout)
     if a and b and a > -1e9 and b > -1e9 and a < 1e9 and b < 1e9 then
       out.tr = arr({ round(math.min(a, b), 2), round(math.max(a, b), 2) })
       out.td = (ua == "db" or (ua == "" and math.min(a, b) < 0)) or nil
+    end
+  end
+  -- a knee that reads as a share of its range (not dB), and which way it
+  -- runs; a ratio that goes under 1:1, its lowest (as the desktop)
+  local kp = cv.kind == "comp" and cv.roles and cv.roles.Knee
+  if kp then
+    local fmt = UN.formatter(track, fx.addr, kp)
+    local _, uk = UN.at(fmt, 0.5)
+    local hi = UN.at(fmt, 1)
+    local as_db = uk == "db" or (uk == "" and hi and hi > 1.5 and hi < 1e9)
+    if not as_db then out.ks = true; out.kr = (cv.rev and cv.rev.Knee) or nil end
+  end
+  -- the ratio's range as drawn: rf when it's written the other way round
+  -- (every setting under 1:1), rl / rh its lowest and highest, ru the end
+  -- (0 or 1) that reads infinite
+  local rp = (cv.kind == "comp" or cv.kind == "gate") and cv.roles and cv.roles.Ratio
+  if rp then
+    local fmt = UN.formatter(track, fx.addr, rp)
+    local a, ua = UN.at(fmt, 0)
+    local b = UN.at(fmt, 1)
+    if ua == "ratio" and a and b and a > 0 and b > 0 then
+      local lo, hi = math.min(a, b), math.max(a, b)
+      local flip = hi <= 1 and lo < 1
+      local function dv(v) return flip and (1 / v) or v end
+      local dl, dh = dv(lo), dv(hi)
+      if dl > dh then dl, dh = dh, dl end
+      out.rf = flip or nil
+      out.rl = round(dl, 4)
+      if dh < 1e9 then out.rh = round(dh, 4)
+      else out.ru = (dv(b) >= 1e9) and 1 or 0 end
+    end
+  end
+  -- a reverb's damping: its readings at either end (which way is more)
+  local dp = cv.kind == "reverb" and cv.roles and cv.roles.Damping
+  if dp then
+    local fmt = UN.formatter(track, fx.addr, dp)
+    local a, b = UN.at(fmt, 0), UN.at(fmt, 1)
+    if a and b and a > -1e9 and b > -1e9 and a < 1e9 and b < 1e9 then out.de = arr({ round(a, 3), round(b, 3) }) end
+  end
+  -- a reverb's early / late balance along its range (TS_CV_RolePanel
+  -- RP.rv_bal_table), and a decay reading plain seconds
+  if cv.kind == "reverb" and cv.roles then
+    if cv.roles.Balance then
+      local tab = UN.balance_table(UN.formatter(track, fx.addr, cv.roles.Balance))
+      if tab then
+        out.bt = arr()
+        for i, q in ipairs(tab) do out.bt[i] = arr({ round(q[1], 4), round(q[2], 2) }) end
+      end
+    end
+    if cv.roles.Decay then
+      local fm = UN.formatter(track, fx.addr, cv.roles.Decay)
+      local a, ua = UN.at(fm, 0)
+      local b, ub = UN.at(fm, 0.9)
+      if a and b and ua == "" and ub == "" and a >= 0.05 and b > a and b <= 200 then out.dsec = 1 end
+    end
+  end
+  -- a reverb's decay measured (TS_CV_Learn LN.start_decay): its points
+  local dcal = M.dec_cal(cv)
+  if dcal then
+    local pts = arr()
+    for i, q in ipairs(dcal.pts) do pts[i] = arr({ q[1], round(q[2], 4), round(q[3], 1) }) end
+    out.dcal = pts
+  end
+  -- its threshold measured (TS_CV_Learn LN.start_thr): the points, and
+  -- its range in dBFS for the scale
+  local tc = M.thr_cal(cv)
+  if tc then
+    local pts = arr()
+    for i, q in ipairs(tc.pts) do pts[i] = arr({ round(q[1], 4), round(q[2], 2) }) end
+    out.tc = { n = tc.n or nil, p = pts }
+    local fmt = UN.formatter(track, fx.addr, tc.p)
+    local xa, xb = 0, 1
+    if not tc.n then xa, xb = UN.at(fmt, 0), UN.at(fmt, 1) end
+    local a = xa and xa > -1e9 and M.thr_dbfs(cv, xa)
+    local b = xb and xb < 1e9 and M.thr_dbfs(cv, xb)
+    if a and b then
+      out.tr = arr({ round(math.max(-96, math.min(a, b)), 2), round(math.min(21, math.max(a, b)), 2) })
+      out.td = true
     end
   end
   -- attack / hold / release: which run the other way, and a switch's
@@ -422,6 +566,78 @@ local function mc_layout(fx, layout)
       end
     end
   end
+  -- a multiband: its band count, and each band as a compressor layout's
+  -- page would want it (threshold range, ratio settings, time steps)
+  if cv.kind == "multi" then
+    out.nb = cv.nb or 3
+    out.bd = arr()
+    for k = 1, out.nb do
+      local b = {}
+      local tp = cv.roles["B" .. k .. "Threshold"]
+      if tp then
+        local fmt = UN.formatter(track, fx.addr, tp)
+        local a, ua = UN.at(fmt, 0)
+        local bb = UN.at(fmt, 1)
+        if a and bb and a > -1e9 and bb > -1e9 and a < 1e9 and bb < 1e9 then
+          b.tr = arr({ round(math.min(a, bb), 2), round(math.max(a, bb), 2) })
+          b.td = (ua == "db" or (ua == "" and math.min(a, bb) < 0)) or nil
+        end
+      end
+      local rp = cv.roles["B" .. k .. "Ratio"]
+      if rp then
+        local pos = UN.positions(UN.formatter(track, fx.addr, rp), 200, 12)
+        if pos then
+          b.rs = arr()
+          for _, ps in ipairs(pos) do b.rs[#b.rs + 1] = { n = round(ps.norm, 4), lo = round(ps.lo, 4), hi = round(ps.hi, 4), t = ps.text } end
+        end
+      end
+      for _, t in ipairs({ { "Attack", "a", 0.1, 500 }, { "Release", "l", 1, 5000 } }) do
+        local p = cv.roles["B" .. k .. t[1]]
+        local rv2 = cv.rev and cv.rev["B" .. k .. t[1]] or nil
+        if p then
+          if rv2 then b.ra = b.ra or {}; b.ra[t[2]] = true end
+          local st = UN.time_steps(UN.formatter(track, fx.addr, p), t[3], t[4], rv2)
+          if st then
+            b.es = b.es or {}
+            local l = arr()
+            for _, ps in ipairs(st) do l[#l + 1] = { n = round(ps.norm, 4), lo = round(ps.lo, 4), hi = round(ps.hi, 4), f = round(ps.f, 4) } end
+            b.es[t[2]] = l
+          end
+        end
+      end
+      -- its knee, when it reads as a share of its range (as a compressor's)
+      local kp = cv.roles["B" .. k .. "Knee"]
+      if kp then
+        local fmt = UN.formatter(track, fx.addr, kp)
+        local _, uk = UN.at(fmt, 0.5)
+        local hi = UN.at(fmt, 1)
+        local as_db = uk == "db" or (uk == "" and hi and hi > 1.5 and hi < 1e9)
+        if not as_db then b.ks = true; b.kr = (cv.rev and cv.rev["B" .. k .. "Knee"]) or nil end
+      end
+      out.bd[k] = b
+    end
+  end
+  -- the other role canvases: which roles run the other way, and the
+  -- settings of the switches the page snaps to or shows as chips
+  if cv.kind ~= "comp" then
+    for role, p in pairs(cv.roles or {}) do
+      local short = MC_SHORT[role]
+      if cv.rev and cv.rev[role] then out.rr = out.rr or {}; out.rr[short] = true end
+      if role == "Note" or role == "Shape" or role == "Time" or role == "Rate" or role == "Predelay"
+         or role == "Decay" or role == "Style" or role:match("^B%dUsed$")
+         or role == "Voices" or role:match("^V%dRate$") or role:match("^V%dNote$")
+         or (cv.kind == "delay" and (role == "TimeR" or role == "NoteR" or role == "Mode" or role == "Offset" or role == "Ratio"
+                                      or role == "Sync" or role == "Rhythm")) then
+        local pos = UN.positions(UN.formatter(track, fx.addr, p), 200, 24)
+        if pos then
+          out.sw = out.sw or {}
+          local l = arr()
+          for _, ps in ipairs(pos) do l[#l + 1] = { n = round(ps.norm, 4), lo = round(ps.lo, 4), hi = round(ps.hi, 4), t = ps.text } end
+          out.sw[short] = l
+        end
+      end
+    end
+  end
   if cv.roles and cv.roles.Ratio then
     local pos = UN.positions(UN.formatter(track, fx.addr, cv.roles.Ratio), 200, 12)
     if pos then
@@ -433,13 +649,29 @@ local function mc_layout(fx, layout)
 end
 
 local function panel_of(fx, i)
-  local key = St.layout_key(fx.name, fx.guid)
+  local key = St.layout_key(fx.name, fx.guid, track, fx.addr)
   local layout, is_default = M.get_or_default(key, track, fx.addr, fx.guid)
+  -- your own ranges for its parameters (TS_CV_Util U.with_ranges)
+  local was_rg = U.with_ranges(layout.ranges)
   local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
   local ctls = arr()
   for _, ctl in ipairs(layout.controls or {}) do
     local o = { t = ctl.type or "knob" }
-    if ctl.param and ctl.param >= 0 and ctl.param < nparams
+    if M.is_virtual(ctl) then
+      -- the layout's own (TS_CV_Mappings Virt<n>): its name, its choices
+      -- and where it starts; its setting comes with the values
+      o.vn = M.vname_of(ctl)
+      o.l = o.vn
+      o.vs = round(ctl.virtual.start or 0)
+      local names = M.vchoices(ctl)
+      if names then
+        o.ch, o.cn = arr(), arr()
+        for k2, t2 in ipairs(names) do o.ch[k2] = t2; o.cn[k2] = round(M.vnorm(ctl, k2)) end
+      end
+      if o.t == "toggle" then o.lit = "#8a63e6"; if ctl.size == "small" then o.sz = "small" end
+      elseif o.t == "knob" then o.cap = "#8a63e6"; o.sz = ctl.size; o.st = ctl.style
+      elseif o.t == "combo" and ctl.buttons then o.btn, o.nb, o.lit = ctl.buttons, #names, "#8a63e6" end
+    elseif ctl.param and ctl.param >= 0 and ctl.param < nparams
        and o.t ~= "blank" and o.t ~= "divider" and o.t ~= "half_gap" then
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, ctl.param, "")
       o.p   = ctl.param
@@ -569,8 +801,15 @@ local function panel_of(fx, i)
   end
   local meter = M.meter_of(layout)
   local has_gr = meter and T.reports_gr(track, fx.addr, fx.guid) or false
-  return {
-    g = fx.guid, i = i, n = U.fx_label(fx), k = key, an = fx.alias and U.clean_fx_name(fx.name) or nil, d = is_default or nil,
+  -- put up by a layout switching rule: that layout's name (the header's pill)
+  local rule = St.switch_rule(fx.guid)
+  local ra
+  if rule then
+    local rr = (M.switch_rules(U.plugin_key(fx.name or "")) or {})[rule]
+    ra = rr and (rr.layout or "Standard") or nil
+  end
+  local panel = {
+    g = fx.guid, i = i, n = U.fx_label(fx), k = key, ra = ra, an = fx.alias and U.clean_fx_name(fx.name) or nil, d = is_default or nil,
     ti = fx.is_top_level and fx.top_index or nil,
     -- where it sits: its level ("" = the chain), its slot there and how
     -- many slots that level has, its parallel setting, the container it's in
@@ -593,6 +832,8 @@ local function panel_of(fx, i)
     mc = (key ~= "ReaEQ" and not RC.is_comp(key)) and mc_layout(fx, layout) or nil,
     ps = presets_json(fx),
   }
+  U.with_ranges(was_rg)
+  return panel
 end
 
 -- ---------------------------------------------------------------------
@@ -983,6 +1224,7 @@ local function mq_vals(fx, layout)
   local cv = layout.canvas
   if M.canvas_todo(cv) then return nil end
   local out = arr()
+  local any_dyn = false
   for k, b in ipairs(cv.bands) do
     local r = ME.read_band(track, fx.addr, b, cv.all_on)
     if r then
@@ -994,13 +1236,35 @@ local function mq_vals(fx, layout)
       end
       local g = r.g or 0
       if g ~= g then g = 0 end
-      out[#out + 1] = { k = k, t = r.type, o = r.order, f = round(r.f or 1000, 1),
-                        g = round(math.max(-30, math.min(30, g)), 2), q = round(r.q or 0.7, 3),
-                        e = r.on or nil, x = table.concat(tx, "   "), wq = b.q and 1 or nil,
-                        s = b.shape and r.s or nil }
+      local o = { k = k, t = r.type, o = r.order, f = round(r.f or 1000, 1),
+                  g = round(math.max(-30, math.min(30, g)), 2), q = round(r.q or 0.7, 3),
+                  e = r.on or nil, x = table.concat(tx, "   "), wq = b.q and 1 or nil,
+                  s = b.shape and r.s or nil }
+      if M.band_dynamic(b) then
+        local dy = ME.read_dyn(track, fx.addr, b)
+        o.d = { r = dy.range and round(dy.range, 2) or nil, t = dy.thr and round(dy.thr, 2) or nil, on = dy.on or nil,
+                xt = dy.thr_text, xr = dy.range_text, xra = dy.ratio_text, xa = dy.atk_text, xl = dy.rel_text }
+        any_dyn = true
+      end
+      out[#out + 1] = o
     end
   end
-  return { b = out }
+  local res = { b = out }
+  -- a dynamic EQ: what it's doing now, a third-octave a value (positive
+  -- dB reduced, -999 no signal), from the probe (never taking it from a
+  -- panel that has it) -- retired with the desktop's (CP.FINE_ON)
+  if any_dyn and TP.FINE_ON then
+    TP.panel_open(fx.guid)
+    TP.want_fine(fx.guid)
+    if TP.set_fine(track, fx.guid, true) then
+      local fd = TP.fine(track, fx.guid)
+      if fd then
+        res.fd = arr()
+        for k = 1, fd.n do res.fd[k] = fd.d[k] and round(-fd.d[k], 1) or -999 end
+      end
+    end
+  end
+  return res
 end
 
 -- A mapped compressor's roles as they read: real value and unit where the
@@ -1008,11 +1272,13 @@ end
 local function mc_vals(fx, layout)
   local cv = layout.canvas
   local out = { v = {}, u = {}, n = {}, x = {} }
+  local R = {}
   for role, p in pairs(cv.roles or {}) do
-    local k = MC_SHORT[role]
+    local k = MC_SHORT[role] or role
     local nv = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
     local txt = RC.text(track, fx.addr, p, nv)
     local v, unit = UN.parse(txt)
+    R[role] = { p = p, n = nv, text = txt, v = v, unit = unit }
     if v == math.huge then v = 1000 elseif v == -math.huge then v = -150 end
     out.v[k] = v and round(v, 3) or nil
     out.u[k] = unit
@@ -1020,6 +1286,104 @@ local function mc_vals(fx, layout)
     out.x[k] = txt
   end
   out.g = round(T.gain_reduction(track, fx.addr) or 0, 2)
+  if cv.kind == "delay" or cv.kind == "mod" then out.bpm = round(reaper.Master_GetTempo() or 120, 2) end
+  -- a delay: its echoes and handles as TS_CV_Delay works them out (the
+  -- page draws them, and hands drags back as dla)
+  if cv.kind == "delay" then
+    local names = {}
+    if cv.roles.Mode then local _, nm = reaper.TrackFX_GetParamName(track, fx.addr, cv.roles.Mode, ""); names.Mode = nm end
+    local mdl = DLY.model(R, cv, { bpm = reaper.Master_GetTempo(), names = names })
+    local d = { sp = round(mdl.span or 2000, 1), bt = round(mdl.beat, 3), bg = mdl.beat_grid and 1 or nil,
+                st = mdl.stereo and 1 or nil, sy = mdl.sync and 1 or nil, pr = mdl.period and round(mdl.period, 1) or nil,
+                e = arr(), h = arr(), dc = {} }
+    for _, e in ipairs(mdl.echoes) do
+      d.e[#d.e + 1] = { round(e.t, 1), round(e.l, 3), round(e.r, 3), e.tag and e.tag.r or -1 }
+    end
+    if mdl.chains then
+      d.ch = arr()
+      for _, ch in ipairs(mdl.chains) do
+        local l = arr()
+        for _, q in ipairs(ch) do l[#l + 1] = { round(q[1], 1), round(q[2], 3) } end
+        d.ch[#d.ch + 1] = l
+      end
+    end
+    for sd, pts in pairs(mdl.decay or {}) do
+      local l = arr()
+      for _, q in ipairs(pts) do l[#l + 1] = { round(q[1], 1), round(q[2], 3) } end
+      d.dc[sd] = l
+    end
+    for _, hd in ipairs(mdl.handles) do
+      d.h[#d.h + 1] = { id = hd.id, t = round(hd.t, 1), tq = hd.tq0 and round(hd.tq0, 1) or nil, s = hd.side,
+                        hh = round(hd.h or 0, 3), k = round(hd.k or 1, 4), pw = hd.pow, v0 = hd.v0 and round(hd.v0, 4) or nil,
+                        ax = hd.across and 1 or nil, ud = hd.updown and 1 or nil, lb = hd.label, n = hd.num,
+                        only = hd.only, own = hd.own, pn = hd.pan and round(hd.pan, 3) or nil }
+    end
+    if mdl.taps then
+      d.tp = arr()
+      for _, tp in ipairs(mdl.taps) do
+        local okr = (cv.builtin == "readelay") and RB.can_remove(track, fx.addr, tp.k, #mdl.taps) or nil
+        d.tp[#d.tp + 1] = { k = tp.k, on = tp.on and 1 or 0, rm = okr and 1 or nil }
+      end
+      if cv.builtin == "readelay" then d.rd = 1; d.mx = M.DL_TAPS end
+    end
+    -- its filters: the plugin's own, or each tap's
+    local function tn(t) return t and { lc = t.lc and round(t.lc, 1) or nil, hc = t.hc and round(t.hc, 1) or nil, lt = t.lct, ht = t.hct, k = t.k } or nil end
+    d.tn = tn(mdl.tone)
+    if mdl.tones and not mdl.tone then
+      d.tns = {}
+      for k, t in pairs(mdl.tones) do d.tns[tostring(k)] = tn(t) end
+    end
+    out.dl = d
+  end
+  -- a saturator: its learned curve (both sides, 49 points of the input
+  -- -1..1), its harmonics at the music's level (or -12 dBFS), where it
+  -- bites, and how far the peaks are being shaved (TS_CV_RolePanel draw_sat)
+  if cv.kind == "sat" then
+    local c = cv.sat_cal
+    local R = cv.roles or {}
+    if c and c.d ~= R.Drive then c = nil end
+    local function n_of(p) return p and reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or nil end
+    local at = c and M.sat_at(c, n_of(R.Drive) or 0, n_of(R.Style) or 0, 0)
+    local lv = TP.levels(track, fx.guid)
+    local live = lv and not lv.old and lv.in_pk and lv.in_pk > -60 and T.get_enabled(track, fx.addr)
+    local sat = { l = at and 1 or nil, live = live and 1 or nil }
+    if at then
+      sat.up, sat.dn = arr(), arr()
+      local loop = false
+      for i = 0, 48 do
+        local x = -1 + i / 24
+        local u, d = M.sat_curve(at, x, "up"), M.sat_curve(at, x, "dn")
+        sat.up[i + 1] = u and round(u, 3) or 0
+        sat.dn[i + 1] = d and round(d, 3) or sat.up[i + 1]
+        if u and d and math.abs(u - d) > 0.02 then loop = true end
+      end
+      sat.lp = loop and 1 or nil
+      local hl = live and math.max(c.L[1], lv.in_pk) or -12
+      local hm, thd = M.sat_harm(c, at, hl)
+      sat.h = arr()
+      for k = 2, 9 do sat.h[k - 1] = hm and hm[k] and round(hm[k], 1) or -999 end
+      sat.thd = thd and round(thd, 1) or nil
+      local b = M.sat_bite(at)
+      sat.bt = b and round(b, 1) or nil
+    end
+    if live then
+      sat.ip = round(lv.in_pk, 1)
+    end
+    out.sat = sat
+  end
+  -- a multiband's bands: where each is (Hz), whether it's in use, and its
+  -- level going in (dBFS; absent while not measured). The reduction is
+  -- the plugin's as a whole (g above): one number, the one that holds up.
+  if cv.kind == "multi" then
+    local plan = TP.mb_plan(track, fx.addr, cv)
+    out.mb = { o = plan.own or nil, b = arr() }
+    for k = 1, plan.nb do
+      local lv = TP.mb_level(track, fx.guid, plan, k)
+      out.mb.b[k] = { lo = round(plan[k].lo, 1), hi = round(plan[k].hi, 1), u = plan[k].used and 1 or 0,
+                      bp = plan[k].byp and 1 or nil, lv = (type(lv) == "number") and round(lv, 1) or nil }
+      if lv == "old" then out.mb.old = 1 end
+    end
+  end
   return out
 end
 
@@ -1235,17 +1599,39 @@ local function tell(text)
   last_msg = { s = ((last_msg and last_msg.s) or 0) + 1, m = text }
 end
 
+-- Whether an instance's layout has moved since last asked (a layout
+-- switching rule): the layout is sent again at once, before the values
+-- for it, not at the next half-second.
+local key_seen = {}
+local function keys_moved()
+  local moved = false
+  for _, fx in ipairs(chain or {}) do
+    local key = St.layout_key(fx.name, fx.guid, track, fx.addr)
+    if key_seen[fx.guid] ~= key then
+      if key_seen[fx.guid] ~= nil then moved = true end
+      key_seen[fx.guid] = key
+    end
+  end
+  return moved
+end
 local function build_vals(lseq, ack)
   local fxv = {}
   local any_eq = false
   for _, fx in ipairs(chain) do
-    local key = St.layout_key(fx.name, fx.guid)
+    local key = St.layout_key(fx.name, fx.guid, track, fx.addr)
     local layout = M.get_or_default(key, track, fx.addr, fx.guid)
+    U.with_ranges(layout.ranges)
     local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
     local v, x = arr(), arr()
     local v2, x2                -- a second parameter's, where there is one
     local rg                    -- linked controls' rings: index -> { lo, hi, live, ends }
+    local base = U.plugin_key(fx.name or "")
     for ci, ctl in ipairs(layout.controls or {}) do
+      if M.is_virtual(ctl) then
+        local vv = St.vvalue(fx.guid, M.vname_of(ctl), base, layout.controls)
+        v[ci] = round(vv); x[ci] = M.vtext(ctl, vv)
+        goto next_ctl
+      end
       if (ctl.type == "xy" or ctl.type == "dual") and ctl.param2 and ctl.param2 >= 0 and ctl.param2 < nparams then
         v2, x2 = v2 or {}, x2 or {}
         local r2 = reaper.TrackFX_GetParamNormalized(track, fx.addr, ctl.param2) or 0
@@ -1276,6 +1662,7 @@ local function build_vals(lseq, ack)
       else
         v[ci] = 0; x[ci] = ""
       end
+      ::next_ctl::
     end
     local meter = M.meter_of(layout)
     local gr = nil
@@ -1289,7 +1676,8 @@ local function build_vals(lseq, ack)
     -- without them and rebuilds when the set changes
     local hid = nil
     do
-      local _, hidden = M.visible(layout.controls, function(p)
+      local _, hidden = M.visible(layout.controls, function(p, vname)
+        if vname then return St.vvalue(fx.guid, vname, base, layout.controls) end
         return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
       end)
       for ci in pairs(hidden) do hid = hid or arr(); hid[#hid + 1] = ci - 1 end
@@ -1303,9 +1691,11 @@ local function build_vals(lseq, ack)
                      wt = (function() local w = wet_of(fx.addr); return w and round(w, 3) end)(),
                      rc = RC.is_comp(key) and rc_vals(fx) or nil,
                      mq = (layout.canvas and layout.canvas.kind == "eq" and not RQ.is_eq(key)) and mq_vals(fx, layout) or nil,
-                     mc = (layout.canvas and layout.canvas.kind == "comp" and not RC.is_comp(key)) and mc_vals(fx, layout) or nil }
+                     mc = (layout.canvas and layout.canvas.kind ~= "eq" and M.ROLES[layout.canvas.kind]
+                           and not RC.is_comp(key)) and mc_vals(fx, layout) or nil }
     if RQ.is_eq(key) then any_eq = true end
   end
+  U.with_ranges(nil)
   local tr = nil
   if track then
     local vol = reaper.GetMediaTrackInfo_Value(track, "D_VOL")
@@ -1591,7 +1981,7 @@ local function apply(verb, a)
   elseif verb == "p" then
     local fx = fx_by_guid(a[1]); local p, v = tonumber(a[2]), tonumber(a[3])
     if fx and p and v then
-      local key = St.layout_key(fx.name, fx.guid)
+      local key = St.layout_key(fx.name, fx.guid, track, fx.addr)
       local layout = M.get_or_default(key, track, fx.addr, fx.guid)
       local inv = false
       for _, ctl in ipairs(layout.controls or {}) do
@@ -1612,6 +2002,11 @@ local function apply(verb, a)
       end
       TP.touched(track, fx.guid)
     end
+  elseif verb == "vctl" then
+    -- vctl|guid|name|v: a virtual control's setting on this instance
+    local fx = fx_by_guid(a[1]); local v = tonumber(a[3])
+    local nm = M.clean_vname(((a[2] or ""):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)))
+    if fx and nm and v then St.vset(fx.guid, nm, v) end
   elseif verb == "mset" then
     -- mset|guid|k|v: a macro's value (its output k: an XY pad's 1 or 2)
     local src = track and MD.find(track, a[1])
@@ -1629,20 +2024,46 @@ local function apply(verb, a)
   elseif track and verb == "mq0" then
     -- mq0|guid|band: the band flat, or off
     local fx = fx_by_guid(a[1]); local k = tonumber(a[2])
-    local layout = fx and M.get(St.layout_key(fx.name, fx.guid))
+    local layout = fx and M.get(St.layout_key(fx.name, fx.guid, track, fx.addr))
     local b = k and layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
     if b then ME.reset(track, fx.addr, b); TP.touched(track, fx.guid) end
   elseif track and verb == "mqs" then
     -- mqs|guid|band|setting: the band's shape switch to that setting
     local fx = fx_by_guid(a[1]); local k, v = tonumber(a[2]), tonumber(a[3])
-    local layout = fx and M.get(St.layout_key(fx.name, fx.guid))
+    local layout = fx and M.get(St.layout_key(fx.name, fx.guid, track, fx.addr))
     local b = k and layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
     if b and v then ME.set_shape(track, fx.addr, b, math.floor(v)); TP.touched(track, fx.guid) end
+  elseif track and (verb == "mqr" or verb == "mqd" or verb == "mqo") then
+    -- a dynamic EQ band: mqr|guid|band|db its range; mqd|guid|band|field|delta
+    -- one of its dynamics (thr, ratio, atk, rel) along its range;
+    -- mqo|guid|band its dynamics switch
+    local fx = fx_by_guid(a[1]); local k = tonumber(a[2])
+    local layout = fx and M.get(St.layout_key(fx.name, fx.guid, track, fx.addr))
+    local b = k and layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
+    local d = b and b.dyn
+    if d then
+      if verb == "mqr" then
+        local v = tonumber(a[3])
+        if v then ME.set_range(track, fx.addr, b, v) end
+      elseif verb == "mqo" then
+        if d.on then
+          local cur = reaper.TrackFX_GetParamNormalized(track, fx.addr, d.on)
+          reaper.TrackFX_SetParamNormalized(track, fx.addr, d.on, cur >= 0.5 and 0 or 1)
+        end
+      else
+        local p, dv = d[a[3] or ""], tonumber(a[4])
+        if p and dv and (a[3] == "thr" or a[3] == "ratio" or a[3] == "atk" or a[3] == "rel" or a[3] == "range") then
+          local cur = reaper.TrackFX_GetParamNormalized(track, fx.addr, p)
+          reaper.TrackFX_SetParamNormalized(track, fx.addr, p, math.max(0, math.min(1, cur + dv)))
+        end
+      end
+      TP.touched(track, fx.guid)
+    end
   elseif track and (verb == "mqf" or verb == "mqg" or verb == "mqq") then
     -- a mapped EQ's band: mqf|guid|band|hz, mqg|guid|band|db, mqq|guid|band|delta
     local fx = fx_by_guid(a[1]); local k, v = tonumber(a[2]), tonumber(a[3])
     if fx and k and v then
-      local layout = M.get(St.layout_key(fx.name, fx.guid))
+      local layout = M.get(St.layout_key(fx.name, fx.guid, track, fx.addr))
       local b = layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
       if b then
         if verb == "mqf" then ME.set_freq(track, fx.addr, b, v)
@@ -1656,7 +2077,7 @@ local function apply(verb, a)
     -- mcv|guid|role|real (in the unit its text reads in)
     local fx = fx_by_guid(a[1]); local v = tonumber(a[3])
     if fx and v then
-      local layout = M.get(St.layout_key(fx.name, fx.guid))
+      local layout = M.get_or_default(St.layout_key(fx.name, fx.guid, track, fx.addr), track, fx.addr, fx.guid)
       local cv = layout and layout.canvas
       for role, p in pairs((cv and cv.roles) or {}) do
         if MC_SHORT[role] == a[2] then
@@ -1668,6 +2089,39 @@ local function apply(verb, a)
           end
           TP.touched(track, fx.guid)
         end
+      end
+    end
+  elseif track and verb == "dla" then
+    -- dla|guid|handle|t or v|value: a drag on a delay canvas's handle, set
+    -- on whichever controls it stands for (TS_CV_Delay DLY.apply)
+    local fx = fx_by_guid(a[1]); local v = tonumber(a[4])
+    if fx and v then
+      local layout = M.get_or_default(St.layout_key(fx.name, fx.guid, track, fx.addr), track, fx.addr, fx.guid)
+      local cv = layout and layout.canvas
+      if cv and cv.kind == "delay" then
+        local R = {}
+        for role, p in pairs(cv.roles or {}) do
+          local nv = reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+          local txt = RC.text(track, fx.addr, p, nv)
+          local val, unit = UN.parse(txt)
+          R[role] = { p = p, n = nv, text = txt, v = val, unit = unit }
+        end
+        local names = {}
+        if cv.roles.Mode then local _, nm = reaper.TrackFX_GetParamName(track, fx.addr, cv.roles.Mode, ""); names.Mode = nm end
+        local io = DLY.io(track, fx.addr, fx.guid, function(tr, ad, p, n) reaper.TrackFX_SetParamNormalized(tr, ad, p, n) end)
+        DLY.apply(R, cv, { bpm = reaper.Master_GetTempo(), names = names }, io, a[2], a[3], v)
+        TP.touched(track, fx.guid)
+      end
+    end
+  elseif track and verb == "rbt" then
+    -- rbt|guid|add, rbt|guid|rm|k: ReaDelay's taps (TS_CV_ReaFX)
+    local fx = fx_by_guid(a[1])
+    if fx and RB.kind(St.layout_key(fx.name, fx.guid, track, fx.addr)) == "readelay" then
+      if a[2] == "add" then RB.add_tap(track, fx.addr)
+      elseif a[2] == "rm" then
+        local k = tonumber(a[3])
+        local nt = RB.taps(track, fx.addr, fx.guid)
+        if k and RB.can_remove(track, fx.addr, k, nt) then RB.remove_tap(track, fx.addr, k) end
       end
     end
   elseif verb == "rcset" then
@@ -2092,6 +2546,7 @@ local function work(now)
   -- The layout is rebuilt twice a second regardless, which also catches
   -- what has no event to watch: a layout edited in ChannelView, a renamed
   -- track, a live parameter name.
+  if track and keys_moved() then layout_dirty = true end
   if layout_dirty or now >= next_layout then
     next_layout = now + 0.5
     layout_dirty = false
@@ -2134,6 +2589,7 @@ local function work(now)
   end
 
   TP.update(now)
+  PR.tick(now)
 end
 
 cycle = function()

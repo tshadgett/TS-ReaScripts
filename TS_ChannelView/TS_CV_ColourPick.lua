@@ -17,6 +17,12 @@
       background or a section since ChannelView started (not saved --
       they're for going back and forth between a few while you try them).
 
+  On macOS and Linux the extension can't read the screen (macOS keeps it
+  behind its Screen Recording permission, and counts its positions up from
+  the bottom), so there the eyedropper button opens REAPER's colour picker
+  instead: on a Mac that's the system's Colours panel, whose own
+  magnifier takes a colour from anywhere on screen.
+
   The eyedropper needs the js_ReaScriptAPI extension: it copies the pixel
   under the pointer off the screen into a one-pixel bitmap of its own
   (JS_GDI_Blit from the screen's DC to the bitmap's) and reads it there
@@ -185,8 +191,10 @@ local function known_order()
 end
 local probe          -- { x, y, rgb }: the dialog's own swatch, in screen pixels
 
+-- Windows only: elsewhere the screen can't be read this way (see above)
+local function os_name() return (reaper.GetOS and reaper.GetOS()) or "" end
 function CP.can_drop()
-  return reaper.JS_GDI_GetScreenDC ~= nil and reaper.JS_GDI_Blit ~= nil
+  return os_name():match("^Win") ~= nil and reaper.JS_GDI_GetScreenDC ~= nil and reaper.JS_GDI_Blit ~= nil
      and reaper.JS_LICE_CreateBitmap ~= nil and reaper.JS_LICE_GetDC ~= nil
      and reaper.JS_LICE_GetPixel ~= nil
      and reaper.JS_Mouse_GetState ~= nil and reaper.GetMousePosition ~= nil
@@ -333,6 +341,20 @@ function CP.any_colour(ctx, s, id)
       ImGui.TextDisabled(ctx, "Click anywhere")
       local got = dropper_frame(ctx)
       if got then s.rgb = got; changed = true end
+    end
+  elseif reaper.GR_SelectColor then
+    -- macOS / Linux: the system's own picker (on a Mac, its Colours panel
+    -- has a magnifier that takes a colour from anywhere on screen)
+    ImGui.SameLine(ctx, 0, 14)
+    local mac = os_name():match("^OSX") or os_name():match("^macOS")
+    if W.icon_button(ctx, "##drop" .. id, "dropper", 24, false,
+        mac and "Eyedropper: opens the Colours panel -- click its magnifier,\nthen anywhere on screen"
+        or "Pick a colour with REAPER's colour picker") then
+      local ok, rv, native = pcall(reaper.GR_SelectColor, reaper.GetMainHwnd())
+      if ok and rv and rv ~= 0 and native then
+        local r, g, b = reaper.ColorFromNative(native)
+        s.rgb = (r << 16) | (g << 8) | b; changed = true
+      end
     end
   end
   return changed

@@ -528,8 +528,7 @@ default), shared with the TCP window and the web page.
   a divider — join into one rounded shape, always the full width of their
   column. Gaps and half-gaps (right-click the empty space) can have one too.
   Backgrounds and sections can have a **Brushed finish** and/or a
-  **Metallic finish** (ticks in the same menus, or *Brushed* and *Metallic*
-  in the editor), like a faceplate's. Sections in a row with the same
+  **Metallic finish** (ticks in the same menus), like a faceplate's. Sections in a row with the same
   style, faceplate and finish join into one.
 - **Faders of any shape.** Right-click a fader ▸ Style ▸ Shape, or in the
   editor: *Direction* up or across, *Length* 2, 3 or 4 rows (columns,
@@ -575,8 +574,22 @@ default), shared with the TCP window and the web page.
   its choices for a switch or dropdown, or on a slider in the plugin's own
   readout for a knob. A hidden control takes no room, so two side by side
   with opposite rules swap in one place: a delay's sync switch showing its
-  note knob when on and its ms knob when off. Conditional controls are
-  marked ◐ in the editor's panel list.
+  note knob when on and its ms knob when off. A rule can follow one of the
+  layout's **virtual controls** too (below). Right-click a control ▸ *Show
+  when* for the quick ones: *Always*, or one click on any button,
+  dropdown, stepped knob or virtual control on the layout; anything else
+  opens the editor at that control. Conditional controls are marked ◐ in
+  the editor's panel list.
+- **Virtual controls.** A layout can have controls of its own that drive
+  no parameter: a **button** (two named states), a **selector** (choices,
+  as chips or a dropdown) or a **knob**. Add one with the editor's
+  *Virtual* button; change its kind under *Type*. They're drawn in violet,
+  and their state is kept per instance, with the project. Their job is to
+  drive *Show when* rules and layout switching: a VIEW button that swaps
+  two sets of controls in one place, or a selector that pages through a
+  plugin's sections. Two layouts of the same plugin with a virtual control
+  of the same name share its state. Right-click one for *Back to where it
+  starts*.
 - **Lock layout.** The padlock at the left of a panel's foot locks that
   plugin's layout, on every track: no more edits, and the controls keep the
   arrangement they had however the panel is resized — a panel too short
@@ -595,12 +608,17 @@ Two different things, kept apart on purpose:
 * A **label** is a caption for *one slot* on the panel, for when a layout is
   cramped and that particular knob needs something shorter.
 
-Right-clicking a control and setting a name sets the **alias**, since that's
-almost always what's wanted. The per-slot label lives in the full editor.
+Right-click a control ▸ **Name** has both — the alias, and this slot's
+label — and *Live name*, which shows whatever the plugin calls the
+parameter right now (for plugins that rename their parameters as you use
+them). Setting the alias there clears the slot's label, so the new name
+shows on the control you renamed. The editor has the same: *Alias*,
+*Label* and *Live name*.
 
 A **toggle** says what its state is called: your **state names** if you've
-set them (right-click ▸ State names), else the plugin's own word for the
-state, and ON/OFF only when the plugin just reports a number.
+set them (right-click ▸ Name ▸ State names, or the editor's *State names*
+row), else the plugin's own word for the state, and ON/OFF only when the
+plugin just reports a number.
 
 A **plugin instance** renamed in REAPER's FX chain shows that name on its
 panel and keeps its layout, which belongs to the plugin. The panel menu's
@@ -611,8 +629,22 @@ filter box takes the first match.
 
 ## Setting a plugin up
 
-Right-click a knob for the quick things — remove it, alias it, change it
-to a button, make its fill centred, drop a gap in front of it.
+Right-click a control for the quick things. The menu is in four parts:
+**Control** — what it does: *Show as*, *Name*, *Values*, *Centred fill*,
+*Reverse*, *Show when*; **Look** — *Style*, *Background*, *Section* and
+*Copy / paste style*; **Automate** — macros and modulators, its
+automation lane and REAPER's parameter modulation; **Arrange** — *Insert
+before* a gap, half-gap or divider, and *Remove from panel*. *Plugin ▸*
+at the foot collapses, moves or opens the whole plugin. Everything under
+Control is in the editor too; looks are set from the right-click only.
+*Edit parameters…* from a control opens the editor with that control
+selected.
+
+The panel menu (**=**) is in three parts: **Layout** (which layout, *Edit
+parameters…*, *Faceplate*, *Meters*, *Reset layout* — auto-fill, clear,
+forget), **Plugin** (collapse, its window, the FX chain, oversampling,
+offline) and **Chain** (move, route, duplicate, insert, containers), with
+*Remove* at the foot.
 
 For the full dialog: panel menu **=** ▸ *Edit parameters…*, or just click an
 unconfigured panel. What the panel shows on the left, the plugin's
@@ -643,6 +675,16 @@ removes one, and the instances using it go back to the plugin's default.
 Each instance's choice is kept with the project; the layouts themselves are
 in the library like any other, as `<plugin> :: <name>`.
 
+A plugin's layouts can also **switch themselves**: Edit Parameters ▸
+*Switch layouts automatically* holds rules such as *use "Dual" when Mode
+is Dual*, on any parameter or one of the layout's virtual controls (*is*,
+*is not*, *is above*, *is below*, *is between*). The first rule that
+matches decides; when none does, the instance's own pick applies. A rule
+on a knob has a little slack, so a knob sitting on the line doesn't
+flicker. The panel's header shows which layout a rule chose, and the
+*Layout* menu says which rule is in charge. The rules belong to the
+plugin and are saved as you change them.
+
 Any of them can be the plugin's **default**: *Make "<name>" the default* in
 the same menu. New instances, and any not set to another, show it; the
 menu marks it *(default)*. *Standard* is the default until you choose
@@ -654,16 +696,20 @@ you've changes you haven't saved), and *Copy to new layout* / *New empty
 layout*, which work from what's in the editor — unsaved changes go to the
 new layout and the one you started from is left as it was.
 
-### EQ and compressor layouts for any plugin
+### Canvas layouts for any plugin
 
-ReaEQ and ReaComp have canvases of their own. Any other EQ or compressor can
-have one too, as a layout: panel menu **=** ▸ *Layout* ▸ **New EQ layout…**
-or **New compressor layout…**. The canvas fills the left of the panel and
+ReaEQ and ReaComp have canvases of their own. Any other plugin of the right
+kind can have one too, as a layout: panel menu **=** ▸ *Layout* ▸ **New
+canvas layout** ▸ *EQ*, *Compressor*, *Multiband*, *Gate*, *Limiter*,
+*De-esser*, *Saturation*, *Delay*, *Reverb*, *Modulation* or *Envelope*.
+ReaDelay and ReaVerbate set themselves up. The canvas fills the left of the panel and
 the plugin's other controls sit in columns beside it: the new layout starts
 with the controls of the one you made it from, less those the canvas takes,
-with their looks and the faceplate. Set it up in the window that opens;
-*Set up this layout…* in the same menu, the panel's own button, or *Set up
-the EQ/compressor canvas…* in Edit Parameters brings it back.
+with their looks and the faceplate. Set it up in the window that opens —
+name the plugin's controls for each role, or let **Guess from names** do
+it; *Set up this layout…* in the same menu, the panel's own
+button, or *Set up the … canvas…* in Edit Parameters brings it back.
+Canvases show no text readouts of what they measure: they draw it.
 
 **An EQ layout** has up to 8 bands. Name each band's controls — frequency,
 gain, Q, a shape switch, an On switch; any can be left out — or **Guess**
@@ -683,18 +729,84 @@ the band out (flat, or off). Right-click a node for its shapes and its On
 switch, or Alt+wheel to step the shape. The nodes say what the plugin's
 own controls read.
 
+An EQ layout can be a **dynamic EQ**: tick *Dynamics* in its setup and map
+each band's threshold, range, ratio, attack, release and dynamics switch.
+Learning holds the dynamics off; the canvas draws each dynamic band's
+reach, with its range node to drag, and the picked band's level going in
+against its threshold.
+
 **A compressor layout** maps roles to the plugin's controls: Threshold,
 Input, Ratio, Knee, Attack, Hold, Release, Make-up and Mix, each optional.
-Nothing is learned — the canvas takes the plugin's own values as fact, and
-a control that doesn't read in its role's unit (a 1176's attack of 1 to 7)
-runs along its range instead. Tick **Reversed** for a *Compression* or
+The canvas takes the plugin's own values as fact, and a control that
+doesn't read in its role's unit (a 1176's attack of 1 to 7) runs along its
+range instead. A compressor's dB isn't always dBFS (an SSL bus compressor's
+0 dB is −22 dBFS), so **Measure threshold** in its setup plays a sine
+through a hidden copy at rising levels and finds where it starts to
+compress; the canvas then draws and drags the threshold in true dBFS. A
+knee reading 0–1 is drawn as a share, and ratios under 1:1 (expansion)
+are drawn as such. Tick **Reversed** for a *Compression* or
 *Peak reduction* control (more of it is a lower threshold), or an attack,
 hold or release that's fastest at the top. A compressor with no threshold
-maps its **Input**: the input drives the signal into a fixed −10 dB
-threshold, drawn as the threshold moving down as the input goes up; map its
-Output as Make-up. A switched ratio or time snaps to the plugin's own
-settings (a release's *Auto* sits after its longest time). Hold draws as a
-flat top on the envelope.
+maps its **Input**: its threshold is drawn fixed (measured, or a guessed
+−10 dBFS), and the input as a gain bar raised towards it from where a
+signal at its 0 dB sits (−18 dBFS unless you set it); map its Output as
+Make-up. A switched ratio or time snaps to the plugin's own settings (a
+release's *Auto* sits after its longest time). Hold draws as a flat top on
+the envelope. With a probe pair on the track, a live dot rides the curve.
+
+**Gate and limiter.** A gate draws its open and close thresholds (solid
+and dashed), the range floor and the ratio, with a lamp that lights while
+it's open; a limiter its level history with the threshold (or input gain)
+and the ceiling.
+
+**Multiband.** Up to four bands, split by shared crossovers or by each
+band's own edges (as Pro-MB does). *All bands* shows the bands over the
+spectrum with a strip each — a small transfer curve with its threshold,
+a dot riding it at the band's level going in, and sliders for ratio,
+attack, release and gain — plus solo, bypass and the band's in-use
+setting; + BAND takes an unused band into use. Click a band for the full
+compressor canvas. One reduction meter for the whole plugin.
+
+**De-esser.** Its band (split-band above the frequency, or around it) over
+the spectrum, filled from the top as it reduces, and the waveform with the
+reduced part in the reduction colour.
+
+**Saturation.** ChannelView **learns** the plugin's curve on a hidden copy
+— a sine at three levels, across the drive's positions and each style —
+and draws it with the music's level riding it, the harmonics it adds, and
+a VU-style drive meter: 0 is where the curve starts to bite. Tone controls
+are held where they're set while it learns.
+
+**Delay.** Every delay is drawn as echoes on one timeline: left above the
+line, right below, the time across (in note values when synced), feedback
+as the second echo, ping-pong, stereo modes (their meanings set in setup),
+offsets and ratios. Up to 10 **taps** with their own time, level, pan and
+feedback — click a tap's dot for its own controls. A *Filters* strip
+draws the low and high cuts. ReaDelay's taps are added (+) and removed on
+the canvas.
+
+**Reverb.** Its energy over time — the pre-delay gap, early reflections
+spaced by size and thinned by diffusion, the tail falling to −60 dB at
+the decay time (or held, when frozen) — and, under it, *decay by
+frequency* with the lows' and highs' crossovers and multipliers, a tone
+tilt or shelves, and the low and high cuts. Style chips and FREEZE along
+the top. A decay that doesn't read in seconds can be **measured**
+(*Measure decay* plays bursts through a hidden copy).
+
+**Modulation.** A scope of its LFO whose timebase follows the rate, depth,
+rate and phase handles, shape chips, and up to three **voices** (a
+chorus's L/C/R, each in its own colour, with its pan). **Envelope:** the
+ADSR with its curve handles.
+
+### Values: when a plugin won't say
+
+Some plugins report their values as bare numbers (Acustica's, for one:
+a frequency as 0.35). Right-click a knob or fader ▸ **Values** ▸ *Custom
+range*: type what its ends read (20 to 20k), the unit and the curve
+(linear, log, squared), and it reads as that everywhere — the panel, the
+tooltip, the numbers round the dial and the web page. *The plugin's own*
+goes back. The same is in the editor's *Values* row. For a knob, *Values*
+also holds the **numbers round the dial**: *None*, *Values* or *0–10*.
 
 ## Hardware looks
 
@@ -739,14 +851,14 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   — either, both or neither.
 - **Numbered scales:** knobs print numbers round their dial — **Values**
   (the plugin's own, units left off and thousands as k, so 12000 Hz reads
-  12k) unless a knob's Style ▸ **Scale** says **0–10** or **None**. A large knob has room for seven
+  12k) unless a knob's **Values** menu (or the editor's *Scale*) says **0–10** or **None**. A large knob has room for seven
   values (eleven for 0–10, or every step of a stepped knob with up to
   eleven); a medium one for three, its ends and middle (six for 0–10, or
   every step up to five). The knob keeps its size, so a number with no
   room for it in the cell is left out (its tick stays); a medium knob's
   value moves to its tooltip, and a small knob has no room for numbers.
-  **Numbers in cap colour** prints them in the knob's colour instead of
-  the faceplate's.
+  **Numbers in cap colour** (Style) prints them in the knob's colour
+  instead of the faceplate's.
 
 Only *Theme* and the *Accent* cap follow Hue/Tint; every other faceplate and
 cap colour is fixed, the way hardware is. The menus stay open while you
@@ -808,6 +920,13 @@ in the plugin window's own preset box and the other way round. Saving
 works for VST2, VST3, JS and CLAP; AU presets load but can't be saved from
 here yet. **View ▸ Preset bar** hides the bar; the foot itself stays, for
 the layout lock at its left.
+
+Some plugins change programs without telling REAPER their parameters
+moved, so the controls stayed where they were. After loading a factory
+preset, ChannelView checks, and if nothing moved it hands the plugin its
+own state back so REAPER reads every parameter again. A plugin that's slow
+to say what preset it's on (VSL's Synchron Player takes a third of a
+second) is asked only now and then.
 
 ## The master
 
@@ -879,11 +998,15 @@ theme's own folder, as REAPER's toolbars find them, and a toggle with an
 | `TS_CV_Mod.lua` | macros and modulators: the plugin, the links, ranges and swings |
 | `TS_CV_ModRack.lua` | the Macros and Modulators panels |
 | `TS_CV_Modulators.jsfx` | the ChannelView Modulators plugin. Goes in `Effects/` |
-| `TS_CV_CanvasSetup.lua` | setting up an EQ or compressor layout for any plugin |
+| `TS_CV_CanvasSetup.lua` | setting up a canvas layout for any plugin |
+| `TS_CV_RolePanel.lua` | the canvases for gates, limiters, multiband, de-essers, saturation, delays, reverbs, modulation and envelopes |
+| `TS_CV_Delay.lua` | the delay canvas's model: every delay as echo lines or taps |
+| `TS_CV_ReaFX.lua` | ReaDelay's and ReaVerbate's canvases, and adding and removing ReaDelay taps |
+| `TS_CV_Busy.lua` | backing off while REAPER is busy |
 | `TS_CV_MapPanel.lua` | an EQ layout's canvas |
 | `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them |
-| `TS_CV_Learn.lua` | learning an EQ's bands on a hidden copy of the plugin |
-| `TS_CV_Learn.jsfx` | the measuring pair learning uses. Goes in `Effects/` |
+| `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: EQ bands, thresholds, reverb decay, saturation |
+| `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` |
 | `TS_CV_Units.lua` | reading a plugin's values from its own text (dB, Hz, ms, ratios) |
 | `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
@@ -1010,16 +1133,19 @@ script into the action list.
 - **ReaComp:** the same canvas as on the desktop — drag the threshold line,
   the knee grips, the curve's end for ratio and the envelope's nodes; tap
   the Detector tab for the drawer.
-- **EQ and compressor layouts** of other plugins show their canvas too,
-  with the layout's other controls beside it: drag an EQ node for frequency
-  and gain, double-tap it to take the band out, tap it to select it for its
-  Q and shape underneath; drag a compressor's threshold, the curve's end
-  for ratio (snapping to a switch's settings) and the envelope's nodes.
-  They're set up on the desktop.
-- **Pages and conditional controls** work as on the desktop: tap a tab to
-  change page (the page is remembered per device), and a control with a
-  *Show when* rule comes and goes as its parameter changes. Each plugin
-  shows its instance's layout, as chosen on the desktop.
+- **Canvas layouts** of other plugins show their canvas too, with the
+  layout's other controls beside it: drag an EQ node for frequency and
+  gain, double-tap it to take the band out, tap it to select it for its Q
+  and shape underneath; drag a compressor's threshold, the curve's end for
+  ratio (snapping to a switch's settings) and the envelope's nodes; the
+  other kinds' handles, chips and taps work as on the desktop. They're set
+  up on the desktop.
+- **Pages, conditional controls and virtual controls** work as on the
+  desktop: tap a tab to change page (the page is remembered per device), a
+  control with a *Show when* rule comes and goes as its parameter or
+  virtual control changes, and a layout switching rule switches the layout
+  here too. Each plugin shows its instance's layout, as chosen on the
+  desktop.
 - **Wet:** in a panel's head where there's room (tap it for a slider), and
   a slider at the top of every plugin's ⋯ sheet and container's sheet.
 - **Gain reduction:** tap a meter to open its trace; tap the trace for its
@@ -1060,7 +1186,9 @@ the way. It times its own frames, and when they suddenly take many times
 longer than usual it shows *ChannelView is waiting while REAPER is busy…*
 and stops reading plugins, trying again once a second until REAPER is
 free. A machine that's simply slow never trips it: it goes by what a frame
-usually costs on that machine. The web companion backs off the same way.
+usually costs on that machine. If frames stay slow for 15 seconds, that's
+taken as what a frame costs now and it carries on, so it can never be left
+waiting. The web companion backs off the same way.
 
 ## Installing
 
@@ -1071,7 +1199,7 @@ Needs the **ReaImGui** extension (ReaPack). SWS is optional — it only powers
 ## Tests
 
 `dev/TS_CV_Test.lua` fakes enough of the REAPER API to exercise the parts
-that don't need a GUI — about a thousand assertions covering plugin-name cleaning, the
+that don't need a GUI — nearly two thousand assertions covering plugin-name cleaning, the
 layout file round-trip, control type guessing, the panel and sends
 geometry, the gain maths and fader taper, the GR meter's peak hold and
 scale, the tooltips' place-once-then-freeze behaviour, and the
@@ -1099,6 +1227,8 @@ layout change, never after it.
 plugins (a switched 73-style EQ and a parametric whose Q means something
 else and cuts narrower than it boosts) and checks the canvas draws them
 within a dB (`lua5.4 dev/TS_CV_LearnSim.lua`).
+It also runs the threshold, reverb-decay and saturation measurements
+against made-up plugins.
 
 `TS_CV_Audit.py` catches the class of mistake Lua only reports mid-frame — a
 call with the wrong number of arguments, a missing `ctx`, a function that
@@ -1188,6 +1318,11 @@ The one hard rule: **nothing sweeps while automation is recording**. A
 sweep under write, touch or latch writes the whole sweep into the lane,
 which is damage to the project rather than a click — so that is refused
 even for an explicit click, and no setting overrides it.
+
+A **stepped knob** (Show as ▸ *Stepped knob*) turns like a knob but lands
+only on the parameter's positions — the plugin's own choices once they've
+been read. It keeps count of a slow drag, so it clicks round one position
+at a time; the wheel moves one position a notch.
 
 Until a parameter has been scanned, the control steps instead: **clicking
 cycles** through the positions and wraps around at the end, Shift-click goes
@@ -1769,7 +1904,8 @@ on its panel: what goes into the plugin and what comes out, from the same
 probe copies. Under them is the change in level, output RMS minus input RMS.
 It works for any plugin between the probes, including ones that report their
 own reduction; those are tapped for their levels alone. Gain reduction and
-levels together share the limit of four plugins per track.
+levels together share the limit of four plugins per track. On a canvas the
+two meters run down the panel's left and right edges.
 
 ### The gain-reduction trace
 
@@ -1781,8 +1917,13 @@ Right-click the trace for its window: 1, 2, 4 or 8 beats (tempo-locked, so
 hits land in the same place every pass) or 1, 2 or 4 seconds. Stop the
 transport and the last pass stays on screen.
 
+The trace lines itself up: about once a second it compares the plugin's
+output with what went in, and its reports with the reduction that shows,
+and draws each at the delay where they agree — a plugin whose meter runs
+early, late or in step with its output all come out right.
+
 The audio comes from the probes, so the track needs a TS_TrackProbe pair
-(1.5.0 or newer: reopen the project after updating). A measured plugin is
+(1.8.0 or newer: reopen the project after updating). A measured plugin is
 already tapped; one that reports its own reduction is tapped for its levels
 while its trace is open, which counts toward the four taps a track can have.
 The waveform shown is one track's at a time, the selected one's. With

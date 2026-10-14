@@ -4719,7 +4719,47 @@ do
   check("busy: typical follows a slow machine", BZ.typical() > 0.15, true)
   check("busy: slow machine needs 5x to trip", frames(3, 0.8), false)
   check("busy: ...and trips at 5x", frames(3, 1.6), true)
+  -- slow for good (a plugin slow to answer every frame, not a job that
+  -- ends): after BZ.GIVE_UP seconds of slow probes, that's the new typical
   BZ.reset()
+  t = 0
+  frames(50, 0.02)
+  frames(3, 0.4)
+  check("busy: backed off", BZ.backed(), true)
+  local b0 = t
+  for k = 1, 10 do BZ.note(0.4, b0 + k) end
+  check("busy: still waiting before giving up", BZ.backed(), true)
+  for k = 11, BZ.GIVE_UP + 1 do BZ.note(0.4, b0 + k) end
+  check("busy: gives up waiting: carries on", BZ.backed(), false)
+  check("busy: the slow frame is the typical now", math.abs(BZ.typical() - 0.4) < 0.01, true)
+  t = b0 + BZ.GIVE_UP + 2
+  check("busy: and doesn't trip on it again", frames(5, 0.4), false)
+  BZ.reset()
+end
+
+-- Presets: REAPER's preset count is asked for now and then, not every
+-- frame -- and a plugin slow to answer it (VSL Synchron Player, a third
+-- of a second) only once a minute or when its preset changes.
+do
+  local PR = require("TS_CV_Presets")
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetFXGUID", "TrackFX_GetPresetIndex", "time_precise", "TrackFX_GetUserPresetFilename" }) do saved[k] = reaper[k] end
+  local now, asked, cost = 100, 0, 0
+  reaper.time_precise = function() return now end
+  reaper.TrackFX_GetFXGUID = function() return "{SLOW}" end
+  reaper.TrackFX_GetUserPresetFilename = function() return nil end
+  reaper.TrackFX_GetPresetIndex = function() asked = asked + 1; now = now + cost; return 0, 5 end
+  PR.forget()
+  for _ = 1, 60 do PR.list(0, 0); now = now + 0.016 end
+  check("presets: count asked now and then, not every frame", asked <= 2, true)
+  PR.forget(); asked = 0; cost = 0.34
+  for _ = 1, 600 do PR.list(0, 0); now = now + 0.016 end
+  check("presets: a slow plugin is asked once in ~10 s", asked, 1)
+  PR.seen(0, 0, "A"); PR.seen(0, 0, "B")
+  PR.list(0, 0)
+  check("presets: ...and again when its preset changes", asked, 2)
+  for k, v in pairs(saved) do reaper[k] = v end
+  PR.forget()
 end
 
 -- ---------------------------------------------------------------------
@@ -4856,6 +4896,160 @@ do
 end
 
 -- ---------------------------------------------------------------------
+-- your own range for a parameter (Range<p>): Acustica's numbers
+-- ---------------------------------------------------------------------
+do
+  local f = { lo = 20, hi = 20000, unit = "Hz", curve = "log" }
+  check("range: log ends", U.range_text(f, 0) .. " | " .. U.range_text(f, 1), "20.0 Hz | 20.0 kHz")
+  check("range: log middle", U.range_text(f, 0.5), "632 Hz")
+  check("range: back", ("%.3f"):format(U.range_norm(f, 632.46)), "0.500")
+  local t = { lo = 0.1, hi = 2000, unit = "ms", curve = "sq" }
+  check("range: squared", U.range_text(t, 0.5) .. " | " .. U.range_text(t, 1), "500 ms | 2.00 s")
+  check("range: squared back", ("%.3f"):format(U.range_norm(t, 500.075)), "0.500")
+  local d = { lo = -30, hi = 0, unit = "dB", curve = "lin" }
+  check("range: linear dB", U.range_text(d, 0.25), "-22.5 dB")
+  check("range: log refused across zero", U.range_text({ lo = -1, hi = 1, unit = "", curve = "log" }, 0.75), "0.50")
+  check("range: ratio", U.range_text({ lo = 1, hi = 20, unit = ":1", curve = "log" }, 0.5), "4.5:1")
+  -- it reads as that while in force, and the values everywhere follow
+  local UN_ = require("TS_CV_Units")
+  local rgn = reaper.TrackFX_GetParamNormalized
+  reaper.TrackFX_GetParamNormalized = function() return 0.5 end
+  local was = U.with_ranges({ [3] = f })
+  check("range: formatted value", U.fmt_value({}, 0, 3), "632 Hz")
+  check("range: a canvas reads it", (UN_.parse(require("TS_CV_ReaComp").text({}, 0, 3))), 632.0)
+  local fm = UN_.formatter({}, 0, 3)
+  check("range: the formatter", fm(1), "20.0 kHz")
+  check("range: find a value", ("%.3f"):format(UN_.find_norm(fm, 1000)), "0.566")
+  check("range: scale labels", table.concat(U.scale_labels({}, 0, 3, "values", { 0, 0.5, 1 }), ","), "20,632,20k")
+  check("range: other params untouched", U.range_of(4), nil)
+  U.with_ranges(was)
+  check("range: put back", U.range_of(3), nil)
+  reaper.TrackFX_GetParamNormalized = rgn
+  -- kept with the layout
+  check("range: line", M.range_line(f), "20|20000|Hz|log")
+  local r2 = M.range_of_line(" 1 | 10 | bogus | weird ")
+  check("range: line read", r2.lo .. " " .. r2.hi .. " [" .. r2.unit .. "] " .. r2.curve, "1 10 [] lin")
+  M.set("Acq TAN2", { controls = { { param = 10, type = "knob" } }, aliases = {}, ranges = { [10] = f } })
+  M.save(); M.reload()
+  local rr = M.get_range("Acq TAN2", 10)
+  check("range: kept", rr and (rr.lo .. " " .. rr.hi .. " " .. rr.unit .. " " .. rr.curve), "20 20000 Hz log")
+  local cp = M.copy(M.get("Acq TAN2")); cp.ranges[10].lo = 30
+  check("range: copy is its own", M.get_range("Acq TAN2", 10).lo, 20)
+  M.remove("Acq TAN2"); M.save(); M.reload()
+end
+
+-- ---------------------------------------------------------------------
+-- virtual controls (Virt<n>) and layout switching (Switch<n>)
+-- ---------------------------------------------------------------------
+do
+  local St = require "TS_CV_State"
+  local PROJ = {}
+  reaper.GetProjExtState = function(_, ns, k) return 1, PROJ[ns .. k] or "" end
+  reaper.SetProjExtState = function(_, ns, k, val) PROJ[ns .. k] = val end
+  St.clear_cache()
+  check("virt: clean name", M.clean_vname(" View|1 ; x "), "View 1 x")
+  check("virt: clean empty", M.clean_vname(" | "), nil)
+  local sel = { param = -1, type = "combo", label = "View", buttons = "across", nbtn = 3,
+                virtual = { start = 0, choices = { "Main", "Sidechain", "Advanced" } } }
+  local btn = { param = -1, type = "toggle", label = "More", virtual = { start = 1, choices = {} } }
+  local kn = { param = -1, type = "knob", label = "", virtual = { start = 0.4, choices = {} } }
+  local shown = { param = 3, type = "knob", show = { param = -1, vname = "View", op = "is", norm = 1, tol = 0.25 } }
+  local more = { param = 4, type = "knob", show = { param = -1, vname = "More", op = "is", norm = 1, tol = 0.499 } }
+  M.set("Comp X", { controls = { sel, btn, kn, shown, more, { param = 0, type = "knob" } } })
+  M.save(); M.reload()
+  local l = M.get("Comp X")
+  check("virt: kept", l.controls[1].virtual and table.concat(l.controls[1].virtual.choices, ","), "Main,Sidechain,Advanced")
+  check("virt: is virtual", M.is_virtual(l.controls[1]) and M.is_virtual(l.controls[2]) and not M.is_virtual(l.controls[6]), true)
+  check("virt: chips one each", l.controls[1].nbtn, 3)
+  check("virt: button start", l.controls[2].virtual.start, 1)
+  check("virt: knob's name", M.vname_of(l.controls[3]), "Amount")
+  check("virt: button names", table.concat(M.vchoices(l.controls[2]), "/"), "Off/On")
+  check("virt: selector values", M.vnorm(l.controls[1], 2) .. " " .. M.vindex(l.controls[1], 0.9) .. " " .. M.vtext(l.controls[1], 0.5), "0.5 3 Sidechain")
+  check("virt: knob text", M.vtext(l.controls[3], 0.42), "42 %")
+  check("virt: show rule kept", l.controls[4].show.vname .. " " .. l.controls[4].show.param, "View -1")
+  check("virt: show line", M.show_line(l.controls[4].show):sub(1, 7), "v:View|")
+  -- shown or not by its setting: the start, then what the instance has
+  local getv = function(p, vn) if vn then return St.vvalue("{V}", vn, "Comp X", l.controls) end return 0 end
+  local _, hid = M.visible(l.controls, getv)
+  check("virt: at start, sidechain knob hidden, more shown", tostring(hid[4]) .. " " .. tostring(hid[5]), "true nil")
+  St.vset("{V}", "View", 1); St.vset("{V}", "More", 0)
+  _, hid = M.visible(l.controls, getv)
+  check("virt: set, shown and hidden", tostring(hid[4]) .. " " .. tostring(hid[5]), "nil true")
+  check("virt: kept per instance", St.vget("{W}", "View"), nil)
+  check("virt: in the project", PROJ["TS_ChannelViewvirt:{V}:View"], "1")
+  St.clear_cache()
+  check("virt: reread", St.vget("{V}", "More"), 0)
+  -- copies keep them; the start found from another layout
+  local cp = M.copy(l)
+  check("virt: copy", cp.controls[1].virtual.choices[3] .. " " .. cp.controls[4].show.vname, "Advanced View")
+  cp.controls[1].virtual.choices[1] = "X"
+  check("virt: copy is its own", l.controls[1].virtual.choices[1], "Main")
+  check("virt: start from the plugin's layout", M.vstart("Comp X", "Amount", {}), 0.4)
+  check("virt: start unknown", M.vstart("Comp X", "Nope", {}), 0)
+
+  -- layout switching: rules on the plugin's own layout
+  M.set("Comp X :: Side", { controls = { { param = 7, type = "knob" } } })
+  M.set("Comp X :: Heavy", { controls = { { param = 8, type = "knob" } } })
+  local rules = { { param = 2, op = "is", norm = 1, tol = 0.25, layout = "Side" },
+                  { param = 0, op = "above", norm = 0.7, tol = 0.005, layout = "Heavy" },
+                  { param = -1, vname = "View", op = "is", norm = 0, tol = 0.25, layout = nil } }
+  check("switch: set", M.set_switch_rules("Comp X", rules), true)
+  M.reload()
+  local sr = M.switch_rules("Comp X")
+  check("switch: kept", sr and (#sr .. " " .. sr[1].layout .. " " .. sr[2].op .. " " .. tostring(sr[3].layout) .. " " .. sr[3].vname), "3 Side above nil View")
+  check("switch: a variant has none", M.get("Comp X :: Side").switch, nil)
+  -- saving the layout over keeps them (the editor's copy doesn't carry them)
+  local ed = M.copy(M.get("Comp X")); ed.switch = nil
+  M.set("Comp X", ed); M.save(); M.reload()
+  check("switch: kept over a save", #(M.switch_rules("Comp X") or {}), 3)
+  -- a copy made into a variant drops them
+  local k2 = M.new_variant("Comp X", "Copy", M.get("Comp X"), false)
+  check("switch: not in a new variant", M.get(k2).switch, nil)
+  M.remove(k2)
+
+  local PV = { [0] = 0.2, [2] = 0 }
+  local rgp = reaper.TrackFX_GetParamNormalized
+  reaper.TrackFX_GetParamNormalized = function(_, _, p) return PV[p] or 0 end
+  local nm = "VST3: Comp X (Someone)"
+  St.vset("{S}", "View", 1)
+  check("switch: none matches, own pick", St.layout_key(nm, "{S}", {}, 0), "Comp X")
+  check("switch: no rule in charge", St.switch_rule("{S}"), nil)
+  PV[2] = 1
+  check("switch: first match", St.layout_key(nm, "{S}", {}, 0), "Comp X :: Side")
+  check("switch: which rule", St.switch_rule("{S}"), 1)
+  PV[0] = 0.9
+  check("switch: first wins", St.layout_key(nm, "{S}", {}, 0), "Comp X :: Side")
+  PV[2] = 0
+  check("switch: knob above", St.layout_key(nm, "{S}", {}, 0), "Comp X :: Heavy")
+  PV[0] = 0.69
+  check("switch: slack holds it", St.layout_key(nm, "{S}", {}, 0), "Comp X :: Heavy")
+  PV[0] = 0.67
+  check("switch: past the slack", St.layout_key(nm, "{S}", {}, 0), "Comp X")
+  PV[0] = 0.69
+  check("switch: no slack coming up", St.layout_key(nm, "{S}", {}, 0), "Comp X")
+  St.vset("{S}", "View", 0)
+  check("switch: by a virtual control, to the plugin's own", St.layout_key(nm, "{S}", {}, 0) .. " " .. tostring(St.switch_rule("{S}")), "Comp X 3")
+  St.set_variant("{S}", "Heavy")
+  check("switch: rule beats the pick", St.layout_key(nm, "{S}", {}, 0), "Comp X")
+  St.vset("{S}", "View", 1)
+  check("switch: the pick when none match", St.layout_key(nm, "{S}", {}, 0), "Comp X :: Heavy")
+  check("switch: without the track, no rules", St.layout_key(nm, "{S}"), "Comp X :: Heavy")
+  -- a rule to a layout that's gone is passed over
+  M.remove("Comp X :: Side"); PV[2] = 1
+  check("switch: gone layout skipped", St.layout_key(nm, "{S}", {}, 0), "Comp X :: Heavy")
+  reaper.TrackFX_GetParamNormalized = rgp
+  check("switch: in words", M.rule_text({ param = 2, op = "is", norm = 1 }, function() return "Mode" end,
+    function(_, n) return n >= 0.5 and "Dual" or "Mono" end), "Mode is Dual")
+  check("switch: in words, virtual", M.rule_text({ param = -1, vname = "View", op = "is", norm = 0.5 }, nil, nil,
+    function() return sel end), "\u{25C6} View is Sidechain")
+  check("switch: in words, between", M.rule_text({ param = 0, op = "between", norm = 0.2, norm2 = 0.6 }), "P0 is between 20 % and 60 %")
+  check("switch: cleared", M.set_switch_rules("Comp X", nil) and M.switch_rules("Comp X"), nil)
+  M.remove("Comp X"); M.remove("Comp X :: Heavy"); M.save(); M.reload()
+  reaper.GetProjExtState, reaper.SetProjExtState = nil, nil
+  St.clear_cache()
+end
+
+-- ---------------------------------------------------------------------
 -- Shared state: the window and the web bridge each have their own copy
 -- of TS_CV_State; a change one makes reaches the other within a second
 do
@@ -4945,7 +5139,9 @@ do
   check("units: 1k2", pv("1k2"), "1200.0|hz")
   check("units: dB", pv("-3.5 dB"), "-3.5|db")
   check("units: ratio", pv("4.0:1"), "4.0|ratio")
-  check("units: ratio other way", pv("1:4"), "4.0|ratio")
+  check("units: ratio as written (an expander's)", pv("1:4"), "0.25|ratio")
+  check("units: ratio under 1:1 (an expander)", pv("0.50:1"), "0.5|ratio")
+  check("units: 1:1", pv("1:1"), "1.0|ratio")
   check("units: limit", pv("Limit"), "inf|ratio")
   check("units: -inf dB", pv("-inf dB"), "-inf|db")
   check("units: seconds", pv("0.35 s"), "350.0|ms")
@@ -5094,6 +5290,609 @@ do
     table.concat(types, " "), "knob2 divider knob7 blank knob3")
 end
 
+-- gate and limiter layouts: kept, and guessed from names
+do
+  M.set("TestGate :: Gate", { controls = {}, aliases = {}, canvas = { kind = "gate",
+    roles = { Threshold = 0, Hysteresis = 3, Range = 4, Release = 6 }, rev = { Release = true } } })
+  M.set("TestLim :: Limiter", { controls = {}, aliases = {}, canvas = { kind = "limit",
+    roles = { Input = 0, Ceiling = 1, Release = 2 }, rev = {} } })
+  M.save(); M.reload()
+  local gl, ll = M.get("TestGate :: Gate"), M.get("TestLim :: Limiter")
+  check("gate layout: its kind", gl and gl.canvas.kind, "gate")
+  check("gate layout: its roles", gl and (gl.canvas.roles.Hysteresis .. "," .. gl.canvas.roles.Range), "3,4")
+  check("gate layout: reversed kept", gl and gl.canvas.rev.Release, true)
+  check("limiter layout: its kind", ll and ll.canvas.kind, "limit")
+  check("limiter layout: its ceiling", ll and ll.canvas.roles.Ceiling, 1)
+  check("a comp role isn't a gate's", (function()
+    M.set("TestGate2 :: Gate", { controls = {}, aliases = {}, canvas = { kind = "gate", roles = { Makeup = 2, Range = 1 } } })
+    M.save(); M.reload(); local l = M.get("TestGate2 :: Gate"); return l.canvas.roles.Makeup end)(), nil)
+  M.remove("TestGate :: Gate"); M.remove("TestLim :: Limiter"); M.remove("TestGate2 :: Gate"); M.save()
+  check("canvas names", M.CANVAS_NAMES.gate .. "/" .. M.CANVAS_NAMES.limit, "Gate/Limiter")
+  local CS = require("TS_CV_CanvasSetup")
+  local g = CS.guess({ "Threshold", "Hysteresis", "Range", "Attack", "Hold", "Release", "Sidechain HPF" }, "gate")
+  check("guess gate: kind", g.kind, "gate")
+  check("guess gate: roles", ("%s %s %s %s %s %s"):format(g.roles.Threshold, g.roles.Hysteresis, g.roles.Range,
+    g.roles.Attack, g.roles.Hold, g.roles.Release), "0 1 2 3 4 5")
+  local g2 = CS.guess({ "Open", "Close", "Hysteresis", "Depth" }, "gate")
+  check("guess gate: close wins over hysteresis", tostring(g2.roles.Close) .. " " .. tostring(g2.roles.Hysteresis), "1 nil")
+  local l = CS.guess({ "Gain", "Output Gain", "Release", "Lookahead" }, "limit")
+  check("guess limiter: gain is the input", l.roles.Input, 0)
+  check("guess limiter: output gain is the ceiling", l.roles.Ceiling, 1)
+  local l2 = CS.guess({ "Threshold", "Out Ceiling", "Release", "Input" }, "limit")
+  check("guess limiter: threshold, so no input", tostring(l2.roles.Threshold) .. " " .. tostring(l2.roles.Input) .. " " .. tostring(l2.roles.Ceiling), "0 nil 1")
+end
+
+-- note values, and the other role canvases
+do
+  local UN = require("TS_CV_Units")
+  check("note: 1/8", UN.note_beats("1/8"), 0.5)
+  check("note: dotted", UN.note_beats("1/8 D"), 0.75)
+  check("note: dotted with a dot", UN.note_beats("1/16."), 0.375)
+  checkf("note: triplet", function() return math.abs(UN.note_beats("1/4T") - 2 / 3) < 1e-9 end)
+  check("note: bars", UN.note_beats("2 bars"), 8)
+  check("note: not one", UN.note_beats("350 ms"), nil)
+  check("time: a note at 120", UN.time_ms("1/8 D", 120), 375.0)
+  check("time: seconds", UN.time_ms("1.2 s"), 1200.0)
+  check("time: neither", UN.time_ms("Hall"), nil)
+  local CS = require("TS_CV_CanvasSetup")
+  local function roles_of(g, list)
+    local t = {}
+    for _, r in ipairs(list) do t[#t + 1] = tostring(g.roles[r]) end
+    return table.concat(t, " ")
+  end
+  check("guess de-esser", roles_of(CS.guess({ "Low Freq", "Frequency", "Threshold", "Range", "Listen" }, "deess"),
+    { "Frequency", "Low", "Threshold", "Range" }), "1 0 2 3")
+  check("guess delay", roles_of(CS.guess({ "Delay Time", "Note", "Sync", "Feedback", "Ping Pong", "Mix" }, "delay"),
+    { "Time", "Note", "Sync", "Feedback", "PingPong", "Mix" }), "0 1 2 3 4 5")
+  -- a stereo delay: the right's own controls, its stereo mode by its likeliest word
+  check("guess stereo delay", roles_of(CS.guess({ "Mode", "Delay Sync", "Time L", "Time R", "Feedback L", "Feedback R",
+      "Cross Feedback", "Width", "Style", "Link", "Mix" }, "delay"),
+    { "Time", "TimeR", "Sync", "Feedback", "FeedbackR", "Cross", "Width", "Mode", "Link", "Mix" }), "2 3 1 4 5 6 7 8 9 10")
+  check("guess delay: right words", roles_of(CS.guess({ "Left Delay", "Right Delay", "Offset", "Ratio" }, "delay"),
+    { "Time", "TimeR", "Offset", "Ratio" }), "0 1 2 3")
+  -- the five delays Tim tried, by their own parameter names
+  do
+    local function g_of(names)
+      local g = CS.guess(names, "delay")
+      local t = {}
+      for r, p in pairs(g.roles) do if not r:match("^T[2-9]") and not r:match("^T10") then t[#t + 1] = r .. "=" .. names[p + 1] end end
+      table.sort(t)
+      return table.concat(t, ","), g.nt
+    end
+    local xd = { "Bypass", "Mix", "Sync to Host", "Multiplier IN", "Multiplier", "Tap 1 IN", "Tap 1 Free/Sync", "Tap 1 Time",
+      "Tap 1 Division", "Tap 1 Rhythm", "Tap 1 Level", "Tap 1 Pan", "Tap 1 Ping Pong", "Tap 1 Ping Pong Pan", "Tap 2 IN", "Tap 2 Time",
+      "Saturation", "Feedback", "Width" }
+    local s_, nt = g_of(xd)
+    check("guess X-Delay", s_ .. " " .. tostring(nt), "Feedback=Feedback,Mix=Mix,Multiplier=Multiplier,Sync=Sync to Host," ..
+      "T1Level=Tap 1 Level,T1Note=Tap 1 Division,T1On=Tap 1 IN,T1Pan=Tap 1 Pan,T1PingPong=Tap 1 Ping Pong,T1Rhythm=Tap 1 Rhythm," ..
+      "T1Sync=Tap 1 Free/Sync,T1Time=Tap 1 Time,Width=Width 2")
+    s_, nt = g_of({ "Note Snap", "Delay Time", "Ping Pong", "Tap 1 Enable", "Tap 2 Enable", "Tap 3 Enable", "Tap 4 Enable", "Saturation",
+      "Feedback", "Width", "Mix" })
+    check("guess X-Echo", s_ .. " " .. tostring(nt), "Feedback=Feedback,Mix=Mix,PingPong=Ping Pong,Sync=Note Snap,T1On=Tap 1 Enable," ..
+      "Time=Delay Time,Width=Width 4")
+    s_, nt = g_of({ "Input", "Mode", "Output", "Ducking", "Mix", "Time", "Spread", "Type", "Feedback", "Modulation", "Damping", "Sync",
+      "FX Feedback" })
+    check("guess UFX-Delay", s_ .. " " .. tostring(nt), "Feedback=Feedback,Mix=Mix,Mode=Type,Offset=Spread,Sync=Sync,Time=Time nil")
+    s_, nt = g_of({ "Max Time", "DAW Sync", "Global Delay Sync", "Pattern Feedback", "Delay Mode", "Time 1", "Pan 1", "Level 1",
+      "T1 State", "Time 2", "Pan 2", "Level 2", "T2 State", "Width", "Dry/Wet Mix" })
+    check("guess Echoes", s_ .. " " .. tostring(nt), "Feedback=Pattern Feedback,Mix=Dry/Wet Mix,Mode=Delay Mode,Note=Global Delay Sync," ..
+      "Sync=DAW Sync,T1Level=Level 1,T1On=T1 State,T1Pan=Pan 1,T1Time=Time 1,Time=Max Time,Width=Width 2")
+    s_, nt = g_of({ "Mix", "DelayStyle", "DelayLSync", "DelayLNote", "DelayL_Ms", "DelayRSync", "DelayRNote", "DelayR_Ms", "DelaySpread",
+      "DelaySpacing", "DelayRatio", "RepeatSwell", "TapA", "Feedback", "Width", "Mode" })
+    check("guess Valhalla Delay", s_ .. " " .. tostring(nt), "Feedback=Feedback,Mix=Mix,Mode=DelayStyle,Note=DelayLNote,NoteR=DelayRNote," ..
+      "Offset=DelaySpread,Ratio=DelayRatio,Sync=DelayLSync,Time=DelayL_Ms,TimeR=DelayR_Ms,Width=Width nil")
+  end
+  do
+    local DLY = require("TS_CV_Delay")
+    local function rd(text, n) local v, u = UN.parse(text); return { p = 0, n = n or 0.5, text = text, v = v, unit = u } end
+    -- a division and a rhythm beside it: 1-8 dotted at 120 = 375 ms
+    local t = DLY.time_of({ Note = rd("1-8"), Rhythm = rd("Dotted"), Sync = rd("Sync") }, { bpm = 120 })
+    check("delay time: division x rhythm", ("%s %.0f"):format(t.how, t.ms), "note 375")
+    -- free, the ms time rules
+    t = DLY.time_of({ Time = rd("520.00 ms"), Note = rd("1-8"), Sync = rd("Free") }, { bpm = 120 })
+    check("delay time: free", ("%s %.0f"):format(t.how, t.ms), "ms 520")
+    -- snapping to what it can reach: divisions x rhythms
+    local DIV = { "1-16", "1-8", "1-4", "1-2" }
+    local RH = { "None", "Dotted", "Triplet" }
+    local function pos(list) local o = {} for i, x in ipairs(list) do o[i] = { norm = (i - 1) / (#list - 1), text = x } end return o end
+    local set_ = {}
+    local io = { positions = function(m) return m.text:find("-", 1, true) and pos(DIV) or pos(RH) end,
+                 set_norm = function(m, n) set_[m.text] = n end, set_to = function() end }
+    DLY.set_time({ Note = rd("1-8", 1 / 3), Rhythm = rd("None", 0), Sync = rd("Sync") }, 760, { bpm = 120 }, io)
+    check("delay snap: 760 ms is a dotted 1/4", ("%.3f %.3f"):format(set_["1-8"] or -1, set_["None"] or -1), "0.667 0.500")
+    -- a time in ms that follows the tempo snaps onto note values
+    local got
+    DLY.set_time({ Time = rd("400.0 ms", 0.4), Sync = rd("On") }, 410,
+      { bpm = 120 }, { positions = function() return nil end, set_norm = function() end, set_to = function(_, v) got = v end })
+    check("delay snap: 410 ms onto a dotted 1/8", ("%.1f"):format(got), "375.0")
+    check("delay labels", table.concat({ DLY.note_label(1.5), DLY.note_label(1 / 3), DLY.note_label(1), DLY.note_label(4) }, " "),
+      "1/4 D 1/8 T 1/4 1 bar")
+    -- X-Echo's taps: no time of their own, each its share of the main time
+    local R = { Time = rd("800.0 ms"), Feedback = rd("50 %"), T1On = rd("Off"), T2On = rd("On"), T3On = rd("Off"), T4On = rd("On") }
+    local mdl = DLY.model(R, { nt = 4, rev = {} }, { bpm = 120 })
+    local on = {}
+    for _, tp in ipairs(mdl.taps) do if tp.on then on[#on + 1] = ("%d@%.0f"):format(tp.k, tp.t) end end
+    check("delay taps: shares of the time", table.concat(on, " ") .. (" P%.0f"):format(mdl.period), "2@400 4@800 P800")
+    -- Echoes' taps: a % of the main time, panned
+    R = { Time = rd("1000.0 ms"), Feedback = rd("0 %"), T1Time = rd("50 %"), T1Pan = rd("-100"), T1Level = rd("100 %") }
+    mdl = DLY.model(R, { nt = 1, rev = {} }, { bpm = 120 })
+    local e = mdl.echoes[1]
+    check("delay taps: a % of the time, left", ("%.0f %.2f %.2f"):format(e.t, e.l, e.r), "500 1.00 0.00")
+    -- a tap's own feedback gets a dot of its own (drawn while it's
+    -- selected), and its pan and feedback are set from the canvas
+    R = { Time = rd("1000.0 ms"), Feedback = rd("50 %"), T1Time = rd("25 %"), T1Feedback = rd("40 %"), T1Pan = rd("L50", 0.25),
+          T2Time = rd("50 %") }
+    mdl = DLY.model(R, { nt = 2, rev = {} }, { bpm = 120 })
+    local ids = {}
+    for _, h in ipairs(mdl.handles) do ids[#ids + 1] = h.id .. (h.own and ("/" .. h.own) or "") end
+    check("delay taps: own feedback handle", table.concat(ids, " "), "t1 f1/1 t2 fb time")
+    local wrote = {}
+    local io2 = { positions = function() return nil end, set_norm = function(m, n) wrote[#wrote + 1] = ("n%.3f"):format(n) end,
+                  set_to = function(m, v) wrote[#wrote + 1] = ("v%.1f"):format(v) end }
+    DLY.apply(R, { nt = 2, rev = {} }, { bpm = 120 }, io2, "p1", "v", 0.5)
+    DLY.apply(R, { nt = 2, rev = {} }, { bpm = 120 }, io2, "f1", "v", 0.6)
+    check("delay taps: pan and own feedback set", table.concat(wrote, " "), "n0.750 v60.0")
+    -- a stereo mode by what setup was told its settings mean
+    check("delay mode: told", tostring(DLY.mode({ Mode = rd("Tape") }, { Tape = "pp" })) .. " " ..
+      tostring(DLY.mode({ Mode = rd("Dual") }, nil)) .. " " .. tostring(DLY.mode({ Mode = rd("On", 1) }, nil, "Ping Pong")), "pp dual pp")
+    -- pans as SSL writes them
+    check("delay pans", table.concat({ DLY.pan_of(rd("L--")), DLY.pan_of(rd("L50")), DLY.pan_of(rd("-C-")), DLY.pan_of(rd("50R")),
+      DLY.pan_of(rd("--R")), DLY.pan_of(rd("-50")) }, " "), "-1 -0.5 0 0.5 1 -0.5")
+    -- the modes and taps survive the file
+    local cvd = M.parse_canvas and nil
+    check("delay modes round trip", M.dl_modes_write(M.dl_modes_parse("Single:mono;PingPong:pp;Tape:none")), "PingPong:pp;Single:mono;Tape:none")
+  end
+  do
+    -- ReaDelay and ReaVerbate: their own canvases
+    local RB = require("TS_CV_ReaFX")
+    local st0 = "AAAAAAAAAAABAAAALAAAAAIAAAAAAAAAQwIAPwAAgD8AAAAAAACAPwAAAAAAAAA8nNEHMwAAgD8AAAAAAACAPwAAgD8AAIA/AAAAPw=="
+    local raw = RB.b64dec(st0)
+    check("readelay state: base64 both ways", #raw .. " " .. tostring(RB.b64enc(raw) == st0), "76 true")
+    local head, taps, tsz = RB.state_split(raw)
+    check("readelay state: one tap of 44", #taps .. " " .. tsz .. " " .. #head, "1 44 32")
+    taps[2] = RB.tap_moved(taps[1], tsz, 1)
+    local raw2 = RB.state_join(head, taps)
+    local _, t2 = RB.state_split(raw2)
+    check("readelay state: a tap added an eighth later", ("%d %.4f"):format(#t2, select(4, string.unpack("<ffff", t2[2])) * 256), "2 3.0000")
+    -- the same as REAPER wrote it with three taps (TS_CV_ReaProbe2)
+    check("readelay state: as REAPER has it", RB.b64enc(RB.state_join(head, { taps[1], RB.tap_moved(taps[1], tsz, 1), RB.tap_moved(taps[1], tsz, 2) })),
+      "AAAAAAAAAAADAAAALAAAAAIAAAAAAAAAQwIAPwAAgD8AAAAAAACAPwAAAAAAAAA8nNEHMwAAgD8AAAAAAACAPwAAgD8AAIA/AAAAPwAAAAAAAIA/AAAAAAAAQDyc0QczAACAPwAAAAAAAIA/AACAPwAAgD8AAAA/AAAAAAAAgD8AAAAAAACAPJzRBzMAAIA/AAAAAAAAgD8AAIA/AACAPwAAAD8=")
+    local saved = {}
+    local function stub(k, f) saved[k] = reaper[k]; reaper[k] = f end
+    local NM = { "Wet", "Dry" }
+    for k = 1, 3 do for _, f in ipairs({ "Enabled", "Length (time)", "Length (musical)", "Feedback", "Lowpass", "Hipass",
+      "Resolution", "Stereo width", "Volume", "Pan" }) do NM[#NM + 1] = k .. ": " .. f end end
+    NM[#NM + 1] = "Bypass"; NM[#NM + 1] = "Wet"; NM[#NM + 1] = "Delta"
+    stub("TrackFX_GetNumParams", function() return #NM end)
+    stub("TrackFX_GetParamName", function(_, _, p) return true, NM[p + 1] or "" end)
+    local lay = RB.ensure({}, 0, "{RD}", "ReaDelay", { controls = {} })
+    local cvr = lay.canvas
+    check("readelay canvas", ("%s %s %d %d %d %d %d %d"):format(cvr.kind, cvr.builtin, cvr.nt, cvr.roles.T2On, cvr.roles.T2Note,
+      cvr.roles.T3Pan, cvr.roles.T1HighCut, cvr.roles.Dry), "delay readelay 3 12 14 31 6 1")
+    lay = RB.ensure({}, 0, "{RV}", "ReaVerbate", { controls = {} })
+    check("reaverbate canvas", ("%s %d %.2f"):format(lay.canvas.kind, lay.canvas.roles.Predelay,
+      M.decay_ms(lay.canvas, 0.294, nil) / 1000), "reverb 5 0.31")
+    check("reaverbate decay not saved", (function() local o = {}; M.canvas_lines(lay.canvas, o); return o.DecayCal == nil end)(), true)
+    check("another kind left alone", RB.ensure({}, 0, "{X}", "ReaDelay", { canvas = { kind = "eq", bands = {} } }).canvas.kind, "eq")
+    -- ReaDelay's taps in the model: time plus musical length, each its own feedback
+    local DLY = require("TS_CV_Delay")
+    local function rd(text, n) local v, u = UN.parse(text); return { p = 0, n = n or 0.5, text = text, v = v, unit = u } end
+    local R = { T1On = rd("ON", 1), T1Time = rd("0.0 ms"), T1Note = rd("2.00 8N"), T1Feedback = rd("-6.0 dB"),
+                T2On = rd("ON", 1), T2Time = rd("100.0 ms"), T2Note = rd("1.00 8N"), T2Feedback = rd("-inf dB") }
+    local mdl = DLY.model(R, { nt = 2, rev = {}, builtin = "readelay" }, { bpm = 120 })
+    check("readelay taps: time + musical", ("%.0f %.0f %.2f %s"):format(mdl.taps[1].t, mdl.taps[2].t, mdl.taps[1].fb,
+      tostring(mdl.beat_grid)), "500 350 0.50 false")
+    local wrote = {}
+    local io3 = { positions = function() return nil end, set_norm = function() end, set_to = function(m, v) wrote[#wrote + 1] = m.text .. "=" .. ("%.2f"):format(v) end }
+    DLY.apply(R, { nt = 2, rev = {}, builtin = "readelay" }, { bpm = 120 }, io3, "t1", "t", 760)
+    DLY.apply(R, { nt = 2, rev = {}, builtin = "readelay" }, { bpm = 120 }, io3, "t2", "t", 400)
+    DLY.apply(R, { nt = 2, rev = {}, builtin = "readelay" }, { bpm = 120 }, io3, "f2", "v", 0.5)
+    check("readelay drags: musical snaps, ms moves, feedback in dB", table.concat(wrote, " "),
+      "2.00 8N=3.00 100.0 ms=150.00 -inf dB=-6.02")
+    for k, fn in pairs(saved) do reaper[k] = fn end
+  end
+  do
+    -- a plugin that answers with what it reads now (Valhalla's): read by moving it
+    local saved = {}
+    local function stub(k, f) saved[k] = reaper[k]; reaper[k] = f end
+    local val = 0.3
+    stub("TrackFX_FormatParamValueNormalized", function() return true, ("%.1f ms"):format(val * 1000) end)
+    stub("TrackFX_GetFormattedParamValue", function() return true, ("%.1f ms"):format(val * 1000) end)
+    stub("TrackFX_GetParamNormalized", function() return val end)
+    stub("TrackFX_SetParamNormalized", function(_, _, _, n) val = n end)
+    stub("TrackFX_GetFXGUID", function() return "{VAL}" end)
+    stub("GetTrackAutomationMode", function() return 0 end)
+    local f = UN.formatter({}, 0, 4)
+    check("dead formatter: read by moving", ("%s %s %.2f"):format(f(0), f(1), val), "0.0 ms 1000.0 ms 0.30")
+    check("dead formatter: between steps", f(0.5004) ~= nil and select(1, UN.parse(f(0.5004))) > 500, true)
+    check("dead formatter: find", ("%.3f"):format(UN.find_norm(f, 250)), "0.250")
+    for k, fn in pairs(saved) do reaper[k] = fn end
+  end
+  check("delay mode", tostring(M.dl_mode_of("Ping-Pong")) .. tostring(M.dl_mode_of("Dual")) .. tostring(M.dl_mode_of("Single"))
+    .. tostring(M.dl_mode_of("Tape")), "ppdualmononil")
+  check("delay sync", tostring(M.dl_sync_of("Free", 1)) .. tostring(M.dl_sync_of("Straight", 0.33)) .. tostring(M.dl_sync_of("Dotted", 0.6))
+    .. tostring(M.dl_sync_of("On", 1)) .. tostring(M.dl_sync_of("Off", 0)) .. tostring(M.dl_sync_of("", 0.7)), "falsetruetruetruefalsetrue")
+  check("delay ratio", ("%g %g %g %s"):format(M.dl_ratio_of("3:4"), M.dl_ratio_of("75 %"), M.dl_ratio_of("1.5"), tostring(M.dl_ratio_of("Off"))),
+    "0.75 0.75 1.5 nil")
+  check("delay note labels", table.concat({ M.dl_note_label(0.5), M.dl_note_label(1.5), M.dl_note_label(4), M.dl_note_label(8),
+    M.dl_note_label(5) }, " "), "1/8 3/8 1 bar 2 bars 5/4")
+  do
+    -- ping-pong: left, right, left at t, 2t, 3t, each down by the feedback
+    local tp = M.dl_taps({ tL = 100, tR = 100, fbL = 0, fbR = 0, cross = 0.5, inL = 1, inR = 0, span = 350 })
+    local s_ = {}
+    for _, e in ipairs(tp) do s_[#s_ + 1] = ("%s%d:%.2f"):format(e.sd, e.t, e.a) end
+    check("delay taps: ping-pong", table.concat(s_, " "), "L100:1.00 R200:0.50 L300:0.25")
+    -- dual: each side its own time and feedback
+    tp = M.dl_taps({ tL = 100, tR = 150, fbL = 0.5, fbR = 0.5, inL = 1, inR = 1, span = 320 })
+    s_ = {}
+    for _, e in ipairs(tp) do s_[#s_ + 1] = ("%s%d"):format(e.sd, e.t) end
+    check("delay taps: dual", table.concat(s_, " "), "L100 R150 L200 R300 L300")
+    -- mono: both sides together, full height either way at no width
+    tp = M.dl_taps({ tL = 100, tR = 100, fbL = 0.5, fbR = 0.5, inL = 1, inR = 1, span = 250 })
+    local b = M.dl_bars(tp, 0)
+    check("delay bars: mono", ("%d %.2f %.2f %.2f"):format(#b, b[1].l, b[1].r, b[2].l), "2 1.00 1.00 0.50")
+    -- width narrows a one-sided echo into a little of the other side
+    b = M.dl_bars({ { t = 100, sd = "L", a = 1 } }, 0.6)
+    check("delay bars: width", ("%.2f %.2f"):format(b[1].l, b[1].r), "0.80 0.20")
+  end
+  check("guess reverb", roles_of(CS.guess({ "Pre-Delay", "Decay Time", "Size", "Early Level", "HF Damping", "Bass Mult", "Dry/Wet" }, "reverb"),
+    { "Predelay", "Decay", "Size", "Early", "Damping", "Bass", "Mix" }), "0 1 2 3 4 5 6")
+  -- CSR Hall-style: crossover, low time, high freq, high damp, diffusion
+  local csr = { "In Level", "Out Level", "Mix", "Type", "Lock", "Rvb Time", "Low Time", "Crossover", "High Freq",
+                "High Damp", "Pre Delay", "Size", "Diffusion", "Early", "Spread", "Modulation" }
+  check("guess reverb: CSR-style", roles_of(CS.guess(csr, "reverb"),
+    { "Decay", "Bass", "LowFreq", "HighFreq", "Damping", "Predelay", "Size", "Diffusion", "Mix" }), "5 6 7 8 9 10 11 12 2")
+  check("guess reverb: cuts are cuts", roles_of(CS.guess({ "Decay", "Low Cut", "High Cut", "HF Damp" }, "reverb"),
+    { "LowCut", "HighCut", "Damping" }), "1 2 3")
+  -- the reverbs Tim tried, by their own names
+  do
+    local function g(names, list) return roles_of(CS.guess(names, "reverb"), list) end
+    check("guess reverb: words apart", CS._rv_words("RTHighMultiply") .. "|" .. CS._rv_words("earlyLateMix") .. "|" .. CS._rv_words("HiCut"),
+      "RT High Multiply|early Late Mix|Hi Cut")
+    check("guess vintageverb", g({ "Mix", "PreDelay", "Decay", "Size", "Attack", "BassMult", "BassXover", "HighShelf", "HighFreq",
+      "EarlyDiffusion", "LateDiffusion", "ModRate", "ModDepth", "HighCut", "LowCut", "ColorMode", "ReverbMode", "Bypass", "Bypass", "Wet", "Delta" },
+      { "Decay", "Early", "Diffusion", "LowFreq", "Bass", "HighFreq", "Damping", "LowCut", "HighCut", "Style", "Mix" }),
+      "2 nil 10 6 5 8 7 14 13 16 0")
+    check("guess tsar-1", g({ "Predelay", "Reverb Time", "Density", "Reverb Tone", "High Cut", "ER Type", "ER Mix", "Diffusion",
+      "Modulation", "Reverb Mix", "Output Vol", "Bypass", "Bypass", "Wet", "Delta" },
+      { "Predelay", "Decay", "Early", "Tone", "HighCut", "Mix" }), "0 1 6 3 4 9")
+    check("guess seventh heaven", g({ "Master Gain", "Dry/Wet Mix", "Decay Time", "Early / Late Level", "VLF Reverb Level", "Pre-delay",
+      "Pre-delay Sync", "Pre-delay Tempo", "Delay (Echo) Time", "Delay Sync", "Delay Tempo", "Low Pass Freq", "High Pass Freq",
+      "Low Pass Enable", "High Pass Enable" },
+      { "Decay", "Balance", "Early", "Predelay", "LowCut", "HighCut", "LowCutOn", "HighCutOn", "Mix" }), "2 3 nil 5 12 11 14 13 1")
+    check("guess ufx-reverb", g({ "Input", "Mode", "Output", "Ducking", "Mix", "Pre-Delay", "Time", "Size", "Diffusion", "Modulation",
+      "Damping", "Freeze", "Filter", "Filter Mode", "Filter Amount" },
+      { "Decay", "Size", "Damping", "Style", "Freeze", "Mix" }), "6 7 10 1 11 4")
+    check("guess pro-r 2", g({ "Space", "Decay Rate", "Distance", "Brightness", "Style", "Character", "Thickness", "Stereo Width",
+      "Ducking", "Mix", "Lock Mix", "Freeze", "Auto Gate", "Auto Gate Enabled", "Auto Gate Offset", "Auto Gate Sync", "Predelay",
+      "Predelay Offset", "Predelay Sync", "Decay EQ Band 1 Used", "Decay EQ Band 1 Enabled", "Decay EQ Band 1 Frequency" },
+      { "Decay", "Tone", "Style", "Freeze", "Mix", "Predelay" }), "0 3 4 11 9 16")
+    check("guess valhallaroom", g({ "mix", "predelay", "decay", "HiCut", "earlyLateMix", "lateSize", "lateCross", "lateModRate",
+      "lateModDepth", "RTBassMultiply", "RTXover", "RTHighMultiply", "RTHighXover", "earlySize", "earlyCross", "earlyModRate",
+      "earlyModDepth", "earlySend", "diffusion", "type", "space", "LoCut" },
+      { "Decay", "Size", "Balance", "Early", "LowFreq", "Bass", "HighFreq", "Damping", "LowCut", "HighCut", "Style" }),
+      "2 5 4 nil 10 9 12 11 21 3 19")
+    check("guess superplate", g({ "Bypass", "Plate Style", "Analog Style", "Decay", "PreDelay", "Modulation", "Mix", "Output", "Input",
+      "Low Cut", "High Cut", "Target Decay", "Threshold", "Recovery Time", "Mod Rate", "Width", "Balance", "EQ1 Gain", "EQ1 Freq",
+      "EQ1 Q", "EQ2 Gain", "EQ2 Freq", "EQ2 Q", "Low Cut Slope", "High Cut Slope" },
+      { "Decay", "Style", "LowCut", "HighCut", "Mix" }), "3 1 9 10 6")
+    check("guess hitsville", g({ "Chamber", "Dist 2648", "Dist 2644", "Speakers", "Microphones", "Width", "Mono", "Predelay", "Low",
+      "High", "Decay", "Mix", "Wet Solo", "Power" }, { "Predelay", "Decay", "LowEQ", "HighEQ", "Mix" }), "7 10 8 9 11")
+    -- the balance's readings
+    check("balance: crossfade", UN.balance_text("0 dB / -16.0 dB") .. " " .. UN.balance_text("-8.0 dB / 0 dB") .. " " .. UN.balance_text("-6.0 / 0 dB"), "16.0 -8.0 -6.0")
+    check("balance: named", UN.balance_text("Equal Mix") .. " " .. UN.balance_text("Reflections") .. " " .. UN.balance_text("Late Reverb"), "0 24 -60")
+    check("balance: percent", ("%.1f %.1f"):format(UN.balance_text("50.00 %"), UN.balance_text("90 %")), "0.0 -19.1")
+    local tab = UN.balance_table(function(n) return ("%.0f %%"):format(n * 100) end)
+    check("balance: table", tab and #tab, 41)
+    check("balance: along and back", ("%.2f"):format(UN.balance_norm(tab, UN.balance_at(tab, 0.3))), "0.30")
+    local RPx = require("TS_CV_RolePanel")
+    check("reverb tone: tilt", ("%.2f %.2f %.2f"):format(RPx.rv_tilt(1, 20000), RPx.rv_tilt(-1, 20000), RPx.rv_tilt(1, 1000)), "4.00 0.25 1.00")
+    check("reverb shelves", ("%.1f %.1f"):format(RPx.rv_shelves(-6, 3, 30), RPx.rv_shelves(-6, 3, 20000)), "-5.8 2.8")
+  end
+  check("guess envelope: a curve isn't a time", roles_of(CS.guess({ "Attack Curve", "Attack", "Decay", "Sustain", "Release", "Release Curve" }, "env"),
+    { "Attack", "AttackCurve", "Decay", "Sustain", "Release", "ReleaseCurve" }), "1 0 2 3 4 5")
+  check("guess modulation", roles_of(CS.guess({ "Rate", "Depth", "Waveform", "Stereo Phase", "Mix" }, "mod"),
+    { "Rate", "Depth", "Shape", "Phase", "Mix" }), "0 1 2 3 4")
+  -- the choruses Tim tried, by their own names: voices of their own
+  -- (Triad Chorus), a depth per side (TriceraChorus), a count (Thorus)
+  do
+    local triad = { "In", "Out", "Feedback", "Stereo", "Voice 1 Amount", "Voice 2 Amount", "Voice 3 Amount",
+      "Voice 1 Pan", "Voice 2 Pan", "Voice 3 Pan", "Voice 1 Phase", "Voice 2 Phase", "Voice 3 Phase",
+      "Voice 1 Rate", "Voice 2 Rate", "Voice 3 Rate", "Voice 1 Rate Sync", "Voice 2 Rate Sync", "Voice 3 Rate Sync",
+      "Voice 1 BPM Sync", "Voice 2 BPM Sync", "Voice 3 BPM Sync", "Voice 1 On", "Voice 2 On", "Voice 3 On",
+      "Bypass", "Bypass", "Wet", "Delta" }
+    local g = CS.guess(triad, "mod")
+    check("guess triad: main", roles_of(g, { "Rate", "Depth", "Phase", "Feedback", "Mix" }), "nil nil nil 2 27")
+    check("guess triad: voice 2", roles_of(g, { "V2Depth", "V2Pan", "V2Phase", "V2Rate", "V2Note", "V2Sync", "V2On" }), "5 8 11 14 17 20 23")
+    check("guess triad: voices", table.concat(M.mod_voices(g.roles), ","), "1,2,3")
+    local tri = { "CHORUS/CHORALE MIX", "CHORUS/CHORALE MODE", "RATE", "DEPTH L", "DEPTH C", "DEPTH R", "DELAY", "ENV RATE",
+      "DETUNE MIX", "DETUNE", "ENV MIX", "TONE", "SOURCE", "SWIRL", "INPUT LEVEL", "OUTPUT LEVEL", "ACTIVE", "RIBBON CONTROLLER",
+      "HOTSWITCH", "TEMPO MODE", "TEMPO", "LFO RETRIGGER" }
+    local t = CS.guess(tri, "mod")
+    check("guess tricera: rate, sides", roles_of(t, { "Rate", "Depth", "V1Depth", "V2Depth", "V3Depth", "Delay" }), "2 nil 3 4 5 6")
+    check("guess tricera: only depths", tostring(t.roles.V1Rate) .. " " .. tostring(t.roles.V1On), "nil nil")
+    local th = CS.guess({ "Speed", "Depth", "Edge", "Tone", "Crossover", "LowGain", "Mode", "NumVoices", "Mix", "Trim", "Bypass" }, "mod")
+    check("guess thorus", roles_of(th, { "Rate", "Depth", "Voices", "Mix", "Phase" }), "0 1 7 8 nil")
+    check("voice of: names", table.concat({ tostring(CS._mod_voice_of("V2 Depth")), tostring(CS._mod_voice_of("Depth Right")),
+      tostring(CS._mod_voice_of("NumVoices")), tostring(CS._mod_voice_of("Voice 3 On")) }, " "), "2 3 nil 3")
+    -- a voice layout keeps its voices
+    M.set("TestCho :: Modulation", { controls = {}, aliases = {}, canvas = { kind = "mod",
+      roles = { Rate = 0, V1Depth = 3, V2Depth = 4, V3Pan = 7, Voices = 9 }, rev = { V3Pan = true } } })
+    M.save(); M.reload()
+    local mc = M.get("TestCho :: Modulation")
+    check("mod voices layout: kept", mc and (mc.canvas.roles.V2Depth .. " " .. mc.canvas.roles.V3Pan .. " " .. mc.canvas.roles.Voices
+      .. " " .. tostring(mc.canvas.rev.V3Pan)), "4 7 9 true")
+    check("mod voices layout: voices", mc and table.concat(M.mod_voices(mc.canvas.roles), ","), "1,2,3")
+    M.remove("TestCho :: Modulation"); M.save()
+  end
+  M.set("TestDly :: Delay", { controls = {}, aliases = {}, canvas = { kind = "delay",
+    roles = { Time = 0, Feedback = 3, PingPong = 4 }, rev = { Feedback = true } } })
+  M.save(); M.reload()
+  local dl = M.get("TestDly :: Delay")
+  check("delay layout: kept", dl and (dl.canvas.kind .. " " .. dl.canvas.roles.PingPong .. " " .. tostring(dl.canvas.rev.Feedback)), "delay 4 true")
+  M.remove("TestDly :: Delay"); M.save()
+  check("canvas order covers every kind", (function()
+    for _, k in ipairs(M.CANVAS_ORDER) do if k ~= "eq" and not M.ROLES[k] then return k end end
+    return #M.CANVAS_ORDER end)(), 11)
+  local RP = require("TS_CV_RolePanel")
+  check("envelope curve: straight", RP._env_bend(0.5, 0), 0.5)
+  checkf("envelope curve: fast start", function() return RP._env_bend(0.5, -1) > 0.8 end)
+  checkf("envelope curve: slow start", function() return RP._env_bend(0.5, 1) < 0.2 end)
+  check("lfo shape: triangle", RP._shape_of("Triangle"), "tri")
+  check("lfo shape: S&H", RP._shape_of("S&H"), "sh")
+  check("lfo shape: saw down", RP._shape_of("Saw Down"), "sawdown")
+  check("lfo shape: unknown is sine", RP._shape_of("Wobble"), "sine")
+  -- a multiband band's reduction from the third-octaves: their median
+  do
+    local fr = { n = 30, f = {}, g = {} }
+    for k = 1, 30 do fr.f[k] = 1000 * 2 ^ ((k - 17) / 3) end
+    fr.g[17], fr.g[18], fr.g[19] = 2, 6, 3          -- 1k, 1.26k, 1.6k
+    check("fine bands: median of those inside", RP.fine_band_gr(fr, 900, 1800), 3)
+    fr.g[20] = 5
+    check("fine bands: an even count averages", RP.fine_band_gr(fr, 900, 2100), 4)
+    check("fine bands: a narrow band takes its nearest", RP.fine_band_gr(fr, 1020, 1100), 2)
+    fr.g[17] = -1
+    check("fine bands: a lift reads as none", RP.fine_band_gr(fr, 990, 1010), 0)
+    check("fine bands: no reading, nil", RP.fine_band_gr(nil, 100, 200), nil)
+  end
+  checkf("lfo: every shape peaks at a quarter, or near", function()
+    return RP._lfo("sine", 0.25) > 0.99 and RP._lfo("tri", 0.25) > 0.99 and RP._lfo("square", 0.1) == 1 end)
+end
+
+-- a factory preset the plugin didn't tell REAPER about: its state handed back
+do
+  local PR = require("TS_CV_Presets")
+  local saved = {}
+  local function stub(k, f) saved[k] = reaper[k]; reaper[k] = f end
+  local vals, chunk_set, preset = { [0] = 0.1, 0.2 }, 0, "Factory A"
+  stub("TrackFX_GetFXGUID", function() return "{PRS}" end)
+  stub("TrackFX_GetCount", function() return 1 end)
+  stub("TrackFX_GetNumParams", function() return 2 end)
+  stub("TrackFX_GetParamNormalized", function(_, _, p) return vals[p] end)
+  stub("TrackFX_GetPreset", function() return false, preset end)
+  stub("TrackFX_SetPreset", function() return true end)
+  stub("TrackFX_GetPresetIndex", function() return 0, 3 end)
+  stub("ValidatePtr", function() return true end)
+  stub("TrackFX_GetNamedConfigParm", function(_, _, k) if k == "vst_chunk" then return true, "AAAA" end return false, "" end)
+  stub("TrackFX_SetNamedConfigParm", function(_, _, k) if k == "vst_chunk" then chunk_set = chunk_set + 1 end return true end)
+  local is_user = PR.is_user
+  PR.is_user = function(_, _, n) return n == "Mine" end
+  PR.load("tr", 0, "Factory A")
+  PR.tick(reaper.time_precise() + 1)
+  check("factory preset, nothing moved: handed back", chunk_set, 1)
+  PR.load("tr", 0, "Factory A"); vals[0] = 0.7; vals[1] = 0.9
+  PR.tick(reaper.time_precise() + 1)
+  check("factory preset that told REAPER: left", chunk_set, 1)
+  preset = "Mine"; PR.load("tr", 0, "Mine"); vals[0] = 0.3
+  PR.tick(reaper.time_precise() + 1)
+  check("user preset: left", chunk_set, 1)
+  PR.seen("tr", 0, "Mine"); preset = "Factory B"; PR.seen("tr", 0, "Factory B")
+  PR.tick(reaper.time_precise() + 1)
+  check("picked in the plugin's window: handed back", chunk_set, 2)
+  PR.is_user = is_user
+  for k, f in pairs(saved) do reaper[k] = f end
+end
+
+-- multiband layouts
+do
+  check("multiband: band role split", table.concat({ M.mb_split("B3Ratio") }, " "), "3 Ratio")
+  check("multiband: not a band role", M.mb_split("Output"), nil)
+  M.set("TestMB :: Multiband", { controls = {}, aliases = {}, canvas = { kind = "multi", nb = 4,
+    roles = { Crossover1 = 0, Crossover3 = 2, B4Threshold = 9, B2Solo = 5, Output = 11 }, rev = { B4Threshold = true } } })
+  M.save(); M.reload()
+  local l = M.get("TestMB :: Multiband")
+  check("multiband: kept", l and ("%s %d %d %d %s"):format(l.canvas.kind, l.canvas.nb, l.canvas.roles.Crossover3,
+    l.canvas.roles.B4Threshold, tostring(l.canvas.rev.B4Threshold)), "multi 4 2 9 true")
+  check("multiband: a copy keeps its bands", M.copy(l).canvas.nb, 4)
+  M.remove("TestMB :: Multiband"); M.save()
+  local CS = require("TS_CV_CanvasSetup")
+  -- C4-style: worded bands and crossovers
+  local c4 = { "Low Crossover", "Mid Crossover", "High Crossover", "Low Thresh", "LowMid Thresh", "HighMid Thresh",
+               "High Thresh", "Low Gain", "High Release", "Output", "Low Solo" }
+  check("multiband guess: four bands from the words", CS.mb_count(c4), 4)
+  local g = CS.guess(c4, "multi")
+  check("multiband guess: crossovers", ("%s %s %s"):format(g.roles.Crossover1, g.roles.Crossover2, g.roles.Crossover3), "0 1 2")
+  check("multiband guess: thresholds", ("%s %s %s %s"):format(g.roles.B1Threshold, g.roles.B2Threshold,
+    g.roles.B3Threshold, g.roles.B4Threshold), "3 4 5 6")
+  check("multiband guess: gain, release, solo, output", ("%s %s %s %s"):format(g.roles.B1Gain, g.roles.B4Release,
+    g.roles.B1Solo, g.roles.Output), "7 8 10 9")
+  -- numbered (ReaXcomp-style)
+  local rx = { "Thresh 1", "Ratio 1", "Attack 1", "Release 1", "Freq 1", "Thresh 2", "Ratio 2", "Freq 2", "Thresh 3", "Ratio 3", "Dry/Wet" }
+  check("multiband guess: three bands from the numbers", CS.mb_count(rx), 3)
+  local g2 = CS.guess(rx, "multi")
+  check("multiband guess: numbered", ("%s %s %s %s %s %s"):format(g2.roles.B1Threshold, g2.roles.B2Ratio, g2.roles.B3Threshold,
+    g2.roles.Crossover1, g2.roles.Crossover2, g2.roles.Mix), "0 6 8 4 7 10")
+  check("multiband: band names", table.concat(CS.band_names(3), "/"), "Low/Mid/High")
+  -- Pro-MB-style: each band its own low and high crossover, and a state
+  local pm = { "Band 1 State", "Band 1 Low Crossover", "Band 1 Low Slope", "Band 1 High Crossover", "Band 1 Threshold",
+               "Band 2 State", "Band 2 Low Crossover", "Band 2 High Crossover", "Band 2 Threshold" }
+  local g3 = CS.guess(pm, "multi", 2)
+  check("multiband guess: a band's own edges", ("%s %s %s %s"):format(g3.roles.B1Low, g3.roles.B1High, g3.roles.B2Low, g3.roles.B2High), "1 3 6 7")
+  check("multiband guess: no crossovers then", tostring(g3.roles.Crossover1), "nil")
+  check("multiband guess: in use", ("%s %s"):format(g3.roles.B1Used, g3.roles.B2Used), "0 5")
+  check("multiband guess: thresholds still", ("%s %s"):format(g3.roles.B1Threshold, g3.roles.B2Threshold), "4 8")
+  check("multiband guess: a band's knee", CS.guess({ "Band 1 Threshold", "Band 1 Knee", "Band 2 Knee" }, "multi", 2).roles.B2Knee, 2)
+  -- where the bands are: shared crossovers, or each its own
+  do
+    local TP = require("TS_CV_Taps")
+    local RC = require("TS_CV_ReaComp")
+    local vals = {}
+    local gn, rt, bg = reaper.TrackFX_GetParamNormalized, RC.text, TP.band_gr
+    reaper.TrackFX_GetParamNormalized = function(_, _, p) return (vals[p] or {})[2] or 0 end
+    RC.text = function(_, _, p) return (vals[p] or {})[1] or "" end
+    TP.band_gr = function(_, _, j) return j * 1.5 end
+    vals[0] = { "5.0 kHz", 0.5 }; vals[1] = { "200 Hz", 0.3 }
+    local pl = TP.mb_plan("tr", 0, { nb = 3, roles = { Crossover1 = 0, Crossover2 = 1 } })
+    check("mb plan: crossovers put in order", ("%.0f %.0f"):format(pl.xs[1], pl.xs[2]), "5000 5100")
+    check("mb plan: a band too narrow to measure", TP.mb_reading("tr", "g", pl, 2), nil)
+    check("mb plan: the others measured", ("%s %s"):format(TP.mb_reading("tr", "g", pl, 1), TP.mb_reading("tr", "g", pl, 3)), "1.5 4.5")
+    vals[0] = { "30 Hz", 0 }; vals[1] = { "250 Hz", 0.3 }; vals[2] = { "Used", 1 }
+    vals[3] = { "Unused", 0 }; vals[4] = { "3.0 kHz", 0.6 }; vals[5] = { "Used", 1 }; vals[6] = { "8.0 kHz", 0.7 }
+    local own = { nb = 3, roles = { B1Low = 0, B1High = 1, B1Used = 2, B2Used = 3, B3Low = 4, B3Used = 5, B3High = 6 } }
+    local po = TP.mb_plan("tr", 0, own)
+    check("mb plan: own edges", ("%s %.0f %.0f %.0f %.0f"):format(tostring(po.own), po[1].lo, po[1].hi, po[3].lo, po[3].hi), "true 30 250 3000 8000")
+    check("mb plan: an unused band", ("%s %s"):format(tostring(po[2].used), tostring(po.at[2])), "false nil")
+    check("mb plan: split between those in use", ("%.0f %s %s"):format(po.xs[1], po.at[1], po.at[3]), "866 1 2")
+    check("mb plan: unused, no reading", TP.mb_reading("tr", "g", po, 2), nil)
+    check("mb plan: the third band reads the second split", TP.mb_reading("tr", "g", po, 3), 3)
+    check("mb state: Pro-MB's three", ("%s %s %s"):format(TP.mb_state_of("Disabled"), TP.mb_state_of("Enabled"), TP.mb_state_of("Unused")), "byp on off")
+    check("mb state: a plain switch", ("%s %s %s"):format(TP.mb_state_of("Off", 0), TP.mb_state_of("On", 1), TP.mb_state_of("", 0.7)), "off on on")
+    vals[3] = { "Disabled", 0.5 }
+    local pd = TP.mb_plan("tr", 0, own)
+    check("mb plan: a disabled band is still there", ("%s %s %s"):format(tostring(pd[2].used), tostring(pd[2].byp), tostring(pd.at[2])), "true true 2")
+    reaper.TrackFX_GetParamNormalized, RC.text, TP.band_gr = gn, rt, bg
+  end
+end
+
+-- a reverb's decay by frequency
+do
+  local RP = require("TS_CV_RolePanel")
+  checkf("reverb: flat between the crossovers", function() return math.abs(RP.rv_mult(1000, 200, 1.5, 5000, 0.5) - 1) < 0.08 end)
+  checkf("reverb: the lows' multiplier below", function() return math.abs(RP.rv_mult(30, 200, 1.5, 5000, 0.5) - 1.5) < 0.05 end)
+  checkf("reverb: the highs' above", function() return math.abs(RP.rv_mult(19000, 200, 1.5, 5000, 0.5) - 0.5) < 0.05 end)
+  -- damping in dB or %: along its range, the larger reading the more
+  check("reverb: damping 0..-24 dB, halfway", ("%.2f"):format(RP.rv_damp({ v = -12, unit = "db", n = 0.5 }, false, 2000, 0, -24)), "0.50")
+  check("reverb: damping all the way", ("%.2f"):format(RP.rv_damp({ v = -24, unit = "db", n = 1 }, false, 2000, 0, -24)), "0.25")
+  check("reverb: damping that runs the other way", ("%.2f"):format(RP.rv_damp({ v = 0, unit = "pct", n = 1 }, false, 2000, 100, 0)), "1.00")
+  check("reverb: damping as a time of its own", RP.rv_damp({ v = 1000, unit = "ms", n = 0.5 }, false, 2000), 0.5)
+  check("reverb: damping as a multiplier", RP.rv_damp({ v = 0.6, unit = "", n = 0.6 }, false, 2000, 0, 1), 0.6)
+  check("reverb: a scale of its own isn't a multiplier", ("%.2f"):format(RP.rv_damp({ v = 1.5, unit = "", n = 0.15 }, false, 2000, 0, 10)), ("%.2f"):format(0.25 ^ 0.15))
+  check("reverb: bass as a time against the decay", RP.rv_bass({ v = 3000, unit = "ms", n = 0.5 }, false, 2000), 1.5)
+  check("reverb: bass as a multiplier", RP.rv_bass({ v = 1.2, unit = "", n = 0.5 }), 1.2)
+  check("reverb: bass along its range, x0.5..x2", ("%.2f %.2f"):format(RP.rv_bass({ unit = "x", n = 0 }), RP.rv_bass({ unit = "x", n = 1 })), "0.50 2.00")
+  check("reverb: diffusion in %", RP.rv_diffusion({ v = 80, unit = "pct", n = 0.3 }), 0.8)
+end
+
+-- a reverb's decay, measured in seconds
+do
+  M.set("TestDec :: Reverb", { controls = {}, aliases = {}, canvas = { kind = "reverb", roles = { Decay = 5, Size = 11 }, rev = {},
+    dec_cal = { p = 5, s = 11, pts = { { 0, 0, 400 }, { 0, 1, 4000 }, { 1, 0, 800 }, { 1, 1, 8000 } } } } })
+  M.save(); M.reload()
+  local l = M.get("TestDec :: Reverb")
+  local dc = l and M.dec_cal(l.canvas)
+  check("decay cal: kept", dc and ("%d %d %d"):format(dc.p, dc.s, #dc.pts), "5 11 4")
+  checkf("decay cal: log between decay points", function() return math.abs(M.decay_ms(l.canvas, 0.5, 0) - 1264.9) < 1 end)
+  checkf("decay cal: log between sizes", function() return math.abs(M.decay_ms(l.canvas, 0, 0.5) - 565.7) < 1 end)
+  checkf("decay cal: back to a position", function() return math.abs(M.decay_pos(l.canvas, 1264.9, 0) - 0.5) < 0.001 end)
+  check("decay cal: a copy keeps it", M.copy(l).canvas.dec_cal.pts[4][3], 8000)
+  l.canvas.roles.Size = nil
+  check("decay cal: not when its size isn't mapped as it was", M.dec_cal(l.canvas), nil)
+  M.remove("TestDec :: Reverb"); M.save()
+  local LN = require("TS_CV_Learn")
+  local env = {}
+  for i = 1, 300 do local t = (i - 1) * 10; env[i] = t < 300 and 0 or -60 * (t - 300) / 2500 end
+  checkf(("decay fit: a 2.5 s tail (%.0f)"):format(LN.decay_fit(env) or 0), function() return math.abs(LN.decay_fit(env) - 2500) < 5 end)
+  check("decay fit: no tail", LN.decay_fit({}), nil)
+  -- not fully wet: the burst heard dry, then a sudden drop to the tail
+  local env2 = {}
+  for i = 1, 400 do local t = (i - 1) * 10; env2[i] = t < 330 and 0 or -30 - 60 * (t - 330) / 2500 end
+  checkf(("decay fit: past a dry burst (%.0f)"):format(LN.decay_fit(env2, LN.DEC_FROM) or 0), function()
+    return math.abs(LN.decay_fit(env2, LN.DEC_FROM) - 2500) < 5 end)
+  check("decay summary", LN.decay_summary({ pts = { { 0, 0, 400 }, { 0.5, 0, 800 }, { 0.5, 1, 4000 }, { 1, 1, 9000 } } }),
+    "0: 0.80 s, 100: 4.00 s (size at 50%)")
+end
+
+-- a compressor's threshold, measured where it really is
+do
+  M.set("TestThr :: Comp", { controls = {}, aliases = {}, canvas = { kind = "comp", roles = { Threshold = 3, Ratio = 4 }, rev = {},
+    thr_cal = { p = 3, n = false, pts = { { -12, -30 }, { 0, -18 }, { 9, -9.2 } } } } })
+  M.save(); M.reload()
+  local l = M.get("TestThr :: Comp")
+  local tc = l and M.thr_cal(l.canvas)
+  check("thr cal: kept", tc and ("%d %s %d %.1f"):format(tc.p, tostring(tc.n), #tc.pts, tc.pts[3][2]), "3 false 3 -9.2")
+  check("thr cal: between points", M.thr_dbfs(l.canvas, -6), -24)
+  checkf("thr cal: past the end, along the last two", function() return math.abs(M.thr_dbfs(l.canvas, 12) - (-6.27)) < 0.01 end)
+  check("thr cal: back again", M.thr_from_dbfs(l.canvas, -24), -6)
+  check("thr cal: a copy keeps it", M.copy(l).canvas.thr_cal.pts[2][2], -18)
+  l.canvas.roles.Threshold = 5
+  check("thr cal: not for another threshold", M.thr_cal(l.canvas), nil)
+  M.remove("TestThr :: Comp"); M.save()
+  -- a reversed control: the points run downwards
+  local cv = { roles = { Threshold = 1 }, thr_cal = { p = 1, n = true, pts = { { 0.2, -10 }, { 0.5, -25 }, { 0.8, -40 } } } }
+  check("thr cal: reversed, back again", M.thr_from_dbfs(cv, -32.5), 0.65)
+  local LN = require("TS_CV_Learn")
+  local T, sl = LN.thr_fit({ { -40, 0 }, { -30, 0.2 }, { -24, 2.25 }, { -21, 4.5 }, { -18, 6.75 } })
+  checkf(("thr fit: the foot of the line (%.2f, %.2f)"):format(T or 0, sl or 0), function() return T and math.abs(T + 27) < 0.01 and math.abs(sl - 0.75) < 0.01 end)
+  check("thr fit: no compression, no threshold", LN.thr_fit({ { -40, 0 }, { -20, 0.3 }, { 0, 0.5 } }), nil)
+end
+
+-- an input-driven compressor or limiter: its input's 0 dB (Ref0)
+do
+  M.set("TestRef :: Limit", { controls = {}, aliases = {}, canvas = { kind = "limit", roles = { Input = 0, Ceiling = 1 }, rev = {}, ref0 = -14 } })
+  M.set("TestRef0 :: Limit", { controls = {}, aliases = {}, canvas = { kind = "limit", roles = { Input = 0, Ceiling = 1 }, rev = {} } })
+  M.save(); M.reload()
+  local l = M.get("TestRef :: Limit")
+  check("ref0: kept", l and l.canvas.ref0, -14)
+  check("ref0: read", M.ref0(l.canvas), -14)
+  check("ref0: a copy keeps it", M.copy(l).canvas.ref0, -14)
+  check("ref0: -18 when unsaid", M.ref0(M.get("TestRef0 :: Limit").canvas), -18)
+  check("ref0: not written when -18", M.get("TestRef0 :: Limit").canvas.ref0, nil)
+  check("thr param: the input, with no threshold", select(2, M.thr_param(l.canvas)), true)
+  M.remove("TestRef :: Limit"); M.remove("TestRef0 :: Limit"); M.save()
+end
+
+-- a dynamic EQ: each band's dynamics
+do
+  local ME = require("TS_CV_MapEQ")
+  M.set("TestDyn :: EQ", { controls = {}, aliases = {}, canvas = { kind = "eq", bands = {
+    { name = "Mid", freq = 1, gain = 2, learn = "x", learn_sig = "1,2,-,-,-",
+      dyn = { thr = 5, range = 6, atk = 8, on = 10, rev = { range = true } } },
+    { name = "High", freq = 3, gain = 4 } } } })
+  M.save(); M.reload()
+  local l = M.get("TestDyn :: EQ")
+  local d = l and l.canvas.bands[1].dyn
+  check("dyn EQ: kept", d and ("%s %s %s %s %s %s"):format(d.thr, d.range, tostring(d.ratio), d.atk, d.on, tostring(d.rev.range)),
+    "5 6 nil 8 10 true")
+  check("dyn EQ: a band without stays without", l and l.canvas.bands[2].dyn, nil)
+  check("dyn EQ: learning untouched by it", l and M.band_sig(l.canvas.bands[1]), "1,2,-,-,-")
+  check("dyn EQ: dynamic", l and M.band_dynamic(l.canvas.bands[1]), true)
+  check("dyn EQ: a copy keeps it", M.copy(l).canvas.bands[1].dyn.range, 6)
+  check("dyn EQ: its controls are the canvas's", M.canvas_params(l.canvas)[8], true)
+  M.remove("TestDyn :: EQ"); M.save()
+  -- guessed: Pro-Q-style numbered, and worded
+  local g = ME.guess({ "Band 1 Frequency", "Band 1 Gain", "Band 1 Q", "Band 1 Dynamic Range", "Band 1 Dynamics Enabled",
+                       "Band 1 Threshold", "Band 2 Frequency", "Band 2 Gain", "Band 2 Enabled" })
+  check("dyn guess: the band's own On isn't its dynamics'", g[1] and ("%s %s %s %s"):format(g[1].freq, tostring(g[1].on),
+    g[1].dyn and g[1].dyn.range, g[1].dyn and g[1].dyn.on), "0 nil 3 4")
+  check("dyn guess: threshold", g[1] and g[1].dyn and g[1].dyn.thr, 5)
+  check("dyn guess: a plain band stays plain", g[2] and ("%s %s"):format(g[2].on, tostring(g[2].dyn)), "8 nil")
+  local g2 = ME.guess({ "Low Mid Freq", "Low Mid Gain", "Low Mid Thresh", "Low Mid Ratio", "Low Mid Attack", "Low Mid Release",
+                        "Low Mid Auto Threshold" })
+  check("dyn guess: worded", g2[1] and g2[1].dyn and ("%s %s %s %s"):format(g2[1].dyn.thr, g2[1].dyn.ratio, g2[1].dyn.atk,
+    g2[1].dyn.rel), "2 3 4 5")
+  -- what the probe measures, read where a band is heard
+  local fr = { n = 30, f = {}, g = {}, lv = {} }
+  for k = 1, 30 do fr.f[k] = 1000 * 2 ^ ((k - 17) / 3); fr.lv[k] = -150 end
+  fr.g[17], fr.g[18] = 4, 2
+  check("dyn: measured at a centre", ME.dev_at(fr, 1000), -4)
+  checkf("dyn: between centres", function() local v = ME.dev_at(fr, 1000 * 2 ^ (1 / 6)); return v < -2.9 and v > -3.1 end)
+  check("dyn: nothing measured is 0", ME.dev_at(fr, 100), 0)
+  fr.lv[17], fr.lv[18] = -20, -20
+  checkf("dyn: level in sums the bands", function() local v = ME.level_in(fr, 900, 1300); return v > -17.1 and v < -16.9 end)
+  check("dyn: a bell's span", ("%.0f %.0f"):format(ME.dyn_span({ type = "bell", f = 1000, q = 1.414 })), "707 1414")
+  check("dyn: a low shelf is heard below it", ME.dyn_focus({ type = "ls", f = 200 }), 100)
+end
+
 -- an EQ band's shape switch
 do
   local ME = require("TS_CV_MapEQ")
@@ -5143,7 +5942,127 @@ do
   checkf("find_norm: past a word at the end", function() return n and math.abs(UN.at(kfmt, n) - 500) < 2 end)
 end
 
+-- a reporting plugin's reduction, lined up with what its tap sees
+do
+  local Tr = require("TS_CV_Trace")
+  local COLS = Tr.COLS
+  local function make(own_c, rep_k, seed)
+    math.randomseed(seed)
+    local d = { mn = {}, mx = {}, ip = {}, gr = {} }
+    local h = { gr = {} }
+    local cur = 1500
+    -- the plugin's reduction over time: hits that decay
+    local red, r = {}, 0
+    for c = 0, COLS - 1 do
+      if math.random() < 0.02 then r = 6 + math.random() * 8 end
+      r = r * 0.93
+      red[c] = r
+    end
+    for c = 0, COLS - 1 do
+      local lvl = 10 ^ ((-18 + math.random() * 6) / 20)           -- what goes in
+      d.ip[(c - own_c) % COLS] = lvl                              -- early by its latency
+      local out = lvl * 10 ^ (-(red[c]) / 20)
+      d.mn[c], d.mx[c] = -out, out
+      h.gr[(c - rep_k) % COLS] = red[c]                           -- its reports, early by rep_k
+    end
+    return h, d, cur
+  end
+  for _, case in ipairs({ { 12, 12 }, { 12, 0 }, { 0, 0 }, { 30, 30 } }) do
+    local own_c, rep_k = case[1], case[2]
+    local h, d, cur = make(own_c, rep_k, 7 + own_c + rep_k)
+    Tr.realign(h, d, own_c, cur, 100)
+    check(("gr align: latency %d, reports %d early"):format(own_c, rep_k), h.k, rep_k)
+  end
+  -- the input held back to sit on the output: by the plugin's latency when
+  -- the copy skipped it, not at all when REAPER already delayed it
+  for _, case in ipairs({ { 12, 12 }, { 12, 0 }, { 30, 30 } }) do
+    local own_c, in_k = case[1], case[2]
+    local _, d, cur = make(in_k, 0, 3 + own_c + in_k)
+    -- give the music shape: louder hits the output follows
+    local e = {}
+    Tr.align_input(e, d, own_c, cur, 100)
+    check(("input align: latency %d, input early by %d"):format(own_c, in_k), e.k, in_k)
+  end
+  -- reports that come LATE (a meter held back to when it's heard): found,
+  -- and nothing read past the latest report
+  do
+    local h, d, cur = make(0, -40, 11)
+    h.c = cur
+    Tr.realign(h, d, 0, cur, 100)
+    check("gr align: reports 40 late", h.k, -40)
+  end
+  -- silence: nothing to go on, nothing found
+  local h = { gr = {} }
+  local d = { mn = {}, mx = {}, ip = {}, gr = {} }
+  Tr.realign(h, d, 12, 100, 100)
+  check("gr align: silence finds nothing", h.k, nil)
+end
+
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
+-- A stepped knob follows a slow drag. The plugin reports its value back
+-- each frame already on a step; a drag that started again from there every
+-- frame lost every move under half a step and never got anywhere (the
+-- forum's "stepped knob behaves very strangely"). The drag's own running
+-- position is kept until the button lets go.
+do
+  local CC = require("TS_CV_Config")
+  local down, dy, wheel = true, -3, 0
+  local fake = setmetatable({
+    GetMouseDelta = function() return 0, dy end,
+    GetMouseWheel = function() return wheel end,
+    GetMousePos = function() return 0, 0 end,
+    GetCursorScreenPos = function() return 0, 0 end,
+    GetWindowDrawList = function() return "dl" end,
+    InvisibleButton = function() return false end,
+    IsItemActive = function() return down end,
+    IsItemHovered = function() return true end,
+    IsItemClicked = function() return false end,
+    IsMouseDown = function() return down end,
+    IsMouseDoubleClicked = function() return false end,
+    IsItemActivated = function() return false end,
+    GetKeyMods = function() return 0 end,
+    CalcTextSize = function() return 6, 10 end,
+  }, { __index = function(_, key)
+    if key:find("Flags_") or key:find("MouseButton_") or key:find("MouseCursor_") or key:find("^Mod_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake)
+  local had = reaper.new_array
+  reaper.new_array = function() return {} end
+  local ok, err = pcall(function()
+    local v, moves = 0, 0
+    for _ = 1, 40 do
+      local ch, nv = W.knob("ctx", "##stp", "Slope", v, "", { step_norm = 0.25 })
+      if ch then v, moves = nv, moves + 1 end
+    end
+    check("stepped: a slow drag walks up the steps", v, 0.75)
+    check("stepped: one change per step", moves, 3)
+    -- the plugin's own choices, unevenly placed: only those are landed on
+    down = false; W.knob("ctx", "##stp", "Slope", 0, "", { step_norm = 0.01 })
+    down = true; v = 0
+    local seen = {}
+    for _ = 1, 60 do
+      local ch, nv = W.knob("ctx", "##stp", "Slope", v, "", { step_norm = 0.01, snaps = { 0, 0.34, 0.67, 1 } })
+      if ch then v = nv; seen[#seen + 1] = nv end
+    end
+    check("stepped: lands only on the choices", table.concat(seen, ","), "0.34,0.67,1")
+    -- letting go forgets the drag; the wheel steps one choice a notch
+    down = false; wheel = -1
+    local ch, nv = W.knob("ctx", "##stp", "Slope", 0.67, "", { snaps = { 0, 0.34, 0.67, 1 } })
+    check("stepped: wheel down one choice", ch and nv, 0.34)
+    wheel = 0
+    -- a plain knob over a plugin that rounds its own value still moves
+    down = true; v = 0
+    for _ = 1, 30 do
+      local ch2, nv2 = W.knob("ctx", "##pln", "Gain", v, "")
+      if ch2 then v = math.floor(nv2 * 10 + 0.5) / 10 end
+    end
+    check("knob: a rounding plugin still follows a slow drag", v >= 0.5, true)
+  end)
+  check("stepped: drag sim ran", ok and true or err, true)
+  reaper.new_array = had
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

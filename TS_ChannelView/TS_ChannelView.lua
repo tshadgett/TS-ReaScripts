@@ -1,15 +1,17 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.0.5
+-- @version 2.1.0
 -- @changelog
---  EQ and compressor layouts for any plugin: Layout ▸ New EQ layout… /
---  New compressor layout…. An EQ's bands are mapped to its controls and
---  their shapes learned from a hidden copy of the plugin; a compressor's
---  threshold, ratio, attack, hold, release and the rest are mapped and
---  read from the plugin's own values. The plugin's other controls sit
---  beside the canvas. On the web companion too.
---  A default layout per plugin (Make "<name>" the default); the plugin's
---  own layout is now called Standard.
+--  Canvas layouts for any plugin: Layout ▸ New canvas layout ▸ EQ (with
+--  dynamic bands), Compressor, Multiband, Gate, Limiter, De-esser,
+--  Saturation, Delay, Reverb, Modulation or Envelope. Shapes, thresholds,
+--  reverb decay and saturation curves measured on a hidden copy of the
+--  plugin. ReaDelay and ReaVerbate set themselves up.
+--  Virtual controls, layouts that switch themselves, a default layout per
+--  plugin, custom value ranges for plugins that won't say.
+--  Tidier right-click and panel menus; settings in both places.
+--  Fixes: stepped knob drag, factory presets, VSL Synchron stall, the
+--  gain-reduction trace's timing. TS_TrackProbe 1.8.0.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -28,10 +30,13 @@
 --  [nomain] TS_CV_Browser.lua
 --  [nomain] TS_CV_Mod.lua
 --  [nomain] TS_CV_Units.lua
+--  [nomain] TS_CV_Delay.lua
+--  [nomain] TS_CV_ReaFX.lua
 --  [nomain] TS_CV_MapEQ.lua
 --  [nomain] TS_CV_MapPanel.lua
 --  [nomain] TS_CV_Learn.lua
 --  [nomain] TS_CV_CanvasSetup.lua
+--  [nomain] TS_CV_RolePanel.lua
 --  [nomain] TS_CV_ModRack.lua
 --  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_Chains.lua
@@ -422,7 +427,7 @@ end
 -- The layout a panel should draw, and the key it's filed under.
 local function layout_for(fx)
   -- the instance's layout variant when it has one (St.variant)
-  local key = St.layout_key(fx.name, fx.guid)
+  local key = St.layout_key(fx.name, fx.guid, app.track, fx.addr)
   local layout, is_default = M.get_or_default(key, app.track, fx.addr, fx.guid)
   return layout, key, is_default
 end
@@ -1136,30 +1141,17 @@ local function style_menu(fx, key, idx, c)
       end
     end
 
-    -- numbers round the dial, like a hardware knob's printed scale
+    -- the numbers round the dial are chosen under Values; their colour
+    -- is a look, so it's here
     ImGui.Spacing(ctx)
-    ImGui.TextDisabled(ctx, "Scale")
-    -- (values unless the knob says otherwise: no Scale line is values)
     local sc_now = M.scale_kind(c) or "none"
-    for i, o in ipairs({ { "none", "None" }, { "values", "Values" }, { "ten", "0\u{2013}10" } }) do
-      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
-      if ImGui.Selectable(ctx, o[2] .. "##scale_" .. o[1], o[1] == sc_now, KEEP_OPEN, 56, 0) then
-        set({ scale = (o[1] ~= "values") and o[1] or false,
-              scale_ink = (o[1] == "none") and false or nil })
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, (o[1] == "values") and "Numbers round the dial in the plugin's own values\n(units left off; thousands as k)."
-          or (o[1] == "ten") and "Numbers round the dial from 0 to 10."
-          or "No numbers.")
-      end
-    end
     ImGui.BeginDisabled(ctx, sc_now == "none")
     local rv, on = ImGui.Checkbox(ctx, "Numbers in cap colour##scale_ink", c.scale_ink == "cap")
     if rv then set({ scale_ink = on and "cap" or false }) end
     ImGui.EndDisabled(ctx)
     if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "The numbers in the knob's colour rather than the faceplate's.\n" ..
-        "A medium knob with numbers shows its value in the tooltip; a small\none has no room for them.")
+      ImGui.SetTooltip(ctx, "The numbers round the dial in the knob's colour rather than\n" ..
+        "the faceplate's. The numbers themselves are under Values.")
     end
   end
 
@@ -1173,15 +1165,15 @@ local function style_menu(fx, key, idx, c)
       for _, o in ipairs(l.controls) do
         if style_family(o.type) == fam then
           o.style, o.cap = src.style, src.cap
-          if fam == "knob" then o.scale, o.scale_ink = src.scale, src.scale_ink end
+          if fam == "knob" then o.scale_ink = src.scale_ink end
           if fam == "fader" then o.dir, o.len, o.thin = src.dir, src.len, src.thin end
         end
       end
     end
     M.set(key, l); M.save()
   end
-  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale ~= nil) then
-    set({ style = false, cap = false, scale = false, scale_ink = false })
+  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale_ink ~= nil) then
+    set({ style = false, cap = false, scale_ink = false })
   end
 end
 
@@ -1388,14 +1380,65 @@ local function panel_menu()
     rescan(true)
     ImGui.CloseCurrentPopup(ctx)
   end
+  -- REAPER's own wet for the plugin: the header shows it where there's
+  -- room, and here it works at any panel width
+  do
+    local wet = reaper.TrackFX_GetParamFromIdent and reaper.TrackFX_GetParamFromIdent(app.track, fx.addr, ":wet")
+    if wet and wet >= 0 then
+      local wv = reaper.TrackFX_GetParam(app.track, fx.addr, wet) or 1
+      ImGui.SetNextItemWidth(ctx, 150)
+      local ch, nv = ImGui.SliderDouble(ctx, "Wet##fxwet", wv * 100, 0, 100, "%.0f%%")
+      if ch then reaper.TrackFX_SetParam(app.track, fx.addr, wet, nv / 100) end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "REAPER's own wet/dry mix for this plugin.\nCtrl+click to type a value.")
+      end
+    end
+  end
+
+  -- a locked layout takes no edits (the padlock in the panel's foot);
+  -- its meters can still be switched on and off
+  local locked = M.locked(layout) ~= nil
+  local function locked_tip()
+    if locked and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, "The layout is locked: unlock it with the padlock\nat the left of the panel's foot.")
+    end
+  end
+  ------------------------------------------------------------- LAYOUT
+  ImGui.SeparatorText(ctx, "Layout")
   -- Layout variants: another layout for the same plugin, picked per
   -- instance (TS_CV_Mappings "<plugin> :: <name>", St.variant). Not for
   -- ReaEQ or ReaComp, whose panels are their own.
   if not RQ.is_eq(key) and not RC.is_comp(key) then
-    local base, cur = M.split_variant(key)
+    local base, shown = M.split_variant(key)
     local dflt = M.default_variant(base)
     local function mark(nm) return (nm == dflt) and "  (default)" or "" end
-    if ImGui.BeginMenu(ctx, "Layout: " .. (cur and U.truncate(cur, 20) or "Standard")) then
+    -- a layout switching rule in charge: the one shown is its, the ticks
+    -- are the instance's own pick (shown again once no rule matches)
+    local rule = St.switch_rule(fx.guid)
+    local _, cur = M.split_variant(rule and St.chosen_key(fx.name, fx.guid) or key)
+    local title = "Layout: " .. (shown and U.truncate(shown, 20) or "Standard") .. (rule and "  \u{00B7} auto" or "")
+    if ImGui.BeginMenu(ctx, title .. "###fxlayout") then
+      local rules = M.switch_rules(base)
+      if rules then
+        local r = rules[rule or 0]
+        local function pname(p)
+          local _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, p, "")
+          return M.display_name(base, p, nil, pn, false)
+        end
+        local function fmt(p, n)
+          local ok_, sv = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, p, n, "")
+          return ok_ and U.trim(sv or "") or nil
+        end
+        local function vfind(nm)
+          local _, vc = M.vstart(base, nm, layout.controls)
+          return vc
+        end
+        local said = r and M.rule_text(r, pname, fmt, vfind)
+        ImGui.TextDisabled(ctx, said and ("Rule %d is in charge: %s"):format(rule, U.truncate(said, 60))
+          or ("%d switching rule%s, none in charge"):format(#rules, #rules == 1 and "" or "s"))
+        ImGui.TextDisabled(ctx, "(set them in Edit Parameters)")
+        ImGui.Separator(ctx)
+      end
       if ImGui.MenuItem(ctx, "Standard" .. mark(nil) .. "##varown", nil, cur == nil) then
         St.set_variant(fx.guid, St.OWN)
       end
@@ -1447,7 +1490,7 @@ local function panel_menu()
       local function make_canvas(kind)
         local nm = M.clean_variant(txt)
         if not nm or M.has(M.variant_key(base, nm)) then
-          local stem = (kind == "eq") and "EQ" or "Compressor"
+          local stem = M.CANVAS_NAMES[kind] or "Compressor"
           nm = stem
           local i = 2
           while M.has(M.variant_key(base, nm)) do nm = stem .. " " .. i; i = i + 1 end
@@ -1455,18 +1498,14 @@ local function panel_menu()
         local made = CS.create(app.track, fx, base, nm, kind, layout)
         if made then St.set_variant(fx.guid, made); app.var_name = nil; ImGui.CloseCurrentPopup(ctx) end
       end
-      if ImGui.Button(ctx, "New EQ layout\u{2026}") then make_canvas("eq") end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "This plugin on an EQ canvas: name its bands' controls,\n" ..
-          "then ChannelView learns each band's shape. Its other controls\n" ..
-          "can sit in columns beside the canvas.")
-      end
-      ImGui.SameLine(ctx)
-      if ImGui.Button(ctx, "New compressor layout\u{2026}") then make_canvas("comp") end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "This plugin on a compressor canvas: name its threshold,\n" ..
-          "ratio, attack and so on. Its other controls can sit in\n" ..
-          "columns beside the canvas.")
+      -- a canvas of its kind (EQ, compressor, gate, limiter, de-esser,
+      -- delay, reverb, envelope, modulation): TS_CV_CanvasSetup
+      if ImGui.BeginMenu(ctx, "New canvas layout") then
+        for _, k in ipairs(M.CANVAS_ORDER) do
+          if ImGui.MenuItem(ctx, M.CANVAS_NAMES[k] .. "\u{2026}") then make_canvas(k) end
+          if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, CS.TIPS[k] or "") end
+        end
+        ImGui.EndMenu(ctx)
       end
       do
         local cl = M.get(key)
@@ -1489,110 +1528,122 @@ local function panel_menu()
       ImGui.EndMenu(ctx)
     end
   end
-  -- REAPER's own wet for the plugin: the header shows it where there's
-  -- room, and here it works at any panel width
-  do
-    local wet = reaper.TrackFX_GetParamFromIdent and reaper.TrackFX_GetParamFromIdent(app.track, fx.addr, ":wet")
-    if wet and wet >= 0 then
-      local wv = reaper.TrackFX_GetParam(app.track, fx.addr, wet) or 1
-      ImGui.SetNextItemWidth(ctx, 150)
-      local ch, nv = ImGui.SliderDouble(ctx, "Wet##fxwet", wv * 100, 0, 100, "%.0f%%")
-      if ch then reaper.TrackFX_SetParam(app.track, fx.addr, wet, nv / 100) end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "REAPER's own wet/dry mix for this plugin.\nCtrl+click to type a value.")
-      end
-    end
-  end
-  ImGui.Separator(ctx)
-
-  -- a locked layout takes no edits (the padlock in the panel's foot);
-  -- its meters can still be switched on and off
-  local locked = M.locked(layout) ~= nil
-  local function locked_tip()
-    if locked and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "The layout is locked: unlock it with the padlock\nat the left of the panel's foot.")
-    end
-  end
   if ImGui.MenuItem(ctx, "Edit parameters\u{2026}", nil, false, not locked) then
     E.open(app.track, fx, key, layout)
   end
   locked_tip()
-  if ImGui.MenuItem(ctx, St.is_collapsed(fx.guid) and "Expand" or "Collapse to a bar") then
-    toggle_fold(fx)
-  end
-
-  -- The meter is a property of the plugin, so it saves with the layout and
-  -- applies to every instance -- same as everything else here.
-  if T.reports_gr(app.track, fx.addr, fx.guid) then
-    local on = M.meter_of(layout) ~= nil
-    if ImGui.MenuItem(ctx, "Gain reduction meter", nil, on) then
-      local l = materialise(fx)
-      M.set_meter(l, not on)
-      M.set(key, l); M.save()
-    end
-  elseif not RQ.is_eq(key) then
-    -- Doesn't report it: it can be MEASURED instead, by the track's probe
-    -- pair (TS_CV_Taps). Not ReaEQ, which has no reduction to measure.
-    local on = layout.measure == true
-    if ImGui.MenuItem(ctx, "Measure gain reduction (estimated)", nil, on) then
-      local l = materialise(fx)
-      l.measure = (not on) or nil
-      M.set_meter(l, not on)
-      M.set(key, l); M.save()
-      TP.invalidate()
-      if not on and TP.status(app.track, fx.guid) == "no_probes" then
-        if reaper.MB("This plugin doesn't report its gain reduction, so it's measured\n" ..
-                     "by a TS_TrackProbe pair: one at the start of the chain, one at\n" ..
-                     "the end. This track doesn't have them.\n\nAdd them now?",
-                     "ChannelView", 4) == 6 then
-          local ok, why = TP.insert_probes(app.track)
-          if not ok then reaper.MB(why, "ChannelView", 0) end
-        end
-      end
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx,
-        "This plugin doesn't report gain reduction to REAPER. Measure it\n" ..
-        "instead, from the audio going in and coming out -- every instance\n" ..
-        "between a TS_TrackProbe pair. An estimate: see the meter's tooltip.")
-    end
-  end
-  -- Input and output meters: any plugin, measured by the same probe pair.
-  do
-    local on = layout.levels == true
-    if ImGui.MenuItem(ctx, "Input/output meters", nil, on) then
-      local l = materialise(fx)
-      l.levels = (not on) or nil
-      M.set(key, l); M.save()
-      TP.invalidate()
-      if not on and TP.status(app.track, fx.guid) == "no_probes" then
-        if reaper.MB("Input and output levels are measured by a TS_TrackProbe pair:\n" ..
-                     "one at the start of the chain, one at the end. This track\n" ..
-                     "doesn't have them.\n\nAdd them now?", "ChannelView", 4) == 6 then
-          local ok, why = TP.insert_probes(app.track)
-          if not ok then reaper.MB(why, "ChannelView", 0) end
-        end
-      end
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx,
-        "Meters for what goes into this plugin and what comes out, and the\n" ..
-        "change in level between them -- every instance between a\n" ..
-        "TS_TrackProbe pair.")
-    end
-  end
   if ImGui.BeginMenu(ctx, "Faceplate", not locked) then
     plate_menu(fx, key, layout)
     ImGui.EndMenu(ctx)
   end
   locked_tip()
-  if ImGui.MenuItem(ctx, "Move left", nil, false, fx.index > 0) then
-    nudge(fx.path_t, -1)
+  if ImGui.BeginMenu(ctx, "Meters") then
+    -- The meter is a property of the plugin, so it saves with the layout and
+    -- applies to every instance -- same as everything else here.
+    if T.reports_gr(app.track, fx.addr, fx.guid) then
+      local on = M.meter_of(layout) ~= nil
+      if ImGui.MenuItem(ctx, "Gain reduction meter", nil, on) then
+        local l = materialise(fx)
+        M.set_meter(l, not on)
+        M.set(key, l); M.save()
+      end
+    elseif not RQ.is_eq(key) then
+      -- Doesn't report it: it can be MEASURED instead, by the track's probe
+      -- pair (TS_CV_Taps). Not ReaEQ, which has no reduction to measure.
+      local on = layout.measure == true
+      if ImGui.MenuItem(ctx, "Measure gain reduction (estimated)", nil, on) then
+        local l = materialise(fx)
+        l.measure = (not on) or nil
+        M.set_meter(l, not on)
+        M.set(key, l); M.save()
+        TP.invalidate()
+        if not on and TP.status(app.track, fx.guid) == "no_probes" then
+          if reaper.MB("This plugin doesn't report its gain reduction, so it's measured\n" ..
+                       "by a TS_TrackProbe pair: one at the start of the chain, one at\n" ..
+                       "the end. This track doesn't have them.\n\nAdd them now?",
+                       "ChannelView", 4) == 6 then
+            local ok, why = TP.insert_probes(app.track)
+            if not ok then reaper.MB(why, "ChannelView", 0) end
+          end
+        end
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx,
+          "This plugin doesn't report gain reduction to REAPER. Measure it\n" ..
+          "instead, from the audio going in and coming out -- every instance\n" ..
+          "between a TS_TrackProbe pair. An estimate: see the meter's tooltip.")
+      end
+    end
+    -- Input and output meters: any plugin, measured by the same probe pair.
+    do
+      local on = layout.levels == true
+      if ImGui.MenuItem(ctx, "Input/output meters", nil, on) then
+        local l = materialise(fx)
+        l.levels = (not on) or nil
+        M.set(key, l); M.save()
+        TP.invalidate()
+        if not on and TP.status(app.track, fx.guid) == "no_probes" then
+          if reaper.MB("Input and output levels are measured by a TS_TrackProbe pair:\n" ..
+                       "one at the start of the chain, one at the end. This track\n" ..
+                       "doesn't have them.\n\nAdd them now?", "ChannelView", 4) == 6 then
+            local ok, why = TP.insert_probes(app.track)
+            if not ok then reaper.MB(why, "ChannelView", 0) end
+          end
+        end
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx,
+          "Meters for what goes into this plugin and what comes out, and the\n" ..
+          "change in level between them -- every instance between a\n" ..
+          "TS_TrackProbe pair.")
+      end
+    end
+    ImGui.EndMenu(ctx)
   end
-  if ImGui.MenuItem(ctx, "Move right", nil, false, fx.index < fx.siblings - 1) then
-    nudge(fx.path_t, 1)
+  -- These three replace a saved layout outright and save straight away --
+  -- one stray click and a layout you spent an hour on is gone, for every
+  -- instance of the plugin. So each asks first whenever there is a saved
+  -- layout to lose. (The Edit Parameters dialog's own Auto-fill needs no
+  -- such guard: nothing there is kept until you press Save.)
+  local function sure(what)
+    if is_default then return true end
+    return reaper.MB(what .. "\n\nThis replaces the saved layout for every " .. key ..
+      " on every track. The library as it was before is kept as\n" ..
+      "TS_ChannelView_Mappings.bak.ini, until the next save.", "ChannelView", 1) == 1
   end
-  parallel_menu(fx.addr, fx.parallel, fx.index, "plugin")
+  if ImGui.BeginMenu(ctx, "Reset layout", not locked) then
+    if ImGui.MenuItem(ctx, "Auto-fill layout\u{2026}", nil, false, not locked) then
+      if sure(("Replace this layout with the plugin's first %d parameters?"):format(C.AUTO_DEFAULT_N)) then
+        M.set(key, M.build_default(app.track, fx.addr)); M.save()
+      end
+    end
+    locked_tip()
+    if ImGui.MenuItem(ctx, "Clear layout\u{2026}", nil, false, not is_default and not locked) then
+      if sure("Clear every control from this layout?") then
+        M.set(key, { controls = {} }); M.save()
+      end
+    end
+    locked_tip()
+    if ImGui.MenuItem(ctx, "Forget saved layout\u{2026}", nil, false, not is_default and not locked) then
+      if sure("Forget this saved layout and go back to the automatic one?") then
+        M.remove(key); M.save()
+      end
+    end
+    locked_tip()
+    ImGui.EndMenu(ctx)
+  end
+  locked_tip()
+  ------------------------------------------------------------- PLUGIN
+  ImGui.SeparatorText(ctx, "Plugin")
+  if ImGui.MenuItem(ctx, St.is_collapsed(fx.guid) and "Expand" or "Collapse to a bar") then
+    toggle_fold(fx)
+  end
+  if ImGui.MenuItem(ctx, "Open the plugin's window") then
+    reaper.TrackFX_Show(app.track, fx.addr, 3)
+  end
+  if ImGui.MenuItem(ctx, "Show in the FX chain") then
+    reaper.TrackFX_Show(app.track, fx.addr, 1)
+  end
   do
     local st = T.os_state(app.track, fx)
     if ImGui.BeginMenu(ctx, "Oversampling" .. (st.lit and ("  (" .. st.lit .. "x)") or "")) then
@@ -1624,6 +1675,15 @@ local function panel_menu()
       end
     end
   end
+  -------------------------------------------------------------- CHAIN
+  ImGui.SeparatorText(ctx, "Chain")
+  if ImGui.MenuItem(ctx, "Move left", nil, false, fx.index > 0) then
+    nudge(fx.path_t, -1)
+  end
+  if ImGui.MenuItem(ctx, "Move right", nil, false, fx.index < fx.siblings - 1) then
+    nudge(fx.path_t, 1)
+  end
+  parallel_menu(fx.addr, fx.parallel, fx.index, "plugin")
   if ImGui.MenuItem(ctx, "Duplicate") then
     reaper.Undo_BeginBlock()
     reaper.PreventUIRefresh(1)
@@ -1634,6 +1694,12 @@ local function panel_menu()
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx, "A copy, settings and all, in the slot right after it.")
+  end
+  if ImGui.MenuItem(ctx, "Insert plugin before\u{2026}") then
+    B.open_menu(insert_target(fx, false))
+  end
+  if ImGui.MenuItem(ctx, "Insert plugin after\u{2026}") then
+    B.open_menu(insert_target(fx, true))
   end
   if ImGui.MenuItem(ctx, "Put in a new container") then
     reaper.Undo_BeginBlock()
@@ -1649,49 +1715,6 @@ local function panel_menu()
       box_menu_items(box)
       ImGui.EndMenu(ctx)
     end
-  end
-  -- These three replace a saved layout outright and save straight away --
-  -- one stray click and a layout you spent an hour on is gone, for every
-  -- instance of the plugin. So each asks first whenever there is a saved
-  -- layout to lose. (The Edit Parameters dialog's own Auto-fill needs no
-  -- such guard: nothing there is kept until you press Save.)
-  local function sure(what)
-    if is_default then return true end
-    return reaper.MB(what .. "\n\nThis replaces the saved layout for every " .. key ..
-      " on every track. The library as it was before is kept as\n" ..
-      "TS_ChannelView_Mappings.bak.ini, until the next save.", "ChannelView", 1) == 1
-  end
-  if ImGui.MenuItem(ctx, "Auto-fill layout\u{2026}", nil, false, not locked) then
-    if sure(("Replace this layout with the plugin's first %d parameters?"):format(C.AUTO_DEFAULT_N)) then
-      M.set(key, M.build_default(app.track, fx.addr)); M.save()
-    end
-  end
-  locked_tip()
-  if ImGui.MenuItem(ctx, "Clear layout\u{2026}", nil, false, not is_default and not locked) then
-    if sure("Clear every control from this layout?") then
-      M.set(key, { controls = {} }); M.save()
-    end
-  end
-  locked_tip()
-  if ImGui.MenuItem(ctx, "Forget saved layout\u{2026}", nil, false, not is_default and not locked) then
-    if sure("Forget this saved layout and go back to the automatic one?") then
-      M.remove(key); M.save()
-    end
-  end
-  locked_tip()
-  ImGui.Separator(ctx)
-  if ImGui.MenuItem(ctx, "Insert plugin before\u{2026}") then
-    B.open_menu(insert_target(fx, false))
-  end
-  if ImGui.MenuItem(ctx, "Insert plugin after\u{2026}") then
-    B.open_menu(insert_target(fx, true))
-  end
-  ImGui.Separator(ctx)
-  if ImGui.MenuItem(ctx, "Open the plugin's window") then
-    reaper.TrackFX_Show(app.track, fx.addr, 3)
-  end
-  if ImGui.MenuItem(ctx, "Show in the FX chain") then
-    reaper.TrackFX_Show(app.track, fx.addr, 1)
   end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, fx.is_container and "Remove container" or "Remove plugin from the chain") then
@@ -1961,7 +1984,6 @@ local function link_items(fx, c, param, axis)
       ImGui.EndMenu(ctx)
     end
   end
-  if l or #s.list > 0 then ImGui.Separator(ctx) end
 end
 
 -- The links on this control: an XY pad's X and Y, a dual knob's ring and
@@ -1973,7 +1995,9 @@ local function mod_items(fx, c)
   local a1, a2 = "X", "Y"
   if c.type == "dual" then a1, a2 = "Ring", "Inner" end
   link_items(fx, c, c.param, a1)
+  ImGui.Separator(ctx)
   link_items(fx, c, c.param2, a2)
+  ImGui.Separator(ctx)
 end
 
 -- "Automation lane" for a control's parameter(s): shows it (made if
@@ -2003,7 +2027,273 @@ local function lane_items(fx, c)
   else
     item(c.param)
   end
+end
+
+-- ---------------------------------------------------------------------
+-- a control's right-click, in four parts: CONTROL (what it does: every
+-- one of these is in Edit parameters too), LOOK (how it looks: only
+-- here), AUTOMATE (what drives it) and ARRANGE (where it sits)
+-- ---------------------------------------------------------------------
+
+local function enter_pressed()
+  return ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+         or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
+end
+
+-- Name: everything a control is called -- the parameter's alias (this
+-- plugin, everywhere), this slot's own label, its live name, and a
+-- button's names for its two states.
+local function name_menu(fx, key, layout, idx, c)
+  local function tip(t) if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then ImGui.SetTooltip(ctx, t) end end
+  -- Renaming here sets the parameter's ALIAS: the name sticks to the
+  -- parameter for this plugin everywhere, panels and editor lists alike.
+  -- This slot's own label, if it has one, is cleared, or it would go on
+  -- hiding the new name on the very control you renamed.
+  ImGui.TextDisabled(ctx, "Alias: this plugin, everywhere")
+  ImGui.SetNextItemWidth(ctx, 170)
+  local _, v = ImGui.InputTextWithHint(ctx, "##alias", "name\u{2026}", app.rename_buf or "")
+  local alias_enter = enter_pressed()
+  app.rename_buf = v
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Set##alias") or alias_enter then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc and lc.label and lc.label ~= "" then lc.label = ""; M.set(key, l); app.label_buf = "" end
+    M.set_alias(key, c.param, app.rename_buf)
+    M.save()
+    ImGui.CloseCurrentPopup(ctx)
+  end
+  ImGui.TextDisabled(ctx, "Label: this slot only")
+  ImGui.SetNextItemWidth(ctx, 170)
+  local _, lv = ImGui.InputTextWithHint(ctx, "##label", "name\u{2026}", app.label_buf or "")
+  local label_enter = enter_pressed()
+  app.label_buf = lv
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Set##label") or label_enter then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.label = U.trim(app.label_buf or "") end
+    M.set(key, l); M.save()
+    ImGui.CloseCurrentPopup(ctx)
+  end
+  tip("A name for this one control, over the alias -- for a cramped\n" ..
+      "layout. Clear it to show the alias again.")
+  if ImGui.MenuItem(ctx, "Live name", nil, (c.live or layout.live) and true or false, not layout.live) then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.live = (not c.live) or nil end
+    M.set(key, l); M.save()
+  end
+  tip(layout.live and "On for every control: Live parameter names is on for this layout."
+    or "Show whatever the plugin calls this parameter right now, instead\n" ..
+       "of the label or alias -- for plugins that rename their parameters.")
+
+  -- A button's two states can have names of their own, for plugins whose
+  -- switches read "0.0"/"1.0" or worse. Hints are what the plugin says.
+  if c.type == "toggle" then
+    ImGui.Separator(ctx)
+    ImGui.TextDisabled(ctx, "State names: this plugin, everywhere")
+    local function hint(n)
+      if reaper.TrackFX_FormatParamValueNormalized then
+        local ok, t = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, c.param, n, "")
+        if ok and t and t ~= "" then return t end
+      end
+      return n < 0.5 and "off" or "on"
+    end
+    app.state_buf = app.state_buf or { "", "" }
+    ImGui.SetNextItemWidth(ctx, 82)
+    local _, v1 = ImGui.InputTextWithHint(ctx, "##stoff", hint(0), app.state_buf[1])
+    local e1 = enter_pressed()
+    app.state_buf[1] = v1
+    ImGui.SameLine(ctx, 0, 6)
+    ImGui.SetNextItemWidth(ctx, 82)
+    local _, v2 = ImGui.InputTextWithHint(ctx, "##ston", hint(1), app.state_buf[2])
+    local e2 = enter_pressed()
+    app.state_buf[2] = v2
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Set##states") or e1 or e2 then
+      materialise(fx)
+      M.set_states(key, c.param, app.state_buf[1], app.state_buf[2])
+      M.save()
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    tip("Off, then on. Leave one empty to keep the plugin's own text;\n" ..
+        "clear both to go back to it entirely.")
+  end
+end
+
+-- Values: what the parameter reads as -- the plugin's own, or your range
+-- for a plugin that won't say (Range<p>, TS_CV_Util U.range_*). The same
+-- as Edit parameters' Values row.
+local function values_menu(fx, key, layout, idx, c)
+  local p = c.param
+  local rg = layout.ranges and layout.ranges[p]
+  local tag = fx.guid .. ":" .. p
+  if app.rng_for ~= tag then
+    local r0 = rg or E.range_start(app.track, fx.addr, p)
+    local ui, ci = 1, 1
+    for i, u in ipairs(U.RANGE_UNITS) do if u == (r0.unit or "") then ui = i end end
+    for i, k in ipairs(U.RANGE_CURVES) do if k == (r0.curve or "lin") then ci = i end end
+    app.rng_for = tag
+    app.rng = { lo = ("%g"):format(r0.lo), hi = ("%g"):format(r0.hi), unit = ui, curve = ci }
+  end
+  local b = app.rng
+  local function typed()
+    local lo, hi = E.parse_num(b.lo), E.parse_num(b.hi)
+    if not lo or not hi or lo == hi then return nil end
+    return { lo = lo, hi = hi, unit = U.RANGE_UNITS[b.unit] or "", curve = U.RANGE_CURVES[b.curve] or "lin" }
+  end
+  local function store(r)
+    local l = materialise(fx)
+    if r then l.ranges = l.ranges or {}; l.ranges[p] = r
+    elseif l.ranges then l.ranges[p] = nil end
+    M.set(key, l); M.save()
+  end
+  -- numbers round the dial, like a hardware knob's printed scale (a
+  -- knob's; values unless it says otherwise; a small knob has no room)
+  if c.type == "knob" or c.type == "stepped" or c.type == nil then
+    ImGui.TextDisabled(ctx, "Numbers round the dial")
+    local sc_now = M.scale_kind(c) or "none"
+    local small = c.size == "small"
+    ImGui.BeginDisabled(ctx, small)
+    for i, o in ipairs({ { "none", "None" }, { "values", "Values" }, { "ten", "0\u{2013}10" } }) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, o[2] .. "##scale_" .. o[1], o[1] == sc_now, KEEP_OPEN, 56, 0) then
+        local l = materialise(fx)
+        local lc = l.controls[idx]
+        if lc then
+          lc.scale = (o[1] ~= "values") and o[1] or nil
+          if o[1] == "none" then lc.scale_ink = nil end
+        end
+        M.set(key, l); M.save()
+      end
+      if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+        ImGui.SetTooltip(ctx, small and "A small knob has no room for numbers."
+          or (o[1] == "values") and "The values it reads as (below), units left off, thousands as k.\nA medium knob with numbers shows its value in the tooltip."
+          or (o[1] == "ten") and "0 to 10, whatever it reads as."
+          or "No numbers.")
+      end
+    end
+    ImGui.EndDisabled(ctx)
+    ImGui.Separator(ctx)
+  end
+  ImGui.TextDisabled(ctx, "What it reads as")
+  if ImGui.MenuItem(ctx, "The plugin's own", nil, rg == nil) and rg then
+    store(nil); app.rng_for = nil
+  end
+  local want = typed()
+  if ImGui.MenuItem(ctx, "Custom range", nil, rg ~= nil, want ~= nil) then store(want) end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, "Your own range for it, below, for a plugin that won't say what\n" ..
+      "its values are -- it reads as that everywhere.")
+  end
   ImGui.Separator(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, "From")
+  ImGui.SameLine(ctx, 46)
+  ImGui.SetNextItemWidth(ctx, 62)
+  local _, lo = ImGui.InputText(ctx, "##rmlo", b.lo)
+  local e1 = enter_pressed()
+  b.lo = lo
+  ImGui.SameLine(ctx, 0, 6); ImGui.Text(ctx, "to"); ImGui.SameLine(ctx, 0, 6)
+  ImGui.SetNextItemWidth(ctx, 62)
+  local _, hi = ImGui.InputText(ctx, "##rmhi", b.hi)
+  local e2 = enter_pressed()
+  b.hi = hi
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, "Unit")
+  ImGui.SameLine(ctx, 46)
+  local un = {}
+  for i, u in ipairs(U.RANGE_UNITS) do un[i] = (u == "") and "none" or u end
+  ImGui.SetNextItemWidth(ctx, 62)
+  local uch, ui = ImGui.Combo(ctx, "##rmunit", b.unit - 1, table.concat(un, "\0") .. "\0")
+  if uch then b.unit = ui + 1 end
+  ImGui.SameLine(ctx, 0, 6); ImGui.Text(ctx, "curve"); ImGui.SameLine(ctx, 0, 6)
+  ImGui.SetNextItemWidth(ctx, 74)
+  local cch, ci = ImGui.Combo(ctx, "##rmcurve", b.curve - 1, "Linear\0Log\0Squared\0")
+  if cch then b.curve = ci + 1 end
+  want = typed()
+  local now = reaper.TrackFX_GetParamNormalized(app.track, fx.addr, p) or 0
+  ImGui.TextDisabled(ctx, want and ("now reads " .. U.range_text(want, now)) or "type two different ends")
+  if not want then ImGui.BeginDisabled(ctx, true) end
+  if ImGui.Button(ctx, "Set##rmset") or ((e1 or e2) and want) then store(want); ImGui.CloseCurrentPopup(ctx) end
+  if not want then ImGui.EndDisabled(ctx) end
+  ImGui.SameLine(ctx)
+  if not rg then ImGui.BeginDisabled(ctx, true) end
+  if ImGui.Button(ctx, "Clear##rmclr") then store(nil); app.rng_for = nil; ImGui.CloseCurrentPopup(ctx) end
+  if not rg then ImGui.EndDisabled(ctx) end
+end
+
+-- Show when: Always, or one click on a button, dropdown, stepped knob or
+-- virtual control on this layout; anything else (another parameter, is
+-- not / above / between) is Edit parameters, opened at this control.
+local function show_when_menu(fx, key, layout, idx, c)
+  local function set(r)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.show = r end
+    M.set(key, l); M.save()
+  end
+  local base = M.split_variant(key)
+  if c.show then
+    local function pname(p)
+      local _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, p, "")
+      return M.display_name(key, p, nil, pn, false)
+    end
+    local function fmt(p, n)
+      local ok_, sv = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, p, n, "")
+      return ok_ and U.trim(sv or "") or nil
+    end
+    local function vfind(nm)
+      local _, vc = M.vstart(base or key, nm, layout.controls)
+      return vc
+    end
+    ImGui.TextDisabled(ctx, "Now: " .. U.truncate(M.rule_text(c.show, pname, fmt, vfind), 44))
+    ImGui.Separator(ctx)
+  end
+  if ImGui.MenuItem(ctx, "Always", nil, c.show == nil) and c.show then set(nil) end
+  local list = E.show_sources(app.track, fx.addr, key, layout.controls, c)
+  if #list > 0 then ImGui.Separator(ctx) end
+  for i, e in ipairs(list) do
+    local mine = c.show and M.show_op(c.show) == "is"
+      and ((e.vname and c.show.vname == e.vname) or (not e.vname and not c.show.vname and c.show.param == e.param))
+    if ImGui.BeginMenu(ctx, U.truncate(e.label, 28) .. "##sw" .. i) then
+      for k, ch in ipairs(e.choices) do
+        local cur = mine and math.abs((c.show.norm or 0) - ch.norm) < 1e-4
+        if ImGui.MenuItem(ctx, "is " .. U.truncate((ch.text or tostring(k)):gsub("%z", ""), 24) .. "##swc" .. k, nil, cur) then
+          set({ param = e.param, vname = e.vname, op = "is", norm = ch.norm, tol = e.tol })
+        end
+      end
+      ImGui.EndMenu(ctx)
+    end
+  end
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Another rule\u{2026}") then E.open(app.track, fx, key, layout, idx) end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Any parameter, and is not / above / below / between:\n" ..
+      "Edit parameters, opened at this control.")
+  end
+end
+
+-- What acts on the whole plugin rather than this control
+local function plugin_sub(fx)
+  if ImGui.BeginMenu(ctx, "Plugin") then
+    if ImGui.MenuItem(ctx, St.is_collapsed(fx.guid) and "Expand" or "Collapse to a bar") then
+      toggle_fold(fx)
+    end
+    if ImGui.MenuItem(ctx, "Move left", nil, false, fx.index > 0) then nudge(fx.path_t, -1) end
+    if ImGui.MenuItem(ctx, "Move right", nil, false, fx.index < fx.siblings - 1) then nudge(fx.path_t, 1) end
+    if ImGui.MenuItem(ctx, "Open the plugin's window") then reaper.TrackFX_Show(app.track, fx.addr, 3) end
+    ImGui.EndMenu(ctx)
+  end
+end
+
+local function automate_items(fx, c)
+  if not (app.track and c and c.param and c.param >= 0) then return end
+  ImGui.SeparatorText(ctx, "Automate")
+  mod_items(fx, c)
+  lane_items(fx, c)
+  param_mod_item(fx, c)
 end
 
 local function control_menu()
@@ -2015,25 +2305,47 @@ local function control_menu()
   local layout, key = layout_for(fx)
   local c = layout.controls and layout.controls[cm.ctl]
   if not c then ImGui.EndPopup(ctx) return end
+  local idx = cm.ctl
+
+  -- a virtual control (the layout's own): its name, back to where it
+  -- starts, and the layout's edits; no parameter to link or automate
+  if M.is_virtual(c) then
+    local nm = M.vname_of(c)
+    ImGui.TextDisabled(ctx, "\u{25C6} " .. U.truncate(nm, 26) .. "  (virtual)")
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Back to where it starts") then St.vset(fx.guid, nm, c.virtual.start or 0) end
+    if not M.locked(layout) then
+      ImGui.SeparatorText(ctx, "Arrange")
+      if ImGui.MenuItem(ctx, "Remove from panel") then
+        local l = materialise(fx); M.save()
+        table.remove(l.controls, idx)
+        M.set(key, l); M.save()
+      end
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then E.open(app.track, fx, key, layout, idx) end
+    end
+    plugin_sub(fx)
+    ImGui.EndPopup(ctx)
+    return
+  end
 
   local _, pname = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param or 0, "")
-  ImGui.TextDisabled(ctx, U.truncate(pname or "", 28))
-  ImGui.Separator(ctx)
-  mod_items(fx, c)
-  lane_items(fx, c)
+  ImGui.TextDisabled(ctx, U.truncate(pname or "", 26) .. "  \u{00B7}  " .. U.truncate(U.fx_label(fx), 20))
+
+  local rescan_ok = (c.type == "combo" or c.type == "stepped") and c.param and c.param >= 0
 
   -- a locked layout takes no edits: say so, and offer only what isn't one
   if M.locked(layout) then
-    ImGui.TextDisabled(ctx, "Layout locked")
-    ImGui.TextDisabled(ctx, "(the padlock at the left of the panel's foot)")
-    ImGui.Separator(ctx)
-    look_items(fx, key, layout, cm.ctl, c, true)
-    ImGui.Separator(ctx)
-    param_mod_item(fx, c)
-    if c.type == "combo" then
-      ImGui.Separator(ctx)
+    ImGui.TextDisabled(ctx, "Layout locked (the padlock at the left of the panel's foot)")
+    if rescan_ok then
+      ImGui.SeparatorText(ctx, "Control")
       if ImGui.MenuItem(ctx, "Rescan choices") then P.rescan_choices(key, c.param) end
     end
+    ImGui.SeparatorText(ctx, "Look")
+    look_items(fx, key, layout, idx, c, true)
+    automate_items(fx, c)
+    ImGui.Separator(ctx)
+    plugin_sub(fx)
     ImGui.EndPopup(ctx)
     return
   end
@@ -2043,12 +2355,20 @@ local function control_menu()
     M.save()
     return l, k
   end
+  local function flip(field)
+    local l = commit()
+    local lc = l.controls[idx]
+    if lc then lc[field] = (not lc[field]) or nil end
+    M.set(key, l); M.save()
+  end
 
+  ------------------------------------------------------------- CONTROL
+  ImGui.SeparatorText(ctx, "Control")
   if ImGui.BeginMenu(ctx, "Show as") then
     for _, t in ipairs(TYPE_ORDER) do
       if ImGui.MenuItem(ctx, TYPE_LABELS[t], nil, c.type == t and not (t == "combo" and c.buttons)) then
         local l = commit()
-        local lc = l.controls[cm.ctl]
+        local lc = l.controls[idx]
         local was = lc.type
         lc.type = t
         lc.buttons, lc.nbtn = nil, nil
@@ -2075,7 +2395,7 @@ local function control_menu()
         for _, d in ipairs({ { "across", "Buttons across" }, { "down", "Buttons down" } }) do
           if ImGui.MenuItem(ctx, d[2], nil, c.type == "combo" and c.buttons == d[1], ok and true or false) then
             local l = commit()
-            local lc = l.controls[cm.ctl]
+            local lc = l.controls[idx]
             lc.type, lc.buttons, lc.nbtn = "combo", d[1], n
             M.set(key, l); M.save()
           end
@@ -2086,38 +2406,73 @@ local function control_menu()
         end
       end
     end
+    -- an XY pad's Y, a concentric knob's inner knob
+    if M.has_second(c) then
+      ImGui.Separator(ctx)
+      if ImGui.BeginMenu(ctx, (c.type == "xy") and "Y parameter" or "Inner knob parameter") then
+        second_param_menu(fx, key, idx, c)
+        ImGui.EndMenu(ctx)
+      end
+    end
+    if rescan_ok then
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Rescan choices") then P.rescan_choices(key, c.param) end
+    end
     ImGui.EndMenu(ctx)
   end
 
-  if not M.has_second(c) and ImGui.MenuItem(ctx, "Centred fill", nil, c.bipolar and true or false) then
-    local l = commit()
-    l.controls[cm.ctl].bipolar = not l.controls[cm.ctl].bipolar
-    M.set(key, l); M.save()
-  end
-
-  -- an XY pad's Y, a concentric knob's inner knob
-  if M.has_second(c) and ImGui.BeginMenu(ctx, (c.type == "xy") and "Y parameter" or "Inner knob parameter") then
-    second_param_menu(fx, key, cm.ctl, c)
+  if ImGui.BeginMenu(ctx, "Name") then
+    name_menu(fx, key, layout, idx, c)
     ImGui.EndMenu(ctx)
   end
 
+  local has_values = (c.type == "knob" or c.type == "stepped" or c.type == "fader" or c.type == "dual"
+                      or c.type == nil) and c.param and c.param >= 0
+  if has_values and ImGui.BeginMenu(ctx, "Values") then
+    values_menu(fx, key, layout, idx, c)
+    ImGui.EndMenu(ctx)
+  end
+
+  if not M.has_second(c) and c.type ~= "toggle" and c.type ~= "combo"
+     and ImGui.MenuItem(ctx, "Centred fill", nil, c.bipolar and true or false) then
+    flip("bipolar")
+  end
+  -- reverse: knobs, buttons, and both halves of a two-parameter control
+  -- (a dropdown's entries are positions in the plugin's own scale)
+  if c.type == "knob" or c.type == "toggle" or c.type == "stepped" or c.type == nil then
+    if ImGui.MenuItem(ctx, "Reverse", nil, c.invert and true or false) then flip("invert") end
+  elseif M.has_second(c) then
+    local a, b = (c.type == "xy") and "X" or "ring", (c.type == "xy") and "Y" or "inner knob"
+    if ImGui.MenuItem(ctx, "Reverse " .. a, nil, c.invert and true or false) then flip("invert") end
+    if ImGui.MenuItem(ctx, "Reverse " .. b, nil, c.invert2 and true or false) then flip("invert2") end
+  end
+  if ImGui.IsItemHovered(ctx) and (c.type ~= "combo" and c.type ~= "fader") then
+    ImGui.SetTooltip(ctx, "Turn it the other way: what the plugin calls minimum sits\n" ..
+      "at the top. The plugin still sees its own value.")
+  end
+
+  if ImGui.BeginMenu(ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then
+    show_when_menu(fx, key, layout, idx, c)
+    ImGui.EndMenu(ctx)
+  end
+
+  ---------------------------------------------------------------- LOOK
+  ImGui.SeparatorText(ctx, "Look")
   local styled = style_family(c.type) or c.type == "xy" or c.type == "dual" or (c.type == "combo" and c.buttons)
   if styled and ImGui.BeginMenu(ctx, "Style") then
-    style_menu(fx, key, cm.ctl, c)
+    style_menu(fx, key, idx, c)
     ImGui.EndMenu(ctx)
   end
-
   -- its own background, over its section's; neighbours with the same one
   -- join into one shape
   if c.type ~= "divider" and ImGui.BeginMenu(ctx, "Background") then
-    back_menu(fx, key, cm.ctl, c)
+    back_menu(fx, key, idx, c)
     ImGui.EndMenu(ctx)
   end
-
   -- the section this control is in belongs to the divider in front of it
   -- (dividers aren't on the panel to right-click, so it's offered here)
   local div_idx
-  for k = cm.ctl - 1, 1, -1 do
+  for k = idx - 1, 1, -1 do
     local o = layout.controls[k]
     if o.type == "divider" then div_idx = k break end
     if P.fader_kind(o) == "column" then break end
@@ -2127,108 +2482,39 @@ local function control_menu()
     ImGui.EndMenu(ctx)
   end
   if not div_idx and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, "A section starts at a divider. To style the first group,\n" ..
-      "put a divider (Line off) at the very start in Edit parameters.")
+    ImGui.SetTooltip(ctx, "A section starts at a divider: Arrange > Insert before > Divider\n" ..
+      "on the first control of the group.")
+  end
+  if ImGui.BeginMenu(ctx, "Copy / paste style") then
+    look_items(fx, key, layout, idx, c, false)
+    ImGui.EndMenu(ctx)
   end
 
-  ImGui.Separator(ctx)
-  look_items(fx, key, layout, cm.ctl, c, false)
+  ------------------------------------------------------------ AUTOMATE
+  automate_items(fx, c)
 
-  ImGui.Separator(ctx)
-  -- Renaming here sets the parameter's ALIAS: the name sticks to the
-  -- parameter for this plugin everywhere, panels and editor lists alike,
-  -- rather than to this one slot. A slot-only caption is still available
-  -- in the full editor for cramped layouts -- but this slot's own label,
-  -- if it has one, is cleared, or it would go on hiding the new name on
-  -- the very control you renamed.
-  ImGui.TextDisabled(ctx, "Alias (this plugin, everywhere)")
-  ImGui.SetNextItemWidth(ctx, 170)
-  local _, v = ImGui.InputTextWithHint(ctx, "##alias", "name\u{2026}", app.rename_buf)
-  local alias_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
-  app.rename_buf = v
-  ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Set") or alias_enter then
-    local l = materialise(fx)
-    local lc = l.controls[cm.ctl]
-    if lc and lc.label and lc.label ~= "" then lc.label = ""; M.set(key, l) end
-    M.set_alias(key, c.param, app.rename_buf)
-    M.save()
-    ImGui.CloseCurrentPopup(ctx)
-  end
-
-  -- A toggle's two states can have names of their own, for plugins whose
-  -- switches read "0.0"/"1.0" or worse. Hints are what the plugin says.
-  if c.type == "toggle" then
-    ImGui.Separator(ctx)
-    ImGui.TextDisabled(ctx, "State names (this plugin, everywhere)")
-    local function hint(v)
-      if reaper.TrackFX_FormatParamValueNormalized then
-        local ok, t = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, c.param, v, "")
-        if ok and t and t ~= "" then return t end
+  ------------------------------------------------------------- ARRANGE
+  ImGui.SeparatorText(ctx, "Arrange")
+  if ImGui.BeginMenu(ctx, "Insert before") then
+    for _, g in ipairs({ { "blank", "Gap" }, { "half_gap", "Half gap" }, { "divider", "Divider" } }) do
+      if ImGui.MenuItem(ctx, g[2]) then
+        local l = commit()
+        table.insert(l.controls, idx, { param = -1, type = g[1], bipolar = false, label = "" })
+        M.set(key, l); M.save()
       end
-      return v < 0.5 and "off" or "on"
     end
-    ImGui.SetNextItemWidth(ctx, 82)
-    local _, v1 = ImGui.InputTextWithHint(ctx, "##stoff", hint(0), app.state_buf[1])
-    local e1 = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
-    app.state_buf[1] = v1
-    ImGui.SameLine(ctx, 0, 6)
-    ImGui.SetNextItemWidth(ctx, 82)
-    local _, v2 = ImGui.InputTextWithHint(ctx, "##ston", hint(1), app.state_buf[2])
-    local e2 = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
-    app.state_buf[2] = v2
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Set##states") or e1 or e2 then
-      materialise(fx)
-      M.set_states(key, c.param, app.state_buf[1], app.state_buf[2])
-      M.save()
-      ImGui.CloseCurrentPopup(ctx)
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Off, then on. Leave one empty to keep the plugin's own text;\n" ..
-                            "clear both to go back to it entirely.")
-    end
+    ImGui.EndMenu(ctx)
   end
-
-  ImGui.Separator(ctx)
-  param_mod_item(fx, c)
-  ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Remove from panel") then
     local l = commit()
-    table.remove(l.controls, cm.ctl)
-    M.set(key, l); M.save()
-  end
-  if ImGui.MenuItem(ctx, "Insert gap before") then
-    local l = commit()
-    table.insert(l.controls, cm.ctl, { param = -1, type = "blank", bipolar = false, label = "" })
-    M.set(key, l); M.save()
-  end
-  if ImGui.MenuItem(ctx, "Insert half-gap before") then
-    local l = commit()
-    table.insert(l.controls, cm.ctl, { param = -1, type = "half_gap", bipolar = false, label = "" })
-    M.set(key, l); M.save()
-  end
-  if c.type == "combo" and ImGui.MenuItem(ctx, "Rescan choices") then
-    P.rescan_choices(key, c.param)
-  end
-  if ImGui.MenuItem(ctx, "Insert divider before") then
-    local l = commit()
-    table.insert(l.controls, cm.ctl, { param = -1, type = "divider", bipolar = false, label = "" })
+    table.remove(l.controls, idx)
     M.set(key, l); M.save()
   end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then
-    E.open(app.track, fx, key, layout)
+    E.open(app.track, fx, key, layout, idx)
   end
-  if ImGui.MenuItem(ctx, St.is_collapsed(fx.guid) and "Expand" or "Collapse to a bar") then
-    toggle_fold(fx)
-  end
-  if ImGui.MenuItem(ctx, "Move left", nil, false, fx.index > 0) then
-    nudge(fx.path_t, -1)
-  end
-  if ImGui.MenuItem(ctx, "Move right", nil, false, fx.index < fx.siblings - 1) then
-    nudge(fx.path_t, 1)
-  end
+  plugin_sub(fx)
   ImGui.EndPopup(ctx)
 end
 
@@ -2471,7 +2757,7 @@ local function probes_menu(state, vis)
   if ImGui.MenuItem(ctx, "Remove the probes\u{2026}") then
     local n = 0
     for _, fx in ipairs(app.chain) do
-      local l = M.get(St.layout_key(fx.name, fx.guid))
+      local l = M.get(St.layout_key(fx.name, fx.guid, app.track, fx.addr))
       if l and (l.measure or l.levels) then n = n + 1 end
     end
     local q = "Take the TS_TrackProbe pair off this track?"
@@ -3254,7 +3540,9 @@ local function panel_row(row_h, row_w)
           end
           -- starts as the name the control shows now
           app.rename_buf = c and c.param
-            and M.display_name(key, c.param, c.label, pn, false) or pn or ""
+            and M.display_name(key, c.param, nil, pn, false) or pn or ""
+          app.label_buf = c and c.label or ""
+          app.rng_for = nil
           local st = c and c.param and M.get_states(key, c.param)
           app.state_buf = { st and st[1] or "", st and st[2] or "" }
           app.open_ctl_menu = true
@@ -3695,6 +3983,8 @@ local function frame()
     -- Probe taps: the heartbeat that keeps them measuring, and one
     -- track's routing re-checked per frame.
     TP.update()
+    -- a factory preset the plugin didn't tell REAPER about (TS_CV_Presets)
+    require("TS_CV_Presets").tick()
     FO.update(ctx, ImGui, C.FOCUS_BACK)
 
     -- Last thing in the frame, on the foreground draw list: a tooltip
