@@ -1,5 +1,9 @@
 # Track Analyser — changelog
 
+## 2.1.1 — in step with ChannelView
+
+No changes. The version moves to 2.1.1 to match ChannelView.
+
 ## 2.1.0 — reported reduction lined up
 
 - A plugin's reported gain reduction is lined up with the audio. Once a

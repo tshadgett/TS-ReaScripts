@@ -1,17 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.1.0
+-- @version 2.1.1
 -- @changelog
---  Canvas layouts for any plugin: Layout ▸ New canvas layout ▸ EQ (with
---  dynamic bands), Compressor, Multiband, Gate, Limiter, De-esser,
---  Saturation, Delay, Reverb, Modulation or Envelope. Shapes, thresholds,
---  reverb decay and saturation curves measured on a hidden copy of the
---  plugin. ReaDelay and ReaVerbate set themselves up.
---  Virtual controls, layouts that switch themselves, a default layout per
---  plugin, custom value ranges for plugins that won't say.
---  Tidier right-click and panel menus; settings in both places.
---  Fixes: stepped knob drag, factory presets, VSL Synchron stall, the
---  gain-reduction trace's timing. TS_TrackProbe 1.8.0.
+--  Fixes: an EQ layout whose band had its Q learned on one side only
+--  stopped ChannelView when the band was turned the other way; a
+--  ReaDelay tap turned up past 0 dB drew its dot off the canvas, out of
+--  reach (the canvas now makes room up to +6 dB).
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

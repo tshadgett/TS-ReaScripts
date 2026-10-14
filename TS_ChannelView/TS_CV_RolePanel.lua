@@ -748,8 +748,18 @@ local function draw_delay(ctx, dl, x, y, w, h, track, fx, req, cv, R)
   end
   local mid = gy0 + (tb - gy0 - 14) * 0.5
   local amp = (tb - gy0 - 14) * 0.5 - 14
-  local scale = amp * 0.85
+  -- drawn to unity, or to twice it when a level goes over (held while a
+  -- handle is being dragged, so the drag doesn't jump as it crosses)
+  if not (ps.dl_top and ImGui.IsMouseDown(ctx, 0)) then ps.dl_top = mdl.top or 1 end
+  local scale = amp * 0.85 / ps.dl_top
   ImGui.DrawList_AddLine(dl, gx0, mid, gx0 + gw, mid, U.with_alpha(C.COL.knob_ring, 0xa0), 1.0)
+  if ps.dl_top > 1 then
+    -- unity, faint, either side
+    for _, sg in ipairs({ -1, 1 }) do
+      u.dashed(dl, gx0, mid + sg * amp * 0.85 / ps.dl_top, gx0 + gw, mid + sg * amp * 0.85 / ps.dl_top,
+        U.with_alpha(C.COL.header_dim, 0x60), 2, 4, 1.0)
+    end
+  end
   if mdl.stereo then
     u.small_text(ctx, dl, gx0 + 4, gy0 + 4, C.COL.header_dim, "L")
     u.small_text(ctx, dl, gx0 + 4, tb - 30, C.COL.header_dim, "R")
@@ -800,6 +810,8 @@ local function draw_delay(ctx, dl, x, y, w, h, track, fx, req, cv, R)
   for _, hd in ipairs(mdl.handles) do
     local px = x_of(hd.t)
     local py = hd.side == "top" and (gy0 + 12) or (hd.side == "L" and (mid - hd.h * scale) or (mid + hd.h * scale))
+    -- never past the canvas, whatever it reads
+    py = math.max(gy0 + 8, math.min(tb - 22, py))
     if px <= tx1 + 4 and not (hd.only and hd.only ~= sel) and py < tb then
       if hd.num and hd.num == sel then ImGui.DrawList_AddCircle(dl, px, py, 11, 0xe6cf79ff, 0, 1.8) end
       local dirs = (hd.across and hd.updown) and "Drag across for its time, up or down for its level"

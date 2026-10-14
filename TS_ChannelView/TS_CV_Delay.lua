@@ -554,6 +554,9 @@ function DL.model(R, cv, o)
     mdl.tones = {}
     for _, tp in ipairs(mdl.taps) do mdl.tones[tp.k] = tone_of("T" .. tp.k) end
   end
+  -- headroom: a level over unity (a tap turned up past 0 dB, up to +6)
+  -- would draw past the canvas; then the canvas is drawn to 2 instead of 1
+  mdl.top = DL.headroom(mdl)
   return mdl
 end
 
@@ -577,6 +580,15 @@ end
 
 -- A drag's new value for an up/down handle: `dpx` pixels (down positive),
 -- `scale` pixels a unit of height.
+-- How tall the canvas is drawn, in levels: 1, or 2 when anything goes
+-- over unity.
+function DL.headroom(mdl)
+  local peak = 0
+  for _, e in ipairs(mdl.echoes or {}) do peak = math.max(peak, e.l or 0, e.r or 0) end
+  for _, hd in ipairs(mdl.handles or {}) do if hd.side ~= "top" then peak = math.max(peak, hd.h or 0) end end
+  return (peak > 1.001) and 2 or 1
+end
+
 function DL.drag_value(hd, dpx, scale)
   local per = math.max(1e-6, (hd.k or 1) * scale)
   local sgn = (hd.side == "R") and 1 or -1

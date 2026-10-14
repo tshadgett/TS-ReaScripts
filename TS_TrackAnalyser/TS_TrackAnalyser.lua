@@ -2,13 +2,9 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.1.0
+-- @version 2.1.1
 -- @changelog
---  A plugin's reported gain reduction is lined up with the audio: once a
---  second it's matched against the reduction measured between the probes,
---  so a plugin whose meter is already in step with its output (a Weiss
---  compressor) is no longer drawn late by its own latency.
---  TS_TrackProbe 1.8.0 (reopen projects after updating).
+--  No changes: the version moves to 2.1.1 to match ChannelView.
 -- @about
 --  # Track Analyser
 --

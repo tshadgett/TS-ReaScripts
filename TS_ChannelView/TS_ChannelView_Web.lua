@@ -1295,7 +1295,7 @@ local function mc_vals(fx, layout)
     local mdl = DLY.model(R, cv, { bpm = reaper.Master_GetTempo(), names = names })
     local d = { sp = round(mdl.span or 2000, 1), bt = round(mdl.beat, 3), bg = mdl.beat_grid and 1 or nil,
                 st = mdl.stereo and 1 or nil, sy = mdl.sync and 1 or nil, pr = mdl.period and round(mdl.period, 1) or nil,
-                e = arr(), h = arr(), dc = {} }
+                hr = (mdl.top and mdl.top > 1) and mdl.top or nil, e = arr(), h = arr(), dc = {} }
     for _, e in ipairs(mdl.echoes) do
       d.e[#d.e + 1] = { round(e.t, 1), round(e.l, 3), round(e.r, 3), e.tag and e.tag.r or -1 }
     end

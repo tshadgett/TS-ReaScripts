@@ -5587,6 +5587,11 @@ const DL = {
     return h.pw === 2 ? Math.sqrt(Math.max(0, (h.v0 || 0) * (h.v0 || 0) + d)) : Math.max(0, (h.v0 || 0) + d);
   },
 };
+// the delay canvas's headroom per plugin, held while a finger is down
+const DLTOP = { m: new Map(), down: false };
+addEventListener("pointerdown", () => { DLTOP.down = true; }, true);
+addEventListener("pointerup", () => { DLTOP.down = false; }, true);
+addEventListener("pointercancel", () => { DLTOP.down = false; }, true);
 function mapDelayCanvas(p, P, hold, CW, bodyH) {
   const I = p.mc.i || {};
   roleFrame(p, P, hold, CW, bodyH, (c, v, api, g) => {
@@ -5604,8 +5609,15 @@ function mapDelayCanvas(p, P, hold, CW, bodyH) {
     if (d.bg) { const sb = DL.beatStep(span / beat);
       for (let b = 0; b * beat <= span + 1e-6; b += sb) { RD.vgrid(c, X(b * beat), 0, by - 14); RD.text(c, b === 0 ? "0" : (DL.noteLabel(b) || String(b)), X(b * beat) + 2, by - 2, css("--dim")); } }
     else { const step = niceStep(span); for (let t = 0; t <= span; t += step) { RD.vgrid(c, X(t), 0, by - 14); RD.text(c, msLabel(t), X(t) + 2, by - 2, css("--dim")); } }
-    const mid = (by - 14) / 2, amp = mid - 14, scale = amp * 0.85;
+    // drawn to unity, or twice it when a level goes over (held while a
+    // finger is down, so a drag doesn't jump as it crosses)
+    if (!DLTOP.down || !DLTOP.m.has(p.g)) DLTOP.m.set(p.g, d.hr || 1);
+    const top = DLTOP.m.get(p.g);
+    const mid = (by - 14) / 2, amp = mid - 14, scale = amp * 0.85 / top;
     RD.hgrid(c, mid, 0, gw);
+    if (top > 1) { c.setLineDash([2, 4]); c.strokeStyle = withA(css("--dim"), 0.4); c.lineWidth = 1;
+      for (const sg of [-1, 1]) { c.beginPath(); c.moveTo(0, mid + sg * amp * 0.85 / top); c.lineTo(gw, mid + sg * amp * 0.85 / top); c.stroke(); }
+      c.setLineDash([]); }
     if (d.st) { RD.text(c, "L", 4, 14, css("--dim")); RD.text(c, "R", 4, by - 18, css("--dim")); }
     if (d.tp && d.pr) { c.setLineDash([4, 4]); c.strokeStyle = "rgba(230,207,121,0.32)"; c.lineWidth = 1;
       for (let r = 1; r * d.pr <= span && r < 40; r++) { const x = X(r * d.pr); c.beginPath(); c.moveTo(x, 0); c.lineTo(x, by - 14); c.stroke(); }
@@ -5627,7 +5639,7 @@ function mapDelayCanvas(p, P, hold, CW, bodyH) {
     if (sel && !(d.tp || []).some(t => t.k === sel)) { sel = null; DLSEL.delete(p.g); }
     api.empty((x, y) => { if (DLSEL.has(p.g) && y < by && !(x > gw - 230 && y < 70)) { DLSEL.delete(p.g); api.redraw(); } });
     for (const h of d.h || []) {
-      const x = X(h.t), y = h.s === "top" ? 12 : (h.s === "L" ? mid - h.hh * scale : mid + h.hh * scale);
+      const x = X(h.t), y = Math.max(8, Math.min(by - 22, h.s === "top" ? 12 : (h.s === "L" ? mid - h.hh * scale : mid + h.hh * scale)));
       if (x > t1 + 4 || (h.only && h.only !== sel) || y > by) continue;
       if (h.n && h.n === sel) { c.strokeStyle = "#e6cf79"; c.lineWidth = 2; c.beginPath(); c.arc(x, y, 13, 0, 7); c.stroke(); }
       RD.dot(c, x, y, h.n ? 9 : (h.own ? 5 : 7), css("--text"), css("--accent"));

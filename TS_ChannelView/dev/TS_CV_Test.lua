@@ -6000,6 +6000,27 @@ end
 
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
+-- An EQ band learned on one side only (cuts, say) asked for its Q on the
+-- other: the other side's shape, not a crash (user report, 2.1.0).
+do
+  local ME = require("TS_CV_MapEQ")
+  local Q = { { -12, 0.9 }, { -6, 0.8 }, { -3, 0.7 } }
+  local ok, q = pcall(ME.q_at, Q, 4)
+  check("q_at: boost with only cuts learned", ok and q ~= nil and q > 0, true)
+  ok, q = pcall(ME.q_at, { { 3, 1.2 }, { 9, 1.5 } }, -6)
+  check("q_at: cut with only boosts learned", ok and q ~= nil and q > 0, true)
+  check("q_at: one side each still scales", ME.q_at({ { -6, 1 }, { -12, 2 }, { 6, 0.5 } }, 6) ~= nil, true)
+end
+
+-- The delay canvas's headroom: a tap turned up past unity (ReaDelay's
+-- volume in dB) draws the canvas to 2, so its dot stays on the canvas.
+do
+  local DLY = require("TS_CV_Delay")
+  check("delay: headroom 1 at unity", DLY.headroom({ echoes = { { l = 1, r = 0.5 } }, handles = {} }), 1)
+  check("delay: headroom 2 over unity", DLY.headroom({ echoes = { { l = 1.6, r = 0 } }, handles = {} }), 2)
+  check("delay: a handle over unity counts", DLY.headroom({ echoes = {}, handles = { { side = "L", h = 1.9 } } }), 2)
+end
+
 -- A stepped knob follows a slow drag. The plugin reports its value back
 -- each frame already on a step; a drag that started again from there every
 -- frame lost every move under half a step and never got anywhere (the

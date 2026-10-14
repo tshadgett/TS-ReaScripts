@@ -433,6 +433,9 @@ function ME.q_at(Q, g)
     return UN.interp(mine, ag, true)
   end
   local shape = UN.interp(other, ag, true)
+  -- nothing measured on this side at all (only cuts learned, say): the
+  -- other side's shape as it is
+  if #mine == 0 then return shape end
   local at_mine = UN.interp(other, mine[1][1], true)
   return shape * ((at_mine and at_mine > 0) and (mine[1][2] / at_mine) or 1)
 end

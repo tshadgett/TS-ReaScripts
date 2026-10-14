@@ -1,5 +1,16 @@
 # ChannelView — changelog
 
+## 2.1.1 — fixes
+
+- An EQ layout whose band had its Q learned on one side only (cuts, say)
+  stopped ChannelView as soon as the band was boosted. It now uses the
+  other side's shape.
+- A ReaDelay tap turned up past 0 dB drew its dot above the delay canvas,
+  over the panel's header, where it couldn't be dragged back down. The
+  canvas now makes room up to +6 dB when anything goes over 0 dB (faint
+  lines mark 0 dB), and no dot is drawn off the canvas. On the web
+  companion too.
+
 ## 2.1.0 — canvas layouts for any plugin
 
 2.0.5 was never released; everything in it is here.
