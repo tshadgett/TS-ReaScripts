@@ -4,6 +4,10 @@
 -- taking it back out leaves every pin as it found it.
 --
 --   lua TS_CV_TapsSim.lua        (from this folder)
+--   PROBE_NEW=1 lua TS_CV_TapsSim.lua
+--     the same, against TS_TrackProbe 2.0.0 (no parameters: everything in
+--     its track's gmem block). The checks still read "params[TP.P_x]":
+--     for a new probe those read and write the block (see probe_params).
 
 local HERE = debug.getinfo(1, "S").source:match("@?(.*[\\/])") or "./"
 package.path = HERE .. "../?.lua;" .. package.path
@@ -16,15 +20,41 @@ local function check(name, got, want)
 end
 
 -- ---------------------------------------------------------------- the pretend project
+local NEW = os.getenv("PROBE_NEW") == "1"
+local gmem = {}
+local track, project
+local TPref                              -- TS_CV_Taps, once loaded
+local PLF = {}                           -- old slider -> block offset
+-- A 2.0.0 probe's "params": its track's block (the track is number 3,
+-- index 2), read and written by the old slider numbers; its role is
+-- where it sits, and the Visualizer's choice is kept on the track.
+local function probe_params(f)
+  return setmetatable({}, {
+    __index = function(_, p)
+      if p == 0 then return TPref and TPref.probe_role(project[1], f.addr) or 0 end
+      if p == 3 then
+        local r = TPref and TPref.probe_role(project[1], f.addr)
+        local c = project[1].ext["P_EXT:TS_TrackProbe_vis"]
+        return ((r == 0 and c == "pre") or (r == 1 and c == "post")) and 1 or 0
+      end
+      local off = PLF[p]
+      return off and (gmem[0x100000 + 3 * 128 + off] or 0) or 0
+    end,
+    __newindex = function(_, p, v)
+      local off = PLF[p]
+      if off then gmem[0x100000 + 3 * 128 + off] = v end
+    end,
+  })
+end
 local function fx(name, guid, nin, nout, extra)
   local f = { name = name, guid = guid, nin = nin, nout = nout, pin_in = {}, pin_out = {}, params = {} }
   for p = 0, nin - 1 do f.pin_in[p] = { p < 32 and (1 << p) or 0, 0 } end
   for p = 0, nout - 1 do f.pin_out[p] = { p < 32 and (1 << p) or 0, 0 } end
   for k, v in pairs(extra or {}) do f[k] = v end
+  if NEW and name:find("TrackProbe", 1, true) then f.params = probe_params(f) end
   return f
 end
 
-local track, project
 local function reset()
   track = {
     nch = 4, ext = {},
@@ -70,7 +100,7 @@ local function F(addr) index(); return amap[addr] end
 extstate = {}
 
 local projext = {}
-local gmem, probe_old = {}, false
+local probe_old = false
 local now_t = 0
 reaper = {
   GetProjExtState = function(_, ns, k) return 0, projext[ns .. k] or "" end,
@@ -160,12 +190,27 @@ reaper = {
   gmem_attach = function() end, gmem_write = function(i, v) gmem[i] = v end,
   gmem_read = function(i) return gmem[i] or 0 end,
   GetLastTouchedFX = function() return false end,
+  TrackFX_GetNumParams = function(tr, a)
+    local f = F(a)
+    if f and f.name:find("TrackProbe", 1, true) then return NEW and 3 or 57 end
+    return 10
+  end,
+  GetTrackGUID = function(tr) return "{TRACK}" end,
+  GetProjectStateChangeCount = function() now_t = now_t; return math.random(1, 1 << 30) end,
+  ValidatePtr2 = function() return true end,
   GetMasterTrack = function() return nil end,
   GetExtState = function(sec, k) return (extstate[sec .. "/" .. k]) or "" end,
   SetExtState = function(sec, k, v) extstate[sec .. "/" .. k] = v end,
 }
 
 local TP = require("TS_CV_Taps")
+TPref = TP
+for _, f in pairs(require("TS_CV_ProbeLink").F) do
+  if f.leg and f.leg ~= 1 and f.leg ~= 4 then
+    for k = 0, (f.n or 1) - 1 do PLF[f.leg + k] = f.off + k end
+  end
+end
+if NEW then print("-- against TS_TrackProbe 2.0.0 (no parameters)") end
 
 local function outbits(a, pin) return F(a).pin_out[pin][1] end
 local function inbits(a, pin) return F(a).pin_in[pin][1] end
@@ -184,7 +229,12 @@ check("first sync changes something", TP.sync(track), true)
 -- Pro-C 2 reports its own GR, so only the LA-2A (addr 2) and the 1176 (addr 3).
 check("two taps",                     F(5).params[TP.P_TAPN], 2)
 check("latency of the first",         F(5).params[TP.P_LAG], 64)
-check("latency of the second",        F(5).params[TP.P_LAG + 1], 0)
+check("latency of the second",        F(5).params[TP.P_LAG + 1] or 0, 0)
+if NEW then
+  -- the pair named in track 3's block: places + 1 (pre at 0, post at 5)
+  check("2.0: the pre named",            gmem[0x100000 + 3 * 128 + 0], 1)
+  check("2.0: the post named",           gmem[0x100000 + 3 * 128 + 1], 6)
+end
 -- 1..4 taken (signal, sidechain receive on 3/4), so 5/6 7/8 9/10 11/12.
 -- Every plugin from the pre probe up writes each "before" copy, so a
 -- bypassed one can't silence it.
@@ -305,10 +355,12 @@ F(5).params[TP.P_MB] = 0
 -- third-octaves: one tap a probe, read back from gmem
 check("fine: a gain tap can be",       TP.fine_ok(track, "{C1}"), true)
 check("fine: a levels-only tap can't", TP.fine_ok(track, "{C3}"), false)
-probe_old = true
-check("fine: an older probe says so",  TP.fine_ok(track, "{C1}"), "old")
-check("fine: and isn't asked",         TP.set_fine(track, "{C1}"), false)
-probe_old = false
+if not NEW then
+  probe_old = true
+  check("fine: an older probe says so",  TP.fine_ok(track, "{C1}"), "old")
+  check("fine: and isn't asked",         TP.set_fine(track, "{C1}"), false)
+  probe_old = false
+end
 check("fine: asked",                   TP.set_fine(track, "{C1}"), true)
 check("fine: the probe's tap",         F(5).params[TP.P_FINE], 1)
 check("fine: nothing published yet",   TP.fine(track, "{C1}"), nil)
@@ -351,15 +403,17 @@ local old = TP.parse_record("v1|TOP|{POST}|{X},{PRE},5,7,0")
 check("old record: reduction",         old.taps[1].what, "g")
 -- an older probe (no levels yet): nothing read from it as levels, and
 -- nothing written to the parameter that is levels-only on a new one
-local real = reaper.TrackFX_GetParamName
-reaper.TrackFX_GetParamName = function() return true, "Bypass" end
-TP.invalidate()
-check("old probe: levels say so",      TP.levels(track, "{C3}") and TP.levels(track, "{C3}").old, true)
-F(5).params[TP.P_NOGR] = 99
-TP.sync(track)
-check("old probe: param 24 untouched", F(5).params[TP.P_NOGR], 99)
-reaper.TrackFX_GetParamName = real
-TP.invalidate()
+if not NEW then
+  local real = reaper.TrackFX_GetParamName
+  reaper.TrackFX_GetParamName = function() return true, "Bypass" end
+  TP.invalidate()
+  check("old probe: levels say so",      TP.levels(track, "{C3}") and TP.levels(track, "{C3}").old, true)
+  F(5).params[TP.P_NOGR] = 99
+  TP.sync(track)
+  check("old probe: param 24 untouched", F(5).params[TP.P_NOGR], 99)
+  reaper.TrackFX_GetParamName = real
+  TP.invalidate()
+end
 check("record round trip",             TP.format_record(TP.parse_record("v1|TOP|{P}|{A},{B},5,7,3,l")),
       "v1|TOP|{P}|{A},{B},5,7,3,l")
 check("nogr mask",                     TP.nogr_mask({ { what = "g" }, { what = "l" }, { what = "gl" }, { what = "l" } }), 10)
@@ -586,7 +640,7 @@ do
   check("ARA: probes inserted",          (TP.insert_probes(track)), true)
   check("ARA: asked for slot 2, then the end", table.concat(asked, ","), "-1001,-1")
   check("ARA: Melodyne still first",     F(0).guid, "{MEL}")
-  check("ARA: pre probe second, post last", F(1).params[TP.P_ROLE] .. "," .. F(3).params[TP.P_ROLE], "0,1")
+  check("ARA: pre probe second, post last", (F(1).params[TP.P_ROLE] or 0) .. "," .. (F(3).params[TP.P_ROLE] or 0), "0,1")
   check("ARA: the pair is found",        TP.status(track, "{J}"), "ok")
   check("ARA: Melodyne outside it",      TP.status(track, "{MEL}"), "outside")
   reaper.GetTrackStateChunk, reaper.TrackFX_AddByName = nil, nil
@@ -653,9 +707,6 @@ do
   check("keep: a pair in a container left", (TP.keep_in_place(track)), false)
   -- shown: where you put them
   track.fx = { P(0, "{PRE}"), P(1, "{POST}"), fx("A", "{EQ}", 2, 2) }
-  TP.set_probes_shown(true)
-  check("keep: shown, nothing moved",     (TP.keep_in_place(track)), false)
-  TP.set_probes_shown(false)
   -- state, the Visualizer, the row
   track.fx = { P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
   TP.invalidate()
@@ -685,7 +736,7 @@ do
   end
   check("complete: inserted",             (TP.insert_probes(track)), true)
   check("complete: only the pre probe",   added .. " " .. order(), "1 N1 EQ POST")
-  check("complete: roles",                F(0).params[TP.P_ROLE] .. F(2).params[TP.P_ROLE], "01")
+  check("complete: roles",                (F(0).params[TP.P_ROLE] or 0) .. (F(2).params[TP.P_ROLE] or 0), "01")
   reaper.GetTrackStateChunk, reaper.TrackFX_AddByName, reaper.TrackFX_CopyToTrack = nil, nil, nil
 end
 

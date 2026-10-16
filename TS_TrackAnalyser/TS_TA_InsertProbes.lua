@@ -120,8 +120,12 @@ local function araFirst(tr)
   return false
 end
 
--- Position 0 = pre, 1 = post. Publish 0 = idle.
+-- Position 0 = pre, 1 = post. Publish 0 = idle. Only an old probe (up to
+-- 1.8.0, still running in a project opened before an update) has those
+-- sliders; since 2.0.0 the first probe on a track is the pre and the last
+-- the post, and Track Analyser names them when it arms them.
 local function configure(tr, idx, role)
+  if (r.TrackFX_GetNumParams(tr, idx) or 0) <= 3 then return end
   r.TrackFX_SetParam(tr, idx, 0, role)
   r.TrackFX_SetParam(tr, idx, 1, 0)
 end

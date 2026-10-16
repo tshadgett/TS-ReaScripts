@@ -149,7 +149,7 @@ local function context_menu(ctx)
       ImGui.EndMenu(ctx)
     end
     if not TM.has_templates(tree) then
-      tip_if_hovered(ctx, "No track templates found in " .. (TO.templates_dir()))
+      tip_if_hovered(ctx, "No track templates in " .. (TO.templates_dir()))
     end
     if not st.ctx_chains then st.ctx_chains = CN.list() end
     if TM.chain_menu(ctx, st.ctx_chains, tr) then changed = true end
@@ -167,15 +167,15 @@ local function context_menu(ctx)
     TO.set_spacer(tg, not sp)
     changed = true
   end
-  tip_if_hovered(ctx, "A gap before this track, here and in REAPER's track panel.")
+  tip_if_hovered(ctx, "Gap before this track, here and in the TCP")
 
   local fixed = LN.is_fixed(tr)
   if ImGui.MenuItem(ctx, "Fixed item lanes", nil, fixed, not master) then
     LN.set_fixed(tg, not fixed)
     changed = true
   end
-  tip_if_hovered(ctx, "REAPER 7's lanes: several lanes of items inside the track,\n" ..
-    "for takes and comping. Each gets a play button in the TCP.")
+  tip_if_hovered(ctx, "Item lanes for takes and comping\n" ..
+    "Each lane gets a TCP play button")
   if fixed and LN.count(tr) > 1 then
     local col = LN.collapsed(tr)
     if ImGui.MenuItem(ctx, "Collapse lanes", nil, col) then
@@ -191,14 +191,14 @@ local function context_menu(ctx)
     TO.move_level(tr, true)
     changed = true
   end
-  tip_if_hovered(ctx, into and "One folder level deeper." or why_in)
+  tip_if_hovered(ctx, into and "One level deeper" or why_in)
 
   local out, why_out = TO.folder_plan(tr, false)
   if ImGui.MenuItem(ctx, "Move out of folder", nil, false, out ~= nil) then
     TO.move_level(tr, false)
     changed = true
   end
-  tip_if_hovered(ctx, out and "One folder level shallower." or why_out)
+  tip_if_hovered(ctx, out and "One level shallower" or why_out)
 
   -- The folder's three states, the same three the folder button cycles
   -- through and REAPER's track panel shows. Applies to every folder
@@ -346,8 +346,8 @@ local function colour_dialog(ctx)
     open_reaper_picker(tracks)
     changed, close = true, true
   end
-  tip_if_hovered(ctx, "REAPER's own picker, with live preview and palette editing.\n" ..
-                      "It colours the selected tracks, so these tracks become the selection.")
+  tip_if_hovered(ctx, "REAPER's picker: live preview, palette editing\n" ..
+                      "Selects these tracks")
 
   -- Anything else -- or anything on screen, with the eyedropper: pick,
   -- then Apply.
@@ -365,7 +365,7 @@ local function colour_dialog(ctx)
       TO.set_colour(tracks, nil)
       changed, close = true, true
     end
-    tip_if_hovered(ctx, "Back to the theme's default track colour.")
+    tip_if_hovered(ctx, "Theme's default colour")
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel")
        or (not CP.dropping() and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape)) then
@@ -451,7 +451,7 @@ function TM.chain_menu(ctx, chains, after, at_end, label)
     ImGui.EndMenu(ctx)
   end
   if not has then
-    tip_if_hovered(ctx, "No FX chains found in " .. (CN.dir()))
+    tip_if_hovered(ctx, "No FX chains in " .. (CN.dir()))
   end
   return made
 end
@@ -490,7 +490,7 @@ local function insert_menu(ctx)
     ImGui.EndMenu(ctx)
   end
   if not TM.has_templates(tree) then
-    tip_if_hovered(ctx, "No track templates found in " .. (TO.templates_dir()))
+    tip_if_hovered(ctx, "No track templates in " .. (TO.templates_dir()))
   end
   if TM.chain_menu(ctx, st.ins_chains, anchor, false, "Insert new track with FX chain") then
     changed = true

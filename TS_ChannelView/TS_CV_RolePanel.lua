@@ -814,10 +814,10 @@ local function draw_delay(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     py = math.max(gy0 + 8, math.min(tb - 22, py))
     if px <= tx1 + 4 and not (hd.only and hd.only ~= sel) and py < tb then
       if hd.num and hd.num == sel then ImGui.DrawList_AddCircle(dl, px, py, 11, 0xe6cf79ff, 0, 1.8) end
-      local dirs = (hd.across and hd.updown) and "Drag across for its time, up or down for its level"
+      local dirs = (hd.across and hd.updown) and "Drag: across for time, up/down for level"
                    or hd.across and "Drag left or right" or "Drag up or down"
       local tip = ((hd.num and ("Tap %d  "):format(hd.num) or "") .. (hd.label or "")) .. "\n" .. dirs
-      if hd.num then tip = tip .. "\nClick: its own controls" .. (hd.haspan and "  \u{00B7}  Wheel: its pan" or "") end
+      if hd.num then tip = tip .. "\nClick: its controls" .. (hd.haspan and "  \u{00B7}  Wheel: pan" or "") end
       local hov, act = node(ctx, dl, ps, "rld" .. hd.id .. "##" .. guid, px, py, tip,
         function(dx, dy, d)
           if not d.axis and (math.abs(dx) > 3 or math.abs(dy) > 3) then
@@ -994,13 +994,13 @@ local function draw_delay(ctx, dl, x, y, w, h, track, fx, req, cv, R)
       local okr, why = RB.can_remove(track, addr, st, #mdl.taps)
       tx = tx - 58
       ImGui.BeginDisabled(ctx, not okr)
-      if u.mini_toggle(ctx, dl, "rltrm##" .. guid, tx, gy0 + 6 + kb_h + 2, 58, 16, false, "REMOVE", okr and "Take this tap away" or why) then
+      if u.mini_toggle(ctx, dl, "rltrm##" .. guid, tx, gy0 + 6 + kb_h + 2, 58, 16, false, "REMOVE", okr and "Remove this tap" or why) then
         if RB.remove_tap(track, addr, st) then ps.dl_sel = nil end
       end
       ImGui.EndDisabled(ctx)
       tx = tx - 4
     end
-    for _, sw_ in ipairs({ { R[pre .. "On"], "ON", "The tap on or off" }, { R[pre .. "PingPong"], "PING-PONG", "The tap ping-pongs" } }) do
+    for _, sw_ in ipairs({ { R[pre .. "On"], "ON", "Tap on/off" }, { R[pre .. "PingPong"], "PING-PONG", "Ping-pong this tap" } }) do
       if sw_[1] then
         local wdt = (sw_[2] == "ON") and 30 or 70
         tx = tx - wdt
@@ -1932,7 +1932,7 @@ local function draw_mod(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     local px_ = tx0 + (0.25 - phase / 360) % 1 * period_px
     if px_ < tx0 + 4 then px_ = px_ + period_px end
     local py_ = mid - amp * depth
-    node(ctx, dl, ps, "rmph##" .. guid, px_, py_, ("Phase %s (the right side)\nDrag left or right"):format(R.Phase.text or ""),
+    node(ctx, dl, ps, "rmph##" .. guid, px_, py_, ("Phase %s (right side)\nDrag left or right"):format(R.Phase.text or ""),
       function(dx, _, d)
         d.v0 = d.v0 or phase
         local nv = math.max(0, math.min(360, d.v0 - dx / period_px * 360))
@@ -2012,7 +2012,7 @@ local function draw_mod(ctx, dl, x, y, w, h, track, fx, req, cv, R)
       ImGui.DrawList_AddText(dl, math.floor(cx + (24 - tw) * 0.5 + 0.5), math.floor(fy + (16 - th) * 0.5 + 0.5),
         v.on and 0x0d1116ff or C.COL.toggle_text, t)
       W.pop_small(ctx)
-      W.tip(ctx, id, ("Voice %d%s: its depth, rate and phase to drag"):format(v.k, v.on and "" or " (off)"), hov, false)
+      W.tip(ctx, id, ("Voice %d%s\nClick: edit its depth, rate, phase"):format(v.k, v.on and "" or " (off)"), hov, false)
       cx = cx + 28
     end
     cx = cx + 10
@@ -2048,7 +2048,7 @@ local function draw_mod(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     local tw = math.max(n * 52 + 4, 120)
     u.small_text(ctx, dl, bx1 - tw, gy0 + 6 + kb_h + 4, sel.col, ("Voice %d"):format(sel.k))
     local tx = bx1
-    for _, sw_ in ipairs({ { sel.syncm, "SYNC", "The voice's rate synced to the tempo" }, { sel.onm, "ON", "The voice on or off" } }) do
+    for _, sw_ in ipairs({ { sel.syncm, "SYNC", "Sync its rate to the tempo" }, { sel.onm, "ON", "Voice on/off" } }) do
       if sw_[1] then
         local wdt = (sw_[2] == "ON") and 30 or 44
         tx = tx - wdt
@@ -2247,7 +2247,7 @@ local function draw_multi(ctx, dl, x, y, w, h, track, fx, req, cv, R)
   end
   if spare and ps.mb_focus == 0 and tx + 60 < x + w - 4 then
     if u.mini_toggle(ctx, dl, "mbadd##" .. guid, tx, y + 2, 56, 16, false, "+ BAND",
-        "Take another band slot into use (slot " .. spare .. ")") then
+        "Add a band (slot " .. spare .. ")") then
       u.set_norm(track, addr, R["B" .. spare .. "Used"].p, on_norm(R["B" .. spare .. "Used"]))
     end
   end
@@ -2266,7 +2266,7 @@ local function draw_multi(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     W.pop_small(ctx)
     local bw = math.min(wmax, tw + 24)
     if u.mini_toggle(ctx, dl, "mbu" .. k .. "##" .. guid, xr - bw, yy, bw, 16, plan[k].used and not plan[k].byp,
-        t .. (pos and " \u{25BE}" or ""), names[k] .. ": in use, switched off, or not used") then
+        t .. (pos and " \u{25BE}" or ""), names[k] .. ": in use, off or unused") then
       if pos then ImGui.OpenPopup(ctx, "mbup" .. k .. "##" .. guid) else u.flip(track, addr, um.p) end
     end
     if pos and ImGui.BeginPopup(ctx, "mbup" .. k .. "##" .. guid) then

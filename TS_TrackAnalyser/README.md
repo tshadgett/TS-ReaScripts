@@ -38,6 +38,9 @@ enough signal through them to average — so on a quiet or half-set-up track
 it comes and goes. The spectrum underneath it does not, so that is what you
 get by default.
 
+*Spectrum release* in the same section sets how quickly the spectrum falls
+back after a peak (400 ms by default).
+
 **Panel 2 — waveform overlay and gain reduction.** One overlay, not two:
 the untouched signal in grey behind, the processed one in front. A gain
 reduction bar runs down the right.
@@ -126,8 +129,8 @@ under your pointer while you are looking at something else; the Settings
 button does not, because you went looking for it.
 
 You can also run **`TS_TA_InsertProbes.lua`** from the action list.
-It puts a `TS_TrackProbe` in the first slot and another in the last, sets each
-one's Position so the panel knows which is which, and leaves both idle. Behind
+It puts a `TS_TrackProbe` in the first slot and another in the last, and
+leaves both idle. The first probe on a track is the pre, the last the post. Behind
 an ARA plugin such as Melodyne, which REAPER keeps in the first slot, the first
 probe goes second.
 
@@ -150,8 +153,16 @@ probe pair into your track templates and every track carries one, idle. An
 idle probe does no FFT and writes no shared memory — it costs a branch per
 sample. Fifty armed templates cost nothing.
 
-The panel arms the pair on whichever track you select, by writing a single
-parameter, and disarms it when you select away.
+The panel arms the pair on whichever track you select and disarms it when
+you select away.
+
+### No parameters
+
+Since 2.2.0 the probe (TS_TrackProbe 2.0.0) has no parameters at all. The
+panel (and ChannelView, and TS Visualizer) talk to it through shared memory,
+so it never shows up in automation or learn lists and never becomes REAPER's
+*last touched* parameter. A project saved with older probes keeps running
+them until it is reopened; the panel still works with them meanwhile.
 
 ### Making them recede
 

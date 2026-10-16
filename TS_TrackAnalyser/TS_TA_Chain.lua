@@ -32,6 +32,19 @@
 local r = reaper
 local M = {}
 
+-- Talking to the probe, old (sliders) or new (2.0.0: no parameters, all
+-- through gmem): TS_TA_ProbeLink.lua beside this file. Without it, only
+-- the old probe can be driven, the old way.
+local PL
+do
+  local here = (debug.getinfo(1, "S").source or ""):match("^@(.*)[\\/]")
+  if here then
+    local ok, m = pcall(dofile, here .. package.config:sub(1, 1) .. "TS_TA_ProbeLink.lua")
+    if ok and type(m) == "table" then PL = m end
+  end
+end
+M.PL = PL
+
 M.PROBE_NAME  = "TS_TrackProbe"
 M.STRIP_MATCH = "InfiniStrip"
 
@@ -262,18 +275,68 @@ local function setSlider(tr, fx, param, value01)
   pcall(r.TrackFX_SetParam, tr, fx.idx, param, value01)
 end
 
+-- Since TS_TrackProbe 2.0.0 the pair is NAMED in its track's gmem block
+-- rather than told its role, and publishes by a flag there: nothing that
+-- REAPER sees as a parameter change (TS_TA_ProbeLink). An old probe is
+-- still driven by its sliders.
+local function live(tr) return tr and r.ValidatePtr2(0, tr, "MediaTrack*") end
+local armed = {}       -- track -> { rig, compare }
+
+local function publish(rig, on, compare)
+  local tr = rig.track
+  if not live(tr) then return end
+  if not PL then
+    if not compare then
+      setSlider(tr, rig.pre, M.P_ROLE, 0)
+      setSlider(tr, rig.post, M.P_ROLE, 1)
+      setSlider(tr, rig.pre, M.P_PUBLISH, on and 1 or 0)
+    else
+      setSlider(tr, rig.post, M.P_ROLE, on and M.ROLE_COMPARE or M.ROLE_POST)
+    end
+    setSlider(tr, rig.post, M.P_PUBLISH, on and 1 or 0)
+    return
+  end
+  local pre, post = rig.pre and rig.pre.idx, rig.post and rig.post.idx
+  if on then PL.name(tr, pre, post) end
+  if compare then
+    if post then
+      PL.set_compare(tr, post, on)
+      PL.set_publish(tr, post, "post", on)
+    end
+  else
+    if pre then PL.set_publish(tr, pre, "pre", on) end
+    if post then PL.set_publish(tr, post, "post", on) end
+  end
+end
+
 function M.arm(rig)
   if not rig then return end
-  setSlider(rig.track, rig.pre,  M.P_ROLE, 0)
-  setSlider(rig.track, rig.post, M.P_ROLE, 1)
-  setSlider(rig.track, rig.pre,  M.P_PUBLISH, 1)
-  setSlider(rig.track, rig.post, M.P_PUBLISH, 1)
+  publish(rig, true, false)
+  armed[rig.track] = { rig = rig, compare = false }
 end
 
 function M.disarm(rig)
   if not rig then return end
-  setSlider(rig.track, rig.pre,  M.P_PUBLISH, 0)
-  setSlider(rig.track, rig.post, M.P_PUBLISH, 0)
+  publish(rig, false, false)
+  armed[rig.track] = nil
+end
+
+-- Every frame: a new probe's names follow its track when it moves
+-- (TS_TA_ProbeLink.tick), and what is armed is written again -- where the
+-- track is now, and over anything another script cleared. Only what
+-- differs is written, so it costs a few gmem reads.
+function M.tick()
+  if not PL then return end
+  PL.tick()
+  for tr, a in pairs(armed) do
+    if live(tr) then publish(a.rig, true, a.compare) else armed[tr] = nil end
+  end
+end
+
+-- Track Analyser's spectrum release, for every new probe (an old one keeps
+-- its own slider).
+function M.setRelease(ms)
+  if PL then PL.set_release(ms) end
 end
 
 ----------------------------------------------------------
@@ -291,15 +354,15 @@ end
 
 function M.armCompare(rig)
   if not rig or not rig.post then return false end
-  setSlider(rig.track, rig.post, M.P_ROLE, M.ROLE_COMPARE)
-  setSlider(rig.track, rig.post, M.P_PUBLISH, 1)
+  publish(rig, true, true)
+  armed[rig.track] = { rig = rig, compare = true }
   return true
 end
 
 function M.releaseCompare(rig)
   if not rig or not rig.post then return end
-  setSlider(rig.track, rig.post, M.P_PUBLISH, 0)
-  setSlider(rig.track, rig.post, M.P_ROLE, M.ROLE_POST)
+  publish(rig, false, true)
+  armed[rig.track] = nil
 end
 
 ----------------------------------------------------------

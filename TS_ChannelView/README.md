@@ -248,13 +248,16 @@ strip's own radius so the two shapes agree about what a strip is.
   widens the destination to four channels if it needs it — REAPER won't,
   and a sidechain send into a two-channel track passes no audio. Right-click
   a send to switch it between direct and sidechain, or remove it.
-* A **header bar** carrying the menus on the left, the track's colour chip,
-  number and name **centred**, and the **FX chain bypass** hard right — the
-  latter bypasses every plugin on the track at once, which is a different
-  thing from bypassing one panel and belongs where it's always visible. The
-  bar's height comes from `C.MENU_PAD_Y`; see *Header height* below for why
-  that is the only number that moves it.
-* **Run when REAPER starts** under *View* — see below; it edits
+* A **header bar**: on the left the **☰** menu (*View*, *Layouts*, *Web
+  companion*, *Dock* and *Run when REAPER starts*) and the view toggle, then
+  the **MIDI learn** and **Probes** buttons; the track's colour chip, number
+  and name **centred**; and on the right **OS**, the FX chain button and the
+  **FX chain bypass** — which bypasses every plugin on the track at once, a
+  different thing from bypassing one panel, and belongs where it's always
+  visible. While the whole chain is bypassed the header glows red along its
+  bottom edge. The bar's height comes from `C.MENU_PAD_Y`; see *Header
+  height* below for why that is the only number that moves it.
+* **Run when REAPER starts** under **☰** — see below; it edits
   `Scripts/__startup.lua`, carefully.
 * One panel per plugin on the selected track, REAPER 7 FX Containers
   expanded so nested plugins get their own panel too.
@@ -494,6 +497,50 @@ Turn the control itself and the whole range moves with it.
 Right-click a lane button (on a macro, or on a modulator setting) to show
 or hide its lane, or to remove it, automation and all after asking. A
 lane that exists but is hidden shows faintly in the source's colour.
+
+**Modulators moved by macros and modulators.** A modulator's own settings
+take links too: drag a macro's or another modulator's ◯ onto a knob in an
+open modulator tile — an LFO's depth, rate, phase or smoothing; a
+Follower's depth, attack, release, floor, ceiling or smoothing; a MIDI
+modulator's depth, low, high or smoothing. Each modulator takes up to two
+of these. They behave like any linked control: the knob follows its
+source, a ring shows the reach with a handle at each end to drag, Alt-click
+a reach's handle to remove it, and turning the knob moves the setting under
+them. A modulator moving another is read a block late, so two can move
+each other without a loop; a modulator can't move itself.
+
+A **button or dropdown macro** can also drive a switch: an LFO's shape,
+sync or free, a Follower's source or gate, a MIDI modulator's hold. Dropped
+on one, a dropdown offers to take the switch's own choices (so a dropdown
+dropped on *Shape* becomes Sine, Triangle, … and picks the shape); right-
+click the switch to set which setting each choice gives, or to remove the
+link. The switch shows the setting in use.
+
+Dots after a tile's name, in the sources' colours, say what moves it; the
+tile's name menu and a knob's right-click list them. All of this lives in
+the Modulators plugin, so it plays back without ChannelView running. A
+project made before 2.2.0 gets it once it's reopened (until then REAPER
+runs the plugin as it was loaded, and ChannelView doesn't offer it).
+
+## MIDI learn
+
+The **MIDI** button in the header opens a bar under it, full width: the
+parameter you last touched — a ChannelView control or one in a plugin's
+own window — on the left, the MIDI control you last moved on the right,
+and a link button between them. Click it to link the two (hollow blue: not
+linked; filled green: linked; click a green one to unlink). The link is
+REAPER's own MIDI learn, the same one REAPER's learn window makes, so it
+shows there too and works without ChannelView.
+
+It takes CCs, notes (a footswitch, say), program change and pitch bend.
+The mode is guessed from what the control sends — an endless encoder's
+1/127 is *Relative 1*, a control swept from 0 to 127 is *Absolute*, a note
+is *Toggle* — and can be changed before or after linking. *Only when its
+track is selected* (on by default) and *Soft takeover* sit beside it. The
+**+** left of the parameter shows its automation lane; **More…** opens
+REAPER's own learn window for it (OSC and anything else). A control's
+right-click ▸ *Automate* ▸ *MIDI learn…* opens the bar with that
+parameter in it.
 
 ## Panels are a fixed height and grow in columns
 
@@ -994,6 +1041,8 @@ theme's own folder, as REAPER's toolbars find them, and a toggle with an
 | `TS_CV_FXIndex.lua` | REAPER's Developers / Categories / FX Folders metadata |
 | `TS_CV_Channel.lua` | the pinned Channel panel |
 | `TS_CV_Taps.lua` | routing for measured gain reduction, and reading it back |
+| `TS_CV_ProbeLink.lua` | talking to TS_TrackProbe, old (parameters) or new (shared memory) |
+| `TS_CV_MidiLearn.lua` | the MIDI learn bar |
 | `TS_CV_Trace.lua` | the gain-reduction trace's data, shared with the web page |
 | `TS_CV_Mod.lua` | macros and modulators: the plugin, the links, ranges and swings |
 | `TS_CV_ModRack.lua` | the Macros and Modulators panels |
@@ -1066,9 +1115,11 @@ Two pieces, both installed by ReaPack with ChannelView:
 2. **Start the bridge.** *Actions ▸ Show action list*, run
    **Script: TS_ChannelView_Web.lua**. It keeps running in the background
    (the action shows as on); run it again to stop it. To start it with
-   REAPER, tick ChannelView's *View ▸ Start web companion with REAPER*, or
-   run the **TS_ChannelView_Web_Startup** action. While it runs, a small
-   tablet shows in ChannelView's header, filled in once a page connects.
+   REAPER, tick ChannelView's *☰ ▸ Web companion ▸ Start it with REAPER*, or
+   run the **TS_ChannelView_Web_Startup** action. While it runs, a
+   thin strip along the top of ChannelView's header shows it: green with a
+   page connected, fainter green with none, amber when a page is open but
+   the bridge isn't running. *☰ ▸ Web companion* starts and stops it.
 3. **Open the page on the tablet**, on the same network:
    `http://<your computer's address>:8080/TS_ChannelView.html`. If Windows
    asks whether REAPER may accept connections on private networks, allow it.
@@ -1867,15 +1918,20 @@ what's there: dim with none (click it to add a pair), lit with a pair,
 teal when this track feeds TS Visualizer's spectrum, amber when one of
 the pair is missing. With any there, clicking it opens a menu: *Add the
 missing probe*; *In the Visualizer's spectrum* — *Not included*, *Before
-the chain* (the pre probe) or *After the chain* (the post probe); open
-either probe's window; *Remove the probes…*, which asks first, saying how
-many plugins they measure, and takes the measuring routing out with them;
-and *Show the probes in the plugin row*. While they're hidden ChannelView
-keeps them at the ends of the chain: insert, move or remove a plugin and
-the pre probe goes back to first (second behind an ARA plugin) and the
-post probe to last. One dragged into a container comes back out; a pair
-put together inside a container is left there. Shown, they stay where you
-put them.
+the chain* (the pre probe) or *After the chain* (the post probe); and
+*Remove the probes…*, which asks first, saying how many plugins they
+measure, and takes the measuring routing out with them. ChannelView keeps
+them at the ends of the chain: insert, move or remove a plugin and the pre
+probe goes back to first (second behind an ARA plugin) and the post probe
+to last. One dragged into a container comes back out; a pair put together
+inside a container is left there.
+
+Since 2.2.0 the probe (TS_TrackProbe 2.0.0) has **no parameters**: nothing
+of it shows in automation or learn lists, and measuring no longer makes it
+REAPER's *last touched* parameter. ChannelView and Track Analyser talk to it
+through shared memory, and the first probe on a track is the pre, the last
+the post. A project saved with older probes keeps running them until it's
+reopened, and both still work with them.
 
 Nothing is inserted next to the plugin. ChannelView routes a copy of what
 goes in and what comes out on spare channels, from 5/6 up, skipping any

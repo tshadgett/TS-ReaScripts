@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 1.8.0
+version: 2.0.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -12,19 +12,30 @@ author: Tim Shadgett
 //
 // It does not alter the audio. It reads it.
 //
-// WHY IT HAS A "Publish" SWITCH
-//   The panel never inserts or removes anything. You bake the container into
-//   your track templates and every track carries a pair of these, idle. The
-//   panel arms the pair on the selected track by writing one parameter, and
-//   disarms the previous pair the same way. An idle probe does no FFT, no
-//   windowing, no gmem writes -- it costs a branch per sample. Fifty armed
-//   templates cost nothing.
+// NO PARAMETERS (2.0.0)
+//   Up to 1.8.0 everything ChannelView, Track Analyser and the Visualizer
+//   told a probe -- which one it was, whether to publish, the taps'
+//   latencies -- and everything it told them back went through hidden
+//   sliders. Hidden from the plugin's window, but still REAPER
+//   parameters: in every automation and learn list, and each write made
+//   one REAPER's "last touched", so its own last-touched tools landed on
+//   "Tap 1 relearn" instead of what you had just moved. So since 2.0.0
+//   there are none. It all goes through gmem, in a block per track (THE
+//   PROBE BLOCK below), and REAPER sees only its own Bypass, Wet and
+//   Delta.
 //
-// WHY IT HAS A "Position" SWITCH
-//   Pre and post write to different regions of gmem. You do not have to set
-//   this: the panel works out which probe comes first in the chain and sets
-//   it for you. It is a slider only so you can see what the panel decided,
-//   and so the thing still works if you drive it by hand.
+//   WHICH PROBE IS WHICH. A probe finds its track and its place in the
+//   chain with get_host_placement(). The scripts write, into the track's
+//   block, the place of the probe that is "pre" and the one that is
+//   "post" (the first and the second of a pair); each probe compares its
+//   own place with them. A probe nobody has named does nothing. The
+//   panel still never inserts or removes anything to arm a pair: it
+//   writes the block, and an idle pair still costs a branch per sample.
+//
+//   NOTHING TO SET BY HAND. Spectrum release is Track Analyser's setting
+//   now (CTRL_REL), and "Include in Visualizer" is kept on the track by
+//   ChannelView and the Visualizer. The plugin's window just says what
+//   it is doing.
 //
 // gmem namespace TS_TA_Mem, shared with the measurement tools.
 //   0  - 19    TS_TA_Cal        (calibration rig -- do not reuse)
@@ -38,8 +49,33 @@ author: Tim Shadgett
 //   0x4F000    tap header, 0x50000 tap traces (PER-PLUGIN GAIN REDUCTION)
 //   0x54000    per-tap waveforms, 0x5C000 their header (PER-PLUGIN WAVEFORMS)
 //   0x60000    measuring the taps' zero, + track index * 8 (THE ZERO POINT)
+//   0x70000    third-octave reduction, + track index * 128
+//   0x100000   THE PROBE BLOCK, + (track index + 1) * 128 (the master is 0)
 //   73         tap heartbeat, bumped by any reader
 //   74         which track's post probe writes the per-tap waveforms
+//   75         spectrum release, ms (0: 400)
+//
+// THE PROBE BLOCK (2.0.0), at 0x100000 + (track index + 1) * 128.
+//   The scripts write:
+//     0  the pre probe's place + 1 (get_host_placement's chain_pos; 0 none)
+//     1  the post probe's place + 1
+//     2  publish, pre probe        3  publish, post probe
+//     4  1: the post probe is the comparison (Track Analyser's masking)
+//     5  Visualizer slot + 1, pre  6  Visualizer slot + 1, post (0 none)
+//     8  tap_n         9..12  tap_lag1..4     13..16  tap_rst1..4
+//    17  tap_gen      18  cal_arm (pre)      19  tap_nogr
+//    20  tap_mb       21..23  tap_mbx1..3    24  tap_fine
+//   The probes write:
+//    32  the pre probe's block count     33  the post probe's (a probe
+//        that has recognised itself; a script sees a pair come alive)
+//    34..49  every probe on the track, recognised or not: [34 + k] its
+//        place + 1, [42 + k] its block count, k = (place + 1) mod 8
+//    64..67  tap_gr1..4      68..71  tap_cal1..4
+//    72..75  tap_inpk1..4    76..79  tap_outpk1..4
+//    80..83  tap_inrms1..4   84..87  tap_outrms1..4
+//    88..91  tap_mbgr1..4    92..95  tap_mbl1..4
+//    96  counts the post probe's writes of the above
+//   The names are the old sliders', kept as the variables inside.
 //
 // INPUT AND OUTPUT LEVELS, PER TAP
 //   The same two copies a tap measures gain reduction from are also the
@@ -286,71 +322,7 @@ author: Tim Shadgett
 
 options:gmem=TS_TA_Mem
 
-slider1:role=0<0,2,1{Pre -- before the strip,Post -- after the strip,Comparison track}>Position
-slider2:publish=0<0,1,1{Idle,Publishing}>Publish
-slider3:rel_ms=400<50,2000,10>Spectrum release (ms)
-slider4:vis_include=0<0,1,1{No,Yes}>Include in Visualizer Spectrum
-slider5:vis_slot=-1<-1,15,1>Visualizer Slot (set automatically)
-// Taps (see PER-PLUGIN GAIN REDUCTION above). Hidden: ChannelView sets
-// the first eleven and reads the last four.
-slider6:tap_n=0<0,4,1>-Measured plugins
-slider7:tap_lag1=0<0,65536,1>-Tap 1 latency (samples)
-slider8:tap_lag2=0<0,65536,1>-Tap 2 latency (samples)
-slider9:tap_lag3=0<0,65536,1>-Tap 3 latency (samples)
-slider10:tap_lag4=0<0,65536,1>-Tap 4 latency (samples)
-slider11:tap_rst1=0<0,1000000,1>-Tap 1 relearn
-slider12:tap_rst2=0<0,1000000,1>-Tap 2 relearn
-slider13:tap_rst3=0<0,1000000,1>-Tap 3 relearn
-slider14:tap_rst4=0<0,1000000,1>-Tap 4 relearn
-slider15:tap_gr1=0<0,60,0.01>-Tap 1 gain reduction (dB)
-slider16:tap_gr2=0<0,60,0.01>-Tap 2 gain reduction (dB)
-slider17:tap_gr3=0<0,60,0.01>-Tap 3 gain reduction (dB)
-slider18:tap_gr4=0<0,60,0.01>-Tap 4 gain reduction (dB)
-// The zero (see THE ZERO POINT). tap_calN are read; tap_gen and cal_arm
-// are set by ChannelView.
-slider19:tap_cal1=0<0,3,1>-Tap 1 zero (0 none 1 ok 2 level-dependent 3 touched since)
-slider20:tap_cal2=0<0,3,1>-Tap 2 zero
-slider21:tap_cal3=0<0,3,1>-Tap 3 zero
-slider22:tap_cal4=0<0,3,1>-Tap 4 zero
-slider23:tap_gen=0<0,1000000,1>-Tap routing generation
-slider24:cal_arm=0<0,1,1>-Measure the zero while stopped (pre probe)
-// Levels (INPUT AND OUTPUT LEVELS, PER TAP). tap_nogr is set by
-// ChannelView; the rest are read.
-slider25:tap_nogr=0<0,15,1>-Taps measuring levels only (a bit per tap)
-slider26:tap_inpk1=-150<-150,24,0.1>-Tap 1 input peak (dBFS)
-slider27:tap_inpk2=-150<-150,24,0.1>-Tap 2 input peak (dBFS)
-slider28:tap_inpk3=-150<-150,24,0.1>-Tap 3 input peak (dBFS)
-slider29:tap_inpk4=-150<-150,24,0.1>-Tap 4 input peak (dBFS)
-slider30:tap_outpk1=-150<-150,24,0.1>-Tap 1 output peak (dBFS)
-slider31:tap_outpk2=-150<-150,24,0.1>-Tap 2 output peak (dBFS)
-slider32:tap_outpk3=-150<-150,24,0.1>-Tap 3 output peak (dBFS)
-slider33:tap_outpk4=-150<-150,24,0.1>-Tap 4 output peak (dBFS)
-slider34:tap_inrms1=-150<-150,24,0.1>-Tap 1 input RMS (dBFS)
-slider35:tap_inrms2=-150<-150,24,0.1>-Tap 2 input RMS (dBFS)
-slider36:tap_inrms3=-150<-150,24,0.1>-Tap 3 input RMS (dBFS)
-slider37:tap_inrms4=-150<-150,24,0.1>-Tap 4 input RMS (dBFS)
-slider38:tap_outrms1=-150<-150,24,0.1>-Tap 1 output RMS (dBFS)
-slider39:tap_outrms2=-150<-150,24,0.1>-Tap 2 output RMS (dBFS)
-slider40:tap_outrms3=-150<-150,24,0.1>-Tap 3 output RMS (dBFS)
-slider41:tap_outrms4=-150<-150,24,0.1>-Tap 4 output RMS (dBFS)
-// A multiband plugin's bands (A MULTIBAND COMPRESSOR, BAND BY BAND).
-// tap_mb and the crossovers are set by ChannelView; tap_mbgrN are read.
-slider42:tap_mb=0<0,4,1>-Multiband tap (0 none)
-slider43:tap_mbx1=0<0,24000,1>-Multiband crossover 1 (Hz)
-slider44:tap_mbx2=0<0,24000,1>-Multiband crossover 2 (Hz)
-slider45:tap_mbx3=0<0,24000,1>-Multiband crossover 3 (Hz)
-slider46:tap_mbgr1=0<0,60,0.01>-Multiband band 1 gain reduction (dB)
-slider47:tap_mbgr2=0<0,60,0.01>-Multiband band 2 gain reduction (dB)
-slider48:tap_mbgr3=0<0,60,0.01>-Multiband band 3 gain reduction (dB)
-slider49:tap_mbgr4=0<0,60,0.01>-Multiband band 4 gain reduction (dB)
-// THIRD-OCTAVE REDUCTION: the tap measured in third-octaves (set by ChannelView)
-slider50:tap_fine=0<0,4,1>-Third-octave tap (0 none)
-// A multiband tap's bands' input levels (1.8.0): how hard each band is
-// driven, measured on the way in only -- nothing compared with anything.
-slider51:tap_mbl1=-150<-150,24,0.1>-Multiband band 1 input level (dBFS)
-slider52:tap_mbl2=-150<-150,24,0.1>-Multiband band 2 input level (dBFS)
-slider53:tap_mbl3=-150<-150,24,0.1>-Multiband band 3 input level (dBFS)
-slider54:tap_mbl4=-150<-150,24,0.1>-Multiband band 4 input level (dBFS)
+// No sliders: see NO PARAMETERS and THE PROBE BLOCK above.
 
 in_pin:left
 in_pin:right
@@ -379,6 +351,35 @@ out_pin:right
   // stop unless told not to. The taps' zero is measured WHILE stopped and
   // used while playing, so it has to survive the transport.
   ext_noinit = 1;
+
+  // THE PROBE BLOCK (see above)
+  PB_BASE = 0x100000; PB_STRIDE = 128; PB_TRACKS = 8192;
+  PB_PRE = 0; PB_POST = 1; PB_PUBPRE = 2; PB_PUBPOST = 3; PB_CMP = 4;
+  PB_VISPRE = 5; PB_VISPOST = 6;
+  PB_TAPN = 8; PB_LAG = 9; PB_RST = 13; PB_GEN = 17; PB_ARM = 18;
+  PB_NOGR = 19; PB_MB = 20; PB_MBX = 21; PB_FINE = 24;
+  PB_ACKPRE = 32; PB_ACKPOST = 33; PB_SEEN = 34; PB_SEENN = 42;
+  PB_GR = 64; PB_CAL = 68; PB_INPK = 72; PB_OUTPK = 76; PB_INRMS = 80;
+  PB_OUTRMS = 84; PB_MBGR = 88; PB_MBL = 92; PB_RSEQ = 96;
+  CTRL_REL = 75;
+
+  // what used to be the sliders, at their old defaults
+  role = -1; publish = 0; rel_ms = 400; vis_include = 0; vis_slot = -1;
+  tap_n = 0; tap_lag1 = tap_lag2 = tap_lag3 = tap_lag4 = 0;
+  tap_rst1 = tap_rst2 = tap_rst3 = tap_rst4 = 0;
+  tap_gr1 = tap_gr2 = tap_gr3 = tap_gr4 = 0;
+  tap_cal1 = tap_cal2 = tap_cal3 = tap_cal4 = 0;
+  tap_gen = 0; cal_arm = 0; tap_nogr = 0;
+  tap_inpk1 = tap_inpk2 = tap_inpk3 = tap_inpk4 = -150;
+  tap_outpk1 = tap_outpk2 = tap_outpk3 = tap_outpk4 = -150;
+  tap_inrms1 = tap_inrms2 = tap_inrms3 = tap_inrms4 = -150;
+  tap_outrms1 = tap_outrms2 = tap_outrms3 = tap_outrms4 = -150;
+  tap_mb = 0; tap_mbx1 = tap_mbx2 = tap_mbx3 = 0;
+  tap_mbgr1 = tap_mbgr2 = tap_mbgr3 = tap_mbgr4 = 0;
+  tap_fine = 0;
+  tap_mbl1 = tap_mbl2 = tap_mbl3 = tap_mbl4 = -150;
+  pb = -1; pl_tr = -3; pl_pos = -1; pl_fl = 0; pb_blocks = 0;
+
 
   CTRL_EPOCH = 64;
   CTRL_FFT   = 65;
@@ -1176,13 +1177,83 @@ out_pin:right
 
   tapBands();
 
-@slider
+  // Where this probe is and what it has been told: its track's block,
+  // its place, and so its role (-1 nobody has named it). Every block.
+  function readControl() local(me, k, r, v) (
+    pl_tr = get_host_placement(pl_pos, pl_fl);
+    pb = (pl_tr >= -1 && pl_tr < PB_TRACKS - 1) ? PB_BASE + (pl_tr + 1) * PB_STRIDE : -1;
+    pb_blocks += 1;
+    r = -1;
+    pb >= 0 ? (
+      me = pl_pos + 1;
+      k = me % 8;
+      gmem[pb + PB_SEEN + k] = me;
+      gmem[pb + PB_SEENN + k] = pb_blocks;
+      gmem[pb + PB_PRE] == me ? r = 0
+      : gmem[pb + PB_POST] == me ? r = (gmem[pb + PB_CMP] >= 0.5 ? 2 : 1);
+    );
+    role = r;
+    role == 0 ? (
+      gmem[pb + PB_ACKPRE] = pb_blocks;
+      publish = gmem[pb + PB_PUBPRE];
+      vis_slot = gmem[pb + PB_VISPRE] - 1;
+      cal_arm = gmem[pb + PB_ARM];
+    ) : role > 0 ? (
+      gmem[pb + PB_ACKPOST] = pb_blocks;
+      publish = gmem[pb + PB_PUBPOST];
+      vis_slot = gmem[pb + PB_VISPOST] - 1;
+      cal_arm = 0;
+    ) : (
+      publish = 0; vis_slot = -1; cal_arm = 0;
+    );
+    vis_include = vis_slot >= 0;
+    // the taps' settings: the post probe's
+    role == 1 ? (
+      tap_n = gmem[pb + PB_TAPN];
+      tap_lag1 = gmem[pb + PB_LAG];     tap_lag2 = gmem[pb + PB_LAG + 1];
+      tap_lag3 = gmem[pb + PB_LAG + 2]; tap_lag4 = gmem[pb + PB_LAG + 3];
+      tap_rst1 = gmem[pb + PB_RST];     tap_rst2 = gmem[pb + PB_RST + 1];
+      tap_rst3 = gmem[pb + PB_RST + 2]; tap_rst4 = gmem[pb + PB_RST + 3];
+      tap_gen = gmem[pb + PB_GEN];
+      tap_nogr = gmem[pb + PB_NOGR];
+      tap_mb = gmem[pb + PB_MB];
+      tap_mbx1 = gmem[pb + PB_MBX]; tap_mbx2 = gmem[pb + PB_MBX + 1]; tap_mbx3 = gmem[pb + PB_MBX + 2];
+      tap_fine = gmem[pb + PB_FINE];
+    ) : (
+      tap_n = 0; tap_mb = 0; tap_fine = 0;
+    );
+    // Track Analyser's spectrum release
+    v = gmem[CTRL_REL];
+    (v < 50 || v > 2000) ? v = 400;
+    v != rel_ms ? ( rel_ms = v; fftsz > 0 ? setBallistics(); );
+  );
 
-  base = role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
-  fftsz > 0 ? setBallistics();
+  // What the post probe has to say, into its block.
+  function writeReadings() (
+    (role == 1 && pb >= 0) ? (
+      gmem[pb + PB_GR] = tap_gr1; gmem[pb + PB_GR + 1] = tap_gr2;
+      gmem[pb + PB_GR + 2] = tap_gr3; gmem[pb + PB_GR + 3] = tap_gr4;
+      gmem[pb + PB_CAL] = tap_cal1; gmem[pb + PB_CAL + 1] = tap_cal2;
+      gmem[pb + PB_CAL + 2] = tap_cal3; gmem[pb + PB_CAL + 3] = tap_cal4;
+      gmem[pb + PB_INPK] = tap_inpk1; gmem[pb + PB_INPK + 1] = tap_inpk2;
+      gmem[pb + PB_INPK + 2] = tap_inpk3; gmem[pb + PB_INPK + 3] = tap_inpk4;
+      gmem[pb + PB_OUTPK] = tap_outpk1; gmem[pb + PB_OUTPK + 1] = tap_outpk2;
+      gmem[pb + PB_OUTPK + 2] = tap_outpk3; gmem[pb + PB_OUTPK + 3] = tap_outpk4;
+      gmem[pb + PB_INRMS] = tap_inrms1; gmem[pb + PB_INRMS + 1] = tap_inrms2;
+      gmem[pb + PB_INRMS + 2] = tap_inrms3; gmem[pb + PB_INRMS + 3] = tap_inrms4;
+      gmem[pb + PB_OUTRMS] = tap_outrms1; gmem[pb + PB_OUTRMS + 1] = tap_outrms2;
+      gmem[pb + PB_OUTRMS + 2] = tap_outrms3; gmem[pb + PB_OUTRMS + 3] = tap_outrms4;
+      gmem[pb + PB_MBGR] = tap_mbgr1; gmem[pb + PB_MBGR + 1] = tap_mbgr2;
+      gmem[pb + PB_MBGR + 2] = tap_mbgr3; gmem[pb + PB_MBGR + 3] = tap_mbgr4;
+      gmem[pb + PB_MBL] = tap_mbl1; gmem[pb + PB_MBL + 1] = tap_mbl2;
+      gmem[pb + PB_MBL + 2] = tap_mbl3; gmem[pb + PB_MBL + 3] = tap_mbl4;
+      gmem[pb + PB_RSEQ] += 1;
+    );
+  );
 
 @block
 
+  readControl();
   base = role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
 
   // vis_slot is only ever a real 0..15 claim while TS_Visualizer is
@@ -1199,7 +1270,7 @@ out_pin:right
   // meant to do (see the "WHY IT HAS A Publish SWITCH" note up top: one
   // armed pair at a time, driven by panel selection). The Visualizer path
   // does not touch that switch and is not touched by it.
-  active = publish >= 0.5 || vis_active;
+  active = role >= 0 && (publish >= 0.5 || vis_active);
 
   active ? (
     // What size does the panel want? Fall back to something sane if it has
@@ -1315,8 +1386,6 @@ out_pin:right
   g4 = (tap_live && tapIsGR(3)) ? tapReading(3) : 0;
   (g1 != tap_gr1 || g2 != tap_gr2 || g3 != tap_gr3 || g4 != tap_gr4) ? (
     tap_gr1 = g1; tap_gr2 = g2; tap_gr3 = g3; tap_gr4 = g4;
-    sliderchange(tap_gr1); sliderchange(tap_gr2);
-    sliderchange(tap_gr3); sliderchange(tap_gr4);
   );
   // a multiband tap's bands, the same way
   mbs = (tap_mb >= 1 && tap_mb <= 4 && tap_live && tapIsGR(tap_mb - 1)) ? TAP_BASE + (tap_mb - 1) * TAP_STRIDE + TAP_S : 0;
@@ -1324,8 +1393,6 @@ out_pin:right
   m3 = mbs ? mbs[TS_MBG + 2] : 0; m4 = mbs ? mbs[TS_MBG + 3] : 0;
   (m1 != tap_mbgr1 || m2 != tap_mbgr2 || m3 != tap_mbgr3 || m4 != tap_mbgr4) ? (
     tap_mbgr1 = m1; tap_mbgr2 = m2; tap_mbgr3 = m3; tap_mbgr4 = m4;
-    sliderchange(tap_mbgr1); sliderchange(tap_mbgr2);
-    sliderchange(tap_mbgr3); sliderchange(tap_mbgr4);
   );
   // and its bands' input levels, to a tenth of a dB
   m1 = mbs ? floor(max(-150, mbs[TS_MBL]) * 10 + 0.5) / 10 : -150;
@@ -1335,8 +1402,6 @@ out_pin:right
   // (with the other levels, about thirty times a second)
   (!mbs || tap_lvc == 0) && (m1 != tap_mbl1 || m2 != tap_mbl2 || m3 != tap_mbl3 || m4 != tap_mbl4) ? (
     tap_mbl1 = m1; tap_mbl2 = m2; tap_mbl3 = m3; tap_mbl4 = m4;
-    sliderchange(tap_mbl1); sliderchange(tap_mbl2);
-    sliderchange(tap_mbl3); sliderchange(tap_mbl4);
   );
   // The levels, about thirty times a second while a reader is alive;
   // silence once, when it goes away.
@@ -1365,10 +1430,6 @@ out_pin:right
   ));
   lvChanged ? (
     lvChanged = 0;
-    sliderchange(tap_inpk1); sliderchange(tap_inpk2); sliderchange(tap_inpk3); sliderchange(tap_inpk4);
-    sliderchange(tap_outpk1); sliderchange(tap_outpk2); sliderchange(tap_outpk3); sliderchange(tap_outpk4);
-    sliderchange(tap_inrms1); sliderchange(tap_inrms2); sliderchange(tap_inrms3); sliderchange(tap_inrms4);
-    sliderchange(tap_outrms1); sliderchange(tap_outrms2); sliderchange(tap_outrms3); sliderchange(tap_outrms4);
   );
 
   (active && tap_cfg > 0) ? (
@@ -1416,7 +1477,7 @@ out_pin:right
   );
 
   // THE PRE PROBE runs the clock and makes the noise.
-  cal_pre = role < 0.5 && cal_arm >= 0.5 && cal_slot >= 0;
+  cal_pre = role == 0 && cal_arm >= 0.5 && cal_slot >= 0;
   cal_pre ? (
     cal_hb = (cal_hb + 1) % 1000000;
     gmem[cal_slot + CS_PREHB] = cal_hb;
@@ -1504,10 +1565,10 @@ out_pin:right
     c4 = tapIsGR(3) ? calState(3) : 0;
     (c1 != tap_cal1 || c2 != tap_cal2 || c3 != tap_cal3 || c4 != tap_cal4) ? (
       tap_cal1 = c1; tap_cal2 = c2; tap_cal3 = c3; tap_cal4 = c4;
-      sliderchange(tap_cal1); sliderchange(tap_cal2);
-      sliderchange(tap_cal3); sliderchange(tap_cal4);
     );
   );
+
+  writeReadings();
 
 @sample
 
@@ -1856,3 +1917,30 @@ out_pin:right
       spl0 += cal_w; spl1 += cal_w;
     );
   );
+
+@gfx 340 112
+
+  // Nothing to set: just what this probe is doing (see NO PARAMETERS).
+  gfx_clear = 0x1d1f22;
+  gfx_setfont(1, "Arial", 15);
+  gfx_r = gfx_g = gfx_b = 0.9;
+  gfx_x = 12; gfx_y = 10;
+  gfx_drawstr("TS_TrackProbe 2.0");
+  gfx_setfont(2, "Arial", 13);
+  gfx_r = gfx_g = gfx_b = 0.62;
+  gfx_x = 12; gfx_y += 22;
+  role == 0 ? gfx_drawstr("Pre: before the plugins it measures")
+  : role == 1 ? gfx_drawstr("Post: after the plugins it measures")
+  : role == 2 ? gfx_drawstr("Comparison track (Track Analyser)")
+  : gfx_drawstr("Idle: not in use by ChannelView or Track Analyser");
+  gfx_x = 12; gfx_y += 18;
+  pl_tr == -1 ? gfx_drawstr("Master track")
+  : pl_tr >= 0 ? ( sprintf(#gfx_s, "Track %d", pl_tr + 1); gfx_drawstr(#gfx_s); );
+  gfx_x = 12; gfx_y += 18;
+  #gfx_s = "";
+  active && publish >= 0.5 ? strcat(#gfx_s, "Publishing to Track Analyser   ");
+  vis_active ? ( sprintf(#gfx_t, "Visualizer slot %d   ", vis_slot + 1); strcat(#gfx_s, #gfx_t); );
+  tap_live ? ( sprintf(#gfx_t, "Measuring %d plugin%s", tap_cfg, tap_cfg == 1 ? "" : "s"); strcat(#gfx_s, #gfx_t); );
+  cal_pre && cal_phase > 0 ? strcat(#gfx_s, "Measuring the zero");
+  gfx_r = 0.36; gfx_g = 0.64; gfx_b = 0.88;
+  gfx_drawstr(#gfx_s);

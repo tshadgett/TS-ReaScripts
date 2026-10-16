@@ -27,12 +27,16 @@ end
 
 local TR = { fx = {}, ext = {} }
 local MDF   -- TS_CV_Mod's field table, once it's loaded
+-- the matrix (192 on): source 0..24, target 0..1515, amount -1..1000000
+local MX_RANGE = { { 0, 24 }, { 0, 1515 }, { -1, 1000000 } }
 function RANGE(n, p)
+  if n.ours and p >= 192 then local r = MX_RANGE[(p - 192) % 3 + 1]; return r[1], r[2] end
   if not n.ours or p < 16 then return 0, 1 end
   local f = MDF[(p - 16) % 22 + 1]
   return f[3], f[4]
 end
 function DEFAULT(n, p)
+  if n.ours and p >= 192 then local lo, hi = RANGE(n, p); return (0 - lo) / (hi - lo) end
   if not n.ours or p < 16 then return 0 end
   local f = MDF[(p - 16) % 22 + 1]
   return (f[2] - f[3]) / (f[4] - f[3])
@@ -132,7 +136,7 @@ reaper = {
   TrackFX_AddByName = function(tr, name, rec, inst)
     local fx
     if name == "Container" then fx = new_fx("Container", 0, true)
-    elseif INSTALLED[name] then fx = new_fx("JS: " .. INSTALLED[name], INSTALLED[name] == "ChannelView Modulators" and 192 or 5)
+    elseif INSTALLED[name] then fx = new_fx("JS: " .. INSTALLED[name], INSTALLED[name] == "ChannelView Modulators" and (OLD_MODS and 192 or 240) or 5)
       fx.ours = INSTALLED[name] == "ChannelView Modulators"
     else return -1 end
     local pos
@@ -481,6 +485,49 @@ end
 -- sidechain
 MD.need_sidechain(TR)
 check("track to 4 channels", TR.info.I_NCHAN, 4)
+
+-- THE MATRIX: a modulator's settings moved by a macro or another modulator
+do
+  local lfo = MD.find(TR, "o1")
+  local knob = MD.find(TR, "m1")
+  local fol
+  for _, src in ipairs(MD.scan(TR).mods) do if src.kind == "follower" then fol = src end end
+  check("matrix: the plugin has it", MD.mx_ok(TR, lfo.slot), true)
+  check("matrix: a macro moves the LFO's rate", (MD.mx_link(TR, lfo, "rsync", knob, 1)), true)
+  local e = MD.mx_get(TR, lfo.slot, lfo.j)
+  local first = e[1] or e[2]
+  check("matrix: rate from macro 1", first and (first.tg.key .. " " .. first.code), "rate 1")
+  check("matrix: half the range to start", first and first.amt, 0.5)
+  check("matrix: not by itself", select(2, MD.mx_can(TR, lfo, "depth", lfo, 1)), "Can't move itself")
+  check("matrix: a knob macro can't move a switch",
+    select(2, MD.mx_can(TR, lfo, "shape", knob, 1)), "Switches: button or dropdown macros only")
+  check("matrix: the follower ducks its depth", (MD.mx_link(TR, lfo, "depth", fol, 1)), true)
+  local dd = MD.find(TR, "m5")
+  check("matrix: full at two", select(2, MD.mx_can(TR, lfo, "shape", dd, 1)), lfo.name .. " is moved by two already")
+  check("matrix: the same pair again just updates", (MD.mx_can(TR, lfo, "rsync", knob, 1)), true)
+  -- a dropdown macro picks the follower's source
+  check("matrix: dropdown to a switch", (MD.mx_link(TR, fol, "fsrc", dd, 1, 1)), true)
+  local fe = MD.mx_get(TR, fol.slot, fol.j)
+  local sw = fe[1] or fe[2]
+  check("matrix: its choices counted", sw and sw.nch, #dd.choices)
+  check("matrix: choice 2 -> Sidechain, the rest its own", sw and MD.mx_unpack(sw.amt, sw.nch)[2], 1)
+  check("matrix: pack / unpack", MD.mx_pack(MD.mx_unpack(4030, 4), 4), 4030)
+  -- a dropdown taking a switch's names: choice c picks setting c
+  check("matrix: dropdown one for one", MD.mx_direct(TR, fol, "fsrc", dd, 1), true)
+  local de = MD.mx_get(TR, fol.slot, fol.j)
+  local dw = de[1] or de[2]
+  local dm = dw and MD.mx_unpack(dw.amt, dw.nch)
+  check("matrix: Track, Sidechain by choice", dm and (tostring(dm[1]) .. tostring(dm[2])), "01")
+  check("matrix: the LFO's six shapes", #MD.mx_names("shape"), 6)
+  -- removing a source clears what it moved
+  MD.remove(TR, fol)
+  local after = MD.mx_get(TR, lfo.slot, lfo.j)
+  local n = 0
+  for _ in pairs(after) do n = n + 1 end
+  check("matrix: the follower's slot gone with it", n, 1)
+  for sl in pairs(after) do MD.mx_unlink(TR, lfo, sl) end
+  check("matrix: unlinked", next(MD.mx_get(TR, lfo.slot, lfo.j)), nil)
+end
 
 -- remove the LFO: its links go with it
 MD.remove(TR, MD.find(TR, "o1"))

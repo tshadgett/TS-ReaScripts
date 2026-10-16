@@ -913,6 +913,197 @@ local function has_envelopes(track, slot)
   return false
 end
 
+-- ---------------------------------------------------------------------
+-- THE MATRIX: a modulator's settings moved by a macro or another
+-- modulator (TS_CV_Modulators.jsfx's own, since 2.1.2)
+-- ---------------------------------------------------------------------
+--   Per modulator two slots, each three parameters after the 192 above:
+--   source (1-16 Macro, 17-24 Modulator), target (MD.MX_TARGETS' code,
+--   + 100 x the macro's choices for a switch), amount (a share of the
+--   setting's knob range, -1..1; a switch: its setting by choice, one
+--   decimal digit each, 0 = its own). Worked out inside the plugin.
+
+MD.MX_BASE = MD.NM + MD.NO * MD.PER          -- 192
+MD.MX_SLOTS = 2
+MD.MX_TARGETS = {
+  { key = "depth", label = "Depth" },  { key = "rate", label = "Rate" },
+  { key = "phase", label = "Phase" },  { key = "smooth", label = "Smooth" },
+  { key = "att", label = "Attack" },   { key = "rel", label = "Release" },
+  { key = "floor", label = "Floor" },  { key = "ceil", label = "Ceiling" },
+  { key = "mlo", label = "Low note" }, { key = "mhi", label = "High note" },
+  { key = "shape", label = "Shape", n = 6 }, { key = "sync", label = "Sync", n = 2 },
+  { key = "fsrc", label = "Source", n = 2 }, { key = "gate", label = "Gate", n = 2 },
+  { key = "mhold", label = "Hold", n = 2 },
+}
+MD.MX_CODE = {}
+for c, t in ipairs(MD.MX_TARGETS) do MD.MX_CODE[t.key] = c; t.code = c end
+MD.MX_CODE.rsync, MD.MX_CODE.rhz = 2, 2      -- either Rate knob is "rate"
+MD.MX_MAX_CHOICES = 6
+
+function MD.mx_param(j, sl, k) return MD.MX_BASE + (j - 1) * MD.MX_SLOTS * 3 + (sl - 1) * 3 + k end
+
+-- Does the plugin on this track have the matrix (a project still running
+-- the one from before 2.1.2 doesn't)?
+function MD.mx_ok(track, slot)
+  return slot ~= nil and (reaper.TrackFX_GetNumParams(track, slot) or 0) >= MD.MX_BASE + MD.NO * MD.MX_SLOTS * 3
+end
+
+-- A source's code, and back: macro i -> i, modulator j -> 16 + j. An XY
+-- pad's second macro is i + 1.
+function MD.mx_code_of(src, k)
+  if src.src == "macro" then return src.i + ((k or 1) - 1) end
+  return MD.NM + src.j
+end
+function MD.mx_source(track, code)
+  if code <= MD.NM then
+    local src = MD.find(track, "m" .. code)
+    if src then return src, 1 end
+    src = MD.find(track, "m" .. (code - 1))
+    if src and src.kind == "xy" then return src, 2 end
+    return nil
+  end
+  return MD.find(track, "o" .. (code - MD.NM))
+end
+
+-- Modulator j's slots: { [sl] = { sl, code, tg (MD.MX_TARGETS entry),
+-- nch, amt } } -- empty ones left out.
+function MD.mx_get(track, slot, j)
+  local out = {}
+  if not MD.mx_ok(track, slot) then return out end
+  for sl = 1, MD.MX_SLOTS do
+    local code = math.floor((reaper.TrackFX_GetParam(track, slot, MD.mx_param(j, sl, 0)) or 0) + 0.5)
+    local tgr = math.floor((reaper.TrackFX_GetParam(track, slot, MD.mx_param(j, sl, 1)) or 0) + 0.5)
+    local tg = MD.MX_TARGETS[tgr % 100]
+    if code >= 1 and tg then
+      out[sl] = { sl = sl, code = code, tg = tg, nch = tgr // 100,
+                  amt = reaper.TrackFX_GetParam(track, slot, MD.mx_param(j, sl, 2)) or 0 }
+    end
+  end
+  return out
+end
+
+local function mx_write(track, slot, j, sl, code, tgr, amt)
+  reaper.TrackFX_SetParam(track, slot, MD.mx_param(j, sl, 0), code)
+  reaper.TrackFX_SetParam(track, slot, MD.mx_param(j, sl, 1), tgr)
+  reaper.TrackFX_SetParam(track, slot, MD.mx_param(j, sl, 2), amt)
+end
+
+-- A switch's settings by choice, packed: digit c-1 = setting + 1 (0 its own).
+function MD.mx_pack(map, n)
+  local v = 0
+  for c = math.min(n, MD.MX_MAX_CHOICES), 1, -1 do v = v * 10 + (map[c] and (map[c] + 1) or 0) end
+  return v
+end
+function MD.mx_unpack(amt, n)
+  local map, v = {}, math.floor(math.max(0, amt) + 0.5)
+  for c = 1, math.min(n, MD.MX_MAX_CHOICES) do
+    local d = v % 10
+    v = v // 10
+    if d > 0 then map[c] = d - 1 end
+  end
+  return map
+end
+
+-- Can `from` (a source, its output k) move modulator `to`'s `key`?
+-- Returns true, or false and why not.
+function MD.mx_can(track, to, key, from, k)
+  local tg = MD.MX_TARGETS[MD.MX_CODE[key] or 0]
+  if not tg then return false, "Can't be moved" end
+  if from.src == "mod" and from.j == to.j then return false, "Can't move itself" end
+  if tg.n and not (from.src == "macro" and (from.kind == "button" or from.kind == "dropdown")) then
+    return false, "Switches: button or dropdown macros only"
+  end
+  local code = MD.mx_code_of(from, k)
+  local used = MD.mx_get(track, to.slot, to.j)
+  local free = false
+  for sl = 1, MD.MX_SLOTS do
+    if not used[sl] or (used[sl].code == code and used[sl].tg == tg) then free = true end
+  end
+  if not free then return false, ("%s is moved by two already"):format(to.name) end
+  return true
+end
+
+-- Links `from` to modulator `to`'s `key`. `setting` is the switch's
+-- setting for a button's on (or a dropdown's second choice). Returns
+-- true, or false and why not.
+function MD.mx_link(track, to, key, from, k, setting)
+  local ok, why = MD.mx_can(track, to, key, from, k)
+  if not ok then return false, why end
+  local tg = MD.MX_TARGETS[MD.MX_CODE[key]]
+  local code = MD.mx_code_of(from, k)
+  local used = MD.mx_get(track, to.slot, to.j)
+  local sl
+  for i = 1, MD.MX_SLOTS do
+    if used[i] and used[i].code == code and used[i].tg == tg then sl = i end
+  end
+  if not sl then for i = MD.MX_SLOTS, 1, -1 do if not used[i] then sl = i end end end
+  local tgr, amt = tg.code, 0.5
+  if tg.n then
+    local n = from.kind == "dropdown" and math.max(2, #(from.choices or {})) or 2
+    n = math.min(n, MD.MX_MAX_CHOICES)
+    tgr = tg.code + 100 * n
+    amt = MD.mx_pack({ [2] = setting or 0 }, n)
+  end
+  reaper.Undo_BeginBlock()
+  mx_write(track, to.slot, to.j, sl, code, tgr, amt)
+  reaper.Undo_EndBlock(("ChannelView: %s moves %s %s"):format(from.name, to.name, tg.label), -1)
+  return true
+end
+
+-- A switch's settings, by name.
+function MD.mx_names(key)
+  if key == "shape" then return MD.SHAPES end
+  if key == "sync" then return { "Free", "Sync" } end
+  if key == "fsrc" then return { "Track", "Sidechain" } end
+  return { "Off", "On" }
+end
+
+-- A dropdown macro on a switch, choice by choice: choice c picks the
+-- switch's setting c (its choices are the switch's names). Rewrites the
+-- slot from `from` to `to`'s `key`.
+function MD.mx_direct(track, to, key, from, k)
+  local tg = MD.MX_TARGETS[MD.MX_CODE[key]]
+  local code = MD.mx_code_of(from, k)
+  local n = math.min(#MD.mx_names(key), MD.MX_MAX_CHOICES)
+  for sl, e in pairs(MD.mx_get(track, to.slot, to.j)) do
+    if e.code == code and e.tg == tg then
+      local map = {}
+      for c = 1, n do map[c] = c - 1 end
+      mx_write(track, to.slot, to.j, sl, code, tg.code + 100 * n, MD.mx_pack(map, n))
+      return true
+    end
+  end
+  return false
+end
+
+function MD.mx_set_amount(track, to, sl, amt)
+  reaper.TrackFX_SetParam(track, to.slot, MD.mx_param(to.j, sl, 2), amt)
+end
+
+function MD.mx_unlink(track, to, sl, no_undo)
+  if not no_undo then reaper.Undo_BeginBlock() end
+  mx_write(track, to.slot, to.j, sl, 0, 0, 0)
+  if not no_undo then reaper.Undo_EndBlock("ChannelView: unlink a modulator setting", -1) end
+end
+
+-- Every slot that a source feeds, or that belongs to modulator j, cleared
+-- (a macro or modulator being removed).
+local function mx_forget(track, slot, src)
+  if not MD.mx_ok(track, slot) then return end
+  local codes = {}
+  if src.src == "macro" then
+    codes[src.i] = true
+    if src.kind == "xy" then codes[src.i + 1] = true end
+  else
+    codes[MD.NM + src.j] = true
+  end
+  for j = 1, MD.NO do
+    for sl, e in pairs(MD.mx_get(track, slot, j)) do
+      if codes[e.code] or (src.src == "mod" and j == src.j) then mx_write(track, slot, j, sl, 0, 0, 0) end
+    end
+  end
+end
+
 -- Removes a macro or modulator and every link from it. The plugin goes
 -- too when nothing's left on it (and it has no automation).
 function MD.remove(track, src)
@@ -922,6 +1113,7 @@ function MD.remove(track, src)
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
   for _, l in ipairs(s.by_mod[src.guid] or {}) do MD.unlink(track, l, true) end
+  mx_forget(track, slot, src)
   if src.src == "macro" then
     local meta = MD.read_macros(track)
     meta[src.i] = nil

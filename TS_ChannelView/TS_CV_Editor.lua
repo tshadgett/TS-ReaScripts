@@ -309,7 +309,7 @@ local function draw_assigned(ctx, track, list_w, list_h)
     st.sel_asg = at
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "An empty cell, for spacing a layout out like a hardware strip.")
+    ImGui.SetTooltip(ctx, "An empty cell, for spacing.")
   end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Half-gap", 70) then
@@ -320,9 +320,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
-      "Staggers the control right after it half a row down, to mimic\n" ..
-      "staggered hardware knobs. Column layouts only -- see the type's\n" ..
-      "own note in TS_ChannelView_Mappings.ini.")
+      "Staggers the next control half a row down.\n" ..
+      "Column layouts only.")
   end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Divider", 64) then
@@ -333,9 +332,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
-      "A rule between groups of controls. Ends the current column,\n" ..
-      "so it separates sections rather than taking a cell. Select it\n" ..
-      "below to turn its line off and keep only the spacing.")
+      "A rule between groups; ends the column.\n" ..
+      "Select it below to hide the line.")
   end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Page", 50) then
@@ -346,9 +344,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
-      "A page break. Everything after it is a new page of the panel,\n" ..
-      "with a tab strip under the header to switch between them.\n" ..
-      "Select it below to name the tab and pick its colour.")
+      "A page break: what follows is a new tab.\n" ..
+      "Select it below to name and colour the tab.")
   end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Virtual", 60) then
@@ -358,10 +355,8 @@ local function draw_assigned(ctx, track, list_w, list_h)
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
-      "A control of the layout's own, with no parameter behind it: a\n" ..
-      "button, a selector or a knob (choose which under Type). Other\n" ..
-      "controls' Show when, and the plugin's layout switching, can\n" ..
-      "follow it. Each instance keeps its own setting.")
+      "A button, selector or knob with no parameter behind it.\n" ..
+      "Rules can follow it; each instance keeps its own setting.")
   end
 end
 
@@ -417,7 +412,7 @@ local function draw_available(ctx, track, list_w, list_h)
   if lch then st.learn = lv end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
-      "While on, touching a control in the plugin's own window adds that parameter here.")
+      "Touch a control in the plugin's window to add it.")
   end
 end
 
@@ -617,9 +612,9 @@ local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row)
     if r.op == "between" and not r.norm2 then r.norm2 = list and list[#list].norm or 1 end
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "is / is not: that value (a knob within a hair of it).\n" ..
-      "is above / is below: past it, not including it.\n" ..
-      "is between: from one value to the other, both included.")
+    ImGui.SetTooltip(ctx, "is / is not: that value\n" ..
+      "is above / below: past it (not including it)\n" ..
+      "is between: both ends included")
   end
   ImGui.SameLine(ctx, 0, 4)
   local v = value_field(id .. "v", r.norm, val_w)
@@ -748,15 +743,14 @@ local function draw_entry_editor(ctx)
     ImGui.SetNextItemWidth(ctx, 92)
     local cch, ci = ImGui.Combo(ctx, "##rgcurve", ccur, "Linear\0Log\0Squared\0")
     if cch then rg.curve = U.RANGE_CURVES[ci + 1] end
-    tip("How it runs between its ends: evenly (linear), by ratio (log:\n" ..
-      "frequencies, and most times), or slow then fast (squared). The\n" ..
-      "plugin's own curve may differ a little in the middle.")
+    tip("How it runs between its ends.\n" ..
+      "Linear: evenly. Log: frequencies, times. Squared: slow then fast.")
     ImGui.SameLine(ctx, 0, 4)
     ImGui.TextDisabled(ctx, "now " .. U.range_text(rg, (st.track and st.fx)
       and reaper.TrackFX_GetParamNormalized(st.track, st.fx.addr, p) or 0))
     ImGui.SameLine(ctx, 0, 8)
     if ImGui.Button(ctx, "Clear##rgclr") then st.scratch.ranges[p] = nil end
-    tip("Back to what the plugin says it reads.")
+    tip("Back to the plugin's own values.")
   end
   -- a control without a scale of numbers: the plugin's own values, or yours
   local function values_row(p)
@@ -768,8 +762,7 @@ local function draw_entry_editor(ctx)
     if vch then
       if vi == 1 then E.ensure_range(p) elseif st.scratch.ranges then st.scratch.ranges[p] = nil end
     end
-    tip("Custom: your own range for it, for a plugin that won't say what\n" ..
-      "its values are -- it reads as that everywhere.")
+    tip("Custom: your own range, for a plugin that doesn't report its values.")
     range_row(p)
   end
 
@@ -798,8 +791,8 @@ local function draw_entry_editor(ctx)
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local pch, pi = ImGui.Combo(ctx, "##p2", c.param2 or 0, table.concat(names, "\0") .. "\0")
     if pch then c.param2 = pi end
-    tip((c.type == "xy") and "The parameter the pad moves up and down (X is across)."
-      or "The parameter the inner knob turns (the ring turns the one above).")
+    tip((c.type == "xy") and "The pad's vertical parameter."
+      or "The inner knob's parameter.")
   end
 
   -- what it is
@@ -859,9 +852,8 @@ local function draw_entry_editor(ctx)
     local nm = M.vname_of(c)
     local twice = 0
     for _, o in ipairs(st.scratch.controls) do if M.is_virtual(o) and M.vname_of(o) == nm then twice = twice + 1 end end
-    tip("Rules (Show when, layout switching) find it by this name, and\n" ..
-      "another layout of this plugin with one of the same name shares\n" ..
-      "its setting." .. (twice > 1 and "\n\nTwo here have this name: give each its own." or ""))
+    tip("Rules find it by this name; same-named ones in other\n" ..
+      "layouts share its setting." .. (twice > 1 and "\nTwo here share this name: rename one." or ""))
     if twice > 1 then ImGui.SameLine(ctx); ImGui.TextColored(ctx, C.COL.warn, "!") end
     if c.type == "toggle" then
       row_name("States")
@@ -875,7 +867,7 @@ local function draw_entry_editor(ctx)
         v1, v2 = U.trim(a1 and v1 or ch1), U.trim(a2 and v2 or ch2)
         c.virtual.choices = (v1 ~= "" or v2 ~= "") and { v1 ~= "" and v1 or "Off", v2 ~= "" and v2 or "On" } or {}
       end
-      tip("What its two states are called (Basic / Advanced, say).")
+      tip("Its two states' names (Basic / Advanced, say).")
     elseif c.type == "combo" then
       row_name("Choices")
       ImGui.SetNextItemWidth(ctx, FIELD_W)
@@ -927,8 +919,7 @@ local function draw_entry_editor(ctx)
         ("%d %%%%"):format(math.floor((c.virtual.start or 0) * 100 + 0.5)))
       if sch then c.virtual.start = sv end
     end
-    tip("Where it is on an instance that's never been set (and where a\n" ..
-      "double-click puts it back).")
+    tip("Its default (Double-click: back to it).")
   end
   if is_param and not virt then
     if live then ImGui.BeginDisabled(ctx, true) end
@@ -940,15 +931,13 @@ local function draw_entry_editor(ctx)
       av = U.trim(av)
       st.scratch.aliases[c.param] = (av ~= "") and av or nil
     end
-    tip("Your name for this parameter. Applies to this plugin everywhere,\n" ..
-      "whether or not the parameter is on a panel. Clear it to go back to\n" ..
-      "what the plugin calls it: " .. (pname ~= "" and pname or "?"))
+    tip("Your name for this parameter, for this plugin everywhere.\n" ..
+      "Clear for the plugin's own: " .. (pname ~= "" and pname or "?"))
     row_name("Label")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local ch, v = ImGui.InputTextWithHint(ctx, "##label", "this slot only", c.label or "")
     if ch then c.label = v end
-    tip("Overrides the alias for THIS slot only. Leave empty unless a\n" ..
-      "cramped layout needs a shorter caption here.")
+    tip("Overrides the alias for this slot only.")
     if live then ImGui.EndDisabled(ctx) end
   end
 
@@ -970,9 +959,8 @@ local function draw_entry_editor(ctx)
       local k = C.SIZE_LIST[si + 1]
       c.size = (k ~= "medium") and k or nil
     end
-    tip("Small: half height, a small dial under its name in small type --\n" ..
-      "its value moves to the tooltip, and two stack in one ordinary cell.\n" ..
-      "Large: half again as big, name and value kept.")
+    tip("Small: half height, value in the tooltip; two stack in a cell.\n" ..
+      "Large: half again as big.")
     -- numbers round the dial (Scale<n>; values unless it says otherwise),
     -- then what the values read as (Range<p>) -- the right-click's Values.
     -- Their colour is a look: right-click > Style.
@@ -985,17 +973,15 @@ local function draw_entry_editor(ctx)
       c.scale = (sci == 0) and "none" or (sci == 2) and "ten" or nil
       if c.scale == "none" then c.scale_ink = nil end
     end
-    tip("Numbers round the dial: the values it reads as (units left off,\n" ..
-      "thousands as k), or 0 to 10. A medium knob with numbers shows its\n" ..
-      "value in the tooltip; a small one has no room for them.")
+    tip("Numbers round the dial: its values, or 0 to 10.\n" ..
+      "Not on small knobs.")
     values_row(c.param)
   elseif c.type == "toggle" then
     row_name("Size")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local sch, si = ImGui.Combo(ctx, "##tsize", (c.size == "small") and 0 or 1, TOGGLE_SIZES_COMBO)
     if sch then c.size = (si == 0) and "small" or nil end
-    tip("Small: half height and all button, with its name on it when the\n" ..
-      "state has no name of its own. Two stack in one cell.")
+    tip("Small: half height, all button; two stack in a cell.")
   elseif c.type == "combo" and c.param and st.track and st.fx then
     -- a dropdown can show its choices as buttons instead (2 to C.BUTTONS_MAX)
     local P = require("TS_CV_Panel")
@@ -1017,8 +1003,8 @@ local function draw_entry_editor(ctx)
       c.nbtn = c.buttons and n or nil
     end
     if not ok then ImGui.EndDisabled(ctx) end
-    tip(ok and "Show the choices as a row, or a column, of buttons, the current one lit."
-      or ("Buttons are only for a parameter with 2 to %d choices."):format(C.BUTTONS_MAX))
+    tip(ok and "Show the choices as buttons, the current one lit."
+      or ("Only for 2 to %d choices."):format(C.BUTTONS_MAX))
   elseif c.type == "fader" then
     values_row(c.param)
     -- a fader's shape (Shape<n>): which way, how long, how thick
@@ -1030,13 +1016,12 @@ local function draw_entry_editor(ctx)
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local lch, li = ImGui.Combo(ctx, "##len", c.len and (c.len - 2) or 3, "2\0" .. "3\0" .. "4\0Full\0")
     if lch then c.len = (li < 3) and (li + 2) or nil end
-    tip("In rows (across: columns), or the full height (across: to the\npanel's right edge).")
+    tip("In rows (across: columns), or full height (across: full width).")
     row_name("Thickness")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local tch2, ti2 = ImGui.Combo(ctx, "##thick", c.thin and 1 or 0, "Full\0Half\0")
     if tch2 then c.thin = (ti2 == 1) or nil end
-    tip("A whole column (across: row) or half of one -- half for a row of\n" ..
-      "faders side by side, a graphic EQ's bands say.")
+    tip("A whole column (across: row), or half for faders side by side.")
   elseif c.type == "xy" then
     row_name("Size")
     local list = { "2x2", "3x2", "2x3", "3x3" }
@@ -1060,9 +1045,7 @@ local function draw_entry_editor(ctx)
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local ch, v = ImGui.InputTextWithHint(ctx, "##pglabel", "unnamed: its number", c.label or "")
     if ch then c.label = (v ~= "") and v or nil end
-    tip("Everything after this break, up to the next one, is a page of its\n" ..
-      "own; the panel shows one page at a time with a tab strip under its\n" ..
-      "header. Dividers inside a page split its columns as they always have.")
+    tip("The tab's name. Everything up to the next break is one page.")
     row_name("Tab colour")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     local keys, names, now = { "" }, { "Theme" }, 0
@@ -1073,8 +1056,8 @@ local function draw_entry_editor(ctx)
     if c.cap and now == 0 then keys[#keys + 1] = c.cap; names[#names + 1] = c.cap; now = #keys - 1 end
     local cch, ci = ImGui.Combo(ctx, "##pgcap", now, table.concat(names, "\0") .. "\0")
     if cch then c.cap = (ci > 0) and keys[ci + 1] or nil end
-    tip("The stripe over the tab's name. Right-click the tab on the panel\n" ..
-      "for the full colour picker.")
+    tip("The stripe over the tab's name.\n" ..
+      "Right-click the tab on the panel: full colour picker.")
   end
 
   -- a divider: its line, and the section after it
@@ -1082,9 +1065,7 @@ local function draw_entry_editor(ctx)
     row_name("Line")
     local lch, lv = ImGui.Checkbox(ctx, "Draw the rule", not c.no_rule)
     if lch then c.no_rule = (not lv) or nil end
-    tip("On: the usual rule between the two groups. Off: still ends\n" ..
-      "the column and opens the same gap, just without the line --\n" ..
-      "pure spacing, for groups that don't need a line between them.")
+    tip("A line between the groups. Off: the same gap, no line.")
     local names, keys = { "None", "Inset" }, { "", "inset" }
     for _, pl in ipairs(C.PLATES) do
       if pl.bg then names[#names + 1] = "Plate: " .. pl.label; keys[#keys + 1] = pl.key end
@@ -1104,8 +1085,7 @@ local function draw_entry_editor(ctx)
       elseif k == "+" then pick_custom(c, "section")
       else c.style, c.cap = "plate", k end
     end
-    tip("An inset, or a faceplate of their own, behind the\n" ..
-      "controls after this divider, up to the next one.")
+    tip("An inset or faceplate behind the controls up to the next divider.")
     -- (its finish, brushed or metallic, is a look: right-click > Section)
   elseif c.type ~= "page" then
     -- its own background (an inset or a faceplate), joined with neighbours'
@@ -1128,8 +1108,7 @@ local function draw_entry_editor(ctx)
         if not c.back then c.brush, c.metal = nil, nil end
       end
     end
-    tip("This control's own background. Neighbours with the same one\n" ..
-      "join into one shape, across a divider too.")
+    tip("This control's background. Matching neighbours join up.")
     -- (its finish is a look: right-click > Background)
   end
 
@@ -1146,10 +1125,8 @@ local function draw_entry_editor(ctx)
       if not e or (e.param == nil and e.vname == nil) then c.show = nil
       else c.show = rule_start(tr, addr, e, st.scratch.controls) end
     end
-    tip("Show this control only while the chosen parameter (or one of\n" ..
-      "the layout's virtual controls, \u{25C6}) reads a given way -- a\n" ..
-      "delay's \"ms\" knob while sync is off, say. A hidden control\n" ..
-      "takes no cell, so two with opposite rules swap in one place.")
+    tip("Show only while a parameter (or virtual control, \u{25C6}) reads a given way.\n" ..
+      "A hidden control takes no cell.")
     if c.show then
       row_name("")
       rule_value_ui(ctx, "##show", tr, addr, c.show, st.scratch.controls, 92, FIELD_W - 96,
@@ -1166,15 +1143,13 @@ local function draw_entry_editor(ctx)
       gap()
       local bch, bv = ImGui.Checkbox(ctx, "Centred", c.bipolar and true or false)
       if bch then c.bipolar = bv end
-      tip("Fill the knob outward from 12 o'clock instead of from the minimum.")
+      tip("Fill from 12 o'clock instead of the minimum.")
     end
     -- reverse: knobs, buttons, and both halves of a two-parameter control.
     -- A dropdown's entries are positions in the plugin's own scale, so
     -- reversing one means reversing the list -- a different job.
-    local rev_tip = "Turn it the other way: what the plugin calls minimum sits\n" ..
-      "at the top. For parameters wired backwards -- a \"threshold\" that\n" ..
-      "opens as it falls, a mix control labelled dry. The plugin still\n" ..
-      "sees its own value; only the control is flipped."
+    local rev_tip = "Flip the control: the plugin's minimum at the top.\n" ..
+      "For parameters wired backwards."
     if c.type == "knob" or c.type == "toggle" or c.type == "stepped" then
       gap()
       local rch, rv = ImGui.Checkbox(ctx, "Reverse", c.invert and true or false)
@@ -1199,10 +1174,9 @@ local function draw_entry_editor(ctx)
     if vch then c.live = vv or nil end
     if st.scratch.live then ImGui.EndDisabled(ctx) end
     tip(st.scratch.live and
-      "On for every control: \"Live parameter names\" is ticked above." or
-      "Show whatever the plugin calls this parameter right now, instead\n" ..
-      "of the label or alias -- for plugins that rename their parameters\n" ..
-      "as you use them. Currently: " .. (pname ~= "" and pname or "?"))
+      "On for every control (\"Live parameter names\" above)." or
+      "Show the plugin's current name for it, not the label or alias.\n" ..
+      "Currently: " .. (pname ~= "" and pname or "?"))
   end
 
   -- a button's own words for its two states, for this plugin everywhere
@@ -1229,8 +1203,8 @@ local function draw_entry_editor(ctx)
       local raw = { c1 and v1 or sn[1] or "", c2 and v2 or sn[2] or "" }
       st.scratch.states[c.param] = (off ~= "" or on ~= "") and raw or nil
     end
-    tip("Off, then on. Leave one empty to keep the plugin's own text;\n" ..
-      "clear both to go back to it entirely. For this plugin everywhere.")
+    tip("Off, then on, for this plugin everywhere.\n" ..
+      "Leave empty for the plugin's own text.")
   end
 end
 
@@ -1309,9 +1283,8 @@ local function draw_layout_row(ctx, track)
     ImGui.EndCombo(ctx)
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "The layout this instance shows, and you're editing. The default\n" ..
-      "is what every instance not set to another shows; choose it in a\n" ..
-      "panel's menu (Layout \u{25B8} Make \"...\" the default).")
+    ImGui.SetTooltip(ctx, "The layout this instance shows (and you're editing).\n" ..
+      "Set the default from a panel's menu: Layout \u{25B8} Make \"...\" the default.")
   end
   ImGui.SameLine(ctx, 0, 16)
   ImGui.SetNextItemWidth(ctx, 170)
@@ -1337,16 +1310,16 @@ local function draw_layout_row(ctx, track)
   if not ok then ImGui.BeginDisabled(ctx, true) end
   if ImGui.Button(ctx, "Copy to new layout") then make(false) end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, ok and "What's in the editor now, as a new layout under that name,\n" ..
-      "for this instance. The layout you started from stays as it was."
-      or "Type a name for the new layout first.")
+    ImGui.SetTooltip(ctx, ok and "Save the editor's contents as a new layout for this instance.\n" ..
+      "The original stays as it was."
+      or "Type a name first.")
   end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "New empty layout") then make(true) end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, ok and "A new layout with no controls, under that name, for this\n" ..
-      "instance. Your names for the plugin's parameters come with it."
-      or "Type a name for the new layout first.")
+    ImGui.SetTooltip(ctx, ok and "A new empty layout for this instance.\n" ..
+      "Your parameter names come with it."
+      or "Type a name first.")
   end
   if not ok then ImGui.EndDisabled(ctx) end
 end
@@ -1364,10 +1337,8 @@ local function draw_switch_rules(ctx, track)
     .. ((#rules > 0) and ("  (%d)"):format(#rules) or "")
   if ImGui.Button(ctx, label .. "##swr") then st.rules_open = not st.rules_open end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Put up another of this plugin's layouts while one of its\n" ..
-      "parameters, or a virtual control, reads a given way: a delay's\n" ..
-      "stereo layout while its mode is Dual, say. The first rule that\n" ..
-      "matches wins; with none, an instance shows the layout it's set to.")
+    ImGui.SetTooltip(ctx, "Show another layout while a parameter or virtual control\n" ..
+      "reads a given way. First match wins.")
   end
   if not st.rules_open then return end
   local addr = st.fx.addr
@@ -1384,7 +1355,7 @@ local function draw_switch_rules(ctx, track)
     ImGui.PushID(ctx, "swr" .. i)
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.TextColored(ctx, (active == i) and C.COL.accent or C.COL.header_dim, tostring(i))
-    if active == i and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "In charge on this instance now.") end
+    if active == i and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Active on this instance.") end
     ImGui.SameLine(ctx); ImGui.Text(ctx, "Use"); ImGui.SameLine(ctx)
     local cur = 0
     for k, nm in ipairs(lays) do if (nm or nil) == r.layout then cur = k - 1 end end
@@ -1404,7 +1375,7 @@ local function draw_switch_rules(ctx, track)
         function(t) ImGui.SameLine(ctx); ImGui.Text(ctx, t); ImGui.SameLine(ctx) end) then changed = true end
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "\u{2715}") then drop = i end
-    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Take this rule away") end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Remove this rule") end
     ImGui.PopID(ctx)
   end
   if drop then table.remove(rules, drop); changed = true end
@@ -1515,8 +1486,8 @@ function E.draw(ctx, _selected)
         end
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "Which of the plugin's controls the canvas uses" ..
-          (kind == "EQ" and ", and learning its bands." or "."))
+        ImGui.SetTooltip(ctx, "Choose the controls the canvas uses" ..
+          (kind == "EQ" and ", and learn its bands." or "."))
       end
     end
     draw_switch_rules(ctx, track)
@@ -1536,7 +1507,7 @@ function E.draw(ctx, _selected)
         st.scratch.meter.on = mv
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "A strip on the panel showing the plugin's own gain reduction.")
+        ImGui.SetTooltip(ctx, "Shows the plugin's own gain reduction on the panel.")
       end
     elseif not RQ.is_eq(st.key) then
       -- Not offered for ReaEQ: an EQ has no reduction to measure.
@@ -1550,13 +1521,8 @@ function E.draw(ctx, _selected)
       end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
-          "This plugin doesn't report gain reduction to REAPER, so it's\n" ..
-          "measured instead: a copy of the audio going in and coming out is\n" ..
-          "routed on spare channels (5/6 up) to the track's post TS_TrackProbe.\n" ..
-          "Every instance between a probe pair is measured.\n\n" ..
-          "An estimate. Its zero -- what \"no reduction\" looks like -- is\n" ..
-          "measured each time playback stops, with a second of quiet test\n" ..
-          "noise that you don't hear. A plugin at 50% mix reads about half.")
+          "Estimates gain reduction (the plugin doesn't report it)\n" ..
+          "via the track's TS_TrackProbe pair. At 50% mix it reads about half.")
       end
     end
     -- Input and output meters: any plugin, reporting or not, measured by
@@ -1566,11 +1532,8 @@ function E.draw(ctx, _selected)
     if lch then st.scratch.levels = lv or nil end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx,
-        "Two slim meters on the panel -- what goes into the plugin and what\n" ..
-        "comes out -- and under them how much it changes the level (output\n" ..
-        "RMS minus input RMS). Measured by the track's TS_TrackProbe pair,\n" ..
-        "for every instance between the probes, up to four per track\n" ..
-        "together with plugins measured for gain reduction.")
+        "Input and output meters, and the level change (RMS).\n" ..
+        "Measured by the track's TS_TrackProbe pair.")
     end
     -- For plugins that rename their own parameters.
     next_tick()
@@ -1578,10 +1541,8 @@ function E.draw(ctx, _selected)
     if lvch then st.scratch.live = lvv or nil end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx,
-        "Every control shows what the plugin calls its parameter right now,\n" ..
-        "instead of a saved label or alias. For plugins that rename their\n" ..
-        "parameters as you use them, like Softube Console 1 and Flow, whose\n" ..
-        "macros take the names of whatever is loaded into them.")
+        "Show the plugin's current parameter names, not saved labels.\n" ..
+        "For plugins that rename them (Softube Console 1, Flow).")
     end
 
     -- what goes with them
@@ -1592,8 +1553,8 @@ function E.draw(ctx, _selected)
       if rch then st.scratch.meter.range = rv end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
-          "How much reduction fills the strip. A bus compressor wants a\n" ..
-          "small range; a limiter wants a large one.")
+          "How much reduction fills the strip.\n" ..
+          "Small for a bus compressor, large for a limiter.")
       end
     end
     if measure_on then
@@ -1616,15 +1577,8 @@ function E.draw(ctx, _selected)
       if zch then TP.set_zero_on(zv) end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
-          "Each time playback stops, the pre probe plays a second of quiet\n" ..
-          "pink noise (-60 and -50 dBFS) through the chain while the post probe\n" ..
-          "stays silent, and that is taken as \"no reduction\". Without it the\n" ..
-          "zero is learnt from the music, and a compressor that never lets go\n" ..
-          "reads low.\n\n" ..
-          "Needs REAPER's \"Run FX when stopped\". Waits for a second of\n" ..
-          "silence and gives way the moment you play or anything arrives --\n" ..
-          "but on an instrument track played while stopped, the first note\n" ..
-          "after a stop can be swallowed. Turn it off if that bothers you.")
+          "On stop, plays a second of quiet noise to learn \"no reduction\"\n" ..
+          "(needs \"Run FX when stopped\"). Can swallow a note played while stopped.")
       end
       if st.track and st.fx then
         local cs = TP.cal_status(st.track, st.fx.guid)
@@ -1690,8 +1644,8 @@ function E.draw(ctx, _selected)
     end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx,
-        "Show it on the panel now, without writing to the library.\n" ..
-        "Cancel still puts everything back.")
+        "Preview on the panel without saving.\n" ..
+        "Cancel still reverts.")
     end
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel", 90) then

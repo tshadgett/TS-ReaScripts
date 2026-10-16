@@ -1,5 +1,61 @@
 # ChannelView — changelog
 
+## 2.2.0 — MIDI learn, modulators moved by macros, a quieter probe
+
+**Reopen your projects after updating.** The probe and the Modulators
+plugin both changed, and REAPER keeps running the versions a project was
+opened with until it's reopened. Everything still works meanwhile.
+
+- **MIDI learn bar.** The new MIDI button in the header opens a bar with
+  the parameter you last touched (in ChannelView or a plugin's own window)
+  beside the MIDI control you last moved, and a link button between them:
+  hollow blue when not linked, green when linked, click again to unlink.
+  It writes REAPER's own MIDI learn, so links show in REAPER's learn window
+  and work without ChannelView. Takes CCs, notes (footswitches), program
+  change and pitch bend; guesses the mode (Relative 1 for endless
+  encoders, Absolute for knobs, Toggle for notes) and lets you change it;
+  *Only when its track is selected* and *Soft takeover*. A **+** shows the
+  parameter's automation lane, *More…* opens REAPER's learn window, and a
+  control's right-click ▸ *Automate* ▸ *MIDI learn…* opens the bar on it.
+- **Modulators moved by macros and modulators.** Drag a macro's or a
+  modulator's ◯ onto a knob in an open modulator tile: LFO depth, rate,
+  phase and smoothing; Follower depth, attack, release, floor, ceiling and
+  smoothing; MIDI depth, low, high and smoothing. Up to two per modulator.
+  They behave like linked plugin controls: the knob follows, a ring with
+  a handle at each end shows the reach, Alt-click a handle to remove it.
+- **Button and dropdown macros drive switches**: LFO shape, sync or free,
+  Follower source and gate, MIDI hold. A dropdown dropped on a switch
+  offers to take its choices (a dropdown on *Shape* becomes Sine,
+  Triangle, …). Right-click the switch to set what each choice picks or
+  to remove the link. The tile shows the setting in use.
+- **Header.** *View* and *Layouts* moved into one **☰** menu, with *Web
+  companion* (start, stop, start with REAPER), *Dock* and *Run when REAPER
+  starts*. The buttons sit in two groups. The web companion's status is a
+  thin strip along the top of the header (green with a page connected,
+  amber when a page is open but the bridge isn't running) instead of the
+  tablet icon. The header glows red while the whole FX chain is bypassed.
+- **TS_TrackProbe 2.0.0 has no parameters.** Measuring made a probe
+  setting REAPER's *last touched* parameter, so REAPER's own learn and
+  lane tools picked up the probe instead of your plugin. The probe now
+  talks to ChannelView, Track Analyser and TS Visualizer through shared
+  memory only, and never shows in automation or learn lists. The first
+  probe on a track is the pre, the last the post. Older probes keep
+  working until the project is reopened. A track's *In the Visualizer's
+  spectrum* choice made on an older probe needs making again afterwards.
+- The probes are always kept out of the plugin row and at the chain's ends;
+  the *Show the probes in the plugin row* and *Open the pre/post probe*
+  menu items are gone.
+- **Track-colour backgrounds** in the mixer, the TCP and the Channel panel
+  now tint the knobs, faders, buttons and labels to match, instead of
+  leaving them grey on colour.
+- **EQ layouts:** a plugin whose gain reads without a unit (TDR Slick EQ)
+  now shows its boosts; switched Q (Narrow / Wide on analogue emulations)
+  steps one position per wheel notch, and a node's right-click lists the
+  positions, on the web companion too. Re-learning a layout keeps boosts
+  that were dropped before.
+- The modulator trace is drawn against time, so a smooth LFO draws smooth.
+- Tooltips throughout are shorter.
+
 ## 2.1.1 — fixes
 
 - An EQ layout whose band had its Q learned on one side only (cuts, say)

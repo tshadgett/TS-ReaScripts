@@ -510,6 +510,8 @@ button { font: inherit; color: inherit; }
   padding: 0 10px; cursor: pointer; font-size: 12px; }
 .eqs .qd { height: 36px; min-width: 96px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); display: flex; align-items: center; justify-content: center; touch-action: none; cursor: ew-resize; }
+.eqs .qd.sw { min-width: 0; padding: 0 12px; cursor: pointer; }
+.eqs .qd.sw.on { background: var(--accent); color: #fff; }
 .mbtab { flex: 0 0 auto; height: 26px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); font-size: 12px; }
 .mbtab.on { background: var(--accent); color: #fff; }
@@ -1464,8 +1466,8 @@ const folderIcon = m => `<svg viewBox="0 0 24 24"><rect x="2.4" y="4.8" width="8
   (m === 2 ? `<rect x="2.4" y="7.7" width="19.2" height="12" rx="1" fill="currentColor"/>`
            : `<rect x="3" y="8.3" width="18" height="10.8" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>` +
              (m === 1 ? `<rect x="2.4" y="13.7" width="19.2" height="6" fill="currentColor"/>` : "")) + `</svg>`;
-const FOLDER_TIP = ["Folder: children in full — tap to collapse them", "Folder: children collapsed — tap to hide them",
-  "Folder: children hidden — tap to show them in full"];
+const FOLDER_TIP = ["Folder open · Tap: collapse", "Folder collapsed · Tap: hide children",
+  "Children hidden · Tap: expand"];
 
 const ICON = {
   fs: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
@@ -3483,7 +3485,7 @@ function buildPanel(p, bodyH) {
   const wet = wetChip(p, w);
   // put up by a layout switching rule: that layout's name in a pill
   const ra = p.ra ? h("span", "ra", p.ra) : null;
-  if (ra) ra.title = "Layout put up by a switching rule";
+  if (ra) ra.title = "Layout set by a switching rule";
   head.append(h("span", "nm", p.n), ...(ra ? [ra] : []), ...(wet ? [wet] : []), moreBtn(p), col, flt, byp);
   const body = h("div", "pb");
   pnl.append(head);
@@ -3880,7 +3882,7 @@ function tintCss(under, hex, amt, readable) {
   const u = hexRgb(under), c = hexRgb(hex);
   if (readable) { const lu = lumOf(u), lc = lumOf(c); if (lc > 136 && lc > lu) amt = Math.min(amt, (136 - lu) / (lc - lu)); }
   const m = u.map((v, k) => Math.round(v + (c[k] - v) * amt));
-  return { css: `rgb(${m[0]},${m[1]},${m[2]})`, light: lumOf(m) > 140 };
+  return { css: `rgb(${m[0]},${m[1]},${m[2]})`, light: lumOf(m) > 140, m };
 }
 function applyTint(el, t, under, readable) {
   if (!t || !(t.bt > 0) || !t.c) return;
@@ -3888,6 +3890,21 @@ function applyTint(el, t, under, readable) {
   if (!r) return;
   el.style.background = r.css;
   if (!readable && r.light) el.style.color = "#0d1116";
+  // a strip or panel: its slots, buttons and outlines in shades of the
+  // tinted body instead of the theme's greys, its dim labels in a pale
+  // tint of the track's colour (as the desktop's W.tinted_inks)
+  if (readable) for (const [k, v] of Object.entries(tintInks(r.m, hexRgb(t.c)))) el.style.setProperty(k, v);
+}
+function tintInks(body, col) {
+  const mixc = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
+  const rgb = a => `rgb(${a[0]},${a[1]},${a[2]})`;
+  const blk = [0, 0, 0], wht = [255, 255, 255];
+  const pale = mixc(wht, col, 0.30);
+  return {
+    "--body": rgb(mixc(body, blk, 0.58)), "--track": rgb(mixc(body, blk, 0.42)),
+    "--toff": rgb(mixc(body, blk, 0.30)), "--ring": rgb(mixc(body, blk, 0.28)),
+    "--border": rgb(mixc(body, blk, 0.35)), "--label": rgb(pale), "--dim": rgb(mixc(pale, body, 0.25)),
+  };
 }
 
 const WET_MIN_W = 230;
@@ -4074,7 +4091,7 @@ function osButton(p) {
   const os = p.os || {}, on = !!os.l;
   const b = h("button", "os" + (on ? " on" : (os.f ? " ox" : "")), osText(os));
   if (on && p.plate) { b.style.background = p.plate.text; b.style.color = p.plate.head; }
-  b.title = on ? `Oversampled by REAPER: ${os.l}x here` : (os.f ? "Oversampled from around it, or set to no effect here" : "Oversampling: off");
+  b.title = on ? `Oversampled ${os.l}x by REAPER` : (os.f ? "Oversampled by the chain, or no effect here" : "Oversampling: off");
   b.setAttribute("aria-label", "Oversampling");
   b.addEventListener("click", e => { e.stopPropagation(); osSheet(p.n, p.os, v => send("fxos", p.g, v)); });
   return b;
@@ -4083,7 +4100,7 @@ function osButton(p) {
 function chainOsButton() {
   const c = layout.cos || {};
   const b = h("button", "cos" + (c.l ? " on" : (c.f ? " ox" : "")), osText(c));
-  b.title = c.l ? `The whole FX chain is oversampled ${c.l}x` : "Oversample the whole FX chain";
+  b.title = c.l ? `Whole FX chain oversampled ${c.l}x` : "Oversample the whole FX chain";
   b.addEventListener("click", () => osSheet("Whole chain", c, v => send("chainos", v)));
   return b;
 }
@@ -4944,7 +4961,7 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
   let stripSig = null;
   function paintStrip() {
     const b = bandsNow().find(v => v.k === st.sel);
-    const sig = b ? [b.k, b.x, b.e, b.s, b.d ? [b.d.xt, b.d.xr, b.d.xra, b.d.xa, b.d.xl, b.d.on].join("/") : ""].join("|") : "none";
+    const sig = b ? [b.k, b.x, b.e, b.s, b.qi, b.d ? [b.d.xt, b.d.xr, b.d.xra, b.d.xa, b.d.xl, b.d.on].join("/") : ""].join("|") : "none";
     if (sig === stripSig) return;
     stripSig = sig; strip.innerHTML = "";
     if (!b) { strip.append(h("span", null, "Drag a node to move a band · tap one to select it · double-tap: flat")); return; }
@@ -4985,7 +5002,15 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
         strip.append(dd);
       }
     }
-    if (b.wq) {
+    if (b.wq && b.qp) {
+      // a Q that's a switch: its settings as chips
+      b.qp.forEach((t, i) => {
+        const c = h("div", "qd sw" + (b.qi === i + 1 ? " on" : ""), t);
+        c.title = "Q: " + t;
+        c.addEventListener("click", () => send("mqp", p.g, b.k, String(i + 1)));
+        strip.append(c);
+      });
+    } else if (b.wq) {
       const qd = h("div", "qd", "Q");
       let x0 = 0;
       qd.addEventListener("pointerdown", e => { e.preventDefault(); qd.setPointerCapture(e.pointerId); x0 = e.clientX; st.qdrag = true; });
@@ -7154,7 +7179,7 @@ function render() {
       if (P.pf.textContent !== t) P.pf.textContent = t;
       P.pf.classList.toggle("mod", !!fv.pm);
       // the full name on hover (a mouse or trackpad), for when it's cut short
-      const tip = fv.pn ? fv.pn + (fv.pm ? " — changed since it was loaded" : "") : "";
+      const tip = fv.pn ? fv.pn + (fv.pm ? " (modified)" : "") : "";
       if (P.pf.title !== tip) P.pf.title = tip;
     }
     const byp = fv.e === false;

@@ -128,8 +128,8 @@ local function fader_menu(ctx, track, pid)
   local eff = TO.effective_fader_look(track, now)
   local col = W.cap_col(eff and eff.cap)
   look_choices(ctx, "fown", own, cat_label and ("As " .. cat_label:lower()) or "Default",
-    cat_label and ("What every one of the " .. cat_label:lower() .. " has, else the Default\n(Group looks, below)")
-      or "The Default look (Group looks, below), else the plain fader",
+    cat_label and ("The " .. cat_label:lower() .. " group's look, else Default")
+      or "The Default look, else plain",
     function(field, value, save) TO.set_fader_part(tg, field, value, save) end,
     revert, col and (col >> 8), "Fader colour")
 
@@ -147,8 +147,8 @@ local function fader_menu(ctx, track, pid)
     local bch, bv = ImGui.SliderInt(ctx, "##bgown", shown, 0, 100, fmt)
     if bch then TO.set_own_tint(tg, bv) end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "This track's strip, name button and Channel panel in its colour\n" ..
-        "at this strength, over its group's setting (Group looks, below).")
+      ImGui.SetTooltip(ctx, "Strip, name and Channel panel tinted in the track colour\n" ..
+        "Overrides the group's setting")
     end
     if mine then
       ImGui.SameLine(ctx)
@@ -160,7 +160,7 @@ local function fader_menu(ctx, track, pid)
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Reset to default", nil, false, own ~= nil) then TO.clear_fader_look(tg) end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, cat_label and ("Back to the " .. cat_label:lower() .. "' look") or "Back to the Default look")
+    ImGui.SetTooltip(ctx, cat_label and ("Back to the " .. cat_label:lower() .. " look") or "Back to the Default look")
   end
 
   -- each group's look, under its own flyout
@@ -178,8 +178,8 @@ local function fader_menu(ctx, track, pid)
         local d = TO.fader_default(c.key)
         local dc = W.cap_col(d and d.cap)
         look_choices(ctx, "fcat" .. c.key, d, "None",
-          (c.key == "default") and "Plain, unless a track or its group has a look"
-            or "The Default look, unless a track has a look of its own",
+          (c.key == "default") and "Plain, unless the track or group has a look"
+            or "The Default look, unless the track has its own",
           function(field, value, save) TO.set_fader_default(c.key, field, value, save) end,
           grevert, dc and (dc >> 8), c.label .. " fader colour")
         -- the strip's background in the track's colour, at a strength
@@ -191,10 +191,9 @@ local function fader_menu(ctx, track, pid)
           pct > 0 and "%d%% track colour" or "Off")
         if tch then TO.set_bg_tint(c.key, tv, true) end
         if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "The strip, its name button and the Channel panel in the\n" ..
-            "track's colour at this strength. " ..
-            ((c.key == "default") and "Every track no group above covers."
-              or "Tracks in this group; others take the Default's."))
+          ImGui.SetTooltip(ctx, "Strip, name and Channel panel tinted in the track colour\n" ..
+            ((c.key == "default") and "For tracks in no group"
+              or "For tracks in this group"))
         end
         ImGui.EndMenu(ctx)
       end
@@ -409,7 +408,7 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
         "Close", nil, opts.ink) then
       opts.on_close()
     end
-  elseif W.icon_button(ctx, idp .. "col", "collapse", btn, false, "Collapse the channel strip") then
+  elseif W.icon_button(ctx, idp .. "col", "collapse", btn, false, "Collapse channel strip") then
     St.toggle_collapsed(KEY)
   end
 
@@ -470,7 +469,7 @@ end
 local function mono_button(ctx, id, label, x, y, w, h)
   local on = CH.master_mono()
   local hit, dbl = W.state_icon(ctx, id, on and "mono" or "stereo", x, y, w, h, on, C.COL.rec_on,
-    on and "Master in mono \u{2014} click for stereo" or "Master in stereo \u{2014} click for mono")
+    on and "Master in mono\nClick: stereo" or "Master in stereo\nClick: mono")
   if hit or dbl then CH.toggle_master_mono() end
 end
 
@@ -552,7 +551,7 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey, expand, expand
   ImGui.SetCursorScreenPos(ctx, cx - btn * 0.5, y + 4)
   -- ink is optional: without it the button takes the palette's colours.
   if W.icon_button(ctx, idp .. "exp", "expand", btn, false,
-      expand_tip or "Expand this strip", nil, ink or nil) then
+      expand_tip or "Expand strip", nil, ink or nil) then
     if expand then expand() else CH.set_collapse(ckey, track, false) end
   end
 
@@ -763,7 +762,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     -- Nor monitoring: three states have no "the same way as the first".
     local m = MON[mon]
     hit, dbl = W.state_button(ctx, idp .. "bI", m.text, bx, by, bw, bh, mon > 0,
-      m.col and C.COL[m.col] or nil, m.tip .. "  \u{2014} click to cycle")
+      m.col and C.COL[m.col] or nil, m.tip .. "\nClick: cycle")
     if dbl then set(track, "I_RECMON", 0)
     elseif hit then set(track, "I_RECMON", (mon + 1) % 3) end
 
@@ -849,20 +848,20 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
       W.gr_bar(dl, gx, top, C.GR_BAR_W, fh, grt, gpk, grange, est_db)
       local g_over = ImGui.IsWindowHovered(ctx)
                      and ImGui.IsMouseHoveringRect(ctx, gx - 1, top, gx + C.GR_BAR_W + 1, top + fh)
-      local lines = { ("Gain reduction, whole track: %.1f dB (peak %.1f)"):format(grt, gpk) }
+      local lines = { ("Track gain reduction: %.1f dB (peak %.1f)"):format(grt, gpk) }
       local unzeroed = false
       for _, p in ipairs(grp) do
         local tag = ""
         if p.est then
           tag = "  est."
-          if p.cal == 0 then tag, unzeroed = "  est., zero not measured", true end
+          if p.cal == 0 then tag, unzeroed = "  est., not zeroed", true end
         end
         lines[#lines + 1] = ("  %s  %.1f dB%s"):format(p.name, p.db, tag)
       end
       if gre then
-        lines[#lines + 1] = "\nest. = measured by the track's probes, not reported"
+        lines[#lines + 1] = "\nest. = measured by the probes"
         if unzeroed then
-          lines[#lines + 1] = "zero not measured = stop playback for a few seconds"
+          lines[#lines + 1] = "not zeroed: stop playback a few seconds"
         end
       end
       W.tip(ctx, idp .. "grt", table.concat(lines, "\n"), g_over, false)
@@ -955,9 +954,14 @@ function CH.draw(ctx, track, avail_h)
 
     local bg = C.COL.panel_bg
     local tint = track and TO.track_tint(track) or 0
+    local inks
     if tint > 0 then
       local tc = U.track_colour(track, 0xff)
-      if tc then bg = U.tint_readable(bg, tc, tint) end
+      if tc then
+        bg = U.tint_readable(bg, tc, tint)
+        -- its slots, buttons and outlines in shades of it, as a mixer strip
+        inks = W.push_tinted(bg, tc)
+      end
     end
     ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, bg, 3.0)
     ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
@@ -988,7 +992,7 @@ function CH.draw(ctx, track, avail_h)
         local btn = C.ICON_SIZE
         ImGui.SetCursorScreenPos(ctx, x + (ww - btn) * 0.5, y + 4)
         if W.icon_button(ctx, "chexp", "expand", btn, false,
-            "Expand the channel strip") then
+            "Expand channel strip") then
           St.toggle_collapsed(KEY)
         end
         W.vertical_text(ctx, dl, x + ww * 0.5, y + 4 + btn + 6,
@@ -1000,6 +1004,7 @@ function CH.draw(ctx, track, avail_h)
         CH.draw_body(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H, track)
       end
     end
+    W.pop_tinted(inks)
     ImGui.EndChild(ctx)
   else
     -- Culled: still occupy the space, or the parent's bounds

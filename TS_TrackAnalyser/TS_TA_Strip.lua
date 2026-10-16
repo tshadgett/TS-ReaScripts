@@ -41,6 +41,21 @@
 local r = reaper
 local M = {}
 
+-- The probe's readings, old (sliders) or new (2.0.0: gmem): see
+-- TS_TA_ProbeLink.lua beside this file.
+local PL
+do
+  local here = (debug.getinfo(1, "S").source or ""):match("^@(.*)[\\/]")
+  if here then
+    local ok, m = pcall(dofile, here .. package.config:sub(1, 1) .. "TS_TA_ProbeLink.lua")
+    if ok and type(m) == "table" then PL = m end
+  end
+end
+local function probeValue(tr, probe, field, legacyParam, i)
+  if PL then return PL.get(tr, probe, field, i) end
+  return r.TrackFX_GetParam(tr, probe, legacyParam + i - 1)
+end
+
 -- Bumped whenever something callers depend on changes, so a half-updated
 -- install says so instead of dying on a nil call.
 M.VERSION = 20
@@ -151,7 +166,7 @@ M.TAP_CAL_PARAM = 18         -- tap_cal1's: where that tap's zero stands
 -- nil when the route isn't a tap.
 function M.tapZero(tr, route)
   if not (route and route.kind == "tap" and route.probe) then return nil end
-  local v = r.TrackFX_GetParam(tr, route.probe, M.TAP_CAL_PARAM + route.index - 1)
+  local v = probeValue(tr, route.probe, "cal", M.TAP_CAL_PARAM, route.index)
   return v and math.floor(v + 0.5) or nil
 end
 
@@ -210,7 +225,7 @@ function M.readReduction(tr, fx, route, law)
   end
   if route.kind == "tap" then
     if not route.probe then return nil end
-    local v = r.TrackFX_GetParam(tr, route.probe, M.TAP_GR_PARAM + route.index - 1)
+    local v = probeValue(tr, route.probe, "gr", M.TAP_GR_PARAM, route.index)
     return v and math.max(0, v) or nil
   end
   local raw = r.TrackFX_GetParam(tr, fx, route.param)

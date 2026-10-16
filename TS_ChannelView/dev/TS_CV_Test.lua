@@ -6012,6 +6012,147 @@ do
   check("q_at: one side each still scales", ME.q_at({ { -6, 1 }, { -12, 2 }, { 6, 0.5 } }, 6) ~= nil, true)
 end
 
+-- MIDI learn: the mode a controller's values suggest, and the binding it
+-- writes (REAPER's own param.<p>.learn.*).
+do
+  local ML = require("TS_CV_MidiLearn")
+  check("learn: an encoder (1 / 127)", ML.guess_mode({ 1, 1, 127, 1, 127 }), 1)
+  check("learn: an encoder one way so far", ML.guess_mode({ 1, 1, 2, 1 }), 1)
+  check("learn: a 63 / 65 encoder", ML.guess_mode({ 65, 65, 63, 65 }), 2)
+  local sweep = {}
+  for v = 40, 80, 3 do sweep[#sweep + 1] = v end
+  check("learn: a sweeping knob", ML.guess_mode(sweep), 0)
+  -- what counts as a control moved: CCs (not 120..127), notes on, program
+  -- change, pitch bend; a note off and All Notes Off don't
+  local function cof(...) local a, b, c = ML.control_of(string.char(...)); return a and ("%d %d %d"):format(a, b, c) or "nil" end
+  check("learn: a CC", cof(0xB0, 21, 65), "176 21 65")
+  check("learn: a footswitch's note", cof(0x90, 59, 127), "144 59 127")
+  check("learn: its note off isn't", cof(0x80, 59, 0), "nil")
+  check("learn: nor a note on at 0", cof(0x90, 59, 0), "nil")
+  check("learn: All Notes Off isn't", cof(0xBF, 123, 127), "nil")
+  check("learn: a program change", cof(0xC2, 5), "194 5 5")
+  check("learn: pitch bend", cof(0xE0, 0, 64), "224 0 64")
+  check("learn: shown as a note", ML._cc_text(0x90, 59), "Note 59 \u{00B7} ch 1")
+  check("learn: too little to tell", ML.guess_mode({ 64 }), nil)
+  local saved_g, saved_s = reaper.TrackFX_GetNamedConfigParm, reaper.TrackFX_SetNamedConfigParm
+  local cfgs = {}
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k) if cfgs[k] then return true, cfgs[k] end return false, "" end
+  reaper.TrackFX_SetNamedConfigParm = function(_, _, k, v) cfgs[k] = v; return true end
+  check("learn: nothing linked", ML.binding(0, 0, 5), nil)
+  ML.link(0, 0, 5, 0xB0, 21, 1, 1)
+  local b = ML.binding(0, 0, 5)
+  check("learn: linked CC", b and b.cc, 21)
+  check("learn: its channel byte", b and b.status, 0xB0)
+  check("learn: Relative 1, selected track", b and (b.mode .. "/" .. b.flags), "1/1")
+  ML.unlink(0, 0, 5)
+  check("learn: removed", ML.binding(0, 0, 5), nil)
+  -- the track probe and the learn copies never become the touched parameter
+  local saved_n = reaper.TrackFX_GetFXName
+  local fxn = { [0] = "VST3: Pro-C 3 (FabFilter)", [1] = "JS: TS_TrackProbe", [2] = "Probe (renamed)" }
+  reaper.TrackFX_GetFXName = function(_, a) return true, fxn[a] end
+  cfgs = { fx_ident = "TS_TrackAnalyser/TS_TrackProbe.jsfx" }
+  check("learn: a probe is a helper", ML._is_helper(0, 1), true)
+  check("learn: a renamed probe too", ML._is_helper(0, 2), true)
+  cfgs = {}
+  check("learn: a plugin isn't", ML._is_helper(0, 0), false)
+  -- TS_CV_ProbeLink: names follow a track that moves, and come off the
+  -- block it left; an old probe (more than REAPER's 3 parameters) is told
+  -- by its sliders
+  do
+    local PLx = require("TS_CV_ProbeLink")
+    local sv = { reaper.GetMediaTrackInfo_Value, reaper.GetTrackGUID, reaper.gmem_read, reaper.gmem_write,
+                 reaper.gmem_attach, reaper.ValidatePtr2, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetFXGUID,
+                 reaper.TrackFX_GetParam, reaper.TrackFX_SetParam }
+    local gm, num, prm = {}, 5, {}
+    reaper.GetMediaTrackInfo_Value = function(_, k) if k == "IP_TRACKNUMBER" then return num end return 0 end
+    reaper.GetTrackGUID = function() return "{T}" end
+    reaper.gmem_read = function(i) return gm[i] or 0 end
+    reaper.gmem_write = function(i, v) gm[i] = v end
+    reaper.gmem_attach = function() end
+    reaper.ValidatePtr2 = function() return true end
+    reaper.TrackFX_GetNumParams = function(_, a) return a == 100 and 57 or 3 end
+    reaper.TrackFX_GetFXGUID = function(_, a) return "{FX" .. a .. "}" end
+    reaper.TrackFX_GetParam = function(_, a, p) return prm[a .. ":" .. p] or 0 end
+    reaper.TrackFX_SetParam = function(_, a, p, v) prm[a .. ":" .. p] = v end
+    local tr = {}
+    local b5 = 0x100000 + 5 * 128
+    PLx.name(tr, 0, 0x2000015)
+    check("probe link: names in the block", gm[b5] .. " " .. gm[b5 + 1], "1 " .. (0x2000015 + 1))
+    PLx.set(tr, 0x2000015, "tap_n", 1, 2)
+    num = 8                                   -- the track moved down
+    local moved = PLx.tick()
+    local b8 = 0x100000 + 8 * 128
+    check("probe link: a move is reported", moved and #moved, 1)
+    check("probe link: names follow", gm[b8] .. " " .. gm[b8 + 1], "1 " .. (0x2000015 + 1))
+    check("probe link: off the old block", gm[b5] .. " " .. gm[b5 + 1] .. " " .. gm[b5 + 8], "0 0 0")
+    PLx.set(tr, 100, "lag", 2, 64)            -- an old probe: its slider
+    check("probe link: old probe's slider", prm["100:7"], 64)
+    check("probe link: new probe readings", (function() gm[b8 + 64 + 1] = 4.5; return PLx.get(tr, 0, "gr", 2) end)(), 4.5)
+    PLx.forget(tr)
+    reaper.GetMediaTrackInfo_Value, reaper.GetTrackGUID, reaper.gmem_read, reaper.gmem_write,
+      reaper.gmem_attach, reaper.ValidatePtr2, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetFXGUID,
+      reaper.TrackFX_GetParam, reaper.TrackFX_SetParam = table.unpack(sv, 1, 10)
+  end
+  reaper.TrackFX_GetFXName = saved_n
+  reaper.TrackFX_GetNamedConfigParm, reaper.TrackFX_SetNamedConfigParm = saved_g, saved_s
+end
+
+-- TDR Slick EQ: a gain whose readout has no unit ("0.0") but whose
+-- settings read in dB ("+18.0 dB") is read from the plugin, not the
+-- learned table (which lost its boosts); a learned boost that fitted
+-- another shape is kept; a switched Q steps a position a notch.
+do
+  local ME = require("TS_CV_MapEQ")
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetFormattedParamValue", "TrackFX_FormatParamValueNormalized", "TrackFX_GetParamNormalized",
+                       "TrackFX_SetParamNormalized", "TrackFX_GetFXGUID", "TrackFX_GetParameterStepSizes" }) do saved[k] = reaper[k] end
+  local V = { [0] = 0.75, [1] = 0.5, [2] = 0.0 }
+  reaper.TrackFX_GetFXGUID = function() return "{SLICK}" end
+  reaper.TrackFX_GetParamNormalized = function(_, _, p) return V[p] or 0 end
+  reaper.TrackFX_SetParamNormalized = function(_, _, p, v) V[p] = v end
+  reaper.TrackFX_GetParameterStepSizes = function() return false end
+  reaper.TrackFX_GetFormattedParamValue = function(_, _, p)
+    if p == 0 then return true, ("%.1f"):format(-18 + 36 * V[0]) end
+    if p == 1 then return true, ("%.0f Hz"):format(100 * 100 ^ V[1]) end
+    return true, (V[2] >= 0.5) and "Wide" or "Narrow"
+  end
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+    if p == 0 then return true, ("%.1f dB"):format(-18 + 36 * n) end
+    if p == 1 then return true, ("%.0f Hz"):format(100 * 100 ^ n) end
+    return true, (n >= 0.5) and "Wide" or "Narrow"
+  end
+  -- cuts only learned, as Tim's Slick EQ mid band
+  local L = { Z = 0.5, shapes = { { type = "bell", F = { { 0, 100 }, { 1, 10000 } },
+    G = { { 0, -15.6 }, { 0.25, -7.6 }, { 0.5, 0 } }, Q = { { -15.6, 0.94 }, { -7.6, 0.86 } }, R = {} } } }
+  local b = { name = "Mid", freq = 1, gain = 0, q = 2, learn = ME.encode(L) }
+  local r = ME.read_band(0, 0, b)
+  check("slick: a boost reads from the plugin's dB", r and math.abs((r.g or 0) - 9) < 0.01, true)
+  -- learning keeps a boost whose shape fitted another type
+  local samples = {
+    { s = 1, fn = 0.5, gn = 0, fit = { type = "bell", f = 1000, g = -15, q = 0.9 } },
+    { s = 1, fn = 0.5, gn = 0.25, fit = { type = "bell", f = 1000, g = -7.5, q = 0.85 } },
+    { s = 1, fn = 0.5, gn = 1, fit = { type = "ls", f = 400, g = 9, q = 0.7 } },
+  }
+  local Ls = ME.summarise(samples, { kind = "eq", Z = 0.5, has_freq = true })
+  local Gs = Ls and Ls.shapes[1] and Ls.shapes[1].G or {}
+  local boost
+  for _, pt in ipairs(Gs) do if pt[1] == 1 then boost = pt[2] end end
+  check("slick: a boost that fitted another shape is kept", boost, 9)
+  check("slick: the band stays a bell", Ls.shapes[1].type, "bell")
+  -- a switched Q
+  local qp = ME.q_positions(0, 0, b)
+  check("slick: a Q switch has its positions", qp and #qp, 2)
+  ME.nudge_q(0, 0, b, 0.02)
+  check("slick: one wheel notch flips it", V[2] >= 0.5, true)
+  ME.nudge_q(0, 0, b, 0.02)
+  check("slick: and stops at the end", V[2] >= 0.5, true)
+  ME.nudge_q(0, 0, b, -0.02)
+  check("slick: one notch back", V[2] < 0.5, true)
+  ME.set_q_pos(0, 0, b, 2)
+  check("slick: picked from the list", ME.q_index(0, 0, b, qp), 2)
+  for k, v in pairs(saved) do reaper[k] = v end
+end
+
 -- The delay canvas's headroom: a tap turned up past unity (ReaDelay's
 -- volume in dB) draws the canvas to 2, so its dot stays on the canvas.
 do

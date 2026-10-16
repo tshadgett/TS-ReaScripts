@@ -252,9 +252,9 @@ end
 
 local FOLDER_ICON = { [0] = "folder_full", [1] = "folder_collapsed", [2] = "folder_hidden" }
 local FOLDER_TIP  = {
-  [0] = "Folder: children full \u{2014} click to collapse them",
-  [1] = "Folder: children collapsed \u{2014} click to hide them",
-  [2] = "Folder: children hidden \u{2014} click to show them in full",
+  [0] = "Folder open\nClick: collapse children",
+  [1] = "Folder collapsed\nClick: hide children",
+  [2] = "Folder children hidden\nClick: show in full",
 }
 
 -- `t` is the track's entry from MX.tracks(). Returns: clicked,
@@ -425,7 +425,7 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
   -- a light track colour as well as a dark one.
   ImGui.SetCursorScreenPos(ctx, x + w - btn - 3, y + 3)
   if W.icon_button(ctx, "mxc" .. t.guid, "collapse", btn, false,
-      "Collapse this strip", nil, U.contrast_text(base)) then
+      "Collapse strip", nil, U.contrast_text(base)) then
     CH.set_collapse("mx:" .. t.guid, t.track, true)
   end
 
@@ -462,7 +462,7 @@ local function strip_collapsed(ctx, dl, x, y, w, h, t, selected)
       for _, k in ipairs(t.fold_by) do parents[#parents + 1] = reaper.GetTrack(0, k - 1) end
       TO.set_folder_mode(parents, 0)
     end
-    tip = "Show this folder's children in full"
+    tip = "Expand folder"
   end
   return CH.draw_collapsed(ctx, dl, x, y, w, h, t.track,
                            "mx" .. t.guid, "mx:" .. t.guid, expand, tip,
@@ -510,6 +510,8 @@ local function column(ctx, t, avail_h, cur_track)
     local tint = TO.track_tint(t.track)
     if tint > 0 and t.col then body = U.tint_readable(body, t.col, tint) end
     ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + strip_h, body, C.STRIP_ROUND)
+    -- on a tinted body: its slots, buttons and outlines in shades of it
+    local tinted = (tint > 0 and t.col) and W.push_tinted(body, t.col) or nil
 
     -- The strip's background is both the select target and the
     -- double-click target, submitted BEFORE the controls so every one of
@@ -581,6 +583,8 @@ local function column(ctx, t, avail_h, cur_track)
       ImGui.DrawList_AddRect(dl, x + 1, y + 1, x + ww - 1, y + strip_h - 1,
         C.COL.drop_marker, C.STRIP_ROUND, 0, 2.0)
     end
+
+    W.pop_tinted(tinted)
 
     -- The name button, in its own slot right below -- same object, same
     -- click semantics as the strip above it, drawn by the one function

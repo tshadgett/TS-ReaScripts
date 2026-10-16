@@ -2,13 +2,11 @@
 -- @title TS_Visualizer
 -- @description TS_Visualizer
 -- @author Tim Shadgett (with Claude) -- fork of JKK_Visualizer by Junki Kim
--- @version 2.1.0
+-- @version 2.2.0
 -- @changelog
---  First release in TS-ReaScripts. A fork of JKK_Visualizer by Junki Kim:
---  LUFS, goniometer, Symbiote, scope, spectrum and spectrogram as before,
---  plus a Dynamics module (short-term LUFS against PSR) with loudness and
---  genre targets, a per-track spectrum overlay from TS_TrackProbe, and a
---  Hue/Tint colour system shared with ChannelView and Track Analyser.
+--  Works with TS_TrackProbe 2.0.0 (no parameters) as well as older probes;
+--  a track's pair is included from ChannelView's Probes button. Shorter
+--  settings descriptions in the Editor.
 -- @license MIT
 -- @provides
 --     [main] TS_Visualizer_Editor.lua
@@ -649,6 +647,18 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
     -- tracks can be live at once. See TS_TrackProbe.jsfx's own header
     -- comment for the full reasoning.
     --
+    -- SINCE TS_TrackProbe 2.0.0 the probe has no parameters at all (each
+    -- was a REAPER parameter, so in every automation and learn list, and
+    -- every write made one REAPER's "last touched"). Which of a track's
+    -- pair is in the Visualizer is kept on the track instead
+    -- (P_EXT:TS_TrackProbe_vis, "pre" or "post", set from ChannelView),
+    -- and the slot goes into the track's PROBE BLOCK in TS_TA_Mem --
+    -- 0x100000 + (track index + 1) * 128: [0]/[1] the pre and post
+    -- probes' places in the chain + 1 (the first and the last probe on
+    -- the track: how the probe knows which it is), [5]/[6] the slot + 1
+    -- for the pre / post. A probe still running from before an update
+    -- (more than REAPER's own 3 parameters) is driven the old way.
+    --
     -- An earlier version of this used a dedicated companion plugin,
     -- TS_SpectrumProbe.jsfx, before TS_TrackProbe grew its own checkbox --
     -- retired once every track already carrying TS_TrackProbe (which is to
@@ -689,15 +699,38 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
     local TRACKPROBE_NAME = "TS_TrackProbe"
     local TRACKPROBE_VIS_INCLUDE_PARAM = 3
     local TRACKPROBE_VIS_SLOT_PARAM    = 4
-    local function find_probe_fx(tr)
-        local n = reaper.TrackFX_GetCount(tr)
-        for i = 0, n - 1 do
+    -- (one table: this chunk is at Lua's limit of 200 locals)
+    local PB = { BASE = 0x100000, STRIDE = 128, VIS_EXT = "P_EXT:TS_TrackProbe_vis" }
+
+    -- The top-level probes on a track, in chain order.
+    function PB.top_probes(tr)
+        local out = {}
+        for i = 0, reaper.TrackFX_GetCount(tr) - 1 do
             local ok, nm = reaper.TrackFX_GetFXName(tr, i, "")
-            if ok and nm and nm:find(TRACKPROBE_NAME, 1, true) then
+            if ok and nm and nm:find(TRACKPROBE_NAME, 1, true) then out[#out + 1] = i end
+        end
+        return out
+    end
+    function PB.is_old(tr, i)
+        return (reaper.TrackFX_GetNumParams(tr, i) or 0) > 3
+    end
+
+    -- The probe this track is watched through: its index, "pre"/"post"
+    -- (a new probe), and the pair's indices. nil when not opted in.
+    local function find_probe_fx(tr)
+        local list = PB.top_probes(tr)
+        if #list == 0 then return nil end
+        if PB.is_old(tr, list[1]) then
+            for _, i in ipairs(list) do
                 local incl = reaper.TrackFX_GetParam(tr, i, TRACKPROBE_VIS_INCLUDE_PARAM)
                 if incl and incl >= 0.5 then return i end
             end
+            return nil
         end
+        if #list < 2 then return nil end
+        local _, which = reaper.GetSetMediaTrackInfo_String(tr, PB.VIS_EXT, "", false)
+        if which == "pre" then return list[1], "pre", list[1], list[#list] end
+        if which == "post" then return list[#list], "post", list[1], list[#list] end
         return nil
     end
 
@@ -706,16 +739,43 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         pcall(reaper.TrackFX_SetParam, tr, fx_idx, param, value)
     end
 
+    function PB.block_of(tr)
+        local n = reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
+        local idx = (n == -1) and -1 or (n and n >= 1) and (math.floor(n) - 1) or nil
+        return idx and (PB.BASE + (idx + 1) * PB.STRIDE) or nil
+    end
+    function PB.gw(i, v)
+        if reaper.gmem_read(i) ~= v then reaper.gmem_write(i, v) end
+    end
+
     -- vis_slot is the whole of what this side owns -- TrackProbe's own
     -- Publish switch is Track Analyser's arm control and is never touched
     -- from here (see TS_TrackProbe.jsfx's own note on why the two are
-    -- independent).
+    -- independent). A new probe is also named in its track's block (the
+    -- same names ChannelView and Track Analyser write), and the slot
+    -- follows the track if it moves: written again on every poll.
     local function arm_probe(e)
-        set_probe_param(e.track, e.fx_idx, TRACKPROBE_VIS_SLOT_PARAM, e.slot)
+        if not e.which then
+            set_probe_param(e.track, e.fx_idx, TRACKPROBE_VIS_SLOT_PARAM, e.slot)
+            return
+        end
+        if not reaper.ValidatePtr2(0, e.track, "MediaTrack*") then return end
+        local b = PB.block_of(e.track)
+        local off = (e.which == "pre") and 5 or 6
+        if e.blk and e.blk ~= b then PB.gw(e.blk + off, 0) end   -- the block it left
+        e.blk = b
+        if not b then return end
+        PB.gw(b + 0, e.pre + 1)
+        PB.gw(b + 1, e.post + 1)
+        PB.gw(b + off, e.slot + 1)
     end
 
     local function disarm_probe(e)
-        set_probe_param(e.track, e.fx_idx, TRACKPROBE_VIS_SLOT_PARAM, -1)
+        if not e.which then
+            set_probe_param(e.track, e.fx_idx, TRACKPROBE_VIS_SLOT_PARAM, -1)
+            return
+        end
+        if e.blk then PB.gw(e.blk + ((e.which == "pre") and 5 or 6), 0) end
     end
 
     -- The track picker itself lives in the Spectrum panel now (a strip of
@@ -802,6 +862,20 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
             for _, guid in ipairs(to_drop) do folder_overlay.armed[guid] = nil end
         end
 
+        -- New probes armed already: written again, so a slot follows its
+        -- track when it moves and survives another script clearing a block.
+        do
+            local any = false
+            for _, e in pairs(folder_overlay.armed) do if e.which then any = true break end end
+            if any then
+                with_ta_mem(function()
+                    for _, e in pairs(folder_overlay.armed) do
+                        if e.which then arm_probe(e) end
+                    end
+                end)
+            end
+        end
+
         -- Anything still wanted that isn't armed yet: one project-track
         -- walk covers every newly wanted guid in the same pass, rather
         -- than a separate walk per guid.
@@ -817,7 +891,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
                 local tr = reaper.GetTrack(0, i)
                 local _, guid = reaper.GetSetMediaTrackInfo_String(tr, "GUID", "", false)
                 if pending[guid] then
-                    local fx_idx = find_probe_fx(tr)
+                    local fx_idx, which, pre, post = find_probe_fx(tr)
                     local slot = fx_idx and claim_free_slot()
                     if fx_idx and slot then
                         local r, g, b = 1, 1, 1
@@ -826,7 +900,8 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
                             local rr, gg, bb = reaper.ColorFromNative(native)
                             r, g, b = rr / 255, gg / 255, bb / 255
                         end
-                        folder_overlay.armed[guid] = { track = tr, fx_idx = fx_idx, slot = slot, r = r, g = g, b = b }
+                        folder_overlay.armed[guid] = { track = tr, fx_idx = fx_idx, slot = slot, r = r, g = g, b = b,
+                                                       which = which, pre = pre, post = post }
                         newly_armed[#newly_armed + 1] = folder_overlay.armed[guid]
                     end
                 end

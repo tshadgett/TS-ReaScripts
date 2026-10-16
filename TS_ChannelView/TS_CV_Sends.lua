@@ -86,9 +86,9 @@ local function mode_of(srcch, dstch, midiflags)
 end
 
 local MODE_TIP = {
-  [DIRECT]    = "Direct \u{2014} audio to channels 1/2",
-  [SIDECHAIN] = "Sidechain \u{2014} audio to channels 3/4",
-  [MIDI]      = "MIDI \u{2014} all channels, no audio",
+  [DIRECT]    = "Direct: audio to 1/2",
+  [SIDECHAIN] = "Sidechain: audio to 3/4",
+  [MIDI]      = "MIDI only, all channels",
 }
 local NEXT_MODE = { [DIRECT] = SIDECHAIN, [SIDECHAIN] = MIDI, [MIDI] = DIRECT }
 
@@ -520,7 +520,7 @@ local function make(kind)
         local btn = C.ICON_SIZE
         ImGui.SetCursorScreenPos(ctx, x + (ww - btn) * 0.5, y + 4)
         if W.icon_button(ctx, ID .. "exp", "expand", btn, false,
-            "Expand the " .. K.title:lower()) then
+            "Expand " .. K.title:lower()) then
           toggle()
         end
         local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
@@ -546,16 +546,16 @@ local function make(kind)
           ImGui.SetCursorScreenPos(ctx, x + ww - btn * 2 - 9, y + 3)
           if W.route_button(ctx, ID .. "route", btn, btn, leds,
               ("Routing and I/O\n%s\n%s\n%s")
-              :format(leds[1] and "Sends to parent/master" or "No parent/master send",
-                      leds[2] and "Sends to other tracks"  or "No sends",
-                      leds[3] and "Receives from elsewhere" or "No receives")) then
+              :format(leds[1] and "Parent/master send" or "No parent/master send",
+                      leds[2] and "Sends to tracks"  or "No sends",
+                      leds[3] and "Has receives" or "No receives")) then
             SD.open_routing(track)
           end
         end
 
         ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + 3)
         if W.icon_button(ctx, ID .. "col", "collapse", btn, false,
-            "Collapse the " .. K.title:lower()) then
+            "Collapse " .. K.title:lower()) then
           toggle()
         end
 
@@ -655,14 +655,14 @@ local function make(kind)
       -- The mode: "DIR" for direct, "SC" lit for sidechain, a MIDI socket
       -- on blue for MIDI. A click steps DIR -> SC -> MIDI -> DIR; a
       -- double-click goes straight back to DIR.
-      local tip = (not sd.hw) and (MODE_TIP[sd.route] .. "\nClick for " .. NEXT_MODE[sd.route] ..
-                  ", double-click for direct") or nil
+      local tip = (not sd.hw) and (MODE_TIP[sd.route] .. "\nClick: " .. NEXT_MODE[sd.route] ..
+                  "\nDouble-click: direct") or nil
       if sd.hw then
         -- An output's second button is where it goes: the device channels,
         -- and a click to move it.
         hit, dbl = W.state_button(ctx, ID .. "c" .. sd.idx, sd.label,
           rx + mw + bgap, by1, hw, bh, false, C.COL.accent,
-          sd.name .. "\nClick to move it to other outputs")
+          sd.name .. "\nClick: move to other outputs")
         if hit or dbl then ctx_send, want_ctx = sd.idx, true end
         hit, dbl = false, false
       elseif sd.route == MIDI then
@@ -680,8 +680,8 @@ local function make(kind)
       local is_pre = (sd.mode ~= POST)
       hit, dbl = W.state_button(ctx, ID .. "p" .. sd.idx, is_pre and "PRE" or "POST",
         rx, by2, rw, bh, is_pre, C.COL.accent,
-        is_pre and "Pre-fader \u{2014} click for post"
-                or "Post-fader \u{2014} click for pre")
+        is_pre and "Pre-fader\nClick: post"
+                or "Post-fader\nClick: pre")
       -- REAPER's own default for a new send is post-fader, so that is what
       -- a double-click goes back to.
       if dbl then send_set(track, sd.idx, "I_SENDMODE", POST)
@@ -692,7 +692,7 @@ local function make(kind)
       -- Inset past the colour bar: the two share the left edge and the x
       -- was sitting on top of it.
       if W.remove_badge(ctx, ID .. sd.idx, cxp, cyp, C.SEND_W, C.CELL_H,
-                        "Remove this " .. noun, BAR + 4) then
+                        "Remove " .. noun, BAR + 4) then
         remove_idx = sd.idx
       end
     end
@@ -726,7 +726,7 @@ local function make(kind)
     dashed_h(ay); dashed_h(ay + ah - 1); dashed_v(ax); dashed_v(ax + aw - 1)
     W.ICONS.plus(dl, ax + (aw - 18) * 0.5, ay + (ah - 18) * 0.5, 18,
       hovered and C.COL.icon_hot or C.COL.icon)
-    W.tip(ctx, ID .. "add", (noun == "output") and "Add a hardware output" or ("Add a " .. noun),
+    W.tip(ctx, ID .. "add", (noun == "output") and "Add hardware output" or ("Add " .. noun),
       hovered, false)
     if pressed then SD.open_menu() end
 

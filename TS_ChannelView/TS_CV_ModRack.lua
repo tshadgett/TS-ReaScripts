@@ -52,7 +52,6 @@ local EXT = { macros = "macros_collapsed", mods = "mods_collapsed" }
 
 local open = {}         -- track..guid -> true: a tile opened for its settings
 local hist = {}         -- track..guid -> recent outputs
-local HIST_N = 72
 local rename_buf = {}   -- guid -> text being typed
 local choice_buf = {}   -- guid -> { names... } being edited
 local pending_popup     -- a popup to open at panel level next frame
@@ -262,10 +261,10 @@ local function lane_button(ctx, dl, id, x, y, track, slot, param, col, what)
     ImGui.DrawList_AddLine(dl, x + px[i], y + px[i + 1], x + px[i + 2], y + px[i + 3], ink, 1.2)
   end
   local tip
-  if not lane then tip = "Automation lane for " .. what .. ": click to show it"
-  elseif lane.shown then tip = what .. (lane.auto and " has automation" or "") .. ": click to hide its lane"
-  else tip = what .. (lane.auto and " has automation" or " has a lane") .. " (hidden): click to show it" end
-  W.tip(ctx, id, tip .. (lane and "\nRight-click to remove it" or ""), hov, false)
+  if not lane then tip = "Automation lane for " .. what .. "\nClick: show"
+  elseif lane.shown then tip = what .. (lane.auto and " has automation" or "") .. "\nClick: hide lane"
+  else tip = what .. (lane.auto and " has automation" or " has a lane") .. " (hidden)\nClick: show lane" end
+  W.tip(ctx, id, tip .. (lane and "\nRight-click: remove" or ""), hov, false)
   if pressed then MD.toggle_lane(track, slot, param) end
   -- right-click: show / hide, or take the lane away with its automation
   if rclick and lane then ImGui.OpenPopup(ctx, "lanemenu" .. id) end
@@ -402,7 +401,7 @@ local function macro_menu(ctx, track, src, s, req)
         req.changed = true
       end
       if c.key == "xy" and not ok and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-        ImGui.SetTooltip(ctx, "An XY pad takes two macros: the next one along is in use.")
+        ImGui.SetTooltip(ctx, "XY pad needs two macros; the next one is in use")
       end
     end
     ImGui.EndMenu(ctx)
@@ -626,7 +625,7 @@ local function draw_macro(ctx, dl, track, src, s, x, y, w, h, req)
   W.allow_overlap(ctx)
   ImGui.InvisibleButton(ctx, "mname##" .. src.guid, w, 18, ImGui.ButtonFlags_MouseButtonRight)
   local menu = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
-  W.tip(ctx, "mname##" .. src.guid, "Right-click to rename, colour, change or remove", ImGui.IsItemHovered(ctx), false)
+  W.tip(ctx, "mname##" .. src.guid, "Right-click: rename, colour, change, remove", ImGui.IsItemHovered(ctx), false)
   local nm = U.truncate(src.name, src.kind == "xy" and 18 or 8)
   local tw = ImGui.CalcTextSize(ctx, nm)
   ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + 3, src.col, nm)
@@ -686,29 +685,46 @@ end
 -- MODULATORS
 -- ---------------------------------------------------------------------
 
+-- A modulator's recent outputs, against time. Sampled each frame but kept
+-- only when the value has moved (the plugin updates it once per audio
+-- block) or a while has passed, and drawn by WHEN they came, not one step
+-- per frame: ChannelView's frames aren't evenly spaced and the plugin's
+-- blocks don't line up with them, so plotting a point per frame drew a
+-- smooth LFO as a wobbly, stepped one.
+local HIST_SEC = 2.5
 local function sample(key, v)
+  local now = reaper.time_precise()
   local h = hist[key]
-  if not h then h = { n = 0 }; hist[key] = h end
-  h.n = h.n % HIST_N + 1
-  h[h.n] = v
-  h.filled = math.min(HIST_N, (h.filled or 0) + 1)
+  if not h then h = {}; hist[key] = h end
+  local last = h[#h]
+  if last and last[2] == v and now - last[1] < 0.1 then
+    last.now = now                       -- still there: the trace runs on to now
+    return
+  end
+  if last and last.now then h[#h + 1] = { last.now, last[2] } end   -- held until just now
+  h[#h + 1] = { now, v }
+  while #h > 2 and now - h[2][1] > HIST_SEC do table.remove(h, 1) end
 end
 
 local function draw_history(dl, key, col, x, y, w, h)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, 0x121416ff, 3)
   local hs = hist[key]
-  if not hs or (hs.filled or 0) < 2 then return end
-  local n = hs.filled
+  if not hs or #hs < 2 then return end
+  local now = reaper.time_precise()
+  local function px_of(t) return x + w - 2 - (w - 4) * (now - t) / HIST_SEC end
+  local function py_of(v) return y + h - 2 - (h - 4) * math.max(0, math.min(1, v)) end
+  ImGui.DrawList_PushClipRect(dl, x, y, x + w, y + h, true)
   local px, py
-  for i = 0, n - 1 do
-    local k = ((hs.n - (n - 1) + i - 1) % HIST_N) + 1
-    local v = hs[k] or 0
-    local xx = x + 2 + (w - 4) * i / (HIST_N - 1)
-    local yy = y + h - 2 - (h - 4) * v
+  for i = 1, #hs do
+    local xx, yy = px_of(hs[i][1]), py_of(hs[i][2])
     if px then ImGui.DrawList_AddLine(dl, px, py, xx, yy, col, 1.5) end
     px, py = xx, yy
   end
-  if px then ImGui.DrawList_AddCircleFilled(dl, px, py, 2.6, col, 8) end
+  local lastp = hs[#hs]
+  local ex = px_of(lastp.now or lastp[1])
+  if ex > px then ImGui.DrawList_AddLine(dl, px, py, ex, py, col, 1.5); px = ex end
+  ImGui.DrawList_PopClipRect(dl)
+  ImGui.DrawList_AddCircleFilled(dl, px, py, 2.6, col, 8)
 end
 
 local SHAPE_FN = {
@@ -772,12 +788,279 @@ do
   K.mhi = { key = "mhi", label = "High", tn = tn, fn = fn, def = 96, text = note_name }
 end
 
--- The settings knob with its lane button.
+-- ---------------------------------------------------------------------
+-- THE MATRIX: a modulator's settings moved by a macro or another
+-- modulator (TS_CV_Mod's mx_*). Drag a ◯ onto a knob (or a switch, from
+-- a button or dropdown macro); the knob gets an arc in the source's
+-- colour with a dot at its reach: drag the dot for the amount, Alt-click
+-- it to remove.
+-- ---------------------------------------------------------------------
+
+local mx_cache = {}     -- track..j -> { t, slots }
+local mx_slot_items     -- a source's menu items (below, with the tile's menu)
+local function mx_slots(track, src)
+  local key = tostring(track) .. ":" .. src.j
+  local c = mx_cache[key]
+  local now = reaper.time_precise()
+  if not c or now - c.t > 0.2 then
+    c = { t = now, slots = MD.mx_get(track, src.slot, src.j) }
+    mx_cache[key] = c
+  end
+  return c.slots
+end
+local function mx_dirty() mx_cache = {} end
+MR.mx_dirty = mx_dirty
+
+-- A setting as the plugin is using it: a switch moved by a button or
+-- dropdown macro shows the setting the macro picks (as the plugin works
+-- it out, THE MATRIX in TS_CV_Modulators.jsfx); anything else its own.
+local function live_field(track, src, key)
+  local v = MD.field(track, src.slot, src.j, key)
+  local code = MD.MX_CODE[key]
+  local tg = code and MD.MX_TARGETS[code]
+  if not (tg and tg.n and MD.mx_ok(track, src.slot)) then return v end
+  for sl = 1, MD.MX_SLOTS do
+    local e = mx_slots(track, src)[sl]
+    if e and e.tg == tg then
+      local from, k = MD.mx_source(track, e.code)
+      if from then
+        local n = math.max(2, e.nch)
+        local i = math.min(MD.MX_MAX_CHOICES - 1, math.floor(MD.value(track, from, k) * (n - 1) + 0.5))
+        local set = MD.mx_unpack(e.amt, n)[i + 1]
+        if set then v = set end
+      end
+    end
+  end
+  return v
+end
+
+-- A drag over a target (a knob's circle, or a switch's rectangle): ring
+-- it, say why not when it can't, link on release.
+local function mx_drop(ctx, dl, track, src, key, set_to, hit, draw)
+  local d = MR.drag
+  if not (d and MD.mx_ok(track, src.slot)) then return end
+  local ok, why = MD.mx_can(track, src, key, d.mod, d.k)
+  if not ok and why == "Can't be moved" then return end
+  local mx, my = ImGui.GetMousePos(ctx)
+  local over = hit(mx, my)
+  if not ok and not over then return end
+  draw(ok and d.mod.col or (C.COL.warn or 0xe0a040ff), over)
+  if over then
+    if not ok then ImGui.SetTooltip(ctx, why)
+    else ImGui.SetTooltip(ctx, ("%s moves %s %s"):format(d.mod.name, src.name, MD.MX_TARGETS[MD.MX_CODE[key]].label)) end
+    if ok and ImGui.IsMouseReleased(ctx, ImGui.MouseButton_Left) then
+      local tg = MD.MX_TARGETS[MD.MX_CODE[key]]
+      if MD.mx_link(track, src, key, d.mod, d.k, set_to) and tg.n and d.mod.kind == "dropdown" then
+        -- a dropdown on a switch: its choices become the switch's, one for
+        -- one (asked first, unless they already are)
+        local names = MD.mx_names(key)
+        local same = table.concat(names, "\0") == table.concat(d.mod.choices or {}, "\0")
+        if same or reaper.MB(("Use %s's settings as %s's choices?\n\n%s"):format(
+             tg.label, d.mod.name, table.concat(names, ", ")), "ChannelView", 4) == 6 then
+          if not same then
+            local n0 = #(d.mod.choices or {})
+            local c = n0 >= 2 and MD.choice_of(MD.value(track, d.mod, 1), n0) or 1
+            MD.set_choices(track, d.mod, names)
+            MD.invalidate(track)
+            MD.set_macro(track, MD.find(track, d.mod.guid) or d.mod, 1, MD.choice_value(math.min(c, #names), #names))
+          end
+          MD.mx_direct(track, src, key, d.mod, d.k)
+        end
+      end
+      mx_dirty()
+    end
+  end
+end
+
+-- The amount, as text: a share of the knob, or whole steps.
+local function mx_amount_text(key, amt)
+  if key == "rsync" then return ("%+d steps"):format(math.floor(amt * 15 + (amt >= 0 and 0.5 or -0.5))) end
+  if key == "mlo" or key == "mhi" then return ("%+d notes"):format(math.floor(amt * 127 + (amt >= 0 and 0.5 or -0.5))) end
+  return ("%+d%%"):format(math.floor(amt * 100 + (amt >= 0 and 0.5 or -0.5)))
+end
+
+-- What moves a setting, as the knob shows it -- the same as a plugin
+-- control linked to a macro or a modulator (TS_CV_Panel's range_ends):
+--   from a macro: the knob sits where the macro puts it, and the ring's
+--     two ends are where it is at the macro's 0% (the knob's own setting)
+--     and at 100% (+ the amount)
+--   from a modulator: the knob moves with it, and the ends are where it
+--     is at rest (its own setting) and at full (+ the amount x that
+--     modulator's Depth)
+-- In the knob's own 0..1. The first end is the setting itself, shared by
+-- both sources; each source has its own second end.
+local function mx_view(track, src, key, base)
+  local code = MD.MX_CODE[key]
+  local list, live = {}, base
+  if not code then return list, live end
+  for sl = 1, MD.MX_SLOTS do
+    local e = mx_slots(track, src)[sl]
+    if e and e.tg.code == code then
+      local from, k = MD.mx_source(track, e.code)
+      local D = (from and from.src == "mod") and MD.field(track, from.slot, from.j, "depth") or 1
+      local sv = from and MD.value(track, from, k) or 0
+      live = live + e.amt * sv
+      list[#list + 1] = { sl = sl, e = e, from = from, D = math.max(0.001, D),
+                          to = base + e.amt * D }
+    end
+  end
+  return list, math.max(0, math.min(1, live))
+end
+
+-- The rings and their handles on a moved knob.
+local function mx_rings(ctx, dl, track, src, d, base, list, live, x, y)
+  local cx, cy = x + KCELL_W * 0.5, y + 11 + KR + 1
+  for i, m in ipairs(list) do
+    local col = m.from and m.from.col or C.COL.label
+    local r = KR + (i - 1) * 4
+    local to = math.max(0, math.min(1, m.to))
+    local ends = (i == 1) and { base, to } or { to }
+    local hot_end
+    for ei, ev in ipairs(ends) do
+      local which = (i == 1 and ei == 1) and 1 or 2       -- 1: the setting, 2: this source's reach
+      local id = ("mxe%d%d##%s%s"):format(m.sl, which, src.guid, d.key)
+      local hx, hy = W.ring_point(cx, cy, r, ev)
+      ImGui.SetCursorScreenPos(ctx, hx - 6, hy - 6)
+      W.allow_overlap(ctx)
+      ImGui.InvisibleButton(ctx, id, 12, 12)
+      local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+      if hov or act then hot_end = ei; ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_Hand) end
+      if hov and which == 2 and ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Left)
+         and (ImGui.GetKeyMods(ctx) & ImGui.Mod_Alt) ~= 0 then
+        MD.mx_unlink(track, src, m.sl)
+        mx_dirty()
+      elseif act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+        local mx, my = ImGui.GetMousePos(ctx)
+        local nv = W.ring_value(cx, cy, mx, my)
+        if which == 1 then
+          -- the setting moves; every source's reach stays where it is
+          for _, o in ipairs(list) do
+            o.e.amt = math.max(-1, math.min(1, (math.max(0, math.min(1, o.to)) - nv) / o.D))
+            MD.mx_set_amount(track, src, o.sl, o.e.amt)
+          end
+          MD.set_field(track, src.slot, src.j, d.key, d.fn(nv))
+        else
+          m.e.amt = math.max(-1, math.min(1, (nv - base) / m.D))
+          MD.mx_set_amount(track, src, m.sl, m.e.amt)
+        end
+      end
+      local nm = m.from and m.from.name or "?"
+      local tip
+      if m.from and m.from.src == "macro" then
+        tip = ("Value at %s of %s\nDrag: set"):format(which == 1 and "0%" or "100%", nm)
+      else
+        tip = ("%s swing, %s\nDrag: set"):format(nm, which == 1 and "at rest" or "at full")
+      end
+      if which == 2 then tip = tip .. "\nAlt-click: remove" end
+      W.tip(ctx, id, tip, hov and not act, false)
+    end
+    W.mod_ring(dl, cx, cy, r, { col = col, lo = math.min(base, to), hi = math.max(base, to),
+      ends = (i == 1) and { base, to } or { to }, hot_end = hot_end and ((i == 1) and hot_end or 1),
+      live = live, hot = hot_end ~= nil or (m.from and MR.hover == m.from.guid) })
+    if m.from then MR.note_target(m.from.guid, "mx" .. src.guid, d.key .. m.sl, cx, cy) end
+  end
+end
+
+-- A knob's right-click: what moves it.
+local function mx_knob_menu(ctx, track, src, d)
+  local pid = "mxk##" .. src.guid .. d.key
+  if not ImGui.BeginPopup(ctx, pid) then return end
+  local code = MD.MX_CODE[d.key]
+  ImGui.TextDisabled(ctx, d.label:upper() .. " \u{00B7} MOVED BY")
+  local any = false
+  for sl, e in pairs(mx_slots(track, src)) do
+    if e.tg.code == code then
+      any = true
+      local from = MD.mx_source(track, e.code)
+      if ImGui.BeginMenu(ctx, ("%s   %s##mxk%d"):format(from and from.name or "?", mx_amount_text(d.key, e.amt), sl)) then
+        if ImGui.MenuItem(ctx, "Reverse the direction") then MD.mx_set_amount(track, src, sl, -e.amt); mx_dirty() end
+        if ImGui.MenuItem(ctx, "Remove") then MD.mx_unlink(track, src, sl); mx_dirty() end
+        ImGui.EndMenu(ctx)
+      end
+    end
+  end
+  if not any then ImGui.TextDisabled(ctx, "nothing: drag a \u{25EF} here") end
+  ImGui.EndPopup(ctx)
+end
+
+-- A switch (a pill, or one of the LFO's shapes) as a drop target, with a
+-- dot in each source's colour on the setting it picks.
+local function mx_switch(ctx, dl, track, src, key, set_to, x, y, w, h)
+  -- right-click: what moves this switch
+  local pid = ("mxs%s%d##%s"):format(key, set_to, src.guid)
+  if MD.mx_ok(track, src.slot) and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then ImGui.OpenPopup(ctx, pid) end
+  if ImGui.BeginPopup(ctx, pid) then
+    local tg = MD.MX_TARGETS[MD.MX_CODE[key]]
+    ImGui.TextDisabled(ctx, tg.label:upper() .. " \u{00B7} MOVED BY")
+    local any = false
+    for sl = 1, MD.MX_SLOTS do
+      local e = mx_slots(track, src)[sl]
+      if e and e.tg.code == tg.code then
+        any = true
+        local from = MD.mx_source(track, e.code)
+        if ImGui.BeginMenu(ctx, ("%s##mxs%d"):format(from and from.name or "?", sl)) then
+          mx_slot_items(ctx, track, src, sl, e, from)
+          ImGui.EndMenu(ctx)
+        end
+      end
+    end
+    if not any then ImGui.TextDisabled(ctx, "nothing: drag a button or dropdown macro's \u{25EF} here") end
+    ImGui.EndPopup(ctx)
+  end
+  mx_drop(ctx, dl, track, src, key, set_to,
+    function(mx, my) return mx >= x and mx < x + w and my >= y and my < y + h end,
+    function(col, over) ImGui.DrawList_AddRect(dl, x - 1, y - 1, x + w + 1, y + h + 1, col, 3, 0, over and 2.0 or 1.0) end)
+  local code = MD.MX_CODE[key]
+  local n = 0
+  for _, e in pairs(mx_slots(track, src)) do
+    if e.tg.code == code then
+      local map = MD.mx_unpack(e.amt, math.max(2, e.nch))
+      for _, set in pairs(map) do
+        if set == set_to then
+          local from = MD.mx_source(track, e.code)
+          ImGui.DrawList_AddCircleFilled(dl, x + w - 3 - n * 6, y + 3, 2.4, from and from.col or C.COL.label, 8)
+          n = n + 1
+        end
+      end
+    end
+  end
+end
+
+-- The settings knob with its lane button. A moved setting's knob sits
+-- where its sources put it; turning it moves the setting under them
+-- (both ends with it), as a linked plugin control does.
 local function setting(ctx, dl, track, src, d, x, y)
   local v = MD.field(track, src.slot, src.j, d.key)
-  local ch, nv = tknob(ctx, dl, d.key .. "##" .. src.guid, x, y, d.tn(v), d.label, d.text(v),
+  local base = d.tn(v)
+  local mxd = MD.MX_CODE[d.key] and MD.mx_ok(track, src.slot)
+  local list, live = {}, base
+  if mxd then list, live = mx_view(track, src, d.key, base) end
+  local shown = (#list > 0) and live or base
+  local ch, nv = tknob(ctx, dl, d.key .. "##" .. src.guid, x, y, shown, d.label, d.text(d.fn(shown)),
     d.tn(d.def), src.col)
-  if ch then MD.set_field(track, src.slot, src.j, d.key, d.fn(nv)) end
+  if ch then
+    local delta = nv - shown
+    if #list > 0 then
+      -- keep every end inside 0..1
+      local lo, hi = base, base
+      for _, m in ipairs(list) do lo = math.min(lo, m.to); hi = math.max(hi, m.to) end
+      delta = math.max(-lo, math.min(1 - hi, delta))
+    end
+    base = math.max(0, math.min(1, base + delta))
+    MD.set_field(track, src.slot, src.j, d.key, d.fn(base))
+    for _, m in ipairs(list) do m.to = m.to + delta end
+  end
+  if mxd then
+    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+      ImGui.OpenPopup(ctx, "mxk##" .. src.guid .. d.key)
+    end
+    local cx, cy = x + KCELL_W * 0.5, y + 11 + KR + 1
+    mx_drop(ctx, dl, track, src, d.key, nil,
+      function(mx, my) return (mx - cx) ^ 2 + (my - cy) ^ 2 <= (KR + 10) ^ 2 end,
+      function(col, over) ImGui.DrawList_AddCircle(dl, cx, cy, KR + 8, U.with_alpha(col, over and 0xff or 0x48), 24, over and 2.0 or 1.0) end)
+    if #list > 0 then mx_rings(ctx, dl, track, src, d, base, list, live, x, y) end
+    mx_knob_menu(ctx, track, src, d)
+  end
   lane_button(ctx, dl, "lane" .. d.key .. "##" .. src.guid, x + KCELL_W - LANE_W - 1, y + 13,
     track, src.slot, MD.param(src.j, d.key), src.col, src.name .. " " .. d.label)
 end
@@ -794,7 +1077,7 @@ local LANES = {
 
 local function sub_text(track, src, nlinks)
   local d = nlinks == 0 and "drag \u{25EF} onto a control" or ("drives %d"):format(nlinks)
-  local f = function(k) return MD.field(track, src.slot, src.j, k) end
+  local f = function(k) return live_field(track, src, k) end
   if src.kind == "lfo" then
     local rate = f("sync") >= 0.5 and (MD.SYNC[math.floor(f("rsync") + 0.5) + 1] or "?")
                  or ("%.2f Hz"):format(f("rhz"))
@@ -812,7 +1095,7 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
   draw_history(dl, key, src.col, x, y, w, 26)
   if not isopen then return end
   y = y + 30
-  local shape = math.floor(MD.field(track, src.slot, src.j, "shape") + 0.5)
+  local shape = math.floor(live_field(track, src, "shape") + 0.5)
   local bw = (w - 5 * 2) / 6
   for i = 1, 6 do
     local bx = x + (i - 1) * (bw + 2)
@@ -822,6 +1105,7 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
     end
     local hov = ImGui.IsItemHovered(ctx)
     W.tip(ctx, ("shape%d##%s"):format(i, src.guid), MD.SHAPES[i], hov, false)
+    mx_switch(ctx, dl, track, src, "shape", i - 1, bx, y, bw, 18)
     local on = (shape == i - 1)
     ImGui.DrawList_AddRectFilled(dl, bx, y, bx + bw, y + 18,
       on and C.COL.accent or (hov and C.COL.knob_body_hi or C.COL.toggle_off), 3)
@@ -834,7 +1118,7 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
     end
   end
   y = y + 22
-  local sync = MD.field(track, src.slot, src.j, "sync") >= 0.5
+  local sync = live_field(track, src, "sync") >= 0.5
   setting(ctx, dl, track, src, sync and K.rsync or K.rhz, x, y)
   setting(ctx, dl, track, src, K.depth, x + KCELL_W, y)
   setting(ctx, dl, track, src, K.phase, x + KCELL_W * 2, y)
@@ -844,9 +1128,11 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
   if pill(ctx, dl, "sync##" .. src.guid, px, y + 8, 46, "Sync", sync) and not sync then
     MD.set_field(track, src.slot, src.j, "sync", 1)
   end
+  mx_switch(ctx, dl, track, src, "sync", 1, px, y + 8, 46, PILL_H)
   if pill(ctx, dl, "free##" .. src.guid, px + 50, y + 8, 46, "Free", not sync) and sync then
     MD.set_field(track, src.slot, src.j, "sync", 0)
   end
+  mx_switch(ctx, dl, track, src, "sync", 0, px + 50, y + 8, 46, PILL_H)
 end
 
 local function level_bar(dl, src, v, x, y, w)
@@ -858,19 +1144,22 @@ local function follower_body(ctx, dl, track, src, x, y, w, isopen)
   level_bar(dl, src, MD.value(track, src), x, y, w)
   if not isopen then return end
   y = y + 16
-  local side = MD.field(track, src.slot, src.j, "fsrc") >= 0.5
-  local gate = MD.field(track, src.slot, src.j, "gate") >= 0.5
+  local side = live_field(track, src, "fsrc") >= 0.5
+  local gate = live_field(track, src, "gate") >= 0.5
   if pill(ctx, dl, "main##" .. src.guid, x, y, 52, "Track", not side) and side then
     MD.set_field(track, src.slot, src.j, "fsrc", 0)
   end
+  mx_switch(ctx, dl, track, src, "fsrc", 0, x, y, 52, PILL_H)
   if pill(ctx, dl, "side##" .. src.guid, x + 55, y, 64, "Sidechain", side) and not side then
     MD.set_field(track, src.slot, src.j, "fsrc", 1)
     MD.need_sidechain(track)
   end
+  mx_switch(ctx, dl, track, src, "fsrc", 1, x + 55, y, 64, PILL_H)
   if pill(ctx, dl, "gate##" .. src.guid, x + w - 44, y, 44, "Gate", gate) then
     MD.set_field(track, src.slot, src.j, "gate", gate and 0 or 1)
   end
-  W.tip(ctx, "gate##" .. src.guid, "On: all or nothing, above the Floor or not", ImGui.IsItemHovered(ctx), false)
+  mx_switch(ctx, dl, track, src, "gate", gate and 0 or 1, x + w - 44, y, 44, PILL_H)
+  W.tip(ctx, "gate##" .. src.guid, "All or nothing at the Floor", ImGui.IsItemHovered(ctx), false)
   y = y + 22
   setting(ctx, dl, track, src, K.att, x, y)
   setting(ctx, dl, track, src, K.rel, x + KCELL_W, y)
@@ -903,16 +1192,47 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
   elseif ms == 2 then
     setting(ctx, dl, track, src, K.mcc, x + KCELL_W, y)
   elseif ms == 0 then
-    local hold = MD.field(track, src.slot, src.j, "mhold") >= 0.5
+    local hold = live_field(track, src, "mhold") >= 0.5
     if pill(ctx, dl, "hold##" .. src.guid, x + KCELL_W + 6, y + 14, 46, "Hold", hold) then
       MD.set_field(track, src.slot, src.j, "mhold", hold and 0 or 1)
     end
-    W.tip(ctx, "hold##" .. src.guid, "On: it keeps the last velocity after the note ends.\nOff: back to 0.",
+    mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + KCELL_W + 6, y + 14, 46, PILL_H)
+    W.tip(ctx, "hold##" .. src.guid, "Keep the last velocity after note-off",
       ImGui.IsItemHovered(ctx), false)
   end
   y = y + KCELL_H
   setting(ctx, dl, track, src, K.depth, x, y)
   setting(ctx, dl, track, src, K.smooth, x + KCELL_W, y)
+end
+
+-- One source's items (in the tile's menu, or a switch's): a switch's
+-- setting for each of the macro's choices, or Reverse; and Remove.
+mx_slot_items = function(ctx, track, src, sl, e, from)
+  if e.tg.n then
+    -- a switch: its setting for each of the macro's choices
+    local nch = math.max(2, e.nch)
+    local map = MD.mx_unpack(e.amt, nch)
+    local names = MD.mx_names(e.tg.key)
+    for c = 1, nch do
+      local label = (from and from.kind == "button") and (c == 1 and "Off" or "On")
+        or (from and from.choices and from.choices[c]) or ("Choice " .. c)
+      if ImGui.BeginMenu(ctx, ("%s:  %s##mxc%d"):format(label, map[c] and names[map[c] + 1] or "its own", c)) then
+        if ImGui.MenuItem(ctx, "Its own setting", nil, map[c] == nil) then
+          map[c] = nil; MD.mx_set_amount(track, src, sl, MD.mx_pack(map, nch)); mx_dirty()
+        end
+        for v = 0, e.tg.n - 1 do
+          if ImGui.MenuItem(ctx, names[v + 1] .. "##mxv" .. v, nil, map[c] == v) then
+            map[c] = v; MD.mx_set_amount(track, src, sl, MD.mx_pack(map, nch)); mx_dirty()
+          end
+        end
+        ImGui.EndMenu(ctx)
+      end
+    end
+    ImGui.Separator(ctx)
+  else
+    if ImGui.MenuItem(ctx, "Reverse the direction") then MD.mx_set_amount(track, src, sl, -e.amt); mx_dirty() end
+  end
+  if ImGui.MenuItem(ctx, "Remove") then MD.mx_unlink(track, src, sl); mx_dirty() end
 end
 
 local function mod_menu(ctx, track, src, s, req)
@@ -936,6 +1256,27 @@ local function mod_menu(ctx, track, src, s, req)
     ImGui.EndMenu(ctx)
   end
   local n = drives_menu(ctx, track, src, s, req)
+  -- what moves it (THE MATRIX)
+  local slots = MD.mx_ok(track, src.slot) and mx_slots(track, src) or {}
+  if next(slots) then
+    ImGui.Separator(ctx)
+    local cnt = 0
+    for _ in pairs(slots) do cnt = cnt + 1 end
+    ImGui.TextDisabled(ctx, ("MOVED BY (%d of %d)"):format(cnt, MD.MX_SLOTS))
+    for sl = 1, MD.MX_SLOTS do
+      local e = slots[sl]
+      if e then
+        local from = MD.mx_source(track, e.code)
+        local name = from and from.name or "?"
+        local amt = e.tg.n and "" or ("   " .. mx_amount_text(e.tg.key == "rate"
+          and (live_field(track, src, "sync") >= 0.5 and "rsync" or "rhz") or e.tg.key, e.amt))
+        if ImGui.BeginMenu(ctx, ("%s \u{2192} %s%s##mxt%d"):format(name, e.tg.label, amt, sl)) then
+          mx_slot_items(ctx, track, src, sl, e, from)
+          ImGui.EndMenu(ctx)
+        end
+      end
+    end
+  end
   ImGui.Separator(ctx)
   remove_item(ctx, track, src, n, req)
   ImGui.EndPopup(ctx)
@@ -960,9 +1301,31 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
     rename_buf[src.guid] = src.name
     ImGui.OpenPopup(ctx, "modtile##" .. src.guid)
   end
-  W.tip(ctx, "name##" .. src.guid, isopen and "Click to close; right-click for more"
-    or "Click for its settings; right-click for its lanes, rename, colour or remove", ImGui.IsItemHovered(ctx), false)
-  ImGui.DrawList_AddText(dl, x + 19, y + 3, C.COL.header_text, U.truncate(src.name, 20))
+  W.tip(ctx, "name##" .. src.guid, isopen and "Click: close\nRight-click: more"
+    or "Click: settings\nRight-click: lanes, rename, colour, remove", ImGui.IsItemHovered(ctx), false)
+  local nm = U.truncate(src.name, 20)
+  ImGui.DrawList_AddText(dl, x + 19, y + 3, C.COL.header_text, nm)
+  -- a dot for each source moving it (THE MATRIX)
+  do
+    local slots = MD.mx_ok(track, src.slot) and mx_slots(track, src) or {}
+    local dx = x + 19 + ImGui.CalcTextSize(ctx, nm) + 7
+    local names = {}
+    for sl = 1, MD.MX_SLOTS do
+      local e = slots[sl]
+      if e then
+        local from = MD.mx_source(track, e.code)
+        ImGui.DrawList_AddCircleFilled(dl, dx, y + 10, 3, from and from.col or C.COL.label, 10)
+        names[#names + 1] = (from and from.name or "?") .. " \u{2192} " .. e.tg.label
+        dx = dx + 8
+      end
+    end
+    if #names > 0 then
+      local mx, my = ImGui.GetMousePos(ctx)
+      if mx >= dx - 8 * #names - 4 and mx < dx and my >= y + 4 and my < y + 16 then
+        ImGui.SetTooltip(ctx, "Moved by\n" .. table.concat(names, "\n"))
+      end
+    end
+  end
   local links = s.by_mod[src.guid] or {}
   W.push_small(ctx)
   ImGui.DrawList_AddText(dl, x + 8, y + HEAD - 1, C.COL.header_dim, U.truncate(sub_text(track, src, #links), 34))

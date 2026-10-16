@@ -1240,6 +1240,13 @@ local function mq_vals(fx, layout)
                   g = round(math.max(-30, math.min(30, g)), 2), q = round(r.q or 0.7, 3),
                   e = r.on or nil, x = table.concat(tx, "   "), wq = b.q and 1 or nil,
                   s = b.shape and r.s or nil }
+      -- a Q that's a switch: its settings, and which it's on (chips, not a drag)
+      local qp = b.q and ME.q_positions(track, fx.addr, b)
+      if qp then
+        o.qp = arr()
+        for i, ps in ipairs(qp) do o.qp[i] = tostring(ps.text) end
+        o.qi = ME.q_index(track, fx.addr, b, qp)
+      end
       if M.band_dynamic(b) then
         local dy = ME.read_dyn(track, fx.addr, b)
         o.d = { r = dy.range and round(dy.range, 2) or nil, t = dy.thr and round(dy.thr, 2) or nil, on = dy.on or nil,
@@ -2059,8 +2066,9 @@ local function apply(verb, a)
       end
       TP.touched(track, fx.guid)
     end
-  elseif track and (verb == "mqf" or verb == "mqg" or verb == "mqq") then
-    -- a mapped EQ's band: mqf|guid|band|hz, mqg|guid|band|db, mqq|guid|band|delta
+  elseif track and (verb == "mqf" or verb == "mqg" or verb == "mqq" or verb == "mqp") then
+    -- a mapped EQ's band: mqf|guid|band|hz, mqg|guid|band|db, mqq|guid|band|delta,
+    -- mqp|guid|band|i (a switched Q's setting)
     local fx = fx_by_guid(a[1]); local k, v = tonumber(a[2]), tonumber(a[3])
     if fx and k and v then
       local layout = M.get(St.layout_key(fx.name, fx.guid, track, fx.addr))
@@ -2068,6 +2076,7 @@ local function apply(verb, a)
       if b then
         if verb == "mqf" then ME.set_freq(track, fx.addr, b, v)
         elseif verb == "mqg" then ME.set_gain(track, fx.addr, b, v)
+        elseif verb == "mqp" then ME.set_q_pos(track, fx.addr, b, math.floor(v))
         else ME.nudge_q(track, fx.addr, b, v) end
         TP.touched(track, fx.guid)
       end
@@ -2593,6 +2602,12 @@ local function work(now)
 end
 
 cycle = function()
+  -- ChannelView's ☰ › Web companion › Stop leaves a note: close (the
+  -- atexit below tidies up as for any other stop).
+  if reaper.GetExtState(NS, "quit") == "1" then
+    reaper.DeleteExtState(NS, "quit", false)
+    return
+  end
   local now = reaper.time_precise()
   if BZ.probe_due(now) then
     work(now)
@@ -2622,4 +2637,5 @@ reaper.atexit(function()
 end)
 
 reaper.SetExtState(NS, "cmd", "", false)
+reaper.DeleteExtState(NS, "quit", false)   -- a stop asked of an earlier run
 cycle()

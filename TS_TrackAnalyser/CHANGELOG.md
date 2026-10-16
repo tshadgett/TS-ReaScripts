@@ -1,5 +1,18 @@
 # Track Analyser — changelog
 
+## 2.2.0 — a quieter probe
+
+**Reopen your projects after updating** to load the new probe.
+
+- **TS_TrackProbe 2.0.0 has no parameters.** It talks to Track Analyser,
+  ChannelView and TS Visualizer through shared memory only, so it never
+  shows in automation or learn lists and never becomes REAPER's *last
+  touched* parameter. The first probe on a track is the pre, the last the
+  post. Older probes keep working until the project is reopened.
+- **Spectrum release** (Settings ▸ Spectrum and response curve) sets how
+  quickly the spectrum falls back; it used to be a setting on the probe.
+- Tooltips are shorter.
+
 ## 2.1.1 — in step with ChannelView
 
 No changes. The version moves to 2.1.1 to match ChannelView.

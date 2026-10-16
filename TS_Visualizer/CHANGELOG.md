@@ -1,5 +1,14 @@
 # TS_Visualizer — changelog
 
+## 2.2.0 — works with TS_TrackProbe 2.0.0
+
+- Reads the per-track spectrum from the new TS_TrackProbe (2.0.0, no
+  parameters), as well as older ones. With the new probe, which of a
+  track's pair is included is chosen from ChannelView's Probes button
+  (*In the Visualizer's spectrum*); the probe's own checkbox is gone, so a
+  choice made there needs making again once the project is reopened.
+- The settings descriptions in the Editor are shorter.
+
 ## 2.1.0 — release cleanup, Junki credited, Dynamics/targets persist
 
 Public-release pass: README, LICENSE (MIT), and this entry, ahead of adding

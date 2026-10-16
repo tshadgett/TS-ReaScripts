@@ -38,6 +38,29 @@ noindex: true
       21  MIDI Hold
   Output is 0..1 from rest (Depth scales it); Output bipolar swings
   round 0.5 (Depth scales the swing), for controls driven both ways.
+    192 + 6*(n-1) + 3*(s-1) + k   Modulator n's source s (of 2), field k:
+       0  Source   0 none, 1-16 Macro 1-16, 17-24 Modulator 1-8
+       1  Target   which setting it moves (THE MATRIX below), + 100 x the
+                   macro's choices when the target is a switch
+       2  Amount   a setting's share of its knob's range, -1..1; for a
+                   switch, the setting by choice, one decimal digit each
+
+  THE MATRIX (ChannelView 2.1.2). Each modulator's settings can be moved
+  by two sources: a macro, or another modulator. Worked out here, at the
+  top of every block -- the moved settings are written over the knobs'
+  for this block and put back at its end, so the knobs (and their lanes)
+  keep their own values. A modulator moved by another uses that one's
+  output from the block before, so two can move each other.
+  Targets: 1 Depth, 2 Rate (Hz, or the synced rate in whole steps),
+  3 Phase, 4 Smooth, 5 Attack, 6 Release, 7 Floor, 8 Ceiling, 9 Low
+  note, 10 High note -- each moved within its knob's own scale -- and
+  the switches, from a button or dropdown macro only: 11 Shape, 12 Sync,
+  13 Follower source, 14 Gate, 15 Hold. A switch's Amount holds, in its
+  decimal digits from the lowest, the setting for each of the macro's
+  choices (0 its own, 1.. the setting + 1), up to six; the choices count
+  is the Target's hundreds.
+  Projects saved before 2.1.2 load with all of these at 0: nothing moved,
+  every link and lane where it was.
 
   The idea of macros and modulators living in the chain, linked by
   REAPER's parameter modulation, comes from Saxmand's FX Modulator
@@ -236,6 +259,55 @@ slider189:m8_mcc=1<0,127,1>-Mod 8 MIDI CC
 slider190:m8_mlo=36<0,127,1>-Mod 8 MIDI Low note
 slider191:m8_mhi=96<0,127,1>-Mod 8 MIDI High note
 slider192:m8_mhold=1<0,1,1{Off,On}>-Mod 8 MIDI Hold
+// THE MATRIX: what moves each modulator's settings (2.1.2)
+slider193:mx1a_src=0<0,24,1>-Mod 1 moved by 1: source
+slider194:mx1a_tgt=0<0,1515,1>-Mod 1 moved by 1: target
+slider195:mx1a_amt=0<-1,1000000,0.0001>-Mod 1 moved by 1: amount
+slider196:mx1b_src=0<0,24,1>-Mod 1 moved by 2: source
+slider197:mx1b_tgt=0<0,1515,1>-Mod 1 moved by 2: target
+slider198:mx1b_amt=0<-1,1000000,0.0001>-Mod 1 moved by 2: amount
+slider199:mx2a_src=0<0,24,1>-Mod 2 moved by 1: source
+slider200:mx2a_tgt=0<0,1515,1>-Mod 2 moved by 1: target
+slider201:mx2a_amt=0<-1,1000000,0.0001>-Mod 2 moved by 1: amount
+slider202:mx2b_src=0<0,24,1>-Mod 2 moved by 2: source
+slider203:mx2b_tgt=0<0,1515,1>-Mod 2 moved by 2: target
+slider204:mx2b_amt=0<-1,1000000,0.0001>-Mod 2 moved by 2: amount
+slider205:mx3a_src=0<0,24,1>-Mod 3 moved by 1: source
+slider206:mx3a_tgt=0<0,1515,1>-Mod 3 moved by 1: target
+slider207:mx3a_amt=0<-1,1000000,0.0001>-Mod 3 moved by 1: amount
+slider208:mx3b_src=0<0,24,1>-Mod 3 moved by 2: source
+slider209:mx3b_tgt=0<0,1515,1>-Mod 3 moved by 2: target
+slider210:mx3b_amt=0<-1,1000000,0.0001>-Mod 3 moved by 2: amount
+slider211:mx4a_src=0<0,24,1>-Mod 4 moved by 1: source
+slider212:mx4a_tgt=0<0,1515,1>-Mod 4 moved by 1: target
+slider213:mx4a_amt=0<-1,1000000,0.0001>-Mod 4 moved by 1: amount
+slider214:mx4b_src=0<0,24,1>-Mod 4 moved by 2: source
+slider215:mx4b_tgt=0<0,1515,1>-Mod 4 moved by 2: target
+slider216:mx4b_amt=0<-1,1000000,0.0001>-Mod 4 moved by 2: amount
+slider217:mx5a_src=0<0,24,1>-Mod 5 moved by 1: source
+slider218:mx5a_tgt=0<0,1515,1>-Mod 5 moved by 1: target
+slider219:mx5a_amt=0<-1,1000000,0.0001>-Mod 5 moved by 1: amount
+slider220:mx5b_src=0<0,24,1>-Mod 5 moved by 2: source
+slider221:mx5b_tgt=0<0,1515,1>-Mod 5 moved by 2: target
+slider222:mx5b_amt=0<-1,1000000,0.0001>-Mod 5 moved by 2: amount
+slider223:mx6a_src=0<0,24,1>-Mod 6 moved by 1: source
+slider224:mx6a_tgt=0<0,1515,1>-Mod 6 moved by 1: target
+slider225:mx6a_amt=0<-1,1000000,0.0001>-Mod 6 moved by 1: amount
+slider226:mx6b_src=0<0,24,1>-Mod 6 moved by 2: source
+slider227:mx6b_tgt=0<0,1515,1>-Mod 6 moved by 2: target
+slider228:mx6b_amt=0<-1,1000000,0.0001>-Mod 6 moved by 2: amount
+slider229:mx7a_src=0<0,24,1>-Mod 7 moved by 1: source
+slider230:mx7a_tgt=0<0,1515,1>-Mod 7 moved by 1: target
+slider231:mx7a_amt=0<-1,1000000,0.0001>-Mod 7 moved by 1: amount
+slider232:mx7b_src=0<0,24,1>-Mod 7 moved by 2: source
+slider233:mx7b_tgt=0<0,1515,1>-Mod 7 moved by 2: target
+slider234:mx7b_amt=0<-1,1000000,0.0001>-Mod 7 moved by 2: amount
+slider235:mx8a_src=0<0,24,1>-Mod 8 moved by 1: source
+slider236:mx8a_tgt=0<0,1515,1>-Mod 8 moved by 1: target
+slider237:mx8a_amt=0<-1,1000000,0.0001>-Mod 8 moved by 1: amount
+slider238:mx8b_src=0<0,24,1>-Mod 8 moved by 2: source
+slider239:mx8b_tgt=0<0,1515,1>-Mod 8 moved by 2: target
+slider240:mx8b_amt=0<-1,1000000,0.0001>-Mod 8 moved by 2: amount
 
 in_pin:Input L
 in_pin:Input R
@@ -267,10 +339,94 @@ beats[12]=6; beats[13]=8; beats[14]=16; beats[15]=32;
 mbuf = 4000;    // MIDI message buffer
 nf = 0;
 
+// THE MATRIX: the moved settings, saved to put back (slider, value pairs)
+mxs = 2200; mxn = 0;
+
+// a target's field in its modulator (-1: Rate, which depends on Sync)
+function mx_field(tg) (
+  tg == 1 ? 3 : tg == 2 ? -1 : tg == 3 ? 9 : tg == 4 ? 4 : tg == 5 ? 11 :
+  tg == 6 ? 12 : tg == 7 ? 13 : tg == 8 ? 14 : tg == 9 ? 19 : tg == 10 ? 20 :
+  tg == 11 ? 5 : tg == 12 ? 6 : tg == 13 ? 10 : tg == 14 ? 15 : tg == 15 ? 21 : -2;
+);
+
+function mx_save(idx) local(i, found) (
+  found = 0; i = 0;
+  loop(mxn, mxs[i * 2] == idx ? found = 1; i += 1; );
+  !found ? ( mxs[mxn * 2] = idx; mxs[mxn * 2 + 1] = slider(idx); mxn += 1; );
+);
+
+// a setting moved by `d` (amount x source) within its knob's own scale
+function mx_move(fi, v, d) local(t) (
+  fi == 8 ? (           // Rate (Hz): a log scale, 0.01..20
+    t = log(max(0.01, v) / 0.01) / log(2000);
+    t = max(0, min(1, t + d)); 0.01 * 2000 ^ t;
+  ) : fi == 7 ? (       // Rate (synced): whole steps
+    t = max(0, min(1, v / 15 + d)); floor(t * 15 + 0.5);
+  ) : fi == 11 ? (      // Attack, a square scale to 500 ms
+    t = max(0, min(1, sqrt(max(0, v) / 500) + d)); 500 * t * t;
+  ) : fi == 12 ? (      // Release, to 2000 ms
+    t = max(0, min(1, sqrt(max(0, v) / 2000) + d)); 2000 * t * t;
+  ) : fi == 13 ? (      // Floor, -80..0 dB
+    t = max(0, min(1, (v + 80) / 80 + d)); t * 80 - 80;
+  ) : fi == 14 ? (      // Ceiling, -60..12 dB
+    t = max(0, min(1, (v + 60) / 72 + d)); t * 72 - 60;
+  ) : (fi == 19 || fi == 20) ? (   // a note
+    t = max(0, min(1, v / 127 + d)); floor(t * 127 + 0.5);
+  ) : (                 // Depth, Phase, Smooth: 0..1
+    max(0, min(1, v + d));
+  );
+);
+
+function mx_apply_all() local(n, s, b, base, src, tgr, tg, nch, amt, sv, fi, idx, v, i, code) (
+  mxn = 0;
+  n = 0;
+  loop(8,
+    base = 17 + 22 * n;                          // this modulator's Type
+    slider(base) >= 0.5 ? (
+      s = 0;
+      loop(2,
+        b = 193 + (n * 2 + s) * 3;
+        src = floor(slider(b) + 0.5);
+        tgr = floor(slider(b + 1) + 0.5); tg = tgr % 100; nch = floor(tgr / 100);
+        amt = slider(b + 2);
+        (src >= 1 && src <= 24 && src != 17 + n && tg >= 1) ? (
+          sv = src <= 16 ? slider(src) : slider(18 + 22 * (src - 17));
+          sv = max(0, min(1, sv));
+          fi = mx_field(tg);
+          fi == -1 ? fi = (slider(base + 6) >= 0.5 ? 7 : 8);
+          fi >= 0 ? (
+            idx = base + fi;
+            mx_save(idx);
+            v = slider(idx);
+            tg >= 11 ? (
+              nch = max(2, nch);
+              i = min(5, floor(sv * (nch - 1) + 0.5));
+              code = floor(max(0, amt) / 10 ^ i) % 10;
+              code > 0 ? v = code - 1;
+            ) : (
+              v = mx_move(fi, v, amt * sv);
+            );
+            slider(idx) = v;
+          );
+        );
+        s += 1;
+      );
+    );
+    n += 1;
+  );
+);
+
+function mx_restore() local(i) (
+  i = 0;
+  loop(mxn, slider(mxs[i * 2]) = mxs[i * 2 + 1]; i += 1; );
+  mxn = 0;
+);
+
 @block
 dt = samplesblock / srate;
 playing = (play_state & 1) == 1;
 nf = 0; nm = 0;
+mx_apply_all();           // THE MATRIX: moved settings, for this block
 
 // ---- modulator 1
 m1_type == 1 ? (
@@ -932,6 +1088,8 @@ nm > 0 ? (
     );
   );
 );
+
+mx_restore();             // the knobs' own values back
 
 @sample
 nf > 0 ? (

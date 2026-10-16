@@ -375,7 +375,7 @@ local function srate()
   return (ok and tonumber(s)) or 48000
 end
 
-local function draw_row(dl, e, x, w, now)
+local function draw_row_inner(dl, e, x, w, now)
   local tr   = e.track
   local y0   = e.y
   local h    = e.h
@@ -570,7 +570,7 @@ local function draw_row(dl, e, x, w, now)
         slot("I", mon > 0, function(bx)
           local m = TCP_MON[mon]
           local hit, dbl = W.state_icon(ctx, "tcpI" .. e.guid, "speaker", bx, cy, cs, cs,
-            mon > 0, m.col and C.COL[m.col] or nil, m.tip .. "  \u{2014} click to cycle")
+            mon > 0, m.col and C.COL[m.col] or nil, m.tip .. "\nClick: cycle")
           if dbl then G.set(tr, "I_RECMON", 0)
           elseif hit then G.set(tr, "I_RECMON", (mon + 1) % 3) end
         end)
@@ -668,6 +668,21 @@ local function draw_row(dl, e, x, w, now)
   end
   W.tip(ctx, "tcpedge" .. e.guid,
     "Resize", ehov and not eact, false)
+end
+
+-- A tinted row's buttons, meter slot and lines in shades of its colour
+-- (W.push_tinted), for the length of its draw.
+local function draw_row(dl, e, x, w, now)
+  local tr = e.track
+  local col = U.track_colour(tr, 0xff)
+  local tint = (TCP_TINT and not e.master and col) and TO.track_tint(tr) or 0
+  local saved
+  if tint > 0 then
+    local row_bg = G.is_selected(tr) and C.COL.header_bg or C.COL.panel_bg
+    saved = W.push_tinted(U.tint_readable(row_bg, col, tint), col)
+  end
+  draw_row_inner(dl, e, x, w, now)
+  W.pop_tinted(saved)
 end
 
 -- ---------------------------------------------------------------------
@@ -841,6 +856,7 @@ local function draw_flyout()
     local tint = (TCP_TINT and tr ~= reaper.GetMasterTrack(0)) and TO.track_tint(tr) or 0
     if tint > 0 and col then fly_bg = U.tint_readable(fly_bg, col, tint) end
     ImGui.DrawList_AddRectFilled(dl, wx, wy, wx + CW, wy + H, fly_bg, 3.0)
+    local fly_ink = (tint > 0 and col) and W.push_tinted(fly_bg, col) or nil
 
     -- Background first, so right-click anywhere empty is the track menu,
     -- as on ChannelView's own Channel panel.
@@ -870,6 +886,7 @@ local function draw_flyout()
     if app.fly then
       CH.draw_body(ctx, dl, wx, wy + C.HEADER_H, CW, H - C.HEADER_H, tr, "tcpf" .. f.guid)
     end
+    W.pop_tinted(fly_ink)
     if app.fly then
       ImGui.SetCursorScreenPos(ctx, wx + CW + C.PANEL_GAP, wy)
       SD.draw(ctx, tr, H)
@@ -948,8 +965,8 @@ local function settings_menu()
     ext_set("tint", TCP_TINT and "1" or "0")
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "The rows in the track's colour at the strengths set in\n" ..
-      "ChannelView (right-click a fader: Background, and Group looks).")
+    ImGui.SetTooltip(ctx, "Rows tinted in the track's colour\n" ..
+      "Strength: set in ChannelView (fader right-click)")
   end
   if ImGui.MenuItem(ctx, "Indent folders", nil, C.TCP_INDENT_FOLDERS) then
     C.TCP_INDENT_FOLDERS = not C.TCP_INDENT_FOLDERS
@@ -974,7 +991,7 @@ local function settings_menu()
       ext_set("chips", C.TCP_STATE_CHIPS and "1" or "0")
     end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Each keeps its place on every row,\nso the buttons line up down the panel")
+      ImGui.SetTooltip(ctx, "Buttons keep their place on every row")
     end
     ImGui.EndMenu(ctx)
   end
@@ -983,7 +1000,7 @@ local function settings_menu()
     ext_set("pdc", C.TCP_PDC and "1" or "0")
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Samples and ms, on tracks with latency,\nwhen the row is tall enough")
+    ImGui.SetTooltip(ctx, "Samples and ms, on tracks with latency\n(tall rows only)")
   end
   ImGui.SetNextItemWidth(ctx, 150)
   local pch, pv = ImGui.SliderInt(ctx, "Channel panel height", math.floor(C.TCP_PANEL_H), 180, 700)

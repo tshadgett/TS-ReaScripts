@@ -27,6 +27,7 @@ local RP  = require("TS_CV_RolePanel")
 local MP  = require("TS_CV_MapPanel")
 local CK  = require("TS_CV_ColourPick")
 local TP  = require("TS_CV_Taps")
+local ML  = require("TS_CV_MidiLearn")
 local PU  = require("TS_CV_PresetUI")
 local Tr  = require("TS_CV_Trace")
 local MD  = require("TS_CV_Mod")
@@ -633,7 +634,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
   local size = P.item_size(item)
   if ctl.type == "toggle" then
     changed, nv, act = W.toggle(ctx, id, name, v, shown,
-      { tooltip = name .. ": " .. shown .. "\n(the layout's own)", text = shown,
+      { tooltip = name .. ": " .. shown .. "\n(layout control)", text = shown,
         on_col = P.VIRT_COL, size = size, style = ctl.style })
   elseif ctl.type == "combo" and item.kind == "buttons" then
     local list = {}
@@ -649,7 +650,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
       { tooltip = name .. ": " .. shown, steps = list })
   else
     changed, nv, act = W.knob(ctx, id, name, v, shown,
-      { tooltip = name .. ": " .. shown .. "\n(the layout's own)", cap = P.VIRT_COL,
+      { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = P.VIRT_COL,
         style = ctl.style, size = size })
   end
   if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
@@ -1115,12 +1116,12 @@ local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter, tw_, req)
     TP.invalidate()
   end
   W.tip(ctx, "gr##" .. fx.guid,
-    ("Gain reduction%s\n%.2f dB now, peak %.2f\nscale 0 to %g dB%s\n%s")
-    :format(est and " (measured, estimated)" or "", gr, peak, range,
+    ("Gain reduction%s\n%.2f dB, peak %.2f\nScale 0 to %g dB%s\n%s")
+    :format(est and " (estimated)" or "", gr, peak, range,
             (range > (meter.range or 0)) and "  (expanded)" or "",
-            St.is_gr_open(fx.guid) and "Click to close the trace" or "Click for a trace")
-    .. (est and ("\n\nMeasured by the track's TS_TrackProbe from the audio in\n" ..
-                 "and out.\n" .. TP.cal_text(TP.cal_status(track, fx.guid))) or ""),
+            St.is_gr_open(fx.guid) and "Click: close trace" or "Click: trace")
+    .. (est and ("\n\nMeasured by the probe\n" ..
+                 TP.cal_text(TP.cal_status(track, fx.guid))) or ""),
     ImGui.IsItemHovered(ctx), false)
   return w
 end
@@ -1160,9 +1161,8 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
     -- An older probe, still running from before the update: nothing to read.
     W.io_bar(ctx, dl, lx, y, w, h, key .. "i", -150, nil, "?")
     W.io_bar(ctx, dl, rx, y, w, h, key .. "o", -150, nil, "?")
-    tip = "This track's TS_TrackProbe is an older version that doesn't measure\n" ..
-          "levels. Reopen the project (or remove and re-add the probes) to\n" ..
-          "load the new one."
+    tip = "Older probe: no levels.\n" ..
+          "Reopen the project to update it."
   else
     local byp = not enabled
     local out_pk  = byp and -150 or lv.out_pk
@@ -1175,9 +1175,8 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
     tip = ("Input   peak %s   RMS %s dBFS\nOutput  peak %s   RMS %s dBFS\n%s")
       :format(f(lv.in_pk), f(lv.in_rms), f(not byp and lv.out_pk or nil), f(not byp and lv.out_rms or nil),
               byp and "Bypassed"
-              or ((lv.in_rms > -70) and ("Change %+.1f dB (output RMS minus input RMS)")
-                  :format(lv.out_rms - lv.in_rms) or "No signal coming in"))
-      .. "\n\nMeasured by the track's TS_TrackProbe pair."
+              or ((lv.in_rms > -70) and ("Change %+.1f dB RMS")
+                  :format(lv.out_rms - lv.in_rms) or "No input signal"))
   end
   for _, c in ipairs({ { lx, "ioi##" }, { rx, "ioo##" } }) do
     ImGui.SetCursorScreenPos(ctx, c[1], y)
@@ -1262,11 +1261,11 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     local _, where = T.where(fx)
     if where then full = full .. "\n\nIn container: " .. where end
     if (fx.index or 0) > 0 and (fx.parallel or 0) ~= 0 then
-      full = full .. (where and "\n" or "\n\n") .. "Runs in parallel with the one before it" ..
+      full = full .. (where and "\n" or "\n\n") .. "Parallel with the previous plugin" ..
         (fx.parallel == 2 and ", MIDI merged" or "")
     end
     local rn = St.switch_rule(fx.guid)
-    if rn then full = full .. ("\n\nIts layout is put up by switching rule %d"):format(rn) end
+    if rn then full = full .. ("\n\nLayout from switching rule %d"):format(rn) end
     W.tip(ctx, "hdr##" .. fx.guid, full, true, false)
   end
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then req.open_menu = true end
@@ -1322,7 +1321,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     ImGui.DrawList_AddText(dl, wx + 3, y + (h - th2) * 0.5,
       full and (hov and C.COL.header_text or C.COL.header_dim) or C.COL.accent, wet_txt)
     W.tip(ctx, "wet##" .. fx.guid,
-      ("Wet %s \u{2014} REAPER's own mix for this plugin\nClick for a slider"):format(wet_txt),
+      ("Wet %s\nClick: slider"):format(wet_txt),
       hov, false)
     if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
       ImGui.OpenPopup(ctx, "wetpop##" .. fx.guid)
@@ -1340,13 +1339,13 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
 
   at(0)
   if W.icon_button(ctx, "col##" .. fx.guid, "collapse", btn, false,
-      "Collapse to a bar (or double-click the name)") then
+      "Collapse (or double-click the name)") then
     req.toggle_collapse = true
   end
 
   at(1)
   if W.icon_button(ctx, "byp##" .. fx.guid, "power", btn, not enabled,
-      enabled and "Bypass" or "Bypassed \u{2014} click to enable",
+      enabled and "Bypass" or "Bypassed\nClick: enable",
       C.COL.bypass_on) then
     req.toggle_bypass = true
   end
@@ -1354,7 +1353,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   at(2)
   local floating = T.is_floating(track, fx.addr)
   if W.icon_button(ctx, "flt##" .. fx.guid, "float", btn, floating,
-      floating and "Close the plugin's window" or "Open the plugin's window",
+      floating and "Close plugin window" or "Open plugin window",
       C.COL.float_on) then
     req.toggle_float = true
   end
@@ -1378,7 +1377,7 @@ local function draw_collapsed(ctx, dl, x, y, w, h, track, fx, enabled, req, mete
 
   ImGui.SetCursorScreenPos(ctx, cx - btn * 0.5, y + 4 + btn + 3)
   if W.icon_button(ctx, "xbyp##" .. fx.guid, "power", btn, not enabled,
-      enabled and "Bypass" or "Bypassed \u{2014} click to enable",
+      enabled and "Bypass" or "Bypassed\nClick: enable",
       C.COL.bypass_on) then
     req.toggle_bypass = true
   end
@@ -1386,7 +1385,7 @@ local function draw_collapsed(ctx, dl, x, y, w, h, track, fx, enabled, req, mete
   ImGui.SetCursorScreenPos(ctx, cx - btn * 0.5, y + 4 + (btn + 3) * 2)
   local floating = T.is_floating(track, fx.addr)
   if W.icon_button(ctx, "xflt##" .. fx.guid, "float", btn, floating,
-      floating and "Close the plugin's window" or "Open the plugin's window",
+      floating and "Close plugin window" or "Open plugin window",
       C.COL.float_on) then
     req.toggle_float = true
   end
@@ -1704,9 +1703,9 @@ local function range_ends(ctx, track, link, rev, key, pos, val)
     end
     local tip
     if link.macro then
-      tip = ("Where it sits at %s of %s: drag to set it"):format(e == 1 and "0%" or "100%", link.mod.name)
+      tip = ("Value at %s of %s\nDrag: set"):format(e == 1 and "0%" or "100%", link.mod.name)
     else
-      tip = ("%s's swing, %s: drag to set it"):format(link.mod.name, e == 1 and "at rest" or "at full")
+      tip = ("%s swing, %s\nDrag: set"):format(link.mod.name, e == 1 and "at rest" or "at full")
     end
     W.tip(ctx, id, tip, hov and not act, false)
     if act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
@@ -2065,7 +2064,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       -- are local to P.layout's own loop and don't exist here.
       local px, py = ImGui.GetCursorScreenPos(ctx)
       ImGui.InvisibleButton(ctx, id, C.CELL_W, C.CELL_H)
-      W.tip(ctx, "oob" .. id, ("parameter %s is out of range for this plugin")
+      W.tip(ctx, "oob" .. id, ("Parameter %s out of range")
         :format(tostring(ctl.param)), ImGui.IsItemHovered(ctx), false)
       if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then req.ctx_control = i end
       local tw = ImGui.CalcTextSize(ctx, "!")
@@ -2123,7 +2122,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       -- detail -- neither is what you're hovering to find out.
       local tip      = shown
       local modded   = P.mod_on(track, fx, p)
-      if modded then tip = (tip or "") .. "\nParameter modulation on" end
+      if modded then tip = (tip or "") .. "\nModulation on" end
 
       local changed, nv, act
       if ctl.type == "xy" or ctl.type == "dual" then
@@ -2146,8 +2145,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         local mod2 = ok2 and P.mod_on(track, fx, p2) or false
         local name = (ctl.label and ctl.label ~= "") and ctl.label or (name1 .. " / " .. name2)
         local tip2 = name1 .. ": " .. (shown or "") .. "\n" .. name2 .. ": " .. shown2
-          .. (ok2 and "" or "\n(right-click to choose its second parameter)")
-          .. ((modded or mod2) and "\nParameter modulation on" or "")
+          .. (ok2 and "" or "\nRight-click: choose second parameter")
+          .. ((modded or mod2) and "\nModulation on" or "")
         local c1, v1, c2, v2
         if ctl.type == "xy" then
           local under = cur_bg.plate and cur_bg.plate.bg or C.COL.panel_bg
@@ -2178,6 +2177,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           if link2 then MD.shift_link(track, link2, pv2 - live2)
           else reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, pv2) end
           TP.touched(track, fx.guid)
+          ML.set_target(track, fx.guid, fx.addr, p2, "cv")
         end
         changed, nv = c1, v1
       elseif ctl.type == "toggle" then
@@ -2291,6 +2291,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         else reaper.TrackFX_SetParamNormalized(track, fx.addr, p, pv) end
         -- A measured plugin relearns its zero point when it's changed.
         TP.touched(track, fx.guid)
+        -- the MIDI learn bar's "last touched"
+        ML.set_target(track, fx.guid, fx.addr, p, "cv")
       end
       if act and act.right_click then req.ctx_control = i end
       -- the rack: a knob has its ring; anything else a corner in the
@@ -2549,17 +2551,17 @@ function P.os_tip(st)
   local lines = {}
   local rate = st.rate
   if st.lit and st.n > 0 then
-    lines[1] = ("Oversampled by REAPER (%s): %dx here."):format(T.os_label(st.n, rate):lower(), st.lit)
+    lines[1] = ("Oversampled (%s): %dx here"):format(T.os_label(st.n, rate):lower(), st.lit)
   elseif st.n > 0 then
-    lines[1] = ("Set to oversample %s, which REAPER already runs at: no effect here."):format(
+    lines[1] = ("Set to %s: already the running rate, no effect"):format(
       T.os_label(st.n, rate):lower())
   else
-    lines[1] = "Oversampling: off."
+    lines[1] = "Oversampling off"
   end
   for _, o in ipairs(st.outer or {}) do
-    lines[#lines + 1] = ("Inside %s, oversampled %s."):format(o.what, T.os_label(o.n, rate):lower())
+    lines[#lines + 1] = ("Inside %s, oversampled %s"):format(o.what, T.os_label(o.n, rate):lower())
   end
-  lines[#lines + 1] = "Click to change."
+  lines[#lines + 1] = "Click: change"
   return table.concat(lines, "\n")
 end
 
@@ -2630,11 +2632,10 @@ draw_footer = function(ctx, dl, x, y, w, h, track, fx, layout, avail_h, is_eq, r
   -- the foot's text colour, which stands out on every faceplate (a fixed
   -- accent colour vanishes on some)
   if W.icon_button(ctx, "lock##" .. fx.guid, rows and "none" or "unlock", btn, false,
-      rows and ("Layout locked at %d rows: no edits, and it scrolls rather than\n" ..
-                "rearranging when the panel is too short. Click to unlock."):format(rows)
-           or "Lock this layout: no more edits, and the controls stay where\n" ..
-              "they are when the panel is resized (it scrolls if too short).\n" ..
-              "Meters can still be switched on and off.",
+      rows and ("Layout locked at %d rows\n" ..
+                "Click: unlock"):format(rows)
+           or "Lock layout: no edits, controls stay put\n" ..
+              "Meters can still be toggled",
       nil, nil) then
     -- (false to unlock: `rows and false or ...` would never give false)
     if rows then req.toggle_lock = false else req.toggle_lock = P.rows_for(avail_h) end

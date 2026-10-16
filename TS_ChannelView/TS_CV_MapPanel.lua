@@ -209,7 +209,7 @@ function draw_dyn_box(ctx, dl, ps, track, addr, fx, b, lvl, gx0, gy0, gw, gh)
     end
     if not act and ps.ddrag and ps.ddrag.id == id then ps.ddrag = nil end
     ImGui.DrawList_AddLine(dl, tx, my - 8, tx, my + 8, (hov or act) and C.COL.header_text or C.COL.accent, 2.4)
-    W.tip(ctx, id, ("Threshold %s\nDrag left or right (Shift: fine)\nThe bar: the band's level going in, from the probe\n(near what the plugin hears, not exactly)"):format(dy.thr_text or ""), hov, act)
+    W.tip(ctx, id, ("Threshold %s\nDrag left or right (Shift: fine)\nBar: the band's input level (probe estimate)"):format(dy.thr_text or ""), hov, act)
     ImGui.DrawList_AddText(dl, mx0, my + 8, C.COL.value, "Threshold " .. (dy.thr_text or ""))
   end
   if lvl then
@@ -486,7 +486,9 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
       end
       local tip = ("%s  (%s)\n%s"):format(name, ME.TYPES[b.type] or b.type,
         table.concat(parts, "   "))
-      if b.map.q then tip = tip .. "\nWheel: Q" end
+      if b.map.q then
+        tip = tip .. (ME.q_positions(track, addr, b.map) and "\nWheel or right-click: Q" or "\nWheel: Q")
+      end
       if b.map.shape then tip = tip .. "\nAlt+wheel or right-click: shape" end
       tip = tip .. "\nDouble-click: " .. (b.map.gain and "flat" or "off")
       W.tip(ctx, id, tip, hovered, active)
@@ -537,6 +539,18 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
         for _, sh in ipairs(shs) do
           if ImGui.MenuItem(ctx, ME.shape_label(sh) .. "##shp" .. sh.s, nil, rb.s == sh.s) then
             ME.set_shape(track, addr, b, sh.s)
+          end
+        end
+        ImGui.Separator(ctx)
+      end
+      -- a Q that's a switch (Narrow / Wide): its settings, by name
+      local qp = ME.q_positions(track, addr, b)
+      if qp then
+        local qi = ME.q_index(track, addr, b, qp)
+        ImGui.TextDisabled(ctx, "Q")
+        for i, ps in ipairs(qp) do
+          if ImGui.MenuItem(ctx, "   " .. tostring(ps.text) .. "##qp" .. i, nil, qi == i) then
+            ME.set_q_pos(track, addr, b, i)
           end
         end
         ImGui.Separator(ctx)

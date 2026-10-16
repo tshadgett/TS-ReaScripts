@@ -2,9 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.1.1
+-- @version 2.2.0
 -- @changelog
---  No changes: the version moves to 2.1.1 to match ChannelView.
+--  TS_TrackProbe 2.0.0: no parameters, everything through shared memory, so
+--  it never shows in automation or learn lists. Reopen projects to load it.
+--  Spectrum release is now a Track Analyser setting. Shorter tooltips.
 -- @about
 --  # Track Analyser
 --
@@ -29,6 +31,7 @@
 --   [main]   TS_TA_InsertProbes.lua
 --   [main]   TS_TA_QuietProbes.lua
 --   [nomain] TS_TA_Chain.lua
+--   [nomain] TS_TA_ProbeLink.lua
 --   [nomain] TS_TA_Strip.lua
 --   [nomain] TS_TA_Mask.lua
 --   [nomain] TS_TA_GR.lua
@@ -389,6 +392,7 @@ local S = {
   scaleDb     = 12,        -- half-range; 12 dB as asked, expanding on demand
   specTop     = -6,
   specBot     = -96,
+  specRel     = 400,       -- ms the spectrum falls back over (the probe's; was its own slider)
   fftSize     = 2048,
   sliceMs     = 2,
   histSec     = 4,         -- how much of the scope ring panel 2 shows
@@ -2987,11 +2991,16 @@ local function tickFps(now)
   fps.t = now
 end
 
+local relSent = nil
 local function frame()
   local tA = r.time_precise()
   tickFps(tA)
   palFollow(tA)
   followTrack()
+  -- the probes' names and publish flags (TS_TrackProbe 2.0.0), and the
+  -- spectrum release they all use
+  if TA.tick then TA.tick() end
+  if TA.setRelease and relSent ~= S.specRel then TA.setRelease(S.specRel) ; relSent = S.specRel end
 
   if rig then
     -- Only when something is actually publishing there. Pumping a dead
@@ -3166,8 +3175,7 @@ local function frame()
         if pushed > 0 then ImGui.PopStyleColor(ctx, pushed) end
         if ImGui.IsItemHovered(ctx) and ImGui.SetTooltip then
           ImGui.SetTooltip(ctx,
-            "Add a probe at each end of this track's FX chain.\n" ..
-            "It only ever adds -- nothing is removed, reordered or replaced.")
+            "Add a probe at each end of the FX chain.")
         end
         if hit then confirmInsertProbes() end
       else
@@ -3412,7 +3420,7 @@ local function frame()
           if MC.why then
             ImGui.SetTooltip(ctx, "collisions -- " .. MC.why)
           elseif hot then
-            ImGui.SetTooltip(ctx, ("%d bands masked, deepest %.1f dB at %.0f Hz")
+            ImGui.SetTooltip(ctx, ("%d bands masked\ndeepest %.1f dB at %.0f Hz")
               :format(MC.nBands, MC.peak, MC.peakHz))
           else
             ImGui.SetTooltip(ctx, on and "collisions on" or "collisions off")
@@ -3494,7 +3502,7 @@ local function frame()
         if ch2 then S[flag] = v2 ; buildPalette() ; touchSettings() end
         if ImGui.IsItemHovered(ctx) then
           ImGui.SetTooltip(ctx,
-            "Follow the hue.\nUntick to set this one colour by hand.")
+            "Follow the hue. Untick to pick it.")
         end
       end
 
@@ -3518,7 +3526,7 @@ local function frame()
       end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
-          "How far the greys lean toward the hue.\n0 is neutral grey, 1 is the default.")
+          "How far the greys lean toward the hue.\n0 grey, 1 default.")
       end
 
       do  -- a live swatch, so the sliders are not guesswork
@@ -3630,6 +3638,11 @@ local function frame()
       ImGui.SameLine(ctx)
       ImGui.SetNextItemWidth(ctx, 150)
       rv, S.specBot   = ImGui.SliderDouble(ctx, 'Spectrum floor', S.specBot, -120, -40, "%.0f dB") ; mark(rv)
+      -- How fast a peak falls back. It used to be a slider on the probe
+      -- itself, one per track; since TS_TrackProbe 2.0.0 the probe has no
+      -- parameters and every probe takes it from here.
+      ImGui.SetNextItemWidth(ctx, 150)
+      rv, S.specRel   = ImGui.SliderDouble(ctx, 'Spectrum release', S.specRel, 50, 2000, "%.0f ms") ; mark(rv)
 
       ImGui.Separator(ctx)
 

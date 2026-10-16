@@ -44,11 +44,12 @@ def build(probe_src, case, secs=24, hb=True):
     init = strip_comments(sec['init'])
     block = strip_comments(sec['block'])
     sample = strip_comments(sec['sample'])
-    fix = lambda c: c.replace('gmem[', 'GMB[')
+    # 2.0.0: no sliders -- the probe finds itself at place 5 on track 3
+    fix = lambda c: c.replace('gmem[', 'GMB[').replace('get_host_placement(pl_pos, pl_fl)', '(pl_pos = 5; pl_fl = 0; 3)')
     prog = f'''
 GMB = 4000000;
 srate = 48000; samplesblock = 480;
-function sliderchange(x) ( 0; );
+function spl(i) ( i == 0 ? spl0 : i == 1 ? spl1 : i == 2 ? spl2 : i == 3 ? spl3 : i == 4 ? spl4 : i == 5 ? spl5 : i == 6 ? spl6 : i == 7 ? spl7 : i == 8 ? spl8 : i == 9 ? spl9 : i == 10 ? spl10 : i == 11 ? spl11 : i == 12 ? spl12 : i == 13 ? spl13 : i == 14 ? spl14 : i == 15 ? spl15 : i == 16 ? spl16 : i == 17 ? spl17 : 0; );
 function get_host_placement() ( 3; );
 play_state = 1; tap_gen = 0; cal_arm = 0;
 role = 1; publish = 0; rel_ms = 400; vis_include = 0; vis_slot = -1;
@@ -56,6 +57,9 @@ tap_n = 1; tap_lag1 = {lag}; tap_lag2 = 0; tap_lag3 = 0; tap_lag4 = 0;
 tap_rst1 = 0; tap_rst2 = 0; tap_rst3 = 0; tap_rst4 = 0;
 tap_gr1 = tap_gr2 = tap_gr3 = tap_gr4 = 0;
 {fix(init)}
+// the post probe named in its track's block (THE PROBE BLOCK), its tap set there
+PBK = GMB + 0x100000 + 4 * 128;
+PBK[1] = 6; PBK[8] = 1; PBK[9] = {lag};
 // ---------------- the test plugin
 function peq(x, f0, gdb, q) instance(b0,b1,b2,a1,a2,z1,z2,init) local(A,w0,al,a0,y) (
   !init ? ( A = 10^(gdb/40); w0 = 2*$pi*f0/srate; al = sin(w0)/(2*q);
@@ -99,7 +103,7 @@ while (i < nsamp) (
     {fix(sample)}
     gacc += gtrue; gcnt += 1;
     gcnt >= tap_slice ? (
-      printf("%f %f %f\\n", gacc/gcnt, (TAP_BASE + TAP_S)[TS_LAST], tap_gr1);
+      printf("%f %f %f\\n", gacc/gcnt, (TAP_BASE + TAP_S)[TS_LAST], PBK[64]);
       gacc = 0; gcnt = 0;
     );
     i += 1;
@@ -125,4 +129,4 @@ if __name__ == '__main__':
         k0 = int(2 * 500)
         t, e, d = a[k0:, 0], a[k0:, 1], a[k0:, 2]
         err = np.sqrt(np.mean((t - e) ** 2)); corr = np.corrcoef(t, e)[0, 1]
-        print(f"{c:9s} cols {len(a):6d} | true mean {t.mean():5.2f} max {t.max():5.2f} | est mean {e.mean():5.2f} max {e.max():5.2f} | rms {err:4.2f} corr {corr:4.2f} | slider max {d.max():5.2f}")
+        print(f"{c:9s} cols {len(a):6d} | true mean {t.mean():5.2f} max {t.max():5.2f} | est mean {e.mean():5.2f} max {e.max():5.2f} | rms {err:4.2f} corr {corr:4.2f} | block max {d.max():5.2f}")

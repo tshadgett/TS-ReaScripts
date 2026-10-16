@@ -67,6 +67,7 @@ local M = require("TS_CV_Mappings")
 local RQ = require("TS_CV_ReaEQ")
 local RC = require("TS_CV_ReaComp")
 local St = require("TS_CV_State")
+local PL = require("TS_CV_ProbeLink")
 
 local TP = {}
 
@@ -303,9 +304,50 @@ local function is_probe(tr, addr)
   return fx_name(tr, addr):find(TP.PROBE_NAME, 1, true) ~= nil
 end
 
-local function probe_role(tr, addr)
-  return math.floor((reaper.TrackFX_GetParam(tr, addr, TP.P_ROLE) or 0) + 0.5)
+-- Every probe on the track, in the order the audio meets them (into
+-- containers as it goes). Cached until the project changes.
+local order_cache = {}
+local function probes_in_order(tr)
+  local key = tostring(tr)
+  local sc = reaper.GetProjectStateChangeCount(0)
+  local c = order_cache[key]
+  if c and c.sc == sc then return c.list end
+  local list = {}
+  local function walk(caddr, depth)
+    for _, a in ipairs(level_items(tr, caddr)) do
+      if is_probe(tr, a) then list[#list + 1] = { addr = a, caddr = caddr }
+      elseif depth < 4 and (container_count(tr, a) or 0) > 0 then walk(a, depth + 1) end
+    end
+  end
+  walk(nil, 0)
+  order_cache[key] = { sc = sc, list = list }
+  return list
 end
+
+-- A probe's role: 0 pre, 1 post, 2 the comparison (Track Analyser's), 3
+-- one too many. An old probe (1.8.0 and before) keeps it in a slider; a
+-- new one is where it sits: the first probe on the track is the pre, the
+-- last the post -- as Track Analyser has always found them, so the two
+-- name a pair the same way. A lone probe is the post when it's last in
+-- the chain (its pre deleted), else the pre.
+local function probe_role(tr, addr)
+  local r = PL.legacy_role(tr, addr)
+  if r then return r end
+  local list = probes_in_order(tr)
+  if #list == 1 then
+    local n = reaper.TrackFX_GetCount(tr)
+    local one = list[1]
+    if one.addr == addr then
+      return (not one.caddr and n > 1 and one.addr == n - 1) and 1 or 0
+    end
+  end
+  if list[1] and list[1].addr == addr then return 0 end
+  if #list >= 2 and list[#list].addr == addr then
+    return PL.get(tr, addr, "compare") >= 0.5 and 2 or 1
+  end
+  return 3
+end
+TP.probe_role = probe_role
 
 -- The level holding a pre probe followed by a post probe: its container
 -- address (nil for the top), the items, and the indices of the two
@@ -483,8 +525,11 @@ function TP.probe_has_levels(tr, probe)
   local key = tostring(tr) .. ":" .. (reaper.TrackFX_GetFXGUID(tr, probe) or tostring(probe))
   local v = levels_ok[key]
   if v == nil then
-    local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_INPK, "")
-    v = (ok and nm and nm:lower():find("input peak", 1, true)) ~= nil
+    if not PL.is_legacy(tr, probe) then v = true
+    else
+      local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_INPK, "")
+      v = (ok and nm and nm:lower():find("input peak", 1, true)) ~= nil
+    end
     levels_ok[key] = v
   end
   return v
@@ -786,10 +831,10 @@ local function lift(tr, rec)
   end
   if probe then
     for p = 2, 2 + TP.MAX_TAPS * 4 - 1 do set_pin(tr, probe, false, p, 0, 0) end
-    reaper.TrackFX_SetParam(tr, probe, TP.P_TAPN, 0)
-    if TP.probe_has_levels(tr, probe) then reaper.TrackFX_SetParam(tr, probe, TP.P_NOGR, 0) end
+    PL.set(tr, probe, "tap_n", 1, 0)
+    if TP.probe_has_levels(tr, probe) then PL.set(tr, probe, "nogr", 1, 0) end
   end
-  if lv then reaper.TrackFX_SetParam(tr, lv.items[lv.pre], TP.P_ARM, 0) end
+  if lv then PL.set(tr, lv.items[lv.pre], "arm", 1, 0) end
   write_record(tr, nil)
 end
 
@@ -858,16 +903,16 @@ local function lay(tr, want, lv)
       local lo, hi = TP.bit(ch)
       set_pin(tr, probe, false, p0 + k - 1, lo, hi)
     end
-    reaper.TrackFX_SetParam(tr, probe, TP.P_LAG + i - 1, t.lag or 0)
+    PL.set(tr, probe, "lag", i, t.lag or 0)
   end
-  reaper.TrackFX_SetParam(tr, probe, TP.P_TAPN, #want.taps)
+  PL.name(tr, lv.items[lv.pre], probe)
+  PL.set(tr, probe, "tap_n", 1, #want.taps)
   if TP.probe_has_levels(tr, probe) then
-    reaper.TrackFX_SetParam(tr, probe, TP.P_NOGR, TP.nogr_mask(want.taps))
+    PL.set(tr, probe, "nogr", 1, TP.nogr_mask(want.taps))
   end
   -- New routing: whatever zeros the probe measured belonged to the old one.
-  reaper.TrackFX_SetParam(tr, probe, TP.P_GEN,
-    (math.floor(reaper.TrackFX_GetParam(tr, probe, TP.P_GEN) or 0) + 1) % 1000000)
-  reaper.TrackFX_SetParam(tr, lv.items[lv.pre], TP.P_ARM, TP.zero_on() and 1 or 0)
+  PL.set(tr, probe, "gen", 1, (math.floor(PL.get(tr, probe, "gen") or 0) + 1) % 1000000)
+  PL.set(tr, lv.items[lv.pre], "arm", 1, TP.zero_on() and 1 or 0)
   write_record(tr, want)
   return true
 end
@@ -881,31 +926,27 @@ function TP.sync(tr)
     if not want then return false end
     -- Same plugins, same places: only the latency can have moved.
     local probe = lv.items[lv.post]
+    local pre = lv.items[lv.pre]
     local changed = false
+    -- The pair named in its track's block (a new probe): every check, as
+    -- gmem starts empty with REAPER, and a track can move.
+    PL.name(tr, pre, probe)
     for i, t in ipairs(want.taps) do
-      local cur = reaper.TrackFX_GetParam(tr, probe, TP.P_LAG + i - 1)
+      local cur = PL.get(tr, probe, "lag", i)
       if math.floor(cur + 0.5) ~= t.lag then
-        reaper.TrackFX_SetParam(tr, probe, TP.P_LAG + i - 1, t.lag)
+        PL.set(tr, probe, "lag", i, t.lag)
         rec.taps[i].lag = t.lag
         changed = true
       end
     end
-    if math.floor(reaper.TrackFX_GetParam(tr, probe, TP.P_TAPN) + 0.5) ~= #want.taps then
-      reaper.TrackFX_SetParam(tr, probe, TP.P_TAPN, #want.taps)
+    if math.floor(PL.get(tr, probe, "tap_n") + 0.5) ~= #want.taps then
+      PL.set(tr, probe, "tap_n", 1, #want.taps)
       changed = true
     end
-    local mask = TP.nogr_mask(want.taps)
-    if TP.probe_has_levels(tr, probe)
-       and math.floor((reaper.TrackFX_GetParam(tr, probe, TP.P_NOGR) or 0) + 0.5) ~= mask then
-      reaper.TrackFX_SetParam(tr, probe, TP.P_NOGR, mask)
-    end
+    if TP.probe_has_levels(tr, probe) then PL.set(tr, probe, "nogr", 1, TP.nogr_mask(want.taps)) end
     -- The pre probe armed for the zero, or not, as the setting says --
     -- also arms routing laid before the zero existed.
-    local pre = lv.items[lv.pre]
-    local arm = TP.zero_on() and 1 or 0
-    if math.floor((reaper.TrackFX_GetParam(tr, pre, TP.P_ARM) or 0) + 0.5) ~= arm then
-      reaper.TrackFX_SetParam(tr, pre, TP.P_ARM, arm)
-    end
+    PL.set(tr, pre, "arm", 1, TP.zero_on() and 1 or 0)
     if changed then write_record(tr, rec) end
     return false
   end
@@ -1018,14 +1059,8 @@ function TP.insert_probes(tr)
   -- a pre probe put in front of the lone post probe moves it along one
   if have_post and not have_pre and pre and pre <= have_post then have_post = have_post + 1 end
   local post = pre and (have_post or add_probe(tr, -1))   -- -1: append
-  if pre then
-    reaper.TrackFX_SetParam(tr, pre, TP.P_ROLE, 0)
-    reaper.TrackFX_SetParam(tr, pre, 1, 0)    -- Publish: idle
-  end
-  if post then
-    reaper.TrackFX_SetParam(tr, post, TP.P_ROLE, 1)
-    reaper.TrackFX_SetParam(tr, post, 1, 0)
-  end
+  order_cache = {}
+  if pre and post then PL.name(tr, pre, post) end   -- an old probe: its role slider
   reaper.PreventUIRefresh(-1)
   reaper.Undo_EndBlock("ChannelView: add TS_TrackProbe pair", -1)
   TP.invalidate()
@@ -1038,8 +1073,8 @@ end
 -- ---------------------------------------------------------------------
 -- hidden, and kept at the ends
 -- ---------------------------------------------------------------------
--- The probes have nothing to show, so the plugin row leaves them out
--- (unless "Show the probes in the plugin row" is ticked) -- and since you
+-- The probes have nothing to show, so the plugin row always leaves them
+-- out (the "Show the probes in the plugin row" option went in 2.1.2) -- and since you
 -- can't see them, ChannelView keeps them where they belong: the pre probe
 -- first (second behind an ARA plugin), the post probe last, after any
 -- insert, move or removal. One of the pair dragged into a container comes
@@ -1051,13 +1086,8 @@ end
 -- back -- and you could never get past it. Without one, undo takes the
 -- chain back to before your insert, probes and all.
 
-TP.SHOWN_KEY = "probes_shown"
-function TP.probes_shown()
-  return reaper.GetExtState("TS_ChannelView", TP.SHOWN_KEY) == "1"
-end
-function TP.set_probes_shown(on)
-  reaper.SetExtState("TS_ChannelView", TP.SHOWN_KEY, on and "1" or "0", true)
-end
+-- Always hidden now; kept as a function so its callers read the same.
+function TP.probes_shown() return false end
 
 -- The top-level pre and post probe slots (the first of each), or nil.
 function TP.top_probes(tr)
@@ -1165,25 +1195,33 @@ function TP.probe_state(tr)
   return c.v, c.vis
 end
 
--- "Include in Visualizer Spectrum" (the probe's own slider4): TS_Visualizer
--- takes the first probe on a track with it ticked, and shows what that
--- probe hears -- the pre probe the track's input, the post probe its
--- output. "pre", "post" or nil.
+-- Which of the pair TS_Visualizer shows, "pre", "post" or nil: the pre
+-- probe the track's input, the post its output. Kept on the track
+-- (TS_CV_ProbeLink's vis_choice); an old probe kept it in its own
+-- "Include in Visualizer Spectrum" checkbox, which still counts.
 TP.P_VIS = 3
 function TP.vis_state(tr)
   local lv = tr and find_level(tr, nil)
   if not lv then return nil end
-  local function on(a) return (reaper.TrackFX_GetParam(tr, a, TP.P_VIS) or 0) >= 0.5 end
-  if on(lv.items[lv.pre]) then return "pre" end
-  if on(lv.items[lv.post]) then return "post" end
-  return nil
+  local pre, post = lv.items[lv.pre], lv.items[lv.post]
+  if PL.is_legacy(tr, pre) then
+    local function on(a) return (reaper.TrackFX_GetParam(tr, a, TP.P_VIS) or 0) >= 0.5 end
+    if on(pre) then return "pre" end
+    if on(post) then return "post" end
+    return nil
+  end
+  return PL.vis_choice(tr)
 end
 function TP.set_vis(tr, which)
   local lv = tr and find_level(tr, nil)
   if not lv then return end
+  local pre, post = lv.items[lv.pre], lv.items[lv.post]
   reaper.Undo_BeginBlock()
-  reaper.TrackFX_SetParam(tr, lv.items[lv.pre], TP.P_VIS, which == "pre" and 1 or 0)
-  reaper.TrackFX_SetParam(tr, lv.items[lv.post], TP.P_VIS, which == "post" and 1 or 0)
+  PL.set_vis_choice(tr, which)
+  if PL.is_legacy(tr, pre) then
+    reaper.TrackFX_SetParam(tr, pre, TP.P_VIS, which == "pre" and 1 or 0)
+    reaper.TrackFX_SetParam(tr, post, TP.P_VIS, which == "post" and 1 or 0)
+  end
   reaper.Undo_EndBlock(which and "ChannelView: include the track in the Visualizer"
                               or "ChannelView: leave the track out of the Visualizer", -1)
   which_cache = {}
@@ -1213,6 +1251,7 @@ function TP.remove_probes(tr)
     if is_probe(tr, i) and probe_role(tr, i) <= 1 then reaper.TrackFX_Delete(tr, i) end
   end
   reaper.PreventUIRefresh(-1)
+  PL.forget(tr)
   reaper.Undo_EndBlock("ChannelView: remove TS_TrackProbe pair", -1)
   TP.invalidate()
 end
@@ -1286,9 +1325,9 @@ function TP.levels(tr, guid)
   local i, rd = tap_for(tr, guid, "l")
   if not i or not rd.probe then return nil end
   if not TP.probe_has_levels(tr, rd.probe) then return { old = true } end
-  local function g(base) return reaper.TrackFX_GetParam(tr, rd.probe, base + i - 1) or -150 end
-  return { in_pk = g(TP.P_INPK), out_pk = g(TP.P_OUTPK),
-           in_rms = g(TP.P_INRMS), out_rms = g(TP.P_OUTRMS) }
+  local function g(f) return PL.get(tr, rd.probe, f, i) or -150 end
+  return { in_pk = g("inpk"), out_pk = g("outpk"),
+           in_rms = g("inrms"), out_rms = g("outrms") }
 end
 
 -- The measured reduction, positive dB, or nil when this plugin isn't
@@ -1296,8 +1335,7 @@ end
 function TP.reading(tr, guid)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return nil end
-  local v = reaper.TrackFX_GetParam(tr, rd.probe, TP.P_GR + i - 1)
-  return math.max(0, v or 0)
+  return math.max(0, PL.get(tr, rd.probe, "gr", i) or 0)
 end
 
 -- Whether a probe is new enough to split a multiband's bands
@@ -1309,8 +1347,11 @@ function TP.probe_has_mb(tr, probe)
   local key = tostring(tr) .. ":" .. (reaper.TrackFX_GetFXGUID(tr, probe) or tostring(probe))
   local v = mb_ok[key]
   if v == nil then
-    local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_MB, "")
-    v = (ok and nm and nm:lower():find("multiband", 1, true)) ~= nil
+    if not PL.is_legacy(tr, probe) then v = true
+    else
+      local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_MB, "")
+      v = (ok and nm and nm:lower():find("multiband", 1, true)) ~= nil
+    end
     mb_ok[key] = v
   end
   return v
@@ -1323,13 +1364,11 @@ end
 function TP.set_mb(tr, guid, xos)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe or not TP.probe_has_mb(tr, rd.probe) then return false end
-  local function put(p, v)
-    if math.abs((reaper.TrackFX_GetParam(tr, rd.probe, p) or 0) - v) > 0.5 then
-      reaper.TrackFX_SetParam(tr, rd.probe, p, v)
-    end
+  local function put(f, k, v)
+    if math.abs((PL.get(tr, rd.probe, f, k) or 0) - v) > 0.5 then PL.set(tr, rd.probe, f, k, v) end
   end
-  put(TP.P_MB, i)
-  for k = 1, 3 do put(TP.P_MBX + k - 1, xos[k] and math.floor(xos[k] + 0.5) or 0) end
+  put("mb", 1, i)
+  for k = 1, 3 do put("mbx", k, xos[k] and math.floor(xos[k] + 0.5) or 0) end
   return true
 end
 
@@ -1338,33 +1377,35 @@ end
 -- second), so two open panels don't take it in turns. Returns whether it
 -- has it.
 local fine_owner = {}
+-- (TS_TrackProbe 1.7.0+, or one without parameters)
+function TP.probe_has_fine(tr, probe)
+  if not PL.is_legacy(tr, probe) then return true end
+  local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_FINE, "")
+  return (ok and nm and nm:lower():find("third", 1, true)) ~= nil
+end
 -- Whether this plugin can be measured in third-octaves: true; "old" when
 -- it's tapped but the project still runs a probe from before 1.7.0 (a
 -- project keeps the JSFX it opened with); false when it isn't tapped.
 function TP.fine_ok(tr, guid)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return false end
-  local ok, nm = reaper.TrackFX_GetParamName(tr, rd.probe, TP.P_FINE, "")
-  return (ok and nm and nm:lower():find("third", 1, true)) and true or "old"
+  return TP.probe_has_fine(tr, rd.probe) and true or "old"
 end
 function TP.set_fine(tr, guid, polite)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return false end
-  local ok, nm = reaper.TrackFX_GetParamName(tr, rd.probe, TP.P_FINE, "")
-  if not (ok and nm and nm:lower():find("third", 1, true)) then return false end
+  if not TP.probe_has_fine(tr, rd.probe) then return false end
   local now = reaper.time_precise()
   local key = tostring(tr)
   local o = fine_owner[key]
   if o and o.guid ~= guid and now - o.t < 0.5 then return false end
   -- polite (the web bridge): only when no other tap has it, so it never
   -- takes the measurement from a window's panel
-  local cur = math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_FINE) or 0) + 0.5)
+  local cur = math.floor((PL.get(tr, rd.probe, "fine") or 0) + 0.5)
   if polite and cur ~= 0 and cur ~= i then return false end
   fine_owner[key] = { guid = guid, t = now, tr = tr, probe = rd.probe, i = i,
                       pguid = reaper.TrackFX_GetFXGUID(tr, rd.probe) }
-  if math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_FINE) or 0) + 0.5) ~= i then
-    reaper.TrackFX_SetParam(tr, rd.probe, TP.P_FINE, i)
-  end
+  if cur ~= i then PL.set(tr, rd.probe, "fine", 1, i) end
   return true
 end
 
@@ -1376,8 +1417,8 @@ function TP.fine_tidy(now)
       fine_owner[key] = nil
       if reaper.ValidatePtr(o.tr, "MediaTrack*") and o.probe
          and reaper.TrackFX_GetFXGUID(o.tr, o.probe) == o.pguid
-         and math.floor((reaper.TrackFX_GetParam(o.tr, o.probe, TP.P_FINE) or 0) + 0.5) == o.i then
-        reaper.TrackFX_SetParam(o.tr, o.probe, TP.P_FINE, 0)
+         and math.floor((PL.get(o.tr, o.probe, "fine") or 0) + 0.5) == o.i then
+        PL.set(o.tr, o.probe, "fine", 1, 0)
       end
     end
   end
@@ -1418,8 +1459,8 @@ end
 function TP.band_gr(tr, guid, k)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe or not TP.probe_has_mb(tr, rd.probe) then return nil end
-  if math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MB) or 0) + 0.5) ~= i then return nil end
-  return math.max(0, reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MBGR + k - 1) or 0)
+  if math.floor((PL.get(tr, rd.probe, "mb") or 0) + 0.5) ~= i then return nil end
+  return math.max(0, PL.get(tr, rd.probe, "mbgr", k) or 0)
 end
 
 -- A multiband's bands, where they are: { nb, own (each band has its own
@@ -1530,8 +1571,11 @@ function TP.probe_has_mbl(tr, probe)
   local key = tostring(tr) .. ":" .. (reaper.TrackFX_GetFXGUID(tr, probe) or tostring(probe))
   local v = mbl_ok[key]
   if v == nil then
-    local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_MBL, "")
-    v = (ok and nm and nm:lower():find("input level", 1, true)) ~= nil
+    if not PL.is_legacy(tr, probe) then v = true
+    else
+      local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_MBL, "")
+      v = (ok and nm and nm:lower():find("input level", 1, true)) ~= nil
+    end
     mbl_ok[key] = v
   end
   return v
@@ -1547,8 +1591,8 @@ function TP.mb_level(tr, guid, plan, k)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe or not TP.probe_has_mb(tr, rd.probe) then return nil end
   if not TP.probe_has_mbl(tr, rd.probe) then return "old" end
-  if math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MB) or 0) + 0.5) ~= i then return nil end
-  local v = reaper.TrackFX_GetParam(tr, rd.probe, TP.P_MBL + j - 1)
+  if math.floor((PL.get(tr, rd.probe, "mb") or 0) + 0.5) ~= i then return nil end
+  local v = PL.get(tr, rd.probe, "mbl", j)
   if not v or v <= -149 then return nil end
   return v
 end
@@ -1560,26 +1604,25 @@ end
 function TP.cal_status(tr, guid)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return nil end
-  return math.floor((reaper.TrackFX_GetParam(tr, rd.probe, TP.P_CAL + i - 1) or 0) + 0.5)
+  return math.floor((PL.get(tr, rd.probe, "cal", i) or 0) + 0.5)
 end
 
 -- One line on it, for tooltips.
 function TP.cal_text(st)
   if not TP.zero_on() then
-    return "Zero learnt from the music (measuring it while stopped is off in\n" ..
-           "Setup), so a compressor that never lets go reads low."
+    return "Zero learnt from the music (stop measuring off in Setup)\n" ..
+           "A compressor that never lets go reads low."
   end
   if st == 1 then return "Zero measured at the last stop."
   elseif st == 2 then
-    return "Zero measured at the last stop, but the plugin was already\n" ..
-           "working on the quiet test signal, so it may read a little low."
+    return "Zero measured at the last stop; plugin was already working\n" ..
+           "on the test signal, so may read a little low."
   elseif st == 3 then
-    return "Zero measured at the last stop; the plugin has been touched since.\n" ..
-           "If that was make-up or output gain, stop playback to measure again."
+    return "Zero measured at the last stop; plugin touched since.\n" ..
+           "Changed make-up or output gain? Stop to re-measure."
   end
-  return "Zero not measured yet: it's measured each time playback stops\n" ..
-         "(needs REAPER's \"Run FX when stopped\"). Until then it's learnt\n" ..
-         "from the music, so a compressor that never lets go reads low."
+  return "Zero not measured yet: measured at each stop\n" ..
+         "(needs \"Run FX when stopped\"). Until then it may read low."
 end
 
 -- Whether the zero is measured while stopped. On unless turned off.
@@ -1637,14 +1680,17 @@ end
 -- A measured plugin was touched: its make-up or EQ may have moved, so the
 -- probe drops what it learnt from the music, and marks a measured zero as
 -- touched-since (it's measured again at the next stop).
+--
+-- (A 1.8.0 probe took this as a parameter change, which made "Tap 1
+-- relearn" REAPER's last touched parameter. Since 2.0.0 it goes through
+-- gmem and REAPER never hears of it.)
+local last_touch = nil
 function TP.touched(tr, guid)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return end
-  local p = TP.P_RST + i - 1
-  reaper.TrackFX_SetParam(tr, rd.probe, p, ((reaper.TrackFX_GetParam(tr, rd.probe, p) or 0) + 1) % 1000000)
+  PL.set(tr, rd.probe, "rst", i, (math.floor(PL.get(tr, rd.probe, "rst", i) or 0) + 1) % 1000000)
 end
 
-local last_touch = nil
 local function poll_touched()
   local ok, trn, fxn, parm = reaper.GetLastTouchedFX()
   if not ok then return end
@@ -1727,6 +1773,15 @@ function TP.update(now)
     end
   end
   poll_touched()
+  -- tracks that moved: their names follow (TS_CV_ProbeLink), and their
+  -- taps' settings are written again where they are now
+  local moved = PL.tick()
+  for _, m in ipairs(moved or {}) do
+    if reaper.ValidatePtr(m.tr, "MediaTrack*") then
+      next_at[tostring(m.tr)] = now + TP.CHECK_EVERY
+      TP.sync(m.tr)
+    end
+  end
   local n = reaper.CountTracks(0)
   if n == 0 then return end
   rr = rr % n
@@ -1745,6 +1800,7 @@ end
 function TP.invalidate()
   next_at, readers, native, sources = {}, {}, {}, {}
   levels_ok = {}
+  order_cache = {}
   has_cache = {}
   which_cache = {}
   any_until = 0

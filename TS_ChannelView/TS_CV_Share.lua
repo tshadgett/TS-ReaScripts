@@ -162,8 +162,8 @@ function LS.draw(ctx, busy)
         if ch then e.pick = v end
         ImGui.EndDisabled(ctx)
         if e.status == "locked" and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-          ImGui.SetTooltip(ctx, "Your layout for this plugin is locked. Unlock it with the padlock\n" ..
-            "in the panel's foot to import this one over it.")
+          ImGui.SetTooltip(ctx, "Your layout is locked\n" ..
+            "Unlock it (padlock, panel foot) to import over it")
         end
         ImGui.SameLine(ctx)
         local note = ("%d control%s"):format(e.controls, e.controls == 1 and "" or "s")

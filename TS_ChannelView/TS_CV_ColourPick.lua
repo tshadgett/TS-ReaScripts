@@ -331,7 +331,7 @@ function CP.any_colour(ctx, s, id)
     ImGui.SameLine(ctx, 0, 14)
     local mine = drop.owner == s
     if W.icon_button(ctx, "##drop" .. id, "dropper", 24, mine,
-        mine and "Stop (Esc)" or "Eyedropper: take a colour from anywhere on screen") then
+        mine and "Stop (Esc)" or "Eyedropper: pick from the screen") then
       if mine then stop()
       else drop.owner, drop.wait_up, drop.rgb = s, true, nil end
     end
@@ -348,8 +348,8 @@ function CP.any_colour(ctx, s, id)
     ImGui.SameLine(ctx, 0, 14)
     local mac = os_name():match("^OSX") or os_name():match("^macOS")
     if W.icon_button(ctx, "##drop" .. id, "dropper", 24, false,
-        mac and "Eyedropper: opens the Colours panel -- click its magnifier,\nthen anywhere on screen"
-        or "Pick a colour with REAPER's colour picker") then
+        mac and "Eyedropper: opens the Colours panel\nClick its magnifier, then the screen"
+        or "REAPER's colour picker") then
       local ok, rv, native = pcall(reaper.GR_SelectColor, reaper.GetMainHwnd())
       if ok and rv and rv ~= 0 and native then
         local r, g, b = reaper.ColorFromNative(native)

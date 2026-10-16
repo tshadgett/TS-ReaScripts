@@ -1,11 +1,16 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.1.1
+-- @version 2.2.0
 -- @changelog
---  Fixes: an EQ layout whose band had its Q learned on one side only
---  stopped ChannelView when the band was turned the other way; a
---  ReaDelay tap turned up past 0 dB drew its dot off the canvas, out of
---  reach (the canvas now makes room up to +6 dB).
+--  Reopen projects after updating (new probe and Modulators plugin).
+--  MIDI learn bar: last touched parameter + last moved MIDI control (CC,
+--  note, program change, pitch bend), one click to link, REAPER's own learn.
+--  Modulators moved by macros and other modulators; button and dropdown
+--  macros switch LFO shape, sync and more. Header: one menu, web companion
+--  status strip with start/stop, red glow while the FX chain is bypassed.
+--  TS_TrackProbe 2.0.0 has no parameters (no more "last touched" hijack).
+--  Track-colour backgrounds tint the controls; TDR Slick EQ boosts and
+--  switched Q; smoother modulator trace; shorter tooltips.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -33,6 +38,8 @@
 --  [nomain] TS_CV_RolePanel.lua
 --  [nomain] TS_CV_ModRack.lua
 --  [nomain] TS_CV_Busy.lua
+--  [nomain] TS_CV_MidiLearn.lua
+--  [nomain] TS_CV_ProbeLink.lua
 --  [nomain] TS_CV_Chains.lua
 --  [nomain] TS_CV_ColourPick.lua
 --  [nomain] TS_CV_Channel.lua
@@ -177,12 +184,13 @@ local RQ = require("TS_CV_ReaEQ")
 local RC = require("TS_CV_ReaComp")
 local RCP = require("TS_CV_CompPanel")
 local BZ = require("TS_CV_Busy")
+local ML = require("TS_CV_MidiLearn")
 local MD = require("TS_CV_Mod")
 local MR = require("TS_CV_ModRack")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
-CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui)
+CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui); ML.attach(ImGui)
 -- a learning track left behind by a ChannelView stopped mid-learn
 pcall(function() require("TS_CV_Learn").sweep() end)
 
@@ -592,7 +600,7 @@ local function custom_rows(id, now, width, pick_key, title, from)
     ImGui.EndMenu(ctx)
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) and #CP.recent == 0 then
-    ImGui.SetTooltip(ctx, "The colours of your own you give faceplates, backgrounds\nand sections are kept here until ChannelView closes.")
+    ImGui.SetTooltip(ctx, "Your custom colours appear here until ChannelView closes.")
   end
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
@@ -607,7 +615,7 @@ local function custom_rows(id, now, width, pick_key, title, from)
     })
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Any colour: from a palette, the picker, or anywhere\non screen with the eyedropper.")
+    ImGui.SetTooltip(ctx, "Pick any colour: palette, picker or eyedropper.")
   end
   -- the [+], where the swatch would be
   local _, th = ImGui.CalcTextSize(ctx, "Ag")
@@ -679,7 +687,7 @@ local function plate_menu(fx, key, layout)
       M.set(key, l); M.save()
     end
     if pl.key == "theme" and ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "The theme's own panel colour, following Hue/Tint.")
+      ImGui.SetTooltip(ctx, "Theme panel colour, follows Hue/Tint.")
     end
     local _, th = ImGui.CalcTextSize(ctx, "Ag")
     local sy = y + (th - SWATCH_H) * 0.5
@@ -710,8 +718,8 @@ local function plate_menu(fx, key, layout)
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, plate and "A fine brushed grain across this faceplate."
-      or "Choose a faceplate first: the theme's panel has no grain.")
+    ImGui.SetTooltip(ctx, plate and "Brushed grain on this faceplate."
+      or "Choose a faceplate first.")
   end
   -- and/or a metallic flake, like metallic paint
   local mt = M.metal(layout, plate)
@@ -721,7 +729,7 @@ local function plate_menu(fx, key, layout)
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, plate and "A fine metallic flake and sheen across this faceplate,\nlike metallic paint. Goes with the brushed finish or on its own."
+    ImGui.SetTooltip(ctx, plate and "Metallic flake on this faceplate.\nCombines with brushed."
       or "Choose a faceplate first.")
   end
 end
@@ -813,8 +821,8 @@ local function toggle_colour_menu(fx, key, idx, c)
         M.set(key, l); M.save()
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, (k == "small") and "Half height: all button, its name on it when the\nstate has no name of its own. Two stack in one cell."
-          or "The ordinary size.")
+        ImGui.SetTooltip(ctx, (k == "small") and "Half height, name on the button.\nTwo stack in one cell."
+          or "Normal size.")
       end
     end
   end
@@ -845,7 +853,7 @@ local function brush_tick(fx, key, idx, c, kind, pl, id)
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, kind and "A fine brushed grain across it."
+    ImGui.SetTooltip(ctx, kind and "Brushed grain."
       or "Choose a background first.")
   end
   -- and/or a metallic flake (Metal<n>)
@@ -858,7 +866,7 @@ local function brush_tick(fx, key, idx, c, kind, pl, id)
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, kind and "A fine metallic flake across it, like metallic paint."
+    ImGui.SetTooltip(ctx, kind and "Metallic flake."
       or "Choose a background first.")
   end
 end
@@ -876,7 +884,7 @@ local function back_menu(fx, key, idx, c)
   end
   ImGui.TextDisabled(ctx, "Behind this control")
   if ImGui.Selectable(ctx, "None##back_none", now == "none", KEEP_OPEN, 170, 0) then set(nil) end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its section's background (or the panel's) shows.") end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "No background of its own.") end
   if ImGui.Selectable(ctx, "Inset##back_inset", now == "inset", KEEP_OPEN, 170, 0) then set("inset") end
   for _, pl in ipairs(C.PLATES) do
     if pl.bg then
@@ -925,7 +933,7 @@ local function section_menu(fx, key, idx, c)
   if ImGui.Selectable(ctx, "None##sec_none", now == "none", KEEP_OPEN, 170, 0) then set(nil, nil) end
   if ImGui.Selectable(ctx, "Inset##sec_inset", now == "inset", KEEP_OPEN, 170, 0) then set("inset", nil) end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "A recessed panel behind them, up to the next divider.")
+    ImGui.SetTooltip(ctx, "Recessed panel up to the next divider.")
   end
   ImGui.Spacing(ctx)
   ImGui.TextDisabled(ctx, "On a faceplate of their own")
@@ -1081,8 +1089,7 @@ local function style_menu(fx, key, idx, c)
     row("Thickness", { { false, "Full" }, { true, "Half" } }, c.thin or false,
       function(v) set({ thin = v }) end)
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Half: half a column wide (or half a row high, across) --\n" ..
-        "for a row of faders side by side, a graphic EQ's bands say.")
+      ImGui.SetTooltip(ctx, "Half: half-width, for faders side by side.")
     end
   end
 
@@ -1129,9 +1136,9 @@ local function style_menu(fx, key, idx, c)
         set({ size = (k ~= "medium") and k or false })
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, (k == "small") and "Half height: a small dial under its name in small type, its value\nin the tooltip. Two stack in the space of one ordinary knob."
-          or (k == "large") and "Half again as big, name and value kept.\nDrawn ordinary size in a panel only one row tall."
-          or "The ordinary size.")
+        ImGui.SetTooltip(ctx, (k == "small") and "Half height, value in the tooltip.\nTwo stack in one cell."
+          or (k == "large") and "One and a half times the size.\nNormal size in a one-row panel."
+          or "Normal size.")
       end
     end
 
@@ -1144,8 +1151,7 @@ local function style_menu(fx, key, idx, c)
     if rv then set({ scale_ink = on and "cap" or false }) end
     ImGui.EndDisabled(ctx)
     if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "The numbers round the dial in the knob's colour rather than\n" ..
-        "the faceplate's. The numbers themselves are under Values.")
+      ImGui.SetTooltip(ctx, "Dial numbers in the knob's colour, not the faceplate's.")
     end
   end
 
@@ -1201,7 +1207,7 @@ local function parallel_menu(addr, cur, index, what)
   end
   if first and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
     ImGui.SetTooltip(ctx, "First in its " .. ((addr or 0) >= T.CONTAINER_FLAG and "container" or "chain") ..
-      " \u{2014} there's nothing before it to route beside.")
+      ": nothing before it to route beside.")
   end
 end
 
@@ -1301,7 +1307,7 @@ box_menu_items = function(node)
     ImGui.CloseCurrentPopup(ctx)
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "A copy of the container and everything in it, right after it.")
+    ImGui.SetTooltip(ctx, "Copy the container and its contents, right after it.")
   end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Open the container's window") then
@@ -1324,7 +1330,7 @@ box_menu_items = function(node)
     ImGui.CloseCurrentPopup(ctx)
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Puts what's inside back in the container's place, in order,\nand removes the empty container.")
+    ImGui.SetTooltip(ctx, "Move the contents out and remove the container.")
   end
   if ImGui.MenuItem(ctx, "Remove container and everything in it") then
     reaper.Undo_BeginBlock()
@@ -1364,8 +1370,7 @@ local function panel_menu()
   local ren_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
   app.fxren_buf = ren_v
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Rename this instance -- REAPER's own name for it, as its FX\n" ..
-      "chain shows. The layout is still the plugin's. Clear it to go back.")
+    ImGui.SetTooltip(ctx, "Rename this instance (layout unchanged).\nClear to restore the plugin's name.")
   end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Rename##fxren") or ren_enter then
@@ -1384,7 +1389,7 @@ local function panel_menu()
       local ch, nv = ImGui.SliderDouble(ctx, "Wet##fxwet", wv * 100, 0, 100, "%.0f%%")
       if ch then reaper.TrackFX_SetParam(app.track, fx.addr, wet, nv / 100) end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "REAPER's own wet/dry mix for this plugin.\nCtrl+click to type a value.")
+        ImGui.SetTooltip(ctx, "Wet/dry mix.\nCtrl+click: type a value.")
       end
     end
   end
@@ -1394,7 +1399,7 @@ local function panel_menu()
   local locked = M.locked(layout) ~= nil
   local function locked_tip()
     if locked and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "The layout is locked: unlock it with the padlock\nat the left of the panel's foot.")
+      ImGui.SetTooltip(ctx, "Layout locked: unlock with the padlock\nin the panel's foot.")
     end
   end
   ------------------------------------------------------------- LAYOUT
@@ -1437,7 +1442,7 @@ local function panel_menu()
         St.set_variant(fx.guid, St.OWN)
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "The plugin's own layout.")
+        ImGui.SetTooltip(ctx, "The plugin's standard layout.")
       end
       for _, nm in ipairs(M.variants(base)) do
         if ImGui.MenuItem(ctx, nm .. mark(nm) .. "##var", nil, cur == nm) then St.set_variant(fx.guid, nm) end
@@ -1448,8 +1453,7 @@ local function panel_menu()
           M.set_default_variant(base, cur); M.save()
         end
         if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "New instances of this plugin, and any not set to another\n" ..
-            "layout, show this one.")
+          ImGui.SetTooltip(ctx, "Used by new instances and any not set to another layout.")
         end
       end
       ImGui.Separator(ctx)
@@ -1469,14 +1473,12 @@ local function panel_menu()
       if not ok then ImGui.BeginDisabled(ctx, true) end
       if ImGui.Button(ctx, "Copy to new layout") then make(false) end
       if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-        ImGui.SetTooltip(ctx, "A copy of this layout under the name above, for this instance.\n" ..
-          "Pick it on any other instance from this menu. (Enter does the same.)")
+        ImGui.SetTooltip(ctx, "Copy this layout under the name above.\nEnter does the same.")
       end
       ImGui.SameLine(ctx)
       if ImGui.Button(ctx, "New empty layout") then make(true) end
       if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-        ImGui.SetTooltip(ctx, "A layout with no controls yet, under the name above, for this\n" ..
-          "instance. Your names for its parameters come with it.")
+        ImGui.SetTooltip(ctx, "Empty layout under the name above.\nParameter names carry over.")
       end
       if not ok then ImGui.EndDisabled(ctx) end
       -- an EQ or compressor canvas for any plugin (TS_CV_CanvasSetup):
@@ -1563,9 +1565,7 @@ local function panel_menu()
       end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
-          "This plugin doesn't report gain reduction to REAPER. Measure it\n" ..
-          "instead, from the audio going in and coming out -- every instance\n" ..
-          "between a TS_TrackProbe pair. An estimate: see the meter's tooltip.")
+          "Estimate gain reduction from audio in vs out.\nNeeds a TS_TrackProbe pair on the track.")
       end
     end
     -- Input and output meters: any plugin, measured by the same probe pair.
@@ -1587,9 +1587,7 @@ local function panel_menu()
       end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
-          "Meters for what goes into this plugin and what comes out, and the\n" ..
-          "change in level between them -- every instance between a\n" ..
-          "TS_TrackProbe pair.")
+          "Input, output and level-change meters.\nNeeds a TS_TrackProbe pair on the track.")
       end
     end
     ImGui.EndMenu(ctx)
@@ -1652,8 +1650,8 @@ local function panel_menu()
       T.set_offline(app.track, fx.addr, not off, U.fx_label(fx))
     end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, off and "Load the plugin again, as it was."
-        or "Unload the plugin: unlike bypass, it frees its CPU and memory.\nIts settings stay; bring it online to use it again.")
+      ImGui.SetTooltip(ctx, off and "Reload the plugin, as it was."
+        or "Unload the plugin to free CPU and memory.\nSettings are kept.")
     end
   end
   do
@@ -1663,9 +1661,7 @@ local function panel_menu()
         T.pass_sidechain(app.track, fx)
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "This plugin has sidechain inputs, but the container it's in only\n" ..
-          "passes two channels in, so a sidechain on the track's 3/4 never\n" ..
-          "reaches it. This widens the container to pass 3/4 in as well.")
+        ImGui.SetTooltip(ctx, "Widen the container to pass channels 3/4,\nso the track's sidechain reaches this plugin.")
       end
     end
   end
@@ -1687,7 +1683,7 @@ local function panel_menu()
     rescan(true)
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "A copy, settings and all, in the slot right after it.")
+    ImGui.SetTooltip(ctx, "Copy with settings, right after it.")
   end
   if ImGui.MenuItem(ctx, "Insert plugin before\u{2026}") then
     B.open_menu(insert_target(fx, false))
@@ -1784,8 +1780,7 @@ local function look_items(fx, key, layout, idx, c, locked)
     app.style_clip = { look = M.look_of(c) }
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Its style, colour, size (a fader's shape), scale, background\n" ..
-      "and finish, to paste onto other controls, on any panel.")
+    ImGui.SetTooltip(ctx, "Copy its whole look to paste onto other controls.")
   end
   if locked then return end
   local s = app.style_clip and app.style_clip.look
@@ -1872,9 +1867,7 @@ local function param_mod_item(fx, c)
       reaper.TrackFX_SetNamedConfigParm(app.track, fx.addr, pre .. "visible", "1")
     end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "REAPER's Parameter Modulation / Link window for this\n" ..
-        "parameter: LFO, audio control signal, MIDI or parameter link.\n" ..
-        "Ticked while its modulation is switched on.")
+      ImGui.SetTooltip(ctx, "Open REAPER's modulation / link window for this parameter.\nTicked while modulation is on.")
     end
   end
 end
@@ -1927,11 +1920,11 @@ local function link_items(fx, c, param, axis)
       ImGui.SetNextItemWidth(ctx, 170)
       local ca, na = ImGui.SliderDouble(ctx, "At 0%##modfrom" .. tag, a * 100, 0, 100, "%.0f%%")
       if ca then MD.set_range(app.track, l, na / 100, b) end
-      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Where the control sits with the macro at 0%.\nCtrl+click to type a value.") end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Control position at macro 0%.\nCtrl+click: type a value.") end
       ImGui.SetNextItemWidth(ctx, 170)
       local cb, nb = ImGui.SliderDouble(ctx, "At 100%##modto" .. tag, b * 100, 0, 100, "%.0f%%")
       if cb then MD.set_range(app.track, l, a, nb / 100) end
-      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Where it sits with the macro at 100%.\nCtrl+click to type a value.") end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Control position at macro 100%.\nCtrl+click: type a value.") end
       if ImGui.MenuItem(ctx, "Swap the ends" .. tag) then MD.set_range(app.track, l, b, a) end
       if ImGui.MenuItem(ctx, "Whole range" .. tag) then MD.set_range(app.track, l, 0, 1) end
       if ImGui.MenuItem(ctx, "Remove the link" .. tag) then MD.unlink(app.track, l) end
@@ -1940,7 +1933,7 @@ local function link_items(fx, c, param, axis)
       local depth = math.abs(l.scale) * 100
       local ch, nv = ImGui.SliderDouble(ctx, "Depth##moddepth" .. tag, depth, 0, 100, "%.0f%%")
       if ch then MD.set_depth(app.track, l, (l.scale < 0 and -1 or 1) * nv / 100) end
-      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "How far the modulator moves it.\nCtrl+click to type a value.") end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Modulation amount.\nCtrl+click: type a value.") end
       local inv = l.scale < 0
       local ich = ImGui.Checkbox(ctx, "Invert##modinv" .. tag, inv)
       if ich then MD.invert(app.track, l) end
@@ -1949,7 +1942,7 @@ local function link_items(fx, c, param, axis)
       local bch = ImGui.Checkbox(ctx, "Bipolar##modbi" .. tag, bi)
       if bch then MD.set_bipolar(app.track, l, not bi) end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "On: it swings both ways around where the control is set.\nOff: only one way from it.")
+        ImGui.SetTooltip(ctx, "Swing both ways around the set position.")
       end
       if ImGui.MenuItem(ctx, "Remove modulation" .. tag) then MD.unlink(app.track, l) end
     end
@@ -2070,17 +2063,15 @@ local function name_menu(fx, key, layout, idx, c)
     M.set(key, l); M.save()
     ImGui.CloseCurrentPopup(ctx)
   end
-  tip("A name for this one control, over the alias -- for a cramped\n" ..
-      "layout. Clear it to show the alias again.")
+  tip("Name for this slot only, over the alias.\nClear to show the alias.")
   if ImGui.MenuItem(ctx, "Live name", nil, (c.live or layout.live) and true or false, not layout.live) then
     local l = materialise(fx)
     local lc = l.controls[idx]
     if lc then lc.live = (not c.live) or nil end
     M.set(key, l); M.save()
   end
-  tip(layout.live and "On for every control: Live parameter names is on for this layout."
-    or "Show whatever the plugin calls this parameter right now, instead\n" ..
-       "of the label or alias -- for plugins that rename their parameters.")
+  tip(layout.live and "On for the whole layout (Live parameter names)."
+    or "Show the plugin's current name for this parameter.")
 
   -- A button's two states can have names of their own, for plugins whose
   -- switches read "0.0"/"1.0" or worse. Hints are what the plugin says.
@@ -2111,8 +2102,7 @@ local function name_menu(fx, key, layout, idx, c)
       M.save()
       ImGui.CloseCurrentPopup(ctx)
     end
-    tip("Off, then on. Leave one empty to keep the plugin's own text;\n" ..
-        "clear both to go back to it entirely.")
+    tip("Off, then on. Leave empty to keep the plugin's text.")
   end
 end
 
@@ -2163,8 +2153,8 @@ local function values_menu(fx, key, layout, idx, c)
       end
       if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
         ImGui.SetTooltip(ctx, small and "A small knob has no room for numbers."
-          or (o[1] == "values") and "The values it reads as (below), units left off, thousands as k.\nA medium knob with numbers shows its value in the tooltip."
-          or (o[1] == "ten") and "0 to 10, whatever it reads as."
+          or (o[1] == "values") and "Its values, without units (thousands as k).\nMedium knobs then show the value in the tooltip."
+          or (o[1] == "ten") and "0 to 10."
           or "No numbers.")
       end
     end
@@ -2178,8 +2168,7 @@ local function values_menu(fx, key, layout, idx, c)
   local want = typed()
   if ImGui.MenuItem(ctx, "Custom range", nil, rg ~= nil, want ~= nil) then store(want) end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, "Your own range for it, below, for a plugin that won't say what\n" ..
-      "its values are -- it reads as that everywhere.")
+    ImGui.SetTooltip(ctx, "Your own range (below), for plugins that don't report values.")
   end
   ImGui.Separator(ctx)
   ImGui.AlignTextToFramePadding(ctx)
@@ -2264,8 +2253,7 @@ local function show_when_menu(fx, key, layout, idx, c)
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Another rule\u{2026}") then E.open(app.track, fx, key, layout, idx) end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Any parameter, and is not / above / below / between:\n" ..
-      "Edit parameters, opened at this control.")
+    ImGui.SetTooltip(ctx, "Other conditions (is not / above / below / between)\nin Edit parameters.")
   end
 end
 
@@ -2287,6 +2275,18 @@ local function automate_items(fx, c)
   ImGui.SeparatorText(ctx, "Automate")
   mod_items(fx, c)
   lane_items(fx, c)
+  -- the MIDI learn bar, with this control's parameter in it
+  local two = M.has_second(c) and c.param2 and c.param2 >= 0
+  local a1, a2 = (c.type == "xy") and "X" or "ring", (c.type == "xy") and "Y" or "inner knob"
+  if ImGui.MenuItem(ctx, two and ("MIDI learn (" .. a1 .. ")\u{2026}") or "MIDI learn\u{2026}") then
+    ML.open_for(app.track, fx.guid, fx.addr, c.param)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Link to a MIDI control via the MIDI learn bar.")
+  end
+  if two and ImGui.MenuItem(ctx, "MIDI learn (" .. a2 .. ")\u{2026}") then
+    ML.open_for(app.track, fx.guid, fx.addr, c.param2)
+  end
   param_mod_item(fx, c)
 end
 
@@ -2394,8 +2394,8 @@ local function control_menu()
             M.set(key, l); M.save()
           end
           if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-            ImGui.SetTooltip(ctx, ok and ("One button per choice (%d), the current one lit."):format(n)
-              or ("Only for a parameter with 2 to %d choices."):format(C.BUTTONS_MAX))
+            ImGui.SetTooltip(ctx, ok and ("One button per choice (%d)."):format(n)
+              or ("Needs 2 to %d choices."):format(C.BUTTONS_MAX))
           end
         end
       end
@@ -2441,8 +2441,7 @@ local function control_menu()
     if ImGui.MenuItem(ctx, "Reverse " .. b, nil, c.invert2 and true or false) then flip("invert2") end
   end
   if ImGui.IsItemHovered(ctx) and (c.type ~= "combo" and c.type ~= "fader") then
-    ImGui.SetTooltip(ctx, "Turn it the other way: what the plugin calls minimum sits\n" ..
-      "at the top. The plugin still sees its own value.")
+    ImGui.SetTooltip(ctx, "Flip the direction on screen only.")
   end
 
   if ImGui.BeginMenu(ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then
@@ -2476,8 +2475,7 @@ local function control_menu()
     ImGui.EndMenu(ctx)
   end
   if not div_idx and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, "A section starts at a divider: Arrange > Insert before > Divider\n" ..
-      "on the first control of the group.")
+    ImGui.SetTooltip(ctx, "Needs a divider first:\nArrange > Insert before > Divider.")
   end
   if ImGui.BeginMenu(ctx, "Copy / paste style") then
     look_items(fx, key, layout, idx, c, false)
@@ -2584,8 +2582,8 @@ local function view_toggle(ctx, mid_y)
   end
   if W.icon_button(ctx, "viewtog", to_mixer and "mixer" or "channel",
       C.ICON_SIZE, false,
-      to_mixer and "Mixer view \u{2014} every track's channel"
-                or "Channel view \u{2014} this track's plugins") then
+      to_mixer and "Mixer view"
+                or "Channel view") then
     set_view(to_mixer)
   end
 end
@@ -2598,7 +2596,7 @@ local function fx_bypass_button(ctx, mid_y)
     ImGui.SetCursorScreenPos(ctx, cx, mid_y - C.ICON_SIZE * 0.5)
   end
   if W.icon_button(ctx, "fxen", "power", C.ICON_SIZE, on,
-      on and "FX chain bypassed \u{2014} click to enable"
+      on and "FX chain bypassed. Click: enable"
           or "Bypass the whole FX chain",
       C.COL.bypass_on) then
     reaper.Undo_BeginBlock()
@@ -2737,15 +2735,6 @@ local function probes_menu(state, vis)
     opt("Not included", nil)
     opt("Before the chain", "pre", "pre probe")
     opt("After the chain", "post", "post probe")
-    ImGui.Separator(ctx)
-    if ImGui.MenuItem(ctx, "Open the pre probe") then
-      local a = TP.probe_addr(app.track, "pre")
-      if a then reaper.TrackFX_Show(app.track, a, 3) end
-    end
-    if ImGui.MenuItem(ctx, "Open the post probe") then
-      local a = TP.probe_addr(app.track, "post")
-      if a then reaper.TrackFX_Show(app.track, a, 3) end
-    end
   end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Remove the probes\u{2026}") then
@@ -2766,161 +2755,349 @@ local function probes_menu(state, vis)
       rescan(true)
     end
   end
-  local shown = TP.probes_shown()
-  if ImGui.MenuItem(ctx, "Show the probes in the plugin row", nil, shown) then
-    TP.set_probes_shown(not shown)
-    app.full_hash = nil
-    rescan(true)
-  end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "While they're hidden, ChannelView keeps them at the\n" ..
-                          "start and end of the chain. Shown, they stay where you put them.")
-  end
   ImGui.EndPopup(ctx)
 end
 
--- The web companion's tablet, in the header while there's anything to
--- say: dim while the bridge runs with no page open, lit and filled in
--- while a page is connected, amber when a page is open but the bridge isn't running (a
--- click starts it). Hidden otherwise. See TS_CV_WebLink.
+-- The web companion's state, polled four times a second: running, and
+-- how many pages are connected (TS_CV_WebLink).
 local weblink = WL.new()
 local weblink_at = 0
-local function web_indicator(ctx, x, mid_y)
+local function web_state()
   local now = reaper.time_precise()
   if now - weblink_at > 0.25 then
     weblink_at = now
     WL.update(weblink, now, reaper.GetExtState("TS_CV_WEB", "alive"),
                             reaper.GetExtState("TS_CV_WEB", "seen"))
   end
-  local running, pages = WL.state(weblink, now)
-  if not running and pages == 0 then return false end
-  local ink, tip
-  if not running then
-    ink, tip = C.COL.warn, "A web page is open, but the web companion isn't running.\nClick to start it."
+  return WL.state(weblink, now)
+end
+
+-- Its colour, how strongly to show it, and what it means: green with a
+-- page connected, a fainter green running with none, amber with a page
+-- open but the companion not running. nil when there's nothing to say.
+local WEB_GREEN = 0x3fb55aff
+local function web_look()
+  local running, pages = web_state()
+  if running and pages > 0 then
+    return WEB_GREEN, 1.0, pages == 1 and "Web companion: 1 page connected"
+                             or ("Web companion: %d pages connected"):format(pages)
+  elseif running then
+    return WEB_GREEN, 0.5, "Web companion running, no page connected"
   elseif pages > 0 then
-    ink = C.COL.accent
-    tip = pages == 1 and "Web companion: a page is connected"
-                      or ("Web companion: %d pages connected"):format(pages)
-  else
-    tip = "Web companion running \u{2014} no page connected"
+    return C.COL.warn or 0xe0a040ff, 1.0,
+      "Web page open, but the companion isn't running.\nStart it: \u{2630} \u{25B8} Web companion."
   end
-  ImGui.SetCursorScreenPos(ctx, x, mid_y - C.ICON_SIZE * 0.5)
-  if W.icon_button(ctx, "weblink", (running and pages > 0) and "tablet_on" or "tablet",
-                   C.ICON_SIZE, false, tip, nil, ink)
-     and not running then
+  return nil
+end
+
+-- A strip of that colour along the top of the header, fading down into
+-- it, in place of an icon: it says the web companion is there without
+-- taking a button's room. Hovering its top edge says what it means.
+local function web_strip(x0, y0, w)
+  local col, k, tip = web_look()
+  if not col then return end
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local function a(alpha) return (col & 0xffffff00) | math.floor(alpha * 255 * k + 0.5) end
+  local solid = k >= 1 and 3 or 2
+  ImGui.DrawList_AddRectFilled(dl, x0, y0, x0 + w, y0 + solid, a(1.0))
+  ImGui.DrawList_AddRectFilledMultiColor(dl, x0, y0 + solid, x0 + w, y0 + solid + 8,
+    a(0.30), a(0.30), a(0.0), a(0.0))
+  local mx, my = ImGui.GetMousePos(ctx)
+  if my >= y0 and my <= y0 + 5 and mx >= x0 and mx <= x0 + w
+     and ImGui.IsWindowHovered(ctx) and not ImGui.IsAnyItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, tip)
+  end
+end
+
+-- ☰ › Web companion: what it's doing, start or stop, and starting it with
+-- REAPER.
+local function web_menu()
+  local running, pages = web_state()
+  local col = web_look()
+  local status = running and (pages > 0 and (pages == 1 and "Running \u{00B7} a page connected"
+                                             or ("Running \u{00B7} %d pages connected"):format(pages))
+                              or "Running \u{00B7} no page connected")
+                 or (pages > 0 and "Not running \u{00B7} a page is waiting for it")
+                 or "Not running"
+  ImGui.TextColored(ctx, col or C.COL.header_dim, status)
+  ImGui.Separator(ctx)
+  if running then
+    if ImGui.MenuItem(ctx, "Stop the web companion") then
+      -- it reads this on its next pass and closes (TS_ChannelView_Web.lua)
+      reaper.SetExtState("TS_CV_WEB", "quit", "1", false)
+    end
+  elseif ImGui.MenuItem(ctx, "Start the web companion") then
+    reaper.DeleteExtState("TS_CV_WEB", "quit", false)
     if not SU.web(script_dir).start() then
       reaper.MB("Couldn't find TS_ChannelView_Web.lua in the Action List.", "ChannelView", 0)
     end
   end
-  return true
+  -- The web companion at startup too: the same fenced block the
+  -- TS_ChannelView_Web_Startup action writes.
+  do
+    local WEB = SU.web(script_dir)
+    if not WEB.checked() then WEB.resolve(); WEB.scan() end
+    local st, note = WEB.state()
+    if ImGui.MenuItem(ctx, "Start it with REAPER", nil, WEB.on(),
+        st ~= "nocmd" and st ~= "manual") then
+      local ok, why
+      if WEB.on() then ok, why = WEB.remove() else ok, why = WEB.add() end
+      if not ok then
+        reaper.MB("__startup.lua was NOT changed.\n\n" .. tostring(why), "ChannelView", 0)
+      elseif WEB.on() and not WEB.running() and
+             reaper.MB("The web companion will start with REAPER from now on.\n\n" ..
+                       "Start it now as well?", "ChannelView", 4) == 6 then
+        WEB.start()
+      end
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Start the web companion with REAPER.")
+    end
+    if st == "nocmd" then
+      note = "TS_ChannelView_Web.lua isn't in the Action List."
+    end
+    if note then
+      ImGui.TextColored(ctx, C.COL.warn, "   " .. U.wrap_note(note, 52))
+    end
+  end
 end
 
 local function menu_bar()
   if not ImGui.BeginMenuBar(ctx) then return end
+  -- the bar's top edge, for the web companion's strip: a menu bar's
+  -- cursor starts at the top of its row
+  local _, bar_top = ImGui.GetCursorScreenPos(ctx)
 
-  if ImGui.BeginMenu(ctx, "View") then
-    if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
-      C.SHOW_VALUES = not C.SHOW_VALUES
-      ext_set("show_values", C.SHOW_VALUES and "1" or "0")
-    end
-    -- off: the wheel never moves a control, it only scrolls (shared with
-    -- the TCP window)
-    if ImGui.MenuItem(ctx, "Use mouse wheel on controls", nil, C.WHEEL_CONTROLS) then
-      C.WHEEL_CONTROLS = not C.WHEEL_CONTROLS
-      ext_set("wheel_controls", C.WHEEL_CONTROLS and "1" or "0")
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Off: the wheel scrolls, and never turns a knob or\nmoves a fader. Shared with the TCP window.")
-    end
-
-    -- the width of a control's column, for every panel
-    if ImGui.BeginMenu(ctx, "Control spacing") then
-      ImGui.SetNextItemWidth(ctx, 140)
-      local cwch, cwv = ImGui.SliderInt(ctx, "##cell_w", C.CELL_W, C.CELL_W_MIN, C.CELL_W_MAX, "%d px")
-      if cwch then
-        C.set_cell_w(cwv)
-        ext_set("cell_w", tostring(C.CELL_W))
+  -- The \u{2630} menu: View, Layouts and the web companion, and the settings
+  -- about ChannelView as a whole. A menu of the bar (so it opens, and
+  -- switches on hover, like one), its label blank and the icon drawn over
+  -- it.
+  local main_open = ImGui.BeginMenu(ctx, "      ##cvmain")
+  local main_x2, main_y1, main_y2
+  do
+    local x1, y1 = ImGui.GetItemRectMin(ctx)
+    local x2, y2 = ImGui.GetItemRectMax(ctx)
+    main_x2, main_y1, main_y2 = x2, y1, y2
+    local hov = ImGui.IsItemHovered(ctx)
+    local sz = C.ICON_SIZE
+    W.ICONS.menu(ImGui.GetWindowDrawList(ctx), (x1 + x2 - sz) * 0.5, (y1 + y2 - sz) * 0.5, sz,
+      (hov or main_open) and C.COL.icon_hot or C.COL.icon)
+    W.tip(ctx, "cvmain", "View, layouts and web companion", hov and not main_open, false)
+  end
+  if main_open then
+    if ImGui.BeginMenu(ctx, "View") then
+      if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
+        C.SHOW_VALUES = not C.SHOW_VALUES
+        ext_set("show_values", C.SHOW_VALUES and "1" or "0")
+      end
+      -- off: the wheel never moves a control, it only scrolls (shared with
+      -- the TCP window)
+      if ImGui.MenuItem(ctx, "Use mouse wheel on controls", nil, C.WHEEL_CONTROLS) then
+        C.WHEEL_CONTROLS = not C.WHEEL_CONTROLS
+        ext_set("wheel_controls", C.WHEEL_CONTROLS and "1" or "0")
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "How wide each control's column is: narrower packs panels tighter.\n" ..
-          "Names that no longer fit are shortened. Ctrl+click to type a number.")
+        ImGui.SetTooltip(ctx, "Off: the wheel only scrolls.")
       end
-      if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CELL_W_DEFAULT), nil, false, C.CELL_W ~= C.CELL_W_DEFAULT) then
-        C.set_cell_w(C.CELL_W_DEFAULT)
-        ext_set("cell_w", tostring(C.CELL_W))
-      end
-      ImGui.EndMenu(ctx)
-    end
 
-    -- the width of an expanded channel strip: the pinned fader panel, every
-    -- mixer strip and the track name buttons (collapsed ones keep theirs)
-    if ImGui.BeginMenu(ctx, "Strip width") then
-      ImGui.SetNextItemWidth(ctx, 140)
-      local swch, swv = ImGui.SliderInt(ctx, "##channel_w", C.CHANNEL_W, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX, "%d px")
-      if swch then
-        C.set_channel_w(swv)
-        ext_set("channel_w", tostring(C.CHANNEL_W))
+      -- the width of a control's column, for every panel
+      if ImGui.BeginMenu(ctx, "Control spacing") then
+        ImGui.SetNextItemWidth(ctx, 140)
+        local cwch, cwv = ImGui.SliderInt(ctx, "##cell_w", C.CELL_W, C.CELL_W_MIN, C.CELL_W_MAX, "%d px")
+        if cwch then
+          C.set_cell_w(cwv)
+          ext_set("cell_w", tostring(C.CELL_W))
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Width of each control's column.\nCtrl+click: type a value.")
+        end
+        if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CELL_W_DEFAULT), nil, false, C.CELL_W ~= C.CELL_W_DEFAULT) then
+          C.set_cell_w(C.CELL_W_DEFAULT)
+          ext_set("cell_w", tostring(C.CELL_W))
+        end
+        ImGui.EndMenu(ctx)
+      end
+
+      -- the width of an expanded channel strip: the pinned fader panel, every
+      -- mixer strip and the track name buttons (collapsed ones keep theirs)
+      if ImGui.BeginMenu(ctx, "Strip width") then
+        ImGui.SetNextItemWidth(ctx, 140)
+        local swch, swv = ImGui.SliderInt(ctx, "##channel_w", C.CHANNEL_W, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX, "%d px")
+        if swch then
+          C.set_channel_w(swv)
+          ext_set("channel_w", tostring(C.CHANNEL_W))
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Width of the fader panel, mixer strips and name buttons.\nCtrl+click: type a value.")
+        end
+        if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CHANNEL_W_DEFAULT), nil, false,
+                          C.CHANNEL_W ~= C.CHANNEL_W_DEFAULT) then
+          C.set_channel_w(C.CHANNEL_W_DEFAULT)
+          ext_set("channel_w", tostring(C.CHANNEL_W))
+        end
+        ImGui.EndMenu(ctx)
+      end
+
+      if ImGui.MenuItem(ctx, "Preset bar", nil, C.PRESET_BAR) then
+        C.PRESET_BAR = not C.PRESET_BAR
+        ext_set("preset_bar", C.PRESET_BAR and "1" or "0")
       end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "How wide the fader panel, each mixer strip and the track name\n" ..
-          "buttons are. The fader and meter grow and shrink with it; collapsed\n" ..
-          "strips keep their width. Ctrl+click to type a number.")
+        ImGui.SetTooltip(ctx, "Preset controls along each panel's foot.")
       end
-      if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CHANNEL_W_DEFAULT), nil, false,
-                        C.CHANNEL_W ~= C.CHANNEL_W_DEFAULT) then
-        C.set_channel_w(C.CHANNEL_W_DEFAULT)
-        ext_set("channel_w", tostring(C.CHANNEL_W))
+
+      if ImGui.MenuItem(ctx, "3D effect", nil, C.EFFECT_3D) then
+        C.EFFECT_3D = not C.EFFECT_3D
+        ext_set("plate_texture", C.EFFECT_3D and "1" or "0")
       end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Gradients, lit edges and soft shadows.")
+      end
+
+      if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
+        C.TRACK_ICONS = not C.TRACK_ICONS
+        ext_set("track_icons", C.TRACK_ICONS and "1" or "0")
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Track icons above the name buttons.")
+      end
+
+      -- Keyboard focus back to REAPER after a click here, so its shortcuts
+      -- keep working. See TS_CV_Focus.
+      do
+        local how = FO.mechanism()
+        if ImGui.MenuItem(ctx, "Return keyboard focus to REAPER", nil,
+            C.FOCUS_BACK and how ~= nil, how ~= nil) then
+          C.FOCUS_BACK = not C.FOCUS_BACK
+          ext_set("focus_back", C.FOCUS_BACK and "1" or "0")
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, how and
+            "Keyboard goes back to REAPER after a click,\nso Space and shortcuts keep working."
+            or "Needs js_ReaScriptAPI or SWS.")
+        end
+      end
+
+      ImGui.Separator(ctx)
+
+      if ImGui.BeginMenu(ctx, "Panel alignment") then
+        if ImGui.MenuItem(ctx, "Left", nil, C.ROW_ALIGN == "left") then
+          C.ROW_ALIGN = "left"; ext_set("row_align", C.ROW_ALIGN)
+        end
+        if ImGui.MenuItem(ctx, "Centred", nil, C.ROW_ALIGN == "centre") then
+          C.ROW_ALIGN = "centre"; ext_set("row_align", C.ROW_ALIGN)
+        end
+        ImGui.EndMenu(ctx)
+      end
+      if ImGui.BeginMenu(ctx, "Control flow") then
+        if ImGui.MenuItem(ctx, "Down, then across", nil, C.FLOW == "column") then
+          C.FLOW = "column"; ext_set("flow", C.FLOW)
+        end
+        if ImGui.MenuItem(ctx, "Across, then down", nil, C.FLOW == "row") then
+          C.FLOW = "row"; ext_set("flow", C.FLOW)
+        end
+        ImGui.EndMenu(ctx)
+      end
+      ImGui.Separator(ctx)
+      if ImGui.BeginMenu(ctx, "Colour") then
+        -- One hue drives the whole palette, so this can be brought into
+        -- line with a REAPER theme without picking thirty colours. Bypass
+        -- and warnings deliberately don't follow it -- see TS_CV_Config.
+        ImGui.SetNextItemWidth(ctx, 190)
+        local hch, hv = ImGui.SliderInt(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
+        if hch then
+          C.BASE_HUE = hv
+          C.build_palette()
+          pal_set(hv, C.TINT)
+        end
+
+        ImGui.SetNextItemWidth(ctx, 190)
+        local tch, tv = ImGui.SliderDouble(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
+        if tch then
+          C.TINT = tv
+          C.build_palette()
+          pal_set(C.BASE_HUE, tv)
+        end
+        W.tip(ctx, "tint",
+          "How much the greys lean toward the hue.\n0: neutral, 1: default.",
+          ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx))
+
+        -- a live swatch, so the slider isn't guesswork
+        local dl = ImGui.GetWindowDrawList(ctx)
+        local cx, cy = ImGui.GetCursorScreenPos(ctx)
+        local sw, sh = 190, 14
+        local keys = { "win_bg", "panel_bg", "header_bg", "knob_body",
+                       "knob_ring", "label", "accent", "knob_fill_bi", "warn" }
+        for i, k in ipairs(keys) do
+          local x0 = cx + (i - 1) * (sw / #keys)
+          ImGui.DrawList_AddRectFilled(dl, x0, cy, x0 + sw / #keys, cy + sh,
+            C.COL[k] or 0, 0)
+        end
+        ImGui.Dummy(ctx, sw, sh + 2)
+
+        ImGui.Separator(ctx)
+        if ImGui.MenuItem(ctx, "Reset to default") then
+          C.BASE_HUE, C.TINT = 219, 1.0
+          C.build_palette()
+          pal_set(219, 1.0)
+        end
+        ImGui.EndMenu(ctx)
+      end
+
       ImGui.EndMenu(ctx)
     end
-
-    if ImGui.MenuItem(ctx, "Preset bar", nil, C.PRESET_BAR) then
-      C.PRESET_BAR = not C.PRESET_BAR
-      ext_set("preset_bar", C.PRESET_BAR and "1" or "0")
+    if ImGui.BeginMenu(ctx, "Layouts") then
+      if ImGui.MenuItem(ctx, "Reload library from disk") then M.reload() end
+      if ImGui.MenuItem(ctx, "Save library now") then M.save() end
+      ImGui.Separator(ctx)
+      -- sharing: some of your layouts to a file, or someone else's into yours
+      if ImGui.MenuItem(ctx, "Import layouts from file\u{2026}") then LS.start_import() end
+      if ImGui.MenuItem(ctx, "Export layouts to file\u{2026}") then
+        local cur = {}
+        for _, fx in ipairs(app.chain or {}) do cur[#cur + 1] = U.plugin_key(fx.name) end
+        LS.start_export(cur)
+      end
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Show the library file") then
+        -- Opens the containing folder; the file itself is plain text and
+        -- safe to edit by hand while this is running (Reload picks it up).
+        if reaper.CF_ShellExecute then
+          reaper.CF_ShellExecute(script_dir)
+        else
+          reaper.MB(M.file_path(), "ChannelView layout library", 0)
+        end
+      end
+      ImGui.Separator(ctx)
+      ImGui.TextDisabled(ctx, U.truncate(M.file_path(), 48))
+      ImGui.EndMenu(ctx)
     end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "The plugin's presets along each panel's foot:\nload, save, save as default, rename, delete.")
-    end
-
-    if ImGui.MenuItem(ctx, "3D effect", nil, C.EFFECT_3D) then
-      C.EFFECT_3D = not C.EFFECT_3D
-      ext_set("plate_texture", C.EFFECT_3D and "1" or "0")
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Light from the top left: a gentle gradient on coloured faceplates,\n" ..
-        "panel edges that catch it, and soft shadows under knobs and buttons.\n" ..
-        "Brushed and metallic finishes are chosen for each faceplate.")
-    end
-
-    if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
-      C.TRACK_ICONS = not C.TRACK_ICONS
-      ext_set("track_icons", C.TRACK_ICONS and "1" or "0")
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Show REAPER's track icons above the name buttons.\n" ..
-        "The row only grows when a track actually has one.")
-    end
-
-    -- Keyboard focus back to REAPER after a click here, so its shortcuts
-    -- keep working. See TS_CV_Focus.
+    -- the web companion, with a dot of its strip's colour
+    local web_open = ImGui.BeginMenu(ctx, "Web companion   ")
     do
-      local how = FO.mechanism()
-      if ImGui.MenuItem(ctx, "Return keyboard focus to REAPER", nil,
-          C.FOCUS_BACK and how ~= nil, how ~= nil) then
-        C.FOCUS_BACK = not C.FOCUS_BACK
-        ext_set("focus_back", C.FOCUS_BACK and "1" or "0")
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, how and
-          "After a click or drag in ChannelView, the keyboard goes back to\n" ..
-          "REAPER's arrange view, so Space and your other shortcuts keep\n" ..
-          "working. Text fields and menus keep it until you're done."
-          or "Needs the js_ReaScriptAPI or SWS extension (both on ReaPack).")
+      local col = web_look()
+      if col then
+        local x1, y1 = ImGui.GetItemRectMin(ctx)
+        local _, y2 = ImGui.GetItemRectMax(ctx)
+        local tw = ImGui.CalcTextSize(ctx, "Web companion ")
+        ImGui.DrawList_AddCircleFilled(ImGui.GetWindowDrawList(ctx),
+          x1 + tw + 8, (y1 + y2) * 0.5, 3.5, col)
       end
     end
-
+    if web_open then
+      web_menu()
+      ImGui.EndMenu(ctx)
+    end
     ImGui.Separator(ctx)
-
+    if ImGui.BeginMenu(ctx, "Dock") then
+      for _, d in ipairs(DOCKS) do
+        if ImGui.MenuItem(ctx, d[1], nil, dock_id == d[2]) then
+          dock_id = d[2]
+          ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_Always)
+          ext_set("dock", dock_id)
+        end
+      end
+      ImGui.EndMenu(ctx)
+    end
     -- Run at startup. Scanned from __startup.lua the first frame this
     -- menu is open rather than remembered in ExtState: the file is the
     -- truth, and a cached boolean is just something that can disagree
@@ -2945,110 +3122,6 @@ local function menu_bar()
         ImGui.TextColored(ctx, C.COL.warn, "   " .. U.wrap_note(note, 52))
       end
     end
-    -- The web companion at startup too: the same fenced block the
-    -- TS_ChannelView_Web_Startup action writes.
-    do
-      local WEB = SU.web(script_dir)
-      if not WEB.checked() then WEB.resolve(); WEB.scan() end
-      local st, note = WEB.state()
-      if ImGui.MenuItem(ctx, "Start web companion with REAPER", nil, WEB.on(),
-          st ~= "nocmd" and st ~= "manual") then
-        local ok, why
-        if WEB.on() then ok, why = WEB.remove() else ok, why = WEB.add() end
-        if not ok then
-          reaper.MB("__startup.lua was NOT changed.\n\n" .. tostring(why), "ChannelView", 0)
-        elseif WEB.on() and not WEB.running() and
-               reaper.MB("The web companion will start with REAPER from now on.\n\n" ..
-                         "Start it now as well?", "ChannelView", 4) == 6 then
-          WEB.start()
-        end
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "Runs TS_ChannelView_Web.lua when REAPER starts, so the\n" ..
-                              "tablet page works without starting it by hand.")
-      end
-      if st == "nocmd" then
-        note = "TS_ChannelView_Web.lua isn't in the Action List."
-      end
-      if note then
-        ImGui.TextColored(ctx, C.COL.warn, "   " .. U.wrap_note(note, 52))
-      end
-    end
-    if ImGui.BeginMenu(ctx, "Panel alignment") then
-      if ImGui.MenuItem(ctx, "Left", nil, C.ROW_ALIGN == "left") then
-        C.ROW_ALIGN = "left"; ext_set("row_align", C.ROW_ALIGN)
-      end
-      if ImGui.MenuItem(ctx, "Centred", nil, C.ROW_ALIGN == "centre") then
-        C.ROW_ALIGN = "centre"; ext_set("row_align", C.ROW_ALIGN)
-      end
-      ImGui.EndMenu(ctx)
-    end
-    if ImGui.BeginMenu(ctx, "Control flow") then
-      if ImGui.MenuItem(ctx, "Down, then across", nil, C.FLOW == "column") then
-        C.FLOW = "column"; ext_set("flow", C.FLOW)
-      end
-      if ImGui.MenuItem(ctx, "Across, then down", nil, C.FLOW == "row") then
-        C.FLOW = "row"; ext_set("flow", C.FLOW)
-      end
-      ImGui.EndMenu(ctx)
-    end
-    ImGui.Separator(ctx)
-    if ImGui.BeginMenu(ctx, "Colour") then
-      -- One hue drives the whole palette, so this can be brought into
-      -- line with a REAPER theme without picking thirty colours. Bypass
-      -- and warnings deliberately don't follow it -- see TS_CV_Config.
-      ImGui.SetNextItemWidth(ctx, 190)
-      local hch, hv = ImGui.SliderInt(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
-      if hch then
-        C.BASE_HUE = hv
-        C.build_palette()
-        pal_set(hv, C.TINT)
-      end
-
-      ImGui.SetNextItemWidth(ctx, 190)
-      local tch, tv = ImGui.SliderDouble(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
-      if tch then
-        C.TINT = tv
-        C.build_palette()
-        pal_set(C.BASE_HUE, tv)
-      end
-      W.tip(ctx, "tint",
-        "How far the greys lean toward the hue.\n0 is neutral grey, 1 is the default.",
-        ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx))
-
-      -- a live swatch, so the slider isn't guesswork
-      local dl = ImGui.GetWindowDrawList(ctx)
-      local cx, cy = ImGui.GetCursorScreenPos(ctx)
-      local sw, sh = 190, 14
-      local keys = { "win_bg", "panel_bg", "header_bg", "knob_body",
-                     "knob_ring", "label", "accent", "knob_fill_bi", "warn" }
-      for i, k in ipairs(keys) do
-        local x0 = cx + (i - 1) * (sw / #keys)
-        ImGui.DrawList_AddRectFilled(dl, x0, cy, x0 + sw / #keys, cy + sh,
-          C.COL[k] or 0, 0)
-      end
-      ImGui.Dummy(ctx, sw, sh + 2)
-
-      ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, "Reset to default") then
-        C.BASE_HUE, C.TINT = 219, 1.0
-        C.build_palette()
-        pal_set(219, 1.0)
-      end
-      ImGui.EndMenu(ctx)
-    end
-
-    ImGui.Separator(ctx)
-    if ImGui.BeginMenu(ctx, "Dock") then
-      for _, d in ipairs(DOCKS) do
-        if ImGui.MenuItem(ctx, d[1], nil, dock_id == d[2]) then
-          dock_id = d[2]
-          ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_Always)
-          ext_set("dock", dock_id)
-        end
-      end
-      ImGui.EndMenu(ctx)
-    end
     ImGui.EndMenu(ctx)
   else
     -- Closed: forget what we read, so the next opening reflects any edit
@@ -3057,41 +3130,13 @@ local function menu_bar()
     SU.web(script_dir).forget()
   end
 
-  if ImGui.BeginMenu(ctx, "Layouts") then
-    if ImGui.MenuItem(ctx, "Reload library from disk") then M.reload() end
-    if ImGui.MenuItem(ctx, "Save library now") then M.save() end
-    ImGui.Separator(ctx)
-    -- sharing: some of your layouts to a file, or someone else's into yours
-    if ImGui.MenuItem(ctx, "Import layouts from file\u{2026}") then LS.start_import() end
-    if ImGui.MenuItem(ctx, "Export layouts to file\u{2026}") then
-      local cur = {}
-      for _, fx in ipairs(app.chain or {}) do cur[#cur + 1] = U.plugin_key(fx.name) end
-      LS.start_export(cur)
-    end
-    ImGui.Separator(ctx)
-    if ImGui.MenuItem(ctx, "Show the library file") then
-      -- Opens the containing folder; the file itself is plain text and
-      -- safe to edit by hand while this is running (Reload picks it up).
-      if reaper.CF_ShellExecute then
-        reaper.CF_ShellExecute(script_dir)
-      else
-        reaper.MB(M.file_path(), "ChannelView layout library", 0)
-      end
-    end
-    ImGui.Separator(ctx)
-    ImGui.TextDisabled(ctx, U.truncate(M.file_path(), 48))
-    ImGui.EndMenu(ctx)
-  end
-
-  -- Where the menus finished, so the centred title knows what it must
-  -- not run into on the left -- and, from the last menu item's own
-  -- rectangle, where the middle of the bar actually is. Asking ImGui
-  -- beats computing it: whatever it does to lay a menu label out, this
-  -- matches.
-  local menus_right = ImGui.GetCursorScreenPos(ctx)
-  local _, item_top = ImGui.GetItemRectMin(ctx)
-  local _, item_bot = ImGui.GetItemRectMax(ctx)
-  local mid_y = (item_top + item_bot) * 0.5
+  -- Where the \u{2630} menu finished, so the centred title knows what it
+  -- must not run into on the left -- and, from its own rectangle (taken
+  -- before anything inside it was drawn), where the middle of the bar
+  -- actually is. Asking ImGui beats computing it: whatever it does to lay
+  -- a menu label out, this matches.
+  local menus_right = math.max(ImGui.GetCursorScreenPos(ctx), main_x2)
+  local mid_y = (main_y1 + main_y2) * 0.5
 
   -- FX chain bypass is pushed hard right; the title then gets whatever
   -- is between the two.
@@ -3103,6 +3148,17 @@ local function menu_bar()
     ImGui.SameLine(ctx, 0, avail - fx_w)
     fx_left = ImGui.GetCursorScreenPos(ctx)
     fx_bypass_button(ctx, mid_y)
+  end
+
+  -- Two groups, each kept together, with a hairline between: on the left
+  -- ChannelView itself (\u{2630}, the view toggle | MIDI learn, probes), on
+  -- the right the track's FX chain (oversampling, load a chain | FX on/off).
+  -- The web companion has no button: it's the strip along the top
+  -- (web_strip) and \u{2630} \u{25B8} Web companion.
+  local GROUP_GAP = 10
+  local function hairline(x)
+    ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx), x, mid_y - 7, x, mid_y + 7,
+      C.COL.panel_border, 1.0)
   end
 
   -- The view toggle sits on the left, straight after the menus; the
@@ -3117,13 +3173,65 @@ local function menu_bar()
     end
   end
 
-  -- The web companion's tablet, straight after the view toggle.
+  -- a hairline, then the tools
+  if fx_left - menus_right > GROUP_GAP + C.ICON_SIZE + 46 then
+    hairline(menus_right + GROUP_GAP * 0.5)
+    menus_right = menus_right + GROUP_GAP
+  end
+
+  -- MIDI learn: the drawer under the header (TS_CV_MidiLearn), first after
+  -- the hairline
   do
-    local tw = C.ICON_SIZE + 4
+    local tw = C.ICON_SIZE + 6
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
-      if web_indicator(ctx, menus_right + 2, mid_y) then menus_right = menus_right + tw end
+      ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
+      if W.icon_button(ctx, "midilearn", "midi", C.ICON_SIZE, ML.is_open(),
+          ML.is_open() and "Close the MIDI learn bar" or "MIDI learn") then
+        ML.toggle()
+      end
+      menus_right = menus_right + tw
     end
+  end
+
+  -- Probes, after MIDI learn: the TS_TrackProbe pair that
+  -- measured gain reduction (and Track Analyser) need. The plugin row
+  -- leaves them out, so this says they're there: dim with none, lit when
+  -- the pair is in place, in the Visualizer's colour while the track is
+  -- in the Visualizer's spectrum, amber with one of them missing. Click
+  -- for the menu.
+  if app.track then
+    local tw = C.ICON_SIZE + 6
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
+      local state, vis = TP.probe_state(app.track)
+      local tip, col
+      if state == "pair" and vis then
+        tip, col = "Probes in place \u{00B7} Visualizer (" .. vis .. ")", C.PROBE_VIS_COL
+      elseif state == "pair" then
+        tip = "Probes in place"
+      elseif state then
+        tip, col = "One probe missing", C.COL.warn or 0xe0a040ff
+      else
+        tip = "Add probes"
+      end
+      if W.icon_button(ctx, "probes", "probe", C.ICON_SIZE, state ~= nil, tip, col) then
+        if state == nil then
+          if confirm_probes() then rescan(true) end
+        else
+          ImGui.OpenPopup(ctx, "probesmenu")
+        end
+      end
+      probes_menu(state, vis)
+      menus_right = menus_right + tw
+    end
+  end
+
+  -- the FX chain's group, after a hairline left of FX on/off
+  if app.track and fx_left - menus_right > GROUP_GAP + C.ICON_SIZE + 46 then
+    fx_left = fx_left - GROUP_GAP
+    hairline(fx_left + GROUP_GAP * 0.5)
   end
 
   -- Load an FX chain, left of the FX bypass.
@@ -3150,11 +3258,10 @@ local function menu_bar()
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
       local tip = cst.lit
-        and ("The whole FX chain is oversampled by REAPER (%s): %dx here. Click to change."):format(
+        and ("FX chain oversampled (%s): %dx.\nClick: change"):format(
               T.os_label(n, cst.rate):lower(), cst.lit)
-        or (n > 0) and ("The whole FX chain is set to oversample %s, which REAPER already runs at:\n" ..
-              "no effect here. Click to change."):format(T.os_label(n, cst.rate):lower())
-        or  "Oversample the whole FX chain (REAPER's own oversampling)."
+        or (n > 0) and ("FX chain oversampling %s: no effect at this rate.\nClick: change"):format(T.os_label(n, cst.rate):lower())
+        or  "Oversample the whole FX chain"
       if W.os_badge(ctx, "chainos", cst.lit, C.ICON_SIZE, tip, C.COL.header_text, C.COL.header_bg, cst.faint) then
         ImGui.OpenPopup(ctx, "chainosmenu")
       end
@@ -3178,41 +3285,26 @@ local function menu_bar()
     end
   end
 
-  -- Probes, left of the FX chain button: the TS_TrackProbe pair that
-  -- measured gain reduction (and Track Analyser) need. The plugin row
-  -- leaves them out, so this says they're there: dim with none, lit when
-  -- the pair is in place, in the Visualizer's colour while the track is
-  -- in the Visualizer's spectrum, amber with one of them missing. Click
-  -- for the menu.
-  if app.track then
-    local tw = C.ICON_SIZE + 6
-    if fx_left - menus_right > tw + 40 then
-      ImGui.SameLine(ctx, 0, 0)
-      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
-      local state, vis = TP.probe_state(app.track)
-      local tip, col
-      if state == "pair" and vis then
-        tip, col = "Probes in place \u{00B7} in the Visualizer (" .. vis .. ")", C.PROBE_VIS_COL
-      elseif state == "pair" then
-        tip = "Probes in place"
-      elseif state then
-        tip, col = "One probe missing", C.COL.warn or 0xe0a040ff
-      else
-        tip = "Add probes"
-      end
-      if W.icon_button(ctx, "probes", "probe", C.ICON_SIZE, state ~= nil, tip, col) then
-        if state == nil then
-          if confirm_probes() then rescan(true) end
-        else
-          ImGui.OpenPopup(ctx, "probesmenu")
-        end
-      end
-      probes_menu(state, vis)
-      fx_left = fx_left - tw
-    end
-  end
-
   track_title(ctx, menus_right + 12, fx_left - 12, mid_y)
+
+  do
+    local wx = ImGui.GetWindowPos(ctx)
+    local ww = ImGui.GetWindowSize(ctx)
+    -- The whole FX chain bypassed: a red glow up from the bar's bottom
+    -- edge and a faint wash over it, so it can't be missed (each plugin's
+    -- own header only dims).
+    if app.track and T.chain_bypassed(app.track) then
+      local dl = ImGui.GetWindowDrawList(ctx)
+      local col = C.COL.bypass_on or 0xd8463cff
+      local function a(alpha) return (col & 0xffffff00) | math.floor(alpha * 255 + 0.5) end
+      local bot = 2 * mid_y - bar_top
+      ImGui.DrawList_AddRectFilled(dl, wx, bar_top, wx + ww, bot, a(0.10))
+      ImGui.DrawList_AddRectFilledMultiColor(dl, wx, bot - 12, wx + ww, bot - 2,
+        a(0.0), a(0.0), a(0.35), a(0.35))
+      ImGui.DrawList_AddRectFilled(dl, wx, bot - 2, wx + ww, bot, a(1.0))
+    end
+    web_strip(wx, bar_top, ww)
+  end
 
   -- Double-clicking the header switches views, the same as the toggle.
   -- Only where nothing else lives: IsAnyItemHovered catches the menus,
@@ -3272,7 +3364,7 @@ local function add_tile(h)
   W.ICONS.plus(dl, x + (w - sz) * 0.5, y + h * 0.5 - sz * 0.5, sz,
     hovered and C.COL.icon_hot or C.COL.icon)
 
-  W.tip(ctx, "addfx", "Add a plugin to the end of the chain", hovered, false)
+  W.tip(ctx, "addfx", "Add a plugin at the end", hovered, false)
   return pressed
 end
 
@@ -3286,18 +3378,18 @@ local function bracket_tip(b)
     local t = ("Container: %s \u{2014} %d %s"):format(box_label(n), inside,
       inside == 1 and "slot" or "slots")
     if not T.get_enabled(app.track, n.addr) then t = t .. "\nBypassed" end
-    if n.parallel ~= 0 then t = t .. "\nRuns in parallel with the one before it" end
+    if n.parallel ~= 0 then t = t .. "\nIn parallel with previous" end
     local st = T.os_state(app.track, { addr = n.addr, ancestors = box_ancestors(n) })
-    if st.lit then t = t .. ("\nEverything in it oversampled %dx (%s)"):format(st.lit, T.os_label(st.n, st.rate):lower()) end
-    return t .. "\n\nClick for the container's menu"
+    if st.lit then t = t .. ("\nOversampled %dx (%s)"):format(st.lit, T.os_label(st.n, st.rate):lower()) end
+    return t .. "\nClick: menu"
   end
-  local lines = { "Running in parallel:" }
+  local lines = { "In parallel:" }
   for k, m in ipairs(b.members) do
     local nm = m.kind == "container" and ("container " .. box_label(m)) or (m.alias or U.fx_label(m))
     if k > 1 and m.parallel == 2 then nm = nm .. "  (MIDI merged)" end
     lines[#lines + 1] = "  \u{2022} " .. nm
   end
-  lines[#lines + 1] = "\nREAPER adds their outputs together. Right-click a\npanel \u{25B8} Route to change it."
+  lines[#lines + 1] = "Outputs summed. Change: right-click a panel \u{25B8} Route"
   return table.concat(lines, "\n")
 end
 
@@ -3765,6 +3857,13 @@ local function frame()
       -- and ImGui only complains at End -- hundreds of lines away from
       -- the line it is actually about. This keeps the promise outright.
       ImGui.Dummy(ctx, 0, 0)
+    end
+
+    -- the MIDI learn drawer, full width under the header: the rows below
+    -- lose its height while it's open
+    if ML.is_open() then
+      local dw = ImGui.GetContentRegionAvail(ctx)
+      ML.draw(ctx, dw)
     end
 
     local _, avail_h = ImGui.GetContentRegionAvail(ctx)

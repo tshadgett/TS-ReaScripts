@@ -96,7 +96,7 @@ function PU.footer(ctx, dl, x, y, w, h, track, fx, inset)
     if W.icon_button(ctx, "pprev##" .. guid, "prev", btn, false, "Previous preset") then
       PR.step(track, addr, -1)
     end
-    local tip = (name ~= "" and not same) and (name .. " \u{2014} changed since it was loaded") or nil
+    local tip = (name ~= "" and not same) and (name .. " (modified)") or nil
     if W.dropdown(ctx, "pdd##" .. guid, shown, gx + btn + gap, y + 2, dw, h - 4, tip) then
       ImGui.OpenPopup(ctx, "plist##" .. guid)
     end

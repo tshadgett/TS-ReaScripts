@@ -336,21 +336,21 @@ local function draw_envelope(ctx, dl, px, py, pw, ph, track, addr, f, ps, guid)
   end
   if f.pre then
     node("rcpre##" .. guid, st, base, false,
-      function() return ("Pre-comp %s\nDrag left: start reducing before the signal arrives\n(adds that much latency)"):format(select(3, real_of(track, addr, f.pre)) or "") end,
+      function() return ("Pre-comp %s (adds latency)\nDrag: left to start reducing earlier"):format(select(3, real_of(track, addr, f.pre)) or "") end,
       function()
         local fr = drag_real(ctx, ps, "rcpre##" .. guid, RC.time_frac(pre, PRE_LO, PRE_HI), -1 / PRE_W, 0)
         set_real(track, addr, f.pre, RC.frac_time(math.max(0, math.min(1, fr)), PRE_LO, PRE_HI))
       end)
   end
   node("rcatk##" .. guid, ak, peak, false,
-    function() return ("Attack %s\nDrag left or right"):format(select(3, real_of(track, addr, f.atk)) or "") end,
+    function() return ("Attack %s\nDrag: left or right"):format(select(3, real_of(track, addr, f.atk)) or "") end,
     function()
       local fr = drag_real(ctx, ps, "rcatk##" .. guid, RC.time_frac(atk, ATK_LO, ATK_HI), 1 / ATK_W, 0)
       set_real(track, addr, f.atk, RC.frac_time(math.max(0, math.min(1, fr)), ATK_LO, ATK_HI))
     end)
   node("rcrel##" .. guid, re, base, auto,
-    function() return ("Release %s%s\nDrag left or right"):format(select(3, real_of(track, addr, f.rel)) or "",
-      auto and "\n(auto release is on: this is its ceiling)" or "") end,
+    function() return ("Release %s%s\nDrag: left or right"):format(select(3, real_of(track, addr, f.rel)) or "",
+      auto and "\nAuto release: this is its ceiling" or "") end,
     function()
       local fr = drag_real(ctx, ps, "rcrel##" .. guid, RC.time_frac(rel, REL_LO, REL_HI), 1 / REL_W, 0)
       set_real(track, addr, f.rel, RC.frac_time(math.max(0, math.min(1, fr)), REL_LO, REL_HI))
@@ -413,8 +413,8 @@ local function draw_meters(ctx, dl, x, y, w, h, track, fx, gr, enabled, peak, ra
     local ps = panel_state(fx.guid)
     if ok ~= true then ps.fine = false end
     h = h - 20
-    local tip = (ok ~= true) and "By frequency\nReopen the project to load the newer probe (TS_TrackProbe 1.7.0), which measures this"
-      or (ps.fine and "Back to the curve" or "The reduction by frequency, in third-octaves\n(measured by the probe while it shows)")
+    local tip = (ok ~= true) and "By frequency\nReopen the project to load the newer probe."
+      or (ps.fine and "Back to the curve" or "Reduction by frequency (third-octaves)")
     if mini_toggle(ctx, dl, "rcfine##" .. fx.guid, x + 6, y + h + 2, w - 10, 15, ps.fine, "Hz", tip) and ok == true then
       ps.fine = not ps.fine
     end
@@ -423,7 +423,7 @@ local function draw_meters(ctx, dl, x, y, w, h, track, fx, gr, enabled, peak, ra
   ImGui.SetCursorScreenPos(ctx, x, y)
   ImGui.InvisibleButton(ctx, "rcmet##" .. fx.guid, w, h)
   W.tip(ctx, "rcmet##" .. fx.guid,
-    ("Gain reduction %.1f dB (peak %.1f)\n\nInput and output levels: the panel's menu \u{25B8} Input/output meters"):format(gr or 0, peak or 0),
+    ("Gain reduction %.1f dB (peak %.1f)\nI/O levels: panel menu \u{25B8} Input/output meters"):format(gr or 0, peak or 0),
     ImGui.IsItemHovered(ctx), false)
 end
 
@@ -444,7 +444,7 @@ local function draw_drawer(ctx, dl, x, y, w, h, track, addr, f, ps, guid)
     hov and C.COL.knob_body_hi or C.COL.knob_body, 3.0)
   small_text(ctx, dl, tx + tw * 0.5, y, C.COL.label,
     (ps.drawer and "\u{25be} " or "\u{25b4} ") .. "Detector", "centre")
-  W.tip(ctx, "rcdrw##" .. guid, ps.drawer and "Hide the detector" or "Show the detector settings", hov, false)
+  W.tip(ctx, "rcdrw##" .. guid, ps.drawer and "Hide the detector" or "Show the detector", hov, false)
   if not ps.drawer then return end
 
   local cy = y + 30
@@ -862,7 +862,7 @@ function CP.draw(ctx, dl, x, y, w, h, track, fx, req)
     local kx = x_of(thr)
     local pill = (hov or act) and C.COL.header_text or C.COL.accent
     ImGui.DrawList_AddRectFilled(dl, kx - 20, ty - 4, kx + 20, ty + 4, pill, 4.0)
-    W.tip(ctx, id, ("Threshold %s\nDrag up or down (Shift: fine)"):format(ttxt or ""), hov, act)
+    W.tip(ctx, id, ("Threshold %s\nDrag: up or down (Shift: fine)"):format(ttxt or ""), hov, act)
   end
 
   -- knee grips, on the band's edges
@@ -885,7 +885,7 @@ function CP.draw(ctx, dl, x, y, w, h, track, fx, req)
       if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
       ImGui.DrawList_AddRectFilled(dl, gxk, ey_ - 2, gxk + 14, ey_ + 2,
         (hov or act) and C.COL.header_text or U.with_alpha(C.COL.accent, 0xd8), 2.0)
-      W.tip(ctx, id, ("Knee %s\nDrag away from the threshold to soften it"):format(ktxt or ""), hov, act)
+      W.tip(ctx, id, ("Knee %s\nDrag: away from the threshold to soften"):format(ktxt or ""), hov, act)
       if s == 1 then
         small_text(ctx, dl, gxk - 5, ey_ - 6, C.COL.label, "Knee " .. (ktxt or ""), "right")
       end
@@ -921,7 +921,7 @@ function CP.draw(ctx, dl, x, y, w, h, track, fx, req)
     end
     if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
     ImGui.DrawList_AddCircleFilled(dl, ex, ey, 5, (hov or act) and C.COL.header_text or C.COL.fader_cap)
-    W.tip(ctx, id, ("Ratio %s\nDrag up or down"):format(rlabel), hov, act)
+    W.tip(ctx, id, ("Ratio %s\nDrag: up or down"):format(rlabel), hov, act)
   end
 
   -- the see-through panels, anchored to the canvas's foot
@@ -1065,7 +1065,7 @@ local function draw_env_mapped(ctx, dl, px, py, pw, ph, track, addr, R, ps, guid
     if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
     ImGui.DrawList_AddCircleFilled(dl, nx, ny, NR, C.COL.header_text)
     ImGui.DrawList_AddCircle(dl, nx, ny, NR, (hov or act) and C.COL.header_text or C.COL.accent, 0, 1.6)
-    W.tip(ctx, id, ("%s %s\nDrag left or right"):format(label, m.text or ""), hov, act)
+    W.tip(ctx, id, ("%s %s\nDrag: left or right"):format(label, m.text or ""), hov, act)
   end
   node("atk", a, ak, peak, ATK_W, ATK_LO, ATK_HI, "Attack")
   node("hold", hd, hk, peak, HOLD_W, HOLD_LO, HOLD_HI, "Hold")
@@ -1275,8 +1275,7 @@ local function draw_gain_bar(ctx, dl, ps, id, gx0, gw, gy0, gh, lo, hi, y_of, d,
   small_text(ctx, dl, gx0 + 8, wy + 16, U.with_alpha(col, 0xc0),
     ("%.0f dBFS in lands at %.1f  \u{00B7}  %.1f dB %s the %s"):format(d.ref, d.bar, math.abs(over),
       over > 0 and "over" or "under", what))
-  W.tip(ctx, id, ("Input %s\nDrag up for more gain (Shift: fine)\n\nThe bar is where a %.0f dBFS signal lands after the gain\n" ..
-    "(the level its 0 dB stands for: Set up)."):format(m.text or "", d.ref), hov, act)
+  W.tip(ctx, id, ("Input %s\nDrag: up for more gain (Shift: fine)\nBar: where %.0f dBFS lands after the gain"):format(m.text or "", d.ref), hov, act)
   return hov, act
 end
 
@@ -1413,7 +1412,7 @@ local function draw_gate(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     -- the threshold it opens at
     local lo, hi = BOT + 6, TOP - 6
     level_line(ctx, dl, ps, "mgthr##" .. guid, gx0, gw, gy0, gh, span, thr, y_of, C.COL.accent, false,
-      gx0 + gw - 40, ("Opens at %s\nDrag up or down (Shift: fine)"):format(R.Threshold.text or ""),
+      gx0 + gw - 40, ("Opens at %s\nDrag: up or down (Shift: fine)"):format(R.Threshold.text or ""),
       function(v) set_level(track, addr, R.Threshold, math.max(BOT, math.min(TOP, v)), thr_along, lo, hi, rev.Threshold) end)
     -- its value on the left, where the curve leaves room (as the compressor's)
     ImGui.DrawList_AddText(dl, gx0 + 8, y_of(thr) - 17, C.COL.value, R.Threshold.text or "")
@@ -1422,7 +1421,7 @@ local function draw_gate(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     if close then
       local m = R.Close or R.Hysteresis
       level_line(ctx, dl, ps, "mgcls##" .. guid, gx0, gw, gy0, gh, span, close, y_of, U.with_alpha(C.COL.accent, 0xc0), true,
-        gx0 + gw - 40, ("Closes at %s\nDrag up or down (Shift: fine)"):format(R.Close and (m.text or "")
+        gx0 + gw - 40, ("Closes at %s\nDrag: up or down (Shift: fine)"):format(R.Close and (m.text or "")
           or (("%.1f dB (hysteresis %s)"):format(close, m.text or ""))),
         function(v)
           v = math.min(thr, v)
@@ -1478,7 +1477,7 @@ local function draw_gate(ctx, dl, x, y, w, h, track, fx, req, cv, R)
       if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
       ImGui.DrawList_AddCircleFilled(dl, rx, ry, 5, (hov or act) and C.COL.header_text or C.COL.fader_cap)
       small_text(ctx, dl, rx - 9, ry - 6, C.COL.value, "Ratio " .. (R.Ratio.text or ""), "right")
-      W.tip(ctx, id, ("Ratio %s\nDrag up or down"):format(R.Ratio.text or ""), hov, act)
+      W.tip(ctx, id, ("Ratio %s\nDrag: up or down"):format(R.Ratio.text or ""), hov, act)
     end
 
     -- the range: a node on the floor (at the foot when the floor is
@@ -1506,7 +1505,7 @@ local function draw_gate(ctx, dl, x, y, w, h, track, fx, req, cv, R)
       ImGui.DrawList_AddCircleFilled(dl, nx, ny, 5, (hov or act) and C.COL.header_text or C.COL.fader_cap)
       ImGui.DrawList_AddCircle(dl, nx, ny, 5, C.COL.accent, 0, 1.4)
       small_text(ctx, dl, nx + 9, ny - 6, C.COL.value, "Range " .. (R.Range.text or "") .. (below and "  \u{2193}" or ""))
-      W.tip(ctx, id, ("Range %s: how far down it turns the signal when shut\nDrag up or down"):format(R.Range.text or ""),
+      W.tip(ctx, id, ("Range %s: depth when shut\nDrag: up or down"):format(R.Range.text or ""),
         hov, act)
     end
 
@@ -1576,7 +1575,7 @@ local function draw_limiter(ctx, dl, x, y, w, h, track, fx, req, cv, R)
   local clip = C.COL.level_clip or C.COL.warn
   if R.Ceiling then
     level_line(ctx, dl, ps, "mlcl##" .. guid, gx0, gw, gy0, gh, span, ceil, y_of, clip, true, gx0 + gw - 40,
-      ("Ceiling %s\nDrag up or down (Shift: fine)"):format(R.Ceiling.text or ""),
+      ("Ceiling %s\nDrag: up or down (Shift: fine)"):format(R.Ceiling.text or ""),
       function(v) set_level(track, addr, R.Ceiling, math.min(TOP, v), ceil_along, -12, 0, rev.Ceiling) end)
   else
     dashed(dl, gx0, y_of(ceil), gx0 + gw, y_of(ceil), U.with_alpha(clip, 0x90), 6, 4, 1.0)
@@ -1589,7 +1588,7 @@ local function draw_limiter(ctx, dl, x, y, w, h, track, fx, req, cv, R)
   elseif thr then
     local m = R.Threshold
     level_line(ctx, dl, ps, "mlth##" .. guid, gx0, gw, gy0, gh, span, thr, y_of, C.COL.accent, false, gx0 + gw - 40,
-      ("Threshold %s\nDrag up or down (Shift: fine)"):format(m.text or ""),
+      ("Threshold %s\nDrag: up or down (Shift: fine)"):format(m.text or ""),
       function(v)
         v = math.max(BOT, math.min(ceil, v))
         set_level(track, addr, m, v, thr_along, -30, 0, rev.Threshold)
@@ -1640,7 +1639,7 @@ local function draw_limiter(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
     ImGui.DrawList_AddCircleFilled(dl, nx, ty, 5, C.COL.header_text)
     ImGui.DrawList_AddCircle(dl, nx, ty, 5, (hov or act) and C.COL.header_text or C.COL.accent, 0, 1.6)
-    W.tip(ctx, id, ("Release %s\nDrag left or right"):format(m.text or ""), hov, act)
+    W.tip(ctx, id, ("Release %s\nDrag: left or right"):format(m.text or ""), hov, act)
   end
 
   draw_meters(ctx, dl, x + w - mw, y, mw, h, track, fx, gr, enabled, gr_peak, gr_range, true)
@@ -1858,7 +1857,7 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
     local kx = x_of(thr)
     ImGui.DrawList_AddRectFilled(dl, kx - 20, ty - 4, kx + 20, ty + 4,
       (hov or act) and C.COL.header_text or C.COL.accent, 4.0)
-    W.tip(ctx, id, ("%s %s\nDrag up or down (Shift: fine)"):format(thr_name, T_.text or ""), hov, act)
+    W.tip(ctx, id, ("%s %s\nDrag: up or down (Shift: fine)"):format(thr_name, T_.text or ""), hov, act)
   end
 
   -- the knee: grips on the band's edges, dragged away from the threshold
@@ -1887,7 +1886,7 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
       if not act and ps.drag and ps.drag.id == id then ps.drag = nil end
       ImGui.DrawList_AddRectFilled(dl, gxk, ey_ - 2, gxk + 14, ey_ + 2,
         (hov or act) and C.COL.header_text or U.with_alpha(C.COL.accent, 0xd8), 2.0)
-      W.tip(ctx, id, ("Knee %s (%.1f dB wide)\nDrag away from the threshold to soften it"):format(m.text or "", knee), hov, act)
+      W.tip(ctx, id, ("Knee %s (%.1f dB wide)\nDrag: away from the threshold to soften"):format(m.text or "", knee), hov, act)
       if s == 1 then
         small_text(ctx, dl, gxk - 5, ey_ - 6, C.COL.label, "Knee " .. (m.text or ""), "right")
       end
@@ -1956,8 +1955,8 @@ function CP.draw_mapped(ctx, dl, x, y, w, h, track, fx, req, cv)
     local ly = (ey < gy0 + 24) and (ey + 6) or (ey - 19)
     ImGui.DrawList_AddText(dl, ex - 10 - rw, ly, C.COL.value, rl)
     small_text(ctx, dl, ex - 10, ly + 25, C.COL.header_dim, "Ratio", "right")
-    W.tip(ctx, id, ("Ratio %s\nDrag up or down%s"):format(R.Ratio.text or "",
-      sw and " (it steps through the plugin's settings)" or ""), hov, act)
+    W.tip(ctx, id, ("Ratio %s\nDrag: up or down%s"):format(R.Ratio.text or "",
+      sw and " (steps through its settings)" or ""), hov, act)
   elseif R.Ratio then
     small_text(ctx, dl, gx0 + gw - 8, gy0 + 22, C.COL.value, "Ratio " .. (R.Ratio.text or ""), "right")
   end

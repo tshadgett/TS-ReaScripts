@@ -55,8 +55,9 @@ an exact date.
   ExtState scheme.
 - **Per-track spectrum overlay.** A strip of colour swatches on the
   Spectrum panel's own right edge, one per track carrying a
-  `TS_TrackProbe` (the probe plugin shared with TS_TrackAnalyser) with its
-  "Include in Visualizer Spectrum" option ticked. Click a swatch to arm
+  `TS_TrackProbe` pair (the probe plugin shared with TS_TrackAnalyser)
+  included in the Visualizer — chosen from ChannelView's Probes button
+  (*In the Visualizer's spectrum*: before or after the chain). Click a swatch to arm
   that track; its spectrum is read from the probe and overlaid on the
   master trace in the track's own colour, so you can see which track is
   dominant at a given frequency without soloing anything. Each swatch's
@@ -144,9 +145,12 @@ Needs the **ReaImGui** extension (ReaPack) for the Editor window.
 | `TS_Visualizer.jsfx` | the metering engine — LUFS, PSR/crest-factor, FFT. Goes in `Effects/TS_Visualizer/` |
 
 The per-track spectrum overlay also depends on `TS_TrackProbe.jsfx`, which
-ships with TS_TrackAnalyser rather than here — any track carrying one with
-its "Include in Visualizer Spectrum" option on becomes eligible for a
-swatch.
+ships with TS_TrackAnalyser and ChannelView rather than here — any track
+whose pair is included (ChannelView's Probes button ▸ *In the Visualizer's
+spectrum*) becomes eligible for a swatch. Since TS_TrackProbe 2.0.0 the
+probe has no parameters, so its old "Include in Visualizer Spectrum"
+checkbox is gone; a project still running older probes keeps its ticks
+until it is reopened, then the choice is made again from ChannelView.
 
 ## Credits
 

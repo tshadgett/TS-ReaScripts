@@ -676,6 +676,43 @@ end
 -- A cap colour by name (C.CAPS), or nil for none chosen. "accent" is the
 -- theme's own, so it follows Hue/Tint like the arc always has.
 -- A custom one (#rrggbb, from the colour picker) is that colour.
+-- ---------------------------------------------------------------------
+-- a strip or row in its track's colour (Group looks ▸ Background)
+-- ---------------------------------------------------------------------
+-- On a tinted body the theme's neutral greys -- the meter's slot, the
+-- fader's, the buttons, the dropdown, the outlines -- lie over the colour
+-- like a grey film. For the length of its draw they're swapped for shades
+-- of the body itself, and the dim labels for a pale tint of the track's
+-- colour; W.pop_tinted puts the theme back. `body` the tinted background,
+-- `col` the track's colour (0xRRGGBBAA).
+local function shade_of(c, k) return U.tint(c, 0x000000ff, k) end
+function W.tinted_inks(body, col)
+  local pale = U.tint(0xffffffff, col, 0.30)
+  return {
+    knob_body    = shade_of(body, 0.58),   -- the meter's slot, a dropdown
+    knob_track   = shade_of(body, 0.42),   -- the fader's slot
+    toggle_off   = shade_of(body, 0.30),   -- a button, off
+    knob_body_hi = U.tint(body, 0xffffffff, 0.08),  -- a button, hovered
+    knob_ring    = shade_of(body, 0.28),   -- outlines, ticks, a knob's rim
+    panel_border = shade_of(body, 0.35),   -- the strip's own edge
+    header_dim   = U.tint(pale, body, 0.25),
+    label        = pale,
+  }
+end
+function W.push_tinted(body, col)
+  if not (body and col) then return nil end
+  local saved = {}
+  for k, v in pairs(W.tinted_inks(body, col)) do
+    saved[k] = C.COL[k]
+    C.COL[k] = v
+  end
+  return saved
+end
+function W.pop_tinted(saved)
+  if not saved then return end
+  for k, v in pairs(saved) do C.COL[k] = v end
+end
+
 function W.cap_col(key)
   local c = key and C.CAP[key]
   if not c then

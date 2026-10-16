@@ -344,6 +344,15 @@ function ME.summarise(samples, opts)
     local e = { type = t, order = o }
     local F, G, Q, R = {}, {}, {}, {}
     local qref = {}
+    -- A setting whose shape fitted another type still says how far the
+    -- band moved: its gain is kept (TDR Slick EQ's broad boosts fit as
+    -- shelves while its cuts are bells, and the boosts were lost).
+    for _, sm in ipairs(list) do
+      local fit = sm.fit
+      if fit.type ~= t and not sm.qn and sm.gn and fit.g then
+        G[sm.gn] = G[sm.gn] or {}; table.insert(G[sm.gn], fit.g)
+      end
+    end
     for _, sm in ipairs(list) do
       local fit = sm.fit
       if fit.type == t then
@@ -561,6 +570,12 @@ function ME.read_band(track, addr, b, all_on)
     -- the plugin's own reading where it gives one in dB, the learned
     -- table where it doesn't
     local v, unit = UN.parse(select(2, reaper.TrackFX_GetFormattedParamValue(track, addr, b.gain, "")))
+    -- a readout without its unit ("0.0", TDR Slick EQ) that the plugin
+    -- spells out in dB when asked what the setting means ("+18.0 dB")
+    if unit ~= "db" then
+      local fv, fu = UN.at(UN.formatter(track, addr, b.gain), gn)
+      if fu == "db" then v, unit = fv, fu end
+    end
     if unit == "db" and v and v > -200 and v < 200 then
       local kp, kn = gain_scale(track, addr, b, e)
       out.g = v * ((v >= 0) and kp or kn)
@@ -871,8 +886,47 @@ function ME.shape_label(sh)
 end
 
 -- Nudges the Q control (wheel): `d` in normalised steps.
+-- A Q control that's a switch (Narrow / Wide on an analog emulation):
+-- its positions { {norm, text, lo, hi}, ... }, or nil for a knob. Read
+-- once per plugin instance and control.
+local qpos_cache = {}
+function ME.q_positions(track, addr, b)
+  if not b.q then return nil end
+  local k = tostring(reaper.TrackFX_GetFXGUID(track, addr) or addr) .. ":" .. b.q
+  local hit = qpos_cache[k]
+  if hit ~= nil then return hit or nil end
+  -- (a knob reads differently at nearly every point: more than 8 runs)
+  local fmt = UN.formatter(track, addr, b.q)
+  if fmt(0) == nil then return nil end        -- can't be read just now: ask again
+  local pos = UN.positions(fmt, 200, 8)
+  if pos and #pos < 2 then pos = nil end
+  qpos_cache[k] = pos or false
+  return pos
+end
+-- which of them it's on
+function ME.q_index(track, addr, b, pos)
+  local v = norm(track, addr, b.q)
+  for i, ps in ipairs(pos) do if v >= ps.lo - 1e-6 and v <= ps.hi + 1e-6 then return i end end
+  local best, bd = 1, math.huge
+  for i, ps in ipairs(pos) do local dd = math.abs(ps.norm - v); if dd < bd then best, bd = i, dd end end
+  return best
+end
+function ME.set_q_pos(track, addr, b, i)
+  local pos = ME.q_positions(track, addr, b)
+  if not (pos and pos[i]) then return end
+  reaper.TrackFX_SetParamNormalized(track, addr, b.q, pos[i].norm)
+end
+
 function ME.nudge_q(track, addr, b, d)
-  if not b.q then return end
+  if not b.q or d == 0 then return end
+  -- a switch: the next position, one a notch
+  local pos = ME.q_positions(track, addr, b)
+  if pos then
+    local i = ME.q_index(track, addr, b, pos)
+    local to = math.max(1, math.min(#pos, i + (d > 0 and 1 or -1)))
+    if to ~= i then reaper.TrackFX_SetParamNormalized(track, addr, b.q, pos[to].norm) end
+    return
+  end
   local v = math.max(0, math.min(1, norm(track, addr, b.q) + d))
   reaper.TrackFX_SetParamNormalized(track, addr, b.q, v)
 end

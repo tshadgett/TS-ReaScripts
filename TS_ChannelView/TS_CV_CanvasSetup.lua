@@ -682,14 +682,14 @@ local function eq_page(ctx, layout, cv, busy)
     end
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Fill the bands in from the plugin's parameter names.\nReplaces the bands above.")
+    ImGui.SetTooltip(ctx, "Fill the bands from the plugin's parameter names.\nReplaces the bands above.")
   end
   ImGui.SameLine(ctx)
   ImGui.Text(ctx, "  All bands On:")
   ImGui.SameLine(ctx)
   local ca, va = picker(ctx, "allon", cv.all_on, 160)
   if ca then cv.all_on = va; changed = true end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A single EQ In / EQ On switch for the whole EQ, if it has one") end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "The whole EQ's In / On switch, if it has one") end
 
   -- a dynamic EQ: each band's dynamics, a tab a band
   ImGui.Spacing(ctx)
@@ -699,9 +699,8 @@ local function eq_page(ctx, layout, cv, busy)
   local cd, vd = ImGui.Checkbox(ctx, "Dynamics (a dynamic EQ)", dlg.show_dyn)
   if cd then dlg.show_dyn = vd end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Name each band's threshold, range, ratio, attack, release and\n" ..
-      "dynamics switch, where it has them. A band with a threshold or a range\n" ..
-      "is dynamic. Its shape is learned as before, with its dynamics held off.")
+    ImGui.SetTooltip(ctx, "Each band's threshold, range, ratio, attack, release and switch.\n" ..
+      "A band with a threshold or range is dynamic.")
   end
   if dlg.show_dyn and #cv.bands > 0 then
     dlg.dyn_tab = math.min(dlg.dyn_tab or 1, #cv.bands)
@@ -738,43 +737,40 @@ local NO_REV = { Sync = true, PingPong = true, Shape = true, Note = true, On = t
                  Freeze = true }
 -- the roles that can run the other way, and what that means for each
 local REV_TIPS = {
-  Threshold = "A \"Compression\" or \"Peak reduction\" control: more of it\n" ..
-              "is a lower threshold",
-  Attack = "Turning it up makes the attack faster (a 1176's 1 to 7).\n" ..
+  Threshold = "More of it is a lower threshold\n" ..
+              "(a \"Compression\" or \"Peak reduction\" control).",
+  Attack = "Turning it up makes the attack faster (1176-style).\n" ..
            "Only matters when it doesn't read in ms.",
   Hold = "Turning it up makes the hold shorter.\nOnly matters when it doesn't read in ms.",
-  Release = "Turning it up makes the release faster (a 1176's 1 to 7).\n" ..
-            "Only matters when it doesn't read in ms or seconds.",
+  Release = "Turning it up makes the release faster (1176-style).\n" ..
+            "Only matters when it doesn't read in ms or s.",
 }
 
 -- what a role means, where its name doesn't say, by kind
 local ROLE_TIPS = {
   comp = {
-    Input = "For a compressor with no threshold control (1176-style):\n" ..
-            "its input drives the signal into a fixed threshold, so the\n" ..
-            "canvas draws the threshold moving down as the input goes up.\n" ..
+    Input = "No threshold (1176-style): drives into a fixed threshold.\n" ..
             "Ignored when Threshold is mapped. Map its Output as Make-up.",
   },
   gate = {
     Threshold  = "Where the gate opens.",
-    Close      = "A threshold of its own for closing, under the one it\nopens at. Or map Hysteresis instead.",
+    Close      = "Its own closing threshold, below the opening one.\nOr map Hysteresis instead.",
     Hysteresis = "How far under the threshold it closes again.\nIgnored when Close is mapped.",
-    Range      = "How far down it turns the signal when shut\n(a gate's depth, or an expander's floor).",
-    Ratio      = "An expander's ratio. Leave it out for a gate:\nshut is shut.",
+    Range      = "How far down it turns the signal when shut.",
+    Ratio      = "An expander's ratio. Leave out for a gate.",
   },
   multi = {
     Crossover = "Where one band hands over to the next.",
     Gain      = "The band's own output gain, or make-up.",
-    Knee      = "The band's knee: drawn and dragged on the band's own view.",
+    Knee      = "The band's knee (on the band's own view).",
     Solo      = "The band's solo switch.",
     Bypass    = "The band's bypass (or mute) switch.",
     Output    = "The plugin's output level.",
-    Low       = "The band's own lower edge, for a plugin whose bands each\n" ..
-                "have their own (FabFilter Pro-MB). Leave the crossovers\n" ..
-                "empty then: a band without one takes its neighbour's.",
+    Low       = "The band's own lower edge (FabFilter Pro-MB style).\n" ..
+                "Leave the crossovers empty then.",
     High      = "The band's own upper edge (see Low edge).",
-    Used      = "Whether the band is in use, for a plugin with more band\n" ..
-                "slots than bands: an unused one isn't drawn or measured.",
+    Used      = "Whether the band is in use.\n" ..
+                "Unused bands aren't drawn or measured.",
   },
   deess = {
     Frequency = "Its frequency: the band's centre, or where it starts.",
@@ -784,41 +780,40 @@ local ROLE_TIPS = {
     Range     = "How far down it turns the esses.",
   },
   delay = {
-    Note     = "A switch of note values, used while Sync is on (or with no Time).",
+    Note     = "Note value, used while Sync is on (or with no Time).",
     Sync     = "Its tempo sync switch: while on, Note is the time.",
     PingPong = "Its ping-pong switch: echoes alternate left and right.",
-    TimeR    = "The right's own time, for a delay with one each side\n(map the left's, or the one for both, as Time).",
+    TimeR    = "The right's own time (Time is the left's or both).",
     NoteR    = "The right's own note value, used while Sync is on.",
-    Offset   = "How much later (or sooner) the right is than the left:\nms, a note value, or a % of the left's time.",
+    Offset   = "The right's offset from the left:\nms, a note value or a % of the left's time.",
     Ratio    = "The right's time against the left's (0.75, 3:4, 75 %).",
-    FeedbackR = "The right's own feedback (map the left's, or the one\nfor both, as Feedback).",
+    FeedbackR = "The right's own feedback (Feedback is the left's or both).",
     Cross    = "Cross-feedback: how much of each side's echo feeds the other.",
     Width    = "How wide the echoes are: at 0 both sides are the same.",
     Link     = "Its link switch: while on, the right follows the left.",
-    Mode     = "Its stereo mode switch (mono, dual or stereo, ping-pong).\n" ..
-               "A mode that's a sound (tape, digital) isn't this one. Below:\nwhat each of its settings means.",
-    Rhythm   = "A straight / dotted / triplet switch beside its note value:\nthe two together are the time.",
+    Mode     = "Its stereo mode switch (mono, dual/stereo, ping-pong),\n" ..
+               "not a sound mode (tape, digital). Settings: below.",
+    Rhythm   = "Straight / dotted / triplet, combined with the note value.",
     Multiplier = "A multiplier on its times (x0.5 .. x2).",
-    Time     = "Its time: in ms, or a note value. In a multi-tap, the time\nthe pattern repeats on (else it's the longest tap).",
+    Time     = "Its time (ms or a note value).\nMulti-tap: the repeat period (else the longest tap).",
     Level    = "The tap's level.",
     Pan      = "The tap's pan: where it comes out, left to right.",
     On       = "The tap's switch (on, enabled, in).",
   },
   reverb = {
     Early     = "The early reflections' level.",
-    Diffusion = "How dense the reflections are: low is separate echoes, high a smooth wash.",
+    Diffusion = "How dense the reflections are (low: echoes, high: a wash).",
     LowFreq   = "The lows' crossover: below it, Bass sets how long they last.",
-    Bass      = "How much longer (or shorter) the lows last: x1.2, a time of its own, or %.",
+    Bass      = "How much longer the lows last (x1.2, a time, or %).",
     HighFreq  = "The highs' crossover: above it, Damping sets how much sooner they die.",
-    Damping   = "How much sooner the highs die: dB or % of damping, a multiplier or a time.\n" ..
-                "(One that reads in Hz is taken as the highs' frequency.)",
+    Damping   = "How much sooner the highs die (dB, %, a multiplier or a time).\n" ..
+                "One in Hz is taken as the highs' frequency.",
     LowCut    = "A low cut on the reverb's sound (its tone, not its decay).",
     HighCut   = "A high cut on the reverb's sound (its tone, not its decay).",
-    Balance   = "Early reflections against the late reverb, as one control:\n" ..
-                "a crossfade (\"0 dB / -16 dB\", \"Equal\") or a % (0 all early,\n" ..
-                "100 all late). Use it instead of Early.",
-    Tone      = "A tone or brightness control that tilts it darker or brighter\n" ..
-                "(-100..+100 %): drawn as a tilt on the decay by frequency.",
+    Balance   = "Early against late, as one control (a crossfade, or % late).\n" ..
+                "Use instead of Early.",
+    Tone      = "A tone or brightness tilt (-100..+100 %),\n" ..
+                "drawn as a tilt on the decay.",
     LowEQ     = "A low shelf on the reverb's sound, in dB.",
     HighEQ    = "A high shelf on the reverb's sound, in dB.",
     LowCutOn  = "The low cut's own on/off switch.",
@@ -834,32 +829,32 @@ local ROLE_TIPS = {
   },
   sat = {
     Drive  = "How hard it's driven: the curve's shape follows it.",
-    Style  = "Its character switch (tape, tube...), if it has one: each\nsetting is learned.",
-    Tone   = "A tone or colour control (warmth, say), if it has one: on the canvas.\n" ..
+    Style  = "Its character switch (tape, tube...): each setting is learned.",
+    Tone   = "A tone or colour control (warmth, say).\n" ..
              "Learning leaves it where it is.",
     Tone2  = "A second one (softness, say): the same.",
     Output = "Its output level.",
   },
   mod = {
-    Phase = "The right side's phase against the left (stereo spread).\nA voice's: where its LFO starts against the others'.",
+    Phase = "The right's phase against the left (stereo spread).\nA voice's: its LFO's start against the others'.",
     Delay = "Its delay or centre time (a chorus's or flanger's).",
-    Voices = "How many voices it has (a switch: 2, 3, 4...). The canvas\ndraws that many, spread through the cycle.",
-    Note = "A switch of note values, used while the voice's Sync is on.",
+    Voices = "How many voices it has (a switch: 2, 3, 4...).",
+    Note = "Note value, used while the voice's Sync is on.",
     Sync = "The voice's tempo sync switch: while on, its Note is its rate.",
     Pan = "Where the voice sits, left to right.",
     On = "The voice's switch.",
   },
   dyneq = {
     Threshold = "Where the band starts to move.",
-    Range     = "How far the band can move from where its gain sits:\n" ..
-                "a cut, or a boost. The canvas draws it as the band's tail.",
-    Ratio     = "How hard it moves past the threshold. With no Range, the\n" ..
-                "tail shows the deepest it has gone lately (measured).",
+    Range     = "How far the band can move from its gain (cut or boost).\n" ..
+                "Drawn as the band's tail.",
+    Ratio     = "How hard it moves past the threshold.\n" ..
+                "With no Range, the tail shows its recent depth.",
     On        = "The band's dynamics switch (apart from the band's own On).",
   },
   limit = {
-    Threshold = "Where it starts limiting. Its gain is the gap\nup to the ceiling.",
-    Input     = "For a limiter with a gain control instead of a\nthreshold: the gain pushes the signal into the\nceiling. Ignored when Threshold is mapped.",
+    Threshold = "Where it starts limiting (gain: the gap to the ceiling).",
+    Input     = "Gain instead of a threshold: drives into the ceiling.\nIgnored when Threshold is mapped.",
     Ceiling   = "The most it lets out. Left out: 0 dB.",
   },
 }
@@ -998,12 +993,8 @@ local function thr_section(ctx, layout, cv, job, busy)
   end
   ImGui.EndDisabled(ctx)
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, "Play a test tone through a hidden copy of the plugin, stepped up in level\n" ..
-      "at four threshold settings, and find where it starts compressing. Your\n" ..
-      "track isn't touched. Takes up to half a minute.\n" ..
-      "Many compressors' thresholds read in a dB of their own (an SSL's, an API's):\n" ..
-      "this puts the canvas's threshold where it really is. One with no threshold,\n" ..
-      "only an input (1176-style), is measured at four input settings instead.")
+    ImGui.SetTooltip(ctx, "Measures where it starts to compress\n" ..
+      "(a test tone through a hidden copy).")
   end
   if job and job.mode == "thr" and job.msg and job.state ~= "measuring" and job.state ~= "starting" then
     ImGui.TextColored(ctx, job.state == "done" and C.COL.accent or C.COL.warn, job.msg)
@@ -1023,9 +1014,8 @@ local function ref_row(ctx, cv)
   ImGui.SetNextItemWidth(ctx, 110)
   local ch, v = ImGui.InputDouble(ctx, "dBFS##ref0", M.ref0(cv), 1, 6, "%.1f")
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "With no threshold, only an input gain, the canvas draws the gain as a bar:\n" ..
-      "where a signal at this level lands once it's through the gain. Most plugins\n" ..
-      "modelled on analogue gear take -18 dBFS as their 0 dB (0 VU); some -20 or -14.")
+    ImGui.SetTooltip(ctx, "The level the input gain's 0 dB stands for.\n" ..
+      "Analogue models: usually -18 dBFS (0 VU).")
   end
   if ch and v then
     v = math.max(-60, math.min(0, v))
@@ -1052,8 +1042,7 @@ local function dshape_row(ctx, cv)
     cv.dshape = "around"; changed = true
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Most de-essers with a single frequency turn down everything above it (split-band).\n" ..
-      "Pick this one for a de-esser that works on an octave around its frequency.")
+    ImGui.SetTooltip(ctx, "For a de-esser working on an octave around its frequency.")
   end
   return changed
 end
@@ -1093,10 +1082,8 @@ local function sat_section(ctx, layout, cv, job, busy)
   end
   ImGui.EndDisabled(ctx)
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, "Play a 250 Hz sine through a hidden copy of the plugin, fully wet, at three\n" ..
-      "levels, and read what comes out: its curve (the output against the input, on\n" ..
-      "the way up and down) and its harmonics. At five Drive points and every Style;\n" ..
-      "tone controls stay where they are. Your track isn't touched. Takes a minute.")
+    ImGui.SetTooltip(ctx, "Learns its curve and harmonics\n" ..
+      "(a 250 Hz sine through a hidden copy). Takes a minute.")
   end
   if job and job.mode == "sat" and job.msg and job.state ~= "measuring" and job.state ~= "starting" then
     ImGui.TextColored(ctx, job.state == "done" and C.COL.accent or C.COL.warn, job.msg)
@@ -1145,10 +1132,8 @@ local function decay_section(ctx, layout, cv, job, busy)
   end
   ImGui.EndDisabled(ctx)
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, "Play bursts of noise through a hidden copy of the plugin, fully wet, and time\n" ..
-      "how long its tail takes to die away: at five decay settings, by three sizes\n" ..
-      "when it has a Size. Your track isn't touched. Takes a minute or two.\n" ..
-      "Other controls (damping, the lows) stay as they are now.")
+    ImGui.SetTooltip(ctx, "Times its tail at five decay settings\n" ..
+      "(noise bursts through a hidden copy). Takes a minute or two.")
   end
   if job and job.mode == "dec" and job.msg and job.state ~= "measuring" and job.state ~= "starting" then
     ImGui.TextColored(ctx, job.state == "done" and C.COL.accent or C.COL.warn, job.msg)
@@ -1291,8 +1276,8 @@ local function delay_page(ctx, cv)
   local ch, v = ImGui.SliderInt(ctx, "##dlnt", nt, 0, M.DL_TAPS, nt == 0 and "none" or "%d")
   if ch then cv.nt = (v > 0) and v or nil; changed = true end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "For a multi-tap: each tap's own time (ms, a note, or a % of the\n" ..
-      "main time), level, pan and switch. A tap with no time of its own\nsits at its share of the main time (tap 2 of 4: half of it).")
+    ImGui.SetTooltip(ctx, "Each tap's own time, level, pan and switch.\n" ..
+      "A tap with no time sits at its share of the main time.")
   end
   if (cv.nt or 0) > 0 and ImGui.BeginTabBar(ctx, "##dltaps") then
     for k = 1, cv.nt do
@@ -1350,8 +1335,8 @@ local function mod_page(ctx, cv)
   ImGui.Spacing(ctx)
   ImGui.TextDisabled(ctx, "Voices of its own")
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "For a chorus with up to three voices, each with its own depth,\n" ..
-      "rate, phase or pan. A voice without a rate or depth of its own\nshares the main one. Leave them empty for one LFO.")
+    ImGui.SetTooltip(ctx, "Up to three voices, each with its own depth, rate, phase or pan.\n" ..
+      "Leave empty for one LFO.")
   end
   if ImGui.BeginTabBar(ctx, "##mdvoices") then
     for k = 1, M.MOD_VOICES do
@@ -1443,9 +1428,9 @@ local function draw_body(ctx, layout, cv, job, busy)
       ImGui.EndDisabled(ctx)
       if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
         ImGui.SetTooltip(ctx, any_mapped and
-          "Measure a hidden copy of the plugin and work out each band's shape.\n" ..
-          "Your track isn't touched. Takes up to a minute."
-          or "Every band needs a frequency or gain control first.")
+          "Measures each band's shape on a hidden copy.\n" ..
+          "Takes up to a minute."
+          or "Map each band's frequency or gain first.")
       end
       if job and job.msg and job.state ~= "measuring" then
         ImGui.SameLine(ctx)
@@ -1457,7 +1442,7 @@ local function draw_body(ctx, layout, cv, job, busy)
     if ImGui.Button(ctx, "Done", 90, 0) then dlg = nil; ImGui.CloseCurrentPopup(ctx) end
     ImGui.EndDisabled(ctx)
     if todo and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "Every band has to be learned first.")
+      ImGui.SetTooltip(ctx, "Learn every band first.")
     end
     ImGui.SameLine(ctx)
     if not busy and todo and ImGui.Button(ctx, "Leave for now") then

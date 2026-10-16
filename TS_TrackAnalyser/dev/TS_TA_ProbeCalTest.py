@@ -13,15 +13,17 @@ import subprocess, sys, numpy as np
 from TS_TA_ProbeTapTest import sections, strip_comments, LOOSE
 import os, tempfile
 
-def prog_common(src):
+def prog_common(src, pos):
     sec = sections(src)
-    f = lambda c: strip_comments(c).replace('gmem[', 'GMB[')
+    # 2.0.0: no sliders -- the probe finds itself at `pos` on track 3
+    f = lambda c: strip_comments(c).replace('gmem[', 'GMB[').replace(
+        'get_host_placement(pl_pos, pl_fl)', f'(pl_pos = {pos}; pl_fl = 0; 3)')
     return f(sec['init']), f(sec['block']), f(sec['sample'])
 
 HDR = '''
 GMB = 4000000;
 srate = 48000; samplesblock = 480;
-function sliderchange(x) ( 0; );
+function spl(i) ( i == 0 ? spl0 : i == 1 ? spl1 : i == 2 ? spl2 : i == 3 ? spl3 : i == 4 ? spl4 : i == 5 ? spl5 : i == 6 ? spl6 : i == 7 ? spl7 : i == 8 ? spl8 : i == 9 ? spl9 : i == 10 ? spl10 : i == 11 ? spl11 : i == 12 ? spl12 : i == 13 ? spl13 : i == 14 ? spl14 : i == 15 ? spl15 : i == 16 ? spl16 : i == 17 ? spl17 : 0; );
 function get_host_placement() ( 3; );
 role = {role}; publish = 0; rel_ms = 400; vis_include = 0; vis_slot = -1;
 tap_n = 1; tap_lag1 = 0; tap_lag2 = tap_lag3 = tap_lag4 = 0;
@@ -30,10 +32,16 @@ tap_gr1 = tap_gr2 = tap_gr3 = tap_gr4 = 0;
 tap_cal1 = tap_cal2 = tap_cal3 = tap_cal4 = 0; tap_gen = 0; cal_arm = {arm};
 play_state = 1;
 '''
+# after the probe's @init: the pair named in track 3's block (pre at 0, post
+# at 5), one tap, and the pre armed to measure the zero when asked
+BLK = '''
+PBK = GMB + 0x100000 + 4 * 128;
+PBK[0] = 1; PBK[1] = 6; PBK[8] = 1; PBK[18] = {arm};
+'''
 
 def post_prog(src, thr, ratio, mk, att=1, rel=300, touch_at=-1):
-    init, block, sample = prog_common(src)
-    return HDR.format(role=1, arm=0) + init + f'''
+    init, block, sample = prog_common(src, 5)
+    return HDR.format(role=1, arm=0) + init + BLK.format(arm=0) + f'''
 pk_b0=0.049922035; pk_b1=-0.095993537; pk_b2=0.050612699; pk_b3=-0.004408786;
 pk_a1=-2.494956002; pk_a2=2.017265875; pk_a3=-0.522189400;
 aa = exp(-1/(srate*{att}/1000)); ar = exp(-1/(srate*{rel}/1000)); env = 0;
@@ -45,7 +53,7 @@ while (i < nsamp) (
   ph = (tb >= 9 && tb < 10) ? 1 : (tb >= 10 && tb < 11) ? 2 : (tb >= 11 && tb < 11.5) ? 3 : 0;
   hbp += 1; GMB[SL + 2] = hbp; GMB[SL + 1] = ph;
   GMB[73] = hbp;
-  {touch_at} >= 0 && tb >= {touch_at} && tb < {touch_at} + 0.011 ? tap_rst1 = 7;
+  {touch_at} >= 0 && tb >= {touch_at} && tb < {touch_at} + 0.011 ? PBK[13] = 7;
   {block}
   loop(samplesblock,
     tt = i / srate;
@@ -74,7 +82,7 @@ while (i < nsamp) (
     (ph > 0) ? outpk = max(outpk, abs(spl0));
     gacc += -g; gcnt += 1;
     gcnt >= tap_slice ? (
-      printf("%f %f %f %f %f %d\\n", tt, gacc/gcnt, (TAP_BASE + TAP_S)[TS_LAST], tap_gr1, outpk, tap_cal1);
+      printf("%f %f %f %f %f %d\\n", tt, gacc/gcnt, (TAP_BASE + TAP_S)[TS_LAST], PBK[64], outpk, PBK[68]);
       gacc = 0; gcnt = 0;
     );
     i += 1;
@@ -83,8 +91,8 @@ while (i < nsamp) (
 '''
 
 def pre_prog(src, play_until=2.0, replay_at=-1, loud_at=-1):
-    init, block, sample = prog_common(src)
-    return HDR.format(role=0, arm=1) + init + f'''
+    init, block, sample = prog_common(src, 0)
+    return HDR.format(role=0, arm=1) + init + BLK.format(arm=1) + f'''
 SL = 0x60000 + 3*8; hbp = 0;
 nsamp = 9 * srate; i = 0; acc = 0; cnt = 0;
 while (i < nsamp) (
