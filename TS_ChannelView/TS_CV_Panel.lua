@@ -56,9 +56,9 @@ function P.footer_h() return C.FOOTER_H end
 
 -- How many rows fit in a panel of `panel_h`.
 function P.rows_for(panel_h)
-  -- Top and bottom are no longer the same: the grid starts tight under
-  -- the header so a cell's name line isn't pushed down, and keeps the
-  -- full pad at the bottom.
+  -- Top and bottom pads differ: the grid starts tight under the header
+  -- so a cell's name line isn't pushed down, and keeps the full pad at
+  -- the bottom.
   local body_h = panel_h - C.HEADER_H - P.footer_h() - C.GRID_TOP_PAD - C.PANEL_PAD
   return math.max(C.MIN_ROWS, math.floor(body_h / C.CELL_H))
 end
@@ -81,12 +81,12 @@ end
 --
 -- THE HALF-CELL GRID. Everything is placed in half-cells, half a CELL_W
 -- across and half a CELL_H down. A control is a block of them: an
--- ordinary one 2 x 2 (exactly the one cell every control has always
--- been), a half_gap 2 x 1, and the sizes in C.SIZES whatever they say. A
--- control too tall for the panel is drawn at the ordinary size instead.
--- With every control 2 x 2 this places each exactly where the old
--- one-cell layout did -- dev/TS_CV_LayoutFixture.lua holds the positions
--- every layout had before, and TS_CV_Test.lua checks them all.
+-- ordinary one 2 x 2 (one whole cell), a half_gap 2 x 1, and the sizes
+-- in C.SIZES whatever they say. A control too tall for the panel is
+-- drawn at the ordinary size instead.
+-- With every control 2 x 2 each one lands on a whole cell --
+-- dev/TS_CV_LayoutFixture.lua holds reference positions for a set of
+-- layouts, and TS_CV_Test.lua checks them all.
 --
 -- A DIVIDER SPLITS THE PANEL INTO SECTIONS. Each section is laid out
 -- independently in its own block of columns, so whatever follows a divider
@@ -110,12 +110,12 @@ end
 --
 -- ROW FLOW (across, then down) fills rows of a fixed width, chosen as the
 -- narrowest that gets everything into the panel's height: with ordinary
--- controls that is ceil(n / rows) cells, as it always was. A half_gap is
+-- controls that is ceil(n / rows) cells. A half_gap is
 -- an ordinary empty slot here; its half-step is a down-the-column idea.
 local HALF_H = C.CELL_H * 0.5
 
 -- `n` half-cells across, or down, in pixels: a whole number whenever it
--- is one, so an ordinary layout's positions are exactly what they were.
+-- is one, so an ordinary layout's positions stay whole pixels.
 local function hx(n) local v = n * C.CELL_W / 2; return math.tointeger(v) or v end
 local function hy(n) local v = n * C.CELL_H / 2; return math.tointeger(v) or v end
 
@@ -133,8 +133,8 @@ function P.button_span(ctl)
 end
 
 -- Where a fader goes (its Shape<n>, TS_CV_Mappings.shape_of):
---   "column"  vertical and full height: it splits the sections, as faders
---             always have, a column wide or half of one
+--   "column"  vertical and full height: it splits the sections, a column
+--             wide or half of one
 --   "band"    horizontal and full length: from where it lands to the
 --             panel's right edge (place_flow)
 --   "block"   any other: placed among the controls like a knob, its
@@ -247,7 +247,7 @@ local function place_column(sec, x0, half_rows, items, spacers)
   return hx(width), deepest
 end
 
--- A panel with faders placed among its controls (any but the old
+-- A panel with faders placed among its controls (any but a
 -- full-height column fader), or an XY pad: MERGED-CELL FLOW. The same down-then-across
 -- strips as place_column, always in list order -- a control never goes
 -- back into an earlier gap -- but a fader takes every cell it covers when
@@ -469,7 +469,7 @@ function P.layout(controls, panel_h, lock)
   local rows  = lock or P.rows_for(panel_h)
   local half_rows = rows * 2
   -- faders placed among the controls: merged-cell flow (place_flow);
-  -- anything else keeps the sections and strips it always had
+  -- anything else is laid out in sections and strips
   if C.FLOW ~= "row" then
     for _, ctl in ipairs(controls) do
       local k = P.fader_kind(ctl)
@@ -543,17 +543,13 @@ function P.layout(controls, panel_h, lock)
            height = math.max(1, math.min(half_rows, deepest)) * HALF_H }
 end
 
--- `key` is optional (existing callers that only ever draw a plain grid
--- don't have to pass one) and only ever matters for one thing: a ReaEQ
--- panel isn't a grid at all, so none of the layout below applies to it --
--- it gets a fixed canvas width instead. See TS_CV_EQPanel.lua.
 -- ---------------------------------------------------------------------
 -- pages
 -- ---------------------------------------------------------------------
 -- A "page" control is a page break: what follows it, up to the next
 -- break, is a page of its own, and the panel shows one page at a time
 -- with a tab strip under its header. Controls before the first break are
--- page 1. Dividers inside a page split its columns as they always have.
+-- page 1. Dividers inside a page split its columns as usual.
 -- Returns a list of { label, cap, controls, ctl }, or nil when the layout
 -- has no break (an ordinary, unpaged panel); a leading break's empty
 -- first page is dropped.
@@ -657,6 +653,8 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
   if changed and nv then
     if ctl.type ~= "knob" then nv = M.vnorm(ctl, M.vindex(ctl, nv)) end
     St.vset(fx.guid, name, nv)
+    -- a REAPER action for the setting picked, when it has one (VAct<n>)
+    M.run_vaction(ctl, nv)
   end
   return act
 end
@@ -673,6 +671,10 @@ function P.scrolls(lay, panel_h, lock)
   return C.GRID_TOP_PAD + lay.height + C.PANEL_PAD > body
 end
 
+-- `key` is optional -- a caller drawing a plain grid needn't pass one --
+-- and only matters for one thing: a ReaEQ panel isn't a grid at all, so
+-- none of the layout applies to it -- it gets a fixed canvas width
+-- instead. See TS_CV_EQPanel.lua.
 function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
   if collapsed then return C.COLLAPSED_W end
   -- an EQ or compressor canvas (any plugin): the canvas, and its layout's
@@ -946,12 +948,6 @@ function P.rescan_choices(key, param)
 end
 
 -- ---------------------------------------------------------------------
--- header
--- ---------------------------------------------------------------------
-
--- Draws the gain-reduction strip and returns the width it consumed,
--- including its gap, so the control grid can start beside it.
--- ---------------------------------------------------------------------
 -- the gain-reduction trace
 -- ---------------------------------------------------------------------
 -- Click a gain-reduction meter and it opens out into a trace beside it.
@@ -1158,7 +1154,7 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
   local key = "io" .. fx.guid
   local tip
   if lv.old then
-    -- An older probe, still running from before the update: nothing to read.
+    -- A probe from an older version, still running: nothing to read.
     W.io_bar(ctx, dl, lx, y, w, h, key .. "i", -150, nil, "?")
     W.io_bar(ctx, dl, rx, y, w, h, key .. "o", -150, nil, "?")
     tip = "Older probe: no levels.\n" ..
@@ -1186,6 +1182,10 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
   return true
 end
 
+-- ---------------------------------------------------------------------
+-- header
+-- ---------------------------------------------------------------------
+
 local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   local h = C.HEADER_H
   local dragging = req.is_drag_source
@@ -1194,9 +1194,9 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   -- I_FXEN) -- the latter doesn't touch any one FX's own enabled state, so
   -- without this a panel would keep its plain header even while every FX
   -- on the track, itself included, is silently doing nothing. Only the
-  -- tint follows the chain state here: `enabled` itself stays exactly what
-  -- it was (this FX's own flag), since that's still what the bypass button
-  -- toggles and what its tooltip and icon state describe.
+  -- tint follows the chain state here: `enabled` stays this FX's own
+  -- flag, since that's what the bypass button toggles and what its
+  -- tooltip and icon state describe.
   local tint_bypassed = (not enabled) or T.chain_bypassed(track)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h,
     dragging and C.COL.header_drag
@@ -1437,9 +1437,6 @@ end
 -- body
 -- ---------------------------------------------------------------------
 
--- A shape's outline as a path, its corners rounded (radius `r`, less where
--- an edge is too short for it): each corner is an arc from the incoming
--- edge's tangent point to the outgoing one's.
 local function sgn(v) return (v > 0 and 1) or (v < 0 and -1) or 0 end
 
 -- Brushed grain, the faceplate's (see draw_plate): a faint light line
@@ -1510,6 +1507,9 @@ local function inner_spans(loops, ox, oy, y, m)
 end
 P._inner_spans = inner_spans    -- for the tests
 
+-- A shape's outline as a path, its corners rounded (radius `r`, less where
+-- an edge is too short for it): each corner is an arc from the incoming
+-- edge's tangent point to the outgoing one's.
 local function back_path(dl, ox, oy, pts, r)
   local n = #pts // 2
   for m = 1, n do
@@ -1623,9 +1623,6 @@ draw_backs = function(ctx, dl, gx0, gy0, lay)
   end
 end
 
--- `panel_h` is the panel's FULL height, header included -- the same value
--- P.width() was given, so the column count here can't disagree with the
--- width the panel was allotted.
 -- The faceplate and extent of the panel being drawn (see draw_plate).
 local cur_bg = { plate = nil, y = 0, h = 1 }
 
@@ -1841,6 +1838,9 @@ local function draw_tab_strip(ctx, dl, x, y, w, fx, pages, cur, req)
   end
 end
 
+-- `panel_h` is the panel's FULL height, header included -- the same value
+-- P.width() was given, so the column count here can't disagree with the
+-- width the panel was allotted.
 local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter, io)
   local controls = layout.controls or {}
   -- conditional controls left out, then paged: the strip under the
@@ -2059,9 +2059,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       --
       -- The cursor is already at this item's own cell -- SetCursorScreenPos
       -- above, from item.x/item.y, positions every item in lay.items the
-      -- same way regardless of which branch below actually draws it; this
-      -- branch must not try to recompute a position from `col`/`row`, which
-      -- are local to P.layout's own loop and don't exist here.
+      -- same way regardless of which branch below actually draws it, so this
+      -- branch draws from the cursor rather than working a position out
+      -- for itself.
       local px, py = ImGui.GetCursorScreenPos(ctx)
       ImGui.InvisibleButton(ctx, id, C.CELL_W, C.CELL_H)
       W.tip(ctx, "oob" .. id, ("Parameter %s out of range")
@@ -2253,12 +2253,11 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       elseif ctl.type == "stepped" then
         local size = P.item_size(item)
         local st = step_norm(track, fx.addr, p, key)
-        -- Same dial as a plain knob, just quantised to the parameter's own
-        -- step grid -- see W.knob's own header for why this needs nothing
-        -- from the (separate, sweep-and-cache) combo_steps machinery: the
-        -- step SIZE is a cheap, un-cached native read, and the readout
-        -- text above is already the plugin's own formatted value for any
-        -- control type, choice name included.
+        -- Same dial as a plain knob, quantised to the parameter's own
+        -- step grid (see W.knob's step_norm), which needs only the step
+        -- SIZE -- a cheap native read, no sweep. The readout text above
+        -- is already the plugin's own formatted value for any control
+        -- type, choice name included.
         -- The plugin's own choices, once they've been read (the same list
         -- a dropdown shows): the knob lands only on those. Until then, or
         -- when the plugin can't be swept, the even step grid.
@@ -2465,13 +2464,6 @@ mix = function(col, to, t)
   return out | (col & 0xff)
 end
 
--- The plate itself: flat, or with the 3D effect a gentle top-lit gradient
--- -- real faceplates catch the light from above, and a flat fill reads as
--- a colour rather than a surface -- and its finish: a metallic flake and
--- sheen, a fine brushed grain (the layout's choice, or aluminium's own),
--- both or neither. The grain is lighter on a dark plate, where white lines
--- show far more. The border is drawn over it afterwards and tidies the
--- corners.
 -- The background at height `yy` of the panel being drawn: what draw_plate
 -- painted there (gradient included), or the flat panel colour. The trace's
 -- fade blends into this.
@@ -2489,6 +2481,13 @@ bg_at = function(yy)
   return mix(pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh), t)
 end
 
+-- The plate itself: flat, or with the 3D effect a gentle top-lit gradient
+-- -- real faceplates catch the light from above, and a flat fill reads as
+-- a colour rather than a surface -- and its finish: a metallic flake and
+-- sheen, a fine brushed grain (the layout's choice, or aluminium's own),
+-- both or neither. The grain is lighter on a dark plate, where white lines
+-- show far more. The border is drawn over it afterwards and tidies the
+-- corners.
 local function draw_plate(ctx, dl, x, y, w, h, pl, brushed, metal)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, 3.0)
   -- the light falling on it (3D effect)
@@ -2657,17 +2656,12 @@ end
 function P.begin_rects() panel_at = {} end
 function P.panel_at(guid) return panel_at[guid] end
 
--- Draws one panel at the current cursor position and advances past it.
--- Returns a `req` table of things the caller should act on this frame:
---   toggle_bypass, toggle_float, open_menu, open_editor, ctx_control
--- ReaComp's canvas, with input/output meters on the panel's outside
--- edges when asked for: false when it can't draw (the grid instead)
 -- A canvas is a screen set into the faceplate. On a light faceplate
 -- (aluminium, cream, stone, amber, gold) it gets a dark screen of the
 -- theme's and the theme's inks for the length of its draw -- the plate's
 -- dark inks vanish on a canvas's dark grounds, and its translucent
--- grounds wash out over a light plate. A dark faceplate shows through as
--- before. `plate` and `saved` are the panel's (push_plate).
+-- grounds wash out over a light plate. A dark faceplate shows through
+-- unchanged. `plate` and `saved` are the panel's (push_plate).
 local function plate_light(pl)
   local c = pl and pl.bg
   if not c then return false end
@@ -2684,6 +2678,8 @@ local function on_screen(plate, saved, dl, x, y, w, h, fn, ...)
   return r
 end
 
+-- ReaComp's canvas, with input/output meters on the panel's outside
+-- edges when asked for: false when it can't draw (the grid instead)
 local function rc_body(ctx, dl, x, y, ww, bh, track, fx, req, io, enabled, plate, saved)
   local ex, ew = x, ww
   if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
@@ -2695,6 +2691,10 @@ local function rc_body(ctx, dl, x, y, ww, bh, track, fx, req, io, enabled, plate
 end
 
 local draw_panel
+
+-- Draws one panel at the current cursor position and advances past it.
+-- Returns a `req` table of things the caller should act on this frame:
+--   toggle_bypass, toggle_float, open_menu, open_editor, ctx_control
 -- (your own ranges for its parameters in force while it's drawn: TS_CV_Util
 -- U.with_ranges -- the values, scales, tooltips and canvases read them)
 function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)

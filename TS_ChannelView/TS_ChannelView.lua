@@ -1,16 +1,15 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.2.0
+-- @version 2.3.0
 -- @changelog
---  Reopen projects after updating (new probe and Modulators plugin).
---  MIDI learn bar: last touched parameter + last moved MIDI control (CC,
---  note, program change, pitch bend), one click to link, REAPER's own learn.
---  Modulators moved by macros and other modulators; button and dropdown
---  macros switch LFO shape, sync and more. Header: one menu, web companion
---  status strip with start/stop, red glow while the FX chain is bypassed.
---  TS_TrackProbe 2.0.0 has no parameters (no more "last touched" hijack).
---  Track-colour backgrounds tint the controls; TDR Slick EQ boosts and
---  switched Q; smoother modulator trace; shorter tooltips.
+--  Action bars anywhere: drawers on any side of ChannelView, bars in their
+--  own windows (floating or docked), the TCP's toolbars and the web's
+--  Actions bar, all built in one Organise actions window, with nested
+--  menus, toolbar switches (tabs) and import / export.
+--  ChannelView's own icons (nearly 300), sharp at any size, matched to
+--  actions automatically, on the desktop and the web page.
+--  Bar sizes per bar. Virtual controls can run REAPER actions.
+--  Canvas curves drawn in one go (cleaner joins). Tidier code comments.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -23,6 +22,7 @@
 --  [webinterface] TS_ChannelView-192.png
 --  [webinterface] TS_ChannelView-512.png
 --  [webinterface] TS_ChannelView-maskable.png
+--  [webinterface] TS_CV_ActionIcons.json
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
 --  [nomain] TS_CV_Toolbar.lua
@@ -39,6 +39,11 @@
 --  [nomain] TS_CV_ModRack.lua
 --  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_MidiLearn.lua
+--  [nomain] TS_CV_Drawers.lua
+--  [nomain] TS_CV_ActionEditor.lua
+--  [nomain] TS_CV_ActionIcons.lua
+--  [main]   TS_ChannelView_Toolbars.lua
+--  [main]   TS_ChannelView_OrganiseActions.lua
 --  [nomain] TS_CV_ProbeLink.lua
 --  [nomain] TS_CV_Chains.lua
 --  [nomain] TS_CV_ColourPick.lua
@@ -91,6 +96,11 @@
 --
 --  On a tablet: TS_ChannelView_Web.lua and the TS_ChannelView.html page put
 --  the same panels in a browser, through REAPER's own web interface.
+--
+--  Action bars: buttons for any REAPER action, with menus, toolbar
+--  switches and ChannelView's own icons, as drawers in this window, in
+--  windows of their own (TS_ChannelView_Toolbars.lua), in the TCP window
+--  and on the web page -- all arranged in Organise actions.
 --
 --  Panels are a fixed height and grow in COLUMNS: rows fall out of the
 --  window height, controls flow down a column and wrap into a new one, so
@@ -187,10 +197,19 @@ local BZ = require("TS_CV_Busy")
 local ML = require("TS_CV_MidiLearn")
 local MD = require("TS_CV_Mod")
 local MR = require("TS_CV_ModRack")
+local TB = require("TS_CV_Toolbar")
+local DR = require("TS_CV_Drawers")
+local AE = require("TS_CV_ActionEditor")
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
 CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui); ML.attach(ImGui)
+TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui)
+-- action drawers (global, not per project), and the window that organises
+-- every action bar
+DR.load()
+DR.organise = function(d, it) AE.open(d, it) end
+DR.share = function(mode) AE.share(mode) end
 -- a learning track left behind by a ChannelView stopped mid-learn
 pcall(function() require("TS_CV_Learn").sweep() end)
 
@@ -261,17 +280,15 @@ end
 --
 --   Hue and tint are one choice for the whole TS_ family, not one per
 --   tool, so they live in their own ExtState section rather than in any
---   one tool's. Before this they lived in ChannelView's section and the
---   TCP window, TS_Visualizer and its editor all reached across into it
---   -- which worked only because ChannelView happened to be the one that
---   owned them, and made every other tool depend on a name that is none
---   of its business.
+--   one tool's. ChannelView, the TCP window, TS_Visualizer and its editor
+--   all read and write this one section, so none of them depends on a
+--   section name that belongs to another tool.
 --
---   Reading falls through to the old location once, so an existing
---   setting survives the update instead of everybody's colours snapping
---   back to stock. Nothing anywhere returns a default: nil means "no
---   shared setting", and each tool keeps its own, which is what lets any
---   of them run on its own.
+--   Reading falls back to ChannelView's own section when the shared one
+--   is empty, so a setting kept there still loads instead of the colours
+--   snapping back to stock. Nothing anywhere returns a default: nil means
+--   "no shared setting", and each tool keeps its own, which is what lets
+--   any of them run on its own.
 -- ---------------------------------------------------------------------
 local PAL_SECT   = "TS_Palette"
 local PAL_LEGACY = "TS_ChannelView"
@@ -294,7 +311,7 @@ C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
 C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
--- (saved under its old name, Faceplate texture, so the choice carries over)
+-- (stored under the key plate_texture, so saved choices still load)
 C.EFFECT_3D = ext_get("plate_texture", C.EFFECT_3D and "1" or "0") == "1"
 C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
@@ -531,7 +548,7 @@ local function drop_under(mx)
 end
 
 -- Where "Insert plugin before/after" adds: a top-level slot as a number,
--- the way the browser always took it, or a slot inside a container.
+-- as the browser takes it, or a slot inside a container.
 local function insert_target(fx, after)
   local gap = (fx.index or fx.top_index or 0) + (after and 1 or 0)
   if fx.is_top_level then return gap end
@@ -1069,7 +1086,7 @@ local function style_menu(fx, key, idx, c)
   end
 
   -- a fader's shape: which way it runs, how long, how thick (Shape<n>).
-  -- Full length and a full column is the fader as it always was.
+  -- Full length and a full column is the standard fader.
   if fam == "fader" then
     ImGui.Spacing(ctx)
     ImGui.TextDisabled(ctx, "Shape")
@@ -2570,8 +2587,8 @@ end
 -- `mid_y` is the vertical centre of the header bar. ImGui centres a menu
 -- label in the bar itself, but the cursor inside a menu bar sits at the
 -- TOP of the row, so anything drawn by hand has to be told where the
--- middle is or it rides high -- which is what had the track name and this
--- button sitting above the menus.
+-- middle is or it rides high, above the menu labels beside it -- the
+-- track name and these buttons included.
 -- Channel view or mixer view. The icon shows the view you would GET,
 -- because a button should say what it does rather than where you are.
 local function view_toggle(ctx, mid_y)
@@ -3228,6 +3245,24 @@ local function menu_bar()
     end
   end
 
+  -- Action drawers (TS_CV_Drawers): lit while any is open; click for the
+  -- list, to open or close each, make a new one, or organise them.
+  do
+    local tw = C.ICON_SIZE + 6
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
+      if W.icon_button(ctx, "drawers", "drawers", C.ICON_SIZE, DR.any_open(), "Action drawers") then
+        ImGui.OpenPopup(ctx, "drawersmenu")
+      end
+      if ImGui.BeginPopup(ctx, "drawersmenu") then
+        DR.header_menu(ctx)
+        ImGui.EndPopup(ctx)
+      end
+      menus_right = menus_right + tw
+    end
+  end
+
   -- the FX chain's group, after a hairline left of FX on/off
   if app.track and fx_left - menus_right > GROUP_GAP + C.ICON_SIZE + 46 then
     fx_left = fx_left - GROUP_GAP
@@ -3312,9 +3347,9 @@ local function menu_bar()
   -- the track name drawn on it, which is not an item at all.
   --
   -- The bar is centred on mid_y and starts at the window top, so its
-  -- height falls out of that rather than needing MenuBarHeight -- which
-  -- ImGui does not report, as the header arithmetic found out the hard
-  -- way.
+  -- height falls out of that rather than needing MenuBarHeight, which
+  -- ImGui does not report (the header arithmetic in frame() works round
+  -- the same gap).
   if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left)
      and not ImGui.IsAnyItemHovered(ctx) then
     local wx, wy = ImGui.GetWindowPos(ctx)
@@ -3743,6 +3778,9 @@ local function frame()
 
   rescan(false)
 
+  -- the action bars' list, when the TCP or the toolbars script changed it
+  DR.sync()
+
   ImGui.SetNextWindowSize(ctx, 1100, 300, ImGui.Cond_FirstUseEver)
   if dock_id ~= 0 then
     ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_FirstUseEver)
@@ -3859,6 +3897,16 @@ local function frame()
       ImGui.Dummy(ctx, 0, 0)
     end
 
+    -- action drawers along the top (TS_CV_Drawers): first under the
+    -- header, above MIDI learn -- they stay, MIDI learn comes and goes
+    if #DR.open_on("top") > 0 then
+      local tw = ImGui.GetContentRegionAvail(ctx)
+      local tx, ty = ImGui.GetCursorScreenPos(ctx)
+      local th = DR.draw_h(ctx, "top", tx, ty, tw)
+      ImGui.SetCursorScreenPos(ctx, tx, ty + th + 2)
+      ImGui.Dummy(ctx, 0, 0)
+    end
+
     -- the MIDI learn drawer, full width under the header: the rows below
     -- lose its height while it's open
     if ML.is_open() then
@@ -3877,7 +3925,7 @@ local function frame()
     -- actually gets is "trackrow" itself: WindowPadding top and bottom
     -- (C.TRACKROW_PAD_Y, trimmed below ReaImGui's own default -- see
     -- that constant), plus its own horizontal scrollbar's height,
-    -- reserved ALWAYS now, not only on a frame the row's content
+    -- reserved ALWAYS, not only on a frame the row's content
     -- actually overflows (see MX.row_pad_y) -- so this is one constant,
     -- the same in both views,
     -- rather than something computed from trackrow's own content width
@@ -3903,8 +3951,8 @@ local function frame()
     -- under it. Channel view splits avail_h between two stacked items,
     -- so this gap has to come out of that split too, or the second
     -- item (the track row, scrollbar included) lands short of the
-    -- window's bottom edge by however many pixels this is -- exactly
-    -- the "padded up" mismatch against mixer view.
+    -- window's bottom edge by however many pixels this is, and comes out
+    -- shorter than mixer view's.
     --
     -- No GetStyleVar here either, so it's measured the same way as
     -- child_pad_y: a zero-height Dummy has no height of its own, so the
@@ -3939,12 +3987,23 @@ local function frame()
     -- two of them are both spent -- so row_h + spacing_y + strip_h
     -- lands on avail_h exactly, the same total mixer view gets, split
     -- differently rather than shrunk.
+    -- Drawers (TS_CV_Drawers): along the bottom they take their height
+    -- (and one more ItemSpacing) from the row; down the sides, their
+    -- width from the panels.
+    local full_w0 = ImGui.GetContentRegionAvail(ctx)
+    local bot_h = DR.extent(ctx, "bottom", full_w0)
+    local bot_take = bot_h > 0 and (bot_h + spacing_y) or 0
+    local left_w, right_w = DR.extent(ctx, "left", 0), DR.extent(ctx, "right", 0)
+    local SIDE_GAP = 4
+    local left_take  = left_w > 0 and (left_w + SIDE_GAP) or 0
+    local right_take = right_w > 0 and (right_w + SIDE_GAP) or 0
+
     local row_h = math.max(C.CELL_H + C.HEADER_H + C.PANEL_PAD * 2,
-                           avail_h - spacing_y - strip_h)
+                           avail_h - spacing_y - strip_h - bot_take)
     -- Channel pinned left, Sends and Receives pinned right, the plugin
     -- row scrolling between them. The pinned panels are measured first so
     -- the row in the middle knows what is left for it.
-    local full_w = ImGui.GetContentRegionAvail(ctx)
+    local full_w = full_w0 - left_take - right_take
     local ch_w   = CH.width(CH.is_collapsed())
     -- The master has no Receives panel: every track feeds it, and the
     -- list would only ever be the odd real send to the master.
@@ -3968,14 +4027,35 @@ local function frame()
       set_view(false)
     end
 
+    -- the side drawers, beside a row h tall starting at the cursor; the
+    -- cursor is left where the row's first item goes
+    local function side_drawers(h)
+      local rx, ry = ImGui.GetCursorScreenPos(ctx)
+      if left_w > 0 then DR.draw_v(ctx, "left", rx, ry, h) end
+      if right_w > 0 then DR.draw_v(ctx, "right", rx + full_w0 - right_w, ry, h) end
+      ImGui.SetCursorScreenPos(ctx, rx + left_take, ry)
+    end
+    -- the bottom drawers, at the cursor (the start of a line)
+    local function bottom_drawers()
+      if bot_h <= 0 then return end
+      local bx, by = ImGui.GetCursorScreenPos(ctx)
+      DR.draw_h(ctx, "bottom", bx, by, full_w0)
+      ImGui.SetCursorScreenPos(ctx, bx, by + bot_h)
+      ImGui.Dummy(ctx, 0, 0)
+    end
+
     if C.MIXER_VIEW then
       -- Mixer view takes the whole upper area. The track row underneath
       -- -- strips and their name buttons together, one scrolling child
       -- -- stays: it is the one thing both views share, and losing it
       -- would make switching feel like changing windows rather than
       -- changing what you are looking at.
+      local mix_h = avail_h - bot_take
+      side_drawers(mix_h)
       local open_it, want_view, dbl_track =
-        MX.draw_row(ctx, avail_h, app.track, true, child_pad_y, win_pad_x)
+        MX.draw_row(ctx, mix_h, app.track, true, child_pad_y, win_pad_x,
+          (left_take + right_take > 0) and full_w or nil)
+      bottom_drawers()
       if want_view then
         set_view(false)
       end
@@ -3990,6 +4070,7 @@ local function frame()
         open_from_name(dbl_track)
       end
     else
+      side_drawers(row_h)
       CH.draw(ctx, app.track, row_h)
       ImGui.SameLine(ctx, 0, C.PANEL_GAP)
       local _, ma_req = MR.draw_macros(ctx, app.track, row_h)
@@ -4019,7 +4100,7 @@ local function frame()
       end
 
       -- Double-clicking the Channel panel's background -- not the fader,
-      -- which still means unity -- goes back to the mixer.
+      -- which means unity -- goes back to the mixer.
       if CH.want_mixer then
         CH.want_mixer = false
         set_view(true)
@@ -4029,13 +4110,13 @@ local function frame()
         set_view(true)
       end
 
-      -- The track row, on its own now -- same window id as mixer view's
+      -- The track row, on its own -- same window id as mixer view's
       -- row, just without the strips above the names, so the scroll
       -- position it lands on here is exactly the one mixer view left it
       -- at. Double-clicking its empty background (past the last name
       -- button) is the mirror of mixer view's own empty-space
       -- double-click: back to mixer, same as double-clicking the
-      -- Channel panel or the empty plugin row already do.
+      -- Channel panel or the empty plugin row does.
       local _, want_mixer, dbl_track =
         MX.draw_row(ctx, strip_h, app.track, false, child_pad_y, win_pad_x)
       if want_mixer then
@@ -4043,6 +4124,9 @@ local function frame()
       elseif dbl_track then
         open_from_name(dbl_track)
       end
+      -- the bottom drawers: under the track names, where mixer view has
+      -- them too
+      bottom_drawers()
     end
 
     do  -- and the matching rule along the bottom edge of the window
@@ -4058,6 +4142,8 @@ local function frame()
     panel_menu()
     control_menu()
     box_menu()
+    DR.draw_menus(ctx)
+    DR.poll()
 
     E.draw(ctx, app.track)
     if SD.draw_menu(ctx, app.track) then rescan(true) end
@@ -4087,6 +4173,8 @@ local function frame()
     W.draw_tip(ctx)
     ImGui.End(ctx)
   end
+  -- the Organise actions window, its own window beside this one
+  AE.draw(ctx)
 
   -- The style pushes happened before Begin, so they unwind either way.
   ImGui.PopStyleVar(ctx, 1)
@@ -4166,6 +4254,7 @@ function safe_frame()
 end
 
 reaper.atexit(function()
+  DR.cancel_picks(); AE.cancel_picks(); E.cancel_vpick()
   M.save(); SC.save()
   reaper.DeleteExtState(C.EXT_SECT, ALIVE, false)
   show_toggle_state(false)      -- no window, no mixer showing

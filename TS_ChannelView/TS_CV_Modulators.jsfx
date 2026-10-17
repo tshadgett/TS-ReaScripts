@@ -45,7 +45,7 @@ noindex: true
        2  Amount   a setting's share of its knob's range, -1..1; for a
                    switch, the setting by choice, one decimal digit each
 
-  THE MATRIX (ChannelView 2.1.2). Each modulator's settings can be moved
+  THE MATRIX. Each modulator's settings can be moved
   by two sources: a macro, or another modulator. Worked out here, at the
   top of every block -- the moved settings are written over the knobs'
   for this block and put back at its end, so the knobs (and their lanes)
@@ -59,8 +59,8 @@ noindex: true
   decimal digits from the lowest, the setting for each of the macro's
   choices (0 its own, 1.. the setting + 1), up to six; the choices count
   is the Target's hundreds.
-  Projects saved before 2.1.2 load with all of these at 0: nothing moved,
-  every link and lane where it was.
+  A project saved without these loads them at 0: nothing moved, every
+  link and lane where it was.
 
   The idea of macros and modulators living in the chain, linked by
   REAPER's parameter modulation, comes from Saxmand's FX Modulator
@@ -259,7 +259,7 @@ slider189:m8_mcc=1<0,127,1>-Mod 8 MIDI CC
 slider190:m8_mlo=36<0,127,1>-Mod 8 MIDI Low note
 slider191:m8_mhi=96<0,127,1>-Mod 8 MIDI High note
 slider192:m8_mhold=1<0,1,1{Off,On}>-Mod 8 MIDI Hold
-// THE MATRIX: what moves each modulator's settings (2.1.2)
+// THE MATRIX: what moves each modulator's settings
 slider193:mx1a_src=0<0,24,1>-Mod 1 moved by 1: source
 slider194:mx1a_tgt=0<0,1515,1>-Mod 1 moved by 1: target
 slider195:mx1a_amt=0<-1,1000000,0.0001>-Mod 1 moved by 1: amount

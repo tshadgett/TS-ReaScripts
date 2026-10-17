@@ -38,10 +38,10 @@ C.LABEL_GAP   = 5         -- air between the name and the control under
                           -- band + gap + knob has to leave room for the
                           -- value line at the bottom.
 C.PANEL_PAD   = 6         -- inner padding around a panel's control grid
--- The top of the grid. Tried tighter than the sides once; it pulled the
--- whole row up under the header and read worse, not better. The air
--- between a cell's name and its knob is the thing that wanted adjusting,
--- and that is LABEL_GAP below.
+-- The top of the grid. Tighter than the sides pulls the whole row up
+-- under the header and reads worse, not better. The air between a
+-- cell's name and its knob is the thing to adjust, and that is
+-- LABEL_GAP above.
 C.GRID_TOP_PAD = C.PANEL_PAD
 C.PANEL_GAP   = 6         -- gap between adjacent panels
 C.HEADER_H    = 20        -- panel header bar height
@@ -60,7 +60,7 @@ C.ICON_ROW_H  = 44        -- what an icon row adds: stripe and icon
 -- The name row grows by C.ICON_ROW_H while track icons are shown. Every
 -- layout that depends on the row's height reads C.STRIP_H, so changing
 -- it here, once, at the start of a frame, keeps both views and the
--- mixer strips in agreement exactly as before.
+-- mixer strips in agreement.
 function C.set_icon_row(on)
   C.STRIP_H = C.STRIP_BASE_H + (on and C.ICON_ROW_H or 0)
 end
@@ -87,10 +87,10 @@ C.TRACKROW_PAD_Y = 4
 -- no real measurement to fall back on yet. Scaled down from the 14 that
 -- matched the probe under ReaImGui's own default WindowPadding, by the
 -- same amount TRACKROW_PAD_Y trims off each of the two edges (8 -> 4 is
--- 4 fewer pixels top and bottom). Being exactly right barely matters --
--- this frame is rare enough that it was never observed, only guarded
--- against -- but it should stay in the right ballpark rather than drift
--- back toward the old, larger default.
+-- 4 fewer pixels top and bottom). Being exactly right barely matters,
+-- since this frame is rare and only guarded against, but the value
+-- should stay in the ballpark of what the probe would measure with
+-- TRACKROW_PAD_Y applied.
 C.CHILD_PAD_Y_FALLBACK = 6
 
 -- Control flow within a panel:
@@ -102,10 +102,10 @@ C.CHILD_PAD_Y_FALLBACK = 6
 C.FLOW = "column"
 
 -- Knob sizes, in half-cells across and down (TS_CV_Panel.layout), and the
--- knob's diameter at each. Medium is the one cell every control has always
--- been. A small knob has its name in small type over a smaller dial and no
--- room for its value, which goes in its tooltip; a large one keeps both
--- and grows its dial about half again.
+-- knob's diameter at each. Medium is one whole cell, the ordinary
+-- control. A small knob has its name in small type over a smaller dial
+-- and no room for its value, which goes in its tooltip; a large one keeps
+-- both and grows its dial about half again.
 C.SIZES = {
   small  = { w = 2, h = 1, d = 18,       label = "Small" },
   medium = { w = 2, h = 2, d = C.KNOB_D, label = "Medium" },
@@ -144,7 +144,7 @@ C.ICON_SIZE = 14
 C.MIX_GAP = 4
 
 -- The strip header's name. Off by default: the track button directly
--- underneath carries the name already, and now that the two line up,
+-- underneath carries the name already, and with the two lined up,
 -- printing it twice in a column an inch tall is just noise.
 C.MIX_STRIP_NAME = false
 
@@ -169,7 +169,7 @@ C.STRIP_ROUND = 3.0
 -- selected one is the only thing at full strength, and lift to the
 -- hover alpha under the mouse. The mixer header and the track button
 -- below it use the SAME pair: they are one object, and a header at full
--- colour over a dimmed name badge looked like a bug rather than a
+-- colour over a dimmed name badge reads as a bug rather than a
 -- decision.
 C.DIM_ALPHA   = 0x66
 C.HOVER_ALPHA = 0xaa
@@ -182,7 +182,7 @@ C.AUTO_BTN_W = 32         -- the automation-mode button in a panel header.
 -- Collapsed panels run their label down the bar. Two ways of doing that:
 -- letters stacked one per line, or the label genuinely rotated.
 --
--- OFF, because the rotated version came out unreadable. ImGui cannot
+-- OFF, because the rotated version is unreadable when scaled. ImGui cannot
 -- rotate text at all, so the rotated path draws the label into a LICE
 -- bitmap and hands ImGui an image to put on a turned quad -- and LICE
 -- has no idea what size ImGui is actually rendering at. On a scaled
@@ -191,8 +191,8 @@ C.AUTO_BTN_W = 32         -- the automation-mode button in a panel header.
 -- it. Fixing it means finding ImGui's real pixel height, which
 -- GetFontSize does not give.
 --
--- The code is still here and still works where the scaling happens to be
--- 1:1. Turn this on to try it.
+-- The rotated path works where the scaling happens to be 1:1. Turn this
+-- on to try it.
 C.ROT_TEXT  = false       -- true rotates; false stacks the letters
 C.ROT_FONT  = "Arial"     -- the LICE side has no access to ImGui's font
 C.ROT_UP    = true        -- reading bottom-to-top, the way a book spine
@@ -207,16 +207,15 @@ C.ROT_UP    = true        -- reading bottom-to-top, the way a book spine
 C.COLLAPSED_W = 30
 
 -- Gain-reduction meter: a full-height strip down the edge of the panel
--- body, NOT a cell in the parameter grid. A cell would be 58px wide for
--- one read-only value and would push every panel a whole column wider;
--- this costs a quarter of that. Being full height also means it works
+-- body, NOT a cell in the parameter grid. A cell would be a whole column
+-- for one read-only value and would push every panel that much wider;
+-- this costs a fraction of that. Being full height also means it works
 -- unchanged in a collapsed panel, which a grid cell cannot.
 -- The BAR stays thin; the readout underneath gets a wider footprint and
--- a smaller font, so "6.4 dB" fits without fattening the meter itself.
--- The whole column is still well under a 58px cell.
--- Sized so the widest readout the ladder can produce -- "60.0 dB" -- fits
--- on one line. The bar itself stays thin; only its column is this wide,
--- and it's still well under a 58px cell.
+-- a smaller font, so a reading fits without fattening the meter itself.
+-- The column is sized so the widest readout the ladder can produce --
+-- "60.0 dB" -- fits on one line, and the whole column is still well
+-- under a cell.
 C.METER_W     = 14        -- the bar
 C.METER_COL_W = 40        -- bar plus the room its readout needs
 C.IO_COL_W    = 28        -- a plugin's input or output meter, with its readout
@@ -293,15 +292,13 @@ C.FADER_CAP_H = 16        -- the moving cap: big enough to grab and to
                           -- read the unity mark against
 C.GR_BAR_W = 5          -- the track's total gain-reduction bar beside it
 C.LEVEL_METER_W = 52      -- the level meter's own width within its half.
-                          -- Wider than it was, because the dB ladder is
-                          -- printed OVER the bars now instead of in a
-                          -- gutter beside them (C.METER_SCALE_OVER) --
-                          -- the bars got the gutter's width back and
-                          -- then the meter got the rest of its half. It
-                          -- is still capped at the half, so it sits
-                          -- centred like the fader rather than flush
-                          -- against the panel edge. (C.METER_W, way
-                          -- above, is the GAIN REDUCTION bar --
+                          -- The dB ladder is printed OVER the bars
+                          -- (C.METER_SCALE_OVER), so the bars have
+                          -- the width a gutter would take. Capped at
+                          -- the half, so it sits centred like the
+                          -- fader rather than flush against the
+                          -- panel edge. (C.METER_W, way above,
+                          -- is the GAIN REDUCTION bar --
                           -- different meter, different panel.)
 -- A send is a DOUBLE-WIDTH cell on the same grid the plugin panels use,
 -- so sends line up row-for-row with parameters: knob in the left half,
@@ -318,19 +315,16 @@ C.SENDS_MAX_W = 3 * C.SEND_W + C.SEND_COL_GAP * 2 + C.PANEL_PAD * 2
 C.METER_FLOOR = -60       -- dB at the bottom of the level meter
 C.METER_MARKS = { 0, -6, -12, -24, -48 }   -- labelled on the channel meter
 -- The ladder goes ON the bars, the way REAPER's own meters do it, rather
--- than in a gutter of numbers beside them -- at this width the gutter was
--- taking a third of the meter to print five short numbers. Each figure
+-- than in a gutter of numbers beside them -- at this width a gutter
+-- takes a third of the meter to print five short numbers. Each figure
 -- takes dark ink where the bar behind it is lit and light ink where it
 -- isn't, which is what makes an overlaid scale readable at all. False
--- puts the gutter back.
+-- prints the ladder in a gutter beside the bars.
 C.METER_SCALE_OVER = true
 -- The RMS hairline beside each bar. Fixed pixels, not a fraction of the
 -- bar: the point of it is to be a hairline, and a proportion stops being
 -- one as soon as the bars get wider.
 C.RMS_STRIP_W = 3
--- The RMS hairline beside each bar. Fixed pixels, not a fraction of the
--- bar: the point of it is to be a hairline, and a proportion stops being
--- one as soon as the bars get wider.
 C.RMS_STRIP_W = 3
 C.LEVEL_HOLD  = 1.2       -- seconds the peak line holds
 C.LEVEL_FALL  = 24        -- dB per second it falls after that
@@ -393,11 +387,11 @@ C.EQ_CURVE_SEGS  = 160     -- points sampled across the canvas width for
 C.EQ_FILL_STRIDE = 1       -- sample stride of the per-band gradient-fill
                             -- strips (see EQPanel) -- one rect per sampled
                             -- point, same as TS_TrackAnalyser's own
-                            -- spectrum fill. Was 3: a flat-topped rect
-                            -- spanning three samples reads as a visible
+                            -- spectrum fill. Above 1, a flat-topped rect
+                            -- spanning several samples reads as a visible
                             -- staircase on any part of the curve with real
-                            -- slope (peaks, rolloffs, notches) -- the extra
-                            -- draw calls at 1 are the same order TA already
+                            -- slope (peaks, rolloffs, notches); the draw
+                            -- calls at 1 are the same order TA already
                             -- pays per frame for its 256-band fill.
 
 -- Cycled by a band's position in RQ.read's list, so bands keep a stable
@@ -436,9 +430,9 @@ C.ROW_TOP_GAP = 5
 
 -- Vertical padding inside the header (menu) bar. ImGui works the bar's
 -- height out from FramePadding when the window opens, so this is the one
--- number that moves it. 4 lands the track-colour rule level with the
--- Track Analyser's, measured off a screenshot of the two docked together
--- -- every point here is two pixels of header, top and bottom.
+-- number that moves it: every point here is two pixels of header, top
+-- and bottom. The track-colour rule follows it (the derivation below
+-- keeps it level with Track Analyser's whatever this is).
 C.MENU_PAD_Y = 6
 
 -- Header height, derived at RUNTIME with no style constants assumed.
@@ -453,13 +447,13 @@ C.MENU_PAD_Y = 6
 --                       frame widgets are the tallest, so GetFrameHeight
 --   + ItemSpacing.y     before the next item, which is the rule
 --
--- Writing those defaults down as numbers is what kept this two or three
--- pixels out: ReaImGui's are not ImGui's, and this build exposes no
--- GetStyleVar to ask. So none of them is written down. We DON'T push a
--- WindowPadding either, which leaves ours equal to TA's, and then:
+-- Writing those defaults down as numbers puts this two or three pixels
+-- out: ReaImGui's are not ImGui's, and there is no GetStyleVar to ask.
+-- So none of them is written down. ChannelView DOESN'T push a
+-- WindowPadding either, which leaves its own equal to TA's, and then:
 --
 --   cursor_after_menu_bar  = window_top + MenuBarHeight + WindowPadding.y
---   MenuBarHeight          = GetFontSize() + 2 * MENU_PAD_Y   (we set it)
+--   MenuBarHeight          = GetFontSize() + 2 * MENU_PAD_Y   (set here)
 --   ItemSpacing.y          = GetTextLineHeightWithSpacing() - GetTextLineHeight()
 --
 -- so subtracting the menu bar recovers window_top + WindowPadding.y
@@ -475,9 +469,9 @@ C.WIN_NO_SCROLLBAR = true
 --
 -- Both windows draw a 2px rect at a y that usually carries a half pixel,
 -- so both cover three rows at the top and two at the bottom. Setting
--- ours to 3 to "match what renders" produced four -- fixing the symptom
--- one layer above the cause, which is how you end up a pixel out in the
--- other direction.
+-- this to 3 to "match what renders" gives four -- fixing the symptom one
+-- layer above the cause, which ends up a pixel out in the other
+-- direction.
 C.RULE_H = 2
 
 -- The residual between where the calculation puts the rule and where
@@ -656,9 +650,9 @@ C.PALETTE = {
   eq_spectrum  = { "tint",  0.0, 0.160, 0.220 },
   level_lo   = { "fixed",  130.2, 0.388, 0.475 },
   -- Green below LEVEL_HOT, red at it, a harder red past LEVEL_CLIP.
-  -- There was an amber step from -6 up; it was removed because -6 dBFS
-  -- is not a warning about anything, and a colour change that means
-  -- nothing is worse than no colour change at all.
+  -- No amber step at -6: -6 dBFS is not a warning about anything, and a
+  -- colour change that means nothing is worse than no colour change at
+  -- all.
   level_clip = { "fixed",    6.0, 0.720, 0.560 },
   -- Clipping is a different KIND of news from "hot", so it gets a colour
   -- of its own rather than more of the same orange: pure red, and lighter
@@ -807,8 +801,8 @@ C.build_palette()
 --
 -- The surface itself -- brushed, metallic, both or neither -- belongs to
 -- each faceplate, background and section (Brush / Metal in the layout),
--- not to this. METAL_K is the metallic flake's strength (the one Tim
--- settled on with the web page's version), and the shadows' too.
+-- not to this. METAL_K is the metallic flake's strength (the same as
+-- the web page's), and the shadows' too.
 C.EFFECT_3D = true
 C.METAL_K = 0.8
 
@@ -854,7 +848,7 @@ C.PLATES = {
 }
 
 -- Cap colours. "accent" has no colour of its own: it is the theme's accent,
--- the one the arc knob has always used.
+-- the one the arc knob uses by default.
 C.CAPS = {
   { key = "accent", label = "Accent" },
   { key = "red",    label = "Red",    col = 0xc8453cff },
@@ -931,12 +925,12 @@ C.PLATE, C.CAP, C.KNOB_STYLE, C.FADER_STYLE = {}, {}, {}, {}
 for _, p in ipairs(C.PLATES)       do C.PLATE[p.key] = p end
 for _, p in ipairs(C.CAPS)         do C.CAP[p.key] = p end
 for _, p in ipairs(C.KNOB_STYLES)  do C.KNOB_STYLE[p.key] = p end
-C.KNOB_STYLE_ALIAS = { api = "nose" }   -- Round nose's name for a few days before 1.7.5
+C.KNOB_STYLE_ALIAS = { api = "nose" }   -- an older name for Round nose, still read
 for _, p in ipairs(C.FADER_STYLES) do C.FADER_STYLE[p.key] = p end
 
 -- A faceplate by key, or nil for the theme's own (or anything unknown --
--- including a faceplate that has since been taken out of the list, which
--- leaves the layout on the theme's).
+-- including a faceplate no longer in the list, which leaves the layout
+-- on the theme's).
 --
 -- Besides the list, any colour at all: a key "#rrggbb" is a CUSTOM
 -- faceplate in that colour (chosen with the [+] after the swatches, see

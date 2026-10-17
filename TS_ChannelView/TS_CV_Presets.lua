@@ -327,7 +327,7 @@ end
 -- REAPER's preset count (TrackFX_GetPresetIndex) is asked for at most
 -- every PR.COUNT_EVERY seconds, not every frame: for most plugins it's
 -- quick, but some list their whole library to answer -- VSL's Synchron
--- Player takes a third of a second -- and asking every frame stalled the
+-- Player takes a third of a second -- and asking every frame stalls the
 -- window. One that's slow to answer (PR.SLOW_CALL) is asked only every
 -- PR.SLOW_EVERY, or when the preset it's on changes (PR.seen).
 PR.COUNT_EVERY = 2
@@ -459,7 +459,6 @@ function PR.delete(track, fx, name)
   return true
 end
 
--- Load by name (user or factory), the default, or step.
 -- ---------------------------------------------------------------------
 -- a plugin's own (factory) presets that REAPER doesn't hear about
 -- ---------------------------------------------------------------------
@@ -541,6 +540,7 @@ function PR.seen(track, fx, name)
   end
 end
 
+-- Load by name (user or factory), the default, or step.
 function PR.load(track, fx, name) watch(track, fx); return reaper.TrackFX_SetPreset(track, fx, name) end
 function PR.load_default(track, fx) watch(track, fx); return reaper.TrackFX_SetPresetByIndex(track, fx, -1) end
 function PR.step(track, fx, dir) watch(track, fx); return reaper.TrackFX_NavigatePresets(track, fx, dir) end

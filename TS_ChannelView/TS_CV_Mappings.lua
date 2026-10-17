@@ -40,8 +40,8 @@
   at a time with a tab strip under its header (TS_CV_Panel's P.pages).
   Its label names the tab; its Style<n> colour (the cap field) is the
   tab's stripe, the theme's accent when unset. Dividers inside a page
-  split its columns as they always have. "xy" is an XY pad (Ctl is X, Dual<n> Y), "dual" a
-  concentric knob (Ctl the outer ring, Dual<n> the inner knob).
+  split its columns as usual. "xy" is an XY pad (Ctl is X, Dual<n> Y),
+  "dual" a concentric knob (Ctl the outer ring, Dual<n> the inner knob).
   "blank" is a deliberate empty cell, so a layout can leave a gap where a
   hardware strip would have one; "divider" ends the current column and,
   by default, draws a rule separating one group of controls from the
@@ -140,6 +140,11 @@
   two layouts of a plugin with one of the same name share its setting.
   The setting is kept per instance, with the project (TS_CV_State
   St.vget). A Show rule on one: Show<n>=v:<name>|<value>|...
+  A button or selector can also run a REAPER action as you pick each of
+  its settings (a button: Off, then On):
+      VAct<n>=<action>;<action>;...
+  one per setting, in order, empty for none; an action is its command id
+  or, for a script or extension, its "_NAME".
 
   LAYOUT SWITCHING (the plugin's own section only, not a variant's):
       Switch<n>=<source>|<value>|<tol>|<op>|<value2>|<layout>
@@ -303,8 +308,8 @@ function M.has_second(c) return c ~= nil and (c.type == "xy" or c.type == "dual"
 -- Shape<n>=h|3|half: a fader's direction (v or h), length in rows or
 -- columns (2, 3 or 4, or full) and thickness (a whole column or row, or
 -- half of one). Returns dir ("h" or nil), len (2..4 or nil) and thin
--- (true or nil); nil throughout is the fader as it always was --
--- vertical, full height, a column wide.
+-- (true or nil); nil throughout is the default fader -- vertical, full
+-- height, a column wide.
 local function shape_of(v)
   local d, l, t = U.trim(v or ""):match("^(%a)%s*|%s*(%w+)%s*|%s*(%a+)")
   if not d then return nil, nil, nil end
@@ -347,8 +352,8 @@ end
 
 -- Scale<n>=values|ten|none[|cap]: what knob n's scale is numbered with,
 -- and whether in the cap's colour. With no line a knob shows its values
--- (the default since 1.8.5, layouts saved before it included); "none"
--- is the only way to have no numbers.
+-- (the default, for every layout without a Scale line); "none" is the
+-- only way to have no numbers.
 local function scale_of(v)
   local k = U.trim(v or ""):match("^(%a+)")
   return (k == "values" or k == "ten" or k == "none") and k or nil
@@ -717,13 +722,6 @@ function M.copy_canvas(cv)
   return out
 end
 
--- A compressor layout's measured threshold, when it's for the threshold
--- mapped now: its points, else nil.
--- The control a compressor's threshold is set by: its Threshold, or with
--- none, its Input (1176-style: the input drives it into a fixed threshold).
--- The parameter, and whether it's the input.
--- What an input gain's 0 dB stands for, unless a layout says otherwise:
--- the usual "0 VU" of a plugin modelled on analogue gear.
 -- ---------------------------------------------------------------------
 -- a saturator's learned curve and harmonics (TS_CV_Learn LN.start_sat)
 -- ---------------------------------------------------------------------
@@ -1039,9 +1037,15 @@ function M.sat_vu_pos(db)
   end
   return 0.7 + 0.3 * db / M.SAT_VU_HI
 end
+
+-- What an input gain's 0 dB stands for, unless a layout says otherwise:
+-- the usual "0 VU" of a plugin modelled on analogue gear.
 M.REF0 = -18
 function M.ref0(cv) return (cv and cv.ref0) or M.REF0 end
 
+-- The control a compressor's threshold is set by: its Threshold, or with
+-- none, its Input (1176-style: the input drives it into a fixed threshold).
+-- The parameter, and whether it's the input.
 function M.thr_param(cv)
   local r = cv and cv.roles
   if not r then return nil end
@@ -1050,10 +1054,12 @@ function M.thr_param(cv)
   return nil
 end
 
+-- A compressor layout's measured threshold, when it's for the threshold
+-- mapped now: its points, else nil.
 function M.thr_cal(cv)
   local tc = cv and cv.thr_cal
   if tc and tc.p and tc.p == M.thr_param(cv) and tc.pts and #tc.pts >= 2 then
-    -- one where the threshold never moved measured nothing (an older
+    -- one where the threshold never moved measured nothing (a
     -- measurement of a copy that passed no sound): set aside
     local lo, hi = math.huge, -math.huge
     for _, q in ipairs(tc.pts) do lo = math.min(lo, q[2]); hi = math.max(hi, q[2]) end
@@ -1244,9 +1250,9 @@ local function parse_section(sect)
     local p, t, bi, label = raw:match("^%s*(-?%d+)%s*|%s*([%a_]*)%s*|%s*(%d*)%s*|?(.*)$")
     if p then
       t = (t ~= "" and VALID_TYPE[t]) and t or "knob"
-      -- Field three is a bitmask: bit 0 is bipolar (its original,
-      -- sole meaning, so a layout written before reverse existed still
-      -- reads back the same), bit 1 is reverse, bit 2 is "no rule" --
+      -- Field three is a bitmask: bit 0 is bipolar (so a plain 0 or 1
+      -- in this field reads as bipolar off or on, nothing else set),
+      -- bit 1 is reverse, bit 2 is "no rule" --
       -- for a divider only, it still ends the column and opens the same
       -- C.DIVIDER_W gap, just without the line. Bit 2 is unused (and
       -- unset) on every other type, the same as bits 0/1 already are on
@@ -1257,7 +1263,7 @@ local function parse_section(sect)
       local f = tonumber(bi) or 0
       local sty, cap = (sect["Style" .. i] or ""):match("^%s*([%w_]*)%s*|?%s*([#%w_]*)")
       -- a section's faceplate as saved (a custom colour in lower case); one
-      -- no longer in the list leaves the section unstyled
+      -- not in the list leaves the section unstyled
       if sty == "plate" then cap = C.plate_key(cap); if not cap then sty = nil end end
       controls[#controls + 1] = {
         param   = tonumber(p),
@@ -1282,7 +1288,7 @@ local function parse_section(sect)
         scale   = scale_of(sect["Scale" .. i]),
         scale_ink = scale_ink_of(sect["Scale" .. i]),
         show    = (t ~= "page") and M.show_of(sect["Show" .. i]) or nil,
-        virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i]) or nil,
+        virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i], sect["VAct" .. i]) or nil,
       }
       -- a virtual selector shown as chips: one for each of its choices
       do
@@ -1385,7 +1391,11 @@ local function serialize(layout)
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
     if c.show and c.type ~= "page" then out["Show" .. (i - 1)] = M.show_line(c.show) end
-    if c.virtual and (c.param or -1) < 0 then out["Virt" .. (i - 1)] = M.virt_line(c.virtual) end
+    if c.virtual and (c.param or -1) < 0 then
+      out["Virt" .. (i - 1)] = M.virt_line(c.virtual)
+      local va = M.vact_line(c.virtual.actions, #(M.vchoices(c) or {}))
+      if va then out["VAct" .. (i - 1)] = va end
+    end
   end
   for k, line in ipairs(M.switch_lines(layout.switch)) do out["Switch" .. (k - 1)] = line end
   return out
@@ -1406,8 +1416,8 @@ end
 
 -- A rule from its line, or nil: { param, op, norm, norm2, tol }.
 -- op: "is" (within tol of norm), "not" (isn't), "above" / "below" (past
--- norm), "between" (norm..norm2, either way round, ends included). The
--- fourth field was once 0 / 1 for is / is not, which still reads the same.
+-- norm), "between" (norm..norm2, either way round, ends included). In
+-- the fourth field 0 is "is" and 1 is "not", as SHOW_CODE has them.
 local SHOW_OPS  = { [0] = "is", "not", "above", "below", "between" }
 local SHOW_CODE = { is = 0, ["not"] = 1, above = 2, below = 3, between = 4 }
 M.SHOW_OPS = { "is", "not", "above", "below", "between" }
@@ -1442,7 +1452,7 @@ function M.show_of(line)
   return r
 end
 
--- A rule's op, allowing for one made before ops (inv = is not).
+-- A rule's op; one with no op but `inv` set is "not".
 function M.show_op(r) return r.op or (r.inv and "not") or "is" end
 
 function M.show_line(r)
@@ -1501,7 +1511,7 @@ function M.clean_vname(name)
   return name ~= "" and name or nil
 end
 
-function M.virt_of(line)
+function M.virt_of(line, act_line)
   if not line then return nil end
   local start, rest = U.trim(line):match("^([^|]*)|?(.*)$")
   local v = { start = math.max(0, math.min(1, tonumber(start or "") or 0)), choices = {} }
@@ -1509,7 +1519,52 @@ function M.virt_of(line)
     ch = U.trim(ch)
     if ch ~= "" then v.choices[#v.choices + 1] = ch end
   end
+  v.actions = M.vact_of(act_line)
   return v
+end
+
+-- The actions a virtual control runs, by setting (1-based; nil where it
+-- runs none): VAct<n>. nil when there are none at all.
+function M.vact_of(line)
+  if not line or U.trim(line) == "" then return nil end
+  local out, i, any = {}, 0, false
+  for part in (U.trim(line) .. ";"):gmatch("([^;]*);") do
+    i = i + 1
+    part = U.trim(part)
+    if part ~= "" and not part:find("[|%s]") then out[i] = part; any = true end
+  end
+  return any and out or nil
+end
+-- And back, for the first n settings; nil when none is set.
+function M.vact_line(actions, n)
+  if not actions then return nil end
+  local list, any = {}, false
+  for i = 1, n or 0 do
+    local a = actions[i]
+    a = (type(a) == "string" and not a:find("[|;%s]")) and a or ""
+    if a ~= "" then any = true end
+    list[i] = a
+  end
+  if not any then return nil end
+  while list[#list] == "" do list[#list] = nil end
+  return table.concat(list, ";")
+end
+
+-- The action a button or selector runs at value v, or nil.
+function M.vaction(c, v)
+  local acts = c and c.virtual and c.virtual.actions
+  if not acts or c.type == "knob" then return nil end
+  return acts[M.vindex(c, v)]
+end
+
+-- Runs it (picked on the panel or the web page). Returns whether it ran.
+function M.run_vaction(c, v)
+  local cmd = M.vaction(c, v)
+  if not cmd then return false end
+  local id = (cmd:sub(1, 1) == "_") and reaper.NamedCommandLookup(cmd) or tonumber(cmd)
+  if not id or id <= 0 then return false end
+  reaper.Main_OnCommand(id, 0)
+  return true
 end
 function M.virt_line(v)
   local list = {}
@@ -1924,8 +1979,8 @@ function M.display_name(key, param, slot_label, plugin_name, live)
     return (n ~= "") and n or ("P" .. tostring(param))
   end
   -- A label that's only the plugin's own name for the parameter says
-  -- nothing of its own -- layouts before 1.7.5 filled every slot with one
-  -- -- so it doesn't hide the alias.
+  -- nothing of its own -- older layouts have one in every slot -- so it
+  -- doesn't hide the alias.
   local own = plugin_name and U.trim(plugin_name) or ""
   if slot_label and slot_label ~= "" and U.trim(slot_label) ~= own then return slot_label end
   local a = M.get_alias(key, param)
@@ -2133,17 +2188,16 @@ function M.import(entries)
   return n
 end
 
--- Deep copy, so the editor can work on a scratch layout and discard it.
 -- ---------------------------------------------------------------------
 -- Copy and paste a control's look
 -- ---------------------------------------------------------------------
 -- What a control looks like, apart from what it is (its parameter, type,
 -- label) and a dropdown's buttons: its style, colour, size (a fader's
--- shape), scale, background and finish. Pasting takes only
--- what fits the control it lands on: a style within its own kind (knob,
--- fader or button), the colour across kinds (as the nearest thing that
--- kind offers), size within the kind (a fader's shape fader to fader), the scale on knobs, the background
--- and finish on anything but a divider.
+-- shape), scale, background and finish. Pasting takes only what fits the
+-- control it lands on: a style within its own kind (knob, fader or
+-- button), the colour across kinds (as the nearest thing that kind
+-- offers), size within the kind (a fader's shape fader to fader), the
+-- scale on knobs, the background and finish on anything but a divider.
 
 -- "knob" (a stepped or concentric knob too), "fader", "xy", "button" (a
 -- toggle, or a dropdown shown as buttons), or nil for anything with no
@@ -2219,6 +2273,7 @@ function M.paste_look(o, s)
   return true
 end
 
+-- Deep copy, so the editor can work on a scratch layout and discard it.
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
@@ -2237,7 +2292,8 @@ function M.copy(layout)
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),
                                             norm = c.show.norm, norm2 = c.show.norm2,
                                             tol = c.show.tol } or nil,
-                        virtual = c.virtual and { start = c.virtual.start, choices = { table.unpack(c.virtual.choices or {}) } } or nil }
+                        virtual = c.virtual and { start = c.virtual.start, choices = { table.unpack(c.virtual.choices or {}) },
+                                                  actions = c.virtual.actions and M.vact_of(M.vact_line(c.virtual.actions, 64)) or nil } or nil }
   end
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.canvas = M.copy_canvas(layout.canvas)

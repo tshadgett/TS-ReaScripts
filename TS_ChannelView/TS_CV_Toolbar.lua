@@ -15,7 +15,9 @@
   a script's numeric id is only valid for this session -- the name is
   what survives a restart.
 
-  Icons are REAPER's toolbar PNGs from Data/toolbar_icons, the same
+  Icons are ChannelView's own ("cv:<key>", TS_CV_ActionIcons: drawn,
+  sharp at any size, in the bar's colours) or REAPER's toolbar PNGs from
+  Data/toolbar_icons, the same
   files its own toolbars use. Those are usually three frames side by
   side -- normal, hover, pressed -- and are drawn that way, with the
   pressed frame standing in for "on" on a toggle action. A single-frame
@@ -24,11 +26,30 @@
   The list lives in ExtState as one line: items split by ";", fields by
   "|". A label can't contain either -- they are simply dropped on the way
   in, which is the whole of the escaping.
+
+  MENUS. An item can be a menu: a button that opens a menu of actions,
+  separators and further menus, nested as deep as you like. Stored in the
+  same line, as "[|icon|label" ... "]" around its contents. Every action
+  bar has them: the TCP's two toolbars, ChannelView's drawers
+  (TS_CV_Drawers) and, through a store of its own, the web companion's
+  Actions bar (TS_CV_ActionEditor).
+
+  SWITCHES. An item whose action is "_TSCV_BAR:<id>" swaps the bar it's
+  on for bar <id> (TS_CV_Drawers puts that bar where this one was);
+  "_TSCV_BAR" alone is a menu of every bar to swap to. Lit when the bar
+  it names is the one showing, so a row of them copied onto each bar of
+  a set reads as tabs.
+
+  Each bar is one make() instance. Two instances can hold the same bar --
+  ChannelView's Organise actions window edits the TCP's toolbars, which
+  the TCP script is showing at the same time -- so every save also bumps
+  a revision ("<key>#rev"), and an instance that sees it move reloads.
 --]]
 
 local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
 local W = require("TS_CV_Widgets")
+local AI = require("TS_CV_ActionIcons")
 
 local ImGui
 
@@ -48,11 +69,25 @@ local TOP_DEFAULTS = {
 -- ImGui id so two bars in one window don't share buttons or popups, and
 -- `defaults` is what it holds before anything is saved. The TCP has two:
 -- one beside the ruler, one under the tracks beside the transport.
-local function make(key, tag, defaults)
+-- `store` (optional) keeps the bar somewhere other than ExtState: a table
+-- of load() -> items, save(items) and stamp() -> anything that changes
+-- when the stored bar does.
+local function make(key, tag, defaults, store)
 local KEY, ID = key, tag
 local DEFAULTS = defaults or {}
 local TB = {}
 TB.DEFAULTS = DEFAULTS
+TB.key, TB.tag = key, tag
+-- The button size (height; an icon button is square). A bar can ask for
+-- its own (TS_CV_Drawers' Size).
+TB.btn = C.TB_BTN
+
+-- "icons": a button is its icon, or its label when it has none (the TCP's
+-- look). "both": an icon and a label side by side (a drawer can ask).
+TB.style = "icons"
+-- Optional hooks, set by whoever shows the bar: extra entries for the
+-- bar's own right-click menu (fn(ctx)), and "Organise actions..." (fn()).
+TB.extra_bg, TB.organise = nil, nil
 
 TB.items = {}
 
@@ -61,17 +96,36 @@ TB.items = {}
 -- ---------------------------------------------------------------------
 
 local function clean(s) return ((s or ""):gsub("[;|]", "")) end
+TB.clean = clean
+
+local function ser(items, out)
+  for _, it in ipairs(items) do
+    if it.menu then
+      out[#out + 1] = "[|" .. clean(it.icon) .. "|" .. clean(it.label)
+      ser(it.items or {}, out)
+      out[#out + 1] = "]"
+    elseif it.gap then out[#out + 1] = "_"
+    elseif it.sep then out[#out + 1] = "-"
+    else out[#out + 1] = clean(it.cmd) .. "|" .. clean(it.icon) .. "|" .. clean(it.label) end
+  end
+end
 
 function TB.serialize(items)
   if #items == 0 then return "none" end
   local out = {}
-  for _, it in ipairs(items) do
-    if it.gap then out[#out + 1] = "_"
-    elseif it.sep then out[#out + 1] = "-"
-    else out[#out + 1] = clean(it.cmd) .. "|" .. clean(it.icon) .. "|" .. clean(it.label) end
-  end
+  ser(items, out)
   return table.concat(out, ";")
 end
+
+local function copy_items(src)
+  local out = {}
+  for i, it in ipairs(src) do
+    out[i] = { sep = it.sep, gap = it.gap, cmd = it.cmd, icon = it.icon or "", label = it.label or "",
+               color = it.color, menu = it.menu, items = it.menu and copy_items(it.items or {}) or nil }
+  end
+  return out
+end
+TB.copy_items = copy_items
 
 -- "" (never saved) gives the defaults; "none" is a toolbar emptied on
 -- purpose and stays empty.
@@ -83,13 +137,23 @@ function TB.parse(s)
     end
     return out
   end
-  local out = {}
-  if s == "none" then return out end
+  local root = {}
+  if s == "none" then return root end
+  local out, stack = root, {}
   for part in (s .. ";"):gmatch("([^;]*);") do
     if part == "-" then
       out[#out + 1] = { sep = true }
     elseif part == "_" then
       out[#out + 1] = { sep = true, gap = true }
+    elseif part == "]" then
+      -- a stray close (no menu open) is dropped
+      if #stack > 0 then out = table.remove(stack) end
+    elseif part:sub(1, 1) == "[" then
+      local icon, label = part:match("^%[|?([^|]*)|?(.*)$")
+      local m = { menu = true, icon = icon or "", label = label or "", items = {} }
+      out[#out + 1] = m
+      stack[#stack + 1] = out
+      out = m.items
     elseif part ~= "" then
       local cmd, icon, label = part:match("^([^|]*)|?([^|]*)|?(.*)$")
       if cmd and cmd ~= "" then
@@ -97,7 +161,42 @@ function TB.parse(s)
       end
     end
   end
+  return root
+end
+
+-- Every action in a bar, menus opened out (for the web page's toggle
+-- states, and tests).
+function TB.flatten(items, out)
+  out = out or {}
+  for _, it in ipairs(items or {}) do
+    if it.menu then TB.flatten(it.items, out)
+    elseif not it.sep then out[#out + 1] = it end
+  end
   return out
+end
+
+-- Is `list` the contents of `menu`, or of a menu somewhere inside it?
+function TB.inside(menu, list)
+  if not (menu and menu.menu) then return false end
+  if menu.items == list then return true end
+  for _, it in ipairs(menu.items or {}) do
+    if it.menu and TB.inside(it, list) then return true end
+  end
+  return false
+end
+
+-- Moves list_a[ia] to list_b, before position ib (#list_b + 1: the end).
+-- Refused (false) when that would put a menu inside itself. Returns the
+-- index it landed at.
+function TB.move_item(list_a, ia, list_b, ib)
+  local it = list_a[ia]
+  if not it then return false end
+  if it.menu and TB.inside(it, list_b) then return false end
+  table.remove(list_a, ia)
+  if list_a == list_b and ib > ia then ib = ib - 1 end
+  ib = math.max(1, math.min(#list_b + 1, ib))
+  table.insert(list_b, ib, it)
+  return ib
 end
 
 -- The stored form of a command id: "_NAME" when REAPER knows it by one,
@@ -145,6 +244,27 @@ end
 function TB.on_icon(file)
   local base = file and file:match("^(.*)_off%.png$")
   return base and (base .. "_on.png") or nil
+end
+
+-- A toolbar switch: "menu" for the menu of bars, a bar id for a button
+-- that swaps to that bar, nil for anything else.
+TB.SWITCH = "_TSCV_BAR"
+function TB.switch_of(it)
+  if not it or it.menu or it.sep or type(it.cmd) ~= "string" then return nil end
+  if it.cmd == TB.SWITCH then return "menu" end
+  local id = it.cmd:match("^_TSCV_BAR:(%d+)$")
+  return id and tonumber(id) or nil
+end
+function TB.switch_cmd(target) return target and (TB.SWITCH .. ":" .. target) or TB.SWITCH end
+
+-- The ChannelView icon made for a stored command, or nil. A script is
+-- found by its file name, so it matches whatever its id is here.
+local function name_of_cmd(cmd)
+  if not (reaper and reaper.NamedCommandLookup) then return nil end
+  return TB.action_name(TB.resolve(cmd))
+end
+function TB.match_icon(cmd)
+  return AI.match(cmd, name_of_cmd)
 end
 
 -- ---------------------------------------------------------------------
@@ -214,28 +334,70 @@ function TB.parse_reaper_toolbar(text, section)
   local idx = {}
   for n, e in pairs(body) do if e.item then idx[#idx + 1] = n end end
   table.sort(idx)
-  local out = {}
+  local root = {}
+  local out, stack = root, {}
   for _, n in ipairs(idx) do
     local e = body[n]
     local cmd, desc = e.item:match("^(%S+)%s*(.*)$")
-    if cmd and cmd:match("^%-%d+$") then
+    -- REAPER's own menus: -2 opens a submenu (its name after it), -3
+    -- closes it, any other negative number is a separator.
+    if cmd == "-2" then
+      local m = { menu = true, icon = "", label = clean(desc or ""), items = {} }
+      out[#out + 1] = m
+      stack[#stack + 1] = out
+      out = m.items
+    elseif cmd == "-3" then
+      if #stack > 0 then out = table.remove(stack) end
+    elseif cmd and cmd:match("^%-%d+$") then
       out[#out + 1] = { sep = true }
     elseif cmd and cmd ~= "" then
       if cmd:match("^[%a_]") and cmd:sub(1, 1) ~= "_" then cmd = "_" .. cmd end
       local icon = e.icon or ""
       if not icon:lower():match("%.png$") then icon = "" end
       if icon == "" then icon = TB.DEFAULT_ICONS[cmd] or "" end
+      -- ChannelView's own icon for it, when there is one
+      icon = TB.match_icon(cmd) or icon
       out[#out + 1] = { cmd = cmd, icon = clean(icon), label = clean(desc or "") }
     end
+  end
+  return root
+end
+
+-- The other sections in reaper-menu.ini: menus you've customised.
+function TB.reaper_menus(text)
+  if not text then
+    local fh = io.open(menu_ini(), "r")
+    if not fh then return {} end
+    text = fh:read("a"); fh:close()
+  end
+  local out = {}
+  for name in text:gmatch("%[([^%]\n]+)%]") do
+    if not name:lower():find("toolbar", 1, true) then out[#out + 1] = name end
   end
   return out
 end
 
-function TB.import(section)
+-- A section's items (toolbar or menu), and its title when it has one.
+function TB.read_reaper(section)
   local fh = io.open(menu_ini(), "r")
-  if not fh then return false end
+  if not fh then return {}, nil end
   local text = fh:read("a"); fh:close()
-  local items = TB.parse_reaper_toolbar(text, section)
+  local title
+  local inside = false
+  for line in (text .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    local head = line:match("^%[(.*)%]%s*$")
+    if head then
+      if inside then break end
+      inside = (head == section)
+    elseif inside then
+      title = title or line:match("^title=(.*)$")
+    end
+  end
+  return TB.parse_reaper_toolbar(text, section), title and clean(title) or nil
+end
+
+function TB.import(section)
+  local items = TB.read_reaper(section)
   if #items == 0 then return false end
   TB.items = items
   TB.save()
@@ -246,12 +408,40 @@ end
 -- load / save
 -- ---------------------------------------------------------------------
 
-function TB.load()
-  TB.items = TB.parse(reaper.GetExtState(C.TCP_EXT_SECT, KEY))
+local REV = KEY .. "#rev"
+local function stamp()
+  if store then return store.stamp() end
+  return reaper.GetExtState(C.TCP_EXT_SECT, REV)
 end
 
+function TB.load()
+  if store then TB.items = store.load()
+  else TB.items = TB.parse(reaper.GetExtState(C.TCP_EXT_SECT, KEY)) end
+  TB.stamp = stamp()
+end
+
+local revs = 0
 function TB.save()
-  reaper.SetExtState(C.TCP_EXT_SECT, KEY, TB.serialize(TB.items), true)
+  if store then
+    store.save(TB.items)
+  else
+    reaper.SetExtState(C.TCP_EXT_SECT, KEY, TB.serialize(TB.items), true)
+    revs = revs + 1
+    reaper.SetExtState(C.TCP_EXT_SECT, REV, ("%.3f.%d"):format(reaper.time_precise(), revs), false)
+  end
+  TB.stamp = stamp()
+end
+
+-- Reloads when another instance (or the web page) saved this bar.
+function TB.sync()
+  if TB.stamp == nil or stamp() ~= TB.stamp then TB.load() end
+end
+
+-- Wipes the stored bar (a drawer being removed).
+function TB.forget()
+  if store then return end
+  reaper.DeleteExtState(C.TCP_EXT_SECT, KEY, true)
+  reaper.DeleteExtState(C.TCP_EXT_SECT, REV, false)
 end
 
 -- ---------------------------------------------------------------------
@@ -276,7 +466,7 @@ local images = {}          -- file name -> image, or false once it has failed
 local loads_left = 0       -- per-frame load budget, see TB.draw / the picker
 
 local function image(ctx, file)
-  if not file or file == "" then return nil end
+  if not file or file == "" or AI.is(file) then return nil end
   local img = images[file]
   if img == nil then
     -- Loading is the one expensive thing here. The picker can put a few
@@ -311,6 +501,11 @@ end
 -- pressed) when it has three. Returns the width it took, or nil when
 -- there is no image to draw.
 local function draw_icon(ctx, dl, file, x, y, h, state)
+  if AI.is(file) then
+    local ink = (state == 3 and C.COL.icon_on) or (state == 2 and C.COL.icon_hot) or C.COL.icon
+    if AI.draw(dl, file, x, y, h, ink) then return h, 1 end
+    return nil
+  end
   local img = image(ctx, file)
   if not img then return nil end
   local iw, ih = ImGui.Image_GetSize(img)
@@ -324,7 +519,10 @@ local function draw_icon(ctx, dl, file, x, y, h, state)
   return dw, frames
 end
 
+TB.draw_icon = function(ctx, dl, file, x, y, h, state) return draw_icon(ctx, dl, file, x, y, h, state or 1) end
+
 local function icon_width(ctx, file, h)
+  if AI.is(file) then return AI.get(file) and h or nil end
   local img = image(ctx, file)
   if not img then return nil end
   local iw, ih = ImGui.Image_GetSize(img)
@@ -338,7 +536,9 @@ end
 -- ---------------------------------------------------------------------
 
 -- While REAPER's Action List is open for us: where the result goes.
--- { at = index to insert before, replace = index to overwrite }.
+-- { list = the list to insert into (TB.items unless a menu's), at = index
+-- to insert before, replace = index to overwrite, item = an item to
+-- overwrite }.
 local pick = nil
 
 function TB.picking() return pick ~= nil end
@@ -346,6 +546,20 @@ function TB.picking() return pick ~= nil end
 function TB.pick_start(at, replace)
   if pick then reaper.PromptForAction(-1, 0, 0) end
   pick = { at = at, replace = replace }
+  reaper.PromptForAction(1, 0, 0)
+end
+
+-- Into a menu's list (or any list of this bar), before `at`.
+function TB.pick_into(list, at)
+  if pick then reaper.PromptForAction(-1, 0, 0) end
+  pick = { list = list, at = at }
+  reaper.PromptForAction(1, 0, 0)
+end
+
+-- A new action for an existing item.
+function TB.pick_replace(item)
+  if pick then reaper.PromptForAction(-1, 0, 0) end
+  pick = { item = item }
   reaper.PromptForAction(1, 0, 0)
 end
 
@@ -360,11 +574,21 @@ function TB.poll()
   pick = nil
   if r < 0 then return end
   local cmd = TB.stored_cmd(r)
-  if p.replace and TB.items[p.replace] and not TB.items[p.replace].sep then
-    TB.items[p.replace].cmd = cmd
+  local list = p.list or TB.items
+  local function set_cmd(it)
+    -- a new action: its own icon, unless the button has one you chose
+    local had = TB.match_icon(it.cmd)
+    it.cmd = cmd
+    if it.icon == "" or (had and it.icon == had) then it.icon = TB.match_icon(cmd) or it.icon end
+  end
+  if p.item then
+    if not p.item.sep and not p.item.menu then set_cmd(p.item) end
+  elseif p.replace and list[p.replace] and not list[p.replace].sep and not list[p.replace].menu then
+    set_cmd(list[p.replace])
   else
-    local at = math.max(1, math.min(#TB.items + 1, p.at or (#TB.items + 1)))
-    table.insert(TB.items, at, { cmd = cmd, icon = "", label = "" })
+    local at = math.max(1, math.min(#list + 1, p.at or (#list + 1)))
+    table.insert(list, at, { cmd = cmd, icon = TB.match_icon(cmd) or "", label = "" })
+    TB.last_added = list[at]
   end
   TB.save()
 end
@@ -382,41 +606,54 @@ local st = {
   item_menu = nil, open_item = false, open_bg = false,
   label_buf = "",
   icons_for = nil, open_icons = false, icon_list = nil, icon_filter = "",
+  pop_item = nil, pop_at = nil, open_pop = false,
 }
 
--- The width a button will take: its icon's, or its label's.
-local function item_width(ctx, it, bh)
-  if it.gap then return math.floor(bh * 0.5 + 0.5) end
-  if it.sep then return 7 end
-  if it.icon ~= "" then
-    local iw = icon_width(ctx, it.icon, bh)
-    if iw then return iw end
+function TB.allow_loads(n) loads_left = math.max(loads_left, n) end
+
+-- What a button says: its own label, else the action's name cut short.
+local function text_of(it)
+  if it.label and it.label ~= "" then return it.label end
+  if it.menu then return "Menu" end
+  local sw = TB.switch_of(it)
+  if sw == "menu" then return TB.bar_name or "Toolbars" end
+  if sw then return (TB.bar_name_of and TB.bar_name_of(sw)) or ("Bar " .. sw) end
+  return TB.short_name(TB.action_name(TB.resolve(it.cmd)))
+end
+TB.text_of = text_of
+
+-- A button whose click opens a menu: a menu, or the menu of bars.
+local function has_caret(it) return it.menu or TB.switch_of(it) == "menu" end
+
+-- The little triangle on a menu button. `dir`: "down", "up", "right" or
+-- "left": the way its menu opens.
+local function caret(dl, cx, cy, dir, col)
+  if dir == "up" then
+    ImGui.DrawList_AddTriangleFilled(dl, cx - 3, cy + 1.5, cx + 3, cy + 1.5, cx, cy - 2, col)
+  elseif dir == "right" then
+    ImGui.DrawList_AddTriangleFilled(dl, cx - 1.5, cy - 3, cx - 1.5, cy + 3, cx + 2, cy, col)
+  elseif dir == "left" then
+    ImGui.DrawList_AddTriangleFilled(dl, cx + 1.5, cy - 3, cx + 1.5, cy + 3, cx - 2, cy, col)
+  else
+    ImGui.DrawList_AddTriangleFilled(dl, cx - 3, cy - 1.5, cx + 3, cy - 1.5, cx, cy + 2, col)
   end
-  local text = (it.label ~= "" and it.label)
-               or TB.short_name(TB.action_name(TB.resolve(it.cmd)))
-  return math.max(bh, ImGui.CalcTextSize(ctx, text) + 12), text
 end
 
-local function draw_item(ctx, dl, i, it, x, y, bw, bh)
-  if it.sep then
-    ImGui.SetCursorScreenPos(ctx, x, y)
-    ImGui.InvisibleButton(ctx, ID .. "sep" .. i, bw, bh)
-    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
-      st.item_menu, st.open_item = i, true
-    end
-    if it.gap then
-      -- A gap is blank; a faint outline on hover shows where to right-click.
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.panel_border, 2.5, 0, 1.0)
-      end
-      return
-    end
-    local cx = math.floor(x + bw * 0.5) + 0.5
-    ImGui.DrawList_AddLine(dl, cx, y + 4, cx, y + bh - 4, C.COL.panel_border, 1.0)
-    return
-  end
+local POP = "_pop"
 
-  local id = TB.resolve(it.cmd)
+-- Where a menu opens from a button at x, y, bw, bh: below it, above it
+-- (a bar along the bottom), or beside it (a column).
+local function anchor(x, y, bw, bh, dir)
+  if dir == "up" then return { x, y - 2, 0, 1 }
+  elseif dir == "right" then return { x + bw + 2, y, 0, 0 }
+  elseif dir == "left" then return { x - 2, y, 1, 0 }
+  end
+  return { x, y + bh + 2, 0, 0 }
+end
+
+-- The button's click: right-click for its menu, left-click runs it (or
+-- opens its menu). Returns hovered, held, on, id.
+local function press(ctx, i, it, x, y, bw, bh, dir)
   ImGui.SetCursorScreenPos(ctx, x, y)
   local pressed = ImGui.InvisibleButton(ctx, ID .. i, bw, bh)
   local hovered = ImGui.IsItemHovered(ctx)
@@ -425,7 +662,87 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh)
     st.item_menu, st.open_item = i, true
     st.label_buf = it.label or ""
   end
+  local sw = TB.switch_of(it)
+  if it.menu or sw == "menu" then
+    local open = st.pop_item == it and ImGui.IsPopupOpen(ctx, ID .. POP)
+    if pressed then
+      st.pop_item, st.pop_at, st.open_pop = it, anchor(x, y, bw, bh, dir), true
+    end
+    W.tip(ctx, ID .. i, (not open) and (sw and "Switch toolbar" or text_of(it)) or nil, hovered, false)
+    return hovered, held or open, false, sw and true or nil
+  end
+  if sw then
+    -- lit while its bar is the one showing: a tab
+    local lit = sw == TB.bar_id
+    W.tip(ctx, ID .. i, lit and text_of(it) or ("Switch to " .. text_of(it)), hovered, false)
+    if pressed and not lit and TB.switch_to then TB.switch_to(sw) end
+    return hovered, held, lit, true
+  end
+  local id = TB.resolve(it.cmd)
   local on = id and reaper.GetToggleCommandStateEx(0, id) == 1
+  local name = TB.action_name(id)
+  W.tip(ctx, ID .. i,
+    (it.label ~= "" and it.label) or name
+         or ("Action not found: " .. tostring(it.cmd)),
+    hovered, false)
+  if pressed and id then reaper.Main_OnCommand(id, 0) end
+  return hovered, held, on, id
+end
+
+-- How big an icon is drawn on a button bh tall: ChannelView's own fill
+-- 85% of it, a PNG beside a label a little less.
+local function icon_pad(bh) return math.floor(bh * 0.075 + 0.5) end
+local function wide_icon(icon, bh)
+  if AI.is(icon) then return bh - icon_pad(bh) * 2 end
+  return bh - 6
+end
+
+-- The width a button will take: its icon's, or its label's.
+local function item_width(ctx, it, bh)
+  if it.gap then return math.floor(bh * 0.5 + 0.5) end
+  if it.sep then return 7 end
+  if TB.style == "both" then
+    local w = 16
+    if it.icon ~= "" and icon_width(ctx, it.icon, wide_icon(it.icon, bh)) then w = w + wide_icon(it.icon, bh) + 5 end
+    w = w + ImGui.CalcTextSize(ctx, text_of(it))
+    if has_caret(it) then w = w + 10 end
+    return math.max(bh, w)
+  end
+  if it.icon ~= "" then
+    local iw = icon_width(ctx, it.icon, bh)
+    if iw then return iw end
+  end
+  local text = text_of(it)
+  return math.max(bh, ImGui.CalcTextSize(ctx, text) + 12 + (has_caret(it) and 10 or 0)), text
+end
+
+-- A separator or gap, `vertical` when the bar is a column.
+local function draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.InvisibleButton(ctx, ID .. "sep" .. i, bw, bh)
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+    st.item_menu, st.open_item = i, true
+  end
+  if it.gap then
+    -- A gap is blank; a faint outline on hover shows where to right-click.
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.panel_border, 2.5, 0, 1.0)
+    end
+    return
+  end
+  if vertical then
+    local cy = math.floor(y + bh * 0.5) + 0.5
+    ImGui.DrawList_AddLine(dl, x + 4, cy, x + bw - 4, cy, C.COL.panel_border, 1.0)
+  else
+    local cx = math.floor(x + bw * 0.5) + 0.5
+    ImGui.DrawList_AddLine(dl, cx, y + 4, cx, y + bh - 4, C.COL.panel_border, 1.0)
+  end
+end
+
+-- The TCP's look: the icon is the button (or a text button without one).
+local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
+  if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, false) end
+  local hovered, held, on, id = press(ctx, i, it, x, y, bw, bh, dir)
 
   local state = (held or on) and 3 or (hovered and 2 or 1)
   local drawn, frames = nil, nil
@@ -437,7 +754,19 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh)
     local alt = TB.on_icon(icon)
     if alt and image(ctx, alt) then icon, paired, state = alt, true, (held and 3 or (hovered and 2 or 1)) end
   end
-  if icon ~= "" then
+  if AI.is(icon) and AI.get(icon) then
+    -- ChannelView's own: drawn in the bar's colours, on the accent when on
+    local caret_ = has_caret(it)
+    if on or hovered or held then
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh,
+        on and C.COL.accent or C.COL.knob_body_hi, 2.5)
+    end
+    local ink = on and C.COL.icon_on or ((hovered or held) and C.COL.icon_hot or C.COL.icon)
+    local pad = icon_pad(bh)
+    AI.draw(dl, icon, x + pad, y + pad, bh - pad * 2, ink)
+    if caret_ then caret(dl, x + bw - 4, y + bh - 4, dir == "up" and "up" or "down", ink) end
+    drawn = true
+  elseif icon ~= "" then
     -- A single-frame icon has no hover or pressed look of its own, so
     -- the button supplies one behind it.
     local img = image(ctx, icon)
@@ -445,7 +774,7 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh)
       local iw, ih = ImGui.Image_GetSize(img)
       if iw and ih and ih > 0 and iw < ih * 2.5 and (hovered or (on and not paired) or held) then
         ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh,
-          on and U.with_alpha(C.COL.accent, 0x99) or C.COL.knob_body_hi, 2.5)
+          (on or (held and it.menu)) and U.with_alpha(C.COL.accent, 0x99) or C.COL.knob_body_hi, 2.5)
       end
     end
     drawn, frames = draw_icon(ctx, dl, icon, x, y, bh, state)
@@ -456,25 +785,102 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh)
       ImGui.DrawList_AddLine(dl, x + 3, y + bh - 1, x + bw - 3, y + bh - 1,
         C.COL.accent, 2.0)
     end
+    if drawn and has_caret(it) then
+      caret(dl, x + bw - 4, y + bh - 4, dir == "up" and "up" or "down",
+        hovered and C.COL.icon_hot or C.COL.icon)
+    end
   end
   if not drawn then
-    local text = (it.label ~= "" and it.label)
-                 or TB.short_name(TB.action_name(id))
-    local bg = on and C.COL.accent
+    local text = text_of(it)
+    local lit = on or (has_caret(it) and held)
+    local bg = lit and C.COL.accent
                or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
     ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
     ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.knob_ring, 2.5, 0, 1.0)
     local tw, th = ImGui.CalcTextSize(ctx, text)
-    ImGui.DrawList_AddText(dl, x + (bw - tw) * 0.5, y + (bh - th) * 0.5,
-      on and C.COL.icon_on or (id and C.COL.label or C.COL.warn), text)
+    local room = bw - (has_caret(it) and 10 or 0)
+    local ink = lit and C.COL.icon_on or ((it.menu or id) and C.COL.label or C.COL.warn)
+    ImGui.DrawList_AddText(dl, x + (room - tw) * 0.5, y + (bh - th) * 0.5, ink, text)
+    if has_caret(it) then caret(dl, x + bw - 8, y + bh * 0.5, dir == "up" and "up" or "down", ink) end
   end
+end
 
-  local name = TB.action_name(id)
-  W.tip(ctx, ID .. i,
-    (it.label ~= "" and it.label) or name
-         or ("Action not found: " .. tostring(it.cmd)),
-    hovered, false)
-  if pressed and id then reaper.Main_OnCommand(id, 0) end
+-- A drawer's look: a button with an icon (when it has one) and, when
+-- `show_label`, its label beside it; a menu has a caret pointing where
+-- its menu opens. Columns use it at full width.
+local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical)
+  if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical) end
+  local hovered, held, on, id = press(ctx, i, it, x, y, bw, bh, dir)
+  local menu_ = has_caret(it)
+  local lit = on or (menu_ and held)
+  local bg = lit and C.COL.accent
+             or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
+  ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.knob_ring, 2.5, 0, 1.0)
+  local ink = lit and C.COL.icon_on or ((it.menu or id) and C.COL.label or C.COL.warn)
+  local ih = bh - 6
+  local cx = x + 6
+  local right = x + bw - (menu_ and 12 or 4)
+  local has_icon = false
+  if AI.is(it.icon) and AI.get(it.icon) then
+    local vh = wide_icon(it.icon, bh)
+    local ix = show_label and (x + icon_pad(bh) + 2) or (x + (bw - vh) * 0.5 - (menu_ and 3 or 0))
+    if ix + vh <= x + bw - 2 then
+      local iink = lit and C.COL.icon_on or ((hovered or held) and C.COL.icon_hot or C.COL.icon)
+      AI.draw(dl, it.icon, ix, y + (bh - vh) * 0.5, vh, iink)
+      cx = ix + vh + 5
+      has_icon = true
+    end
+  elseif it.icon ~= "" then
+    local icon = it.icon
+    if on then
+      local alt = TB.on_icon(icon)
+      if alt and image(ctx, alt) then icon = alt end
+    end
+    local iw = icon_width(ctx, icon, ih)
+    if iw then
+      local ix = show_label and cx or (x + (bw - iw) * 0.5 - (menu_ and 3 or 0))
+      if ix + iw <= x + bw - 2 then
+        ImGui.DrawList_PushClipRect(dl, x, y, x + bw, y + bh, true)
+        draw_icon(ctx, dl, icon, ix, y + 3, ih, (held or on) and 3 or (hovered and 2 or 1))
+        ImGui.DrawList_PopClipRect(dl)
+        cx = ix + iw + 5
+        has_icon = true
+      end
+    end
+  end
+  if show_label or not has_icon then
+    local text = text_of(it)
+    local tw, th = ImGui.CalcTextSize(ctx, text)
+    local room = right - cx
+    if room > 6 then
+      if tw > room then
+        -- cut it to the room it has
+        local n = #text
+        while n > 1 do
+          n = n - 1
+          local t = text:sub(1, n) .. "."
+          tw = ImGui.CalcTextSize(ctx, t)
+          if tw <= room then text = t break end
+        end
+      end
+      local tx = (show_label and has_icon) and cx or (show_label and x + 8 or x + (bw - tw) * 0.5 - (menu_ and 3 or 0))
+      ImGui.DrawList_AddText(dl, tx, y + (bh - th) * 0.5, ink, text)
+    end
+  end
+  if menu_ then caret(dl, x + bw - 7, y + bh * 0.5, dir, ink) end
+end
+
+-- How many rows a horizontal bar w wide needs for every button.
+function TB.rows_needed(ctx, w, bh)
+  bh = bh or TB.btn
+  local cx, rows = 4, 1
+  for _, it in ipairs(TB.items) do
+    local bw = item_width(ctx, it, bh)
+    if cx + bw > w - 4 and cx > 4 then rows, cx = rows + 1, 4 end
+    cx = cx + bw + C.TB_GAP
+  end
+  return rows
 end
 
 -- Draws the toolbar into the box x, y, w, h and handles its own menus.
@@ -482,11 +888,14 @@ end
 --   menu      true when the settings button was clicked
 --   overflow  the items that didn't fit, for the settings menu to list
 -- `no_menu` leaves out the settings button: only the top toolbar has it.
-function TB.draw(ctx, x, y, w, h, no_menu)
+-- `dir` is where a menu button's menu opens ("down" unless said).
+function TB.draw(ctx, x, y, w, h, no_menu, dir)
+  TB.sync()
   loads_left = 8
   TB.poll()
+  dir = dir or "down"
   local dl = ImGui.GetWindowDrawList(ctx)
-  local bh = C.TB_BTN
+  local bh = TB.btn
   local res = { menu = false, overflow = {} }
   if h < C.TB_MIN_H then return res end
   bh = math.min(bh, h - 4)
@@ -530,7 +939,11 @@ function TB.draw(ctx, x, y, w, h, no_menu)
     if row >= rows then
       if not it.sep then res.overflow[#res.overflow + 1] = it end
     else
-      draw_item(ctx, dl, i, it, cx, top + row * (bh + C.TB_GAP), bw, bh)
+      if TB.style == "both" then
+        draw_wide(ctx, dl, i, it, cx, top + row * (bh + C.TB_GAP), bw, bh, true, dir, false)
+      else
+        draw_item(ctx, dl, i, it, cx, top + row * (bh + C.TB_GAP), bw, bh, dir)
+      end
       cx = cx + bw + C.TB_GAP
     end
   end
@@ -549,15 +962,123 @@ function TB.draw(ctx, x, y, w, h, no_menu)
   return res
 end
 
+-- The bar as a column (a drawer down one side): one button a row, full
+-- width, icon and label while there's room for a label, icons only once
+-- it's narrower. `dir` is where a menu opens ("right" from a column on
+-- the left, "left" from one on the right). What doesn't fit is left off.
+function TB.draw_v(ctx, x, y, w, h, dir)
+  TB.sync()
+  loads_left = 8
+  TB.poll()
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local bh = TB.btn
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  W.allow_overlap(ctx)
+  ImGui.InvisibleButton(ctx, ID .. "bg", math.max(1, w), math.max(1, h))
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then st.open_bg = true end
+
+  local bw = w - 8
+  local show_label = bw >= bh + 34
+  local cy = y + 4
+  if #TB.items == 0 and not pick then
+    local hint = show_label and "Right-click\nto add actions" or "+"
+    local _, th = ImGui.CalcTextSize(ctx, hint)
+    ImGui.DrawList_AddText(dl, x + 6, cy + 2, C.COL.header_dim, hint)
+    cy = cy + th + 4
+  end
+  for i, it in ipairs(TB.items) do
+    local ih = it.gap and math.floor(bh * 0.5) or (it.sep and 7 or bh)
+    if cy + ih > y + h - 2 then break end
+    draw_wide(ctx, dl, i, it, x + 4, cy, bw, ih, show_label, dir, true)
+    cy = cy + ih + C.TB_GAP
+  end
+  if pick and show_label and cy + 16 < y + h then
+    ImGui.DrawList_AddText(dl, x + 6, cy + 2, C.COL.accent, "Pick an action\u{2026}")
+  end
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.Dummy(ctx, 0, 0)
+end
+
 -- Runs a stored item, for the settings menu's overflow list.
 function TB.run(it)
+  local sw = TB.switch_of(it)
+  if sw then
+    if sw ~= "menu" and TB.switch_to then TB.switch_to(sw) end
+    return
+  end
   local id = it and TB.resolve(it.cmd)
   if id then reaper.Main_OnCommand(id, 0) end
 end
 
 function TB.label_of(it)
+  if it.menu or TB.switch_of(it) then return text_of(it) end
   local id = TB.resolve(it.cmd)
   return (it.label ~= "" and it.label) or TB.action_name(id) or tostring(it.cmd)
+end
+
+-- A list of items as menu entries, menus as submenus to any depth: what a
+-- menu button opens, and the TCP's overflow list. `path` keeps ids apart.
+function TB.menu_entries(ctx, items, path)
+  path = path or "m"
+  if #items == 0 then ImGui.TextDisabled(ctx, "(empty)") end
+  for k, it in ipairs(items) do
+    local key = "##" .. ID .. path .. "." .. k
+    if it.menu then
+      if ImGui.BeginMenu(ctx, text_of(it) .. key) then
+        TB.menu_entries(ctx, it.items or {}, path .. "." .. k)
+        ImGui.EndMenu(ctx)
+      end
+    elseif it.gap then
+      ImGui.Dummy(ctx, 1, 4)
+    elseif it.sep then
+      ImGui.Separator(ctx)
+    elseif TB.switch_of(it) == "menu" then
+      if ImGui.BeginMenu(ctx, "Switch toolbar" .. key) then
+        TB.switch_entries(ctx)
+        ImGui.EndMenu(ctx)
+      end
+    elseif TB.switch_of(it) then
+      local sw = TB.switch_of(it)
+      if ImGui.MenuItem(ctx, text_of(it) .. key, nil, sw == TB.bar_id) and sw ~= TB.bar_id and TB.switch_to then
+        TB.switch_to(sw)
+      end
+    else
+      local id = TB.resolve(it.cmd)
+      local on = id and reaper.GetToggleCommandStateEx(0, id) == 1
+      local label = (it.label ~= "" and it.label) or TB.action_name(id) or ("not found: " .. tostring(it.cmd))
+      if ImGui.MenuItem(ctx, label .. key, nil, on, id ~= nil) and id then
+        reaper.Main_OnCommand(id, 0)
+      end
+    end
+  end
+end
+
+-- The menu of bars a switch opens: every bar, the one showing ticked;
+-- picking one swaps it in here. TB.switch_list (from TS_CV_Drawers) gives
+-- { { id, name, where } }.
+function TB.switch_entries(ctx)
+  local list = TB.switch_list and TB.switch_list() or {}
+  if #list == 0 then ImGui.TextDisabled(ctx, "No other bars") end
+  for _, e in ipairs(list) do
+    local cur = e.id == TB.bar_id
+    if ImGui.MenuItem(ctx, e.name .. "##" .. ID .. "sw" .. e.id, e.where, cur) and not cur and TB.switch_to then
+      TB.switch_to(e.id)
+    end
+  end
+end
+
+-- Every button given the ChannelView icon made for its action (menus'
+-- too). Returns how many changed.
+function TB.use_cv_icons(items)
+  local n = 0
+  for _, it in ipairs(items or TB.items) do
+    if it.menu then n = n + TB.use_cv_icons(it.items)
+    elseif not it.sep then
+      local m = TB.match_icon(it.cmd)
+      if m and it.icon ~= m then it.icon = m; n = n + 1 end
+    end
+  end
+  return n
 end
 
 -- ---------------------------------------------------------------------
@@ -571,6 +1092,35 @@ local function move(i, d)
   TB.save()
 end
 
+local function new_menu() return { menu = true, icon = "", label = "Menu", items = {} } end
+TB.new_menu = new_menu
+
+-- The label box, in a right-click menu.
+local function label_box(ctx, it, hint)
+  ImGui.TextDisabled(ctx, hint)
+  ImGui.SetNextItemWidth(ctx, 150)
+  local _, v = ImGui.InputText(ctx, "##" .. ID .. "label", st.label_buf)
+  local enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  st.label_buf = v
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Set") or enter then
+    it.label = clean(st.label_buf); TB.save()
+    ImGui.CloseCurrentPopup(ctx)
+  end
+end
+
+-- What a switch can be: the menu of bars, or one bar. `pick(target)`
+-- gets nil for the menu, else the bar's id; `cur` ticks the current one.
+function TB.switch_targets(ctx, pick, cur)
+  if ImGui.MenuItem(ctx, "A menu of every bar##" .. ID .. "swm", nil, cur == "menu") then pick(nil) end
+  ImGui.Separator(ctx)
+  local list = TB.switch_list and TB.switch_list() or {}
+  if #list == 0 then ImGui.TextDisabled(ctx, "No other bars yet") end
+  for _, e in ipairs(list) do
+    if ImGui.MenuItem(ctx, e.name .. "##" .. ID .. "swt" .. e.id, e.where, cur == e.id) then pick(e.id) end
+  end
+end
+
 local function item_menu(ctx)
   if st.open_item then ImGui.OpenPopup(ctx, ID .. "_item"); st.open_item = false end
   if not ImGui.BeginPopup(ctx, ID .. "_item") then return end
@@ -578,7 +1128,12 @@ local function item_menu(ctx)
   local it = i and TB.items[i]
   if not it then ImGui.EndPopup(ctx) return end
 
-  if it.sep then
+  local sw = TB.switch_of(it)
+  if it.menu then
+    ImGui.TextDisabled(ctx, text_of(it) .. " (menu)")
+  elseif sw then
+    ImGui.TextDisabled(ctx, sw == "menu" and "Toolbar switch: a menu of bars" or ("Toolbar switch: " .. text_of(it)))
+  elseif it.sep then
     ImGui.TextDisabled(ctx, it.gap and "Gap" or "Separator")
   else
     ImGui.TextDisabled(ctx, U.truncate(TB.action_name(TB.resolve(it.cmd))
@@ -586,30 +1141,46 @@ local function item_menu(ctx)
   end
   ImGui.Separator(ctx)
 
+  if it.menu then
+    if ImGui.MenuItem(ctx, "Add action to it\u{2026}") then TB.pick_into(it.items, nil) end
+    if ImGui.MenuItem(ctx, "Add a menu to it") then
+      it.items[#it.items + 1] = new_menu(); TB.save()
+    end
+    if ImGui.MenuItem(ctx, "Add separator to it") then
+      it.items[#it.items + 1] = { sep = true }; TB.save()
+    end
+    if TB.organise and ImGui.MenuItem(ctx, "Organise\u{2026}") then TB.organise(it) end
+    ImGui.Separator(ctx)
+  end
   if not it.sep then
-    if ImGui.MenuItem(ctx, "Change action\u{2026}") then TB.pick_start(nil, i) end
+    if sw then
+      if ImGui.BeginMenu(ctx, "Switches to") then
+        TB.switch_targets(ctx, function(target) it.cmd = TB.switch_cmd(target); TB.save() end, sw)
+        ImGui.EndMenu(ctx)
+      end
+    elseif not it.menu and ImGui.MenuItem(ctx, "Change action\u{2026}") then TB.pick_start(nil, i) end
     if ImGui.MenuItem(ctx, "Icon\u{2026}") then
-      st.icons_for, st.open_icons = i, true
+      st.icons_for, st.open_icons, st.icons_where = it, true, nil
     end
     if ImGui.MenuItem(ctx, "No icon", nil, false, it.icon ~= "") then
       it.icon = ""; TB.save()
     end
     ImGui.Separator(ctx)
-    ImGui.TextDisabled(ctx, "Label (blank: the action's name)")
-    ImGui.SetNextItemWidth(ctx, 150)
-    local _, v = ImGui.InputText(ctx, "##" .. ID .. "label", st.label_buf)
-    local enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
-    st.label_buf = v
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Set") or enter then
-      it.label = clean(st.label_buf); TB.save()
-      ImGui.CloseCurrentPopup(ctx)
-    end
+    label_box(ctx, it, (it.menu and "Label") or (sw and "Label (blank: the bar's name)") or "Label (blank: the action's name)")
     ImGui.Separator(ctx)
   end
   if ImGui.MenuItem(ctx, "Move left", nil, false, i > 1) then move(i, -1) end
   if ImGui.MenuItem(ctx, "Move right", nil, false, i < #TB.items) then move(i, 1) end
   if ImGui.MenuItem(ctx, "Insert action before\u{2026}") then TB.pick_start(i) end
+  if ImGui.BeginMenu(ctx, "Insert toolbar switch before") then
+    TB.switch_targets(ctx, function(target)
+      table.insert(TB.items, i, { cmd = TB.switch_cmd(target), icon = "", label = "" }); TB.save()
+    end, nil)
+    ImGui.EndMenu(ctx)
+  end
+  if ImGui.MenuItem(ctx, "Insert menu before") then
+    table.insert(TB.items, i, new_menu()); TB.save()
+  end
   if ImGui.MenuItem(ctx, "Insert separator before") then
     table.insert(TB.items, i, { sep = true }); TB.save()
   end
@@ -617,7 +1188,7 @@ local function item_menu(ctx)
     table.insert(TB.items, i, { sep = true, gap = true }); TB.save()
   end
   ImGui.Separator(ctx)
-  if ImGui.MenuItem(ctx, "Remove") then
+  if ImGui.MenuItem(ctx, it.menu and "Remove the menu and what's in it" or "Remove") then
     table.remove(TB.items, i); TB.save()
   end
   ImGui.EndPopup(ctx)
@@ -626,14 +1197,27 @@ end
 local function bg_menu(ctx)
   if st.open_bg then ImGui.OpenPopup(ctx, ID .. "_bg"); st.open_bg = false end
   if not ImGui.BeginPopup(ctx, ID .. "_bg") then return end
+  if TB.extra_bg then TB.extra_bg(ctx, "head") end
   if ImGui.MenuItem(ctx, "Add action\u{2026}") then TB.pick_start(nil) end
+  if ImGui.MenuItem(ctx, "Add menu") then
+    TB.items[#TB.items + 1] = new_menu(); TB.save()
+  end
   if ImGui.MenuItem(ctx, "Add separator") then
     TB.items[#TB.items + 1] = { sep = true }; TB.save()
   end
   if ImGui.MenuItem(ctx, "Add gap") then
     TB.items[#TB.items + 1] = { sep = true, gap = true }; TB.save()
   end
+  if ImGui.BeginMenu(ctx, "Add toolbar switch") then
+    TB.switch_targets(ctx, function(target)
+      TB.items[#TB.items + 1] = { cmd = TB.switch_cmd(target), icon = "", label = "" }; TB.save()
+    end, nil)
+    ImGui.EndMenu(ctx)
+  end
   ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Use ChannelView icons") then
+    if TB.use_cv_icons() > 0 then TB.save() end
+  end
   if ImGui.BeginMenu(ctx, "Copy a REAPER toolbar") then
     local list = TB.reaper_toolbars()
     if #list == 0 then ImGui.TextDisabled(ctx, "No customised toolbars found") end
@@ -642,12 +1226,36 @@ local function bg_menu(ctx)
     end
     ImGui.EndMenu(ctx)
   end
-  if ImGui.MenuItem(ctx, "Reset to the default buttons") then
+  if #DEFAULTS > 0 and ImGui.MenuItem(ctx, "Reset to the default buttons") then
     TB.items = TB.parse(""); TB.save()
   end
+  if TB.organise then
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Organise actions\u{2026}") then TB.organise() end
+  end
+  if TB.extra_bg then TB.extra_bg(ctx, "tail") end
   ImGui.EndPopup(ctx)
 end
 
+-- A menu button's menu, opened beside its button.
+local function pop_menu(ctx)
+  if st.open_pop then ImGui.OpenPopup(ctx, ID .. POP); st.open_pop = false end
+  if st.pop_at then
+    ImGui.SetNextWindowPos(ctx, st.pop_at[1], st.pop_at[2], ImGui.Cond_Appearing, st.pop_at[3], st.pop_at[4])
+  end
+  if not ImGui.BeginPopup(ctx, ID .. POP) then return end
+  local it = st.pop_item
+  if it and TB.switch_of(it) == "menu" then TB.switch_entries(ctx)
+  elseif it then TB.menu_entries(ctx, it.items or {}, "p") end
+  ImGui.EndPopup(ctx)
+end
+
+-- The icon picker opened for any item of this bar (the organiser's too).
+-- `where` names the window asking (draw_menus is handed the same), so
+-- the picker opens there and not in another window showing this bar.
+function TB.open_icons(it, where)
+  st.icons_for, st.open_icons, st.icons_where = it, true, where
+end
 -- The icon picker: every PNG in Data/toolbar_icons, filterable by name.
 local function list_icons()
   local out, dir = {}, TB.icon_dir()
@@ -664,41 +1272,22 @@ end
 
 local ICON_CELL = 34
 
-local function icon_picker(ctx)
-  if st.open_icons then
-    st.open_icons = false
-    st.icon_list = list_icons()
-    ImGui.OpenPopup(ctx, ID .. "_icons")
-  end
-  if not ImGui.BeginPopup(ctx, ID .. "_icons") then return end
-  local it = st.icons_for and TB.items[st.icons_for]
-  if not it or it.sep then ImGui.EndPopup(ctx) return end
-
-  loads_left = 24
-  ImGui.SetNextItemWidth(ctx, 200)
-  -- Enter takes the first icon the filter shows
-  local _, v = ImGui.InputTextWithHint(ctx, "##" .. ID .. "iconflt", "filter\u{2026}", st.icon_filter)
-  local icon_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
-  st.icon_filter = v
-  local first_icon
-  ImGui.SameLine(ctx)
-  ImGui.TextDisabled(ctx, U.truncate(TB.icon_dir(), 40))
-
+-- The PNG grid: every file in Data/toolbar_icons, filtered.
+local function png_grid(ctx, it, flt)
   local list = st.icon_list or {}
+  ImGui.TextDisabled(ctx, U.truncate(TB.icon_dir(), 60))
   if #list == 0 then
     ImGui.TextDisabled(ctx, "No PNG files in that folder.")
-    ImGui.EndPopup(ctx)
-    return
+    return nil
   end
-
+  local first
   local cols = 12
   if ImGui.BeginChild(ctx, ID .. "iconsgrid", cols * (ICON_CELL + 4) + 12, 300) then
     local dl = ImGui.GetWindowDrawList(ctx)
-    local flt = st.icon_filter:lower()
     local n = 0
     for _, f in ipairs(list) do
       if flt == "" or f:lower():find(flt, 1, true) then
-        first_icon = first_icon or f
+        first = first or f
         if n % cols ~= 0 then ImGui.SameLine(ctx, 0, 4) end
         n = n + 1
         local x, y = ImGui.GetCursorScreenPos(ctx)
@@ -726,8 +1315,106 @@ local function icon_picker(ctx)
     if n == 0 then ImGui.TextDisabled(ctx, "Nothing matches.") end
     ImGui.EndChild(ctx)
   end
-  if icon_enter and first_icon then
-    it.icon = first_icon; TB.save()
+  return first
+end
+
+-- ChannelView's own icons, by family; the one made for this button's
+-- action first.
+local function cv_grid(ctx, it, flt)
+  local first
+  local cols = 12
+  local fams = AI.families()
+  if #fams == 0 then
+    ImGui.TextDisabled(ctx, "ChannelView's icon file (" .. AI.FILE .. ") wasn't found.")
+    return nil
+  end
+  local match = TB.match_icon(it.cmd)
+  if ImGui.BeginChild(ctx, ID .. "cvgrid", cols * (ICON_CELL + 4) + 12, 300) then
+    local dl = ImGui.GetWindowDrawList(ctx)
+    local shown = 0
+    local function cell(ic, n, tag)
+      local key = AI.PREFIX .. ic.key
+      first = first or key
+      if n % cols ~= 0 then ImGui.SameLine(ctx, 0, 4) end
+      local x, y = ImGui.GetCursorScreenPos(ctx)
+      if ImGui.InvisibleButton(ctx, (tag or "cv") .. ic.key .. "_" .. n, ICON_CELL, ICON_CELL) then
+        it.icon = key; TB.save()
+        ImGui.CloseCurrentPopup(ctx)
+      end
+      local hov = ImGui.IsItemHovered(ctx)
+      local cur = key == it.icon
+      if hov or cur then
+        ImGui.DrawList_AddRectFilled(dl, x, y, x + ICON_CELL, y + ICON_CELL,
+          cur and C.COL.accent or C.COL.knob_body_hi, 2.5)
+      end
+      if ImGui.IsItemVisible(ctx) then
+        AI.draw(dl, key, x + 5, y + 5, ICON_CELL - 10,
+          cur and C.COL.icon_on or (hov and C.COL.icon_hot or C.COL.icon))
+      end
+      if hov then ImGui.SetTooltip(ctx, ic.name) end
+    end
+    if match and flt == "" then
+      ImGui.SeparatorText(ctx, "Made for this action")
+      cell(AI.get(match), 0, "cvm")
+    end
+    for _, fam in ipairs(fams) do
+      local n = 0
+      local famhit = flt ~= "" and fam.name:lower():find(flt, 1, true)
+      for _, ic in ipairs(fam.icons) do
+        if flt == "" or famhit or ic.name:lower():find(flt, 1, true) or ic.key:find(flt, 1, true) then
+          if n == 0 then ImGui.SeparatorText(ctx, fam.name) end
+          cell(ic, n)
+          n = n + 1
+        end
+      end
+      shown = shown + n
+    end
+    if shown == 0 then ImGui.TextDisabled(ctx, "Nothing matches.") end
+    ImGui.EndChild(ctx)
+  end
+  return first
+end
+
+local function icon_picker(ctx, where)
+  if st.open_icons and st.icons_where == where then
+    st.open_icons = false
+    st.icon_list = list_icons()
+    -- a PNG button opens on the PNGs, anything else on ChannelView's
+    st.icon_tab = (st.icons_for and st.icons_for.icon ~= "" and not AI.is(st.icons_for.icon)) and "png" or "cv"
+    st.icon_tab_set = true
+    ImGui.OpenPopup(ctx, ID .. "_icons")
+  end
+  if not ImGui.BeginPopup(ctx, ID .. "_icons") then return end
+  local it = st.icons_for
+  if not it or it.sep then ImGui.EndPopup(ctx) return end
+
+  loads_left = 24
+  ImGui.SetNextItemWidth(ctx, 200)
+  -- Enter takes the first icon the filter shows
+  local _, v = ImGui.InputTextWithHint(ctx, "##" .. ID .. "iconflt", "filter\u{2026}", st.icon_filter)
+  local icon_enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
+  st.icon_filter = v
+  local flt = st.icon_filter:lower()
+  local first
+  if ImGui.BeginTabBar(ctx, ID .. "icontabs") then
+    local set = st.icon_tab_set
+    st.icon_tab_set = false
+    if ImGui.BeginTabItem(ctx, "ChannelView##" .. ID, nil,
+        (set and st.icon_tab == "cv") and ImGui.TabItemFlags_SetSelected or 0) then
+      st.icon_tab = "cv"
+      first = cv_grid(ctx, it, flt)
+      ImGui.EndTabItem(ctx)
+    end
+    if ImGui.BeginTabItem(ctx, "Your PNGs##" .. ID, nil,
+        (set and st.icon_tab == "png") and ImGui.TabItemFlags_SetSelected or 0) then
+      st.icon_tab = "png"
+      first = png_grid(ctx, it, flt)
+      ImGui.EndTabItem(ctx)
+    end
+    ImGui.EndTabBar(ctx)
+  end
+  if icon_enter and first then
+    it.icon = first; TB.save()
     ImGui.CloseCurrentPopup(ctx)
   end
   ImGui.EndPopup(ctx)
@@ -735,10 +1422,13 @@ end
 
 -- Draws whichever toolbar popup is open. Call once a frame from the
 -- window TB.draw was called in, outside any child.
-function TB.draw_menus(ctx)
-  item_menu(ctx)
-  bg_menu(ctx)
-  icon_picker(ctx)
+function TB.draw_menus(ctx, where)
+  if where == nil then
+    item_menu(ctx)
+    bg_menu(ctx)
+    pop_menu(ctx)
+  end
+  icon_picker(ctx, where)
 end
 
 return TB
@@ -746,5 +1436,5 @@ end   -- make
 
 local TB = make("toolbar", "tb", TOP_DEFAULTS)
 TB.make = make
-function TB.attach(imgui) ImGui = imgui end
+function TB.attach(imgui) ImGui = imgui; AI.attach(imgui) end
 return TB

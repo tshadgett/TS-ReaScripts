@@ -2,11 +2,9 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.2.0
+-- @version 2.2.1
 -- @changelog
---  TS_TrackProbe 2.0.0: no parameters, everything through shared memory, so
---  it never shows in automation or learn lists. Reopen projects to load it.
---  Spectrum release is now a Track Analyser setting. Shorter tooltips.
+--  Tidier code comments and README. Nothing changes in use.
 -- @about
 --  # Track Analyser
 --
@@ -45,8 +43,7 @@
 --   Panel 1  the spectrum the probes are publishing, pre and/or post, with
 --            the MEASURED response of whatever sits between them drawn over
 --            it. Post minus pre, from a running power average both probes
---            take on the same frames, IS the magnitude response -- checked
---            against the stepped-tone models to 0.069 dB rms. The POST
+--            take on the same frames, IS the magnitude response. The POST
 --            probe does that subtraction itself on a 256-point log grid and
 --            smooths it there, so the panel reads a curve rather than
 --            building one. It needs no parameter map and is right about
@@ -60,41 +57,20 @@
 --            Gain reduction is drawn ONLY from the VST3 route, where
 --            REAPER hands over decibels directly. Plugins that instead
 --            expose a reduction parameter -- InfiniStrip among them --
---            need a measured law, a staleness test and a hold to be read
---            at all, and every one of those was a source of error: a
---            calibration that was right for one module and wrong for
---            another, a hold that plateaued, a staleness test that never
---            released. The waveforms still show what those plugins do.
---            The reduction trace does not pretend to.
+--            would need a measured law, a staleness test and a hold to be
+--            read at all, and each of those is a source of error. The
+--            waveforms still show what those plugins do. The reduction
+--            trace does not pretend to.
 --
 -- Nothing on screen is modelled. Both panels read the audio.
 --
--- WHAT 1.0.0 TOOK OUT
---   Everything that existed to serve the modelled version of this panel,
---   now that nothing draws from a model:
---     - the per-module Gate / Comp / Lim reduction series, and with them
---       the measured meter laws, the staleness test and the timed hold
---     - the probe-derived "gain change across the span" trace, which was a
---       different quantity wearing the same name and showed no meaningful
---       difference from the measured figure when both were on screen
---     - the InfiniStrip slot, filter, EQ and insert-slot readers in
---       TS_TA_Strip, which cost about two thousand formatted-parameter calls
---       a second and fed nothing
---     - the probe's excitation generator, its per-sample level meters, and
---       its per-bin spectrum publishing -- about two thousand gmem writes
---       per frame per probe that nothing read
---
---   And the sample rate is no longer assumed to be 48 kHz, which at 96 kHz
---   had the scope ring holding half the time it claimed and the first FFT
---   bin sitting at 46.9 Hz, above the bottom of the display.
---
--- REQUIRES  TS_TA_Chain.lua and TS_TA_Strip.lua beside this file, and
---           TS_TrackProbe.jsfx (2026-09-07 or later) installed as an effect.
+-- REQUIRES  TS_TA_Chain.lua and TS_TA_Strip.lua beside this file, and a
+--           current TS_TrackProbe.jsfx installed as an effect.
 --           ReaPack puts it under Effects/ mirroring wherever this script
 --           landed, so nothing here assumes a fixed path for it. An older
 --           probe shows as a missing curve plus a note in Settings.
 --           TS_TA_Strip is what finds and reads the reduction reporters, so
---           it is needed even though nothing draws a strip any more.
+--           it is needed even though nothing draws a strip.
 --========================================================
 
 local r = reaper
@@ -165,10 +141,10 @@ end
 ----------------------------------------------------------
 -- run at startup
 --
--- __startup.lua is the one file in this project that can break things
--- OTHER than this project: everything else Tim auto-starts runs from it,
--- so a malformed edit costs the grid script, the visualiser and the
--- update utility as well as this panel. Three rules follow from that.
+-- __startup.lua is the one file this script touches that can break things
+-- OTHER than this script: everything else you auto-start runs from it,
+-- so a malformed edit costs those scripts as well as this panel. Three
+-- rules follow from that.
 --
 --   1  A BACKUP FIRST, every time, to __startup.lua.bak.
 --   2  THE RESULT IS COMPILED BEFORE IT IS SAVED. load() on the new text
@@ -176,18 +152,16 @@ end
 --      startup file that does not parse is not written, ever.
 --   3  LINES THIS SCRIPT DID NOT WRITE ARE NOT TOUCHED. Its own block is
 --      fenced with markers and only that is ever removed. If the command
---      id turns up outside the fence -- added by hand, which is exactly
---      how it got there the first time -- the panel reports it and leaves
---      it alone rather than editing somebody else's line.
+--      id turns up outside the fence -- added by hand -- the panel reports
+--      it and leaves it alone rather than editing somebody else's line.
 ----------------------------------------------------------
 
 local START_BEGIN = "-- >>> Track Analyser (added by TS_TrackAnalyser)"
 local START_END   = "-- <<< Track Analyser"
 
 -- The markers are full of Lua pattern metacharacters -- ( ) - . > -- so
--- they cannot be used as patterns raw. Matching on them unescaped is
--- exactly what made the panel report a block it had just written as
--- somebody else's hand-edit.
+-- they cannot be used as patterns raw. Unescaped, the panel would report
+-- a block it had just written as somebody else's hand-edit.
 local function esc(str) return (str:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")) end
 local BEGIN_PAT, END_PAT = esc(START_BEGIN), esc(START_END)
 
@@ -317,9 +291,7 @@ local TA    = need("TS_TA_Chain", true, { "walk", "find", "arm", "disarm", "atta
 if not TA then return end
 
 -- Three functions, and only three: find what reports reduction, read it,
--- and know whether the plugin is switched on. The module-meter reader, its
--- calibration laws and the whole InfiniStrip parameter map went with the
--- per-module bars.
+-- and know whether the plugin is switched on.
 local Strip = need("TS_TA_Strip", true, {
   "reductionSources", "readReduction", "fxActive",
 })
@@ -330,14 +302,13 @@ local Mask = need("TS_TA_Mask", true, {
 })
 -- The gain-reduction arithmetic, out here for the same reason: it is
 -- testable on synthetic band levels with a known answer, and this file is
--- not. See its header for why the measured trace is no longer a broadband
--- ratio.
+-- not. See its header for why the measured trace is not a broadband ratio.
 local GR = need("TS_TA_GR", true, { "shape" })
 if not Strip then return end
 if not Mask then return end
 if not GR then return end
 
--- The measured models are no longer part of drawing. They are kept for the
+-- The measured models are not part of drawing. They are for the
 -- measurement tools and are not loaded here at all -- the panel must not
 -- fail, or warn, over a file it does not use.
 
@@ -389,10 +360,10 @@ local S = {
 
   excRange    = 60,        -- draw a bin only within this much of the loudest
   curveFill   = true,      -- shade between the curve and 0 dB
-  scaleDb     = 12,        -- half-range; 12 dB as asked, expanding on demand
+  scaleDb     = 12,        -- half-range in dB, expanding on demand
   specTop     = -6,
   specBot     = -96,
-  specRel     = 400,       -- ms the spectrum falls back over (the probe's; was its own slider)
+  specRel     = 400,       -- ms the spectrum falls back over (sent to the probe)
   fftSize     = 2048,
   sliceMs     = 2,
   histSec     = 4,         -- how much of the scope ring panel 2 shows
@@ -476,8 +447,8 @@ end
 -- what make this readable and they should not be at the mercy of a
 -- colour picker.
 --
--- At hue 219 and tint 1.0 every entry reproduces the hand-picked colour
--- it replaced, exactly -- checked byte for byte across all 21.
+-- At hue 219 and tint 1.0 every entry reproduces the hand-picked palette
+-- byte for byte.
 local ALERT_HUE = 17
 
 local PALETTE = {
@@ -533,22 +504,19 @@ local COL = {}
 
 -- THE DATA COLOURS, DERIVED FROM THE SAME HUE
 --
---   The spectrum, waveform, curve and reduction colours were seven hand
---   picked hex values, which meant moving the Hue slider recoloured the
---   furniture and left the data sitting on the old scheme.
+--   The spectrum, waveform, curve and reduction colours follow the Hue
+--   slider too, so the data moves with the furniture.
 --
 --   Each is written here as the offset, saturation and lightness that
---   reproduces the hand-picked value EXACTLY at hue 219 -- every entry
---   round-trips to its original hex -- so turning this on changes
---   nothing until you move the hue.
+--   reproduces its hand-picked value EXACTLY at hue 219, so the default
+--   look is unchanged until you move the hue.
 --
 --   Two families, and the split is not arbitrary. The unprocessed and
 --   processed pairs sit within about sixteen degrees of the base: they
 --   are the subject, and they belong to it. The response curve and the
 --   reduction trace come out at -175 and +171 -- complementary, which is
 --   what makes them readable ON TOP of the first pair rather than lost
---   in it. Those were the numbers already in the file; naming them is
---   the only thing that changed.
+--   in it.
 --
 --   cMask is deliberately absent. Collision red is a fixed colour for a
 --   fixed purpose, like a bypass lamp, and a warning that changes colour
@@ -608,15 +576,12 @@ local function alpha(col, a)
   return (col & 0xFFFFFF00) | math.floor(a * 255)
 end
 
--- The alpha a colour was picked with, 0..1, and the same colour opened up
--- for the outline that makes it findable behind another one.
 -- Fit a label into a measured pixel width, ellipsising if it will not go.
 -- Returns the text and its width, or nil when even "..." does not fit.
 --
 -- Cut on a UTF-8 BOUNDARY. Track names are whatever you typed, and
--- slicing a multi-byte character in half renders as a replacement box --
--- which looks exactly like the font missing a glyph, and would have sent
--- somebody looking in the wrong place.
+-- slicing a multi-byte character in half renders as a replacement box,
+-- which looks exactly like the font missing a glyph.
 local chipFitCache = { s = nil, w = -1, out = nil, tw = 0 }
 
 local function chipFit(ctx, str, maxW)
@@ -687,16 +652,16 @@ local function trackRule(dl, x, y, w, tr)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + 2, col or COL.grid, 0)
 end
 
-local function alphaOf(col) return (col & 0xFF) / 255 end
-local function edgeOf(col)  return alpha(col, math.min(1, alphaOf(col) + 0.35)) end
+local function alphaOf(col) return (col & 0xFF) / 255 end  -- as picked, 0..1
+local function edgeOf(col)  return alpha(col, math.min(1, alphaOf(col) + 0.35)) end  -- outline
 
 ----------------------------------------------------------
 -- the widget style
 --
 -- ImGui's defaults are a bright blue on mid grey, which is fine in a
--- debug overlay and wrong next to two near-black panels -- the Settings
--- button was the loudest thing on screen, competing with the traces it
--- exists to configure.
+-- debug overlay and wrong next to two near-black panels -- a stock
+-- Settings button is the loudest thing on screen, competing with the
+-- traces it exists to configure.
 --
 -- So the stock widgets are dressed in the panel's own palette: near-black
 -- frames, a hairline border instead of a fill, and the response curve's
@@ -821,12 +786,10 @@ local EXT = "TS_TrackAnalyser"
 --
 --   Hue and tint are one choice across ChannelView, this panel and
 --   TS_Visualizer, so they live in a section of their own rather than in
---   any one tool's. They used to live in ChannelView's, which three other
---   scripts reached across into -- workable only for as long as
---   ChannelView was the one that happened to own them.
+--   any one tool's.
 --
---   The old location is still read when the new one is empty, so an
---   existing setting survives the update rather than everybody's colours
+--   ChannelView's own section is read when the shared one is empty, so an
+--   existing setting carries over rather than everybody's colours
 --   snapping back to stock. Nothing here supplies a default: nil means
 --   "no shared setting", and this panel then keeps its own, which is what
 --   lets it run with neither of the other tools installed.
@@ -919,10 +882,9 @@ buildPalette()
 -- packed drawing
 --
 -- ReaImGui marshals every DrawList_* call across the Lua/C boundary, and
--- this panel was issuing about four thousand a frame: one quad and one line
--- per pixel column, per trace, per panel. The arithmetic was never the
--- problem. The same geometry handed over as one packed array of points is
--- a single call.
+-- one quad and one line per pixel column, per trace, per panel comes to
+-- about four thousand a frame. The arithmetic is not the cost. The same
+-- geometry handed over as one packed array of points is a single call.
 --
 -- It also cures an artefact. Adjacent alpha-blended quads overlap along
 -- their shared edge by a fraction of a pixel, and that sliver gets blended
@@ -936,14 +898,13 @@ buildPalette()
 
 -- ONLY STROKES ARE PACKED. FILLS ARE NOT.
 --
--- The first version of this also packed the filled areas into single
--- AddConcavePolyFilled calls. Do not do that. A waveform band is about
--- twelve hundred points, ImGui triangulates a concave polygon rather than
--- fanning it, and where the minimum and maximum paths touch, the polygon
--- self-intersects -- which is how you get REAPER sitting there. Strokes are
--- linear in the number of points and are what AddPolyline exists for; the
--- fills go back to a quad per span, which after the band summary is 256 of
--- them for a spectrum rather than 600.
+-- Do not pack the filled areas into single AddConcavePolyFilled calls. A
+-- waveform band is about twelve hundred points, ImGui triangulates a
+-- concave polygon rather than fanning it, and where the minimum and
+-- maximum paths touch, the polygon self-intersects -- which leaves REAPER
+-- sitting there. Strokes are linear in the number of points and are what
+-- AddPolyline exists for; the fills are a quad per span, which after the
+-- band summary is 256 of them for a spectrum.
 local polyOK = type(ImGui.DrawList_AddPolyline) == "function"
            and type(r.new_array) == "function"
 
@@ -997,7 +958,7 @@ local rigNeedsProbes = false
 local rigSources = {}     -- everything between the probes that reports reduction
 local rigOutside = {}     -- reduction reporters that are NOT between them
 local lock       = {}     -- the scope trigger: anchor, step, ring length
-local chainSig   = nil    -- what the chain looked like last time we looked
+local chainSig   = nil    -- what the chain looked like at the last look
 local lagCheckedAt = 0
 local rigLag     = 0      -- samples of latency reported by the FX between
                           -- the probes; the pre probe delays itself by it
@@ -1070,13 +1031,11 @@ end
 
 -- NEVER DISARM A PROBE THE PANEL'S OWN RIG IS USING.
 --
---   This is what froze the post spectrum. Select track A, compare
---   against B, then select B: B's probes now belong to the rig, armed by
---   TA.arm, with its post probe publishing to POST_BASE. But cmpRig was
---   still pointing at B. Picking a new comparison track called
---   releaseCompare first, which set publish = 0 on B's post probe -- the
---   selected track's own post probe -- and the post spectrum stopped
---   dead while everything else carried on.
+--   Select track A, compare against B, then select B: B's probes now
+--   belong to the rig, armed by TA.arm, with its post probe publishing to
+--   POST_BASE, while cmpRig can still point at B. Releasing it then would
+--   set publish = 0 on the selected track's own post probe, and the post
+--   spectrum would stop dead while everything else carried on.
 --
 --   So the release checks whose track it is. If the comparison track has
 --   become the selected one, the reference is dropped and the probes are
@@ -1094,10 +1053,9 @@ end
 local function refreshCompare()
   local want = trackByGuid(cmpGuid)
 
-  -- Checked BEFORE the early return. The old code returned as soon as
-  -- the wanted track matched the one already held, which meant becoming
-  -- the selected track went unnoticed for as long as the pick did not
-  -- change.
+  -- Checked BEFORE the early return, or the comparison track becoming
+  -- the selected track would go unnoticed for as long as the pick did
+  -- not change.
   if want and want == rigTrack then
     releaseCompare()
     cmpTrack, cmpName = nil, ""
@@ -1117,22 +1075,22 @@ local function refreshCompare()
   end
 end
 
--- The selected track changed: put back whatever it was last compared
--- against, and release the previous partner so two comparison probes are
--- never publishing into the one region.
 -- The partner chosen most recently, whatever track you were on. See
 -- compareFollowTrack for what it is for.
 local cmpLast = nil
 
+-- The selected track changed: put back whatever it was last compared
+-- against, and release the previous partner so two comparison probes are
+-- never publishing into the one region.
 local function compareFollowTrack()
   local g = guidOf(rigTrack)
   -- WHAT THIS TRACK WAS PAIRED WITH, OR FAILING THAT, THE LAST PARTNER
   -- YOU CHOSE AT ALL.
   --
-  --   Falling back to nothing meant that switching to a track you had
-  --   not compared before left collisions switched on and inert -- lamp
-  --   lit, nothing on screen, no track named. That reads as the feature
-  --   having quietly turned itself off.
+  --   Falling back to nothing would leave collisions switched on and
+  --   inert on a track you had not compared before -- lamp lit, nothing
+  --   on screen, no track named. That reads as the feature having quietly
+  --   turned itself off.
   --
   --   The fallback matches how the tool actually gets used: you pick the
   --   vocal once and then walk the arrangement checking everything
@@ -1163,12 +1121,11 @@ end
 ----------------------------------------------------------
 -- the analysis geometry, kept in step with the real sample rate
 --
--- Both of these used to assume 48 kHz. At 96 kHz that made the scope ring
--- hold 4.1 seconds while claiming 8.2, and it put the first FFT bin at
--- 46.9 Hz -- so the bottom half-octave of the display had nothing behind
--- it and drew as background. At 48 kHz nothing here changes: 48000/2048 is
--- 23.4 Hz, already under the limit, so the size you asked for is the size
--- you get.
+-- Neither assumes 48 kHz. At 96 kHz a fixed 2048-point FFT puts the first
+-- bin at 46.9 Hz, so the bottom half-octave of the display would have
+-- nothing behind it, and a fixed ring would hold half the time it claims.
+-- At 48 kHz nothing here changes: 48000/2048 is 23.4 Hz, already under the
+-- limit, so the size you asked for is the size you get.
 ----------------------------------------------------------
 
 local function fftFor(srate)
@@ -1201,12 +1158,11 @@ local clearState
 -- WHEN TO LOOK AT THE CHAIN AGAIN
 --
 --   Moving a plugin in or out of the probes changes what the panel should
---   be reading, and nothing about the TRACK changes when you do it. The
---   first attempt fingerprinted the chain twice a second regardless, which
---   was wrong: walking it costs three GetNamedConfigParm calls per FX to
---   collect alternate names -- around twenty a second on a chain this size,
---   on the same API that serves GainReduction_dB -- and it disturbed the
---   meter readings it was meant to keep honest.
+--   be reading, and nothing about the TRACK changes when you do it. But
+--   fingerprinting the chain on a clock is wrong: walking it costs three
+--   GetNamedConfigParm calls per FX to collect alternate names, on the
+--   same API that serves GainReduction_dB, and done twice a second it
+--   disturbs the meter readings it is meant to keep honest.
 --
 --   REAPER already counts project changes. Reading that integer is one
 --   call per frame and costs nothing, and while you are not editing
@@ -1289,13 +1245,11 @@ end
 --   up with each other; it does not time-travel inside a chain, and nothing
 --   puts this right before it reaches the probes.
 --
---   Uncorrected it is not a small error. At 32 samples -- a third of a
---   scope column, which is what one oversampled plugin costs -- the
---   measured trace's error against a known reduction goes from 0.01 dB to
---   2.36 dB and its correlation from 1.00 to 0.74. At one whole column a
---   silent gap in one ring lines up with a transient in the other and it
---   stops being wrong and starts being noise: 226 dB spikes on a 12 dB
---   reduction.
+--   Uncorrected it is not a small error. Even 32 samples -- a third of a
+--   scope column, which is what one oversampled plugin costs -- puts the
+--   measured trace dB out against a known reduction. At one whole column
+--   a silent gap in one ring lines up with a transient in the other and
+--   it stops being wrong and starts being noise.
 --
 --   Walked in CHAIN ORDER rather than by comparing indices, because an FX
 --   inside a container carries an encoded index and `i > lo and i < hi` is
@@ -1393,16 +1347,15 @@ local function setUpRig(tr, keepPre, keepPost)
 
   -- Only the VST3 route is drawn. It reports decibels directly, so there is
   -- no law to calibrate, no staleness to detect and nothing to hold through
-  -- -- which is where every fault in the parameter-meter path came from. A
+  -- -- each of which is a source of error in the parameter-meter path. A
   -- plugin that only fakes a reduction parameter is listed but not drawn.
   --
   -- NAMING THE BAR
-  --   One bar showing one thing is gain reduction, so it says GR. It used
-  --   to take an initial from the plugin's name, which is why a single
-  --   Pro-C 3 appeared as "P" -- a letter that told you nothing you did not
-  --   already know from the track. Initials are only worth having when
-  --   there are two sources to tell apart, so that is the only case that
-  --   gets them.
+  --   One bar showing one thing is gain reduction, so it says GR. An
+  --   initial from the plugin's name -- "P" for a single Pro-C 3 -- would
+  --   tell you nothing you did not already know from the track. Initials
+  --   are only worth having when there are two sources to tell apart, so
+  --   that is the only case that gets them.
   local nUsable = 0
   for _, s in ipairs(rigSources) do
     -- Reported in decibels, or measured by a probe tap: both are drawn.
@@ -1436,13 +1389,13 @@ local function setUpRig(tr, keepPre, keepPost)
   -- NOTHING IS WRITING THE PRE REGION, SO EMPTY IT.
   --
   --   Disarming a probe stops it writing; it does not clear what it
-  --   wrote. On a one-probe track the pre region therefore still held the
+  --   wrote. On a one-probe track the pre region would still hold the
   --   last two-probe track's spectrum and scope ring -- frozen, and drawn
   --   as though it belonged to the track in front of you.
   --
-  --   Guarding each drawing site on rig.pre fixed the ones I could find,
-  --   which is the weaker fix: it leaves live-looking stale data sitting
-  --   in shared memory for the next reader to trip over. Clearing the
+  --   Guarding each drawing site on rig.pre alone is the weaker fix: it
+  --   leaves live-looking stale data sitting in shared memory for the
+  --   next reader to trip over. Clearing the
   --   region at the source means every consumer -- the spectrum, the
   --   scope, the response, and anything added later -- sees "no data"
   --   because there is none, rather than because it remembered to ask.
@@ -1500,19 +1453,15 @@ end
 ----------------------------------------------------------
 -- the response
 --
--- It used to be built from a MODEL: every module, every band and every
--- control law of InfiniStrip measured by hand, so the panel could draw
--- each band's own contribution. That model is real and it is accurate --
--- the archived TA_*_Model scripts still hold it -- but it was unbounded
--- work, because every new module, insert slot and channel strip started
--- again from nothing, and every gap in it showed on screen as a confident
--- curve that was quietly wrong.
---
--- The probe pair measures the real response instead. See drawPanel1.
+-- Measured by the probe pair, not built from a MODEL. A model of every
+-- module, band and control law could draw each band's own contribution,
+-- but it is unbounded work -- every new module, insert slot and channel
+-- strip starts again from nothing -- and every gap in it shows on screen
+-- as a confident curve that is quietly wrong. See drawPanel1.
 ----------------------------------------------------------
 
 -- Set by the drawing code when the probes are older than this panel: they
--- are the ones that compute the response now, so a stale JSFX shows as a
+-- are the ones that compute the response, so a stale JSFX shows as a
 -- missing curve and nothing else, which would be a puzzle rather than a
 -- message.
 local probeTooOld = false
@@ -1691,18 +1640,9 @@ local grChangeCol, grChangeVal = {}, {}
 -- publishes at 1 Hz is a number rather than an impression.
 local grGapEma = {}
 
--- THE MODULE METERS ARE GONE, AND WITH THEM THEIR MACHINERY.
---   Reading InfiniStrip's per-module Gate / Comp / Lim meters needed a
---   measured law per module, a staleness test (seventy per cent of reads
---   came back as an identical idle tuple), and a timed hold to bridge the
---   stale runs. Every one of those was a source of error in turn: a
---   calibration right for one module and wrong for another, a hold that
---   plateaued, a staleness test that never released.
---
---   The VST3 route needs none of it. It answers in decibels, it answered
---   on every one of 159 logged samples, and it is what the bars draw. So
---   the laws, the hold, the staleness test and the three module series
---   have all been taken out rather than left switched off.
+-- Each source's reduction this frame, in dB, indexed like rigSources. The
+-- VST3 route answers in decibels, so there is no meter law, staleness
+-- test or timed hold here to get wrong.
 local GRsrc = {}
 
 -- PEAK HOLD, the same law ChannelView uses so the two read alike:
@@ -1753,9 +1693,9 @@ local function updateGR()
     local db = 0
     if s.usable and s.active then
       db = Strip.readReduction(rigTrack, s.fx, s.route, s.law)
-      -- The route answered on every one of 159 logged samples. If it ever
-      -- does not, the previous value is better than a hole, but there is
-      -- no timed hold and no staleness test: this path does not need one.
+      -- If the route ever fails to answer, the previous value is better
+      -- than a hole. There is no timed hold and no staleness test: this
+      -- path does not need one.
       if db == nil then db = GRsrc[i] or 0 end
     end
     GRsrc[i] = db
@@ -1790,22 +1730,15 @@ local function pumpGR()
 
   local cur = sc.cur
 
-  -- WHY THE TRACE WAS A STAIRCASE
+  -- A STRAIGHT LINE BETWEEN READINGS, NOT A HOLD
   --
-  -- There used to be two passes here and they fought each other.
+  --   Holding the previous reading across every column since the last
+  --   frame draws a flat run followed by a vertical jump: a staircase.
+  --   Reported readings arrive slower than the frame rate -- Pro-C 3 at
+  --   about 18 a second against a frame rate near 30 -- so most frames
+  --   see no change at all and the hold is what would stay on screen.
   --
-  --   The first wrote a HOLD across every column since the last frame --
-  --   the previous reading, repeated. That is a flat run followed by a
-  --   vertical jump, i.e. a staircase, and it was written every frame.
-  --
-  --   The second tried to undo it: when a value CHANGED, it went back and
-  --   replaced the flat run with a ramp -- but only if the run was shorter
-  --   than a learned cap. Measured on Pro-C 3, the readings arrive about
-  --   18 times a second against a frame rate near 30, so most frames see
-  --   no change at all and the hold is what stays on screen. The ramp only
-  --   sometimes caught up, and only sometimes was allowed to.
-  --
-  -- One pass replaces both. Each frame reads the value once; that reading
+  -- So: each frame reads the value once; that reading
   -- and the previous one are two samples of a continuous quantity, and the
   -- straight line between them is the best estimate of what happened in
   -- between. So every column since the last frame is filled with that
@@ -1842,9 +1775,9 @@ local function pumpGR()
   end
 
   -- HOW OFTEN THE PLUGIN ACTUALLY PRODUCES A NEW NUMBER.
-  --   Kept only as a statistic now -- it decides nothing about the
-  --   drawing. It is what told us Pro-C reports at about 18 Hz rather
-  --   than at frame rate, which is worth being able to see.
+  --   A statistic only -- it decides nothing about the drawing. It shows,
+  --   for instance, that Pro-C reports at about 18 Hz rather than at frame
+  --   rate, which is worth being able to see.
   for j = 1, #v do
     local prev = grChangeVal[j]
     if prev == nil then
@@ -1908,16 +1841,11 @@ local function drawPanel1(dl, x0, y0, w, h)
   end
 
   ---------------------------------------------------- spectrum
-  -- Every pixel column gets a value. Where the column spans one or more
-  -- bins we take the loudest, so narrow peaks survive; where it spans less
-  -- than a bin -- which below about 1 kHz is most of them, since a 2048
-  -- point FFT is 23 Hz per bin -- we interpolate between neighbours
-  -- instead of leaving a gap. Skipping those was what drew the picket
-  -- fence.
-  -- The probes now publish a log-spaced summary of their own spectrum, so
-  -- this reads 256 points instead of 1024 bins and draws 256 spans instead
-  -- of one per pixel column. Reducing bins to pixels was the panel's single
-  -- largest per-frame cost and none of it needed to happen in Lua.
+  -- The probes publish a log-spaced summary of their own spectrum, so
+  -- this reads 256 points rather than 1024 bins and draws 256 spans rather
+  -- than one per pixel column. Reducing bins to pixels would be the
+  -- panel's single largest per-frame cost and none of it needs to happen
+  -- in Lua.
   -- The colour's own alpha is the fill; the outline sits a little above it,
   -- which is what lets the trace behind be found through the one in front.
   -- Two filled shapes at usable opacities are otherwise one shape.
@@ -1963,13 +1891,9 @@ local function drawPanel1(dl, x0, y0, w, h)
     --   output spectrum, the output waveform and everything the collision
     --   overlay needs, for half the install. But disarming a probe stops
     --   it WRITING; it does not clear what it wrote. So on a single-probe
-    --   track the pre region still held the last two-probe track's
-    --   spectrum, frozen, and the panel drew it as though it belonged to
-    --   the track you were looking at.
-    --
-    --   The response curve was already guarded this way. These two were
-    --   not, which made the single-probe setup look broken when it is
-    --   actually supported.
+    --   track the pre region can still hold the last two-probe track's
+    --   spectrum, frozen, and would be drawn as though it belonged to the
+    --   track you are looking at.
     if S.showPre and rig.pre then drawSpectrum(G.PRE_BASE, S.cSpecPre) end
     if S.showPost then drawSpectrum(G.POST_BASE, S.cSpecPost, true) end
   end
@@ -1977,15 +1901,15 @@ local function drawPanel1(dl, x0, y0, w, h)
   ---------------------------------------------------- collisions
   -- THE RED IS PART OF THE SPECTRUM, NOT A CURTAIN OVER IT.
   --
-  -- It used to be full-height columns. That was defensible -- masking is
-  -- a property of a frequency region, not of a level, so any height is an
-  -- invention -- but it reads as a separate object sitting in front of
-  -- the display, and it buries the traces it is describing.
+  -- Full-height columns would be defensible -- masking is a property of a
+  -- frequency region, not of a level, so any height is an invention --
+  -- but they read as a separate object sitting in front of the display,
+  -- and they bury the traces they are describing.
   --
   -- So it is drawn INTO the post spectrum's own silhouette: the same
   -- quads, in the same places, recoloured where that band is masked. The
   -- shape carries no extra meaning -- it is the shape already on screen --
-  -- and the red now reads as "this part of the track is being covered"
+  -- and the red reads as "this part of the track is being covered"
   -- rather than as a band across the panel.
   --
   -- The top edge is stroked brighter over the same span. The contour is
@@ -2002,18 +1926,17 @@ local function drawPanel1(dl, x0, y0, w, h)
     --
     -- THE CONTOUR HAS TO FADE WITH THE FILL.
     --
-    --   It used to stroke a whole contiguous run of masked bands in one
-    --   flat colour. The fill was per band and varied with depth; the
-    --   contour did not, so a band masked by half a decibel wore the same
-    --   bright red as one masked by fifteen, and the line ran at full
-    --   strength across regions the fill had almost given up on. It read
-    --   as a much larger and more confident finding than the measurement
-    --   supports, which is the one thing an indicative overlay must not
-    --   do.
+    --   The fill is per band and varies with depth. A contour stroked in
+    --   one flat colour along a whole run of masked bands would put a band
+    --   masked by half a decibel in the same bright red as one masked by
+    --   fifteen, at full strength across regions the fill has almost given
+    --   up on. That reads as a much larger and more confident finding than
+    --   the measurement supports, which is the one thing an indicative
+    --   overlay must not do.
     --
-    --   Per-segment alpha is the fix, but a separate AddLine per band is
-    --   256 marshalled calls a frame and this panel has been there
-    --   before. So the depth is QUANTISED into a few levels and runs of
+    --   Per-segment alpha is the answer, but a separate AddLine per band
+    --   is 256 marshalled calls a frame. So the depth is QUANTISED into a
+    --   few levels and runs of
     --   equal level are packed into one polyline each -- typically a
     --   couple of dozen calls, and the banding is invisible because the
     --   fill underneath is already continuous.
@@ -2028,9 +1951,9 @@ local function drawPanel1(dl, x0, y0, w, h)
     local function flushRun(upto)
       if runFrom and runLvl > 0 and upto > runFrom then
         local t = runLvl / LEVELS
-        -- Same t the fill uses, lifted by the same proportion the contour
-        -- was always lifted by. At full depth it is the bright edge; at a
-        -- tenth of it, a tenth as present.
+        -- Same t the fill uses, lifted by the same 0.35 as every other
+        -- outline. At full depth it is the bright edge; at a tenth of it,
+        -- a tenth as present.
         polyline(dl, SP.x, SP.y, runFrom, upto,
           alpha(S.cMask, math.min(1, (baseA + 0.35) * t)), 1.6)
       end
@@ -2064,19 +1987,18 @@ local function drawPanel1(dl, x0, y0, w, h)
   --
   -- Both probes take a running power average of their own spectrum on the
   -- same frames; post minus pre, per band, IS the magnitude response of
-  -- whatever sits between them, checked against the stepped-tone models to
-  -- 0.069 dB rms. The POST probe does that subtraction itself, on the log
-  -- grid, and smooths it there -- so no parameter is read, no control law
-  -- is fitted, and no module has to have been characterised first. It is
-  -- right about bypass, mute, insert slots, saturation and plugins nobody
-  -- has ever seen, because it looks at the audio.
+  -- whatever sits between them. The POST probe does that subtraction
+  -- itself, on the log grid, and smooths it there -- so no parameter is
+  -- read, no control law is fitted, and no module has to have been
+  -- characterised first. It is right about bypass, mute, insert slots,
+  -- saturation and plugins nobody has ever seen, because it looks at the
+  -- audio.
   --
   -- What it cannot do is say which band did what. That is the trade.
   --
   -- Doing the arithmetic in the DSP is not only cheaper. Averaging a band
-  -- of bins into one point is what stopped the curve looking like noise at
-  -- the top end, where a per-bin difference showed every wobble in the
-  -- average.
+  -- of bins into one point keeps the curve from looking like noise at the
+  -- top end, where a per-bin difference shows every wobble in the average.
   local CC = curveCache
   if not (S.showCurve and rig and rig.pre and rig.post) then
     CC.n, CC.peak = 0, 0
@@ -2100,14 +2022,14 @@ local function drawPanel1(dl, x0, y0, w, h)
 
         -- BOTH ENDS HAVE TO BE MEASURABLE.
         --
-        -- The gate used to look only at the excitation, which is the wrong
-        -- half below a high-pass corner: there is plenty of signal going IN
-        -- at 20 Hz and nothing at all coming out, so the ratio was the
-        -- filter's stopband plus whatever noise the post probe had -- fifty
-        -- and more decibels of a number that means nothing, and that number
-        -- then dragged the levelling reference along with it. The post side
-        -- now gets the same test as the pre side, and where it fails the
-        -- curve breaks rather than reporting a noise floor as a filter slope.
+        -- Gating on the excitation alone is the wrong half below a
+        -- high-pass corner: there is plenty of signal going IN at 20 Hz and
+        -- nothing at all coming out, so the ratio is the filter's stopband
+        -- plus whatever noise the post probe has -- fifty and more decibels
+        -- of a number that means nothing, and that number then drags the
+        -- levelling reference along with it. So the post side gets the same
+        -- test as the pre side, and where it fails the curve breaks rather
+        -- than reporting a noise floor as a filter slope.
         local postMax = -400
         for i = 0, nb - 1 do
           local pv = r.gmem_read(G.POST_BASE + G.OFF_BAND + i * G.BAND_STRIDE + 1)
@@ -2174,9 +2096,9 @@ local function drawPanel1(dl, x0, y0, w, h)
         -- comes along for the ride. Levelling the curve against its own
         -- middle throws the gain away and keeps the shape.
         --
-        -- Compensating from the plugin's REPORTED reduction was tried
-        -- instead and dropped: it was indistinguishable from doing nothing
-        -- on real material, which is what you would expect from sampling a
+        -- Compensating from the plugin's REPORTED reduction instead does
+        -- not work: it is indistinguishable from doing nothing on real
+        -- material, which is what you would expect from sampling a
         -- millisecond-scale quantity thirty times a second.
         CC.shift = CC.ref and -CC.ref or nil
 
@@ -2254,8 +2176,8 @@ local function drawPanel1(dl, x0, y0, w, h)
       if i <= NPTS + 1 and ok[i] then
         runStart = runStart or i
       elseif runStart then
-        -- 1.1, near enough to the 0.9 the per-band contributor lines used
-        -- to be drawn at. At 2.0 it read as a bar rather than a curve.
+        -- 1.1, thin enough to read as a curve. At 2.0 it reads as a bar
+        -- rather than a curve.
         polyline(dl, xs, ys, runStart, i - 1, S.cCurve, 1.1)
         runStart = nil
       end
@@ -2274,9 +2196,8 @@ end
 --
 -- One overlay, not two panels: the untouched signal in grey behind, the
 -- processed one in front. Gain reduction hangs from the top edge on its
--- own scale, gate blue, compressor yellow, limiter red, each a thin line
--- with the same gradient fill as the EQ bands. The three bars on the right
--- are the same three numbers as a level.
+-- own scale, one thin line per source. The bars on the right are the same
+-- numbers as a level.
 ----------------------------------------------------------
 
 local function drawPanel2(dl, x0, y0, w, h)
@@ -2287,8 +2208,6 @@ local function drawPanel2(dl, x0, y0, w, h)
     return
   end
   -- Build the bars first, because how many there are decides the width.
-  -- The total always exists -- Pro-C 3 has no per-module split and would
-  -- otherwise leave three empty bars labelled for a strip it is not.
   local labels, cols, vals = {}, {}, {}
   local function bar(lab, col, v)
     labels[#labels + 1] = lab ; cols[#cols + 1] = col ; vals[#vals + 1] = v
@@ -2337,23 +2256,20 @@ local function drawPanel2(dl, x0, y0, w, h)
     bar("\u{03A3}", allMeas and S.cGRMeas or S.cGR, grTotal)
   end
 
-  -- THE TAG IS GONE, and the column is the better for it. It cost twelve
-  -- pixels at the top -- which is precisely the twelve pixels that made
-  -- the meter's scale disagree with the trace's -- to print a word that
-  -- only ever said what the panel it sits in already says.
+  -- No label above the meter: it would cost twelve pixels at the top, put
+  -- the meter's scale out of step with the trace's, and only say what the
+  -- panel already says.
   --
-  -- The column is now as wide as the held figure needs and no wider; the
-  -- bar itself is narrower than that and centred in it.
   -- The bar fills its column and the column sits almost against the panel
   -- edge: no centring slack, no gap to the waveform, and three pixels of
   -- inset on the right.
   --
   -- Those three pixels are not decoration. The held figure is about
   -- twenty pixels wide and the column is twelve, so it has to overhang
-  -- its bar. Centred, it overhung BOTH ways and the right-hand end fell
-  -- outside the clip rect -- which is why "8.2" arrived as "8.". It is
-  -- right-aligned to the bar now and overhangs only to the left, onto
-  -- the waveform, where there is room for it.
+  -- its bar. Centred, it would overhang BOTH ways and the right-hand end
+  -- would fall outside the clip rect ("8.2" showing as "8."). So it is
+  -- right-aligned to the bar and overhangs only to the left, onto the
+  -- waveform, where there is room for it.
   local BAR_W    = 12
   local RIGHT_PAD = 3
   local BARW  = (#labels > 0) and (BAR_W * #labels) or 0
@@ -2394,11 +2310,11 @@ local function drawPanel2(dl, x0, y0, w, h)
     newest = sc.cur
 
     -- THE TRIGGER
-    --   The first version derived the right edge every frame from the play
-    --   position, and shuddered: the play clock and the probe's column
-    --   counter are sampled at different instants, so their difference
-    --   jittered by a frame's worth of columns -- about 16, which at a two
-    --   second window is 16 pixels of wobble every frame.
+    --   Deriving the right edge every frame from the play position
+    --   shudders: the play clock and the probe's column counter are
+    --   sampled at different instants, so their difference jitters by a
+    --   frame's worth of columns -- about 16, which at a two second window
+    --   is 16 pixels of wobble every frame.
     --
     --   A scope does not work that way. It arms once and then free-runs on
     --   its own counter. So the anchor is set from the play position when
@@ -2461,10 +2377,9 @@ local function drawPanel2(dl, x0, y0, w, h)
         if not hi[px] or c[2] > hi[px] then hi[px] = c[2] end
       end
     end
-    -- The waveform is a band between a minimum and a maximum path, which
-    -- is one closed polygon: out along the top, back along the bottom.
-    -- It used to be a quad per pixel column, six hundred calls a frame
-    -- for each of the two waveforms.
+    -- The waveform is a band between a minimum and a maximum path, drawn
+    -- as a quad per pixel column that has data. Not one concave polygon:
+    -- see ONLY STROKES ARE PACKED for why.
     local half = h * 0.5 * 0.92
     local wx, wt, wb, n = {}, {}, {}, 0
     for px = math.floor(x0), math.floor(x1) do
@@ -2497,33 +2412,21 @@ local function drawPanel2(dl, x0, y0, w, h)
   -- THE CURTAIN
   --   One series per reduction source, from what each plugin reports to
   --   the host, so this works with any compliant plugin rather than only
-  --   with InfiniStrip's module meters. Measured 2026-08-31: the
-  --   host-facing readout is bit-identical to the module meter, so nothing
-  --   was lost by dropping the per-module split.
+  --   with one strip's module meters.
   --
-  --   The probe-derived version of this went with it. What the two probes
-  --   bracket is the whole span, so pre-minus-post is the compressor AND
-  --   the limiter AND the EQ together, moving with the signal's spectrum
-  --   from moment to moment -- a different quantity wearing the same
-  --   name, and it showed no meaningful difference from the measured
-  --   figure when both were on screen.
-  -- HOW THE TRACE IS SAMPLED, AND WHY IT LOOKED COARSE
+  -- HOW THE TRACE IS SAMPLED
   --
-  --   It used to read ONE column per pixel -- k = (px - x0) / w * total --
-  --   and with a four second window that is 2000 columns across about 840
-  --   pixels, so more than half of them were skipped. Which one a pixel
-  --   landed on shifted as the ring advanced, so the trace shimmered
-  --   between neighbouring readings instead of holding still.
+  --   A pixel covers every column it spans and keeps the DEEPEST reduction
+  --   in them, the same way the waveform does. Reading ONE column per
+  --   pixel would skip more than half of them at a four second window
+  --   (2000 columns across about 840 pixels), and which one a pixel landed
+  --   on would shift as the ring advanced, so the trace would shimmer.
   --
-  --   And a column with no reading in it was drawn as `or 0`, i.e. at the
-  --   top of the axis, meaning no reduction at all. Every gap in the ring
-  --   -- the wrap, a dropped frame, the columns ahead of the write cursor
-  --   -- became a spike to zero and back.
+  --   A column with nothing in it holds the last real value rather than
+  --   inventing a zero. Drawn as 0 it would sit at the top of the axis,
+  --   and every gap in the ring -- the wrap, a dropped frame, the columns
+  --   ahead of the write cursor -- would be a spike to zero and back.
   --
-  --   Both are fixed the same way the waveform already handles it: a pixel
-  --   covers every column it spans and keeps the DEEPEST reduction in
-  --   them, and a column with nothing in it holds the last real value
-  --   rather than inventing a zero.
   -- MEASURED FROM THE PROBES, WHEN THAT IS WHAT YOU ASKED FOR.
   --
   --   GainReduction_dB is a plugin PARAMETER, so it arrives only when the
@@ -2538,39 +2441,35 @@ local function drawPanel2(dl, x0, y0, w, h)
   --   the same order as the plugin's own display.
   --
   --   WHAT IT COSTS: it is the whole span, not one plugin, so an EQ
-  --   between the probes moves it too. And with makeup or auto gain on --
-  --   as it is in Pro-C by default -- the absolute figure is meaningless,
-  --   because the plugin gives back what it took. So this is drawn as
-  --   SHAPE: the least-reducing moment in the visible window is the zero,
-  --   and everything is measured down from there.
+  --   between the probes moves it too (handled per band, below). And with
+  --   makeup or auto gain on -- as it is in Pro-C by default -- the
+  --   absolute figure is meaningless, because the plugin gives back what
+  --   it took. So the probes give the SHAPE and the reporting plugins give
+  --   the size (see the fit below).
   --
   --   Which is the right division of labour. The meter reports the real
   --   decibels from the plugin, where 18 a second is plenty for a number
   --   you read. The trace shows the envelope, where resolution is the
   --   whole point.
+  --
   -- IT NEEDS SOMETHING TO ANCHOR TO, AND SOMETHING TO BE ABOUT.
   --
-  --   post-RMS over pre-RMS is the gain change across the span, from any
-  --   cause -- an EQ, a saturator, a fader inside the chain. It is gain
-  --   REDUCTION only when a compressor dominates that change, and the
-  --   panel cannot tell by looking.
-  --
-  --   Worse, with nothing reporting there is nothing to slide the shape
-  --   onto, so the offset came out zero and the trace was drawn zeroed
-  --   at the window's least-reducing moment -- swinging across the full
-  --   scale and looking like heavy compression on a chain doing none.
+  --   The span's gain change has any cause -- an EQ, a saturator, a fader
+  --   inside the chain. It is gain REDUCTION only when a compressor
+  --   dominates that change, and the panel cannot tell by looking. And
+  --   with nothing reporting there is nothing to put the shape at the
+  --   right height: it would swing across the full scale and look like
+  --   heavy compression on a chain doing none.
   --
   --   So a reporting plugin is required. It is what makes the number
   --   mean decibels of reduction, and it is what puts the trace at the
   --   right height. Without one, nothing is drawn and the panel says so.
-  -- WANTED versus GOT. These were one variable, and that was a hole: the
-  -- reported trace was suppressed whenever the measured one was ASKED for,
-  -- whether or not it turned out to have anything to draw. While the
-  -- measured route was a broadband ratio it always had something, so the
-  -- hole never opened. Now that it can legitimately come up empty -- a
-  -- probe from before the filterbank, a window that has not filled yet --
-  -- a chain with a compressor reporting perfectly well drew no trace at
-  -- all and said nothing about why.
+  --
+  -- WANTED versus GOT. Whether the measured trace actually drew, as
+  -- opposed to whether it was asked for. It can legitimately come up
+  -- empty -- a probe without the filterbank, a window that has not filled
+  -- yet -- and then the reported trace is drawn instead, rather than a
+  -- chain with a compressor reporting perfectly well showing nothing.
   local measuredDrew = false
   -- WHO DRAWS WHAT.
   --   A plugin measured by a probe tap draws its own series: 500 a
@@ -2589,10 +2488,10 @@ local function drawPanel2(dl, x0, y0, w, h)
     -- and does not grow when you zoom out.
     -- A LEVEL GATE, BECAUSE A RATIO OF TWO SMALL NUMBERS IS NOISE.
     --
-    --   The only guard here was a[3] > 1e-7, which is -140 dBFS -- so in
-    --   the gaps between notes the trace was dividing one noise floor by
-    --   another and drawing whatever came out. On quiet material that is
-    --   a spike to the bottom of the scale on every gap.
+    --   A bare guard at -140 dBFS is not enough: in the gaps between
+    --   notes the trace would divide one noise floor by another and draw
+    --   whatever came out. On quiet material that is a spike to the
+    --   bottom of the scale on every gap.
     --
     --   Two thresholds, because one will not do. An absolute floor, since
     --   below about -70 dBFS there is no signal to take a ratio of. And a
@@ -2602,8 +2501,8 @@ local function drawPanel2(dl, x0, y0, w, h)
     --   either.
     --
     --   Gated columns are HELD, not dropped to zero. A gap in the audio
-    --   is not a moment of no gain reduction; it is a moment we cannot
-    --   measure, and the honest thing is to carry the last real reading
+    --   is not a moment of no gain reduction; it is a moment that cannot
+    --   be measured, and the honest thing is to carry the last real reading
     --   across it.
     --
     --   It matters for the height as well as the spikes: the offset that
@@ -2611,13 +2510,12 @@ local function drawPanel2(dl, x0, y0, w, h)
     --   gaps drags the whole trace off.
     -- PER BAND, NOT BROADBAND.
     --
-    --   This used to be post RMS over pre RMS. That is the span's LEVEL
-    --   change, which equals its gain only while nothing in the span
-    --   touches the spectrum -- and one EQ band is enough to break it. A
-    --   static +6 dB at 100 Hz adds six decibels to the ratio through a
-    --   bass note and nothing through a cymbal, so the EQ's contribution
-    --   swings with the programme and lands on the trace looking exactly
-    --   like compression. Against a true 13 dB reduction it drew 39 dB.
+    --   Broadband post RMS over pre RMS is the span's LEVEL change, which
+    --   equals its gain only while nothing in the span touches the
+    --   spectrum -- and one EQ band is enough to break it. A static +6 dB
+    --   at 100 Hz adds six decibels to the ratio through a bass note and
+    --   nothing through a cymbal, so the EQ's contribution swings with the
+    --   programme and lands on the trace looking exactly like compression.
     --
     --   The bands come from the probes' own filterbank and the separation
     --   is done in TS_TA_GR.lua, where it can be tested. Both probes have
@@ -2641,17 +2539,16 @@ local function drawPanel2(dl, x0, y0, w, h)
     --
     --   The two are matched by a straight-line fit over the visible
     --   window, reported = a * span + b, rather than by sliding means
-    --   together as this used to:
+    --   together:
     --     * nothing reducing: the span's wobble has nothing in common
     --       with reports of zero, a comes out 0, and the trace lies flat
-    --       on zero. Sliding means drew the wobble, half of it clipped
-    --       against the top -- the square wave beside meters reading 0.
+    --       on zero. Sliding means would draw the wobble, half of it
+    --       clipped against the top, beside meters reading 0.
     --     * reducing: a comes out near 1 and the trace has the span's
     --       detail at the reports' size.
     --   The span is smoothed to about the reports' own rate (60 ms) for the
-    --   FIT only -- fitting a sharp signal against a blurred one shrinks a,
-    --   by a quarter in a test against a known reduction; smoothed, 0.96.
-    --   It is drawn sharp.
+    --   FIT only -- fitting a sharp signal against a blurred one shrinks a
+    --   by about a quarter. It is drawn sharp.
     local rep, repN = {}, {}
     local each = {}          -- per reporting source: its reports, column by column
     local colsPerSec = sc.sr / math.max(1, sc.slice)
@@ -2681,7 +2578,7 @@ local function drawPanel2(dl, x0, y0, w, h)
       -- latency too on the assumption that its meter runs ahead of its
       -- output (a lookahead's does). Many plugins already hold their meter
       -- back to match their output -- a Weiss reporting 169 ms of latency
-      -- drew 169 ms late -- and some hold it back further still. So once a
+      -- would draw 169 ms late -- and some hold it back further still. So once a
       -- second, while the span is measuring, each reporting plugin's reports
       -- are tried against it at every delay from 0.6 s early to past its own
       -- latency, and drawn at the one where they agree best (correlation of
@@ -2862,14 +2759,11 @@ local function drawPanel2(dl, x0, y0, w, h)
 
   ---------------------------------------------------- the meters
   --
-  -- ONE MAPPING FOR BOTH. The bar used to run from y0+12 (under the tag)
-  -- to y1-15 (above the readout), while the trace and the dB scale down
-  -- the left both used yGR, which spans the full y0..y1. So -3.1 dB on
-  -- the trace and -3.1 dB on the bar were at different heights, and the
-  -- meter quietly disagreed with the picture next to it.
-  --
-  -- The bar now uses yGR itself. Nothing is derived from it, nothing is
-  -- parallel to it -- it IS it, so the two cannot drift apart again.
+  -- ONE MAPPING FOR BOTH. The trace and the dB scale down the left use
+  -- yGR, which spans the full y0..y1, and the bar uses yGR itself. Nothing
+  -- is derived from it, nothing is parallel to it -- it IS it, so -3.1 dB
+  -- on the trace and -3.1 dB on the bar are always at the same height and
+  -- the meter cannot quietly disagree with the picture next to it.
   local colw = BAR_W
   local now  = r.time_precise()
   for i = 1, #labels do
@@ -2963,22 +2857,22 @@ local openSettings = false
 
 -- A FRAME THAT TAKES TOO LONG SAYS SO, AND SAYS WHERE
 --
--- "REAPER hangs" is not something anyone can act on, and guessing at it is
--- how this project has lost time before. So the frame times itself in three
--- parts and, when one goes pathological, prints the breakdown once -- rate
--- limited, so a genuinely stuck panel does not also flood the console.
+-- "REAPER hangs" is not something anyone can act on, and guessing at it
+-- wastes time. So the frame times itself in parts and, when one goes
+-- pathological, prints the breakdown once -- rate limited, so a genuinely
+-- stuck panel does not also flood the console.
 local wd = { last = 0, worst = 0 }
 
 -- THE PANEL'S OWN FRAME RATE.
 --
 --   The publish-rate figure counts how often the reduction value
---   CHANGES, which is only the plugin's update rate if we are looking
+--   CHANGES, which is only the plugin's update rate if the panel looks
 --   more often than it changes. If the panel runs at 18 frames a second
---   then we look 18 times, every look shows a change, and the figure
---   reports our frame rate wearing the plugin's name.
+--   then it looks 18 times, every look shows a change, and the figure
+--   reports the panel's frame rate wearing the plugin's name.
 --
---   Printed next to it so the two can be compared. Equal means we are
---   the bottleneck; publish clearly below fps means the plugin is.
+--   Printed next to it so the two can be compared. Equal means the panel
+--   is the bottleneck; publish clearly below fps means the plugin is.
 local fps = { t = -1, v = 0 }
 local function tickFps(now)
   if fps.t > 0 then
@@ -2997,8 +2891,8 @@ local function frame()
   tickFps(tA)
   palFollow(tA)
   followTrack()
-  -- the probes' names and publish flags (TS_TrackProbe 2.0.0), and the
-  -- spectrum release they all use
+  -- the probes' names and publish flags, and the spectrum release they
+  -- all use
   if TA.tick then TA.tick() end
   if TA.setRelease and relSent ~= S.specRel then TA.setRelease(S.specRel) ; relSent = S.specRel end
 
@@ -3113,8 +3007,8 @@ local function frame()
     -- The header row's origin AND the width actually available to it.
     -- GetWindowSize is the whole window including its padding and border;
     -- drawing is clipped to the CONTENT region, which is narrower. Using
-    -- the former as the right-hand limit is why the chip lost its last
-    -- few pixels no matter how short the label was.
+    -- the former as the right-hand limit would clip the chip's last few
+    -- pixels no matter how short the label was.
     local headX, headY = ImGui.GetCursorScreenPos(ctx)
     local headAvail = ImGui.GetContentRegionAvail(ctx)
     ImGui.Text(ctx, name)
@@ -3215,7 +3109,7 @@ local function frame()
       end
       -- Where the header row actually is, captured before the row was
       -- built. Reading the cursor here gives the position AFTER the row
-      -- wrapped, which is how the chip ended up on a line of its own.
+      -- wrapped, which would put the chip on a line of its own.
       local cy = headY
       local savedX, savedY = ImGui.GetCursorScreenPos(ctx)
 
@@ -3224,7 +3118,7 @@ local function frame()
       -- short ones.
       -- "track missing" is only true when the panel WENT LOOKING and did
       -- not find it. With collisions off nothing looks, so saying it
-      -- reported a fault that had not occurred: the partner is simply
+      -- would report a fault that has not occurred: the partner is simply
       -- released, and the honest word for that is none.
       local full = cmpTrack and cmpName
                  or (S.showMask and cmpGuid and cmpGuid ~= "" and "track missing")
@@ -3445,8 +3339,8 @@ local function frame()
       --   The panel window is created with NoScrollWithMouse, because over
       --   the spectrum the wheel means floor and over the scope it means
       --   time. That flag belongs to the window, and settings is drawn
-      --   inside it -- so the wheel did nothing here, and anything past the
-      --   bottom edge could not be reached at all.
+      --   inside it -- so the wheel would do nothing here, and anything past
+      --   the bottom edge could not be reached at all.
       --
       --   A child window has its own scrollbar and its own wheel, and the
       --   parent's flag does not reach into it. Bounding its height also
@@ -3594,7 +3488,7 @@ local function frame()
       -- no guessing which picker belongs to which line. The alpha bar on
       -- each one is what sets how solid the fill is: the pre spectrum wants
       -- to be faint enough to read the post one through, and how faint
-      -- depends on your monitor, not on a number I can pick for you.
+      -- depends on your monitor, not on a number picked in advance.
       -- With one probe there is no "before" to show, and a live-looking
       -- checkbox that changes nothing is worse than a greyed one.
       local havePre = (rig and rig.pre) and true or false
@@ -3638,9 +3532,8 @@ local function frame()
       ImGui.SameLine(ctx)
       ImGui.SetNextItemWidth(ctx, 150)
       rv, S.specBot   = ImGui.SliderDouble(ctx, 'Spectrum floor', S.specBot, -120, -40, "%.0f dB") ; mark(rv)
-      -- How fast a peak falls back. It used to be a slider on the probe
-      -- itself, one per track; since TS_TrackProbe 2.0.0 the probe has no
-      -- parameters and every probe takes it from here.
+      -- How fast a peak falls back. The probe has no parameters, so every
+      -- probe takes it from here.
       ImGui.SetNextItemWidth(ctx, 150)
       rv, S.specRel   = ImGui.SliderDouble(ctx, 'Spectrum release', S.specRel, 50, 2000, "%.0f ms") ; mark(rv)
 
@@ -3757,8 +3650,8 @@ local function frame()
           -- Which of the two is the bottleneck, said rather than left to
           -- be worked out from the numbers.
           --
-          -- THE FASTEST SOURCE, NOT THE FIRST. Keying this to grGapEma[1]
-          -- meant it stayed silent whenever source one happened to be the
+          -- THE FASTEST SOURCE, NOT THE FIRST. Keyed to the first source,
+          -- this would stay silent whenever that one happened to be the
           -- idle plugin -- which with three reporters on a track is most
           -- of the time. What matters is whether ANY of them is keeping
           -- up with the panel.
@@ -3807,7 +3700,7 @@ local function frame()
             ImGui.TextColored(ctx, COL.warn,
               "measuring needs both probes -- falling back to what the plugin reports")
           elseif rig.pre and rig.post and nbg < 4 then
-            -- A probe from before the filterbank. It cannot publish the
+            -- An older probe without the filterbank. It cannot publish the
             -- per-band levels the measured trace is built from, and the
             -- panel will not guess: it says so and draws the reported one.
             ImGui.TextColored(ctx, COL.warn,
@@ -3957,7 +3850,7 @@ local function frame()
 
     local GAP = 6
     -- ONE PANEL, OR TWO.
-    --   With both on this is the old split. With one hidden the other
+    --   With both on they share the split. With one hidden the other
     --   takes the whole height and the divider goes with it -- a
     --   draggable line with nothing on one side of it is furniture
     --   pretending to be a control.
@@ -4029,14 +3922,13 @@ local function frame()
 
     ImGui.End(ctx)
   end
-  -- Balanced against the push above, outside the Begin/End pair. The
-  -- pairing itself is left exactly as it was.
+  -- Balanced against the push above, outside the Begin/End pair.
   popStyle(ctx, styleC, styleV)
 
   -- Written at most once a second, and only after something changed, so a
   -- slider being dragged does not write ExtState thirty times a second.
   -- Never at exit: by the time a REAPER shutdown reaches a script the
-  -- window is already going away, which is how the dock ID used to be lost.
+  -- window is already going away, and the dock ID would be saved wrong.
   if settingsDirty and r.time_precise() - settingsAt > 1.0 then
     settingsDirty, settingsAt = false, r.time_precise()
     saveSettings()

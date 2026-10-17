@@ -277,9 +277,9 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
       bands[#bands + 1] = rb
     end
   end
-  -- a dynamic EQ: what it was doing now came from the probe's third-
-  -- octaves, retired (CP.FINE_ON); the curve is the knobs', and the picked
-  -- band's box shows its level going in against its threshold
+  -- a dynamic EQ: what it's doing now comes from the probe's third-octaves
+  -- only while CP.FINE_ON is set; otherwise the curve is the knobs', and the
+  -- picked band's box shows its level going in against its threshold
   local fr, fwhy
   if any_dyn then
     if require("TS_CV_CompPanel").FINE_ON then fr, fwhy = require("TS_CV_CompPanel").fine_frame(track, fx.guid) end

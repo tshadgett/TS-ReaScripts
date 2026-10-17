@@ -68,11 +68,10 @@ local st = {
 
 function E.attach(imgui) ImGui = imgui end
 
--- A "Brushed" tick beside a background or section combo: Brush<n> on the
--- control, cleared when it matches what the faceplate does anyway.
--- The colours of your own a Background or Section combo offers after the
--- faceplates: the one it has now, the recent ones (TS_CV_ColourPick), and
--- "Custom colour..." -- key "+" -- which opens the picker.
+-- The colours of your own that a Background or Section combo offers
+-- after the faceplates: the one it has now, the recent ones
+-- (TS_CV_ColourPick), and "Custom colour..." -- key "+" -- which opens
+-- the picker. Appends to `names` and `keys`, `prefix` before each name.
 local function custom_choices(names, keys, prefix, now)
   local seen = {}
   local function add(k)
@@ -683,6 +682,26 @@ function E.new_virtual(kind, controls)
   return c
 end
 
+-- A virtual control's action being picked in REAPER's Action List:
+-- { ctl, i = the setting it's for }. Polled every frame the dialog draws.
+local vpick = nil
+local function poll_vpick()
+  if not vpick then return end
+  local r = reaper.PromptForAction(0, 0, 0)
+  if r == 0 then return end
+  reaper.PromptForAction(-1, 0, 0)
+  local p = vpick
+  vpick = nil
+  if r > 0 and p.ctl.virtual then
+    p.ctl.virtual.actions = p.ctl.virtual.actions or {}
+    p.ctl.virtual.actions[p.i] = require("TS_CV_Toolbar").stored_cmd(r)
+  end
+end
+function E.cancel_vpick()
+  if vpick then reaper.PromptForAction(-1, 0, 0) end
+  vpick = nil
+end
+
 local function draw_entry_editor(ctx)
   local c = st.scratch.controls[st.sel_asg]
   ImGui.SeparatorText(ctx, "Selected control")
@@ -920,6 +939,44 @@ local function draw_entry_editor(ctx)
       if sch then c.virtual.start = sv end
     end
     tip("Its default (Double-click: back to it).")
+
+    -- a REAPER action for each setting, run when it's picked (VAct<n>)
+    local names2 = (c.type ~= "knob") and M.vchoices(c) or nil
+    if names2 then
+      local TB = require("TS_CV_Toolbar")
+      ImGui.Spacing(ctx)
+      row_name("Actions")
+      ImGui.TextDisabled(ctx, "run as each is picked")
+      tip("A REAPER action for any of its settings, run when you pick\n" ..
+          "that setting on the panel or the web page.")
+      for i, t in ipairs(names2) do
+        local cmd = c.virtual.actions and c.virtual.actions[i]
+        row_name(U.truncate((t:gsub("%z", "")), 12))
+        local text
+        if vpick and vpick.ctl == c and vpick.i == i then
+          text = "Pick in the Action List\u{2026}"
+        elseif cmd then
+          text = TB.action_name(TB.resolve(cmd)) or ("not found: " .. cmd)
+        else
+          text = "None"
+        end
+        local bw = FIELD_W - (cmd and 26 or 0)
+        if ImGui.Button(ctx, U.truncate(text, 30) .. "##vact" .. i, bw, 0) then
+          if vpick then reaper.PromptForAction(-1, 0, 0) end
+          vpick = { ctl = c, i = i }
+          reaper.PromptForAction(1, 0, 0)
+        end
+        tip(cmd and (text .. "\nClick: change it") or "Click: pick an action")
+        if cmd then
+          ImGui.SameLine(ctx, 0, 4)
+          if ImGui.Button(ctx, "\u{00D7}##vactx" .. i, 22, 0) then
+            c.virtual.actions[i] = nil
+            if next(c.virtual.actions) == nil then c.virtual.actions = nil end
+          end
+          tip("No action")
+        end
+      end
+    end
   end
   if is_param and not virt then
     if live then ImGui.BeginDisabled(ctx, true) end
@@ -1234,12 +1291,6 @@ end
 
 -- ---------------------------------------------------------------------
 
--- Returns "saved", "cancelled", or nil while still open.
--- Which layout is being edited, at the top of the window: the plugin's
--- default or one of its variants (TS_CV_Mappings "<plugin> :: <name>"),
--- the one this instance shows. Switching here switches the instance;
--- Copy to new and New empty make a variant from what's in the editor
--- (unsaved edits go to the new one, the old one is left as it was).
 local function edited()
   return M.signature(st.scratch) ~= M.signature(st.original)
 end
@@ -1252,6 +1303,11 @@ local function switch_to(track, key)
   E.open(track, st.fx, key, l)
   st.request = false        -- already open: don't open it again
 end
+-- Which layout is being edited, at the top of the window: the plugin's
+-- default or one of its variants (TS_CV_Mappings "<plugin> :: <name>"),
+-- the one this instance shows. Switching here switches the instance;
+-- Copy to new and New empty make a variant from what's in the editor
+-- (unsaved edits go to the new one, the old one is left as it was).
 local function draw_layout_row(ctx, track)
   if RQ.is_eq(st.key) or RC.is_comp(st.key) then return end
   local base, cur = M.split_variant(st.key)
@@ -1412,6 +1468,7 @@ end
 -- for (st.track), whatever is selected meanwhile -- and closes, putting
 -- back anything applied, if that track or its plugin goes away (deleted,
 -- the project closed or switched).
+-- Returns "saved", "cancelled", or nil while still open.
 function E.draw(ctx, _selected)
   if not st.open then return nil end
   -- gone: put back anything applied (the library, not the track, so this
@@ -1426,6 +1483,7 @@ function E.draw(ctx, _selected)
     return "cancelled"
   end
   local track = st.track
+  poll_vpick()
 
   if st.request then
     ImGui.OpenPopup(ctx, TITLE)

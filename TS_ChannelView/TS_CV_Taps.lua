@@ -103,11 +103,11 @@ TP.P_OUTRMS = 37    -- 37..40  output RMS
 TP.P_MB    = 41     -- the multiband tap, 1..4 (0 none)
 TP.P_MBX   = 42     -- 42..44  its crossovers, Hz (0 unused)
 TP.P_MBGR  = 45     -- 45..48  each of its bands' reduction, dB
-TP.P_FINE  = 49     -- the tap measured in third-octaves, 1..4 (0 none; no longer asked for)
-TP.P_MBL   = 50     -- 50..53  each multiband band's input level, dBFS (1.8.0)
+TP.P_FINE  = 49     -- the tap measured in third-octaves, 1..4 (0 none; unused while FINE_ON is off)
+TP.P_MBL   = 50     -- 50..53  each multiband band's input level, dBFS
 -- The reduction by frequency (third-octaves, before against after) is
--- retired: comparing before with after held up for one number, not for
--- thirty. Its code stays, switched off here.
+-- switched off here: comparing before with after holds up for one
+-- number, not for thirty.
 TP.FINE_ON = false
 TP.FINE_GM = 0x70000   -- its results, + track index * TP.FINE_GSTR (see the probe)
 TP.FINE_GSTR = 128
@@ -193,7 +193,7 @@ end
 --   v1|<level guid or TOP>|<post probe guid>|t1|t2...
 --   t = <target guid>,<writers>,<before ch>,<after ch>,<latency>,<what>
 -- <what> is what the tap is for: "g" gain reduction, "l" levels, or both.
--- A record from before levels existed has no <what>, and means "g".
+-- A tap with no <what> means "g".
 -- <writers> is every plugin that writes the "before" copy, GUIDs joined
 -- with "+" (see WHO WRITES THE BEFORE COPY, below).
 --
@@ -325,11 +325,11 @@ local function probes_in_order(tr)
 end
 
 -- A probe's role: 0 pre, 1 post, 2 the comparison (Track Analyser's), 3
--- one too many. An old probe (1.8.0 and before) keeps it in a slider; a
--- new one is where it sits: the first probe on the track is the pre, the
--- last the post -- as Track Analyser has always found them, so the two
--- name a pair the same way. A lone probe is the post when it's last in
--- the chain (its pre deleted), else the pre.
+-- one too many. A legacy probe keeps it in a slider; otherwise it's where
+-- it sits: the first probe on the track is the pre, the last the post --
+-- as Track Analyser finds them, so the two name a pair the same way. A
+-- lone probe is the post when it's last in the chain (its pre deleted),
+-- else the pre.
 local function probe_role(tr, addr)
   local r = PL.legacy_role(tr, addr)
   if r then return r end
@@ -392,8 +392,8 @@ end
 -- Whether a plugin should be tapped: ticked for measuring, and it doesn't
 -- report its own reduction (one that does never needs measuring). Never
 -- ReaEQ: an EQ has no reduction, and what the probe would "measure" is its
--- curve's effect on the programme, which swings with every note. (Older
--- layouts can still carry Measure=1 for it; it is ignored.)
+-- curve's effect on the programme, which swings with every note. (A
+-- layout carrying Measure=1 for it is ignored.)
 local function wants_measure(tr, addr)
   local key = St.layout_key(fx_name(tr, addr), fx_guid(tr, addr), tr, addr)
   if RQ.is_eq(key) then return false end
@@ -578,8 +578,8 @@ end
 --   Not just the plugin in front: every plugin from the pre probe up to
 --   the measured one. A BYPASSED plugin writes nothing to its extra pins
 --   -- REAPER passes the buffer straight through -- so with one writer,
---   bypassing it left the copy silent and the reading dead. With all of
---   them writing, a bypassed one leaves the copy as the enabled one
+--   bypassing it would leave the copy silent and the reading dead. With
+--   all of them writing, a bypassed one leaves the copy as the enabled one
 --   before it wrote it, which is the same audio a bypassed plugin passes
 --   on. So the copy is always the measured plugin's real input, whatever
 --   is bypassed, and a bypass never needs re-routing.
@@ -645,9 +645,9 @@ function TP.desired(tr)
         addr = a, writers = c.writers, path = c.path, pathg = table.concat(pg, "+"),
         -- how long the input is held back to sit on the output: as measured
         -- from the audio when the trace has found it (a plugin's reported
-        -- latency can be wrong: a de-esser reporting none was 2048 samples
-        -- out, which reads as 9 dB of reduction it wasn't doing), else as
-        -- the plugin reports
+        -- latency can be wrong: one reporting none but 2048 samples out
+        -- reads as about 9 dB of reduction that isn't there), else as the
+        -- plugin reports
         lag = TP.measured_lag[fx_guid(tr, a)] or math.floor(tonumber(ok and pdc or 0) or 0),
         what = (gr and "g" or "") .. (lvl and "l" or ""),
       }
@@ -945,7 +945,7 @@ function TP.sync(tr)
     end
     if TP.probe_has_levels(tr, probe) then PL.set(tr, probe, "nogr", 1, TP.nogr_mask(want.taps)) end
     -- The pre probe armed for the zero, or not, as the setting says --
-    -- also arms routing laid before the zero existed.
+    -- also arms routing that was laid without it.
     PL.set(tr, pre, "arm", 1, TP.zero_on() and 1 or 0)
     if changed then write_record(tr, rec) end
     return false
@@ -1074,19 +1074,18 @@ end
 -- hidden, and kept at the ends
 -- ---------------------------------------------------------------------
 -- The probes have nothing to show, so the plugin row always leaves them
--- out (the "Show the probes in the plugin row" option went in 2.1.2) -- and since you
--- can't see them, ChannelView keeps them where they belong: the pre probe
--- first (second behind an ARA plugin), the post probe last, after any
--- insert, move or removal. One of the pair dragged into a container comes
--- back out to its end; a pair kept together inside a container is left
--- alone (that's deliberate).
+-- out -- and since you can't see them, ChannelView keeps them where they
+-- belong: the pre probe first (second behind an ARA plugin), the post
+-- probe last, after any insert, move or removal. One of the pair dragged
+-- into a container comes back out to its end; a pair kept together
+-- inside a container is left alone (that's deliberate).
 --
 -- The moves make NO undo point of their own. If they did, undoing your
 -- insert would first undo the move, which would put the probe straight
 -- back -- and you could never get past it. Without one, undo takes the
 -- chain back to before your insert, probes and all.
 
--- Always hidden now; kept as a function so its callers read the same.
+-- Always hidden; a function so its callers read the same.
 function TP.probes_shown() return false end
 
 -- The top-level pre and post probe slots (the first of each), or nil.
@@ -1197,8 +1196,8 @@ end
 
 -- Which of the pair TS_Visualizer shows, "pre", "post" or nil: the pre
 -- probe the track's input, the post its output. Kept on the track
--- (TS_CV_ProbeLink's vis_choice); an old probe kept it in its own
--- "Include in Visualizer Spectrum" checkbox, which still counts.
+-- (TS_CV_ProbeLink's vis_choice); a legacy probe keeps it in its own
+-- "Include in Visualizer Spectrum" checkbox, which also counts.
 TP.P_VIS = 3
 function TP.vis_state(tr)
   local lv = tr and find_level(tr, nil)
@@ -1384,7 +1383,7 @@ function TP.probe_has_fine(tr, probe)
   return (ok and nm and nm:lower():find("third", 1, true)) ~= nil
 end
 -- Whether this plugin can be measured in third-octaves: true; "old" when
--- it's tapped but the project still runs a probe from before 1.7.0 (a
+-- it's tapped but the project still runs a probe older than 1.7.0 (a
 -- project keeps the JSFX it opened with); false when it isn't tapped.
 function TP.fine_ok(tr, guid)
   local i, rd = tap_for(tr, guid, "g")
@@ -1681,9 +1680,8 @@ end
 -- probe drops what it learnt from the music, and marks a measured zero as
 -- touched-since (it's measured again at the next stop).
 --
--- (A 1.8.0 probe took this as a parameter change, which made "Tap 1
--- relearn" REAPER's last touched parameter. Since 2.0.0 it goes through
--- gmem and REAPER never hears of it.)
+-- On a current probe it goes through gmem, not a parameter, so "Tap 1
+-- relearn" never becomes REAPER's last touched parameter.
 local last_touch = nil
 function TP.touched(tr, guid)
   local i, rd = tap_for(tr, guid, "g")

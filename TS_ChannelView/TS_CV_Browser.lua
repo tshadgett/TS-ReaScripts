@@ -23,7 +23,7 @@
       formats, and you end up inserting the VST2 when you picked the VST3.
     * TrackFX_AddByName's `instantiate` argument doubles as a position:
       -1000 - n inserts at top-level slot n, while -1 appends. That's why
-      this never has to add-then-move.
+      a top-level insert never has to add-then-move.
 --]]
 
 local C  = require("TS_CV_Config")
@@ -582,7 +582,7 @@ end
 -- has the keyboard, so typing searches straight away -- no "Search..." to
 -- click first. Once there is something in it the trees give way to a flat
 -- list of matches, best first (TS_CV_Search, as in the dialog); Enter takes
--- the first. With the box empty the menu is the menu it always was. The box
+-- the first. With the box empty it's the usual menu of trees. The box
 -- lives in the menu rather than handing over to the search dialog because
 -- a text box that takes focus with text already in it selects that text,
 -- and the next key typed would replace the first.
@@ -592,8 +592,8 @@ local MENU_ROWS = 14     -- matches shown before the list scrolls
 -- Where the menu opens, and which way it grows. ImGui places a popup once,
 -- when it opens, sized for what it held then, and leaves it there however
 -- tall it gets after -- so a menu opened low on the screen (ChannelView
--- docked at the bottom, say) had its matches pushed off the bottom as you
--- typed. Opened in the lower half of the monitor, it's anchored by its
+-- docked at the bottom, say) would have its matches pushed off the bottom
+-- as you type. Opened in the lower half of the monitor, it's anchored by its
 -- bottom edge at the mouse and grows upward instead; and the matches scroll
 -- past MENU_ROWS rather than growing without end.
 local function menu_anchor(ctx)

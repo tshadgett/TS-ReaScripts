@@ -12,34 +12,32 @@ author: Tim Shadgett
 //
 // It does not alter the audio. It reads it.
 //
-// NO PARAMETERS (2.0.0)
-//   Up to 1.8.0 everything ChannelView, Track Analyser and the Visualizer
-//   told a probe -- which one it was, whether to publish, the taps'
-//   latencies -- and everything it told them back went through hidden
-//   sliders. Hidden from the plugin's window, but still REAPER
-//   parameters: in every automation and learn list, and each write made
-//   one REAPER's "last touched", so its own last-touched tools landed on
-//   "Tap 1 relearn" instead of what you had just moved. So since 2.0.0
-//   there are none. It all goes through gmem, in a block per track (THE
-//   PROBE BLOCK below), and REAPER sees only its own Bypass, Wet and
-//   Delta.
+// NO PARAMETERS
+//   Everything ChannelView, Track Analyser and the Visualizer tell a
+//   probe -- which one it is, whether to publish, the taps' latencies --
+//   and everything it tells them back goes through gmem, in a block per
+//   track (THE PROBE BLOCK below), not sliders. A hidden slider is still
+//   a REAPER parameter: it sits in every automation and learn list, and
+//   each write makes it REAPER's "last touched", so last-touched tools
+//   would land on it instead of what you had just moved. REAPER sees
+//   only its own Bypass, Wet and Delta.
 //
 //   WHICH PROBE IS WHICH. A probe finds its track and its place in the
 //   chain with get_host_placement(). The scripts write, into the track's
 //   block, the place of the probe that is "pre" and the one that is
 //   "post" (the first and the second of a pair); each probe compares its
 //   own place with them. A probe nobody has named does nothing. The
-//   panel still never inserts or removes anything to arm a pair: it
-//   writes the block, and an idle pair still costs a branch per sample.
+//   panel never inserts or removes anything to arm a pair: it writes
+//   the block, and an idle pair costs a branch per sample.
 //
 //   NOTHING TO SET BY HAND. Spectrum release is Track Analyser's setting
-//   now (CTRL_REL), and "Include in Visualizer" is kept on the track by
+//   (CTRL_REL), and "Include in Visualizer" is kept on the track by
 //   ChannelView and the Visualizer. The plugin's window just says what
 //   it is doing.
 //
 // gmem namespace TS_TA_Mem, shared with the measurement tools.
 //   0  - 19    TS_TA_Cal        (calibration rig -- do not reuse)
-//   20 - 23    TS_TA_WaveProbe  (superseded, left alone)
+//   20 - 23    TS_TA_WaveProbe  (reserved, unused)
 //   64 - 95    control, panel -> probes
 //   0x10000    PRE  block
 //   0x20000    POST block
@@ -55,7 +53,7 @@ author: Tim Shadgett
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
 //
-// THE PROBE BLOCK (2.0.0), at 0x100000 + (track index + 1) * 128.
+// THE PROBE BLOCK, at 0x100000 + (track index + 1) * 128.
 //   The scripts write:
 //     0  the pre probe's place + 1 (get_host_placement's chain_pos; 0 none)
 //     1  the post probe's place + 1
@@ -75,7 +73,7 @@ author: Tim Shadgett
 //    80..83  tap_inrms1..4   84..87  tap_outrms1..4
 //    88..91  tap_mbgr1..4    92..95  tap_mbl1..4
 //    96  counts the post probe's writes of the above
-//   The names are the old sliders', kept as the variables inside.
+//   The names are those of the variables that hold them.
 //
 // INPUT AND OUTPUT LEVELS, PER TAP
 //   The same two copies a tap measures gain reduction from are also the
@@ -123,24 +121,17 @@ author: Tim Shadgett
 //   points, from one capture, instead of a stepped tone sweep.
 //
 //   That matters for narrow features. A Q 20 bell at 632 Hz is about
-//   0.036 octaves wide; the tone sweep that measured the filters stepped
-//   0.23 octaves and never landed on the peak. Bin spacing here is about
-//   0.001 octaves there.
+//   0.036 octaves wide; a tone sweep stepping 0.23 octaves can miss the
+//   peak entirely. Bin spacing here is about 0.001 octaves there.
 //
 //   The source never has to be spectrally flat: any colour in it cancels in
 //   the ratio between the two probes. What does NOT cancel is
 //   non-linearity, so a reading taken through heavy saturation describes
 //   the saturation as much as the filter.
 //
-//   The probe used to be able to generate its own excitation for the
-//   stepped-measurement rig. Those scripts are archived and the generator
-//   went with them: it replaced the incoming audio when armed, which is a
-//   sharp edge to leave on a plugin that lives in every track template.
-//
 // Probe block, relative to its base:
 //    0  seq            increments on every publication -- the panel waits
-//                      for this to advance rather than sampling on a clock,
-//                      which is what fixed the measurement rig
+//                      for this to advance rather than sampling on a clock
 //    3  srate
 //    4  nbins
 //    5  fft size
@@ -160,36 +151,31 @@ author: Tim Shadgett
 // 16384 + band*4 + 2           response, dB          (post probe only)
 // 16384 + band*4 + 3           excitation, dB <= 0   (post probe only)
 //
-// SLOTS 1, 2, 13 AND 14 ARE RESERVED, NOT PUBLISHED. They carried RMS and
-// peak meters that nothing ever read; the per-sample work behind them is
-// gone. Named here so nothing else claims them.
+// SLOTS 1, 2, 13 AND 14 ARE RESERVED, NOT PUBLISHED. Named here so
+// nothing else claims them.
 //
 // "INCLUDE IN VISUALIZER SPECTRUM" (vis_include / vis_slot)
 //   TS_Visualizer's Spectrum panel can colour its peaks by whichever
-//   watched track is loudest at that frequency. That started folder-only,
-//   fed by a dedicated companion probe (TS_SpectrumProbe.jsfx, since
-//   retired), because this plugin's Pre/Post/Comparison addressing has
-//   room for at most two tracks project-wide -- fine for Track Analyser's
-//   own panel, not for several tracks watched at once. This checkbox pair
-//   is what replaced that companion: a second, independent publishing
-//   path out of the SAME probe, so nothing extra needs inserting.
+//   watched track is loudest at that frequency. This plugin's
+//   Pre/Post/Comparison addressing has room for at most two tracks
+//   project-wide -- fine for Track Analyser's own panel, not for several
+//   tracks watched at once -- so the Visualizer gets a second,
+//   independent publishing path out of the SAME probe, and nothing extra
+//   needs inserting.
 //
-//   vis_include is a plain opt-in checkbox: since a TS_TrackProbe pair
-//   ships baked into every track template, EVERY track has one of these,
-//   almost always idle, and "has the plugin" can't be what makes a track
-//   selectable in the Visualizer's picker or the list would be the whole
-//   project. Ticking it just means "this instance is a candidate"; it is
-//   its own on/off, independent of Position and of this track's own
-//   Publish switch below, so leaving Track Analyser's panel pointed
-//   elsewhere doesn't drop a track out of the Visualizer.
+//   A TS_TrackProbe pair ships baked into every track template, so EVERY
+//   track has one, almost always idle, and "has the plugin" can't be what
+//   makes a track selectable in the Visualizer's picker or the list would
+//   be the whole project. Whether a track is included is kept on the
+//   track by ChannelView and the Visualizer, independent of this track's
+//   own Publish, so leaving Track Analyser's panel pointed elsewhere
+//   doesn't drop a track out of the Visualizer.
 //
-//   vis_slot is NOT a user control -- TS_Visualizer assigns it (0..15, or
-//   -1 for "not currently watching this one"): a claim on
-//   0x40000 + slot*2048, the same slot space the retired companion probe
-//   used, so the Visualizer's reading side didn't need to change when
-//   this replaced it. Ticking vis_include only makes a track a CANDIDATE;
-//   nothing is published under this track's identity until the
-//   Visualizer's own picker actually selects it and hands back a slot.
+//   vis_slot is TS_Visualizer's claim, read from the probe block (0..15,
+//   or -1 for "not watching this one"): a slot at 0x40000 + slot*2048.
+//   vis_include just means "has a slot". Nothing is published under this
+//   track's identity until the Visualizer's picker selects it and hands
+//   back a slot.
 //
 //   Whichever band data this probe already has -- this instance's own
 //   role, Pre or Post or Comparison, whatever track it is physically on --
@@ -226,9 +212,8 @@ author: Tim Shadgett
 //   The baseline is the zero point, and it is the part that can be wrong:
 //   learnt from the music, it is the least-compressed moment the plugin
 //   has shown, and a compressor that never lets go reads low -- by how
-//   much it never releases (3.4 dB low on synthetic material; a steady
-//   test tone held at -5 dB read 0). So the baseline is only the
-//   fallback. The real zero is MEASURED, while playback is stopped:
+//   much it never releases. So the baseline is only the fallback. The
+//   real zero is MEASURED, while playback is stopped:
 //
 // A MULTIBAND COMPRESSOR, BAND BY BAND
 //   A multiband plugin reports one reduction to REAPER, if any. Its tap
@@ -239,7 +224,7 @@ author: Tim Shadgett
 //   the median of the filterbank bands whose centres fall inside it (the
 //   one nearest its middle when none do), with the same zero, smoothing
 //   and fall as the tap's own reading. One multiband tap per probe.
-//   Since 1.8.0 each band's INPUT level comes out too, on tap_mbl1..4:
+//   Each band's INPUT level comes out too, on tap_mbl1..4:
 //   the filterbank bands' power inside it on the way in, a 2 ms mean
 //   square scaled so a sine reads its peak, falling 20 dB/s. It needs
 //   no zero and no alignment, so it can be trusted where the per-band
@@ -272,7 +257,7 @@ author: Tim Shadgett
 //   -- every band's after/before ratio -- is the plugin with NO reduction:
 //   its make-up, its static EQ, its saturation's small-signal gain. That
 //   is the zero. While playing, reduction is how far each band sits below
-//   it, median across bands as before.
+//   it, median across bands.
 //
 //   Each band keeps the higher of the two levels' ratios, so a compressor
 //   still recovering from the music, or a gate shut on the quieter level,
@@ -291,19 +276,17 @@ author: Tim Shadgett
 //   1 measured, 2 measured but the plugin was level-dependent at the test
 //   level, 3 measured but the plugin has been touched since -- a make-up
 //   change moves the zero, and the next stop measures it again. A touch
-//   (tap_rstN) also resets the music baseline, as before. A new routing
+//   (tap_rstN) also resets the music baseline. A new routing
 //   (tap_gen bumped by ChannelView) forgets every zero: tap 1 may be a
 //   different plugin now.
 //
 //   The two probes talk through gmem at CAL_BASE + track index * 8, the
 //   track index from get_host_placement(). Needs REAPER's "Run FX when
-//   stopped" (on by default). Measured on synthetic material: a
-//   compressor that never lets go reads its true average to within
-//   0.1 dB once calibrated.
+//   stopped" (on by default).
 //
-//   The reading comes out on tap_grN, a read-only slider, so any script
-//   can read it from any track with TrackFX_GetParam -- no arming, no
-//   gmem addressing, every track at once. While Track Analyser has this
+//   The reading comes out on tap_grN, in the track's probe block, so a
+//   script can read any track's taps without arming anything, every
+//   track at once. While Track Analyser has this
 //   track armed, each tap's per-column reduction also goes to gmem at
 //   TAPTR_BASE on the panel's own column clock, for its traces.
 //
@@ -314,10 +297,10 @@ author: Tim Shadgett
 //   The tap pins are INPUTS ONLY. The copies carry on along their spare
 //   channels after this probe; ChannelView picks channels that nothing
 //   after the probe uses and that a parent track has too few channels to
-//   receive. Declaring outputs to silence them would have been tidier,
-//   but a probe already saved in a project could come back with those
-//   output pins mapped and their inputs not -- and then it would write
-//   silence over channels 3/4 on every track, sidechains included.
+//   receive. Declaring outputs to silence them would be tidier, but a
+//   probe saved in a project can come back with those output pins
+//   mapped and their inputs not -- and then it would write silence over
+//   channels 3/4 on every track, sidechains included.
 //========================================================================
 
 options:gmem=TS_TA_Mem
@@ -363,7 +346,7 @@ out_pin:right
   PB_OUTRMS = 84; PB_MBGR = 88; PB_MBL = 92; PB_RSEQ = 96;
   CTRL_REL = 75;
 
-  // what used to be the sliders, at their old defaults
+  // the settings and readings, at their defaults
   role = -1; publish = 0; rel_ms = 400; vis_include = 0; vis_slot = -1;
   tap_n = 0; tap_lag1 = tap_lag2 = tap_lag3 = tap_lag4 = 0;
   tap_rst1 = tap_rst2 = tap_rst3 = tap_rst4 = 0;
@@ -413,25 +396,21 @@ out_pin:right
                                   // can show what it compensated rather than
                                   // what it asked for
 
-  // OFF_SPEC (64) and OFF_AVG (2048) used to carry a per-bin spectrum and
-  // a per-bin average into gmem, about two thousand writes per frame per
-  // probe. Nothing reads them: the panel reads the band summary below and
-  // the scope ring, and the measurement scripts that wanted per-bin data
-  // are archived with the probe they were written against. The regions are
-  // left unwritten rather than reused, so an old tool reads zeros instead
-  // of something that looks plausible and is not.
+  // No per-bin data goes to gmem: the panel reads the band summary below
+  // and the scope ring. Offsets 64 to 4095 are left unwritten rather than
+  // reused, so an older tool reads zeros there instead of something that
+  // looks plausible and is not.
   OFF_SCOPE = 4096;
   SCOPE_COLS = 4096;              // 8.2 s of history at 2 ms per column
 
   // THE LOG-SPACED SUMMARY, AND WHY IT IS DONE HERE
-  //   The panel used to read every one of 1024 bins from both probes and
-  //   then draw a quad per pixel column -- about three thousand gmem reads
-  //   and four thousand marshalled draw calls a frame, which is what made
-  //   it lag. Nothing about that work needs to happen in Lua: this is one
-  //   pass over data the DSP already has in front of it.
+  //   Reading all 1024 bins from both probes and drawing a quad per pixel
+  //   column would be about three thousand gmem reads and four thousand
+  //   marshalled draw calls a frame, enough to make the panel lag. Here it
+  //   is one pass over data the DSP already has in front of it.
   //
-  //   Summarising to a log grid is also the fix for the jagged response
-  //   curve. A per-bin difference shows every bit of bin-to-bin noise in
+  //   Summarising to a log grid also keeps the response curve from going
+  //   jagged. A per-bin difference shows every bit of bin-to-bin noise in
   //   the average; a band holding a dozen bins averages it away, and it
   //   holds most bins exactly where the jaggedness was -- the top end.
   //
@@ -458,14 +437,13 @@ out_pin:right
   vis_seq = 0;
 
   // THE GAIN-REDUCTION FILTERBANK, AND WHY IT EXISTS
-  //   The measured trace used to be post RMS over pre RMS across the whole
-  //   span. That is not gain: it is the span's LEVEL change, and when
+  //   Post RMS over pre RMS across the whole span is not gain: it is the
+  //   span's LEVEL change, and when
   //   anything in the span changes the SPECTRUM, the level change depends
   //   on where the programme's energy happens to be sitting. One EQ band,
   //   +6 dB at 100 Hz, adds +6 dB to the ratio through a bass note and
   //   nothing through a cymbal. The EQ never moved; the music did, and it
-  //   went onto the trace as if it were compression. Measured on a 13 dB
-  //   reduction it drew a 39 dB one.
+  //   would go onto the trace as if it were compression.
   //
   //   A per-BAND ratio does not have that property. Band b's ratio is the
   //   EQ's gain in band b whatever the programme is doing. So each probe
@@ -662,7 +640,7 @@ out_pin:right
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
   tap_lvc = 0; tap_lvdead = 0;
-  TAP_SMOOTH = 0.3;               // per column, see the prototype notes
+  TAP_SMOOTH = 0.3;               // per column
   TAP_RISE   = 0.5;
   TAP_DEC    = 0.1;               // dB/s the baseline sinks
   TAP_REL    = 150;               // dB/s the reading falls: a short hold, so a
@@ -736,7 +714,7 @@ out_pin:right
   // other) reads as a jump the zero then believes for minutes
   fn_hold = 0;
   // how fast the zero learnt from the music climbs to a higher ratio, a
-  // frame (the taps' 0.5 let one odd frame lift it halfway)
+  // frame (the taps' 0.5 would let one odd frame lift it halfway)
   FN_RISE = 0.03;
 
   function fineSetup() local(i, k, fc, fl, fh, b, lo, hi, j) (
@@ -830,8 +808,8 @@ out_pin:right
           );
           d = r - ((fn_hascal && b[9] > 0.5) ? b[8] : b[5]);
           // as measured: ChannelView smooths it. (Held at its deepest, a
-          // kick landing at a window's edge -- one frame's swing -- read as
-          // reduction that wasn't there.)
+          // kick landing at a window's edge -- one frame's swing -- reads
+          // as reduction that isn't there.)
           b[14] = d;
           b[15] = 1;
         ) : ( b[15] = 0; b[14] = min(0, b[14] + rel); );
@@ -908,10 +886,10 @@ out_pin:right
     s = tb + TAP_S;
     n = max(0, min(DLY_MAX, floor(n)));
     // The delay line is cleared -- and the baseline learnt from the music
-    // too: learnt with the two sides out of line, it climbed to the
-    // biggest swings a hit made (a kick 725 samples out left 7 dB of
-    // "reduction" on a plugin doing nothing). The measured zero (THE ZERO
-    // POINT) is the plugin's own and stays.
+    // too: learnt with the two sides out of line, it climbs to the
+    // biggest swings a hit makes and reads as reduction on a plugin doing
+    // nothing. The measured zero (THE ZERO POINT) is the plugin's own and
+    // stays.
     n != s[TS_LAGN] ? (
       s[TS_LAGN] = n;
       s[TS_DPOS] = 0;
@@ -1256,20 +1234,16 @@ out_pin:right
   readControl();
   base = role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
 
-  // vis_slot is only ever a real 0..15 claim while TS_Visualizer is
-  // actually watching this instance; -1 (its default, and what disarming
-  // sets it back to) means "not right now" even if vis_include is still
-  // ticked. Both have to hold, same as Track Analyser's own Publish gates
-  // everything on "is anything reading this".
+  // vis_slot is a real 0..15 claim only while TS_Visualizer is watching
+  // this instance; -1 means "not right now". Like Track Analyser's own
+  // Publish, it gates everything on "is anything reading this".
   vis_active = vis_include >= 0.5 && vis_slot >= 0 && vis_slot < VIS_MAX_SLOTS;
 
-  // A track ticked for the Visualizer runs its own FFT/band pipeline
-  // whether or not Track Analyser's panel happens to be pointed at this
-  // track right now -- the whole point is several tracks live at once,
-  // which is exactly what Track Analyser's own Publish switch was never
-  // meant to do (see the "WHY IT HAS A Publish SWITCH" note up top: one
-  // armed pair at a time, driven by panel selection). The Visualizer path
-  // does not touch that switch and is not touched by it.
+  // A track the Visualizer is watching runs its own FFT/band pipeline
+  // whether or not Track Analyser's panel is pointed at it: the
+  // Visualizer watches several tracks at once, where Track Analyser's
+  // Publish arms one pair at a time, driven by panel selection. The
+  // Visualizer path does not touch Publish and is not touched by it.
   active = role >= 0 && (publish >= 0.5 || vis_active);
 
   active ? (
@@ -1331,7 +1305,7 @@ out_pin:right
     // Visualizer bridge header. Only touches VIS_SLOT_BASE, never this
     // instance's own PRE/POST/CMP block above -- Track Analyser's panel
     // reads that block and must never see a value change because a
-    // completely different tool ticked a completely different checkbox.
+    // different tool claimed a slot.
     vis_active ? (
       vbase = VIS_SLOT_BASE + vis_slot * VIS_SLOT_STRIDE;
       vis_slot != vis_slotn ? (
@@ -1346,10 +1320,9 @@ out_pin:right
         gmem[vbase + VIS_H_FFTSZ] = fftsz;
       );
     ) : (
-      vis_slotn = -2;   // dropped (unticked, or the Visualizer let go of
-                        // the slot) -- forces a fresh header write if it
-                        // ever comes back, rather than trusting stale
-                        // state from before
+      vis_slotn = -2;   // dropped (the Visualizer let go of the slot) --
+                        // forces a fresh header write if it comes back,
+                        // rather than trusting stale state
     );
   );
 
@@ -1712,12 +1685,11 @@ out_pin:right
           bc = (b0 + b1) * 0.5;
           kk = floor(bc); tt = bc - kk;
 
-          // THE LEFT EDGE, AND WHY IT WAS BLANK
+          // THE LEFT EDGE
           //   A band whose centre falls below bin 1 has no pair of bins to
-          //   interpolate between, so this test failed and the band kept
-          //   its -180 -- which the panel draws at the floor. That is the
-          //   gap at the bottom of the display: 20 Hz to the first bin,
-          //   about 23 Hz at 2048 points and 48 kHz.
+          //   interpolate between, so without this it would keep its -180
+          //   and the panel would draw a gap at the floor: 20 Hz to the
+          //   first bin, about 23 Hz at 2048 points and 48 kHz.
           //
           //   Bin 1 is still the nearest thing that was actually measured,
           //   and the energy down there is real even though the transform
@@ -1745,11 +1717,11 @@ out_pin:right
         // both sides of the bridge.
         vis_active ? gmem[vbase + VIS_OFF_BAND + bi] = dmax;
         // Whether this band has a value at all. With the left edge held
-        // from bin 1 the only bands that fail this now are the ones above
+        // from bin 1 the only bands that fail this are the ones above
         // Nyquist, where a floor is the truth. A band with no value is
         // kept out of the response smoothing below, so two floors cannot
-        // average a false zero into their neighbours -- which is what put
-        // a little hook on the bottom of the high-pass.
+        // average a false zero into their neighbours (a little hook at
+        // the bottom of a high-pass).
         BUF_BV[bi] = pn > 0 ? 1 : 0;
         pwb = pn > 0 ? psum / pn * anorm : 0;
         BUF_BA[bi] = pwb > 0.000000000000000001 ? 10 * log10(pwb) + scdb : -240;

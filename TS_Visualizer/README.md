@@ -3,8 +3,8 @@
 A docked, real-time metering and visualizer window for REAPER — LUFS, a
 goniometer, an organic "Symbiote" level blob, an oscilloscope, a log-frequency
 spectrum analyser with per-track colour overlay, a spectrogram/waterfall, and
-a live LUFS-vs-dynamics plot, all in one resizable panel grid with a shared,
-huggable colour theme.
+a live LUFS-vs-dynamics plot, all in one resizable panel grid with a shared
+colour theme you can shift in hue and tint.
 
 ## Origin
 
@@ -36,11 +36,6 @@ largely unchanged in its core rendering math. Everything described under
   (see **Targets**).
 
 ## What's new since JKK_Visualizer
-
-This list is compiled from this fork's own CHANGELOG, source comments, and
-the full working history of this release pass — it should be complete, but
-nothing from before the fork's own CHANGELOG started (version 2.0.1) carries
-an exact date.
 
 - **A new Dynamics module.** Not present in the original at all. Backed by
   a new PSR/crest-factor engine added to the JSFX (a short-term 3-second
@@ -85,12 +80,12 @@ an exact date.
   (which module happened to draw last); this fork collects every
   divider's colour and endpoints during layout and draws them all in one
   pass at the very end of the frame, so a boundary is never missing.
-- **A reliable colour bootstrap on startup.** The original (and early
-  versions of this fork) could show default grey instead of the saved
-  palette on REAPER's first paint, because several colour/sync settings
-  were only ever restored by the Editor's own load path, not by the
-  visualizer script's own startup. All of it now restores unconditionally
-  before the first frame, Editor open or not.
+- **A reliable colour bootstrap on startup.** The original could show
+  default grey instead of the saved palette on REAPER's first paint,
+  because several colour/sync settings were only ever restored by the
+  Editor's own load path, not by the visualizer script's own startup. This
+  fork restores all of it unconditionally before the first frame, Editor
+  open or not.
 - **Persistent Loudness/Genre targets**, per the two-tier scheme above —
   the original had no targets to persist.
 - **A swatch margin and permanent track labels**, tuned so the per-track
@@ -147,9 +142,9 @@ Needs the **ReaImGui** extension (ReaPack) for the Editor window.
 The per-track spectrum overlay also depends on `TS_TrackProbe.jsfx`, which
 ships with TS_TrackAnalyser and ChannelView rather than here — any track
 whose pair is included (ChannelView's Probes button ▸ *In the Visualizer's
-spectrum*) becomes eligible for a swatch. Since TS_TrackProbe 2.0.0 the
-probe has no parameters, so its old "Include in Visualizer Spectrum"
-checkbox is gone; a project still running older probes keeps its ticks
+spectrum*) becomes eligible for a swatch. The probe has no parameters, so
+that choice is made from ChannelView. A project still running probes older
+than TS_TrackProbe 2.0.0 keeps their *Include in Visualizer Spectrum* ticks
 until it is reopened, then the choice is made again from ChannelView.
 
 ## Credits

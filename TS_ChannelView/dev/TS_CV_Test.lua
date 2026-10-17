@@ -3252,6 +3252,7 @@ do
     "TS_CV_Receives", "TS_CV_Focus", "TS_CV_Icons", "TS_CV_Inputs",
     "TS_ChannelView_TCP", "TS_CV_Arrange", "TS_CV_Toolbar", "TS_CV_Envelopes", "TS_CV_Actions", "TS_CV_Lanes",
     "TS_CV_Chains", "TS_CV_Taps", "TS_CV_WebLink", "TS_ChannelView_Web_Startup", "TS_CV_HwOut",
+    "TS_CV_Drawers", "TS_CV_ActionEditor", "TS_ChannelView_Toolbars", "TS_ChannelView_OrganiseActions",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.
@@ -3320,6 +3321,222 @@ do
     check("toolbar gap", items[3].sep == true and items[3].gap == true, true)
     check("toolbar label kept", items[1].label, "Add")
     check("toolbar round-trip", TB.serialize(items), "40001|a.png|Add;-;_;40005||")
+
+    -- menus: "[|icon|label" ... "]", nested
+    local line = "40029||Undo;[|m.png|Render;41824||;[||Stems;40001||All;-;];];1157||Snap"
+    local t = TB.parse(line)
+    check("menu: top count", #t, 3)
+    check("menu: is a menu", t[2].menu == true and t[2].label == "Render" and t[2].icon == "m.png", true)
+    check("menu: inside", #t[2].items, 2)
+    check("menu: nested", t[2].items[2].menu == true and #t[2].items[2].items == 2, true)
+    check("menu: after it", t[3].cmd, "1157")
+    check("menu: round-trip", TB.serialize(t), line)
+    check("menu: empty menu", TB.serialize(TB.parse("[||Empty;]")), "[||Empty;]")
+    check("menu: stray close dropped", #TB.parse("40001||;];40002||"), 2)
+    check("menu: unclosed kept", #TB.parse("[||M;40001||")[1].items, 1)
+    check("menu: flatten", #TB.flatten(t), 4)
+    -- moving: into a menu, along a list, and never a menu into itself
+    local a = TB.parse("1||A;2||B;[||M;3||C;[||N;];]")
+    local M_, N_ = a[3], a[3].items[2]
+    check("move: into a menu", TB.move_item(a, 1, M_.items, #M_.items + 1), 3)
+    check("move: left the top", a[1].cmd, "2")
+    check("move: menu into itself refused", TB.move_item(a, 2, N_.items, 1), false)
+    check("move: down the same list", TB.move_item(a, 1, a, 3), 2)
+    check("move: order after", a[1].menu and a[2].cmd == "2", true)
+    check("inside: nested", TB.inside(M_, N_.items) and not TB.inside(N_, M_.items), true)
+    local c = TB.copy_items({ M_ })[1]
+    check("copy: deep", c ~= M_ and c.items ~= M_.items and #c.items == #M_.items, true)
+    -- REAPER's menus: -2 opens a submenu, -3 closes it
+    local ini = "[Main extensions]\nitem_0=40001 Insert track\nitem_1=-2 Render\nitem_2=41824 Render project\nitem_3=-1\nitem_4=-3\nitem_5=40029 Undo\n"
+    local r = TB.parse_reaper_toolbar(ini, "Main extensions")
+    check("reaper menu: top", #r, 3)
+    check("reaper menu: submenu", r[2].menu and r[2].label == "Render" and #r[2].items == 2, true)
+    check("reaper menu: sep inside", r[2].items[2].sep == true, true)
+    check("reaper menus: listed", table.concat(TB.reaper_menus("[Main toolbar]\n[Main extensions]\n[Floating toolbar 1]\n"), ","), "Main extensions")
+  end
+end
+
+-- Action bars: the list round-trips (old drawers' lines too); bad places
+-- and widths are mended; the first load builds the list from the old
+-- one; a single place swaps.
+do
+  local okd, DR = pcall(require, "TS_CV_Drawers")
+  if okd and DR.serialize then
+    local line = "1|top|1|128|both|drawer_1|0|Edit;2|window|0|90|icons|drawer_2|-3|Tracks"
+    local l = DR.parse(line)
+    check("bars: count", #l, 2)
+    check("bars: fields", l[2].side == "window" and l[2].open == false and l[2].width == 90 and l[2].style == "icons" and l[2].dock == -3, true)
+    check("bars: round-trip (sizes added)", DR.serialize(l), "1|top|1|128|both|drawer_1|0|24|Edit;2|window|0|90|icons|drawer_2|-3|24|Tracks")
+    local sized = "1|top|1|128|both|drawer_1|0|30|Edit;2|left|1|90|icons|drawer_2|0|99|7"
+    local sl = DR.parse(sized)
+    check("bars: size read", sl[1].size, 30)
+    check("bars: size kept in range", sl[2].size, DR.SIZE_MAX)
+    check("bars: a numeric name isn't a size", sl[2].name, "7")
+    check("bars: old line with a numeric name", DR.parse("1|top|1|128|both|k|0|12")[1].name .. "/" .. DR.parse("1|top|1|128|both|k|0|12")[1].size, "12/24")
+    local old = DR.parse("1|top|1|128|both|Edit;2|left|0|90|icons|Tracks")
+    check("bars: old drawers' line", #old == 2 and old[2].side == "left" and old[2].key == "drawer_2" and old[2].name == "Tracks", true)
+    local m = DR.parse("3|sideways|1|9999|odd|k|0|X")
+    check("bars: mended", m[1].side == "top" and m[1].width == DR.W_MAX and m[1].style == "both", true)
+    check("bars: none", #DR.parse("none") + #DR.parse(""), 0)
+    check("bars: names lose ; and |", DR.serialize({ { id = 1, side = "top", open = true, width = 100, style = "both", key = "drawer_1", name = "a;b|c" } }),
+      "1|top|1|100|both|drawer_1|0|24|abc")
+    local mg = DR.migrate("1|top|1|128|both|Edit")
+    local places = {}
+    for _, d in ipairs(mg) do places[#places + 1] = d.side .. ":" .. d.key end
+    check("bars: migrated", table.concat(places, ","), "top:drawer_1,tcp1:toolbar,tcp2:toolbar2,web:web_actions")
+    check("bars: migrated ids", mg[4].id, 4)
+    local mg0 = DR.migrate("")
+    check("bars: migrated from nothing", #mg0 == 3 and mg0[1].id == 1, true)
+    -- moving: onto a single place swaps; onto a side doesn't
+    local a, b = mg[1], mg[2]
+    local other = DR.place_in(mg, a, "tcp1")
+    check("place: swap", other == b and a.side == "tcp1" and b.side == "top", true)
+    check("place: side no swap", DR.place_in(mg, mg[3], "left") == nil and mg[3].side == "left", true)
+    check("place: same place nothing", DR.place_in(mg, mg[3], "left"), nil)
+    check("place: unknown refused", DR.place_in(mg, mg[3], "moon") == nil and mg[3].side == "left", true)
+    -- sharing: a file of [Bar] sections round-trips buttons, menus, place
+    local TB = require("TS_CV_Toolbar")
+    local bars = {
+      { name = "Edit", side = "top", style = "icons", width = 140, dock = 0,
+        items = TB.parse("40029|undo.png|Undo;[||Render;41824||;-;];_RSabc||") },
+      { name = "Web", side = "web", style = "both", width = 128, dock = 0,
+        items = { { cmd = "40161", icon = "", label = "M1", color = "#d98a2f" }, { sep = true, gap = true } } },
+    }
+    local txt = DR.export_text(bars, function(c) return c == "40029" and "Edit: Undo" or nil end)
+    local back = DR.parse_export(txt)
+    check("share: count", back and #back, 2)
+    check("share: fields", back[1].name == "Edit" and back[1].place == "top" and back[1].style == "icons" and back[1].width == 140, true)
+    check("share: size", back[1].size, 24)
+    check("share: items", TB.serialize(back[1].items), "40029|undo.png|Undo;[||Render;41824||;-;];_RSabc||")
+    check("share: action names", back[1].names["40029"] .. "/" .. tostring(back[1].names["_RSabc"]), "Edit: Undo/")
+    check("share: web colour kept", back[2].web_items[1].color, "#d98a2f")
+    check("share: not a bars file", (select(2, DR.parse_export("[Something]\nx=1\n"))) ~= nil, true)
+    check("share: names lose newlines", DR.parse_export(DR.export_text({ { name = "a\nb", side = "none", items = {} } }))[1].name, "a b")
+  end
+end
+
+-- ChannelView's own action icons: paths flatten (lines, arcs, curves,
+-- relative and absolute), the file loads, actions find their icons
+-- (scripts by file name), and dashes come out the length asked.
+do
+  local oki, AI = pcall(require, "TS_CV_ActionIcons")
+  check("action icons: module", oki and type(AI.flatten) == "function", true)
+  if oki then
+    local f = AI.flatten("M4 9v6")
+    check("ai path: line", #f == 1 and table.concat(f[1].pts, ","), "4,9,4,15")
+    local c = AI.flatten("M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0z")
+    local far = 0
+    for k = 1, #c[1].pts, 2 do
+      far = math.max(far, math.abs(math.sqrt((c[1].pts[k] - 12) ^ 2 + (c[1].pts[k + 1] - 12) ^ 2) - 10))
+    end
+    check("ai path: circle closed, on its radius", c[1].closed and far < 1e-6, true)
+    local a = AI.flatten("M6.34 17.66A8 8 0 0 1 16 5.07")
+    local n = #a[1].pts
+    check("ai path: arc ends where asked", math.abs(a[1].pts[n - 1] - 16) < 1e-6 and math.abs(a[1].pts[n] - 5.07) < 1e-6, true)
+    -- the arc goes over the top (through y < 6), not under
+    local top = 24
+    for k = 2, n, 2 do top = math.min(top, a[1].pts[k]) end
+    check("ai path: arc sweeps the right way", top < 4.5, true)
+    local two = AI.flatten("M3 3h4M10 10l2 2z")
+    check("ai path: two subpaths", #two == 2 and not two[1].closed and two[2].closed, true)
+    local rel = AI.flatten("m1 1l2 0 0 2")
+    check("ai path: implicit lines after l", table.concat(rel[1].pts, ","), "1,1,3,1,3,3")
+    local cu = AI.flatten("M0 0C0 10 10 10 10 0s10-10 10 0")
+    check("ai path: S reflects", math.abs(cu[1].pts[#cu[1].pts - 1] - 20) < 1e-9 and #cu[1].pts == 2 + 32, true)
+    check("ai path: numbers run together", table.concat(AI.flatten("M1.5-2L.5.5")[1].pts, ","), "1.5,-2,0.5,0.5")
+    check("ai path: junk stops, no error", #AI.flatten("M1 1 Q 2 2 3 3"), 1)
+    local d = AI.dashes({ pts = { 0, 0, 20, 0 }, closed = false }, 0, 0, 1, 4, 2)
+    check("ai dashes: on 4 off 2 over 20", #d, 4)
+    check("ai dashes: first", ("%g,%g,%g,%g"):format(table.unpack(d[1])), "0,0,4,0")
+
+    AI.path = HERE .. "../TS_CV_ActionIcons.json"
+    local count = AI.load()
+    check("ai file: loaded", count > 200, true)
+    check("ai file: families", #AI.families() > 10, true)
+    check("ai match: undo", AI.match("40029"), "cv:undo")
+    check("ai match: SWS by name", AI.match("_SWS_AWCOUNTRECTOG"), "cv:count_in")
+    check("ai match: MIDI-editor icons not for the main section", AI.match("40472"), nil)
+    check("ai match: a script by file, any id", AI.match("_RSdeadbeef", function() return "Script: TS_ChannelView_TCP.lua" end), "cv:cv_tcp")
+    check("ai match: unknown", AI.match("99999999"), nil)
+    check("ai: is/get", AI.is("cv:undo") and AI.get("cv:undo").name ~= nil and AI.get("undo.png") == nil, true)
+    -- every icon in the file draws: each path flattens to something
+    local empty = {}
+    for _, fam in ipairs(AI.families()) do
+      for _, ic in ipairs(fam.icons) do
+        local sh = AI.shapes(ic)
+        if #sh.d + #sh.fi + #sh.ti + #sh.da == 0 then empty[#empty + 1] = ic.key end
+      end
+    end
+    check("ai file: every icon has a shape", table.concat(empty, ","), "")
+    -- a REAPER toolbar copied: ChannelView's icon over REAPER's
+    local TB = require("TS_CV_Toolbar")
+    local r = TB.parse_reaper_toolbar("[T]\nitem_0=40029 Undo\nicon_0=toolbar_undo.png\nitem_1=99999 Odd\nicon_1=mine.png\n", "T")
+    check("copy toolbar: our icon", r[1].icon, "cv:undo")
+    check("copy toolbar: no match keeps the PNG", r[2].icon, "mine.png")
+    local items = { { cmd = "40029", icon = "", label = "" }, { menu = true, icon = "", label = "M", items = { { cmd = "1007", icon = "x.png", label = "" } } } }
+    check("use cv icons: count", TB.use_cv_icons(items), 2)
+    check("use cv icons: in menus too", items[2].items[1].icon, "cv:play")
+  end
+end
+
+-- Toolbar switches: the item, swapping two bars' places, ids remapped on
+-- import, the export carrying ids.
+do
+  local TB = require("TS_CV_Toolbar")
+  check("switch: menu", TB.switch_of({ cmd = "_TSCV_BAR", icon = "", label = "" }), "menu")
+  check("switch: to a bar", TB.switch_of({ cmd = "_TSCV_BAR:7", icon = "", label = "" }), 7)
+  check("switch: not one", TB.switch_of({ cmd = "40029" }) == nil and TB.switch_of({ menu = true, cmd = "_TSCV_BAR" }) == nil, true)
+  check("switch: cmd", TB.switch_cmd(3) .. "/" .. TB.switch_cmd(nil), "_TSCV_BAR:3/_TSCV_BAR")
+  local back = TB.parse(TB.serialize({ { cmd = "_TSCV_BAR:3", icon = "cv:undo", label = "" } }))
+  check("switch: round-trips", back[1].cmd .. "|" .. back[1].icon, "_TSCV_BAR:3|cv:undo")
+  local okd, DR = pcall(require, "TS_CV_Drawers")
+  if okd and DR.swap_in then
+    local a = { id = 1, side = "top", open = true, width = 140, dock = 0 }
+    local b = { id = 2, side = "none", open = false, width = 90, dock = -2 }
+    check("switch: swap", DR.swap_in(a, b) and a.side == "none" and b.side == "top" and b.open and b.width == 140 and a.width == 90, true)
+    local w1 = { id = 3, side = "window", open = true, width = 128, dock = -4 }
+    local w2 = { id = 4, side = "tcp1", open = true, width = 128, dock = 0 }
+    DR.swap_in(w1, w2)
+    check("switch: window's dock goes with the place", w2.side == "window" and w2.dock == -4 and w1.side == "tcp1" and w1.dock == 0, true)
+    check("switch: itself refused", DR.swap_in(a, a), false)
+    local items = { { cmd = "_TSCV_BAR:5", icon = "", label = "" }, { menu = true, icon = "", label = "", items = { { cmd = "_TSCV_BAR:6", icon = "", label = "" } } }, { cmd = "_TSCV_BAR", icon = "", label = "" } }
+    DR.remap_switches(items, { [5] = 12 })
+    check("switch: remapped", items[1].cmd, "_TSCV_BAR:12")
+    check("switch: unknown bar becomes the menu", items[2].items[1].cmd, "_TSCV_BAR")
+    check("switch: menu left alone", items[3].cmd, "_TSCV_BAR")
+    local txt = DR.export_text({ { id = 9, name = "Tabs", side = "top", items = { { cmd = "_TSCV_BAR:9", icon = "", label = "" } } } })
+    local got = DR.parse_export(txt)
+    check("switch: export has the bar's id", got[1].id, 9)
+    check("switch: no action line for a switch", txt:find("action=_TSCV_BAR", 1, true), nil)
+  end
+end
+
+-- The web companion's Actions list, as the organiser reads and writes it.
+do
+  local oka, AE = pcall(require, "TS_CV_ActionEditor")
+  if oka and AE.json_decode then
+    local js = '[{"l":"Undo","a":"40029","c":"#4aa3df"},{"sp":1},{"m":1,"l":"Render","c":"","i":[{"l":"","a":"41824","c":""},{"sp":1},{"m":1,"l":"Sub","c":"","i":[]}]},{"l":"Odd \\"q\\"","a":"_RS1","c":"","el":{}}]'
+    local arr = AE.json_decode(js)
+    check("web json: decoded", type(arr) == "table" and #arr, 4)
+    local items = AE.from_web(arr)
+    check("web: action", items[1].cmd == "40029" and items[1].label == "Undo" and items[1].color == "#4aa3df", true)
+    check("web: spacer", items[2].sep and items[2].gap, true)
+    check("web: menu", items[3].menu and #items[3].items == 3 and items[3].items[3].menu, true)
+    check("web: escaped label", items[4].label, 'Odd "q"')
+    local back = AE.json_encode_list(AE.to_web(items))
+    check("web: round-trip", AE.json_encode_list(AE.to_web(AE.from_web(AE.json_decode(back)))), back)
+    check("web: no el", back:find('"el"') == nil, true)
+    check("web json: junk", AE.json_decode("not json") == nil and AE.json_decode("") == nil, true)
+    check("web json: unicode", AE.json_decode('["\\u00e9"]')[1], "\u{00E9}")
+    -- a toolbar separator goes to the web as a spacer
+    check("web: sep to spacer", AE.json_encode_list(AE.to_web({ { sep = true } })), '[{"sp":1}]')
+    -- icons ride along (the page ignores them), only when there are some
+    local wi = AE.json_encode_list(AE.to_web({ { cmd = "1", label = "A", icon = "x.png" }, { cmd = "2", label = "B", icon = "" } }))
+    check("web: icon kept", wi, '[{"l":"A","a":"1","c":"","ic":"x.png"},{"l":"B","a":"2","c":""}]')
+    check("web: icon back", AE.from_web(AE.json_decode(wi))[1].icon, "x.png")
+    -- locate finds an item inside a menu
+    local l, k = AE.locate(items, items[3].items[2])
+    check("locate: in a menu", l == items[3].items and k == 2, true)
   end
 end
 
@@ -3437,6 +3654,26 @@ do
   check("trace: open adds its width",    w1 - w0, CC.GRV_W + CC.PANEL_PAD)
   check("trace: no meter, no trace",     PP.width(ctl, 300, false, false, "X", false, true),
         PP.width(ctl, 300, false, false, "X", false, false))
+end
+
+-- The EQ canvases draw a curve in one AddPolyline call once ReaImGui is
+-- attached (it isn't yet when the file loads), with the per-segment
+-- fallback when the packed call isn't there.
+do
+  local EQP = require("TS_CV_EQPanel")
+  local n = { poly = 0, line = 0, size = nil }
+  local fake = { DrawList_AddPolyline = function(_, a) n.poly = n.poly + 1; n.size = a.n end,
+                 DrawList_AddLine = function() n.line = n.line + 1 end }
+  local had = reaper.new_array
+  reaper.new_array = function(sz) return { n = sz } end
+  EQP.attach(fake)
+  EQP.util.polyline("dl", { 0, 1, 2, 3 }, { 0, 1, 0, 1 }, 4, 0xffffffff, 2.0)
+  check("eq polyline: one packed call", n.poly == 1 and n.line == 0, true)
+  check("eq polyline: buffer is the points", n.size, 8)
+  fake.DrawList_AddPolyline = nil
+  EQP.util.polyline("dl", { 0, 1, 2, 3 }, { 0, 1, 0, 1 }, 4, 0xffffffff, 2.0)
+  check("eq polyline: no packed call, a line a segment", n.line, 3)
+  reaper.new_array = had
 end
 
 -- Every knob face and fader style draws without error, bypassed or not,
@@ -4986,6 +5223,35 @@ do
   check("virt: copy is its own", l.controls[1].virtual.choices[1], "Main")
   check("virt: start from the plugin's layout", M.vstart("Comp X", "Amount", {}), 0.4)
   check("virt: start unknown", M.vstart("Comp X", "Nope", {}), 0)
+
+  -- actions per setting (VAct<n>): kept, copied, run for the setting picked
+  do
+    local sel2 = { param = -1, type = "combo", label = "Mode",
+                   virtual = { start = 0, choices = { "A", "B", "C" }, actions = { [1] = "40001", [3] = "_RS9f" } } }
+    local btn2 = { param = -1, type = "toggle", label = "Go", virtual = { start = 0, choices = {}, actions = { [2] = "40044" } } }
+    local kn2 = { param = -1, type = "knob", label = "K", virtual = { start = 0, choices = {}, actions = { "40001" } } }
+    M.set("Act X", { controls = { sel2, btn2, kn2 } })
+    M.save(); M.reload()
+    local la = M.get("Act X")
+    local a1 = la.controls[1].virtual.actions
+    check("vact: kept", a1 and (tostring(a1[1]) .. " " .. tostring(a1[2]) .. " " .. tostring(a1[3])), "40001 nil _RS9f")
+    check("vact: button", la.controls[2].virtual.actions and la.controls[2].virtual.actions[2], "40044")
+    check("vact: a knob has none", la.controls[3].virtual.actions, nil)
+    check("vact: line", M.vact_line(a1, 3), "40001;;_RS9f")
+    check("vact: trailing gaps dropped", M.vact_line({ "1" }, 3), "1")
+    check("vact: none", M.vact_line({}, 3), nil)
+    check("vact: by value", tostring(M.vaction(la.controls[1], 0)) .. " " .. tostring(M.vaction(la.controls[1], 0.5)) .. " " .. tostring(M.vaction(la.controls[1], 1)), "40001 nil _RS9f")
+    check("vact: button on", M.vaction(la.controls[2], 1), "40044")
+    local ran = {}
+    reaper.Main_OnCommand = function(id) ran[#ran + 1] = id end
+    reaper.NamedCommandLookup = function(n) return n == "_RS9f" and 55123 or 0 end
+    M.run_vaction(la.controls[1], 0); M.run_vaction(la.controls[1], 0.5); M.run_vaction(la.controls[1], 1)
+    check("vact: ran", table.concat(ran, ","), "40001,55123")
+    local cpa = M.copy(la)
+    cpa.controls[1].virtual.actions[1] = "1"
+    check("vact: copy is its own", la.controls[1].virtual.actions[1], "40001")
+    reaper.Main_OnCommand, reaper.NamedCommandLookup = nil, nil
+  end
 
   -- layout switching: rules on the plugin's own layout
   M.set("Comp X :: Side", { controls = { { param = 7, type = "knob" } } })

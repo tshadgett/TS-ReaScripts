@@ -107,7 +107,8 @@ local CP = require("TS_CV_ColourPick")
 local IC = require("TS_CV_Icons")
 local FO = require("TS_CV_Focus")
 local AR = require("TS_CV_Arrange")
-local TB = require("TS_CV_Toolbar")
+local TBm = require("TS_CV_Toolbar")
+local DR = require("TS_CV_Drawers")
 local EN = require("TS_CV_Envelopes")
 local SD = require("TS_CV_Sends")
 local RV = require("TS_CV_Receives")
@@ -118,7 +119,8 @@ local LN = require("TS_CV_Lanes")
 local SU = require("TS_CV_Startup").make("ChannelView TCP", "TS_ChannelView_TCP.lua",
                                          "channelview_tcp_cmd")
 
-W.attach(ImGui); CH.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui); TB.attach(ImGui)
+W.attach(ImGui); CH.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui); TBm.attach(ImGui)
+DR.attach(ImGui)
 EN.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); B.attach(ImGui); LN.attach(ImGui)
 -- Asked for while the action context is still this script's, as
 -- ChannelView does.
@@ -153,9 +155,9 @@ local function cv_get(k, default)
 end
 local function cv_set(k, v) reaper.SetExtState(C.EXT_SECT, k, tostring(v), true) end
 
--- Hue and tint are no longer ChannelView's to own -- see TS_Palette in
--- TS_ChannelView.lua. Falls through to the old location once so an
--- existing setting survives the update.
+-- Hue and tint are shared by the TS_ tools -- see TS_Palette in
+-- TS_ChannelView.lua. Falls back to ChannelView's own keys when the
+-- shared ones are empty, so an existing setting carries over.
 local function pal_get()
   local h = reaper.GetExtState("TS_Palette", "base_hue")
   local t = reaper.GetExtState("TS_Palette", "tint")
@@ -190,11 +192,22 @@ local TCP_TINT    = ext_get("tint", "1") == "1"
 C.TCP_PANEL_H     = tonumber(ext_get("panel_h", C.TCP_PANEL_H)) or C.TCP_PANEL_H
 local dock_id     = tonumber(ext_get("dock", "0")) or 0
 
-TB.load()
--- A second toolbar under the tracks, beside the transport: the space
--- between the bottom of the arrange view and the bottom of the window.
-local TB2 = TB.make("toolbar2", "tb2", {})
-TB2.load()
+-- The two toolbars are action bars (TS_CV_Drawers) like ChannelView's
+-- drawers: whichever bar is in the "TCP by the ruler" place, and the one in
+-- "TCP by the transport" -- the space between the bottom of the arrange
+-- view and the bottom of the window. Built and arranged in Organise
+-- actions, which opens in the toolbars script from here.
+local TB, TB2
+local function bind_bars()
+  local a = DR.ensure("tcp1", "TCP toolbar")
+  local b = DR.ensure("tcp2", "TCP transport toolbar")
+  TB, TB2 = a.tb, b.tb
+end
+DR.load()
+DR.organise = function() DR.request_organiser() end
+-- a bar moved or switched from here: show whichever bars are here now
+DR.on_change = bind_bars
+bind_bars()
 
 local ctx = ImGui.CreateContext(C.TCP_WIN_TITLE)
 local small_font = ImGui.CreateFont("sans-serif")
@@ -220,7 +233,7 @@ local app = {
 -- keeping up with ChannelView
 -- ---------------------------------------------------------------------
 
--- Hue and Tint are ChannelView's settings, and either window can change
+-- Hue and Tint are shared settings, and either window can change
 -- them, so both look twice a second. ExtState is a string lookup; this
 -- costs nothing worth measuring.
 local function poll_shared(now)
@@ -937,13 +950,16 @@ local function settings_menu()
 
   if #app.overflow > 0 and ImGui.BeginMenu(ctx, "More buttons") then
     for i, it in ipairs(app.overflow) do
-      if ImGui.MenuItem(ctx, TB.label_of(it) .. "##ovf" .. i) then TB.run(it) end
+      if it.menu then
+        if ImGui.BeginMenu(ctx, TB.label_of(it) .. "##ovf" .. i) then
+          TB.menu_entries(ctx, it.items or {}, "ovf" .. i)
+          ImGui.EndMenu(ctx)
+        end
+      elseif ImGui.MenuItem(ctx, TB.label_of(it) .. "##ovf" .. i) then TB.run(it) end
     end
     ImGui.EndMenu(ctx)
+    ImGui.Separator(ctx)
   end
-  if ImGui.MenuItem(ctx, "Add toolbar action\u{2026}") then TB.pick_start(nil) end
-  if ImGui.MenuItem(ctx, "Add bottom toolbar action\u{2026}") then TB2.pick_start(nil) end
-  ImGui.Separator(ctx)
 
   if ImGui.MenuItem(ctx, "Track icons", nil, C.TCP_ICONS) then
     C.TCP_ICONS = not C.TCP_ICONS
@@ -1077,6 +1093,8 @@ end
 local safe_frame
 
 local function frame()
+  -- the bars' list changed elsewhere (ChannelView, the organiser)
+  if DR.sync() then bind_bars() end
   local now = reaper.time_precise()
   W.begin_frame()
   -- A swipe ends when the mouse comes up. Said here because a button
@@ -1161,7 +1179,7 @@ local function frame()
         local dl = ImGui.GetWindowDrawList(ctx)
         ImGui.DrawList_AddLine(dl, wx, area_bot + 0.5, wx + ww, area_bot + 0.5,
           C.COL.panel_border, 1.0)
-        local res2 = TB2.draw(ctx, cx, area_bot + 1, ww, bottom - area_bot - 2, true)
+        local res2 = TB2.draw(ctx, cx, area_bot + 1, ww, bottom - area_bot - 2, true, "up")
         for _, it in ipairs(res2.overflow) do app.overflow[#app.overflow + 1] = it end
       end
       ImGui.SetCursorScreenPos(ctx, cx, cy)

@@ -18,8 +18,8 @@ the selected track.
 ## Two views
 
 A toggle in the header swaps the upper area between them, as does a
-double-click on the header itself — anywhere nothing else lives, which
-`IsAnyItemHovered` sorts out for us — and the **TS_ChannelView_ToggleMixer**
+double-click on the header itself — anywhere nothing else lives — and the
+**TS_ChannelView_ToggleMixer**
 action, for a keyboard shortcut or a toolbar button (ChannelView's window
 never gets the keyboard, so the shortcut has to be REAPER's; a toolbar
 button for it lights while the mixer is showing). The track list
@@ -28,48 +28,10 @@ along the bottom belongs to both.
 **Channel view** is one track in depth: its plugins, its channel strip,
 its sends. **Mixer view** is every track at a glance, one strip each.
 
-A mixer strip *is* the Channel panel — `CH.draw_body`, the same function,
-given a different track and a different id prefix. That is the whole
-design and the reason it was worth doing: a second implementation of a
-fader, a meter and a mute button would drift from the first inside a
-week, and this way it is the same fader taper, the same peak hold, the
-same swipe and the same double-click-for-default, because it is the same
-code. The id prefix is what makes it possible — without it every strip
-would share one set of ImGui ids and one peak store, and they would all
-fight over both.
-
 Double-click a strip to open it in channel view; double-click the Channel
 panel's background, the empty space between plugin panels, or the empty
 space to the right of the last mixer strip, to come back. Not the fader:
-that still means unity. Both targets are submitted *before* the controls
-they sit under, so anything you can actually click takes precedence and
-only the gaps switch views.
-
-The track list is the mixer's ruler, not a separate list that happens to
-agree. Each button asks `MX.col_width` for its width, which asks the
-Channel panel — so a collapsed strip's button collapses with it, and the
-written-down number that would have drifted does not exist. The gap
-between columns and the TCP visual spacer are the same constants in both.
-
-The strips and the track list aren't two windows kept in sync any more —
-they're one window. `MX.draw_row` draws both, on a single BeginChild
-called `trackrow` in both views: the strips with a name button under
-each in mixer view, just the name buttons in channel view. Same id
-either way, so ImGui's own per-window scroll memory is what keeps them
-lined up — there is no variable being copied back and forth, and so
-nothing to fall out of step. (There used to be one — `MX.scroll_x`,
-written by whichever view was up, read by the other — and it's exactly
-where two real scroll bugs turned up: the mouse wheel not reaching a
-strip's own nested child window, and the track list never having wheel
-handling of its own at all. One shared window closes off that whole
-class of bug rather than patching the instances of it.) Channel view
-uses the same widths, so nothing under the divider moves when you
-switch — the mixer stays scrolled where it was and one track's detail is
-shown instead of it, not drawn over it: the strips aren't rendered while
-channel view is up, only parked at the same position for when you switch
-back. That also means channel view's track list is as wide as the mixer
-needs it to be rather than as narrow as channel view could get away
-with, which is the trade we wanted.
+that means unity.
 
 Mixer strip headers carry the track colour and no name. The name is
 directly below at full width in the track list, and the header could only
@@ -77,15 +39,11 @@ have shown a truncation of it. Unselected, the header and its button
 below dim to the same alpha -- one object, one selected state.
 
 Clicking anywhere on a strip selects its track, the meter and the fader
-included. That is a window hover rather than a background button: an item
-on top of the background swallows the background's click, but nothing can
-swallow the fact that the mouse went down inside the strip. Ctrl (or Cmd)
-adds and removes, Shift takes the range back to the last click, and the
-track buttons answer the same gestures through the same function --
-`MX.click` -- because a button and the strip above it had better not
-disagree about what a ctrl-click means. Hidden tracks are not in a range:
-the range is what you can see. And ctrl can never take the selection down
-to nothing, because channel view has to have a track to show.
+included. Ctrl (or Cmd) adds and removes, Shift takes the range back to
+the last click, and the track buttons answer the same gestures. Hidden
+tracks are not in a range: the range is what you can see. And ctrl can
+never take the selection down to nothing, because channel view has to
+have a track to show.
 
 ## Ganging
 
@@ -133,14 +91,14 @@ button, submitted before everything else, so a knob or a fader under the
 pointer swallows the click; the header, the meter and the space around
 things fall through to it. That is also why the meter's tooltip hovers by
 rectangle rather than hanging off an invisible button -- a button is an
-item, and an item over the meter ate the click the background needed.
+item, and an item over the meter would eat the click the background needs.
 
 ## The level meter
 
 The dB ladder is printed over the bars rather than in a gutter beside
-them, which is what lets the bars have the meter's whole width. A gutter
-was needed while the scale had one fixed ink -- any single colour is
-unreadable over signal for half its range. Each figure instead asks
+them, which is what lets the bars have the meter's whole width. One
+fixed ink would need a gutter -- any single colour is unreadable over
+signal for half its range. Each figure instead asks
 whether the bar directly behind it is lit at its own level and takes dark
 ink if it is, light ink if it is not. That is one comparison and one draw
 per figure, which is the part that matters: thirty strips redrawing five
@@ -162,10 +120,9 @@ theme change that made the scale invisible.
 
 Both figures under the meter are held and both are per channel, one
 column under each bar. The RMS figure holds with the same hold and fall
-as the peak one: it used to be live, which made it a number that changed
-sixty times a second sitting next to one that did not, and neither of
-those is readable for the same reason. The moving strip beside the bar is
-still live -- that is what a strip is for, and what a figure is for is
+as the peak one: a live figure changes sixty times a second, and beside
+one that does not, neither reads well. The moving strip beside the bar is
+live -- that is what a strip is for, and what a figure is for is
 catching a value and keeping it still long enough to look at.
 
 How many bars get drawn comes from the track's own channel count, capped
@@ -193,17 +150,6 @@ colour rather than in one accent colour for every track (`C.SEL_OUTLINE`,
 `"track"` or `"accent"`). It has to be brightened rather than used
 straight: on the selected strip the fill is already that colour, so the
 outline would have nothing to stand against.
-
-The outline is inset by half its own stroke width. ImGui centres a stroke
-on the path it is given, so a rect drawn on the child's bounds spills half
-a line-width past them on every side -- except that the child's clip rect
-eats the spill on the right and the bottom and not on the left and the
-top. That asymmetry is a visibly fatter left-hand edge, and insetting is
-the fix rather than nudging the coordinates.
-
-It is also drawn last, after the header and the body, or the header paints
-out the two corners it just rounded; and the header is capped to the
-strip's own radius so the two shapes agree about what a strip is.
 
 ## What it does
 
@@ -256,7 +202,7 @@ strip's own radius so the two shapes agree about what a strip is.
   different thing from bypassing one panel, and belongs where it's always
   visible. While the whole chain is bypassed the header glows red along its
   bottom edge. The bar's height comes from `C.MENU_PAD_Y`; see *Header
-  height* below for why that is the only number that moves it.
+  height* in `dev/NOTES.md` for why that is the only number that moves it.
 * **Run when REAPER starts** under **☰** — see below; it edits
   `Scripts/__startup.lua`, carefully.
 * One panel per plugin on the selected track, REAPER 7 FX Containers
@@ -519,8 +465,9 @@ link. The switch shows the setting in use.
 Dots after a tile's name, in the sources' colours, say what moves it; the
 tile's name menu and a knob's right-click list them. All of this lives in
 the Modulators plugin, so it plays back without ChannelView running. A
-project made before 2.2.0 gets it once it's reopened (until then REAPER
-runs the plugin as it was loaded, and ChannelView doesn't offer it).
+project still running an older copy of the plugin gets it once it's
+reopened (until then REAPER runs the plugin as it was loaded, and
+ChannelView doesn't offer it).
 
 ## MIDI learn
 
@@ -541,6 +488,62 @@ track is selected* (on by default) and *Soft takeover* sit beside it. The
 REAPER's own learn window for it (OSC and anything else). A control's
 right-click ▸ *Automate* ▸ *MIDI learn…* opens the bar with that
 parameter in it.
+
+## Action bars
+
+Rows (or columns) of buttons that run any REAPER action — native, SWS,
+your own scripts — built and arranged in one place and shown wherever you
+put them. Every bar is global, not per project.
+
+- **Where a bar goes.** A *drawer* in ChannelView's window: along the top
+  (above the MIDI learn bar), down the left or right, or along the bottom
+  under the track names. A bar in **its own window**, floating or in one of
+  REAPER's dockers (wider than tall: rows; taller: a column). The TCP
+  window's toolbar by the ruler or by the transport, or the web companion's
+  Actions bar. Or **nowhere**, kept for later. One place per bar; the TCP's
+  two and the web's take one bar each, and moving a bar onto one swaps it
+  with the bar there. The header's drawers button lists the drawers and
+  windowed bars (click to open or close one), makes new ones and opens
+  **Organise actions**.
+- **Menus.** A button can be a menu of actions, separators and further
+  menus, nested as deep as you like. Clicking it always opens the menu.
+  The web page shows the same menus (a sheet, with *‹ Back* for a submenu).
+- **Toolbar switches.** A button that puts another bar in this bar's place
+  — its spot, width, docker or window position — and puts this one away;
+  lit while its bar is the one showing, so a row of them copied onto each
+  bar of a set works as tabs. Or a **menu of every bar** to pick from.
+  Right-click a bar ▸ *Add toolbar switch*, or *+ Switch* in Organise
+  actions; *Switch to* in a bar's right-click does the same once. They work
+  on the TCP's bars and the web page too.
+- **Icons.** ChannelView has its own icons, drawn sharp at any size in the
+  bars' colours (lit on the accent while a toggle is on): REAPER's main
+  toolbar, transport, editing, markers and regions, fixed lanes and
+  comping, the View menu, SWS windows, ChannelView's own scripts,
+  instruments and effect types, nearly 300 in all. A button added from the
+  Action List, or copied from a REAPER toolbar, gets the icon made for its
+  action without being asked; right-click a bar ▸ *Use ChannelView icons*
+  gives every button its icon. The icon picker has a *ChannelView* tab
+  (the icon made for that action first) and *Your PNGs* (from
+  `Data/toolbar_icons`). The web page draws the same icons from the same
+  file, `TS_CV_ActionIcons.json`.
+- **Look.** *Icons and labels* or *Icons*, and a **Size** per bar (Small,
+  Normal, Large, Extra large), in a bar's right-click ▸ *Show* or in
+  Organise actions. The TCP's bars still fit the ruler's height.
+- **Organise actions** (the drawers button, a bar's right-click, or the
+  *Organise actions* action, which works without ChannelView open): every
+  bar by place on the left; the selected bar's buttons as a tree in the
+  middle — drag rows to reorder, drop onto a menu to put it inside, + adds
+  actions, menus, switches, separators and gaps, *Import* copies a REAPER
+  toolbar or menu; the selected button's label, icon, action and (web)
+  colour on the right, with *Copy to* another bar. The web companion's
+  list is edited here too.
+- **Import / export.** The drawers button ▸ *Export bars to file* writes
+  any of your bars to a text file; *Import bars from file* brings them in
+  (new ones, or replacing yours of the same name), naming any action the
+  importing REAPER doesn't have.
+- **Bars in their own windows** are drawn by **ChannelView toolbars**
+  (`TS_ChannelView_Toolbars.lua`), started for you when a bar goes in a
+  window; it can run when REAPER starts (a windowed bar's right-click).
 
 ## Panels are a fixed height and grow in columns
 
@@ -580,8 +583,8 @@ default), shared with the TCP window and the web page.
 - **Faders of any shape.** Right-click a fader ▸ Style ▸ Shape, or in the
   editor: *Direction* up or across, *Length* 2, 3 or 4 rows (columns,
   across) or *Full*, *Thickness* a whole column (row) or half of one. Up
-  and full is the fader as it always was, a column of its own at the
-  panel's full height. The rest sit among the controls, their name over
+  and full is the standard fader, a column of its own at the panel's full
+  height. The rest sit among the controls, their name over
   them and the plugin's value under them — half-width ones side by side
   make a graphic EQ's row of bands. A full-length fader across runs from
   where it lands to the panel's right edge.
@@ -603,7 +606,7 @@ default), shared with the TCP window and the web page.
   comes after flows round it: below it in its own column, then above or
   below it in the columns it runs into. A fader across and an XY pad run
   over a divider (its line stops at their edges); everything else starts a
-  new column at one. Panels with neither are laid out as they always were.
+  new column at one. Panels with neither are laid out as usual.
 - **Pages.** A **Page** break (the editor's *Page* button, beside Gap,
   Half-gap and Divider) starts a new page: everything after it, up to the
   next break, is a page of its own, and the panel shows one page at a time
@@ -636,7 +639,9 @@ default), shared with the TCP window and the web page.
   two sets of controls in one place, or a selector that pages through a
   plugin's sections. Two layouts of the same plugin with a virtual control
   of the same name share its state. Right-click one for *Back to where it
-  starts*.
+  starts*. Each setting can also run a REAPER action (*Actions* in the
+  editor: one per setting, a button's Off and On), from the panel and from
+  the web page alike.
 - **Lock layout.** The padlock at the left of a panel's foot locks that
   plugin's layout, on every track: no more edits, and the controls keep the
   arrangement they had however the panel is resized — a panel too short
@@ -965,11 +970,11 @@ These are REAPER's presets, not ChannelView's: the same `presets/*.ini`
 files, written exactly as REAPER writes them, so whatever you save shows up
 in the plugin window's own preset box and the other way round. Saving
 works for VST2, VST3, JS and CLAP; AU presets load but can't be saved from
-here yet. **View ▸ Preset bar** hides the bar; the foot itself stays, for
+here. **View ▸ Preset bar** hides the bar; the foot itself stays, for
 the layout lock at its left.
 
 Some plugins change programs without telling REAPER their parameters
-moved, so the controls stayed where they were. After loading a factory
+moved, which would leave the controls where they were. After loading a factory
 preset, ChannelView checks, and if nothing moved it hands the plugin its
 own state back so REAPER reads every parameter again. A plugin that's slow
 to say what preset it's on (VSL's Synchron Player takes a third of a
@@ -1016,11 +1021,13 @@ double-click clears one. Monitoring cycles off, input and auto. A lane's
 menu in the TCP window has **Remove envelope**, which asks first when the
 lane has automation.
 
-Right-click the TCP window's toolbar ▸ **Copy a REAPER toolbar** to fill
-it with the buttons of any toolbar you've customised in REAPER, icons
-and all. Icons are found in `Data/toolbar_icons` and in the current
-theme's own folder, as REAPER's toolbars find them, and a toggle with an
-`_off` icon shows its `_on` partner while it's on.
+The TCP window's two toolbars are action bars like any other (see
+*Action bars*): right-click one ▸ **Copy a REAPER toolbar** to fill it
+with the buttons of any toolbar you've customised in REAPER. A button
+whose action has a ChannelView icon gets that; otherwise REAPER's own
+icon comes too, found in `Data/toolbar_icons` and the current theme's
+folder as REAPER's toolbars find them (a toggle with an `_off` icon shows
+its `_on` partner while it's on).
 
 ## Files
 
@@ -1035,13 +1042,13 @@ theme's own folder, as REAPER's toolbars find them, and a toggle with an
 | `TS_CV_Panel.lua` | one plugin's panel |
 | `TS_CV_Editor.lua` | the Setup Edit Parameters dialog |
 | `TS_CV_Mixer.lua` | mixer view, and the shared track row (`MX.draw_row`) both views draw into |
-| `TS_CV_TrackStrip.lua` | asks the track row to scroll to the selection -- everything else moved into TS_CV_Mixer.lua |
+| `TS_CV_TrackStrip.lua` | asks the track row to scroll to the selection |
 | `TS_CV_Browser.lua` | the add-a-plugin picker |
 | `TS_CV_Search.lua` | the forgiving, ranked plugin search (picker, [+] menu and web page) |
 | `TS_CV_FXIndex.lua` | REAPER's Developers / Categories / FX Folders metadata |
 | `TS_CV_Channel.lua` | the pinned Channel panel |
 | `TS_CV_Taps.lua` | routing for measured gain reduction, and reading it back |
-| `TS_CV_ProbeLink.lua` | talking to TS_TrackProbe, old (parameters) or new (shared memory) |
+| `TS_CV_ProbeLink.lua` | talking to TS_TrackProbe: through shared memory, or parameters on older probes |
 | `TS_CV_MidiLearn.lua` | the MIDI learn bar |
 | `TS_CV_Trace.lua` | the gain-reduction trace's data, shared with the web page |
 | `TS_CV_Mod.lua` | macros and modulators: the plugin, the links, ranges and swings |
@@ -1062,13 +1069,21 @@ theme's own folder, as REAPER's toolbars find them, and a toggle with an
 | `TS_CV_Share.lua` | importing and exporting layouts (*Layouts ▸ Import / Export*) |
 | `TS_CV_ColourPick.lua` | the colour picker every colour dialog shares: palettes, eyedropper, recent colours |
 | `TS_ChannelView_ToggleMixer.lua` | the *Toggle mixer view* action, for a shortcut or toolbar |
+| `TS_CV_Toolbar.lua` | an action bar: its buttons, menus, switches, icon picker |
+| `TS_CV_Drawers.lua` | every action bar and where it is: drawers, windows, the TCP's, the web's |
+| `TS_CV_ActionEditor.lua` | the Organise actions window, and importing and exporting bars |
+| `TS_CV_ActionIcons.lua` | drawing ChannelView's icons, and finding the one made for an action |
+| `TS_CV_ActionIcons.json` | the icons themselves, shared with the web page. Goes in `reaper_www_root/` |
+| `TS_ChannelView_Toolbars.lua` | **ChannelView toolbars**: bars in windows of their own |
+| `TS_ChannelView_OrganiseActions.lua` | the *Organise actions* action |
 | `TS_CV_Startup.lua` | the Run-when-REAPER-starts option, and the `__startup.lua` surgery |
 | `TS_CV_State.lua` | per-instance view state (collapsed), saved in the project |
 | `TS_CV_Steps.lua` | cached choices for stepped parameters (derived, deletable) |
 | `TS_ChannelView_Web.lua` | the web companion's bridge — see *On a tablet* |
 | `TS_ChannelView.html` | the web companion's page. Goes in `reaper_www_root/` |
 | `TS_ChannelView.webapp.json`, `TS_ChannelView-*.png` | what lets a tablet install the page as an app, and its icons. Go in `reaper_www_root/` |
-| `dev/TS_CV_Test.lua` | offline tests — see below. Not installed |
+| `dev/TS_CV_Test.lua` | offline tests — see `dev/NOTES.md`. Not installed |
+| `dev/NOTES.md` | developer notes: how parts of it work and the pitfalls behind them. Not installed |
 | `TS_CV_Diag.lua` | dumps what REAPER reports about the selected track's FX, and how much of your plugin collection the FX index resolves |
 | `dev/TS_CV_Audit.py` | checks every ImGui call against your installed ReaImGui. Not installed |
 | `TS_ChannelView_Mappings.ini` | your layouts (created on first save) |
@@ -1218,10 +1233,12 @@ script into the action list.
   REAPER's arrange view.
 - **Presets:** the bar along the foot of a panel — tap the name for the
   list, ‹ › to step, + to save, save as default, rename or delete.
-- **Actions:** the bar of action buttons (called the macro bar before 2.0).
+- **Actions:** the bar of action buttons.
   The pencil turns on editing. + adds a button for any action (searchable)
-  or a spacer, tap a button to change it, press and drag to move it, ×
-  removes it.
+  or a spacer, tap a button to change it (its label, icon and colour),
+  press and drag to move it, × removes it. Menus, toolbar switches and
+  ChannelView's icons from the desktop's Organise actions show here, and
+  the bar reloads when it's changed there.
 - **Macros and modulators:** their panels come first in the row when the
   track has any, folded until you open them. Macros play here — knobs,
   buttons, faders, dropdowns and XY pads — and a modulator's tile opens to
@@ -1232,8 +1249,8 @@ script into the action list.
 ## While REAPER is busy
 
 On a long job — a plugin scan, say — REAPER keeps running scripts behind
-its progress window, and ChannelView reading plugins every frame got in
-the way. It times its own frames, and when they suddenly take many times
+its progress window, and ChannelView reading plugins every frame would
+get in the way. It times its own frames, and when they suddenly take many times
 longer than usual it shows *ChannelView is waiting while REAPER is busy…*
 and stops reading plugins, trying again once a second until REAPER is
 free. A machine that's simply slow never trips it: it goes by what a frame
@@ -1246,93 +1263,6 @@ waiting. The web companion backs off the same way.
 Actions ▸ Show action list ▸ New action ▸ Load ReaScript… ▸ `TS_ChannelView.lua`.
 Needs the **ReaImGui** extension (ReaPack). SWS is optional — it only powers
 *Layouts ▸ Show the library file*. For the tablet page, see *On a tablet* above.
-
-## Tests
-
-`dev/TS_CV_Test.lua` fakes enough of the REAPER API to exercise the parts
-that don't need a GUI — nearly two thousand assertions covering plugin-name cleaning, the
-layout file round-trip, control type guessing, the panel and sends
-geometry, the gain maths and fader taper, the GR meter's peak hold and
-scale, the tooltips' place-once-then-freeze behaviour, and the
-`__startup.lua` surgery, and the master track's nil reads. It runs in plain
-Lua, outside REAPER:
-
-    lua5.4 dev/TS_CV_Test.lua
-
-One block checks the add-plugin submenus against a *real* `reaper-fxtags.ini`,
-which is the only way to catch grouping cases a synthetic list never
-produces. That file is personal and not in the repo, so point the harness at
-your own and it runs 392 assertions instead of 386:
-
-    TS_CV_TEST_FXTAGS=~/path/to/reaper-fxtags.ini lua5.4 dev/TS_CV_Test.lua
-
-The layout has a baseline of its own. `dev/TS_CV_LayoutFixture.lua` holds
-where every control landed in a set of real and made-up layouts, in both
-flows at one to six rows, recorded before the half-cell grid; the test
-checks every one is still where it was. `dev/TS_CV_WebLayoutTest.js` does
-the same for the web page (`node dev/TS_CV_WebLayoutTest.js`).
-`dev/TS_CV_LayoutSnap.lua` records a new baseline — only ever before a
-layout change, never after it.
-
-`dev/TS_CV_LearnSim.lua` runs EQ learning end to end against made-up
-plugins (a switched 73-style EQ and a parametric whose Q means something
-else and cuts narrower than it boosts) and checks the canvas draws them
-within a dB (`lua5.4 dev/TS_CV_LearnSim.lua`).
-It also runs the threshold, reverb-decay and saturation measurements
-against made-up plugins.
-
-`TS_CV_Audit.py` catches the class of mistake Lua only reports mid-frame — a
-call with the wrong number of arguments, a missing `ctx`, a function that
-doesn't exist in your ReaImGui build, an `End`/`EndChild` that isn't
-guarded, a file-scope local used above its declaration, a track property
-read without a nil fallback, or one of *our own* module functions called
-with the wrong number of arguments — Lua pads a short call with nils
-rather than complaining, so that one surfaces much later as a nil inside
-the callee. It reads the binding that ships with REAPER's own ReaImGui reference
-(`Data/reaper_imgui_doc.html`), so it always checks against the version you
-actually have:
-
-    python dev/TS_CV_Audit.py
-
-Worth running after any edit, before reloading the script in REAPER.
-
-### Two rules worth knowing before you edit
-
-**ReaImGui keeps Dear ImGui's pre-1.90 convention: `End()` and `EndChild()`
-are called ONLY when the matching `Begin()`/`BeginChild()` returned true.**
-Upstream Dear ImGui now requires the opposite, so most examples you'll find
-online are wrong here, and getting it backwards trips an assertion that
-kills the defer loop — the window just vanishes, with the real reason only
-in the console. Both shapes below are correct:
-
-```lua
-local ok = ImGui.BeginChild(ctx, 'x', w, h)
-if ok then
-  ...
-  ImGui.EndChild(ctx)      -- inside the guard
-end
-
-if not ImGui.BeginPopup(ctx, 'menu') then return end
-...
-ImGui.EndPopup(ctx)        -- early-return guard: body is already guarded
-```
-
-`TS_CV_Audit.py` checks this by bracket-matching each `End` to its real
-partner, so it understands nesting and the early-return form.
-
-**Output parameters occupy real argument positions in the Lua API and must
-be passed as `nil`.** `GetMouseDragDelta` is the one that catches people:
-
-```lua
-ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)   -- correct
-ImGui.GetMouseDragDelta(ctx, ImGui.MouseButton_Left)             -- wrong
-```
-
-The second silently reads the button as the `x` output slot and watches
-whichever button is the default. Note that the generated Python binding
-(`imgui.py`) *drops* these output parameters from its argument list, so it
-is not a safe reference for Lua signatures — which is why the auditor reads
-the HTML doc instead. It flags a value in a `nil` slot.
 
 ## Stepped parameters
 
@@ -1382,113 +1312,23 @@ clicking is "give me the next one", where stopping dead looks broken, while
 scrolling is a scrubbing gesture, where a silent wrap is a nasty surprise. A
 small caret marks the controls that have a list.
 
-## Chains that change underneath you
-
-A REAPER FX address is a **position**, not an identity, so the moment a
-plugin is moved or deleted every cached address after it means a different
-plugin. Left alone that isn't a cosmetic glitch: dragging a knob would
-write to whichever plugin now sits in that slot.
-
-Two guards run every frame, both cheap. The project's change count moves on
-any edit, catching the common cases immediately rather than at the next
-poll. And each panel's remembered GUID is compared against whatever is now
-at its address, catching anything the counter misses. Either forces a
-rescan before a single control is drawn, and open menus are dropped because
-they hold an index into a chain that no longer exists.
-
 ## Run when REAPER starts
 
-*View ▸ Run when REAPER starts* adds a fenced block to
-`Scripts/__startup.lua` that calls this script's own action. Ported from
-Track Analyser, which does the same job, and treated with the same
-caution — that file is the one thing here that can break things **other
-than this project**, since everything else you auto-start runs from it
-too. Three rules:
+**☰ ▸ Run when REAPER starts** adds a fenced block to
+`Scripts/__startup.lua` that calls this script's own action, the same way
+Track Analyser does. It is careful with that file: it is the one thing
+here that can break things **other than this project**, since everything
+else you auto-start runs from it too. Three rules:
 
 1. **A backup first**, every time, to `__startup.lua.bak`.
 2. **The result is compiled before it is saved.** `load()` on the new
    text catches a mangled edit while it is still a string in memory. A
    startup file that doesn't parse is never written.
-3. **Lines this script did not write are not touched.** Our block is
+3. **Lines this script did not write are not touched.** Its block is
    fenced with markers and only that is ever removed. If the command id
    turns up *outside* the fence — added by hand, which is how most people
    get there first — the menu says so and leaves it alone rather than
    editing somebody else's line.
-
-The command id is **asked for, not written down**: `get_action_context`
-gives the running instance's numeric id and `ReverseNamedCommandLookup`
-turns it into the stable `_RS…` name. A hardcoded one would tie the option
-to a single machine's action list and quietly write a dead line into
-`__startup.lua` anywhere else. If REAPER hasn't given the script an id yet
-— it gets one the first time you add it to the Action List — the option is
-greyed out and says why.
-
-State is read from the file each time the menu opens, never cached in
-ExtState: the file is the truth, and a remembered boolean is just
-something that can disagree with it after a hand edit.
-
-The text surgery (`classify`, `fenced_add`, `fenced_remove`) is pure — it
-takes a string and returns a string — which is what the tests exercise,
-on strings, rather than on your real startup file.
-
-## Things that get lost at the edges
-
-Three separate versions of the same problem, fixed the same way — by
-measuring rather than guessing:
-
-* **Tooltips** are clamped to the **window**, not the screen, and *flip to
-  the other side of the pointer* rather than merely sliding, so the box
-  never ends up covering the control it describes. The foreground draw
-  list is clipped to the window ReaImGui is drawing into, so a tooltip
-  that fits on the monitor but hangs past the right edge of a docked
-  ChannelView is simply cut off — which is every tooltip in the Sends
-  panel, since that panel *is* the right edge. Clamping to the viewport
-  alone fixed nothing: there was plenty of screen out there. Both bounds
-  are applied, whichever is tighter, so a window half off the monitor
-  still gets a readable tooltip.
-* **A panel header name** loses its tail exactly where the version number
-  lives, so hovering the header gives you the name in full, with the
-  vendor and format under it. The FX-container warning still has to get
-  through, so it goes *underneath* rather than instead.
-* **A format badge** in the add menu reserves its room with spaces whose
-  count is *measured* (`badge_pad`) rather than hardcoded: the label font
-  is proportional and the space width moves with the UI scale, so a count
-  that's right on one machine overlaps the plugin name on another.
-
-## A culled child still owes the layout its space
-
-ReaImGui keeps Dear ImGui's **pre-1.90** convention: `EndChild` is called
-only when `BeginChild` returned true. The catch nobody mentions is that a
-culled child then submits **no item at all** — so the parent's content
-bounds never grow past it, the `SameLine` after it starts from the wrong
-place, and if the cursor was moved by hand beforehand the frame ends with:
-
-    ImGui_End: Code uses SetCursorPos()/SetCursorScreenPos() to extend
-    window/parent boundaries. Please submit an item e.g. Dummy()
-    afterwards in order to grow window/parent boundaries.
-
-...raised from `End`, hundreds of lines from the child that caused it, and
-only when the window happens to be small enough for something to be
-culled. Every `BeginChild` here now has an `else` that calls
-`W.child_skipped(ctx, w, h)` — a `Dummy` of the size the child would have
-taken.
-
-The track-colour rule moves the cursor by hand and then trusts the panels
-below to draw at it, so it submits a zero `Dummy` of its own rather than
-relying on that. Moving the cursor is a promise to draw something there;
-this keeps the promise outright instead of hoping the next thing does.
-
-## The cursor is not a scratch variable
-
-`SetCursorScreenPos` followed by no item is an assertion at `EndChild`:
-*“Code uses SetCursorPos()/SetCursorScreenPos() to extend window/parent
-boundaries. Please submit an item e.g. Dummy() afterwards.”* ImGui has no
-way to tell “I moved the cursor and changed my mind” from “I drew
-something you should have grown the window for”.
-
-That bites anything that saves the cursor, goes somewhere else, and puts
-it back — which is exactly what the remove badge does. The fix is a
-zero-size `Dummy` after the restore.
 
 ## Taking something out
 
@@ -1501,71 +1341,10 @@ right-click menu; an x on every knob would be clutter buying nothing. A
 send has nowhere else to be removed from, which is the whole argument for
 putting one there.
 
-That only works because the cell's own button allows being overlapped.
-Without `SetNextItemAllowOverlap` the full-cell `InvisibleButton` keeps
-the hover for itself and the corner never responds, so every widget that
-fills a cell calls `W.allow_overlap()` just before its button. While the
-control is being *dragged* ImGui holds the active id, so the badge can't
-steal a knob mid-turn.
-
-A send is deleted at the **end** of the frame, never in the middle of the
-loop: every send after it shifts down by one, and their cells have already
-been drawn with the old indices.
-
-## Air between a name and its control
-
-`C.LABEL_GAP` is the space under a cell's name. It was 2px for the knob
-and 6 for the toggle and the stepped combo, which is why only the knob
-read as having its label sitting on top of it. One number drives all
-three now.
-
-The cell height is fixed, so `LABEL_H + LABEL_GAP + KNOB_D` has to leave
-room for the value line at the bottom — raising the gap meant taking two
-pixels off the knob. Padding the *grid* instead was tried and reverted: it
-pulled the whole first row up under the panel header, which fixed nothing
-and cost the panel its breathing room.
-
-## A knob belongs at the top of its cell
-
-A cell is `CELL_W` x `CELL_H` and a knob fills it: `W.LABEL_H` of name
-band, then the face, then the value readout. Move the knob down even a
-little and the readout drops out of the bottom of the cell and into the
-next row.
-
-That matters because the Sends panel draws its **own** name — one across a
-double-width cell rather than one per half — and the obvious way to do
-that is to write the name first and put the knob under it. Which pushes
-the knob down a line, out of step with every parameter cell beside it, and
-the readout out of the cell. Writing it *lower* instead, into the space
-the knob's own label would have used, collides with the top of the face.
-
-So the name goes in the band the knob already reserves, at the very top,
-and the knob stays where a knob goes. `W.knob_face_y(cell_top)` gives the
-face's centre, and the send's buttons line up on that rather than on the
-cell's middle — the name sits above the face and the value below, so the
-two are several pixels apart and it's the face the eye lines up with. Two
-files, one source for the number.
-
-## Things that should be centred, and were not
-
-* A **grid narrower than the room it has** is centred in it. The panel has
-  a minimum width, so a plugin with a single column of parameters sat hard
-  against the left edge with all the air on the right, which reads as a
-  layout that went wrong rather than as a small plugin.
-* The **level meter** is `C.LEVEL_METER_W` wide and centred in its half,
-  the way the fader's track is centred in the other one. Both filling
-  their columns is not the same as the two looking aligned: a meter flush
-  to the panel edge beside a centred fader reads as a mistake.
-* The **track name and FX bypass** in the header are centred on the last
-  menu item's own rectangle, not on the cursor — see *Header height*.
-
 ## Double-click means default
 
 Every control — knob, fader, toggle, stepped combo, channel button — goes
-back to its default on a double-click. What "default" means is the
-caller's business, not the widget's: the widget reports the double-click
-in its `act` table (or as a second return value for the state buttons) and
-the caller decides.
+back to its default on a double-click:
 
 | | |
 |---|---|
@@ -1633,207 +1412,6 @@ is an identity, not decoration, and VST3 has to stay the same colour
 whatever the base hue is set to. A format that isn't listed still gets a
 neutral badge rather than nothing.
 
-## ReaImGui returns more than the docs say
-
-`Data/reaper_imgui_doc.html` gives `CalcTextSize` as:
-
-    number w, number h = ImGui.CalcTextSize(ctx, text,
-                           hide_text_after_double_hashInOptional,
-                           wrap_widthInOptional)
-
-It returns **four** values. REAPER hands optional parameters back as
-further return values — `nil` for each one you didn't pass — and the
-documented return list doesn't mention them.
-
-Those trailing nils are invisible almost everywhere, because Lua adjusts a
-call to a single value in an assignment, in arithmetic, in a comparison.
-The exception is the **last argument position of another call**, where the
-whole list is passed on:
-
-    gut = math.max(gut, ImGui.CalcTextSize(ctx, label))   -- math.max(gut, w, h, nil, nil)
-
-That raises *attempt to compare number with nil* from inside `math.max`,
-naming nothing in this project. Bind it to a name first and the problem
-disappears:
-
-    local lw = ImGui.CalcTextSize(ctx, label)
-    if lw > gut then gut = lw end
-
-`TS_CV_Audit.py` now flags a bare multi-value ImGui call in a last argument
-position, counting the optional parameters as returns. `select(n, f())` is
-exempt — picking one of several returns is exactly what it's for.
-
-## When it falls over
-
-The defer loop runs through `xpcall`. On a runtime error the console gets
-a **full traceback** — every function on the way down, not just the line
-that raised — the layouts are saved, and the loop stops rather than
-throwing the same error sixty times a second.
-
-That matters because REAPER reports an error at the line it happened *on*,
-which for a nil handed to a drawing helper names the helper rather than
-the caller that produced the nil. Nearly every bug this window has had has
-been of that shape.
-
-## The master track answers nil, not zero
-
-`GetMediaTrackInfo_Value` returns **nil** — not 0 — when a track does not
-*have* the thing you asked about. Record arm, input monitoring and phase
-invert on the master are the obvious cases. In Lua `nil > 0.5` is a hard
-error, not a false, so one unguarded read takes the whole window down, and
-only ever when the master is selected, which is exactly the path you don't
-test.
-
-Two defences:
-
-* `CH.read(track, key, default)` gives every read a default — and
-  `CH.is_master(track)` decides which controls the track has at all, so
-  the master gets mute and solo and gives the freed rows to the fader and
-  meter rather than showing three dead buttons. The same applies to sends:
-  `GetTrackSendInfo_Value` answers nil for a send that vanished between
-  collecting and reading.
-* `TS_CV_Audit.py` flags any `*Info_Value` result compared or used in
-  arithmetic without an `or <default>` in front of the operator — the
-  shape `(reaper.GetMediaTrackInfo_Value(tr, "I_FXEN") or 1) < 0.5` is the
-  correct one.
-
-## Tooltips that stay put
-
-ImGui's own tooltip follows the pointer and vanishes the instant the item
-stops being hovered — which is exactly when a knob is being *dragged*,
-since by then the pointer has usually left the cell. So the ones here are
-drawn by hand, in `TS_CV_Widgets`:
-
-* `W.tip(ctx, id, text, hovered, active)` records the box's position the
-  first time a control asks for it and **freezes it there** while the
-  control is held, so the value you are watching doesn't chase the mouse
-  off the screen. The text keeps updating.
-* `W.draw_tip(ctx)` paints the live one **once, at the very end of the
-  frame**, on `GetForegroundDrawList` — above every panel, child window,
-  popup and menu, regardless of what was drawn when. `TS_ChannelView.lua`
-  calls it as the last thing inside the window.
-* `W.clear_tips()` drops the remembered positions; it runs with the other
-  per-chain caches when the chain changes underneath us.
-
-**The trap, which cost a release:** those caches used to be cleared on any
-*forced* rescan, and a forced rescan happens whenever REAPER's project
-change count moves — which is on **every parameter write**, i.e. on every
-frame of every knob drag. So the tooltip was re-anchored to the pointer
-sixty times a second, and the meters' peak hold was reset just as often.
-Re-reading the chain and throwing away UI state are two different jobs:
-the first follows `force`, the second follows the chain hash actually
-changing.
-
-There are no `SetTooltip` calls left anywhere in the project, and there
-shouldn't be new ones — a control that uses ImGui's tooltip will behave
-differently from every other control the moment you drag it.
-
-## Header height
-
-The track-colour rule has to land on the same line as Track Analyser's.
-This took four goes, and the first three failed for one reason: a style
-number written down.
-
-TS_TrackAnalyser.lua pushes no `WindowPadding`, `ItemSpacing` or `FramePadding` of
-its own — its `STYLE_VAR` list carries only rounding and border sizes — so
-its rule sits at `WindowPadding.y` + a frame-height header row +
-`ItemSpacing.y` below the window top. The only hard part is
-`WindowPadding.y`, because this ReaImGui build has no `GetStyleVar` to ask
-with. The three failures were: ImGui's documented default (ReaImGui's are
-not ImGui's), a number read off a screenshot (right on one machine, wrong
-on every other), and `MenuBarHeight` worked back from `GetFontSize()`
-(ReaImGui's menu bar is not `FontSize + 2 × FramePadding` either).
-
-It is **measured** now, from three things the window will tell us:
-
-    start_y = GetCursorStartPos().y   = WindowPadding.y + decorations
-    avail_h = GetContentRegionAvail() = Size.y - 2*WindowPadding.y
-                                                - decorations
-    Size.y - avail_h - start_y        = WindowPadding.y
-
-The decorations — title bar, menu bar — **cancel**, which is the whole
-point: their height never has to be known, so neither the menu bar's
-padding nor the font nor the display scaling can get it wrong. It holds
-only because there is no *bottom* decoration to subtract, which is why
-`C.WIN_NO_SCROLLBAR` exists and why a test checks the flag is still set.
-`ItemSpacing.y` comes from `GetTextLineHeightWithSpacing() -
-GetTextLineHeight()`, read before our own `ItemSpacing` goes on the stack.
-
-The rule is clamped to the content start, never to our own cursor further
-down — the cursor is the thing being corrected for, so clamping to it
-silently undoes the correction. That was failure number three.
-
-### What the metrics said
-
-One session, one line:
-
-    font 12.0   frame_h 20.5   itemspacing_y 4.0
-    window 536 high, content start 36.5, avail 491.5 -> WindowPadding.y 8.0
-    menu bar + padding left the cursor at 36.5; the rule went to 36.5
-
-The padding measurement works: 536 − 491.5 − 36.5 = 8.0. The calculation
-wanted `8 + 20.5 + 4 = 32.5`. **The rule went to 36.5** — because it was
-being clamped to our own content start, which sounded careful and was the
-bug. Our content begins *below* the menu bar; TA has none, so its rule
-sits above anywhere ours could start. The clamp fired every frame and
-replaced the answer with the cursor.
-
-That also explains why a `HEADER_NUDGE` of −6 had no visible effect: a
-fudge behind a clamp looks exactly like that from the outside. You change
-the number and nothing moves.
-
-**`C.HEADER_NUDGE` is 0.** TA's rule measures 32.5 below the same window
-top, which is what the derivation says, to the pixel. The two intermediate
-values (−6, then −2) were both measuring the clamp rather than any real
-offset — the −2 survived the fix and then overcorrected by exactly
-itself. A test asserts the nudge stays zero, because a number there means
-something above it has gone wrong again.
-
-`C.RULE_H` is 2, the same rect TA draws. It was briefly 3, to "match what
-renders" — both windows put a 2px rect at a y carrying a half pixel, so
-both cover three rows at the top and two at the bottom, and setting ours
-to 3 produced four. Fixing the symptom one layer above the cause is how
-you end up a pixel out in the other direction.
-
-The rule is clamped to the window and nothing else now, so it can sit a
-few pixels up into the menu bar's lower margin — empty space under the
-labels, and exactly where TA's lands. The panels are still held below the
-content boundary: the rule may overlap the bar, they may not.
-
-(There was a **View ▸ Log header metrics** command that printed all of
-this, including what the rule wanted *before* any clamp — that last
-number is what finally found it, after five rounds of reading
-screenshots. Removed once it had done its job; the numbers above are its
-output, kept because they are the evidence for everything here.)
-
-## dB, gain and the fader taper
-
-REAPER's Lua API does **not** expose `VAL2DB`, `DB2VAL`, `DB2SLIDER` or
-`SLIDER2DB`. Plenty of forum snippets reference those names, but calling
-one is a nil-value crash, so every conversion here is ours, in `TS_CV_Util`.
-
-That includes the fader taper, which therefore can't match REAPER's
-exactly — nothing exposes it. What's here is console-shaped: unity at 72%
-of travel, and a curve below it so half travel lands near −14 dB rather
-than the −36 a linear-in-dB throw would give, which would spend most of the
-fader's length on levels nobody mixes at.
-
-    100%  +12.0      50%  -14.0
-     86%   +6.0      36%  -27.7
-     72%    0.0      25%  -40.0
-                     10%  -58.6
-
-`U.UNITY_POS` and `U.CURVE` adjust it if you want a different feel.
-
-The very bottom of the throw is silence rather than `MIN_DB`: a fader
-pulled all the way down has to actually shut up.
-
-Two printers, and they are not interchangeable — `U.db_text(v)` takes a
-**volume** and converts, `U.db_str(db)` takes a figure that is **already in
-dB** (a meter reading, say). Pushing a meter reading through `db_text`
-works by accident, via a round trip through `db2val`, and reads as a
-mistake to anyone who looks.
-
 ## Spacer tracks in the send menu
 
 Tracks whose name is nothing but punctuation — `--------`, `~~~~` — are
@@ -1843,41 +1421,12 @@ strict: **punctuation only**. A labelled divider like `== BUSES ==` stays a
 destination, because guessing wrong there hides a track you meant to send
 to, which is worse than listing one you didn't.
 
-## Rotated labels
-
-A collapsed panel runs its name down the bar. Two ways to do that —
-letters stacked one per line, which is what ships, or the label genuinely
-rotated, which is written and switched off.
-
-ImGui has no way to rotate text — the draw list takes glyphs at a position
-and that is that. It can place an arbitrary image on an arbitrary quad,
-though, so the label is rendered once into a LICE bitmap, copied into an
-ImGui image with `CreateImageFromLICE`, and drawn with
-`DrawList_AddImageQuad` on corners turned a quarter turn. One image per
-(text, colour, size), cached — a bitmap, a font and a texture upload per
-frame would be absurd.
-
-That needs **js_ReaScriptAPI** for the LICE and GDI calls. Without it, or
-if any part of it raises, the stacked-capital version still runs and
-nothing is retried — whatever was missing will still be missing next
-frame, and finding that out sixty times a second is its own bug.
-
-**`C.ROT_TEXT` is off.** The rotated version came out unreadable, and the
-reason is the seam in the middle of the approach: LICE has no idea what
-size ImGui is actually rendering at. On a scaled display ImGui reports a
-font size of 12 while drawing considerably larger, so the bitmap comes
-back small and thin and the quad stretches it. Fixing it means finding
-ImGui's real pixel height, which `GetFontSize` does not give.
-
-The code is still there and still correct where the scaling is 1:1. Turn
-the flag on to try it; `C.ROT_UP` picks which way the text reads.
-
 ## A bypassed plugin still answers
 
 `GainReduction_dB` keeps reporting whatever the plugin last measured when
-you bypass it. It stopped processing, not stopped talking. So the meter
-froze at the reduction it happened to be doing at the moment you switched
-it off — a number that is not true of anything.
+you bypass it. It has stopped processing, not stopped talking. Read as
+is, the meter would freeze at the reduction it happened to be doing at
+the moment you switched it off — a number that is not true of anything.
 
 `T.gain_reduction` returns 0 for a disabled FX before asking. The peak
 hold then decays from where it was rather than sticking, because it is
@@ -1893,10 +1442,10 @@ output levels would mean inserting probe FX either side of every metered
 plugin, with PDC compensation, and the reading would still only be a level
 *difference* that makeup gain and wet/dry quietly corrupt.
 
-That's a signal-path problem, and it belongs to Track Analyser, which has
-the probes for it. This window inserts nothing into your chains unless you
-press a button that says so. GR answers "is this compressor working", which
-is a glanceable question; levels answer "is my staging right", which isn't.
+So anything beyond self-reported reduction needs probes: the measured
+gain reduction and input/output meters below use a TS_TrackProbe pair,
+and ChannelView only adds one when you press a button that says so. A
+whole track's signal path is Track Analyser's job.
 
 ### Measured gain reduction
 
@@ -1926,12 +1475,12 @@ probe goes back to first (second behind an ARA plugin) and the post probe
 to last. One dragged into a container comes back out; a pair put together
 inside a container is left there.
 
-Since 2.2.0 the probe (TS_TrackProbe 2.0.0) has **no parameters**: nothing
-of it shows in automation or learn lists, and measuring no longer makes it
-REAPER's *last touched* parameter. ChannelView and Track Analyser talk to it
-through shared memory, and the first probe on a track is the pre, the last
-the post. A project saved with older probes keeps running them until it's
-reopened, and both still work with them.
+The probe has **no parameters**: nothing of it shows in automation or
+learn lists, and measuring never makes it REAPER's *last touched*
+parameter. ChannelView and Track Analyser talk to it through shared
+memory, and the first probe on a track is the pre, the last the post. A
+project saved with probes older than TS_TrackProbe 2.0.0 keeps running
+them until it's reopened, and both work with them.
 
 Nothing is inserted next to the plugin. ChannelView routes a copy of what
 goes in and what comes out on spare channels, from 5/6 up, skipping any
@@ -2011,9 +1560,8 @@ separate modulator plugins in a *Modulators* container (it has one plugin
 of its own, ChannelView Modulators, at the top of the chain), and any
 compatibility with his script — it doesn't read, control or need setups
 made with it; the two are independent. Also left out: his A/B snapshot
-slider, the curve-mapped (MSEG) and 4-in-1-out modulators, modulators
-driving other modulators, the counter, and mapping by touching a plugin's
-parameter.
+slider, the curve-mapped (MSEG) and 4-in-1-out modulators, the counter,
+and mapping by touching a plugin's parameter.
 
 The parameter-mapping idea, the per-plugin layout library and its file
 format were taken from Wormhole Labs' **StripLink** — the concepts and the

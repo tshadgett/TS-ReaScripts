@@ -16,14 +16,14 @@
     3  LINES THIS SCRIPT DID NOT WRITE ARE NOT TOUCHED. Our block is
        fenced with markers and only that is ever removed. If the command
        id turns up OUTSIDE the fence -- added by hand, which is how most
-       people get there first -- we say so and leave it alone rather than
-       editing somebody else's line.
+       people get there first -- the user is told and the line is left
+       alone rather than editing somebody else's line.
 
   The text surgery is separated from the file handling on purpose: the
   three functions that decide what the file should say are pure, take a
   string and return a string, and are the part the tests exercise.
 
-  Ported from Track_Analyser/TA_Panel.lua, which does the same job.
+  Track_Analyser/TA_Panel.lua does the same job.
 --]]
 
 local SEP = package.config:sub(1, 1)

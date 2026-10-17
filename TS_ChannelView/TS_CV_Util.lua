@@ -724,4 +724,94 @@ function U.scale_labels(track, addr, param, kind, marks)
   return out
 end
 
+-- ---------------------------------------------------------------------
+-- JSON, reading only: the web's action list (TS_CV_Drawers) and the
+-- icon set (TS_CV_ActionIcons). nil for anything it can't read.
+-- ---------------------------------------------------------------------
+
+local function skip(s, i)
+  local _, e = s:find("^[ \t\r\n]*", i)
+  return e + 1
+end
+
+local decode_value
+local function decode_string(s, i)
+  local out, j = {}, i + 1
+  while true do
+    local c = s:sub(j, j)
+    if c == "" then return nil, j end
+    if c == '"' then return table.concat(out), j + 1 end
+    if c == "\\" then
+      local n = s:sub(j + 1, j + 1)
+      local map = { b = "\b", f = "\f", n = "\n", r = "\r", t = "\t" }
+      if n == "u" then
+        local cp = tonumber(s:sub(j + 2, j + 5), 16) or 63
+        out[#out + 1] = utf8.char(cp)
+        j = j + 6
+      else
+        out[#out + 1] = map[n] or n
+        j = j + 2
+      end
+    else
+      out[#out + 1] = c
+      j = j + 1
+    end
+  end
+end
+
+decode_value = function(s, i)
+  i = skip(s, i)
+  local c = s:sub(i, i)
+  if c == "{" then
+    local obj = {}
+    i = skip(s, i + 1)
+    if s:sub(i, i) == "}" then return obj, i + 1 end
+    while true do
+      local k
+      k, i = decode_string(s, skip(s, i))
+      if k == nil then return nil, i end
+      i = skip(s, i)
+      if s:sub(i, i) ~= ":" then return nil, i end
+      local v
+      v, i = decode_value(s, i + 1)
+      obj[k] = v
+      i = skip(s, i)
+      local d = s:sub(i, i)
+      if d == "}" then return obj, i + 1 end
+      if d ~= "," then return nil, i end
+      i = i + 1
+    end
+  elseif c == "[" then
+    local arr = {}
+    i = skip(s, i + 1)
+    if s:sub(i, i) == "]" then return arr, i + 1 end
+    while true do
+      local v
+      v, i = decode_value(s, i)
+      arr[#arr + 1] = v
+      i = skip(s, i)
+      local d = s:sub(i, i)
+      if d == "]" then return arr, i + 1 end
+      if d ~= "," then return nil, i end
+      i = i + 1
+    end
+  elseif c == '"' then
+    return decode_string(s, i)
+  elseif s:sub(i, i + 3) == "true" then return true, i + 4
+  elseif s:sub(i, i + 4) == "false" then return false, i + 5
+  elseif s:sub(i, i + 3) == "null" then return nil, i + 4
+  else
+    local num = s:match("^-?%d+%.?%d*[eE]?[-+]?%d*", i)
+    if num and num ~= "" then return tonumber(num), i + #num end
+  end
+  return nil, i + 1
+end
+
+function U.json_decode(s)
+  if type(s) ~= "string" or s == "" then return nil end
+  local ok, v = pcall(decode_value, s, 1)
+  if ok then return v end
+  return nil
+end
+
 return U

@@ -99,6 +99,20 @@ button { font: inherit; color: inherit; }
 .mbtn { height: 42px; min-width: 84px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--border);
   background: var(--panel); flex-shrink: 0; cursor: pointer; position: relative; border-bottom-width: 3px; }
 .mbtn.on { background: var(--accent); color: #fff; }
+/* ChannelView's own icons (TS_CV_ActionIcons.json), drawn in the text colour */
+.ai { display: inline-block; width: 20px; height: 20px; vertical-align: -5px; flex: none; }
+.ai svg { display: block; }
+.mbtn .ai + .t { margin-left: 7px; }
+.mbtn.ico { min-width: 46px; padding: 0 10px; }
+.sheet .opt .ai { margin-right: 10px; }
+.icgrid { display: flex; flex-wrap: wrap; gap: 4px; max-height: 34vh; overflow-y: auto; margin: 6px 0; }
+.icgrid .fam { width: 100%; font-size: 11px; color: var(--dim); margin: 6px 0 2px; }
+.icgrid button { width: 40px; height: 40px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--text); padding: 0; }
+.icgrid button .ai { width: 24px; height: 24px; vertical-align: middle; }
+.icgrid button.cur { background: var(--accent); color: #fff; }
+.icrow { display: flex; align-items: center; gap: 8px; }
+.icrow button { height: 40px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--toff); color: var(--text); cursor: pointer; }
+.icrow .ai { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 5px; padding: 3px; }
 .mbtn .x { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%;
   background: var(--rec); color: #fff; font-size: 13px; line-height: 22px; text-align: center; display: none; }
 #mac.edit .mbtn .x { display: block; }
@@ -579,6 +593,18 @@ button { font: inherit; color: inherit; }
 .sw button { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
 .sw button.cur { border-color: #fff; }
 .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+/* a menu on the Actions bar (made in ChannelView's Organise actions): its
+   button has a caret; its sheet lists its actions, a submenu slides in
+   with Back */
+.mbtn.menu::after { content: ""; display: inline-block; margin-left: 7px; vertical-align: 2px;
+  border: 4px solid transparent; border-top: 5px solid currentColor; border-bottom: 0; opacity: 0.7; }
+.sheet .mhead { display: block; width: 100%; text-align: left; padding: 6px 2px 10px; border: 0; background: transparent;
+  color: var(--text); font-size: 15px; font-weight: 600; }
+.sheet .mhead.back { color: var(--accent); cursor: pointer; }
+.sheet .mlist { max-height: 60vh; overflow-y: auto; }
+.sheet .mlist .opt.sub::after { content: "\25B8"; float: right; color: var(--dim); }
+.sheet .mlist .opt.on { background: var(--accent); color: #fff; }
+.sheet .msep { border-top: 1px solid var(--border); margin: 6px 4px; }
 .acts button { height: 40px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--toff); cursor: pointer; }
 .acts .pri { background: var(--accent); border-color: var(--accent); color: #fff; }
 .res { max-height: 36vh; overflow-y: auto; margin-bottom: 8px; }
@@ -728,7 +754,7 @@ async function poll() {
   busy = true;
   try {
     let q = `GET/EXTSTATE/${NS}/vals;GET/EXTSTATE/${NS}/alive;TRANSPORT;BEATPOS;GET/40364;GET/1068;GET/${MONO_CMD}`;
-    for (const m of macros) if (m.a) q += ";GET/" + encodeURIComponent(m.a);
+    for (const m of flatMacros(macros)) q += ";GET/" + encodeURIComponent(m.a);
     if (Date.now() - seenAt > 1000) {
       seenAt = Date.now(); seenN = (seenN + 1) % 1000;
       q = `SET/EXTSTATE/${NS}/seen/${PAGE_ID}.${seenN};` + q;
@@ -746,6 +772,7 @@ async function poll() {
         while (outbox.length && outbox[0].seq <= vals.A) outbox.shift();
         if (vals.L !== layoutSeq) await fetchLayout();
         if (vals.nv && vals.nv.N !== navSeq) await fetchNav();
+        if (vals.br) gotBars(vals.br);
       }
     }
     render();
@@ -781,7 +808,7 @@ async function loadMacros() {
   buildMacros();
 }
 function saveMacros() {
-  reaper(`SET/EXTSTATEPERSIST/${NS}/macros/` + encodeURIComponent(JSON.stringify(macros))).catch(() => {});
+  reaper(`SET/EXTSTATEPERSIST/${NS}/macros/` + encodeURIComponent(JSON.stringify(macros, (k, v) => k === "el" ? undefined : v))).catch(() => {});
   buildMacros();
 }
 
@@ -883,8 +910,8 @@ function metalCap(g, defs, r, cap, id) {
 const lighten = (hex, t) => { const h = hex.replace("#", "").slice(0, 6);
   return "#" + [0, 2, 4].map(i => { const c = parseInt(h.substr(i, 2), 16);
     return Math.round(c + (255 - c) * t).toString(16).padStart(2, "0"); }).join(""); };
-const STYLE_ALIAS = { api: "nose" };
-const BUTTON_FACES = new Set(["lens", "window", "backlit"]);   // a button's Style (W.button_face)   // Round nose's name for a few days before 1.7.5
+const STYLE_ALIAS = { api: "nose" };   // "api": an older name for Round nose, still read
+const BUTTON_FACES = new Set(["lens", "window", "backlit"]);   // a button's Style (W.button_face)
 let gradN = 0;
 
 function el(tag, attrs, parent) {
@@ -1183,7 +1210,7 @@ const cellW = cw => Math.round(84 * (cw || 50) / 58);
 const SIZES = { small: [2, 1], medium: [2, 2], large: [3, 3] };
 const KNOB_D = { small: 30, medium: KNOB, large: 78 };
 // Where a fader goes, as TS_CV_Panel.fader_kind: "column" (up, full
-// height: splits the sections as faders always have), "band" (across,
+// height: splits the sections), "band" (across,
 // full width: along the foot of its section), "block" (placed among the
 // controls). dr/ln/th from the bridge: direction, length, half-thick.
 function faderKind(c) {
@@ -1622,7 +1649,8 @@ function buildTransport() {
       macroEdit = !macroEdit;
       btns.edit.classList.toggle("on", macroEdit);
       if (macroEdit && !showMacros) btns.macros.click();
-      buildMacros();
+      if (!macroEdit && macroReload) { macroReload = false; loadMacros(); }
+      else buildMacros();
     }, "Edit actions"),
   );
   // full screen: hides the browser's bars and the tablet's status bar. Not
@@ -1650,6 +1678,166 @@ if (window.ResizeObserver) {
   }).observe($("mac"));
 }
 
+// ChannelView's own icons, the same file the desktop draws from: an
+// item's "ic" of "cv:<key>" is drawn as an SVG in the text colour.
+let AICONS = null, AIFAMS = [];
+fetch("TS_CV_ActionIcons.json").then(r => r.json()).then(j => {
+  AICONS = {}; AIFAMS = [];
+  const fams = {};
+  for (const e of j.icons || []) {
+    AICONS[e.k] = e;
+    if (!fams[e.f]) { fams[e.f] = { name: e.f, icons: [] }; AIFAMS.push(fams[e.f]); }
+    fams[e.f].icons.push(e);
+  }
+  buildMacros();
+}).catch(() => {});
+function aiDef(ic) { return (AICONS && typeof ic === "string" && ic.startsWith("cv:")) ? AICONS[ic.slice(3)] : null; }
+function aiEl(ic, px = 20) {
+  const e = aiDef(ic);
+  if (!e) return null;
+  const sw = (1.5 * 24 / px).toFixed(3), da = (3.4 * 24 / 18).toFixed(2) + " " + (3.0 * 24 / 18).toFixed(2);
+  let p = "";
+  for (const d of e.ti || []) p += `<path d="${d}" fill="currentColor" fill-opacity="0.35"/>`;
+  for (const d of e.d || []) p += `<path d="${d}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  for (const d of e.da || []) p += `<path d="${d}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${da}"/>`;
+  for (const d of e.fi || []) p += `<path d="${d}" fill="currentColor" stroke="currentColor" stroke-width="${(sw / 2).toFixed(3)}" stroke-linejoin="round"/>`;
+  const s = h("span", "ai");
+  s.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 24 24">${p}</svg>`;
+  return s;
+}
+// The icon made for an action, by its id ("cv:<key>"), or "".
+function aiMatch(a) {
+  if (!AICONS || !a) return "";
+  for (const k in AICONS) { const e = AICONS[k]; if (e.c === a && !e.s) return "cv:" + k; }
+  return "";
+}
+
+// Toolbar switches (made in ChannelView's organiser): "_TSCV_BAR" opens a
+// list of every bar, "_TSCV_BAR:<id>" puts that bar here. The list comes
+// with the values (vals.br: c = the bar shown here, l = all of them, k =
+// moves when this bar's buttons change, so they're read again).
+let webBars = { c: 0, l: [], k: null }, barsSig = "", macroReload = false;
+function switchOf(m) {
+  if (!m || m.m || m.sp || typeof m.a !== "string") return null;
+  if (m.a === "_TSCV_BAR") return "menu";
+  const r = /^_TSCV_BAR:(\d+)$/.exec(m.a);
+  return r ? +r[1] : null;
+}
+function barName(id) { const b = webBars.l.find(b => b.i === id); return b ? b.n : "Bar " + id; }
+function gotBars(br) {
+  const first = webBars.k === null;
+  const changed = !first && br.k !== webBars.k;
+  const sig = JSON.stringify([br.c, br.l]);
+  webBars = br;
+  if (changed) { if (macroEdit) macroReload = true; else loadMacros(); }
+  else if (sig !== barsSig) buildMacros();
+  barsSig = sig;
+}
+function switchTo(id) { if (id !== webBars.c) send("bar", id); }
+function openBars() {
+  openSheet(sh => {
+    sh.append(h("div", "mhead", "Switch toolbar"));
+    const list = h("div", "mlist");
+    for (const b of webBars.l) {
+      const o = h("button", "opt" + (b.i === webBars.c ? " on" : ""), b.n);
+      const w = h("span", "vn", b.w); w.style.float = "right"; w.style.color = "var(--dim)"; w.style.fontSize = "12px";
+      o.append(w);
+      o.addEventListener("click", () => { switchTo(b.i); closeSheet(); });
+      list.append(o);
+    }
+    if (!webBars.l.length) list.append(h("div", "lbl", "No other bars."));
+    sh.append(list);
+  });
+}
+// What a button says: its label, else a switch's bar, else (with no icon)
+// its action.
+function macroText(m) {
+  if (m.l) return m.l;
+  const sw = switchOf(m);
+  if (sw === "menu") return barName(webBars.c);
+  if (sw !== null) return barName(sw);
+  if (m.m) return "Menu";
+  return aiDef(m.ic) ? "" : (m.a || "");
+}
+
+// Every action on the bar, menus opened out (their toggle states are polled
+// too, so a sheet shows which are on).
+function flatMacros(list, out = []) {
+  for (const m of list || []) {
+    if (m.m) flatMacros(m.i, out);
+    else if (m.a && switchOf(m) === null) out.push(m);
+  }
+  return out;
+}
+
+// A menu's sheet: its actions (tap one to run it), separators, and its own
+// menus, which open in place with Back to return.
+function openMenu(m) {
+  const stack = [m];
+  const draw = sh => {
+    sh.innerHTML = "";
+    const cur = stack[stack.length - 1];
+    const head = h("button", "mhead" + (stack.length > 1 ? " back" : ""),
+      (stack.length > 1 ? "‹ " : "") + (cur.l || "Menu"));
+    if (stack.length > 1) head.addEventListener("click", () => { stack.pop(); draw(sh); });
+    sh.append(head);
+    const list = h("div", "mlist");
+    const items = cur.i || [];
+    if (!items.length) list.append(h("div", "lbl", "Nothing in this menu yet."));
+    for (const it of items) {
+      if (it.sp) { list.append(h("div", "msep")); continue; }
+      if (it.m) {
+        const b = h("button", "opt sub", it.l || "Menu");
+        b.addEventListener("click", () => { stack.push(it); draw(sh); });
+        list.append(b);
+        continue;
+      }
+      const sw = switchOf(it);
+      const lit = sw !== null ? (sw === webBars.c) : macroStates[it.a] === 1;
+      const b = h("button", "opt" + (lit ? " on" : ""));
+      const ic = aiEl(it.ic, 20);
+      if (ic) b.append(ic);
+      b.append(document.createTextNode(macroText(it) || it.a));
+      if (it.c) b.style.boxShadow = `inset 3px 0 0 ${it.c}`;
+      b.addEventListener("click", () => {
+        if (sw === "menu") { openBars(); return; }
+        if (sw !== null) switchTo(sw); else run(it.a);
+        closeSheet();
+      });
+      list.append(b);
+    }
+    sh.append(list);
+  };
+  openSheet(draw);
+}
+
+// A menu while editing: its name, colour and place. What's in it is
+// arranged in ChannelView (Action drawers ▸ Organise actions).
+function editMenu(i) {
+  const m = macros[i];
+  const col = { c: m.c || "" };
+  openSheet(sh => {
+    sh.append(h("h3", null, "Menu"));
+    const lab = h("input", "fld"); lab.placeholder = "Label"; lab.value = m.l || "";
+    const sw = h("div", "sw");
+    const paint = () => [...sw.children].forEach((b, k) => b.classList.toggle("cur", CAPS[k] === col.c));
+    CAPS.forEach(c => { const b = h("button"); b.style.background = c;
+      b.addEventListener("click", () => { col.c = (col.c === c) ? "" : c; paint(); }); sw.append(b); });
+    paint();
+    const acts = h("div", "acts");
+    const left = h("button", null, "◀"), right = h("button", null, "▶");
+    const rm = h("button", null, "Remove"), ok = h("button", "pri", "Save");
+    left.addEventListener("click", () => { if (i > 0) { [macros[i - 1], macros[i]] = [macros[i], macros[i - 1]]; i--; saveMacros(); } });
+    right.addEventListener("click", () => { if (i < macros.length - 1) { [macros[i + 1], macros[i]] = [macros[i], macros[i + 1]]; i++; saveMacros(); } });
+    rm.addEventListener("click", () => { macros.splice(i, 1); saveMacros(); closeSheet(); });
+    ok.addEventListener("click", () => { m.l = lab.value.trim(); m.c = col.c; saveMacros(); closeSheet(); });
+    lab.addEventListener("keydown", e => { if (e.key === "Enter") ok.click(); });
+    acts.append(left, right, rm, ok);
+    sh.append(lab, h("div", "lbl", "Colour"), sw,
+      h("div", "note", `${(m.i || []).length} inside. Its actions are arranged in ChannelView: Action drawers ▸ Organise actions.`), acts);
+  });
+}
+
 function buildMacros() {
   const bar = $("mac");
   bar.innerHTML = "";
@@ -1670,7 +1858,11 @@ function buildMacros() {
       bar.append(g);
       return;
     }
-    const b = h("button", "mbtn", m.l || m.a);
+    const sw = switchOf(m);
+    const ic = aiEl(m.ic, 20), text = macroText(m);
+    const b = h("button", "mbtn" + ((m.m || sw === "menu") ? " menu" : "") + (ic && !text ? " ico" : ""));
+    if (ic) b.append(ic);
+    if (text || !ic) b.append(h("span", "t", text));
     b.style.borderBottomColor = m.c || "var(--border)";
     const x = h("span", "x", "×");
     b.append(x);
@@ -1679,8 +1871,12 @@ function buildMacros() {
       if (macroEdit) {
         if (Date.now() - macroDragAt < 350) return;     // the end of a drag, not a tap
         if (e.target === x) { macros.splice(i, 1); saveMacros(); }
+        else if (m.m) editMenu(i);
         else editMacro(i);
-      } else run(m.a);
+      } else if (m.m) openMenu(m);
+      else if (sw === "menu") openBars();
+      else if (sw !== null) switchTo(sw);
+      else run(m.a);
     });
     m.el = b;
     bar.append(b);
@@ -1692,7 +1888,7 @@ function buildMacros() {
 
 // Dragging a macro (or spacer) along the bar while editing. A press that
 // moves more than a few pixels is a drag; one that doesn't is a tap, and
-// opens the item as before. The bar wraps, so the drop point is found row
+// opens the item. The bar wraps, so the drop point is found row
 // by row: the row under the finger, then the gap between the two items
 // either side of it, marked with an accent bar.
 let macroDragAt = 0;
@@ -1777,6 +1973,7 @@ $("scrim").addEventListener("click", e => { if (e.target === $("scrim")) closeSh
 let findSeq = 0, findTimer = null;
 function editMacro(i) {
   const m = i >= 0 ? Object.assign({}, macros[i]) : { l: "", a: "", c: "" };
+  m.ic = m.ic || "";
   openSheet(sh => {
     sh.append(h("h3", null, i >= 0 ? "Edit action" : "New action"));
     const lab = h("input", "fld"); lab.placeholder = "Label"; lab.value = m.l || "";
@@ -1791,9 +1988,44 @@ function editMacro(i) {
       m.a = act.value.trim();
       clearTimeout(findTimer);
       findTimer = setTimeout(() => searchActions(act.value, res, (id, name) => {
+        const had = aiMatch(m.a);
         m.a = id; act.value = id; if (!lab.value) lab.value = shortName(name); res.innerHTML = "";
+        // the icon made for it, unless one was chosen
+        if (!m.ic || m.ic === had) { m.ic = aiMatch(id) || m.ic; paintIcon(); }
       }), 250);
     });
+    // the icon: ChannelView's own, picked from a grid (filter by name)
+    const icrow = h("div", "icrow"), icNow = h("span"), icFlt = h("input", "fld"), icNone = h("button", null, "None");
+    icFlt.placeholder = "Find an icon"; icFlt.style.flex = "1"; icFlt.style.margin = "0";
+    const grid = h("div", "icgrid");
+    const paintIcon = () => {
+      icNow.innerHTML = "";
+      const e = aiEl(m.ic, 26); icNow.append(e || h("span", "ai"));
+      [...grid.querySelectorAll("button")].forEach(b => b.classList.toggle("cur", b.dataset.k === m.ic));
+    };
+    const fillGrid = () => {
+      grid.innerHTML = "";
+      const q = icFlt.value.trim().toLowerCase();
+      if (!q) { grid.style.display = "none"; return; }
+      grid.style.display = "flex";
+      for (const f of AIFAMS) {
+        const hit = f.name.toLowerCase().includes(q);
+        const icons = f.icons.filter(e => hit || e.n.toLowerCase().includes(q) || e.k.includes(q));
+        if (!icons.length) continue;
+        grid.append(h("div", "fam", f.name));
+        for (const e of icons) {
+          const b = h("button"); b.dataset.k = "cv:" + e.k; b.title = e.n;
+          b.append(aiEl("cv:" + e.k, 24));
+          b.addEventListener("click", () => { m.ic = "cv:" + e.k; paintIcon(); });
+          grid.append(b);
+        }
+      }
+      paintIcon();
+    };
+    icFlt.addEventListener("input", fillGrid);
+    icNone.addEventListener("click", () => { m.ic = ""; paintIcon(); });
+    icrow.append(icNow, icFlt, icNone);
+    paintIcon(); fillGrid();
     const acts = h("div", "acts");
     const cancel = h("button", null, "Cancel"); cancel.addEventListener("click", closeSheet);
     const left = h("button", null, "◀"); const right = h("button", null, "▶");
@@ -1804,6 +2036,7 @@ function editMacro(i) {
       m.l = lab.value.trim(); m.a = act.value.trim();
       if (!m.a) return;
       const clean = { l: m.l, a: m.a, c: m.c };
+      if (m.ic) clean.ic = m.ic;
       if (i >= 0) macros[i] = clean; else macros.push(clean);
       saveMacros(); closeSheet();
     });
@@ -1817,7 +2050,7 @@ function editMacro(i) {
     acts.append(cancel, ok);
     // Enter in either box saves, as the button does
     for (const f of [lab, act]) f.addEventListener("keydown", e => { if (e.key === "Enter") ok.click(); });
-    sh.append(lab, act, res, h("div", "lbl", "Colour"), sw, acts);
+    sh.append(lab, act, res, h("div", "lbl", "Icon"), icrow, grid, h("div", "lbl", "Colour"), sw, acts);
     setTimeout(() => lab.focus(), 50);
   });
 }
@@ -1898,7 +2131,7 @@ function grainFills(svg, bg) {
 // grains show far more.
 const flakeCache = {};
 // The flake's strength, and the 3D effect's shadows': the desktop's
-// C.METAL_K, the one Tim settled on.
+// C.METAL_K.
 const METAL_K = 0.8;
 // { url, css }: the tile as an image, and as a CSS background layer
 function flakeTile(light) {
@@ -2901,7 +3134,7 @@ function modDot(svg, st, cap) {
 }
 
 // ---------------------------------------------------------------------------
-// macros and modulators (TS_CV_Mod, ChannelView 2.0) -- set up on the
+// macros and modulators (TS_CV_Mod) -- set up on the
 // desktop; here they're played, and a modulator's settings turned
 // ---------------------------------------------------------------------------
 // A link's ring round a knob (TS_CV_Widgets.mod_ring): the span in the
@@ -7265,7 +7498,11 @@ function renderTransport() {
 }
 
 function renderMacros() {
-  for (const m of macros) if (m.el) m.el.classList.toggle("on", macroStates[m.a] === 1 && !macroEdit);
+  for (const m of macros) if (m.el) {
+    const sw = switchOf(m);
+    const lit = (sw !== null && sw !== "menu") ? sw === webBars.c : macroStates[m.a] === 1;
+    m.el.classList.toggle("on", lit && !macroEdit);
+  }
 }
 
 function renderStatus() {

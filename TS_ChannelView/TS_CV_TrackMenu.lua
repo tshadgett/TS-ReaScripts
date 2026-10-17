@@ -501,10 +501,6 @@ local function insert_menu(ctx)
 end
 
 -- ---------------------------------------------------------------------
-
--- Draws whichever track popup is open. Call once per frame from the main
--- window, outside any child. Returns true on a frame something changed.
--- ---------------------------------------------------------------------
 -- icon
 -- ---------------------------------------------------------------------
 
@@ -622,6 +618,8 @@ local function icon_picker(ctx)
   return changed
 end
 
+-- Draws whichever track popup is open. Call once per frame from the main
+-- window, outside any child. Returns true on a frame something changed.
 function TM.draw(ctx)
   local changed = false
   if context_menu(ctx)  then changed = true end

@@ -2,11 +2,9 @@
 -- @title TS_Visualizer
 -- @description TS_Visualizer
 -- @author Tim Shadgett (with Claude) -- fork of JKK_Visualizer by Junki Kim
--- @version 2.2.0
+-- @version 2.2.1
 -- @changelog
---  Works with TS_TrackProbe 2.0.0 (no parameters) as well as older probes;
---  a track's pair is included from ChannelView's Probes button. Shorter
---  settings descriptions in the Editor.
+--  Tidier code comments and README. Nothing changes in use.
 -- @license MIT
 -- @provides
 --     [main] TS_Visualizer_Editor.lua
@@ -37,18 +35,15 @@ local function load_layout_settings()
     -- those locals aren't in scope yet this early in the file). Without
     -- this, a session where this script is the only thing that ever runs
     -- (e.g. launched via Run at REAPER Startup, Settings never opened)
-    -- left every one of these at gmem's cold-start 0 -- and
+    -- leaves every one of these at gmem's cold-start 0 -- and
     -- build_palette() only ever touches a swatch whose Follow flag is
-    -- non-zero, so every themed colour just stayed at whatever raw value
-    -- had last been saved, including grid's old, pre-fix alpha. The
-    -- render loop's own init_default_colors() looks like it should have
-    -- covered this, but it's gated behind "nothing saved for bg alpha
-    -- yet", which stops being true forever the first time any colour is
-    -- ever saved -- so in practice it never ran again once a palette
-    -- existed. Loading these here, unconditionally, the same place this
-    -- file already proves out doing exactly this for layout, closes that
-    -- gap: opening Settings "fixing" it was only ever a side effect of
-    -- the Editor's own LoadAllSettings() reaching these same keys.
+    -- non-zero, so every themed colour just stays at whatever raw value
+    -- was last saved. The render loop's own init_default_colors() looks
+    -- like it should cover this, but it's gated behind "nothing saved for
+    -- bg alpha yet", which stops being true forever the first time any
+    -- colour is ever saved -- so in practice it never runs again once a
+    -- palette exists. So these are loaded here, unconditionally, the
+    -- same way as the layout settings above.
     local saved_hue = tonumber(reaper.GetExtState("TS_Visualizer", "BaseHue"))
     reaper.gmem_write(1470, saved_hue or 219)
     local saved_tint = tonumber(reaper.GetExtState("TS_Visualizer", "Tint"))
@@ -70,12 +65,11 @@ local function load_layout_settings()
     -- alpha is still 0, and by the time the first frame can even check
     -- that, Initialize_System() has already set it non-zero building the
     -- hue-driven roles (bg included, almost always on) -- so that gate
-    -- is shut before it's ever read. Same bug class as Base Hue/Tint
-    -- above, one layer further in: any role flagged "don't follow the
-    -- hue" read gmem's cold-start 0,0,0,0 (fully transparent) until
-    -- Settings was opened and its own unconditional MEM_* load fixed it
-    -- as a side effect. Loading the same range here, unconditionally,
-    -- closes that gap too.
+    -- is shut before it's ever read. Same problem as Base Hue/Tint
+    -- above, one layer further in: without this, any role flagged "don't
+    -- follow the hue" reads gmem's cold-start 0,0,0,0 (fully transparent)
+    -- until Settings is opened and its own unconditional MEM_* load fills
+    -- it in. Loading the same range here, unconditionally, avoids that.
     for i = 1000, 1100 do
         local saved_val = tonumber(reaper.GetExtState("TS_Visualizer", "MEM_"..i))
         if saved_val then reaper.gmem_write(i, saved_val) end
@@ -288,8 +282,8 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         local true_zero_limit = 1.0 
         local visual_limit = guide_size / (2 * dot_size)
 
-        -- line_a is opaque now (matching TrackAnalyser's own grid role --
-        -- see the ROLE_PALETTE note above), so this "boosted" 1.5x guide
+        -- line_a is opaque (matching TrackAnalyser's own grid role -- see
+        -- the ROLE_PALETTE note further down), so this "boosted" 1.5x guide
         -- crosshair would otherwise ask gfx.set for an alpha above 1;
         -- clamped rather than assuming gfx quietly does that itself.
         gfx.set(line_r, line_g, line_b, math.min(1.0, line_a * 3 / 2))
@@ -637,33 +631,32 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
     --
     -- FED BY TS_TrackProbe ITSELF. TS_TrackProbe (Track Analyser's plugin,
     -- baked into every track template) normally publishes to one of three
-    -- FIXED gmem addresses, chosen by its Position slider -- built for one
-    -- track (plus one comparison track) at a time, which can't show
-    -- several tracks at once. Its "Include in Visualizer Spectrum"
-    -- checkbox is a second, independent path: once ticked, this script can
-    -- also hand that instance a SLOT (0..15) via its vis_slot parameter,
-    -- and it publishes its already-computed log-band spectrum there
-    -- instead of (or as well as) its fixed role address, so any number of
-    -- tracks can be live at once. See TS_TrackProbe.jsfx's own header
-    -- comment for the full reasoning.
+    -- FIXED gmem addresses, chosen by its role -- built for one track
+    -- (plus one comparison track) at a time, which can't show several
+    -- tracks at once. So this script can also hand a probe a SLOT
+    -- (0..15), and it publishes its already-computed log-band spectrum
+    -- there instead of (or as well as) its fixed role address, so any
+    -- number of tracks can be live at once. See TS_TrackProbe.jsfx's own
+    -- header comment for the full reasoning.
     --
-    -- SINCE TS_TrackProbe 2.0.0 the probe has no parameters at all (each
-    -- was a REAPER parameter, so in every automation and learn list, and
-    -- every write made one REAPER's "last touched"). Which of a track's
-    -- pair is in the Visualizer is kept on the track instead
-    -- (P_EXT:TS_TrackProbe_vis, "pre" or "post", set from ChannelView),
-    -- and the slot goes into the track's PROBE BLOCK in TS_TA_Mem --
-    -- 0x100000 + (track index + 1) * 128: [0]/[1] the pre and post
-    -- probes' places in the chain + 1 (the first and the last probe on
-    -- the track: how the probe knows which it is), [5]/[6] the slot + 1
-    -- for the pre / post. A probe still running from before an update
-    -- (more than REAPER's own 3 parameters) is driven the old way.
+    -- The probe has no parameters at all (a parameter is in every
+    -- automation and learn list, and every write makes it REAPER's "last
+    -- touched"). Which of a track's pair is in the Visualizer is kept on
+    -- the track (P_EXT:TS_TrackProbe_vis, "pre" or "post", set from
+    -- ChannelView), and the slot goes into the track's PROBE BLOCK in
+    -- TS_TA_Mem, at 0x100000 + (track index + 1) * 128:
     --
-    -- An earlier version of this used a dedicated companion plugin,
-    -- TS_SpectrumProbe.jsfx, before TS_TrackProbe grew its own checkbox --
-    -- retired once every track already carrying TS_TrackProbe (which is to
-    -- say, nearly every track) no longer needed a second plugin just to
-    -- become selectable here.
+    --   [0] / [1]   the pre and post probes' places in the chain + 1
+    --               (the first and the last probe on the track: how the
+    --               probe knows which it is)
+    --   [5] / [6]   the slot + 1, for the pre / post
+    --
+    -- An older probe still running from before an update (more than
+    -- REAPER's own 3 parameters) is driven the old way, by its
+    -- parameters: its Position slider picks the fixed address, its
+    -- "Include in Visualizer Spectrum" checkbox opts the track in, and
+    -- its vis_slot parameter takes the slot (see find_probe_fx and
+    -- arm_probe below).
     ----------------------------------------------------------
 
     local TA_NAMESPACE = "TS_TA_Mem"      -- shared with TS_TrackProbe
@@ -690,8 +683,8 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         return a, b, c
     end
 
-    -- A track becomes watchable by ticking TS_TrackProbe's own "Include in
-    -- Visualizer Spectrum" checkbox. That checkbox is the opt-in; without
+    -- On an older probe, a track becomes watchable by ticking its own
+    -- "Include in Visualizer Spectrum" checkbox. That's the opt-in; without
     -- it every track in the project would qualify, since the plugin is
     -- everywhere. See TS_TrackProbe.jsfx's own note on vis_include/
     -- vis_slot for the full design -- param indices below are slider4 and
@@ -778,23 +771,20 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         if e.blk then PB.gw(e.blk + ((e.which == "pre") and 5 or 6), 0) end
     end
 
-    -- The track picker itself lives in the Spectrum panel now (a strip of
+    -- The track picker itself lives in the Spectrum panel (a strip of
     -- swatches down its right edge -- see draw_track_swatches, called from
-    -- draw_spectrum); it used to be a checkbox list in the Editor, then a
-    -- whole-window sidebar. Wherever it lives, this file only ever needed
-    -- the current selection, resolved below -- the Editor never shared
-    -- Lua state with this script, only gmem and ExtState, so moving the
-    -- picker changed nothing here.
+    -- draw_spectrum). This file only needs the current selection: the
+    -- project ExtState CSV read in poll_folder_overlay().
 
     -- armed: guid -> { track, fx_idx, slot, r, g, b }. Project-scoped (a
     -- track GUID only means anything inside one project), so the WANTED
     -- side of this lives in project ExtState, not the user-global
-    -- SECTION everything else in this file uses. The key is still called
-    -- "FolderOverlayGUIDs" and the table "folder_overlay" -- this started
-    -- folder-only and is now any track, but renaming every reference
-    -- project-wide (including the saved ExtState key, which would orphan
-    -- anyone's existing selection) wasn't worth doing in the same pass as
-    -- actually generalising the behaviour.
+    -- SECTION everything else in this file uses. The key is called
+    -- "FolderOverlayGUIDs" and the table "folder_overlay": they are
+    -- named for folders, though any track can be picked. The names
+    -- stay as they are because renaming the saved ExtState key would
+    -- orphan anyone's existing selection, and the table name matches
+    -- the key.
     folder_overlay = { armed = {} }
 
     -- How far above the panel's own floor (in normalised 0..1 units, same
@@ -804,8 +794,8 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
     -- colour there. This is NOT a comparison against the master's own
     -- level -- a single folder is routinely far quieter than the summed
     -- master even when it's clearly the dominant contributor at that
-    -- frequency, so gating on that basis meant the peak line almost never
-    -- recoloured. This only exists to stop two silent folders (both
+    -- frequency, so gating on that basis would leave the peak line almost
+    -- never recoloured. This only exists to stop two silent folders (both
     -- sitting at the floor) from "winning" against each other on
     -- floating-point noise.
     FOLDER_DOMINANT_MIN_T = 0.03
@@ -917,7 +907,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
                     -- master Spectrum trace's own FFT size, not 2048 --
                     -- the finer the native bin resolution, the less often
                     -- a 256-band split ends up narrower than a bin at the
-                    -- low end, which is where peaks were reading soft.
+                    -- low end, which is where peaks read soft.
                     if reaper.gmem_read(TA_CTRL_FFT) ~= 4096 then
                         reaper.gmem_write(TA_CTRL_FFT, 4096)
                     end
@@ -1064,7 +1054,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
             local t = t_raw -- linear dB-to-pixel mapping (no power curve)
 
             -- Light smoothing across neighboring bins (frequency axis), on
-            -- top of the existing per-bin time-domain smoothing, to soften
+            -- top of the per-bin time-domain smoothing, to soften
             -- bin-to-bin jaggedness a touch.
             if vis_t_smooth then
                 vis_t_smooth = vis_t_smooth + (t - vis_t_smooth) * 0.6
@@ -1082,7 +1072,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
             local x_norm = math.log(k) / k_max_log
             local dx = x + (x_norm * w)
             
-            -- Nothing is drawn in here any more; the shape is collected
+            -- Nothing is drawn in here; the shape is collected
             -- and rasterised by pixel column below. See the note there.
             np = np + 1
             pts_x[np] = dx ; pts_t[np] = t ; pts_p[np] = pt
@@ -1099,22 +1089,21 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         ------------------------------------------------------------------
         -- FILL BY PIXEL COLUMN, NOT BY ANALYSIS STEP
         --
-        -- The fill used to be one alpha-blended quad per step. Two adjacent
-        -- quads overlap along their shared edge by a fraction of a pixel,
-        -- and that sliver gets blended twice -- so every seam drew a
-        -- brighter vertical line. Above a couple of hundred hertz the steps
-        -- are narrower than a pixel and the seams smear into one another;
-        -- below it they are several pixels apart, which is exactly where
-        -- the striping showed.
+        -- Not one alpha-blended quad per step: two adjacent quads overlap
+        -- along their shared edge by a fraction of a pixel, and that sliver
+        -- gets blended twice -- so every seam draws a brighter vertical
+        -- line. Above a couple of hundred hertz the steps are narrower than
+        -- a pixel and the seams smear into one another; below it they are
+        -- several pixels apart, which is exactly where the striping would
+        -- show.
         --
         -- One vertical line per column, anti-aliasing off, cannot overlap
         -- itself, so the artefact cannot happen. Columns between two steps
         -- are interpolated, so the low end stays continuous rather than
         -- turning into a picket fence the other way.
         ------------------------------------------------------------------
-        -- Read every armed folder's bands once per frame (not once per
-        -- pixel, and not a second time down in the curve-overlay block
-        -- below -- both uses share this same table now).
+        -- Read every armed folder's bands once per frame, not once per
+        -- pixel.
         local folder_groups = next(folder_overlay.armed) and read_folder_overlay_bands() or nil
 
         if np > 1 then
@@ -1141,15 +1130,15 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
                 -- summed into the master, so on a real mix it is routinely
                 -- 10-20dB or more under the master even when it's clearly
                 -- the dominant contributor at that frequency; gating
-                -- against the master's own level (an earlier version of
-                -- this did) meant the gate almost never opened. The only
-                -- gate that still matters is FOLDER_DOMINANT_MIN_T: the
-                -- winning folder has to be above the noise floor by a
-                -- small margin, or two folders both sitting at -180dB
-                -- would "win" on floating-point noise alone. Used below to
-                -- override the "Strong (Peak)" fill-gradient stop, not the
-                -- separate "Spec Freq Line" peak-hold stroke, which stays
-                -- its own plain colour regardless.
+                -- against the master's own level would leave the gate
+                -- almost never open. The only gate is
+                -- FOLDER_DOMINANT_MIN_T: the winning folder has to be
+                -- above the noise floor by a small margin, or two folders
+                -- both sitting at -180dB would "win" on floating-point
+                -- noise alone. Used below to override the "Strong (Peak)"
+                -- fill-gradient stop, not the separate "Spec Freq Line"
+                -- peak-hold stroke, which stays its own plain colour
+                -- regardless.
                 local dom_r, dom_g, dom_b = nil, nil, nil
                 if folder_groups then
                     local x_norm_px = (px - x) / w
@@ -1230,16 +1219,6 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
             end
         end
 
-        -- The separate per-folder "baseline" curve (each armed folder's
-        -- own absolute-level trace, drawn low against the panel since a
-        -- single folder is routinely far quieter than the summed master)
-        -- used to be drawn here. Removed now that the "Strong (Peak)"
-        -- fill-gradient override above does the actual job -- showing
-        -- which folder owns a peak by colouring the peak itself, not by a
-        -- second, separately-scaled curve that needed reading alongside
-        -- the master trace. folder_groups is still fetched above and
-        -- still drives that override; only this extra curve is gone.
-
         gfx.set(line_r, line_g, line_b, line_a)
         local freqs = {100, 1000, 10000}
         local labels = {"100", "1k", "10k"}
@@ -1264,7 +1243,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
             local hz = k_val * srate / fft_size
 
             -- Slope Guide Line (pivots through the cursor position). Traced
-            -- per pixel through the same (now linear) dB-to-pixel mapping
+            -- per pixel through the same (linear) dB-to-pixel mapping
             -- the spectrum itself uses, so a constant dB/octave slope comes
             -- out as a true straight line. Net slope is (guide - tilt): the
             -- guide represents a slope value in the material's own terms,
@@ -1552,7 +1531,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
     }
 
     -- Genre PSR target bands (center +/- tolerance), pulled directly from
-    -- true:level's own reference zones - same PSR metric family we compute.
+    -- true:level's own reference zones - same PSR metric family computed here.
     -- Bands widened ~0.5dB on each side beyond the raw true:level +/- tolerance,
     -- for a bit more visual breathing room.
     local GENRE_TARGETS = {
@@ -1742,11 +1721,11 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
 
     local SECTION = "TS_Visualizer"
     -- The shared palette. Hue and tint belong to the TS_ family rather
-    -- than to any one tool, so they live in their own section; the old
-    -- ChannelView-only location is still read when the new one is empty,
-    -- so an existing setting survives. The Sync flag still decides
-    -- whether Visualizer follows it at all -- this is only about WHERE
-    -- the setting lives, not whether Visualizer is allowed to ignore it.
+    -- than to any one tool, so they live in their own section; the older
+    -- ChannelView-only location is also read when this one is empty, so
+    -- an existing setting survives. The Sync flag decides whether
+    -- Visualizer follows it at all -- this is only about WHERE the
+    -- setting lives, not whether Visualizer is allowed to ignore it.
     local PAL_SECTION = "TS_Palette"
     local CV_SECTION = "TS_ChannelView"
     local function pal_read(k)
@@ -1775,25 +1754,21 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
     -- Editor - the same per-colour auto-follow idea as TrackAnalyser.
     -- build_palette() only ever touches a swatch whose flag is on.
     --
-    -- The offset/saturation/lightness below reproduce TS_Visualizer's own
-    -- previous default colours at Hue 219 / Tint 1.0 (and for bg, text,
-    -- zero, mid, peak and frez, they exactly match the equivalent role
-    -- already proven in TS_TrackAnalyser's own palette), so nothing looks
-    -- different at the defaults. "grid" had accidentally been given the
-    -- exact same colour as "text" (just less opaque) instead of its own
-    -- role, so this gives it TrackAnalyser's real, distinct hue/sat/lum --
-    -- but TrackAnalyser's grid role is always fully opaque (its own
-    -- buildPalette() bakes every UI-role swatch, grid included, at alpha
-    -- 0xff and gets its subtlety purely from a low lightness against the
-    -- dark background, never from transparency); alpha 0.20 survived here
-    -- from the "text, just less opaque" original, and against this dark a
-    -- background that is faint enough to read as invisible -- worse, grid
-    -- lines aren't the only thing drawn in this colour: every module
-    -- title and axis label (Gonio/Symbiote/Scope/Spectrum/Spectrogram/
-    -- Dynamics, the Gonio "-1"/"+1", the Spectrum's "100/1k/10k") is drawn
-    -- with gfx.set(line_r, line_g, line_b, line_a) too, so the same faint
-    -- alpha was quietly taking the grid's own text down with it. Matching
-    -- TrackAnalyser's opaque grid fixes both at once.
+    -- At Hue 219 / Tint 1.0 the offsets, saturation and lightness below
+    -- give TS_Visualizer's default colours, so nothing looks different
+    -- at the defaults. For bg, text, zero, mid, peak and frez they match
+    -- the equivalent role in TS_TrackAnalyser's own palette exactly.
+    --
+    -- "grid" has its own hue/sat/lum, distinct from "text", taken from
+    -- TrackAnalyser, and like TrackAnalyser's grid role it is fully
+    -- opaque: its subtlety comes purely from a low lightness against the
+    -- dark background. A low alpha against a background this dark reads
+    -- as invisible, and grid lines aren't the only thing drawn in this
+    -- colour: every module title and axis label
+    -- (Gonio/Symbiote/Scope/Spectrum/Spectrogram/Dynamics, the Gonio
+    -- "-1"/"+1", the Spectrum's "100/1k/10k") is drawn with
+    -- gfx.set(line_r, line_g, line_b, line_a) too, so a faint alpha
+    -- would take that text down with it.
     ----------------------------------------------------------
     local ROLE_NAMES = { "bg", "grid", "text", "zero", "mid", "peak", "frez" }
     local ROLE_PALETTE = {
@@ -2030,11 +2005,11 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
             reaper.gmem_write(MEM_TINT, 1.0)
         end
 
-        -- Sync with the shared palette defaults ON (that's what was asked
-        -- for), and - same class of bug as Base Hue/Tint just above - has
-        -- to be loaded here too, not just in the Editor's LoadAllSettings,
-        -- or a plain restart without the Editor open would silently drop
-        -- back to manual/off.
+        -- Sync with the shared palette defaults ON. Like Base Hue/Tint
+        -- just above, it has to be loaded here too, not just in the
+        -- Editor's LoadAllSettings, or a plain restart without the
+        -- Editor open would drop back to manual/off instead of
+        -- following the shared palette.
         if reaper.HasExtState(SECTION, "SyncChannelView") then
             reaper.gmem_write(MEM_SYNC_CV, tonumber(reaper.GetExtState(SECTION, "SyncChannelView")))
         else
@@ -2063,10 +2038,10 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
             for i=1, 7 do reaper.gmem_write(1150 + i, 1) end
         end
 
-        -- Slope Guide / Spectrum Tilt: same class of bug as Pair Gonio +
-        -- Symbiote above - the Editor only writes these into gmem while it's
-        -- open, so a plain project/REAPER restart (with only this display
-        -- script running) silently dropped them back to "Off".
+        -- Slope Guide / Spectrum Tilt: the Editor only writes these into
+        -- gmem while it's open, so they're loaded here too, or a plain
+        -- project/REAPER restart (with only this display script running)
+        -- would drop them back to "Off".
         if reaper.HasExtState(SECTION, "SpectrumSlope") then
             reaper.gmem_write(1400, tonumber(reaper.GetExtState(SECTION, "SpectrumSlope")))
         end
@@ -2113,9 +2088,9 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         -- Derived from this script's own path rather than spelled out
         -- under GetResourcePath(), so renaming or moving the folder
         -- doesn't leave the gear icon pointing at a file that no longer
-        -- exists. (This is exactly what broke it: the Editor was renamed
-        -- to TS_Visualizer_Editor.lua and this path wasn't updated to
-        -- match, so AddRemoveReaScript silently failed to find it.)
+        -- exists. AddRemoveReaScript fails silently on a path that
+        -- doesn't exist, so the file name here has to match the
+        -- Editor's.
         local here = debug.getinfo(1, "S").source:match("@?(.*[\\/])") or ""
         local editor_path = here .. "TS_Visualizer_Editor.lua"
         local cmd_id = reaper.AddRemoveReaScript(true, 0, editor_path, true)
@@ -2126,26 +2101,23 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
 
     ----------------------------------------------------------
     -- Track swatches -- picking which tracks feed the Spectrum panel's
-    -- dominant-colour overlay used to mean opening the Editor, then (for
-    -- one session) a strip down the right edge of the whole window. It
-    -- draws inside the Spectrum panel itself now, since that is the only
-    -- place this selection actually does anything: a strip of colour
-    -- swatches on the panel's own right edge, one per eligible track (any
-    -- TS_TrackProbe with "Include in Visualizer Spectrum" ticked -- see
-    -- find_probe_fx above), the stack centred vertically in the panel's
-    -- height rather than pinned to its top. Click a swatch to toggle it
-    -- in or out. Selection itself is unchanged: the same project ExtState
-    -- CSV poll_folder_overlay already reads.
+    -- dominant-colour overlay. Drawn inside the Spectrum panel itself,
+    -- since that is the only place this selection actually does
+    -- anything: a strip of colour swatches on the panel's own right
+    -- edge, one per eligible track (any track whose probe is opted in --
+    -- see find_probe_fx above), the stack centred vertically in the
+    -- panel's height rather than pinned to its top. Click a swatch to
+    -- toggle it in or out. The selection is the same project ExtState
+    -- CSV poll_folder_overlay reads.
     --
     -- Each track's name is drawn beside its own swatch full-time, not as
     -- a hover-only tooltip: with one swatch per eligible track this reads
-    -- as a small legend rather than clutter, and it was the simpler fix
-    -- for a real problem the tooltip version had -- the Spectrum panel's
+    -- as a small legend rather than clutter, and the Spectrum panel's
     -- own cursor-following frequency tooltip lands in roughly the same
     -- spot while hovering the strip (it flips to the left of the cursor
     -- whenever it would run off the window's right edge, which is exactly
-    -- what happens here), and would cover a tooltip but not a label that's
-    -- already sitting there before the cursor arrives.
+    -- what happens here): it would cover a hover tooltip, but not a label
+    -- that's already there before the cursor arrives.
     ----------------------------------------------------------
     local SWATCH_STRIP_W = 20
     local SWATCH_SIZE = 14
@@ -2226,7 +2198,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         gfx.setfont(1, "Arial", 13 * g_font_scale)
 
         for _, t in ipairs(swatch_tracks) do
-            if yy + SWATCH_SIZE > y + h - 4 then break end -- out of room; simplest overflow for now
+            if yy + SWATCH_SIZE > y + h - 4 then break end -- out of room: the rest aren't drawn
             local qx = sx + math.floor((SWATCH_STRIP_W - SWATCH_SIZE) / 2)
             local qy = yy
             local hovered = gfx.mouse_x >= qx and gfx.mouse_x <= qx + SWATCH_SIZE and
@@ -2465,10 +2437,10 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
         -- panel's own background, LUFS's) paint a solid rect starting
         -- right at their own edge -- which is exactly where a divider
         -- drawn inline, before that content, would sit, so that content
-        -- was silently painting over its own top/left divider every
-        -- frame. Collecting the lines here and drawing them all after
-        -- the loop guarantees they're the topmost thing on screen
-        -- regardless of what any one module fills.
+        -- would paint over its own top/left divider every frame.
+        -- Collecting the lines here and drawing them all after the loop
+        -- guarantees they're the topmost thing on screen regardless of
+        -- what any one module fills.
         local pending_dividers = {}
 
         for gi = 1, group_count do
@@ -2536,7 +2508,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
                 end
             end
 
-            -- A single-module group draws full-rect as before; a paired
+            -- A single-module group draws full-rect; a paired
             -- group splits its rect side by side (50/50).
             local sub_rects
             if #group_ids == 1 then
@@ -2602,7 +2574,7 @@ local ui_order = {1, 2, 3, 4, 6, 5, 7}
                     -- LUFS has a full-width row (Vertical layout) and
                     -- stacked when it has a narrow column (Horizontal
                     -- layout, or paired with Dynamics sharing a half-width
-                    -- row in Vertical layout - same shape, same fix).
+                    -- row in Vertical layout - same shape).
                     local lufs_stack_horizontal = is_vertical and #sub_rects == 1
                     draw_lufs(sx, sy, sw, sh, lufs_stack_horizontal)
                 elseif mod_id == 2 then draw_gonio(sx, sy, sw, sh, specific_gain)

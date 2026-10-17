@@ -15,7 +15,6 @@ slider2:0.5<0,1,0.001>Scope Gain
 slider3:0.5<0,1,0.001>Symbiote Gain
 slider4:0.5<0,1,0.001>Spectrum Gain
 slider5:0.25<0,1,0.001>Spectrum Floor (Macro %)
-// slider2:0.25<0,1,0.001>Spectrum Floor (Macro %)
 slider6:0<0,19,1{Off,-6 LUFS (Loud/Rock),-7 LUFS,-8 LUFS,-9 LUFS,-10 LUFS,-11 LUFS,-12 LUFS,-13 LUFS,-14 LUFS (Streaming),-15 LUFS,-16 LUFS,-17 LUFS,-18 LUFS,-19 LUFS,-20 LUFS,-21 LUFS,-22 LUFS,-23 LUFS,-24 LUFS (Broadcast)}Loudness Target
 slider7:0<0,13,1{Off,Universal,Acoustic,Classical,Country,EDM,Funk,Hip Hop,Jazz,Metal,Pop,R&B,Rock,Speech}Genre/Dynamics Target
 

@@ -58,6 +58,7 @@ local ME = require("TS_CV_MapEQ")
 local UN = require("TS_CV_Units")
 local DLY = require("TS_CV_Delay")
 local RB = require("TS_CV_ReaFX")
+local DR = require("TS_CV_Drawers")
 
 local NS = "TS_CV_WEB"
 
@@ -738,7 +739,7 @@ local function panel_of(fx, i)
         local n = (o.t == "stepped" and type(o.cn) == "table") and #o.cn or nil
         local marks = U.scale_marks(kind, ctl.size, n)
         -- what the plugin calls each mark, kept a few seconds (the layout
-        -- is rebuilt twice a second, and every knob has a scale now)
+        -- is rebuilt twice a second, and every knob has a scale)
         local ck = table.concat({ fx.guid or "", ctl.param, kind, ctl.size or "", o.inv and "r" or "", n or "" }, "|")
         local hit = scale_labels_cache[ck]
         local labels
@@ -1259,7 +1260,7 @@ local function mq_vals(fx, layout)
   local res = { b = out }
   -- a dynamic EQ: what it's doing now, a third-octave a value (positive
   -- dB reduced, -999 no signal), from the probe (never taking it from a
-  -- panel that has it) -- retired with the desktop's (CP.FINE_ON)
+  -- panel that has it); off unless TP.FINE_ON, like the desktop's (CP.FINE_ON)
   if any_dyn and TP.FINE_ON then
     TP.panel_open(fx.guid)
     TP.want_fine(fx.guid)
@@ -1621,6 +1622,27 @@ local function keys_moved()
   end
   return moved
 end
+-- The action bars, for the page's toolbar switches: every bar's id,
+-- name and place, which one the page shows (c), and a count that moves
+-- whenever the page's list changes (k: set from ChannelView's organiser,
+-- or a switch), so the page reloads it.
+local bars_stamp, bars_list, web_text, web_rev = nil, nil, nil, 0
+local function bars_vals()
+  local stamp = reaper.GetExtState(C.EXT_SECT, DR.REV)
+  if stamp ~= bars_stamp or not bars_list then
+    bars_stamp = stamp
+    DR.load()
+    bars_list = {}
+    for _, e in ipairs(DR.switch_list()) do
+      bars_list[#bars_list + 1] = { i = e.id, n = e.name, w = e.where }
+    end
+  end
+  local t = reaper.GetExtState(DR.WEB_NS, DR.WEB_KEY)
+  if t ~= web_text then web_text = t; web_rev = web_rev + 1 end
+  local cur = DR.at("web")
+  return { k = web_rev, c = cur and cur.id or 0, l = bars_list }
+end
+
 local function build_vals(lseq, ack)
   local fxv = {}
   local any_eq = false
@@ -1756,7 +1778,7 @@ local function build_vals(lseq, ack)
   end
   return { L = lseq, A = ack, fx = fxv, mrv = mrv, msg = last_msg, tr = tr, s = sends_vals(on_master() and HO.CAT or 0), r = sends_vals(-1), mx = mx,
            nv = nav_open() and nav_vals() or nil,
-           sp = any_eq and spectrum_vals() or nil, bw = bw }
+           sp = any_eq and spectrum_vals() or nil, bw = bw, br = bars_vals() }
 end
 
 -- ---------------------------------------------------------------------
@@ -2013,7 +2035,14 @@ local function apply(verb, a)
     -- vctl|guid|name|v: a virtual control's setting on this instance
     local fx = fx_by_guid(a[1]); local v = tonumber(a[3])
     local nm = M.clean_vname(((a[2] or ""):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)))
-    if fx and nm and v then St.vset(fx.guid, nm, v) end
+    if fx and nm and v then
+      St.vset(fx.guid, nm, v)
+      -- and the REAPER action for that setting, when it has one
+      local key = St.layout_key(fx.name, fx.guid, track, fx.addr)
+      local layout = M.get_or_default(key, track, fx.addr, fx.guid)
+      local ctl = layout and M.vfind(layout.controls or {}, nm)
+      if ctl then M.run_vaction(ctl, v) end
+    end
   elseif verb == "mset" then
     -- mset|guid|k|v: a macro's value (its output k: an XY pad's 1 or 2)
     local src = track and MD.find(track, a[1])
@@ -2454,6 +2483,12 @@ local function apply(verb, a)
       T.rename(track, fx.addr, fx.guid, U.trim(nm))
       layout_dirty = true
     end
+  elseif verb == "bar" then
+    -- bar|id: a toolbar switch on the page's Actions bar
+    DR.load()
+    local here, e = DR.at("web"), DR.by_id(tonumber(a[1]))
+    if here and e then DR.switch(here, e) end
+    bars_list = nil
   elseif verb == "find" then
     found_seq = found_seq + 1
     reaper.SetExtState(NS, "found", json({ q = a[1] or "", s = found_seq, r = find_actions(a[1] or "") }), false)

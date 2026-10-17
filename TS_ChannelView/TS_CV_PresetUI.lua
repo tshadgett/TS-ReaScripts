@@ -32,7 +32,7 @@ local dlg = nil
 
 local function err(text) reaper.MB(text, "ChannelView", 0) end
 
--- The plugin's address now: by the one we had, or by its GUID if the chain
+-- The plugin's address now: the one the dialog has, or by its GUID if the chain
 -- moved under the dialog.
 local function addr_of(track, addr, guid)
   if not reaper.ValidatePtr(track, "MediaTrack*") then return nil end

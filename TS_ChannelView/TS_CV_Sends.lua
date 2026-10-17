@@ -276,7 +276,7 @@ local function make(kind)
   -- Creates the send between the panel's track and `other`: from the panel's
   -- track to `other` on the Sends panel, from `other` to it on Receives, in
   -- `mode`: "direct" (or nil), "sidechain" or "midi"; true and false are
-  -- still taken as sidechain and direct.
+  -- also taken, as sidechain and direct.
   function SD.add_send(track, other, mode)
     if not track or not other or track == other then return false end
     if mode == true then mode = SIDECHAIN
@@ -339,7 +339,7 @@ local function make(kind)
         -- A number missing from the middle of the list reads as a bug in the
         -- list, not as "a track can't send to itself".
         local hit = ImGui.MenuItem(ctx, label, nil, false, not t.self)
-        -- the colour swatch, drawn into the item we just laid out
+        -- the colour swatch, drawn into the item just laid out
         local ix, iy = ImGui.GetItemRectMin(ctx)
         local _, iy2 = ImGui.GetItemRectMax(ctx)
         local dl = ImGui.GetWindowDrawList(ctx)
@@ -471,7 +471,7 @@ local function make(kind)
 
   function SD.open_routing(track)
     if not track then return end
-    -- Only reselect if we have to. Clobbering a multi-track selection to
+    -- Only reselect when needed. Clobbering a multi-track selection to
     -- open a window the user could have opened from the mixer would be a
     -- poor trade, and this window follows the selection anyway, so the
     -- track is almost always already the one.
@@ -646,8 +646,8 @@ local function make(kind)
       local mw    = math.floor(rw * 0.4)
       local hw    = rw - mw - bgap
       -- Mute and the mode side by side: one is the send's own state, the
-      -- other is where it lands, and stacking them implied an order that
-      -- isn't there.
+      -- other is where it lands, and stacking them would imply an order
+      -- that isn't there.
       local hit, dbl = W.state_button(ctx, ID .. "m" .. sd.idx, "M", rx, by1, mw, bh,
         sd.mute, C.COL.mute_on, "Bypass this " .. noun)
       if hit or dbl then send_set(track, sd.idx, "B_MUTE", (dbl or sd.mute) and 0 or 1) end
@@ -689,8 +689,8 @@ local function make(kind)
 
       -- Same corner, same badge as a parameter cell -- here it deletes the
       -- send itself rather than a control, which is why it says so.
-      -- Inset past the colour bar: the two share the left edge and the x
-      -- was sitting on top of it.
+      -- Inset past the colour bar: the two share the left edge, and the x
+      -- would otherwise sit on top of it.
       if W.remove_badge(ctx, ID .. sd.idx, cxp, cyp, C.SEND_W, C.CELL_H,
                         "Remove " .. noun, BAR + 4) then
         remove_idx = sd.idx
@@ -698,8 +698,8 @@ local function make(kind)
     end
 
     -- the add tile: simply the next cell on the grid, inset evenly inside
-    -- it. Drawn at the cell's own corner it carried all its slack on the
-    -- right and read as pushed left -- most obviously with a single column,
+    -- it. Drawn at the cell's own corner it would carry all its slack on
+    -- the right and read as pushed left -- most obviously with one column,
     -- where there is nothing beside it to blame the gap on.
     local cx0, cy0 = cell(#sends)
     local aw, ah = C.SEND_W - 6, C.CELL_H - 6

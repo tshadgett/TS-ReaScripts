@@ -268,13 +268,13 @@ function TO.custcolors_from_ini(text) return TO.ini_value(text, "custcolors") en
       colors=1E48A8 B21B1B 12620C ...      (RRGGBB, space-separated)
 
   shown in the picker as "User 1", "User 2" ... (a name= key, should a
-  palette carry one, is used instead). The old 16 custom colours
-  (custcolors in reaper.ini, what SWS palettes load into) were copied
-  into User 1 on the first run of 7.81 and are separate from it since;
-  they're still offered, for SWS's sake. The picker's "project palette"
-  is the colours the project uses, worked out rather than saved, so it's
-  worked out here the same way. Its built-in palettes are compiled into
-  REAPER and saved nowhere, so they're copied below, as 7.81 has them.
+  palette carry one, is used instead). The 16 custom colours
+  (custcolors in reaper.ini, what SWS palettes load into) are separate
+  from User 1, and are offered too, for SWS's sake. The picker's
+  "project palette" is the colours the project uses, worked out rather
+  than saved, so it's worked out here the same way. Its built-in
+  palettes are compiled into REAPER and saved nowhere, so they're copied
+  below, as 7.81 has them.
 --]]
 
 -- REAPER 7.81's built-in palettes, in its picker's order: 16 colours
@@ -369,8 +369,8 @@ end
 
 -- Every palette ChannelView can show, in the order REAPER's picker lists
 -- them -- the project's colours, the built-ins, User 1 to 4 -- and then
--- the old custom colours. Before 7.81 there are no palettes to list but
--- the project's and the custom colours. `user_text` is reaper-colors.ini,
+-- the 16 custom colours. Before REAPER 7.81 there are no palettes to
+-- list but the project's and the custom colours. `user_text` is reaper-colors.ini,
 -- `version` REAPER's (both looked up when not given); `project` and
 -- `custom` the colour lists for those two.
 TO.PROJECT_PALETTE = "Project"
@@ -826,9 +826,6 @@ function TO.custom_colours()
   return TO.parse_custcolors(s and s:match("^%s*%x+") and s or nil)
 end
 
--- Drags a track to just before 0-based position `before` (the track
--- count for the end). Returns true when something moved. The moved
--- tracks end up selected, as after a drag in REAPER's track panel.
 -- The tracks a drag of `track` carries, as a sorted 1-based move set:
 -- the selection when the track is part of it, the track alone when not,
 -- each with its folder's children.
@@ -862,7 +859,9 @@ local function reorder(idxs, before, mode, undo_one, undo_many, prep)
 end
 
 -- Moves `track` (with the selection, if it's selected, and any folder
--- children) to just before 0-based position `before`.
+-- children) to just before 0-based position `before` (the track count
+-- for the end). Returns true when something moved. The moved tracks end
+-- up selected, as after a drag in REAPER's track panel.
 function TO.move_tracks(track, before)
   local idxs = carried(track)
   if not idxs or not TO.is_move(idxs, before + 1) then return false end

@@ -51,15 +51,6 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
     local ui_order  = {1, 2, 3, 4, 5, 6, 7}
     local ui_active = {true, true, true, true, true, true, true}
 
-    -- Folder Spectrum Overlay's picker (which tracks feed the Spectrum
-    -- panel's dominant-colour overlay) used to live here as a checkbox
-    -- list. It moved to the main window itself -- a strip of colour
-    -- swatches down its right edge, hover for the name, click to toggle
-    -- -- so picking tracks doesn't need this settings window open. See
-    -- draw_track_sidebar in TS_Visualizer.lua. This window never held any
-    -- state for it beyond the project ExtState CSV both scripts read/
-    -- write, so nothing else here needed to change.
-
 ----------------------------------------------------------
 -- UI Info Description
 ----------------------------------------------------------
@@ -112,9 +103,9 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
     -- doesn't reset to "Off" just because this particular song never had
     -- one saved yet. gmem is just the live channel to the display script;
     -- neither of these persists by itself just from writing to gmem.
-    -- SECTION isn't in scope yet this far up the file (declared with the
-    -- rest of Save/LoadAllSettings below), so the literal is used here
-    -- too, same as the ProjExtState call already did.
+    -- SECTION isn't in scope yet this far up the file (it's declared
+    -- with the rest of Save/LoadAllSettings below), so the literal is
+    -- used here.
     local function SaveTargetToProject(key, value)
         reaper.SetProjExtState(0, "TS_Visualizer", key, tostring(value))
         reaper.SetExtState("TS_Visualizer", key, tostring(value), true)
@@ -245,9 +236,9 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
 ----------------------------------------------------------
 -- Run at Startup (REAPER's native Scripts/__startup.lua)
 --
--- Ported from Track Analyser's own copy of this feature (TA_Panel.lua),
--- which already has to solve the same problem: __startup.lua is shared
--- with every other auto-launched tool (Adaptive Grid, Gridbox, Track
+-- Works the same way as Track Analyser's copy of this feature
+-- (TA_Panel.lua), and for the same reason: __startup.lua is shared with
+-- every other auto-launched tool (Adaptive Grid, Gridbox, Track
 -- Analyser, ChannelView, ...), so a bad edit here can silently break all
 -- of them, not just this one. Same three rules apply:
 --
@@ -257,16 +248,16 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
 --      startup file that doesn't parse is never written.
 --   3  LINES THIS EDITOR DID NOT WRITE ARE NOT TOUCHED. Its own block is
 --      fenced with markers and only that is ever removed. If the command
---      id turns up outside the fence (this project already has one such
---      entry, added some other way), it's reported and left alone rather
---      than edited or duplicated.
+--      id turns up outside the fence - an entry added by hand or by
+--      another tool - it's reported and left alone rather than edited
+--      or duplicated.
 --
 -- One difference from Track Analyser: TA_Panel.lua IS the script that
 -- gets auto-started, so it can ask get_action_context() for its own
 -- command id. This Editor is a separate script from TS_Visualizer.lua
 -- (the one that actually needs to run at startup), so it has to resolve
 -- that script's id from its path instead - the same AddRemoveReaScript
--- call TS_Visualizer.lua already uses on itself to launch this Editor.
+-- call TS_Visualizer.lua uses on itself to launch this Editor.
 ----------------------------------------------------------
     local START_BEGIN = "-- >>> TS_Visualizer (added by TS_Visualizer Editor)"
     local START_END   = "-- <<< TS_Visualizer"
@@ -295,7 +286,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
     -- "_RS29282ada...". Uses `here` (this script's own folder, derived
     -- up top) rather than a spelled-out path, so this survives the
     -- folder being renamed or moved the same way the gear icon's path
-    -- now does.
+    -- does.
     local function get_visualizer_cmd_name()
         local script_path = here .. "TS_Visualizer.lua"
         local cmd_id = reaper.AddRemoveReaScript(true, 0, script_path, true)
@@ -424,12 +415,10 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
         -- gmem is written every frame the picker reports a change, so the
         -- swatch and the live visualizer both track the drag smoothly.
         -- SaveAllSettings() is NOT called here on purpose: it writes on
-        -- the order of 150+ ExtState keys, and doing that on every single
-        -- frame while a picker is being dragged is exactly what was
-        -- freezing the Editor on colour changes (a pre-existing pattern,
-        -- not something this rewrite introduced - it just touched this
-        -- code again). IsItemDeactivatedAfterEdit() below fires once,
-        -- when the picker is released/closed, which is the only point
+        -- the order of 150+ ExtState keys, and doing that on every
+        -- single frame while a picker is being dragged freezes the
+        -- Editor. IsItemDeactivatedAfterEdit() below fires once, when
+        -- the picker is released/closed, which is the only point
         -- anything actually needs to hit disk.
         if retval then
             local nr, ng, nb, na = reaper.ImGui_ColorConvertU32ToDouble4(new_packed_col)
@@ -501,35 +490,28 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
         end    
         reaper.ImGui_PushFont(ctx, font_13, 13)
         if visible then
-            -- Hover descriptions used to be drawn inline, right-aligned
-            -- in a row reserved above "Visual Size" -- first sized for
-            -- the old logo, then (once the logo was gone) reserving a
-            -- fixed height whether or not anything was actually hovered,
-            -- which left a dead gap at the top most of the time. Making
-            -- that reservation track hover state instead just moved the
-            -- problem: with 30-odd controls below each setting
-            -- shared_info.hovered_id on its own hover, the reserved row
-            -- was appearing and disappearing, and everything below it
-            -- jumping by its height, on nearly every mouse move over the
-            -- window. A floating ImGui tooltip near the cursor doesn't
-            -- occupy a slot in the window's own layout at all, so
-            -- nothing below it moves, hovered or not. hovered_id itself
-            -- is unchanged -- every slider/checkbox below still sets it
-            -- on its own IsItemHovered() check -- only reset up here, at
-            -- the start of the frame, instead of after a now-deleted
-            -- inline render; the tooltip itself is drawn once, from
-            -- whatever's current by the end of this same frame, right
-            -- before the window closes below.
+            -- Hover descriptions are a floating ImGui tooltip near the
+            -- cursor, not a row in the window's own layout. A reserved row
+            -- either leaves a dead gap at the top most of the time or, if
+            -- it tracks hover state, appears and disappears on nearly every
+            -- mouse move over the 30-odd controls below, and everything
+            -- under it jumps by its height. A tooltip occupies no slot, so
+            -- nothing below it moves, hovered or not.
+            --
+            -- Every slider/checkbox below sets hovered_id on its own
+            -- IsItemHovered() check. It is reset here, at the start of the
+            -- frame, and the tooltip is drawn once, from whatever is
+            -- current by the end of the frame, right before the window
+            -- closes below.
             shared_info.hovered_id = nil
             -- Visual Size
                 reaper.ImGui_SeparatorText(ctx, 'Visual Size')
                 -- Every slider below writes gmem on every frame it changes
                 -- (for a live-tracking drag) but only calls SaveAllSettings()
                 -- - which writes 150+ ExtState keys - once, when the drag
-                -- is released. Doing that write on every frame of a drag is
-                -- what makes the Editor stutter/freeze while adjusting
-                -- anything; this was already the pattern throughout this
-                -- file before the colour rewrite touched it again.
+                -- is released. Doing that write on every frame of a drag
+                -- makes the Editor stutter and freeze while adjusting
+                -- anything. The same pattern is used throughout this file.
                 -- 1. Gonio Gain
                 local g_gain = reaper.gmem_read(MEM_GAIN_GONIO)
                 local g_changed, g_new = reaper.ImGui_SliderDouble(ctx, "Gonio Gain", g_gain, 0.0, 1.0, "%.3f")
@@ -592,10 +574,10 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
 
                 reaper.ImGui_Spacing(ctx)
 
-                -- Folder Spectrum Overlay's track picker used to be a
-                -- checkbox list here. It's the swatch sidebar down the
-                -- right edge of the main window now -- see
-                -- draw_track_sidebar in TS_Visualizer.lua.
+                -- Folder Spectrum Overlay's track picker isn't in this
+                -- window: it's the swatch sidebar down the right edge of
+                -- the main window -- see draw_track_sidebar in
+                -- TS_Visualizer.lua.
 
                 reaper.ImGui_Spacing(ctx)
                 local font_scale = reaper.gmem_read(1300)
@@ -613,7 +595,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                     if current_att <= 0 then current_att = 1.0 end
                     local changed_att, new_att = reaper.ImGui_SliderDouble(ctx, "Response Speed", current_att, 0.1, 1.0, "%.2fx")
                     -- Right-click reset is its own single event, not part of
-                    -- a drag, so it still saves immediately rather than
+                    -- a drag, so it saves immediately rather than
                     -- waiting on IsItemDeactivatedAfterEdit (which a
                     -- right-click doesn't reliably trigger).
                     local reset_att = reaper.ImGui_IsItemClicked(ctx, 1)
@@ -777,7 +759,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "GENRE_TARGET" end
                 reaper.ImGui_Spacing(ctx)
 
-            -- Order (adding the Waterfall module)
+            -- Order
                 local module_names = {
                     [1]="   ▩ LUFS", [2]="   ▩ Gonio", [3]="   ▩ Symbiote",
                     [4]="   ▩ Scope", [5]="   ▩ Spectrum", [6]="   ▩ Spectrogram", [7]="   ▩ Dynamics"
@@ -880,7 +862,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 -- Signal) follow Hue but ignore Tint, staying fully
                 -- saturated - same as those tools' "solid" role. Only
                 -- swatches with "Follow" ticked above actually move.
-                -- Same fix as the colour pickers above: gmem is written
+                -- As with the colour pickers above: gmem is written
                 -- every frame so the drag tracks live, but SaveAllSettings()
                 -- (150+ ExtState keys) only fires once, on release - not on
                 -- every one of the dozens of frames a drag touches.
@@ -924,12 +906,10 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "RESET" end
 
                 -- Quiet, permanent credit line for Junki Kim, whose
-                -- JKK_Visualizer this was forked from -- a plain-text
-                -- footer rather than the old hover-only logo credit
-                -- (removed earlier, along with LOGO.png, at Tim's
-                -- request), since a static line can't go missing behind
-                -- another panel's tooltip the way the hover version
-                -- could and doesn't need the image asset back.
+                -- JKK_Visualizer this was forked from. A plain-text
+                -- footer rather than a hover-only credit: a static line
+                -- can't go missing behind another panel's tooltip, and
+                -- needs no image asset.
                 reaper.ImGui_Spacing(ctx)
                 reaper.ImGui_PushFont(ctx, font_11, 11)
                 reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), textcol_gray)

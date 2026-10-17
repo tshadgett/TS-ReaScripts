@@ -16,7 +16,7 @@
 
   Focusing a window isn't in REAPER's own API. It goes through the
   js_ReaScriptAPI extension if present, otherwise SWS's "Focus arrange"
-  action; with neither, focus simply stays here as it always has.
+  action; with neither, focus simply stays here.
 --]]
 
 local F = {}

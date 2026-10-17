@@ -348,13 +348,13 @@ end
 W.drag_value = drag_value
 
 -- A drag's own running position, kept between frames for as long as the
--- button is held. Each frame used to start again from the value read back
--- from the plugin, so anything that lands the value on a grid -- a stepped
--- knob's snapping, or a plugin that rounds its own stepped parameter --
--- threw away every move smaller than half a step: a slow drag never got
--- anywhere and a quick one leapt. Now the pointer's travel adds up, and
--- only what's sent is snapped. `key` is the control's id (plus a part, for
--- a control with two). W.drag_done forgets it when the button lets go.
+-- button is held. Starting each frame from the value read back from the
+-- plugin would lose every move smaller than half a step wherever the value
+-- lands on a grid -- a stepped knob's snapping, or a plugin that rounds
+-- its own stepped parameter -- so a slow drag would never get anywhere.
+-- The pointer's travel adds up here, and only what's sent is snapped.
+-- `key` is the control's id (plus a part, for a control with two).
+-- W.drag_done forgets it when the button lets go.
 local drag_raw = {}
 function W.drag_from(ctx, key, value)
   local raw = drag_raw[key]
@@ -461,11 +461,11 @@ end
 -- the knob's BODY -- the skirt, the pointer's reach, the trim pot's rim --
 -- is the same size as the arc knob's: one set of numbers serves the
 -- 34-pixel panel knob and the preview in the menu alike. (Scaling the
--- whole design, ticks included, into the arc's circle left the bodies a
--- third smaller than the arc beside them.) The scale ticks sit just
--- OUTSIDE the body, a fixed few pixels, in the air between the name and
--- the knob; they use knob_ring, which a faceplate retints, so they read on
--- cream as well as on charcoal.
+-- whole design, ticks included, into the arc's circle would leave the
+-- bodies a third smaller than the arc beside them.) The scale ticks sit
+-- just OUTSIDE the body, a fixed few pixels, in the air between the name
+-- and the knob; they use knob_ring, which a faceplate retints, so they
+-- read on cream as well as on charcoal.
 local FACE_BODY = { skirted = 38, pointer = 43, trim = 47,   -- trim sits a size down
                     nose = 40, bar = 37, fluted = 38, bezel = 38,
                     rbezel = 38, hifi = 38, led = 40 }
@@ -673,9 +673,6 @@ local function face_arc(dl, cx, cy, r, v, o)
   if o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring) end
 end
 
--- A cap colour by name (C.CAPS), or nil for none chosen. "accent" is the
--- theme's own, so it follows Hue/Tint like the arc always has.
--- A custom one (#rrggbb, from the colour picker) is that colour.
 -- ---------------------------------------------------------------------
 -- a strip or row in its track's colour (Group looks ▸ Background)
 -- ---------------------------------------------------------------------
@@ -713,6 +710,9 @@ function W.pop_tinted(saved)
   for k, v in pairs(saved) do C.COL[k] = v end
 end
 
+-- A cap colour by name (C.CAPS), or nil for none chosen. "accent" is the
+-- theme's own, so it follows Hue/Tint like the arc does.
+-- A custom one (#rrggbb, from the colour picker) is that colour.
 function W.cap_col(key)
   local c = key and C.CAP[key]
   if not c then
@@ -739,7 +739,7 @@ end
 -- knob, a corner on a button, dropdown or fader. The accent says what it
 -- means -- unless the accent would vanish on whatever is under it, where
 -- it turns black or white instead. Colour aware, the way the knob inks
--- and button text already are.
+-- and button text are.
 local function lum(col)
   return 0.299 * ((col >> 24) & 0xff) + 0.587 * ((col >> 16) & 0xff) + 0.114 * ((col >> 8) & 0xff)
 end
@@ -1112,7 +1112,7 @@ end
 -- the parameter's own discrete positions instead of moving continuously.
 -- For a plugin with a handful of named choices (a slope, a mode) where a
 -- full combo list feels heavier than the panel needs. Falsy/nil (the
--- default) behaves exactly as before -- a plain continuous knob.
+-- default) is a plain continuous knob.
 -- opts.snaps -- the plugin's own choices' places (0..1), when they're
 -- known: the knob lands only on those, which matters when a plugin reports
 -- a fine step but names only a few positions along it.
@@ -1175,9 +1175,9 @@ function W.knob(ctx, id, label, value, formatted, opts)
     end
   end
 
-  -- geometry: the dial centred in the room between the name and the
-  -- value line (for the ordinary cell, exactly where it always sat), or
-  -- in the whole cell when it's small and has neither
+  -- geometry: the dial centred in the room between the name
+  -- and the value line, or in the whole cell when it's small
+  -- and has neither
   local label_h = W.LABEL_H
   local cx = x + cw * 0.5
   local cy
@@ -1542,7 +1542,7 @@ end
 -- button faces: how a toggle or a button row's buttons look
 -- ---------------------------------------------------------------------
 -- A button's Style (its right-click Style menu, saved in the Style line's
--- style field; nil is the flat look it has always had):
+-- style field; nil is flat):
 --   lens     a lit lens: tinted dark glass when off; on, a hot centre
 --            fading out to the colour, a glow round it, a glossy top
 --   window   an LED window: a neutral button with a small LED strip
@@ -2363,13 +2363,13 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body, 2.0)
   ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.knob_ring, 2.0, 0, 1.0)
 
-  -- The ladder is printed OVER the bars, the way REAPER's own meters do
-  -- it, so the bars get the whole width instead of giving a third of it
-  -- to a gutter of numbers. "Unreadable the moment there is signal" was
-  -- the reason for the gutter, and it is a real problem with one fixed
-  -- ink -- but each figure knows whether the bar behind it is lit at
-  -- that level, so it can take a dark ink over a lit bar and a light one
-  -- over an unlit one, and be readable either way. See below.
+  -- The ladder is printed OVER the bars, the way REAPER's own meters
+  -- do it, so the bars get the whole width instead of giving a third
+  -- of it to a gutter of numbers. One fixed ink would be unreadable
+  -- the moment there is signal, but each figure knows whether the bar
+  -- behind it is lit at that level, so it can take a dark ink over a
+  -- lit bar and a light one over an unlit one, and be readable either
+  -- way. See below.
   --
   -- C.METER_SCALE_OVER false puts the gutter back.
   local gut = 0
@@ -2525,7 +2525,7 @@ end
 -- the bar colours (W.level_bar_colour), the RMS hairline on each bar's
 -- outer edge, the per-channel hold line stopping short of that hairline,
 -- and the scale ink that flips between lit and unlit -- so a track reads
--- the same here as in the mixer. Only the geometry is new.
+-- the same here as in the mixer. Only the geometry differs.
 --
 -- No ladder at all: a TCP meter is a few pixels tall, and figures or
 -- ticks squeezed into it only get in the way of the bars.
@@ -2677,8 +2677,8 @@ function W.end_paint() paint = nil end
 -- and from then until you let go ImGui reports every OTHER item as not
 -- hovered -- correctly, since a click belongs to the thing you pressed.
 -- A swipe is the one gesture where that is exactly wrong: the buttons
--- it is about are the ones you cross with the mouse still down. So we
--- ask the only question that still has a true answer: is the pointer
+-- it is about are the ones you cross with the mouse still down. So this
+-- asks the only question that still has a true answer: is the pointer
 -- inside this button's rectangle? (Clipped, so a strip scrolled out of
 -- view is not painted by a drag going past where it would have been.)
 local function paint_value(ctx, id, kind, on, x, y, w, h)
@@ -3191,7 +3191,18 @@ local function icon_dropper(dl, x, y, sz, col)
   ImGui.DrawList_AddLine(dl, e1x, e1y, e2x, e2y, col, math.max(1.0, sz * 0.05))
 end
 
+-- Action drawers: a window with one drawer along its top and one down
+-- its left.
+local function icon_drawers(dl, x, y, sz, col)
+  local a, b = x + sz * 0.14, x + sz * 0.86
+  local t, u = y + sz * 0.18, y + sz * 0.82
+  ImGui.DrawList_AddRect(dl, a, t, b, u, col, 1.5, 0, 1.3)
+  ImGui.DrawList_AddRectFilled(dl, a, t, b, t + sz * 0.17, col, 1.5)
+  ImGui.DrawList_AddRectFilled(dl, a, t, a + sz * 0.2, u, col, 1.5)
+end
+
 W.ICONS = {
+  drawers  = icon_drawers,
   dropper  = icon_dropper,
   lock     = function(dl, x, y, sz, col) icon_lock(dl, x, y, sz, col, false) end,
   unlock   = function(dl, x, y, sz, col) icon_lock(dl, x, y, sz, col, true) end,
@@ -3408,10 +3419,6 @@ function W.route_button(ctx, id, w, h, leds, tooltip)
   return pressed
 end
 
--- Text running down a narrow bar, one character per line -- what a console
--- does with a collapsed strip. ImGui can't rotate text, and stacked
--- capitals stay readable in a way a rotated bitmap font would not.
--- Returns the height used.
 -- Rotated labels.
 --
 -- ImGui has no way to rotate text: the draw list takes glyphs at a
@@ -3525,8 +3532,8 @@ function W.vertical_text(ctx, dl, cx, y, text, col, max_h)
     end
   end
 
-  -- Stacked capitals: no rotation anywhere, but legible in a way a
-  -- rotated bitmap font would not be if we had to fake one.
+  -- Stacked capitals, one per line: no rotation anywhere, and legible in
+  -- a way a faked rotated bitmap font would not be.
   local _, line_h = ImGui.CalcTextSize(ctx, "X")
   line_h = line_h - 2
   local n = math.max(0, math.floor(max_h / line_h))
@@ -3562,7 +3569,7 @@ end
 -- bailing out -- cursor.x snaps back to the line start and cursor.y
 -- advances by a full line (the child's own height plus item spacing),
 -- exactly as if a normal item had just been placed and closed. That
--- happens BEFORE we ever get here, so by the time child_skipped runs,
+-- happens BEFORE this is called, so by the time child_skipped runs,
 -- the cursor is sitting one whole row below (and back at column 0 of)
 -- where the caller explicitly parked it with SetCursorPos.
 --

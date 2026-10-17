@@ -56,10 +56,9 @@ Reduction is drawn **only** from the VST3 named route
 (`GainReduction_dB`), where REAPER hands over decibels directly. Plugins
 that instead expose reduction as an ordinary parameter — InfiniStrip among
 them — need a measured law, a staleness test and a hold to be read at all,
-and in practice every one of those was a source of error: a calibration
-right for one module and wrong for another, a hold that plateaued, a
-staleness test that never released. So the waveforms still show what those
-plugins do, and the reduction trace does not pretend to.
+and each of those is a source of error: a calibration right for one module
+is wrong for another. So the waveforms still show what those plugins do,
+and the reduction trace does not pretend to.
 
 **Plugins ChannelView measures** (see ChannelView's *Measured gain
 reduction*) are drawn too, in pink: a bar and a trace at 500 readings a
@@ -69,11 +68,11 @@ plugins account for, is fitted to their reports and split by their share
 of them. Every trace is delayed by the latency of the plugins after it, so
 it sits on its transient.
 
-One measurement settled it (2026-08-31, Pro-C 3 + InfiniStrip): the named
-route answered on **all 159** samples, in decibels; the parameter path
-returned a bare zero on **67%** of frames. REAPER also *formats* that same
-parameter as `20*log10(v)`, which read "−0.44 dB" while the compressor was
-pulling 26 — so read the value and apply the law, never the text.
+Measured with Pro-C 3 and InfiniStrip, the named route answered on **all
+159** samples, in decibels; the parameter path returned a bare zero on
+**67%** of frames. REAPER also *formats* that same parameter as
+`20*log10(v)`, which can read "−0.44 dB" while the compressor is pulling
+26 — so the value is read and the law applied, never the text.
 
 ## Collisions
 
@@ -158,11 +157,12 @@ you select away.
 
 ### No parameters
 
-Since 2.2.0 the probe (TS_TrackProbe 2.0.0) has no parameters at all. The
-panel (and ChannelView, and TS Visualizer) talk to it through shared memory,
-so it never shows up in automation or learn lists and never becomes REAPER's
-*last touched* parameter. A project saved with older probes keeps running
-them until it is reopened; the panel still works with them meanwhile.
+The probe has no parameters at all. The panel (and ChannelView, and TS
+Visualizer) talk to it through shared memory, so it never shows up in
+automation or learn lists and never becomes REAPER's *last touched*
+parameter. A project saved with probes older than TS_TrackProbe 2.0.0
+keeps running them until it is reopened; the panel works with them
+meanwhile.
 
 ### Making them recede
 

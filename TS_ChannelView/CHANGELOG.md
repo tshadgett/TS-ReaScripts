@@ -1,5 +1,39 @@
 # ChannelView — changelog
 
+## 2.3.0 — action bars anywhere, ChannelView's own icons
+
+- **Action bars.** Rows or columns of buttons for any REAPER action, built
+  in one place and shown where you put them: drawers along the top, left,
+  right or bottom of ChannelView's window, bars in windows of their own
+  (floating or docked; the new **ChannelView toolbars** script draws them,
+  started for you), the TCP window's two toolbars, the web companion's
+  Actions bar, or nowhere for now. Global, not per project.
+- **Menus** on any bar, nested as deep as you like; the web page shows the
+  menus made on the desktop.
+- **Toolbar switches**: a button that swaps another bar into this bar's
+  place (lit while it's showing, so a row of them works as tabs), or a
+  menu of every bar. On the TCP's bars and the web page too.
+- **Organise actions**: one window for every bar — drag to reorder and
+  into menus, labels, icons, places, sizes, copying between bars, REAPER
+  toolbars and menus imported. Also an action of its own, and it edits the
+  web companion's list. **Import / export** bars to a file.
+- **ChannelView's own icons**, nearly 300, drawn sharp at any size in the
+  bars' colours: REAPER's main toolbar, transport, editing, markers and
+  regions, markers 1–16, fixed lanes and comping, zoom, the View menu, SWS
+  windows, ChannelView's scripts, instruments and effect types. Buttons get
+  the icon made for their action without being asked (copied REAPER
+  toolbars too); *Use ChannelView icons* does a whole bar. The web page
+  draws the same icons and can pick them.
+- **Bar sizes**: Small, Normal, Large or Extra large, per bar.
+- **Virtual controls run actions**: each setting of a virtual control can
+  run a REAPER action, from the panel or the web page.
+- The TCP's settings menu loses *Add toolbar action* and *Add bottom
+  toolbar action* (a bar's own right-click does it).
+- Curves on the EQ and the other canvases are drawn in one go: thick
+  curves join cleanly, and busy panels do less work.
+- Code comments tidied throughout, and the README is now the user guide
+  only (the developer notes are in `dev/NOTES.md`).
+
 ## 2.2.0 — MIDI learn, modulators moved by macros, a quieter probe
 
 **Reopen your projects after updating.** The probe and the Modulators

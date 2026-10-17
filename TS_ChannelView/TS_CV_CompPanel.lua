@@ -401,7 +401,7 @@ end
 -- the strip beside the curve: the reduction (input and output levels,
 -- when asked for, go on the panel's outside edges, as on any panel)
 CP.METERS_W = 44
-CP.FINE_ON = TP.FINE_ON   -- the reduction by frequency: retired (TS_CV_Taps)
+CP.FINE_ON = TP.FINE_ON   -- the reduction by frequency: switched off (TS_CV_Taps)
 
 -- fine_btn: a compressor canvas's "Hz" switch at the foot, between its
 -- transfer curve and its reduction by frequency (while it's tapped)

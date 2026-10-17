@@ -2,25 +2,25 @@
 --[[
   TS_CV_ProbeLink -- talking to TS_TrackProbe, whichever version it is.
 
-  Since TS_TrackProbe 2.0.0 the probe has no parameters at all (see NO
-  PARAMETERS in TS_TrackProbe.jsfx): everything the scripts tell it, and
-  everything it tells them, goes through a block of gmem per track, THE
-  PROBE BLOCK, at 0x100000 + (track index + 1) * 128 in TS_TA_Mem. Up to
-  1.8.0 it was all hidden sliders -- still REAPER parameters, so in every
-  automation and learn list, and each write made one of them REAPER's
-  "last touched".
+  The probe has no parameters (see NO PARAMETERS in TS_TrackProbe.jsfx):
+  everything the scripts tell it, and everything it tells them, goes
+  through a block of gmem per track, THE PROBE BLOCK, at 0x100000 +
+  (track index + 1) * 128 in TS_TA_Mem. The older probe uses hidden
+  sliders instead -- still REAPER parameters, so in every automation
+  and learn list, and each write makes one of them REAPER's "last
+  touched".
 
   A project keeps running the probe it compiled when it was opened, so
   after an update the old one is still there until the project is
   reopened. So every read and write here asks which it is talking to: a
   probe with more than REAPER's own three parameters (Bypass, Wet, Delta)
-  is the old one, and gets its sliders as before.
+  is the old one, and gets its sliders.
 
-  WHICH PROBE IS WHICH. The old probe kept its role (pre, post,
+  WHICH PROBE IS WHICH. The old probe keeps its role (pre, post,
   comparison) in a slider. The new one finds its place in the chain with
   get_host_placement() -- which is REAPER's own FX address, containers
-  included (checked on REAPER 7.82: 0, 7, 0x2000015, 0x2000041 all came
-  back as themselves) -- and recognises itself when that place is written
+  included (an address inside a container, such as 0x2000015, comes
+  back as itself) -- and recognises itself when that place is written
   into its track's block as the pre or the post. PL.name() does that. A
   probe nobody names does nothing.
 

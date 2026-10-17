@@ -120,10 +120,10 @@ local function araFirst(tr)
   return false
 end
 
--- Position 0 = pre, 1 = post. Publish 0 = idle. Only an old probe (up to
--- 1.8.0, still running in a project opened before an update) has those
--- sliders; since 2.0.0 the first probe on a track is the pre and the last
--- the post, and Track Analyser names them when it arms them.
+-- Position 0 = pre, 1 = post. Publish 0 = idle. Only an old probe (still
+-- running in a project opened before an update) has those sliders; for a
+-- current probe the first on a track is the pre and the last the post,
+-- and Track Analyser names them when it arms them.
 local function configure(tr, idx, role)
   if (r.TrackFX_GetNumParams(tr, idx) or 0) <= 3 then return end
   r.TrackFX_SetParam(tr, idx, 0, role)
@@ -160,7 +160,7 @@ for t = 0, sel - 1 do
     local first = araFirst(tr) and 1 or 0   -- where the pre probe goes
 
     -- PRE: added at the end, then moved to the front. Adding directly at a
-    -- position needs an encoded index whose exact form I could not confirm;
+    -- position needs an encoded index whose exact form is not documented;
     -- moving is documented, does the same thing, and cannot land the plugin
     -- somewhere unintended.
     if n <= first or not isProbe(tr, first) then
@@ -174,7 +174,7 @@ for t = 0, sel - 1 do
       didSomething = true
     end
 
-    -- POST: whatever is last now. If the pre probe we just added is also
+    -- POST: whatever is last now. If the pre probe just added is also
     -- the last thing on the track, the chain is empty and it still needs a
     -- partner behind it.
     n = r.TrackFX_GetCount(tr)

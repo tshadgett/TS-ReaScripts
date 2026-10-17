@@ -78,9 +78,9 @@ end
 -- than in the running order. `guid` is the collapse key and the widget-id
 -- prefix; a track pointer would do for neither, since it changes across
 -- a reopen and cannot be written into an id. `num` and `name` are the
--- name button's label too, now that one loop over this list draws both
--- the strip and the button under it -- no second, separate re-read of
--- the track's name and colour for the row underneath.
+-- name button's label too: one loop over this list draws both the strip
+-- and the button under it, so the row underneath never re-reads the
+-- track's name and colour.
 --
 -- `folder` is true on a folder parent and `fmode` is its state (0 full,
 -- 1 children collapsed, 2 children hidden). A track in a folder whose
@@ -209,16 +209,6 @@ function MX.click(track, guid, mods)
 end
 
 -- ---------------------------------------------------------------------
--- the name button
--- ---------------------------------------------------------------------
-
--- One coloured track button, drawn rather than themed so the track colour
--- can be the fill while the label stays readable over it. Fixed width --
--- the row should read as a row of equal slots like a console, not jump
--- about with the length of each track's name. Used both under a strip
--- (mixer view) and on its own (channel view): the same object either
--- way, so it had better look and answer like one.
--- ---------------------------------------------------------------------
 -- dragging to reorder
 -- ---------------------------------------------------------------------
 -- A strip's header, or a name button, is a drag handle: past the drag
@@ -249,6 +239,17 @@ local function drag_source(ctx, t, limit_y)
     press.pending = nil
   end
 end
+
+-- ---------------------------------------------------------------------
+-- the name button
+-- ---------------------------------------------------------------------
+
+-- One coloured track button, drawn rather than themed so the track colour
+-- can be the fill while the label stays readable over it. Fixed width --
+-- the row should read as a row of equal slots like a console, not jump
+-- about with the length of each track's name. Used both under a strip
+-- (mixer view) and on its own (channel view): the same object either
+-- way, so it had better look and answer like one.
 
 local FOLDER_ICON = { [0] = "folder_full", [1] = "folder_collapsed", [2] = "folder_hidden" }
 local FOLDER_TIP  = {
@@ -437,9 +438,8 @@ end
 
 -- A collapsed strip is the Channel panel's collapsed bar, the same way
 -- an expanded one is its body: the expand button, mute and solo, and the
--- meter with the ghost fader laid over it. Writing a second one here is
--- how the pinned panel ended up with a fader on its collapsed bar and
--- the mixer did not.
+-- meter with the ghost fader laid over it. Sharing it keeps the pinned
+-- panel's collapsed bar and the mixer's the same.
 -- Returns true when the meter (that is, the ghost fader over it) was
 -- clicked rather than dragged, which on a collapsed strip means "this
 -- track": there is nothing else down there to click.
@@ -654,11 +654,9 @@ function MX.row_pad_y(ctx, pad_x)
     ImGui.WindowFlags_HorizontalScrollbar | ImGui.WindowFlags_AlwaysHorizontalScrollbar
     | ImGui.WindowFlags_NoScrollWithMouse)
   if ok then
-    -- No overflow to fake any more -- AlwaysHorizontalScrollbar means
-    -- this child's own scrollbar is already showing on this very first
-    -- read, not "as of whatever it overflowed by last frame", so there
-    -- is nothing left that a Dummy submitted afterward would have been
-    -- protecting this read from.
+    -- AlwaysHorizontalScrollbar means this child's own scrollbar is
+    -- already showing on this first read, not "as of whatever it
+    -- overflowed by last frame", so no Dummy is needed to force it.
     local _, h = ImGui.GetContentRegionAvail(ctx)
     pad_y = 100 - h
     ImGui.EndChild(ctx)
@@ -702,7 +700,9 @@ end
 --               view; mixer view, from channel view).
 --   dbl_track -- a NAME BUTTON was double-clicked, in either view: open
 --               this track in channel view.
-function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
+-- `row_w` (optional) is the row's width; 0 or nil fills the window (less
+-- room is left when a drawer sits beside it, TS_CV_Drawers).
+function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
   local open_it, want_view, dbl_track = nil, false, nil
 
   local row_x, row_y0 = ImGui.GetCursorPos(ctx)
@@ -713,10 +713,10 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
   -- AlwaysHorizontalScrollbar: see row_pad_y's own comment on the same
   -- pair of flags. Without it, THIS row -- the real one, not the probe
   -- -- only shows a scrollbar on a frame its own content genuinely
-  -- overflows, so a short track list reserved the strip and then drew
+  -- overflows, so a short track list would reserve the strip and draw
   -- nothing in it: reserved space with nothing there to explain it.
   -- With it, the strip is never anything other than a scrollbar.
-  local ok = ImGui.BeginChild(ctx, "trackrow", 0, total_h, 0,
+  local ok = ImGui.BeginChild(ctx, "trackrow", row_w or 0, total_h, 0,
     ImGui.WindowFlags_HorizontalScrollbar | ImGui.WindowFlags_AlwaysHorizontalScrollbar
     | ImGui.WindowFlags_NoScrollWithMouse)
   if ok then
@@ -724,7 +724,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
     -- depends on which VIEW is asking (both are handed the exact same
     -- pad_y, from the ONE call per frame) or on whether the row's
     -- content happens to overflow this frame, because nothing here asks
-    -- that question any more.
+    -- that question.
     local inner_h = total_h - pad_y
     local list = MX.tracks()
 
@@ -785,9 +785,9 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
         -- is no strip above it to leave room for.
         local selected = MX.selected(t.track) or (t.track == cur_track)
         -- Same fallback colour as mixer view's column() uses for a
-        -- blank track (C.COL.header_bg, the resolved theme colour) --
-        -- not a second, hardcoded guess at it, which is how a blank
-        -- track ended up a visibly different grey in each view.
+        -- blank track (C.COL.header_bg, the resolved theme colour), not
+        -- a hardcoded guess at it, so a blank track is the same grey in
+        -- both views.
         local hit, dbl, menu = name_button(ctx, track_label(t),
           t.col or C.COL.header_bg, selected, t.guid, w, t)
         if hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
@@ -949,8 +949,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
     -- ReaImGui says so plainly when nothing follows one that would grow
     -- the window: "Please submit an item e.g. Dummy() afterwards". In
     -- channel view there is nothing after the button loop to be that
-    -- item, which is exactly what made this the hard error rather than
-    -- just a stray scrollbar. Reasserting (x_off, row_y) and a
+    -- item, so without this one ReaImGui raises that error rather than
+    -- just showing a stray scrollbar. Reasserting (x_off, row_y) and a
     -- zero-width, one-row-tall Dummy here does double duty: it is the
     -- item ReaImGui asked for, and it caps the row's content height at
     -- exactly one row no matter what the last thing drawn above -- a
@@ -962,8 +962,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x)
 
     -- This row is one line, always -- it scrolls sideways and never up
     -- or down. Whatever ReaImGui's own bookkeeping thinks the content
-    -- height is (and that bookkeeping is exactly what has been fought
-    -- through this whole file), a vertical scroll position is never
+    -- height is (it's unreliable here: see the culling note above), a
+    -- vertical scroll position is never
     -- allowed to leave 0, so there is never a "second row" to land on
     -- by scrolling, no matter what the bookkeeping says exists below it.
     if ImGui.GetScrollY(ctx) ~= 0 then

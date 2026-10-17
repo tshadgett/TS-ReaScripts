@@ -346,7 +346,7 @@ end
 -- why: a straight SetEQParam real-value write for gain or Q, on a band
 -- this file just created, doesn't reliably mean what the read path
 -- (which IS trusted -- see RQ.read's own header) reports back. Gain
--- overshoots a boost and clamps a cut flat to 0dB; Q comes out inverted.
+-- overshoots a boost and drives a cut to its floor; Q comes out inverted.
 -- Both are consistent, monotonic mismatches rather than noise, which is
 -- enough to correct for WITHOUT knowing what the true relationship is:
 -- probe the two search bounds once to learn which direction increasing
@@ -487,7 +487,7 @@ local LOG10 = math.log(10)
 -- A band's gain can read back as -inf (ReaEQ's own floor -- see RQ.read),
 -- and 10^(-inf/40) is 0, which puts an infinity in the denominators
 -- below and NaN in what comes out. NaN poisons everything it's summed
--- with, so one such band took the combined curve off the canvas with it.
+-- with, so one such band would take the combined curve with it.
 -- Clamped here to a little past what the canvas can show (the curve runs
 -- off its edge either way): -inf draws as a cut that leaves the canvas,
 -- which is what it is. Not further: a shelf's filter maths goes unstable

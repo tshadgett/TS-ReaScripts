@@ -186,9 +186,9 @@ local F_LO, F_HI = 20, 20000
 
 -- What it's reducing, over its band: one depth (its gain reduction, as the
 -- waveform has it) across the band, soft at the edges. A de-esser turns
--- one gain down over its band, so this is drawn as roughly as it's known:
--- measured band by band, the quiet bands' noise said more than the plugin
--- did. The depth swells at once and settles back over half a second; the
+-- one gain down over its band, so one depth is all there is to draw:
+-- measured band by band, the quiet bands' noise would say more than the
+-- plugin. The depth swells at once and settles back over half a second; the
 -- scale steps 6 / 12 / 24 dB so it doesn't breathe.
 local function deess_fill(ctx, dl, ps, gx0, gw, y0, y1, a, b, gr, open_hi)
   local now = reaper.time_precise()
@@ -1043,7 +1043,7 @@ function RP.rv_mult(fq, lf, bass, hf, dmul)
   return math.exp(wl * math.log(math.max(0.01, bass)) + wh * math.log(math.max(0.01, dmul)))
 end
 
--- Its diffusion, 0..1 (nil when it has none mapped: drawn as before).
+-- Its diffusion, 0..1 (nil when it has none mapped).
 function RP.rv_diffusion(m, rv)
   if not m then return nil end
   if m.unit == "pct" and m.v then return math.max(0, math.min(1, m.v / 100)) end
@@ -1357,7 +1357,7 @@ local function draw_reverb(ctx, dl, x, y, w, h, track, fx, req, cv, R)
     local function mul_of(py) return M_LO * (M_HI / M_LO) ^ ((my1 - py) / (my1 - my0)) end
     local lf, lf_along = val(R.LowFreq, "hz", 50, 1000, true, rev.LowFreq)
     local hf, hf_along = val(R.HighFreq, "hz", 1000, 20000, true, rev.HighFreq)
-    -- a Damping that reads in Hz is where the highs start (as it was drawn before)
+    -- a Damping that reads in Hz is where the highs start
     local damp_hz = R.Damping and R.Damping.unit == "hz" and R.Damping.v and not R.HighFreq
     if damp_hz then hf = R.Damping.v end
     lf, hf = lf or 250, hf or 4000
@@ -2183,7 +2183,7 @@ end
 -- A multiband: each band's level going in against its threshold (measured
 -- on the way in only, so it holds up), and ONE reduction -- the plugin's
 -- as a whole -- down the side. Each band's own reduction isn't measured:
--- comparing before with after held up for one number, not for four.
+-- comparing before with after holds up for one number, not for four.
 local function draw_multi(ctx, dl, x, y, w, h, track, fx, req, cv, R)
   local addr, guid = fx.addr, fx.guid
   local ps = u.panel_state(guid)

@@ -6,7 +6,7 @@
   the ReaEQ-reading, -writing and curve math lives in TS_CV_ReaEQ.lua;
   this file is ImGui only -- geometry, drawing, hit-testing.
 
-  INTERACTION, per the spec this was built against:
+  INTERACTION:
     double-click empty canvas  -- add a node. Which of the five types it
       becomes follows only from WHERE you clicked (RQ.infer_type) --
       extremes are a pass filter, a little in from there is a shelf, the
@@ -51,21 +51,30 @@ local function panel_state(guid)
 end
 
 -- ---------------------------------------------------------------------
--- batched polyline strokes -- lifted from the exact pattern TS_TrackAnalyser
--- already proved out for this: AddPolyline over a packed reaper.array is
+-- batched polyline strokes -- the same pattern TS_TrackAnalyser uses:
+-- AddPolyline over a packed reaper.array is
 -- one call instead of one per segment, with a per-segment AddLine fallback
 -- if the installed ReaImGui doesn't have the packed call or the first
 -- attempt errors. Fills stay a rect per span rather than one concave
 -- polygon -- a concave fill self-intersects where two curves cross, which
--- is the documented reason TrackAnalyser's own spectrum fill is quads, not
--- one polygon.
+-- is also why TrackAnalyser's own spectrum fill is quads, not one
+-- polygon.
 -- ---------------------------------------------------------------------
-local polyOK = (type(ImGui) == "table") -- refined properly once attached
-local PTBUF = {}
+-- On until a call fails. (ImGui isn't attached yet when this file loads,
+-- so whether the packed call exists is asked at draw time.)
+local polyOK = true
+-- One buffer per point count: AddPolyline reads the whole array, so its
+-- size has to be exactly the points drawn. Dropped when there get to be a
+-- lot of sizes (a canvas being resized), rather than kept forever.
+local PTBUF, ptbuf_n = {}, 0
 local function ptbuf(npoints)
   local need = npoints * 2
   local a = PTBUF[need]
-  if not a then a = reaper.new_array(need); PTBUF[need] = a end
+  if not a then
+    if ptbuf_n >= 32 then PTBUF, ptbuf_n = {}, 0 end
+    a = reaper.new_array(need); PTBUF[need] = a
+    ptbuf_n = ptbuf_n + 1
+  end
   return a
 end
 
@@ -88,7 +97,7 @@ local function polyline(dl, xs, ys, n, col, thick)
 end
 
 -- A faded version of `polyline`, for a trace that should read as a hint
--- rather than a second real curve -- currently just the hover preview.
+-- rather than a second real curve (the hover preview).
 -- AddPolyline can't vary colour/alpha along its own length, so this goes
 -- segment by segment instead, each one's alpha scaled by how far it sits
 -- from the 0dB line (`y_zero`): full strength at a peak, fading away to
@@ -295,7 +304,7 @@ end
 --
 -- RQ.add_band's real-value (isnorm=false) writes for gain and Q on this
 -- native effect are unreliable (see its header): a positive gain
--- overshoots, a negative gain always pins to exactly 0dB, and Q comes
+-- overshoots, a negative gain drives the band to its floor, and Q comes
 -- out inverted. This is consistent with SetEQParam's "real" value for
 -- gain/Q being silently treated as if it were normalized (0..1) on this
 -- effect, unlike freq, which genuinely takes real Hz.
@@ -540,8 +549,8 @@ function EQP.draw(ctx, dl, x, y, w, h, track, fx, req)
         -- normalized (0..1), unlike freq, which genuinely takes real Hz.
         -- So [0,1] is searched as the WRITTEN-value bracket; job.target
         -- stays in real dB/Q units throughout, compared against the
-        -- trusted real-unit read-back -- eq_fix_step itself needs no
-        -- change, only where each job starts its search.
+        -- trusted real-unit read-back, so each job only needs to know
+        -- where its search starts.
         -- Gain is skipped when it's already 0: a value that's already 0
         -- needs no correction. Q always gets queued -- every band gets a
         -- real target Q (RQ.DEFAULT_Q), never left wherever it landed.

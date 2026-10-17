@@ -117,7 +117,7 @@ local function make_track(job)
   reaper.TrackFX_SetParam(tr, ana, 0, 1)        -- analyser
   local _, pdc = reaper.TrackFX_GetNamedConfigParm(tr, job.p, "pdc")
   reaper.TrackFX_SetParam(tr, ana, 2, tonumber(pdc) or 0)
-  -- the copy must answer only to what we write: no links from the
+  -- the copy must answer only to what this writes: no links from the
   -- original track's macros or modulators (on the hidden track they'd
   -- point at the measuring plugins, or at nothing), no LFOs, no lanes
   -- holding a parameter where it is -- on every parameter, not just the
@@ -472,8 +472,8 @@ function LN.step(job)
     job.i, job.state = 1, "measuring"
     job.msg = "Measuring\u{2026}"
     if job.mode == "thr" then
-      -- a REAPER still running the measuring plugin from before it could
-      -- play a tone (TS_CV_Learn.jsfx as it was when first loaded)
+      -- an older TS_CV_Learn.jsfx still loaded in REAPER, one that can't
+      -- play a tone (no Sidechain slider)
       local _, sig = reaper.TrackFX_GetParamName(job.tmp, 0, 7, "")
       if not (sig or ""):lower():find("sidechain", 1, true) then
         return fail(job, "REAPER is still running the older measuring plugin (TS_CV_Learn.jsfx). " ..
@@ -570,9 +570,6 @@ LN.THR_LO_IN = -84
 LN.THR_DEAD, LN.THR_WAKE = -40, 5
 local BAND_1K = 68            -- the analyser's band holding 1 kHz (958..1015 Hz)
 
--- Where the reduction starts, from { {level, reduction}, ... }: a line
--- through the points reduced by 1 dB or more, run back to none. nil when
--- there aren't two, or it hardly reduces.
 -- Whether measured thresholds {x, dBFS} move with their control: more
 -- than 1 dB between the highest and the lowest.
 function LN.thr_moves(pts)
@@ -581,6 +578,9 @@ function LN.thr_moves(pts)
   return hi - lo > 1
 end
 
+-- Where the reduction starts, from { {level, reduction}, ... }: a line
+-- through the points reduced by 1 dB or more, run back to none. nil when
+-- there aren't two, or it hardly reduces.
 function LN.thr_fit(pts)
   local xs, ys = {}, {}
   for _, q in ipairs(pts) do
@@ -955,7 +955,7 @@ function step_dec(job)
   if st.probe then
     -- in the middle of its range, no tail (or one under 30 ms) is the burst
     -- coming straight through, not a reverb: try its Mix the other way
-    -- round (a mix whose wet end is where we thought dry was), and if
+    -- round (a mix whose wet end is where dry was assumed), and if
     -- that's dry too, say so and stop
     if dry then
       local mix = job.layout.canvas.roles.Mix

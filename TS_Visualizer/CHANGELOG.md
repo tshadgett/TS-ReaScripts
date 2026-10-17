@@ -1,5 +1,10 @@
 # TS_Visualizer — changelog
 
+## 2.2.1 — tidier code
+
+- Code comments and the README tidied: what the code does and why, without
+  the development history. Nothing changes in use.
+
 ## 2.2.0 — works with TS_TrackProbe 2.0.0
 
 - Reads the per-track spectrum from the new TS_TrackProbe (2.0.0, no

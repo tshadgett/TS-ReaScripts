@@ -9,39 +9,32 @@
 --
 -- Not a script you run. TS_TrackAnalyser requires this.
 --
--- WHAT IS LEFT, AND WHAT WENT
---   This used to read the whole of InfiniStrip: every slot's Type, Mute and
---   Solo, the filter and EQ settings, the insert-slot parameters, and the
---   per-module Gate / Comp / Lim meters -- the last of those through a
---   measured meter law, a staleness test and a timed hold, because seventy
---   per cent of reads came back as an identical idle tuple.
+-- WHAT THIS READS, AND WHAT IT DOESN'T
+--   Find every plugin between the probes that reports reduction to the
+--   host, read it, and say whether that plugin is actually switched on.
+--   Nothing else about a plugin is read: no slot Type, Mute or Solo, no
+--   filter or EQ settings, no insert-slot parameters, no per-module
+--   Gate / Comp / Lim meters. The response comes from the probe pair,
+--   which measures the audio and is therefore right about bypass, mute,
+--   insert slots and saturation without being told anything. Reduction
+--   is drawn only from the VST3 route, which reports decibels directly
+--   and needs no meter law, no staleness test and no hold.
 --
---   The panel does not draw any of that any more. The response comes from
---   the probe pair, which measures the audio and is therefore right about
---   bypass, mute, insert slots and saturation without being told anything;
---   and reduction is drawn only from the VST3 route, which reports
---   decibels directly and needs no law, no staleness test and no hold.
---
---   So the parameter map, the meter laws, the slot reader and the module
---   meters have gone. What is here is the part that still runs: find every
---   plugin between the probes that reports reduction to the host, read it,
---   and say whether that plugin is actually switched on.
---
--- THE ONE MEASUREMENT WORTH KEEPING (2026-08-31, Pro-C 3 + InfiniStrip):
---   TrackFX_GetNamedConfigParm(tr, fx, "GainReduction_dB") answered on
---   every one of 159 samples and returns DECIBELS -- no scale to work out.
---   The parameter path returned a bare zero on 67% of frames. REAPER also
---   FORMATS the same parameter as 20*log10(v), which read "-0.44 dB" while
---   the compressor was pulling 26: read the value and apply the law, never
---   the text. InfiniStrip does not support the named route -- it fakes its
---   readout as an ordinary parameter -- so the parameter path stays as a
---   fallback, listed but not drawn.
+-- WHY THE NAMED ROUTE COMES FIRST
+--   TrackFX_GetNamedConfigParm(tr, fx, "GainReduction_dB") answers on
+--   every frame and returns DECIBELS -- no scale to work out. The
+--   parameter path returns a bare zero on about two frames in three.
+--   REAPER also FORMATS the same parameter as 20*log10(v), which can read
+--   "-0.44 dB" while the compressor is pulling 26: read the value and
+--   apply the law, never the text. InfiniStrip does not support the
+--   named route -- it fakes its readout as an ordinary parameter -- so
+--   the parameter path stays as a fallback, listed but not drawn.
 --========================================================
 
 local r = reaper
 local M = {}
 
--- The probe's readings, old (sliders) or new (2.0.0: gmem): see
+-- The probe's readings, old (sliders) or new (gmem): see
 -- TS_TA_ProbeLink.lua beside this file.
 local PL
 do
@@ -60,7 +53,7 @@ end
 -- install says so instead of dying on a nil call.
 M.VERSION = 20
 
--- Normalised key for matching a plugin name against a law we have.
+-- Normalised key for matching a plugin name against a known law.
 function M.key(s)
   return (s or ""):gsub("[^%w]", ""):lower()
 end
@@ -123,13 +116,13 @@ end
 ----------------------------------------------------------
 -- THE ROUTE, IN ORDER OF PREFERENCE
 --
--- Measured 2026-08-31 with Pro-C 3 and InfiniStrip on one track:
+-- Pro-C 3 and InfiniStrip show the two cases:
 --
 --   TrackFX_GetNamedConfigParm(tr, fx, "GainReduction_dB")
 --     answers on Pro-C 3 and returns DECIBELS directly -- no law, no
---     calibration, no meter scale to work out. It answered on every one of
---     159 samples with a sane value, where the parameter path returned a
---     bare zero on 67% of frames. This is REAPER's own route, the one
+--     calibration, no meter scale to work out. It answers on every frame
+--     with a sane value, where the parameter path returns a bare zero on
+--     about two frames in three. This is REAPER's own route, the one
 --     feeding the reduction meter on the mixer strip, and it works for any
 --     plugin that reports through the proper VST3 mechanism.
 --
@@ -138,7 +131,7 @@ end
 --     fallback, with its per-plugin law.
 --
 --   Neither: the probes measure it, which needs nothing from the plugin
---   at all -- they measured Pro-C's whole compression curve unaided.
+--   at all -- they can measure a whole compression curve unaided.
 ----------------------------------------------------------
 
 M.GR_KEY = "GainReduction_dB"

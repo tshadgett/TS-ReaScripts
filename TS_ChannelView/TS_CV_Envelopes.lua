@@ -174,10 +174,10 @@ end
 -- The track's own envelopes the menu offers, by the tag REAPER files
 -- each under in the track's state chunk, and the name of REAPER's own
 -- "show" action for it (looked up by name -- see TS_CV_Actions -- with
--- the command id as the fallback). `pt`
--- gives the value of the starting point when the envelope has to be
--- built by hand. There is no solo envelope: REAPER doesn't automate solo.
--- Width is left out: its lanes didn't come up reliably from here.
+-- the command id as the fallback). `pt` gives the value of the starting
+-- point when the envelope has to be built by hand. There is no solo
+-- envelope: REAPER doesn't automate solo. Width is left out: its lane
+-- doesn't come up reliably from here.
 local function tv(track, key, d) return reaper.GetMediaTrackInfo_Value(track, key) or d end
 EN.TRACK_ENVS = {
   { name = "Volume", chunk = "<VOLENV2",
@@ -384,9 +384,9 @@ function EN.track_env(track, def)
 end
 
 -- A new envelope block, visible in its own lane, with one point at the
--- start holding the track's current value -- REAPER drops an envelope
--- with no points at all when it reads the chunk back, which is why the
--- first version of this made nothing.
+-- start holding the track's current value. The point is needed: REAPER
+-- drops an envelope with no points at all when it reads the chunk back,
+-- and nothing would be made.
 function EN.env_block(tag, value, shape)
   return ("%s\nACT 1 -1\nVIS 1 1 1\nLANEHEIGHT 0 0\nARM 0\nDEFSHAPE %d -1 -1\nPT 0 %.10g %d\n>\n")
     :format(tag, shape or 0, value or 0, shape or 0)
@@ -420,10 +420,6 @@ function EN.create_track_env(track, def)
   return EN.track_env(track, def)
 end
 
--- Shows a track envelope, creating it if it doesn't exist. REAPER's own
--- "toggle ... envelope visible" action first -- found by name, run on
--- this track alone, selection put back after -- since that builds the
--- envelope exactly as REAPER would; the chunk only if that found nothing.
 -- Runs a Main action on `track` alone, putting the selection back after.
 local function run_on_track(track, id, undo)
   local sel = {}
@@ -483,8 +479,8 @@ function EN.show(track, env, on)
 end
 
 -- Shows a track envelope, creating it if it doesn't exist: REAPER's own
--- toggle action creates and shows in one go; the chunk only when there
--- is no action for it.
+-- toggle action creates and shows in one go, exactly as REAPER would;
+-- the chunk only when there is no action for it.
 function EN.show_track_env(track, def)
   local env = EN.track_env(track, def)
   if env then EN.show(track, env, true) return end
@@ -512,9 +508,9 @@ function EN.show_fx_env(track, fx, p)
     end
   end
   -- A new lane is automation, not modulation -- but REAPER switches the
-  -- parameter's modulation on when it makes the envelope (seen in a log:
-  -- mod.active absent before GetFXEnvelope(create), 1 after, with no LFO,
-  -- audio follower or link). Switch it back off, unless it was on before.
+  -- parameter's modulation on when it makes the envelope (mod.active goes
+  -- to 1, with no LFO, audio follower or link to drive it). Switch it back
+  -- off, unless it was on before.
   if not was_on then
     local ok1, now_ = reaper.TrackFX_GetNamedConfigParm(track, fx, key)
     if ok1 and tonumber(now_) == 1 then

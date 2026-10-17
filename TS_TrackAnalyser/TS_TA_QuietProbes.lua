@@ -16,16 +16,15 @@
 --
 -- WHY RENAMING RATHER THAN HIDING
 --   REAPER has no hidden-FX flag, and reaching into the FX chain window
---   to hide rows is how this project already crashed REAPER once: the
---   Docked Plugin Display reparented a plugin's child window and did not
---   return it, and every FX chain opened afterwards took REAPER down.
---   A label is a label.
+--   to hide rows is not safe: a plugin's child window that is reparented
+--   and not returned can take REAPER down on every FX chain opened
+--   afterwards. A label is a label.
 --
 -- WHY IT MIGHT DO NOTHING, AND WHY THAT IS THE RIGHT OUTCOME
 --   The rename goes through TrackFX_SetNamedConfigParm with the key
---   "renamed_name". I could not confirm that key from REAPER's own
---   documentation, so the script does not assume it: it writes to one
---   probe, reads the value back, and only proceeds if the value stuck.
+--   "renamed_name". That key is not in REAPER's own documentation, so
+--   the script does not assume it: it writes to one probe, reads the
+--   value back, and only proceeds if the value stuck.
 --   If it did not, nothing is changed and it says so, rather than
 --   spraying writes at config keys on your plugins to see what happens.
 --

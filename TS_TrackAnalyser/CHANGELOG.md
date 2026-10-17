@@ -1,5 +1,10 @@
 # Track Analyser — changelog
 
+## 2.2.1 — tidier code
+
+- Code comments and the README tidied: what the code does and why, without
+  the development history. Nothing changes in use.
+
 ## 2.2.0 — a quieter probe
 
 **Reopen your projects after updating** to load the new probe.

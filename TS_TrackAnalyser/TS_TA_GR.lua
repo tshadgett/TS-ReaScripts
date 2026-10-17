@@ -8,19 +8,19 @@
 --
 -- Not a script you run. TS_TrackAnalyser requires this.
 --
--- WHAT THIS IS FOR, AND WHAT IT REPLACES
---   The measured gain-reduction trace used to be post RMS over pre RMS
---   across the span between the probes. That is not gain. It is the
---   span's LEVEL change, and the two are the same thing only when
---   nothing in the span touches the SPECTRUM.
+-- WHY PER BAND
+--   Post RMS over pre RMS across the span between the probes is not
+--   gain. It is the span's LEVEL change, and the two are the same thing
+--   only when nothing in the span touches the SPECTRUM.
 --
 --   The moment something does -- one EQ band is enough -- the level
 --   change starts depending on where the programme's energy happens to
 --   be sitting. A static +6 dB at 100 Hz adds six decibels to the ratio
 --   through a bass note and nothing at all through a cymbal. The EQ
---   never moved. The music did, and it went onto the trace looking
+--   never moves. The music does, and it goes onto the trace looking
 --   exactly like compression. Measured against a true 13 dB reduction,
---   that drew a 39 dB one: 3.10 dB of error, correlation 0.71.
+--   the broadband ratio draws a 39 dB one: 3.10 dB of error,
+--   correlation 0.71.
 --
 --   A per-BAND ratio does not have that property. Band b's ratio is
 --   whatever the EQ does in band b, regardless of how much energy is
@@ -60,14 +60,14 @@
 local M = {}
 
 -- Where the band levels start inside a scope column. 1..3 are min, max
--- and RMS, which were there first.
+-- and RMS.
 M.BAND0 = 4
 
--- A band with nothing in it is not evidence of anything. Two thresholds,
--- for the same reason the broadband gate needed two: an absolute floor,
--- below which there is no signal to take a ratio of, and one relative to
--- what that band does at its loudest, because a band that lives at -60
--- has real gaps far above any fixed floor.
+-- A band with nothing in it is not evidence of anything. Two thresholds:
+-- an absolute floor, below which there is no signal to take a ratio of,
+-- and one relative to what that band does at its loudest, because a band
+-- that lives at -60 has real gaps far above any fixed floor. A column
+-- counts only where the pre level clears both and the post the floor.
 local GATE_ABS = 10 ^ (-90 / 20)
 local GATE_REL = 50
 
@@ -209,8 +209,8 @@ function M.shape(pre, post, len, oldest, total, nb, out, scratch)
       end
     end
     -- A column nothing could be measured in HOLDS. A gap in the audio is
-    -- not a moment of no gain reduction; it is a moment we cannot
-    -- measure, and drawing it as zero invents a release that did not
+    -- not a moment of no gain reduction; it is a moment that cannot be
+    -- measured, and drawing it as zero invents a release that did not
     -- happen.
     if n > 0 then
       local m

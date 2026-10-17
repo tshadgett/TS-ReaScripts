@@ -19,8 +19,8 @@
 --
 -- THE CONTAINER PROBLEM, AND HOW THIS AVOIDS GUESSING
 --   REAPER addresses FX inside a container with an encoded index, not a
---   plain one. I could not confirm the exact encoding from the documentation
---   available to me, and a tool that guesses wrong here does not fail --
+--   plain one. The exact encoding is not documented clearly enough to
+--   rely on, and a tool that guesses wrong here does not fail --
 --   it quietly writes parameters to the wrong plugin. So this does not
 --   guess. It tries each candidate encoding, reads the FX name back, and
 --   keeps the form that answers. If none answers it says so rather than
@@ -32,7 +32,7 @@
 local r = reaper
 local M = {}
 
--- Talking to the probe, old (sliders) or new (2.0.0: no parameters, all
+-- Talking to the probe, old (sliders) or new (no parameters, all
 -- through gmem): TS_TA_ProbeLink.lua beside this file. Without it, only
 -- the old probe can be driven, the old way.
 local PL
@@ -69,8 +69,8 @@ local function fxName(tr, idx)
 end
 
 -- Every name REAPER will admit to for one FX: what it shows, and what it
--- was called before anyone renamed it. Tim's container is called "Strip",
--- so anything that keys off the displayed name alone is already broken.
+-- was called before anyone renamed it. A container is often renamed (to
+-- "Strip", say), so anything keyed off the displayed name alone breaks.
 local function namesOf(tr, idx)
   local out = {}
   local shown = fxName(tr, idx)
@@ -266,19 +266,19 @@ end
 -- THE TRACK POINTER IS CHECKED, NOT ASSUMED. disarm() is called from the
 -- panel's atexit, and on a REAPER shutdown the project -- and every
 -- MediaTrack in it -- can already be gone by the time that runs. Writing a
--- slider to a freed track is what threw
+-- slider to a freed track throws
 --   "bad argument #1 to 'TrackFX_SetParam' (MediaTrack expected)"
--- in everyone's face on the way out.
+-- on the way out.
 local function setSlider(tr, fx, param, value01)
   if not fx or not tr then return end
   if not r.ValidatePtr2(0, tr, "MediaTrack*") then return end
   pcall(r.TrackFX_SetParam, tr, fx.idx, param, value01)
 end
 
--- Since TS_TrackProbe 2.0.0 the pair is NAMED in its track's gmem block
--- rather than told its role, and publishes by a flag there: nothing that
--- REAPER sees as a parameter change (TS_TA_ProbeLink). An old probe is
--- still driven by its sliders.
+-- A current probe pair is NAMED in its track's gmem block rather than
+-- told its role, and publishes by a flag there: nothing that REAPER sees
+-- as a parameter change (TS_TA_ProbeLink). An old probe is still driven
+-- by its sliders.
 local function live(tr) return tr and r.ValidatePtr2(0, tr, "MediaTrack*") end
 local armed = {}       -- track -> { rig, compare }
 
@@ -391,19 +391,19 @@ M.gmem = {
   -- Written by the POST probe of whatever track the panel is comparing
   -- against, with its Position set to 2. Only ever one comparison track:
   -- the masking overlay is between the track you are looking at and the
-  -- one you picked, which is the scope that was asked for.
+  -- one you picked.
   CMP_BASE   = 0x30000,
 
   H_SEQ = 0, H_RMS = 1, H_PEAK = 2, H_SRATE = 3, H_NBINS = 4, H_FFTSZ = 5,
   H_SLICE = 6, H_EPOCHACK = 7, H_CUR = 8, H_COLS = 9, H_BLOCKS = 10,
   H_ROLE = 11, H_NCH = 12, H_PKL = 13, H_PKR = 14,
 
-  -- RESERVED, NOT PUBLISHED. The probe used to write a per-bin spectrum
-  -- and a per-bin average here -- about two thousand gmem writes a frame,
-  -- each -- and nothing read either one. The panel reads OFF_BAND and
-  -- OFF_SCOPE. Kept in the map so nothing else claims the regions, and so
-  -- an archived measurement tool that expects them finds zeros rather than
-  -- something plausible and stale.
+  -- RESERVED, NOT PUBLISHED. Room for a per-bin spectrum and a per-bin
+  -- average. Writing them costs about two thousand gmem writes a frame,
+  -- each, and nothing reads them: the panel reads OFF_BAND and OFF_SCOPE.
+  -- Kept in the map so nothing else claims the regions, and so an archived
+  -- measurement tool that expects them finds zeros rather than something
+  -- plausible and stale.
   OFF_SPEC  = 64,
   OFF_AVG   = 2048,
   OFF_SCOPE = 4096,

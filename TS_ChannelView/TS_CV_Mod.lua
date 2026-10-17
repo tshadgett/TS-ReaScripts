@@ -559,10 +559,6 @@ function MD.default_depth(v)
   return -v
 end
 
--- Links source `src` (output `k`) to parameter `param` of the plugin at
--- `path`. Replaces whatever link the parameter had (the caller asks
--- first). A macro takes the control over its whole range (drag the ring's
--- ends to narrow it); a modulator swings it from where it's set.
 -- Whether a parameter is centre-oriented (pan, a ± gain): the plugin
 -- shows a negative number at its bottom and not at its top.
 function MD.is_centred(track, addr, param)
@@ -583,6 +579,10 @@ end
 -- as far as it can go each side.
 function MD.default_depth_bi(v) return 2 * math.min(v, 1 - v) end
 
+-- Links source `src` (output `k`) to parameter `param` of the plugin at
+-- `path`, replacing whatever link it had (the caller asks first). A macro
+-- takes the control over its whole range (drag the ring's ends to narrow
+-- it); a modulator swings it from where it's set.
 -- `centre`: the control is centre-oriented (its layout says bipolar, or
 -- MD.is_centred), so a modulator swings it both ways round where it's set
 -- rather than up from it.
@@ -632,11 +632,11 @@ function MD.unlink(track, l, no_undo)
   MD.invalidate(track)
 end
 
--- (No rescan: the link is the scan's own, changed in place -- a drag
--- calls this every frame.)
--- `limit`: how far the scale may go (1 unless a swing end needs more --
--- see set_swing_end; REAPER keeps a scale past 1, checked 11 Oct 2026).
--- What REAPER keeps is read back into the link.
+-- Sets a link's depth (its scale). `limit`: how far the scale may go (1
+-- unless a swing end needs more -- see set_swing_end; REAPER keeps a
+-- scale past 1). What REAPER keeps is read back into the link. No
+-- rescan: the link is the scan's own, changed in place, and a drag calls
+-- this every frame.
 function MD.set_depth(track, l, scale, limit)
   limit = limit or 1
   scale = math.max(-limit, math.min(limit, scale))
@@ -915,7 +915,7 @@ end
 
 -- ---------------------------------------------------------------------
 -- THE MATRIX: a modulator's settings moved by a macro or another
--- modulator (TS_CV_Modulators.jsfx's own, since 2.1.2)
+-- modulator (TS_CV_Modulators.jsfx's own)
 -- ---------------------------------------------------------------------
 --   Per modulator two slots, each three parameters after the 192 above:
 --   source (1-16 Macro, 17-24 Modulator), target (MD.MX_TARGETS' code,
@@ -942,8 +942,8 @@ MD.MX_MAX_CHOICES = 6
 
 function MD.mx_param(j, sl, k) return MD.MX_BASE + (j - 1) * MD.MX_SLOTS * 3 + (sl - 1) * 3 + k end
 
--- Does the plugin on this track have the matrix (a project still running
--- the one from before 2.1.2 doesn't)?
+-- Does the plugin on this track have the matrix? An older copy saved in
+-- a project may not have its parameters.
 function MD.mx_ok(track, slot)
   return slot ~= nil and (reaper.TrackFX_GetNumParams(track, slot) or 0) >= MD.MX_BASE + MD.NO * MD.MX_SLOTS * 3
 end

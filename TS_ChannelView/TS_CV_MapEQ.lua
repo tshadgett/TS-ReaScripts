@@ -346,7 +346,7 @@ function ME.summarise(samples, opts)
     local qref = {}
     -- A setting whose shape fitted another type still says how far the
     -- band moved: its gain is kept (TDR Slick EQ's broad boosts fit as
-    -- shelves while its cuts are bells, and the boosts were lost).
+    -- shelves while its cuts fit as bells; the boosts would be lost).
     for _, sm in ipairs(list) do
       local fit = sm.fit
       if fit.type ~= t and not sm.qn and sm.gn and fit.g then
@@ -885,7 +885,6 @@ function ME.shape_label(sh)
   return sh.text .. "  \u{00B7}  " .. kind
 end
 
--- Nudges the Q control (wheel): `d` in normalised steps.
 -- A Q control that's a switch (Narrow / Wide on an analog emulation):
 -- its positions { {norm, text, lo, hi}, ... }, or nil for a knob. Read
 -- once per plugin instance and control.
@@ -911,12 +910,14 @@ function ME.q_index(track, addr, b, pos)
   for i, ps in ipairs(pos) do local dd = math.abs(ps.norm - v); if dd < bd then best, bd = i, dd end end
   return best
 end
+-- puts it on position i
 function ME.set_q_pos(track, addr, b, i)
   local pos = ME.q_positions(track, addr, b)
   if not (pos and pos[i]) then return end
   reaper.TrackFX_SetParamNormalized(track, addr, b.q, pos[i].norm)
 end
 
+-- Nudges the Q control (wheel): `d` in normalised steps.
 function ME.nudge_q(track, addr, b, d)
   if not b.q or d == 0 then return end
   -- a switch: the next position, one a notch

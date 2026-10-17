@@ -689,8 +689,8 @@ end
 -- only when the value has moved (the plugin updates it once per audio
 -- block) or a while has passed, and drawn by WHEN they came, not one step
 -- per frame: ChannelView's frames aren't evenly spaced and the plugin's
--- blocks don't line up with them, so plotting a point per frame drew a
--- smooth LFO as a wobbly, stepped one.
+-- blocks don't line up with them, so plotting a point per frame would
+-- draw a smooth LFO as a wobbly, stepped one.
 local HIST_SEC = 2.5
 local function sample(key, v)
   local now = reaper.time_precise()
