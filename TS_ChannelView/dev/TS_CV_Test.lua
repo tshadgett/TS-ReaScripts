@@ -1141,7 +1141,8 @@ do
   check("parallel: set inside a container", shape(), "A,C1[B|2,C2[D,E|1]],F|1,G|2")
   check("parallel: changes the chain's hash", T.hash(T.collect(TR)) ~= T.hash(list), true)
 
-  for k, v in pairs(saved) do reaper[k] = v end
+  for _, k in ipairs({ "JS_Window_SetFocus", "JS_Window_FindChildByID", "GetMainHwnd",
+                       "SetCursorContext", "NamedCommandLookup" }) do reaper[k] = saved[k] end
 end
 
 
@@ -2872,6 +2873,29 @@ do
   check("a text field keeps it",               (function() f(true, true, false); return f(false, true, false) end)(), false)
   check("until it's done with",                f(false, false, false), true)
   check("a popup closing hands back too",      (function() f(false, true, true); return f(false, false, false) end)(), true)
+
+  -- Where it goes: the arrange view, or the tracks after a track was
+  -- clicked (Insert FX actions follow the context).
+  local saved = {}
+  for _, k in ipairs({ "JS_Window_SetFocus", "JS_Window_FindChildByID", "GetMainHwnd",
+                       "SetCursorContext", "NamedCommandLookup" }) do saved[k] = reaper[k] end
+  local calls = {}
+  reaper.GetMainHwnd = function() return "main" end
+  reaper.JS_Window_FindChildByID = function() return "arrange" end
+  reaper.JS_Window_SetFocus = function(h) calls[#calls + 1] = "focus " .. h end
+  reaper.SetCursorContext = function(m) calls[#calls + 1] = "context " .. m end
+  local h = {}
+  local _, to = F.hand_back(h)
+  check("hands back to the arrange view",      to, "arrange")
+  check("without touching the context",        table.concat(calls, ","), "focus arrange")
+  calls = {}
+  h.tracks = true
+  _, to = F.hand_back(h)
+  check("after a track click, to the tracks",  to, "tracks")
+  check("focus, then the tracks as context",   table.concat(calls, ","), "focus arrange,context 0")
+  check("only for that one hand-back",         h.tracks, nil)
+  for _, k in ipairs({ "JS_Window_SetFocus", "JS_Window_FindChildByID", "GetMainHwnd",
+                       "SetCursorContext", "NamedCommandLookup" }) do reaper[k] = saved[k] end
 end
 
 -- Track icons: no icon, or one whose file can't be found, draws nothing.
@@ -4775,7 +4799,8 @@ do
   check("os: an empty chain reads off", FT.chain_os("TR"), 0)
   reaper.GetSetProjectInfo = function(_, k) if k == "PROJECT_SRATE_USE" then return 1 end return 96000 end
   check("os: or the project's rate, when it's set to use its own", FT.run_rate(), 96000)
-  for k, v in pairs(saved) do reaper[k] = v end
+  for _, k in ipairs({ "JS_Window_SetFocus", "JS_Window_FindChildByID", "GetMainHwnd",
+                       "SetCursorContext", "NamedCommandLookup" }) do reaper[k] = saved[k] end
 end
 
 -- View > Strip width: clamped, and the strips' width follows it
@@ -4826,7 +4851,8 @@ do
   check("offline: set", FT.get_offline("TR", 3), true)
   FT.set_offline("TR", 3, false, "X")
   check("offline: back online", FT.get_offline("TR", 3), false)
-  for k, v in pairs(saved) do reaper[k] = v end
+  for _, k in ipairs({ "JS_Window_SetFocus", "JS_Window_FindChildByID", "GetMainHwnd",
+                       "SetCursorContext", "NamedCommandLookup" }) do reaper[k] = saved[k] end
 end
 
 -- ReaEQ: a band at -inf gain (ReaEQ's own floor) must not poison the curve
@@ -6483,7 +6509,8 @@ do
   check("slick: one notch back", V[2] < 0.5, true)
   ME.set_q_pos(0, 0, b, 2)
   check("slick: picked from the list", ME.q_index(0, 0, b, qp), 2)
-  for k, v in pairs(saved) do reaper[k] = v end
+  for _, k in ipairs({ "JS_Window_SetFocus", "JS_Window_FindChildByID", "GetMainHwnd",
+                       "SetCursorContext", "NamedCommandLookup" }) do reaper[k] = saved[k] end
 end
 
 -- The delay canvas's headroom: a tap turned up past unity (ReaDelay's

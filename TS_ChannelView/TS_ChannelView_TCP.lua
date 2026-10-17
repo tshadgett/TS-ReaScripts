@@ -296,6 +296,10 @@ local function click_select(e, mods)
     reaper.Main_OnCommand(40914, 0)            -- first selected is last touched
     app.anchor = e.guid
   end
+  -- And the tracks become the context, as they do for a click in REAPER's
+  -- own panel: without it the arrange view keeps it, and Insert FX and
+  -- the like look for selected items instead.
+  FO.tracks_next()
   reaper.UpdateArrange()
 end
 

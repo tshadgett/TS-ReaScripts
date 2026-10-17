@@ -14,6 +14,12 @@
   until they finish, and focus goes back then. Only ever after a click in
   this window -- nothing here takes focus away from anywhere else.
 
+  Where focus goes back to decides what REAPER's actions work on, as a
+  click in REAPER's own windows would: a click that selects a track in
+  ChannelView's TCP makes the tracks the context (so Delete, Insert FX
+  and the like go to the selected tracks); anything else goes back to
+  the arrange view, which makes the items the context.
+
   Focusing a window isn't in REAPER's own API. It goes through the
   js_ReaScriptAPI extension if present, otherwise SWS's "Focus arrange"
   action; with neither, focus simply stays here.
@@ -73,11 +79,38 @@ function F.to_arrange()
   return false
 end
 
+-- REAPER's track panel as the context: keyboard focus to the arrange
+-- view as above, then the tracks made the context, as a click in
+-- REAPER's own track panel makes them.
+function F.to_tracks()
+  local moved = F.to_arrange()
+  if reaper.SetCursorContext then
+    reaper.SetCursorContext(0, nil)
+    return true
+  end
+  return moved
+end
+
+local state = {}
+
+-- The next hand-back is to the tracks rather than the arrange view: for
+-- a click that selected a track.
+function F.tracks_next()
+  state.tracks = true
+end
+
+-- The hand-back itself, to wherever `s` says.
+function F.hand_back(s)
+  local tracks = s.tracks
+  s.tracks = nil
+  if tracks then return F.to_tracks(), "tracks" end
+  return F.to_arrange(), "arrange"
+end
+
 -- Call once per frame, after everything is drawn, while the main window
 -- is still current. `enabled` is the user's setting.
-local state = {}
 function F.update(ctx, ImGui, enabled)
-  if not enabled then state.armed = false return end
+  if not enabled then state.armed, state.tracks = false, nil return end
   -- By the end of the frame a click on a knob or fader has already made
   -- that item active, and an active item hides the window from a plain
   -- hover test -- so the test has to allow for it, or only clicks on
@@ -99,7 +132,7 @@ function F.update(ctx, ImGui, enabled)
     ImGui.PopupFlags_AnyPopupId | ImGui.PopupFlags_AnyPopupLevel)
   local busy = held or popup or active
   if F.step(state, { clicked = clicked, busy = busy, popup = popup }) then
-    F.to_arrange()
+    F.hand_back(state)
   end
 end
 

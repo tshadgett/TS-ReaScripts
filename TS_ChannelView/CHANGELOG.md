@@ -1,5 +1,14 @@
 # ChannelView — changelog
 
+## 2.3.2 — Insert FX with the TCP
+
+- Fixed: with ChannelView TCP running, REAPER's *Insert FX* actions (from
+  the Action List, a toolbar or a script) did nothing after a track was
+  selected in it. Selecting a track there now makes the tracks REAPER's
+  context, as a click in REAPER's own track panel does, so those actions
+  go to the selected tracks. As in REAPER's panel, Delete then removes
+  the selected tracks.
+
 ## 2.3.1 — aligned and coloured action bars
 
 - **Alignment.** Each bar's buttons can sit left, centre or right, and

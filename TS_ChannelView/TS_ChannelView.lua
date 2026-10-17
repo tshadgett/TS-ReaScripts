@@ -1,12 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.3.1
+-- @version 2.3.2
 -- @changelog
---  Action bars: align buttons left, centre or right and top, centre or
---  bottom; colour buttons (an underline, or coloured icons that fill when
---  on), desktop and web; Add a PNG in the icon picker copies one into
---  Data/toolbar_icons. Fixed: "exceeded maximum object attachment limit"
---  when browsing PNG icons.
+--  Fixed: with ChannelView TCP running, REAPER's Insert FX actions did
+--  nothing after a track was selected in it. Selecting a track there now
+--  makes the tracks REAPER's context, as a click in REAPER's own track
+--  panel does (so Delete removes tracks too, as there).
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
