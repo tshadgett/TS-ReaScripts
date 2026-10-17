@@ -81,6 +81,14 @@ TB.key, TB.tag = key, tag
 -- The button size (height; an icon button is square). A bar can ask for
 -- its own (TS_CV_Drawers' Size).
 TB.btn = C.TB_BTN
+-- Where the buttons sit: across "l", "c" or "r", up and down "t", "c" or
+-- "b"; "-" is the usual place (left; a row centred, a column at the top).
+TB.halign, TB.valign = "-", "-"
+
+-- How a button's colour shows: "u" an underline, "i" its icon (and
+-- label) drawn in it, filling with it while on. A PNG icon keeps the
+-- underline either way.
+TB.cstyle = "u"
 
 -- "icons": a button is its icon, or its label when it has none (the TCP's
 -- look). "both": an icon and a label side by side (a drawer can ask).
@@ -98,15 +106,26 @@ TB.items = {}
 local function clean(s) return ((s or ""):gsub("[;|]", "")) end
 TB.clean = clean
 
+-- A button's colour, one of these (the web page's too), stored "#rrggbb".
+TB.COLOURS = { "#4aa3df", "#c8453c", "#d98a2f", "#d9be45", "#4f9c62", "#3f74b8", "#8a5cc2", "#8d9298", "#e6e0d2", "#26282b" }
+local function colour_of(hex)
+  local h = type(hex) == "string" and hex:match("^#(%x%x%x%x%x%x)$")
+  return h and ((tonumber(h, 16) << 8) | 0xff) or nil
+end
+TB.colour_of = colour_of
+local function colour_field(it)
+  return colour_of(it.color) and ("|" .. it.color:lower()) or ""
+end
+
 local function ser(items, out)
   for _, it in ipairs(items) do
     if it.menu then
-      out[#out + 1] = "[|" .. clean(it.icon) .. "|" .. clean(it.label)
+      out[#out + 1] = "[|" .. clean(it.icon) .. "|" .. clean(it.label) .. colour_field(it)
       ser(it.items or {}, out)
       out[#out + 1] = "]"
     elseif it.gap then out[#out + 1] = "_"
     elseif it.sep then out[#out + 1] = "-"
-    else out[#out + 1] = clean(it.cmd) .. "|" .. clean(it.icon) .. "|" .. clean(it.label) end
+    else out[#out + 1] = clean(it.cmd) .. "|" .. clean(it.icon) .. "|" .. clean(it.label) .. colour_field(it) end
   end
 end
 
@@ -150,14 +169,18 @@ function TB.parse(s)
       if #stack > 0 then out = table.remove(stack) end
     elseif part:sub(1, 1) == "[" then
       local icon, label = part:match("^%[|?([^|]*)|?(.*)$")
-      local m = { menu = true, icon = icon or "", label = label or "", items = {} }
+      local l2, col = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)$")
+      if l2 then label = l2 end
+      local m = { menu = true, icon = icon or "", label = label or "", color = col, items = {} }
       out[#out + 1] = m
       stack[#stack + 1] = out
       out = m.items
     elseif part ~= "" then
       local cmd, icon, label = part:match("^([^|]*)|?([^|]*)|?(.*)$")
+      local l2, col = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)$")
+      if l2 then label = l2 end
       if cmd and cmd ~= "" then
-        out[#out + 1] = { cmd = cmd, icon = icon or "", label = label or "" }
+        out[#out + 1] = { cmd = cmd, icon = icon or "", label = label or "", color = col }
       end
     end
   end
@@ -465,9 +488,14 @@ end
 local images = {}          -- file name -> image, or false once it has failed
 local loads_left = 0       -- per-frame load budget, see TB.draw / the picker
 
+-- Images aren't attached to the context: a context takes only so many,
+-- and the picker shows every PNG in the folder. ReaImGui frees one that
+-- nothing has used for a while, so each is checked before use and loaded
+-- again when it's gone.
 local function image(ctx, file)
   if not file or file == "" or AI.is(file) then return nil end
   local img = images[file]
+  if img and not ImGui.ValidatePtr(img, "ImGui_Image*") then img = nil; images[file] = nil end
   if img == nil then
     -- Loading is the one expensive thing here. The picker can put a few
     -- hundred icons on screen at once, and loading all of them in one
@@ -487,7 +515,6 @@ local function image(ctx, file)
       local ok, res = false, nil
       if fh then ok, res = pcall(ImGui.CreateImage, path) end
       if ok and res then
-        pcall(ImGui.Attach, ctx, res)
         img = res
         break
       end
@@ -739,6 +766,21 @@ local function draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical)
   end
 end
 
+-- A button's colour: the colour (or nil), and whether it tints the icon
+-- and label rather than underlining (never for a PNG icon).
+local function tint_of(it, png)
+  local col = colour_of(it.color)
+  return col, (col ~= nil and TB.cstyle == "i" and not png)
+end
+-- A colour a step lighter, for hover.
+local function lighten(col, t)
+  local function ch(v) return math.floor(v + (255 - v) * t + 0.5) end
+  return (ch((col >> 24) & 0xff) << 24) | (ch((col >> 16) & 0xff) << 16) | (ch((col >> 8) & 0xff) << 8) | (col & 0xff)
+end
+local function underline(dl, x, y, bw, bh, col)
+  ImGui.DrawList_AddRectFilled(dl, x + 4, y + bh - 2.5, x + bw - 4, y + bh - 0.5, col, 1.0)
+end
+
 -- The TCP's look: the icon is the button (or a text button without one).
 local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
   if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, false) end
@@ -757,14 +799,19 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
   if AI.is(icon) and AI.get(icon) then
     -- ChannelView's own: drawn in the bar's colours, on the accent when on
     local caret_ = has_caret(it)
+    local col, tint = tint_of(it, false)
     if on or hovered or held then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh,
-        on and C.COL.accent or C.COL.knob_body_hi, 2.5)
+        on and ((tint and col) or C.COL.accent) or C.COL.knob_body_hi, 2.5)
     end
-    local ink = on and C.COL.icon_on or ((hovered or held) and C.COL.icon_hot or C.COL.icon)
+    local ink
+    if on then ink = C.COL.icon_on
+    elseif hovered or held then ink = tint and lighten(col, 0.35) or C.COL.icon_hot
+    else ink = tint and col or C.COL.icon end
     local pad = icon_pad(bh)
     AI.draw(dl, icon, x + pad, y + pad, bh - pad * 2, ink)
     if caret_ then caret(dl, x + bw - 4, y + bh - 4, dir == "up" and "up" or "down", ink) end
+    if col and not tint then underline(dl, x, y, bw, bh, col) end
     drawn = true
   elseif icon ~= "" then
     -- A single-frame icon has no hover or pressed look of its own, so
@@ -789,19 +836,24 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
       caret(dl, x + bw - 4, y + bh - 4, dir == "up" and "up" or "down",
         hovered and C.COL.icon_hot or C.COL.icon)
     end
+    local col = colour_of(it.color)
+    if drawn and col then underline(dl, x, y, bw, bh, col) end
   end
   if not drawn then
     local text = text_of(it)
     local lit = on or (has_caret(it) and held)
-    local bg = lit and C.COL.accent
+    local col, tint = tint_of(it, false)
+    local bg = lit and ((tint and col) or C.COL.accent)
                or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
     ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
     ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.knob_ring, 2.5, 0, 1.0)
     local tw, th = ImGui.CalcTextSize(ctx, text)
     local room = bw - (has_caret(it) and 10 or 0)
     local ink = lit and C.COL.icon_on or ((it.menu or id) and C.COL.label or C.COL.warn)
+    if tint and not lit then ink = (hovered or held) and lighten(col, 0.35) or col end
     ImGui.DrawList_AddText(dl, x + (room - tw) * 0.5, y + (bh - th) * 0.5, ink, text)
     if has_caret(it) then caret(dl, x + bw - 8, y + bh * 0.5, dir == "up" and "up" or "down", ink) end
+    if col and not tint then underline(dl, x, y, bw, bh, col) end
   end
 end
 
@@ -813,11 +865,14 @@ local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical
   local hovered, held, on, id = press(ctx, i, it, x, y, bw, bh, dir)
   local menu_ = has_caret(it)
   local lit = on or (menu_ and held)
-  local bg = lit and C.COL.accent
+  local png = it.icon ~= "" and not AI.is(it.icon)
+  local col, tint = tint_of(it, png)
+  local bg = lit and ((tint and col) or C.COL.accent)
              or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
   ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.knob_ring, 2.5, 0, 1.0)
   local ink = lit and C.COL.icon_on or ((it.menu or id) and C.COL.label or C.COL.warn)
+  if tint and not lit then ink = (hovered or held) and lighten(col, 0.35) or col end
   local ih = bh - 6
   local cx = x + 6
   local right = x + bw - (menu_ and 12 or 4)
@@ -827,6 +882,7 @@ local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical
     local ix = show_label and (x + icon_pad(bh) + 2) or (x + (bw - vh) * 0.5 - (menu_ and 3 or 0))
     if ix + vh <= x + bw - 2 then
       local iink = lit and C.COL.icon_on or ((hovered or held) and C.COL.icon_hot or C.COL.icon)
+      if tint and not lit then iink = ink end
       AI.draw(dl, it.icon, ix, y + (bh - vh) * 0.5, vh, iink)
       cx = ix + vh + 5
       has_icon = true
@@ -869,6 +925,48 @@ local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical
     end
   end
   if menu_ then caret(dl, x + bw - 7, y + bh * 0.5, dir, ink) end
+  if col and not tint then underline(dl, x, y, bw, bh, col) end
+end
+
+-- Pure: where each button of a row-wise bar goes. `ws` are the buttons'
+-- widths in order; they fill rows from `left` to `right`, `gap` apart, up
+-- to `rows` rows, and each row is then moved across for `halign` ("c",
+-- "r"; anything else stays left). Returns pos[i] = { row, x } (false for
+-- a button that didn't fit) and the number of rows used.
+function TB.place_rows(ws, left, right, gap, rows, halign)
+  local pos, members = {}, {}
+  local row, cx, used = 0, left, 0
+  for i, bw in ipairs(ws) do
+    if cx + bw > right and cx > left then row, cx = row + 1, left end
+    if row >= rows then
+      pos[i] = false
+    else
+      pos[i] = { row = row, x = cx, w = bw }
+      members[row] = members[row] or {}
+      table.insert(members[row], i)
+      used = row + 1
+      cx = cx + bw + gap
+    end
+  end
+  if halign == "c" or halign == "r" then
+    for _, idx in pairs(members) do
+      local last = pos[idx[#idx]]
+      local spare = (right - left) - (last.x + last.w - left)
+      local dx = (halign == "r") and spare or math.floor(spare * 0.5)
+      if dx > 0 then for _, i in ipairs(idx) do pos[i].x = pos[i].x + dx end end
+    end
+  end
+  return pos, used
+end
+
+-- Pure: the top of a block `used_h` tall in a space at y, h tall, for
+-- `valign` ("t", "c", "b"); nil for the usual place.
+function TB.place_v(y, h, used_h, valign, pad)
+  pad = pad or 2
+  if valign == "t" then return y + pad end
+  if valign == "c" then return y + math.max(pad, (h - used_h) * 0.5) end
+  if valign == "b" then return y + math.max(pad, h - used_h - pad) end
+  return nil
 end
 
 -- How many rows a horizontal bar w wide needs for every button.
@@ -922,7 +1020,7 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
     end
   end
 
-  local cx, row = x + 4, 0
+  local cx = x + 4
   local right = mx - 6
   if #TB.items == 0 and not pick then
     local hint = "Right-click to add actions"
@@ -931,20 +1029,24 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
       ImGui.DrawList_AddText(dl, cx + 2, y + (h - th) * 0.5, C.COL.header_dim, hint)
     end
   end
+  local ws = {}
+  for i, it in ipairs(TB.items) do ws[i] = item_width(ctx, it, bh) end
+  local pos, used = TB.place_rows(ws, x + 4, right, C.TB_GAP, rows, TB.halign)
+  if used > 0 then
+    top = TB.place_v(y, h, used * bh + (used - 1) * C.TB_GAP, TB.valign) or top
+  end
   for i, it in ipairs(TB.items) do
-    local bw = item_width(ctx, it, bh)
-    if cx + bw > right and cx > x + 4 then
-      row, cx = row + 1, x + 4
-    end
-    if row >= rows then
+    local p = pos[i]
+    if not p then
       if not it.sep then res.overflow[#res.overflow + 1] = it end
     else
+      local by = top + p.row * (bh + C.TB_GAP)
       if TB.style == "both" then
-        draw_wide(ctx, dl, i, it, cx, top + row * (bh + C.TB_GAP), bw, bh, true, dir, false)
+        draw_wide(ctx, dl, i, it, p.x, by, p.w, bh, true, dir, false)
       else
-        draw_item(ctx, dl, i, it, cx, top + row * (bh + C.TB_GAP), bw, bh, dir)
+        draw_item(ctx, dl, i, it, p.x, by, p.w, bh, dir)
       end
-      cx = cx + bw + C.TB_GAP
+      cx = p.x + p.w + C.TB_GAP
     end
   end
 
@@ -980,6 +1082,16 @@ function TB.draw_v(ctx, x, y, w, h, dir)
   local bw = w - 8
   local show_label = bw >= bh + 34
   local cy = y + 4
+  if #TB.items > 0 and TB.valign ~= "-" then
+    -- the column's height, as far as it fits
+    local total = 0
+    for _, it in ipairs(TB.items) do
+      local ih = it.gap and math.floor(bh * 0.5) or (it.sep and 7 or bh)
+      if total + ih > h - 6 then break end
+      total = total + ih + C.TB_GAP
+    end
+    cy = TB.place_v(y, h, total - C.TB_GAP, TB.valign, 4) or cy
+  end
   if #TB.items == 0 and not pick then
     local hint = show_label and "Right-click\nto add actions" or "+"
     local _, th = ImGui.CalcTextSize(ctx, hint)
@@ -1109,6 +1221,38 @@ local function label_box(ctx, it, hint)
   end
 end
 
+-- A row of colour swatches for a button, "no colour" first; a click sets
+-- it.
+function TB.colour_row(ctx, it, id)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  do
+    local x0, y0 = ImGui.GetCursorScreenPos(ctx)
+    if ImGui.InvisibleButton(ctx, "##" .. id .. "none", 20, 20) and colour_of(it.color) then
+      it.color = nil; TB.save()
+    end
+    local hov = ImGui.IsItemHovered(ctx)
+    local ink = hov and C.COL.icon_hot or C.COL.icon
+    ImGui.DrawList_AddRect(dl, x0 + 0.5, y0 + 0.5, x0 + 19.5, y0 + 19.5, ink, 2, 0, 1.0)
+    ImGui.DrawList_AddLine(dl, x0 + 4, y0 + 16, x0 + 16, y0 + 4, ink, 1.5)
+    if not colour_of(it.color) then
+      ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x0 + 22, y0 + 22, C.COL.label, 2, 0, 1.5)
+    end
+    if hov then ImGui.SetTooltip(ctx, "No colour") end
+  end
+  for k, hex in ipairs(TB.COLOURS) do
+    ImGui.SameLine(ctx, 0, 4)
+    if ImGui.ColorButton(ctx, "##" .. id .. k, colour_of(hex), ImGui.ColorEditFlags_NoTooltip, 20, 20) then
+      it.color = hex
+      TB.save()
+    end
+    if it.color == hex then
+      local x0, y0 = ImGui.GetItemRectMin(ctx)
+      local x1, y1 = ImGui.GetItemRectMax(ctx)
+      ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.label, 2, 0, 1.5)
+    end
+  end
+end
+
 -- What a switch can be: the menu of bars, or one bar. `pick(target)`
 -- gets nil for the menu, else the bar's id; `cur` ticks the current one.
 function TB.switch_targets(ctx, pick, cur)
@@ -1164,6 +1308,10 @@ local function item_menu(ctx)
     end
     if ImGui.MenuItem(ctx, "No icon", nil, false, it.icon ~= "") then
       it.icon = ""; TB.save()
+    end
+    if ImGui.BeginMenu(ctx, "Colour") then
+      TB.colour_row(ctx, it, ID .. "col")
+      ImGui.EndMenu(ctx)
     end
     ImGui.Separator(ctx)
     label_box(ctx, it, (it.menu and "Label") or (sw and "Label (blank: the bar's name)") or "Label (blank: the action's name)")
@@ -1272,9 +1420,61 @@ end
 
 local ICON_CELL = 34
 
+-- Copies a PNG from anywhere into Data/toolbar_icons and returns its file
+-- name there (what a button stores), or nil and why. A file already in
+-- the folder is used where it is; one of the same name but different
+-- content gets " (2)", " (3)" ... rather than replacing it.
+function TB.import_png(path, dir)
+  dir = dir or TB.icon_dir()
+  local fh = io.open(path or "", "rb")
+  if not fh then return nil, "Couldn't open that file." end
+  local data = fh:read("a"); fh:close()
+  if data:sub(1, 8) ~= "\137PNG\r\n\26\n" then return nil, "That isn't a PNG file." end
+  local name = (path:match("([^/\\]+)$") or "icon.png"):gsub("[;|]", "")
+  if not name:lower():match("%.png$") then name = name .. ".png" end
+  local function same(p)
+    local h = io.open(p, "rb")
+    if not h then return nil end
+    local d = h:read("a"); h:close()
+    return d == data
+  end
+  local stem = name:sub(1, -5)
+  local n = 1
+  while true do
+    local cand = (n == 1) and name or (stem .. " (" .. n .. ").png")
+    local s = same(dir .. sep .. cand)
+    if s == true then return cand end          -- already there
+    if s == nil then name = cand break end      -- free
+    n = n + 1
+  end
+  if reaper and reaper.RecursiveCreateDirectory then reaper.RecursiveCreateDirectory(dir, 0) end
+  local out = io.open(dir .. sep .. name, "wb")
+  if not out then return nil, "Couldn't write to " .. dir .. "." end
+  out:write(data); out:close()
+  return name
+end
+
 -- The PNG grid: every file in Data/toolbar_icons, filtered.
 local function png_grid(ctx, it, flt)
   local list = st.icon_list or {}
+  if ImGui.Button(ctx, "Add a PNG\u{2026}##" .. ID .. "addpng") then
+    local ok, path = reaper.GetUserFileNameForRead("", "Choose an icon (PNG)", "png")
+    if ok and path and path ~= "" then
+      local name, err = TB.import_png(path)
+      if name then
+        images[name] = nil
+        it.icon = name; TB.save()
+        st.icon_list = list_icons()
+        ImGui.CloseCurrentPopup(ctx)
+      else
+        reaper.MB(err, "ChannelView", 0)
+      end
+    end
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Copies it into Data/toolbar_icons and uses it here")
+  end
+  ImGui.SameLine(ctx)
   ImGui.TextDisabled(ctx, U.truncate(TB.icon_dir(), 60))
   if #list == 0 then
     ImGui.TextDisabled(ctx, "No PNG files in that folder.")

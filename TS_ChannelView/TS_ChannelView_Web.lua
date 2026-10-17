@@ -1640,7 +1640,7 @@ local function bars_vals()
   local t = reaper.GetExtState(DR.WEB_NS, DR.WEB_KEY)
   if t ~= web_text then web_text = t; web_rev = web_rev + 1 end
   local cur = DR.at("web")
-  return { k = web_rev, c = cur and cur.id or 0, l = bars_list }
+  return { k = web_rev, c = cur and cur.id or 0, l = bars_list, a = cur and cur.halign or "-", cs = cur and cur.cstyle or "u" }
 end
 
 local function build_vals(lseq, ack)

@@ -33,7 +33,7 @@ local ImGui
 function AE.attach(imgui) ImGui = imgui end
 
 -- the web page's button colours (CAPS in TS_ChannelView.html)
-AE.CAPS = { "#4aa3df", "#c8453c", "#d98a2f", "#d9be45", "#4f9c62", "#3f74b8", "#8d9298", "#e6e0d2", "#26282b" }
+AE.CAPS = TB.COLOURS
 
 -- The web list's JSON lives with the bars (TS_CV_Drawers); these
 -- aliases are for the tests.
@@ -196,7 +196,7 @@ local function draw_rows(ctx, tb, list, depth, x, w, web)
       local mw = ImGui.CalcTextSize(ctx, meta)
       ImGui.DrawList_AddText(dl, x + w - mw - 8, cy - th * 0.5, C.COL.header_dim, meta)
     else
-      if web and it.color and it.color ~= "" then
+      if it.color and it.color ~= "" then
         local hex = it.color:match("^#(%x%x%x%x%x%x)$")
         if hex then
           ImGui.DrawList_AddRectFilled(dl, lx, cy + 5, lx + 14, cy + 7, (tonumber(hex, 16) << 8) | 0xff)
@@ -414,6 +414,45 @@ local function bar_settings(ctx, bar)
     ImGui.EndGroup(ctx)
     measure(ctx, "size")
   end
+  local across, updown = DR.aligns(d)
+  if across or updown then
+    flow(ctx, "align", 14)
+    ImGui.BeginGroup(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, "Align")
+    local function combo(id, list, cur, usual, set)
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, 84)
+      local name = usual
+      for _, a in ipairs(list) do if a[2] == cur then name = a[1] end end
+      if ImGui.BeginCombo(ctx, id, name) then
+        for _, a in ipairs(list) do
+          if ImGui.Selectable(ctx, a[1] .. id .. a[2], cur == a[2]) then set(a[2]); DR.save() end
+        end
+        ImGui.EndCombo(ctx)
+      end
+    end
+    if across then combo("##aeha", DR.HALIGN, d.halign or "-", "Left", function(v) d.halign = v end) end
+    if updown then
+      local column = d.side == "left" or d.side == "right"
+      combo("##aeva", DR.VALIGN, d.valign or "-", column and "Top" or "Centre", function(v) d.valign = v end)
+    end
+    ImGui.EndGroup(ctx)
+    measure(ctx, "align")
+  end
+  flow(ctx, "cstyle", 14)
+  ImGui.BeginGroup(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, "Colours")
+  ImGui.SameLine(ctx)
+  ImGui.SetNextItemWidth(ctx, 120)
+  if ImGui.BeginCombo(ctx, "##aecs", d.cstyle == "i" and "Coloured icons" or "Underlines") then
+    if ImGui.Selectable(ctx, "Underlines##aecsu", d.cstyle ~= "i") then d.cstyle = "u"; DR.save() end
+    if ImGui.Selectable(ctx, "Coloured icons##aecsi", d.cstyle == "i") then d.cstyle = "i"; DR.save() end
+    ImGui.EndCombo(ctx)
+  end
+  ImGui.EndGroup(ctx)
+  measure(ctx, "cstyle")
   if d.side == "window" then
     flow(ctx, "dock", 14)
     ImGui.BeginGroup(ctx)
@@ -510,21 +549,9 @@ local function item_props(ctx, tb, web)
     if changed then st.label_buf = v end
     if ImGui.IsItemDeactivatedAfterEdit(ctx) then it.label = TB.clean(st.label_buf); tb.save() end
     ImGui.Spacing(ctx)
-    if web then
-      ImGui.Text(ctx, "Colour (the web button's underline)")
-      for k, hex in ipairs(AE.CAPS) do
-        if k > 1 then ImGui.SameLine(ctx, 0, 4) end
-        local rgb = tonumber(hex:sub(2), 16)
-        if ImGui.ColorButton(ctx, "##aecap" .. k, (rgb << 8) | 0xff, ImGui.ColorEditFlags_NoTooltip, 20, 20) then
-          it.color = (it.color == hex) and "" or hex
-          tb.save()
-        end
-        if it.color == hex then
-          local x0, y0 = ImGui.GetItemRectMin(ctx)
-          local x1, y1 = ImGui.GetItemRectMax(ctx)
-          ImGui.DrawList_AddRect(ImGui.GetWindowDrawList(ctx), x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.label, 2, 0, 1.5)
-        end
-      end
+    do
+      ImGui.Text(ctx, "Colour")
+      tb.colour_row(ctx, it, "aecap")
       ImGui.Spacing(ctx)
     end
     do

@@ -1,15 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.3.0
+-- @version 2.3.1
 -- @changelog
---  Action bars anywhere: drawers on any side of ChannelView, bars in their
---  own windows (floating or docked), the TCP's toolbars and the web's
---  Actions bar, all built in one Organise actions window, with nested
---  menus, toolbar switches (tabs) and import / export.
---  ChannelView's own icons (nearly 300), sharp at any size, matched to
---  actions automatically, on the desktop and the web page.
---  Bar sizes per bar. Virtual controls can run REAPER actions.
---  Canvas curves drawn in one go (cleaner joins). Tidier code comments.
+--  Action bars: align buttons left, centre or right and top, centre or
+--  bottom; colour buttons (an underline, or coloured icons that fill when
+--  on), desktop and web; Add a PNG in the icon picker copies one into
+--  Data/toolbar_icons. Fixed: "exceeded maximum object attachment limit"
+--  when browsing PNG icons.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

@@ -524,11 +524,20 @@ put them. Every bar is global, not per project.
   action without being asked; right-click a bar ▸ *Use ChannelView icons*
   gives every button its icon. The icon picker has a *ChannelView* tab
   (the icon made for that action first) and *Your PNGs* (from
-  `Data/toolbar_icons`). The web page draws the same icons from the same
+  `Data/toolbar_icons`; *Add a PNG…* copies one there from anywhere).
+  The web page draws the same icons from the same
   file, `TS_CV_ActionIcons.json`.
-- **Look.** *Icons and labels* or *Icons*, and a **Size** per bar (Small,
-  Normal, Large, Extra large), in a bar's right-click ▸ *Show* or in
-  Organise actions. The TCP's bars still fit the ruler's height.
+- **Look.** *Icons and labels* or *Icons*, a **Size** per bar (Small,
+  Normal, Large, Extra large) and where the buttons sit (**Align** left,
+  centre or right; top, centre or bottom), in a bar's right-click ▸
+  *Show* or in Organise actions. The TCP's bars still fit the ruler's
+  height.
+- **Colours.** A button can have a colour (its right-click ▸ *Colour*, or
+  Organise actions; the first swatch is *no colour*). Each bar shows them
+  as **underlines** or as **coloured icons**, where the icon and label
+  are drawn in the colour and the button fills with it while on; a
+  button with your own PNG icon keeps the underline. The web page shows
+  the same.
 - **Organise actions** (the drawers button, a bar's right-click, or the
   *Organise actions* action, which works without ChannelView open): every
   bar by place on the left; the selected bar's buttons as a tree in the

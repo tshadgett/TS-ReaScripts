@@ -3366,7 +3366,7 @@ do
     local l = DR.parse(line)
     check("bars: count", #l, 2)
     check("bars: fields", l[2].side == "window" and l[2].open == false and l[2].width == 90 and l[2].style == "icons" and l[2].dock == -3, true)
-    check("bars: round-trip (sizes added)", DR.serialize(l), "1|top|1|128|both|drawer_1|0|24|Edit;2|window|0|90|icons|drawer_2|-3|24|Tracks")
+    check("bars: round-trip (sizes added)", DR.serialize(l), "1|top|1|128|both|drawer_1|0|24|--|Edit;2|window|0|90|icons|drawer_2|-3|24|--|Tracks")
     local sized = "1|top|1|128|both|drawer_1|0|30|Edit;2|left|1|90|icons|drawer_2|0|99|7"
     local sl = DR.parse(sized)
     check("bars: size read", sl[1].size, 30)
@@ -3379,7 +3379,7 @@ do
     check("bars: mended", m[1].side == "top" and m[1].width == DR.W_MAX and m[1].style == "both", true)
     check("bars: none", #DR.parse("none") + #DR.parse(""), 0)
     check("bars: names lose ; and |", DR.serialize({ { id = 1, side = "top", open = true, width = 100, style = "both", key = "drawer_1", name = "a;b|c" } }),
-      "1|top|1|100|both|drawer_1|0|24|abc")
+      "1|top|1|100|both|drawer_1|0|24|--|abc")
     local mg = DR.migrate("1|top|1|128|both|Edit")
     local places = {}
     for _, d in ipairs(mg) do places[#places + 1] = d.side .. ":" .. d.key end
@@ -3509,6 +3509,73 @@ do
     check("switch: export has the bar's id", got[1].id, 9)
     check("switch: no action line for a switch", txt:find("action=_TSCV_BAR", 1, true), nil)
   end
+end
+
+-- Bar alignment: rows filled then moved across, a block placed up and
+-- down, and the setting stored with the bar.
+do
+  local TB = require("TS_CV_Toolbar")
+  local pos, used = TB.place_rows({ 20, 20, 20 }, 0, 100, 4, 2, "l")
+  check("align: left", pos[1].x .. "," .. pos[3].x .. "/" .. used, "0,48/1")
+  pos = TB.place_rows({ 20, 20, 20 }, 0, 100, 4, 2, "r")
+  check("align: right ends at the edge", pos[3].x + pos[3].w, 100)
+  pos = TB.place_rows({ 20, 20, 20 }, 0, 100, 4, 2, "c")
+  check("align: centre", pos[1].x, 16)
+  pos, used = TB.place_rows({ 60, 60, 60 }, 0, 100, 4, 2, "c")
+  check("align: each row on its own", pos[1].x .. "," .. pos[2].x .. "/" .. used .. "/" .. tostring(pos[3]), "20,20/2/false")
+  check("align: top / centre / bottom", TB.place_v(0, 100, 20, "t") .. "," .. TB.place_v(0, 100, 20, "c") .. "," .. TB.place_v(0, 100, 20, "b"), "2,40.0,78")
+  check("align: usual place", TB.place_v(0, 100, 20, "-"), nil)
+  local okd, DR = pcall(require, "TS_CV_Drawers")
+  if okd then
+    local l = DR.parse("1|top|1|128|both|drawer_1|0|30|cb|Edit;2|left|1|90|icons|k|0|24|Tracks")
+    check("align: read", l[1].halign .. l[1].valign .. "/" .. l[2].halign .. l[2].valign .. "/" .. l[2].name, "cb/--/Tracks")
+    check("align: written", DR.serialize({ l[1] }), "1|top|1|128|both|drawer_1|0|30|cb|Edit")
+    check("align: a name like an alignment stays a name", DR.parse("1|top|1|128|both|k|0|24|cb")[1].name, "cb")
+    local got = DR.parse_export(DR.export_text({ { id = 1, name = "A", side = "top", halign = "r", valign = "t", items = {} } }))
+    check("align: exported", got[1].halign .. got[1].valign, "rt")
+  end
+end
+
+-- Button colours: stored after the label, menus too, read back; a bar's
+-- colour style rides in its align field.
+do
+  local TB = require("TS_CV_Toolbar")
+  local items = { { cmd = "40029", icon = "cv:undo", label = "Undo", color = "#C8453C" },
+                  { menu = true, icon = "", label = "M", color = "#4aa3df", items = { { cmd = "1007", icon = "", label = "" } } },
+                  { cmd = "1016", icon = "", label = "", color = "nonsense" } }
+  local line = TB.serialize(items)
+  check("colour: stored", line, "40029|cv:undo|Undo|#c8453c;[||M|#4aa3df;1007||;];1016||")
+  local back = TB.parse(line)
+  check("colour: read", back[1].color .. "/" .. back[1].label .. "/" .. back[2].color .. "/" .. back[2].label .. "/" .. tostring(back[3].color), "#c8453c/Undo/#4aa3df/M/nil")
+  check("colour: a plain line still reads", TB.parse("40029|x.png|Undo")[1].label, "Undo")
+  check("colour: value", TB.colour_of("#ff0000"), 0xff0000ff)
+  local okd, DR = pcall(require, "TS_CV_Drawers")
+  if okd then
+    local l = DR.parse("1|top|1|128|both|k|0|24|cbi|Edit;2|top|1|128|both|k2|0|24|--|B")
+    check("colour style: read", l[1].cstyle .. l[1].halign .. l[1].valign .. "/" .. l[2].cstyle, "icb/u")
+    check("colour style: written", DR.serialize({ l[1], l[2] }), "1|top|1|128|both|k|0|24|cbi|Edit;2|top|1|128|both|k2|0|24|--|B")
+  end
+end
+
+-- Adding a PNG: copied into the icon folder, the same file reused, a
+-- different one of the same name kept apart, anything else refused.
+do
+  local TB = require("TS_CV_Toolbar")
+  local dir = os.tmpname(); os.remove(dir); os.execute("mkdir -p '" .. dir .. "'")
+  local src = os.tmpname() .. ".png"
+  local png = "\137PNG\r\n\26\nabc"
+  local f = io.open(src, "wb"); f:write(png); f:close()
+  local name = TB.import_png(src, dir)
+  local base = src:match("([^/]+)$")
+  check("add png: copied under its own name", name, base)
+  check("add png: the same file again is reused", TB.import_png(src, dir), base)
+  f = io.open(src, "wb"); f:write(png .. "x"); f:close()
+  check("add png: a different one alongside", TB.import_png(src, dir), base:sub(1, -5) .. " (2).png")
+  local txt = os.tmpname() .. ".png"
+  f = io.open(txt, "wb"); f:write("not an image"); f:close()
+  check("add png: not a PNG refused", TB.import_png(txt, dir), nil)
+  check("add png: missing refused", TB.import_png(dir .. "/nope.png", dir), nil)
+  os.execute("rm -rf '" .. dir .. "' '" .. src .. "' '" .. txt .. "'")
 end
 
 -- The web companion's Actions list, as the organiser reads and writes it.

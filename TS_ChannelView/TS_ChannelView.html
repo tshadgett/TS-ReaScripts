@@ -104,6 +104,10 @@ button { font: inherit; color: inherit; }
 .ai svg { display: block; }
 .mbtn .ai + .t { margin-left: 7px; }
 .mbtn.ico { min-width: 46px; padding: 0 10px; }
+/* the bar's colours as coloured icons: the icon and label in the button's
+   colour, filling with it while on */
+.mbtn.tint { color: var(--tc); }
+.mbtn.tint.on { background: var(--tc); color: #0d1116; }
 .sheet .opt .ai { margin-right: 10px; }
 .icgrid { display: flex; flex-wrap: wrap; gap: 4px; max-height: 34vh; overflow-y: auto; margin: 6px 0; }
 .icgrid .fam { width: 100%; font-size: 11px; color: var(--dim); margin: 6px 0 2px; }
@@ -592,6 +596,10 @@ button { font: inherit; color: inherit; }
 .sw { display: flex; gap: 8px; margin: 6px 0 12px; flex-wrap: wrap; }
 .sw button { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
 .sw button.cur { border-color: #fff; }
+.sw button.none { background: transparent; border-color: var(--dim); position: relative; }
+.sw button.none::after { content: ""; position: absolute; left: 3px; right: 3px; top: 50%; height: 2px; margin-top: -1px;
+  background: var(--dim); transform: rotate(-45deg); }
+.sw button.none.cur { border-color: #fff; }
 .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 /* a menu on the Actions bar (made in ChannelView's Organise actions): its
    button has a caret; its sheet lists its actions, a submenu slides in
@@ -1727,8 +1735,10 @@ function barName(id) { const b = webBars.l.find(b => b.i === id); return b ? b.n
 function gotBars(br) {
   const first = webBars.k === null;
   const changed = !first && br.k !== webBars.k;
-  const sig = JSON.stringify([br.c, br.l]);
+  const sig = JSON.stringify([br.c, br.l, br.cs]);
   webBars = br;
+  // the bar's alignment, set on the desktop (Show ▸ Align)
+  $("mac").style.justifyContent = { c: "center", r: "flex-end" }[br.a] || "";
   if (changed) { if (macroEdit) macroReload = true; else loadMacros(); }
   else if (sig !== barsSig) buildMacros();
   barsSig = sig;
@@ -1819,11 +1829,7 @@ function editMenu(i) {
   openSheet(sh => {
     sh.append(h("h3", null, "Menu"));
     const lab = h("input", "fld"); lab.placeholder = "Label"; lab.value = m.l || "";
-    const sw = h("div", "sw");
-    const paint = () => [...sw.children].forEach((b, k) => b.classList.toggle("cur", CAPS[k] === col.c));
-    CAPS.forEach(c => { const b = h("button"); b.style.background = c;
-      b.addEventListener("click", () => { col.c = (col.c === c) ? "" : c; paint(); }); sw.append(b); });
-    paint();
+    const sw = colourRow(() => col.c, c => { col.c = c; });
     const acts = h("div", "acts");
     const left = h("button", null, "◀"), right = h("button", null, "▶");
     const rm = h("button", null, "Remove"), ok = h("button", "pri", "Save");
@@ -1863,7 +1869,9 @@ function buildMacros() {
     const b = h("button", "mbtn" + ((m.m || sw === "menu") ? " menu" : "") + (ic && !text ? " ico" : ""));
     if (ic) b.append(ic);
     if (text || !ic) b.append(h("span", "t", text));
-    b.style.borderBottomColor = m.c || "var(--border)";
+    const tint = webBars.cs === "i" && m.c;
+    if (tint) { b.classList.add("tint"); b.style.setProperty("--tc", m.c); }
+    b.style.borderBottomColor = (!tint && m.c) || "var(--border)";
     const x = h("span", "x", "×");
     b.append(x);
     wireMacroDrag(b, i);
@@ -1958,7 +1966,22 @@ function wireMacroDrag(el, i) {
   });
 }
 
-const CAPS = ["#4aa3df", "#c8453c", "#d98a2f", "#d9be45", "#4f9c62", "#3f74b8", "#8d9298", "#e6e0d2", "#26282b"];
+const CAPS = ["#4aa3df", "#c8453c", "#d98a2f", "#d9be45", "#4f9c62", "#3f74b8", "#8a5cc2", "#8d9298", "#e6e0d2", "#26282b"];
+// A row of colour swatches, "no colour" first; get() and set(c) read and
+// write the colour ("" for none).
+function colourRow(get, set) {
+  const sw = h("div", "sw");
+  const all = ["", ...CAPS];
+  const paint = () => [...sw.children].forEach((b, k) => b.classList.toggle("cur", all[k] === (get() || "")));
+  all.forEach(c => {
+    const b = h("button", c ? null : "none");
+    if (c) b.style.background = c; else b.title = "No colour";
+    b.addEventListener("click", () => { set(c); paint(); });
+    sw.append(b);
+  });
+  paint();
+  return sw;
+}
 
 function openSheet(build) {
   const sh = $("sheet");
@@ -1979,11 +2002,7 @@ function editMacro(i) {
     const lab = h("input", "fld"); lab.placeholder = "Label"; lab.value = m.l || "";
     const act = h("input", "fld"); act.placeholder = "Search actions, or an action ID"; act.value = m.a || "";
     const res = h("div", "res");
-    const sw = h("div", "sw");
-    const paint = () => [...sw.children].forEach((b, k) => b.classList.toggle("cur", CAPS[k] === m.c));
-    CAPS.forEach(c => { const b = h("button"); b.style.background = c;
-      b.addEventListener("click", () => { m.c = (m.c === c) ? "" : c; paint(); }); sw.append(b); });
-    paint();
+    const sw = colourRow(() => m.c, c => { m.c = c; });
     act.addEventListener("input", () => {
       m.a = act.value.trim();
       clearTimeout(findTimer);

@@ -56,11 +56,13 @@ local function image(ctx, raw)
   local path = IC.resolve(raw)
   if not path then return nil end
   local img = cache[path]
+  -- Not attached (a context takes only so many, and the toolbars' icons
+  -- share them): ReaImGui frees an image nothing has used for a while,
+  -- so it's checked and loaded again when it's gone.
+  if img and not ImGui.ValidatePtr(img, "ImGui_Image*") then img = nil end
   if img == nil then
     local ok, res = pcall(ImGui.CreateImage, path)
     if ok and res then
-      -- Attached, so it survives frames where no track happens to use it.
-      pcall(ImGui.Attach, ctx, res)
       img = res
     else
       img = false

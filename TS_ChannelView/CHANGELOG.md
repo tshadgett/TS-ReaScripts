@@ -1,5 +1,22 @@
 # ChannelView — changelog
 
+## 2.3.1 — aligned and coloured action bars
+
+- **Alignment.** Each bar's buttons can sit left, centre or right, and
+  top, centre or bottom (a bar's right-click ▸ *Show*, or Organise
+  actions). Rows that wrap are aligned one by one. The web's Actions bar
+  follows the across setting.
+- **Colours.** Any button can have a colour (right-click ▸ *Colour*, or
+  Organise actions), from the same set as the web page, now with purple
+  and a *no colour* swatch. Each bar shows them as **underlines** (the
+  default) or **coloured icons**: the icon and label in the colour,
+  filling with it while on. A button with your own PNG icon keeps the
+  underline. The web page shows both.
+- **Add a PNG…** in the icon picker's *Your PNGs* tab copies an image
+  from anywhere into `Data/toolbar_icons` and puts it on the button.
+- Fixed: browsing a large folder of PNG icons filled the console with
+  *ImGui_Attach: exceeded maximum object attachment limit*.
+
 ## 2.3.0 — action bars anywhere, ChannelView's own icons
 
 - **Action bars.** Rows or columns of buttons for any REAPER action, built

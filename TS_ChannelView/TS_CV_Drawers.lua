@@ -63,6 +63,21 @@ DR.W_DEF, DR.W_MIN, DR.W_MAX = 128, 34, 360
 -- button sizes (height, px): a bar's Size
 DR.SIZES = { { "Small", 20 }, { "Normal", 24 }, { "Large", 30 }, { "Extra large", 36 } }
 DR.SIZE_DEF, DR.SIZE_MIN, DR.SIZE_MAX = 24, 16, 48
+-- where a bar's buttons sit: across (l, c, r) and up and down (t, c, b);
+-- "-" is the bar's usual place (left; a row centred, a column at the top)
+DR.HALIGN = { { "Left", "l" }, { "Centre", "c" }, { "Right", "r" } }
+DR.VALIGN = { { "Top", "t" }, { "Centre", "c" }, { "Bottom", "b" } }
+-- The align field also carries how button colours show: a third
+-- character "i" (coloured icons); none means underlines.
+local function align_of(v)
+  local h, a, c = tostring(v or ""):match("^([lcr%-])([tcb%-])([ui]?)$")
+  if not h then return "-", "-", "u" end
+  return h, a, (c == "i") and "i" or "u"
+end
+local function align_field(d)
+  return (d.halign or "-") .. (d.valign or "-") .. ((d.cstyle == "i") and "i" or "")
+end
+DR.align_of = align_of
 local function size_of(v)
   return math.max(DR.SIZE_MIN, math.min(DR.SIZE_MAX, math.floor(tonumber(v) or DR.SIZE_DEF)))
 end
@@ -90,20 +105,26 @@ function DR.serialize(list)
   for _, d in ipairs(list) do
     out[#out + 1] = table.concat({ d.id, d.side, d.open and "1" or "0",
       tostring(math.floor(d.width or DR.W_DEF)), d.style or "both", clean(d.key or ""),
-      tostring(math.floor(d.dock or 0)), tostring(size_of(d.size)), clean(d.name) }, "|")
+      tostring(math.floor(d.dock or 0)), tostring(size_of(d.size)),
+      align_field(d), clean(d.name) }, "|")
   end
   return table.concat(out, ";")
 end
 
--- Every form: id|place|open|width|style|key|dock|size|name, the same
--- without size, and the older drawers-only
+-- Every form: id|place|open|width|style|key|dock|size|align|name, the
+-- same without align, without size too, and the older drawers-only
 -- id|side|open|width|style|name.
 function DR.parse(s)
   local out = {}
   if not s or s == "" or s == "none" then return out end
   for part in (s .. ";"):gmatch("([^;]*);") do
-    local id, side, open, width, style, key, dock, size, name =
-      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|(.*)$")
+    local id, side, open, width, style, key, dock, size, align, name =
+      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?)|(.*)$")
+    if not id then
+      id, side, open, width, style, key, dock, size, name =
+        part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|(.*)$")
+      align = nil
+    end
     if not id then
       id, side, open, width, style, key, dock, name =
         part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(.*)$")
@@ -119,6 +140,8 @@ function DR.parse(s)
                         style = (style == "icons") and "icons" or "both",
                         key = (key and key ~= "") and key or ("drawer_" .. id),
                         dock = tonumber(dock) or 0, size = size_of(size), name = name }
+      local e = out[#out]
+      e.halign, e.valign, e.cstyle = align_of(align)
     end
   end
   return out
@@ -284,6 +307,7 @@ function DR.export_text(list, name_of)
     out[#out + 1] = "width=" .. tostring(math.floor(d.width or DR.W_DEF))
     out[#out + 1] = "dock=" .. tostring(math.floor(d.dock or 0))
     out[#out + 1] = "size=" .. tostring(size_of(d.size))
+    out[#out + 1] = "align=" .. align_field(d)
     out[#out + 1] = "items=" .. TB.serialize(items)
     out[#out + 1] = "web=" .. DR.json_encode_list(DR.to_web(items))
     local seen = {}
@@ -317,6 +341,7 @@ function DR.parse_export(text)
       elseif k == "width" then cur.width = math.max(DR.W_MIN, math.min(DR.W_MAX, tonumber(v) or DR.W_DEF))
       elseif k == "dock" then cur.dock = tonumber(v) or 0
       elseif k == "size" then cur.size = size_of(v)
+      elseif k == "align" then cur.halign, cur.valign, cur.cstyle = align_of(v)
       elseif k == "items" then cur.items = TB.parse(v ~= "" and v or "none")
       elseif k == "web" then cur.web_items = DR.from_web(DR.json_decode(v) or {})
       elseif k == "action" then
@@ -347,6 +372,7 @@ local function bar_for(d)
   tb.load()
   tb.style = d.style
   tb.btn = size_of(d.size)
+  tb.halign, tb.valign, tb.cstyle = d.halign or "-", d.valign or "-", d.cstyle or "u"
   tb.organise = function(item) if DR.organise then DR.organise(d, item) end end
   tb.extra_bg = function(ctx, where) DR.drawer_menu(ctx, d, where) end
   -- toolbar switches (TS_CV_Toolbar): what this bar is, and the others
@@ -377,7 +403,10 @@ function DR.save()
   DR.stamp = ("%.3f.%d"):format(reaper.time_precise(), revs)
   reaper.SetExtState(C.EXT_SECT, DR.REV, DR.stamp, false)
   for _, d in ipairs(DR.list) do
-    if d.tb then d.tb.style = d.style; d.tb.btn = size_of(d.size); d.tb.bar_name = DR.name_of(d) end
+    if d.tb then
+      d.tb.style = d.style; d.tb.btn = size_of(d.size); d.tb.bar_name = DR.name_of(d)
+      d.tb.halign, d.tb.valign, d.tb.cstyle = d.halign or "-", d.valign or "-", d.cstyle or "u"
+    end
   end
 end
 
@@ -512,6 +541,8 @@ function DR.import(entries, use_places)
     d.style, d.width, d.dock = e.style, e.width, e.dock
     d.size = size_of(e.size)
     d.tb.btn = d.size
+    d.halign, d.valign, d.cstyle = e.halign or "-", e.valign or "-", e.cstyle or "u"
+    d.tb.halign, d.tb.valign, d.tb.cstyle = d.halign, d.valign, d.cstyle
     local items = (d.side == "web" and e.web_items) or e.items
     d.tb.items = TB.copy_items(items or {})
     d.tb.style = d.style
@@ -780,6 +811,37 @@ for i = 1, 16 do DR.DOCKS[#DR.DOCKS + 1] = { "Docker " .. i, -i } end
 
 local rename_buf, rename_for = "", nil
 
+-- Which ways a bar's buttons can be aligned where it is: across for a
+-- row, up and down for both (the web's bar only across).
+function DR.aligns(d)
+  local column = d.side == "left" or d.side == "right"
+  return not column or d.side == "window", d.side ~= "web"
+end
+
+-- The alignment entries, for a bar's Show menu.
+function DR.align_items(ctx, d)
+  local across, updown = DR.aligns(d)
+  local h, v = d.halign or "-", d.valign or "-"
+  if across then
+    for _, a in ipairs(DR.HALIGN) do
+      local cur = h == a[2] or (h == "-" and a[2] == "l")
+      if ImGui.MenuItem(ctx, "Align " .. a[1]:lower() .. "##drha" .. d.id .. a[2], nil, cur) then
+        d.halign = a[2]; DR.save()
+      end
+    end
+  end
+  if updown then
+    if across then ImGui.Separator(ctx) end
+    for _, a in ipairs(DR.VALIGN) do
+      local column = d.side == "left" or d.side == "right"
+      local cur = v == a[2] or (v == "-" and a[2] == (column and "t" or "c"))
+      if ImGui.MenuItem(ctx, "Align " .. a[1]:lower() .. "##drva" .. d.id .. a[2], nil, cur) then
+        d.valign = a[2]; DR.save()
+      end
+    end
+  end
+end
+
 -- A bar's own entries in its right-click menu (TB's background menu calls
 -- this at its head and tail).
 function DR.drawer_menu(ctx, d, where)
@@ -818,6 +880,11 @@ function DR.drawer_menu(ctx, d, where)
     for _, z in ipairs(DR.SIZES) do
       if ImGui.MenuItem(ctx, z[1] .. "##drsz" .. d.id .. z[2], nil, size_of(d.size) == z[2]) then d.size = z[2]; DR.save() end
     end
+    ImGui.Separator(ctx)
+    DR.align_items(ctx, d)
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Colours as underlines##drcu" .. d.id, nil, d.cstyle ~= "i") then d.cstyle = "u"; DR.save() end
+    if ImGui.MenuItem(ctx, "Coloured icons##drci" .. d.id, nil, d.cstyle == "i") then d.cstyle = "i"; DR.save() end
     ImGui.EndMenu(ctx)
   end
   if ImGui.BeginMenu(ctx, "Rename##dr" .. d.id) then
