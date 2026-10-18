@@ -448,22 +448,27 @@ function CN.open(track)
   st.req, st.track = true, track
 end
 
-local function items(ctx, node, pick)
+local function items(ctx, node, pick, ticked)
   for _, d in ipairs(node.dirs) do
     if ImGui.BeginMenu(ctx, d.name) then
-      items(ctx, d.node, pick)
+      items(ctx, d.node, pick, ticked)
       ImGui.EndMenu(ctx)
     end
   end
   for i, f in ipairs(node.files) do
-    if ImGui.MenuItem(ctx, f.name .. "##cn" .. i) then pick(f) end
+    if ImGui.MenuItem(ctx, f.name .. "##cn" .. i, nil, ticked and ticked(f) or false) then pick(f) end
   end
 end
 
 -- The FXChains tree (CN.list) as menu items -- subfolders as submenus.
 -- `pick(f)` is called for the one chosen. Draw inside an open menu.
 function CN.items(ctx, tree, pick)
-  if tree then items(ctx, tree, pick) end
+  if tree then items(ctx, tree, pick, nil) end
+end
+
+-- The same, with a tick on each chain `ticked(f)` says.
+function CN.items_ticked(ctx, tree, pick, ticked)
+  if tree then items(ctx, tree, pick, ticked) end
 end
 
 function CN.has_chains(tree)

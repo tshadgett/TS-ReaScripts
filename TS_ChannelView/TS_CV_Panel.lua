@@ -21,6 +21,9 @@ local SC  = require("TS_CV_Steps")
 local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
+local TR  = require("TS_CV_Trimmer")
+local TRP = require("TS_CV_TrimmerPanel")
+local FB  = require("TS_CV_FXButtons")
 local RC  = require("TS_CV_ReaComp")
 local CP  = require("TS_CV_CompPanel")
 local RP  = require("TS_CV_RolePanel")
@@ -37,7 +40,7 @@ local P   = {}
 local ImGui
 local panel_at = {}
 
-function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui); RP.attach(imgui) end
+function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui); RP.attach(imgui); TRP.attach(imgui) end
 
 -- An expanded panel's foot: the layout lock at its left, and the preset
 -- bar (TS_CV_PresetUI, View > Preset bar) when that's on. It's always
@@ -677,6 +680,8 @@ end
 -- instead. See TS_CV_EQPanel.lua.
 function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
   if collapsed then return C.COLLAPSED_W end
+  -- the TS_CV Trimmer: its own panel, as wide as the strip's height needs
+  if key and TR.is(key) then return TRP.width(avail_h) end
   -- an EQ or compressor canvas (any plugin): the canvas, and its layout's
   -- controls in columns beside it
   if canvas then
@@ -2709,15 +2714,17 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   local is_eq = RQ.is_eq(key)
   -- ReaComp's panel is its own canvas, with its own meters beside it
   local is_rc = RC.is_comp(key)
+  -- the TS_CV Trimmer: meters, trims and filters of its own
+  local is_trim = TR.is(key)
   -- ReaEQ has nothing to meter -- T.reports_gr would already say no for
   -- it, but skipping the check entirely is one fewer FX-parameter scan
   -- for the one plugin type that's never going to answer yes.
-  local meter = (not is_eq and not is_rc) and M.meter_of(layout) or nil
+  local meter = (not is_eq and not is_rc and not is_trim) and M.meter_of(layout) or nil
   if meter and not T.reports_gr(track, fx.addr, fx.guid) then meter = nil end
   -- input/output meters: on any panel, a canvas's or ReaComp's included
   -- (their own strip beside the curve is the reduction only)
-  local io = P.has_io(track, fx, layout)
-  local canvas = (not is_eq and not is_rc) and layout.canvas or nil
+  local io = (not is_trim) and P.has_io(track, fx, layout)
+  local canvas = (not is_eq and not is_rc and not is_trim) and layout.canvas or nil
   if canvas then meter = nil end
   local w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
                     St.is_gr_open(fx.guid), M.locked(layout), canvas)
@@ -2746,6 +2753,18 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       is_drag_source and C.COL.drop_marker or C.COL.panel_border, 3.0, 0,
       is_drag_source and 2.0 or 1.0)
 
+    -- The selected plugin: the panel last clicked. Plugin and FX chain
+    -- buttons on the action bars add after it (TS_CV_FXButtons).
+    if ImGui.IsMouseClicked(ctx, 0) or ImGui.IsMouseClicked(ctx, 1) then
+      if ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows
+                                    | ImGui.HoveredFlags_AllowWhenBlockedByActiveItem) then
+        FB.select(track, fx.guid)
+      end
+    end
+    if not is_drag_source and FB.selected(track) == fx.guid then
+      ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + ww - 0.5, y + wh - 0.5, C.COL.accent, 3.0, 0, 1.6)
+    end
+
     -- the 3D effect: knobs and buttons cast shadows, the edges catch the light
     W.hw = (not is_drag_source and C.EFFECT_3D) and C.METAL_K or 0
 
@@ -2760,6 +2779,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       local fh = P.footer_h()
       if req.offline then
         draw_offline(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx)
+      elseif is_trim then
+        TRP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx, req)
       elseif is_eq then
         -- The whole body becomes the draggable-node curve canvas rather
         -- than the ordinary parameter grid: a ReaEQ panel IS the EQ view,
@@ -2812,7 +2833,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
                       key, req, meter, io)
       end
-      if fh > 0 then draw_footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx, layout, avail_h, is_eq, req) end
+      if fh > 0 then draw_footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx, layout, avail_h, is_eq or is_trim, req) end
     end
     if W.hw > 0 then W.metal_edges(dl, x, y, ww, wh, W.hw) end
     W.hw = 0

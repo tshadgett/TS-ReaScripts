@@ -2483,6 +2483,9 @@ local function apply(verb, a)
       T.rename(track, fx.addr, fx.guid, U.trim(nm))
       layout_dirty = true
     end
+  elseif verb == "fxb" then
+    -- fxb|cmd: a plugin or FX chain button on the page's Actions bar
+    require("TS_CV_FXButtons").run({ cmd = a[1] or "" })
   elseif verb == "bar" then
     -- bar|id: a toolbar switch on the page's Actions bar
     DR.load()

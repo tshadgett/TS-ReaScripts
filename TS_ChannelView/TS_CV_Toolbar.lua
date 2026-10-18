@@ -50,6 +50,7 @@ local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
 local W = require("TS_CV_Widgets")
 local AI = require("TS_CV_ActionIcons")
+local FB = require("TS_CV_FXButtons")
 
 local ImGui
 
@@ -113,8 +114,23 @@ local function colour_of(hex)
   return h and ((tonumber(h, 16) << 8) | 0xff) or nil
 end
 TB.colour_of = colour_of
+-- A button can show its colour its own way, whatever the bar does: it.cs
+-- "u" (underline), "i" (icon and label in it), "ui" (both), "" (neither),
+-- nil (as the bar). Stored after the colour: "#rrggbb/ui", "/n" for "".
+local function cs_field(it)
+  if it.cs == nil then return "" end
+  return "/" .. ((it.cs == "") and "n" or it.cs)
+end
+local function cs_parse(f)
+  if not f or f == "" then return nil end
+  f = f:sub(2)
+  if f == "n" then return "" end
+  local u, i = f:find("u", 1, true) ~= nil, f:find("i", 1, true) ~= nil
+  return (u and "u" or "") .. (i and "i" or "")
+end
+TB.cs_parse = cs_parse
 local function colour_field(it)
-  return colour_of(it.color) and ("|" .. it.color:lower()) or ""
+  return colour_of(it.color) and ("|" .. it.color:lower() .. cs_field(it)) or ""
 end
 
 local function ser(items, out)
@@ -140,7 +156,7 @@ local function copy_items(src)
   local out = {}
   for i, it in ipairs(src) do
     out[i] = { sep = it.sep, gap = it.gap, cmd = it.cmd, icon = it.icon or "", label = it.label or "",
-               color = it.color, menu = it.menu, items = it.menu and copy_items(it.items or {}) or nil }
+               color = it.color, cs = it.cs, menu = it.menu, items = it.menu and copy_items(it.items or {}) or nil }
   end
   return out
 end
@@ -169,18 +185,18 @@ function TB.parse(s)
       if #stack > 0 then out = table.remove(stack) end
     elseif part:sub(1, 1) == "[" then
       local icon, label = part:match("^%[|?([^|]*)|?(.*)$")
-      local l2, col = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)$")
+      local l2, col, cs = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)(/?%a*)$")
       if l2 then label = l2 end
-      local m = { menu = true, icon = icon or "", label = label or "", color = col, items = {} }
+      local m = { menu = true, icon = icon or "", label = label or "", color = col, cs = cs_parse(cs), items = {} }
       out[#out + 1] = m
       stack[#stack + 1] = out
       out = m.items
     elseif part ~= "" then
       local cmd, icon, label = part:match("^([^|]*)|?([^|]*)|?(.*)$")
-      local l2, col = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)$")
+      local l2, col, cs = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)(/?%a*)$")
       if l2 then label = l2 end
       if cmd and cmd ~= "" then
-        out[#out + 1] = { cmd = cmd, icon = icon or "", label = label or "", color = col }
+        out[#out + 1] = { cmd = cmd, icon = icon or "", label = label or "", color = col, cs = cs_parse(cs) }
       end
     end
   end
@@ -645,6 +661,8 @@ local function text_of(it)
   local sw = TB.switch_of(it)
   if sw == "menu" then return TB.bar_name or "Toolbars" end
   if sw then return (TB.bar_name_of and TB.bar_name_of(sw)) or ("Bar " .. sw) end
+  local fk, fw = FB.kind(it)
+  if fk then return FB.short(fk, fw) end
   return TB.short_name(TB.action_name(TB.resolve(it.cmd)))
 end
 TB.text_of = text_of
@@ -704,6 +722,13 @@ local function press(ctx, i, it, x, y, bw, bh, dir)
     W.tip(ctx, ID .. i, lit and text_of(it) or ("Switch to " .. text_of(it)), hovered, false)
     if pressed and not lit and TB.switch_to then TB.switch_to(sw) end
     return hovered, held, lit, true
+  end
+  if FB.kind(it) then
+    -- a plugin or an FX chain to add (TS_CV_FXButtons): lit while the
+    -- plugin is on the selected track
+    W.tip(ctx, ID .. i, (it.label ~= "" and (it.label .. "\n") or "") .. FB.tip(it), hovered, false)
+    if pressed then FB.run(it) end
+    return hovered, held, FB.is_on(it), true
   end
   local id = TB.resolve(it.cmd)
   local on = id and reaper.GetToggleCommandStateEx(0, id) == 1
@@ -766,11 +791,22 @@ local function draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical)
   end
 end
 
--- A button's colour: the colour (or nil), and whether it tints the icon
--- and label rather than underlining (never for a PNG icon).
+-- How a button shows its colour: its own (it.cs) or the bar's. Returns
+-- underline, icon -- both booleans.
+function TB.cstyle_of(it)
+  local s = (it and it.cs) or TB.cstyle or "u"
+  return s:find("u", 1, true) ~= nil, s:find("i", 1, true) ~= nil
+end
+
+-- A button's colour: the colour (or nil), whether it tints the icon and
+-- label, and whether it's underlined. A PNG icon can't be tinted: it's
+-- underlined instead.
 local function tint_of(it, png)
   local col = colour_of(it.color)
-  return col, (col ~= nil and TB.cstyle == "i" and not png)
+  if not col then return nil, false, false end
+  local u, i = TB.cstyle_of(it)
+  local tint = i and not png
+  return col, tint, u or (i and png)
 end
 -- A colour a step lighter, for hover.
 local function lighten(col, t)
@@ -799,7 +835,7 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
   if AI.is(icon) and AI.get(icon) then
     -- ChannelView's own: drawn in the bar's colours, on the accent when on
     local caret_ = has_caret(it)
-    local col, tint = tint_of(it, false)
+    local col, tint, under = tint_of(it, false)
     if on or hovered or held then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh,
         on and ((tint and col) or C.COL.accent) or C.COL.knob_body_hi, 2.5)
@@ -811,7 +847,7 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
     local pad = icon_pad(bh)
     AI.draw(dl, icon, x + pad, y + pad, bh - pad * 2, ink)
     if caret_ then caret(dl, x + bw - 4, y + bh - 4, dir == "up" and "up" or "down", ink) end
-    if col and not tint then underline(dl, x, y, bw, bh, col) end
+    if under then underline(dl, x, y, bw, bh, col) end
     drawn = true
   elseif icon ~= "" then
     -- A single-frame icon has no hover or pressed look of its own, so
@@ -836,13 +872,13 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
       caret(dl, x + bw - 4, y + bh - 4, dir == "up" and "up" or "down",
         hovered and C.COL.icon_hot or C.COL.icon)
     end
-    local col = colour_of(it.color)
-    if drawn and col then underline(dl, x, y, bw, bh, col) end
+    local col, _, under = tint_of(it, true)
+    if drawn and under then underline(dl, x, y, bw, bh, col) end
   end
   if not drawn then
     local text = text_of(it)
     local lit = on or (has_caret(it) and held)
-    local col, tint = tint_of(it, false)
+    local col, tint, under = tint_of(it, false)
     local bg = lit and ((tint and col) or C.COL.accent)
                or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
     ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
@@ -853,7 +889,7 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
     if tint and not lit then ink = (hovered or held) and lighten(col, 0.35) or col end
     ImGui.DrawList_AddText(dl, x + (room - tw) * 0.5, y + (bh - th) * 0.5, ink, text)
     if has_caret(it) then caret(dl, x + bw - 8, y + bh * 0.5, dir == "up" and "up" or "down", ink) end
-    if col and not tint then underline(dl, x, y, bw, bh, col) end
+    if under then underline(dl, x, y, bw, bh, col) end
   end
 end
 
@@ -866,7 +902,7 @@ local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical
   local menu_ = has_caret(it)
   local lit = on or (menu_ and held)
   local png = it.icon ~= "" and not AI.is(it.icon)
-  local col, tint = tint_of(it, png)
+  local col, tint, under = tint_of(it, png)
   local bg = lit and ((tint and col) or C.COL.accent)
              or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
@@ -925,7 +961,7 @@ local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical
     end
   end
   if menu_ then caret(dl, x + bw - 7, y + bh * 0.5, dir, ink) end
-  if col and not tint then underline(dl, x, y, bw, bh, col) end
+  if under then underline(dl, x, y, bw, bh, col) end
 end
 
 -- Pure: where each button of a row-wise bar goes. `ws` are the buttons'
@@ -1118,49 +1154,95 @@ function TB.run(it)
     if sw ~= "menu" and TB.switch_to then TB.switch_to(sw) end
     return
   end
+  if FB.kind(it) then FB.run(it) return end
   local id = it and TB.resolve(it.cmd)
   if id then reaper.Main_OnCommand(id, 0) end
 end
 
 function TB.label_of(it)
-  if it.menu or TB.switch_of(it) then return text_of(it) end
+  if it.menu or TB.switch_of(it) or FB.kind(it) then return text_of(it) end
   local id = TB.resolve(it.cmd)
   return (it.label ~= "" and it.label) or TB.action_name(id) or tostring(it.cmd)
 end
 
 -- A list of items as menu entries, menus as submenus to any depth: what a
 -- menu button opens, and the TCP's overflow list. `path` keeps ids apart.
+-- A menu row's colour and icon, drawn into the room its label's leading
+-- spaces keep, from the row's own rectangle (the last item): the colour
+-- a strip down the row's left edge (where a bar button has its
+-- underline), the icon after it, in the colour when it colours its icon.
+local STRIP = 5
+local function row_icon(ctx, it, ih, strip)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x0, y0 = ImGui.GetItemRectMin(ctx)
+  local _, y1 = ImGui.GetItemRectMax(ctx)
+  local col, tint, under = tint_of(it, it.icon ~= "" and not AI.is(it.icon))
+  if col and (under or not (it.icon and it.icon ~= "")) then
+    ImGui.DrawList_AddRectFilled(dl, x0, y0 + 2, x0 + 3, y1 - 2, col, 1.0)
+  end
+  if ih <= 0 or not it.icon or it.icon == "" then return end
+  local x = x0 + 2 + (strip and STRIP or 0)
+  local y = y0 + ((y1 - y0) - ih) * 0.5
+  if AI.is(it.icon) then
+    AI.draw(dl, it.icon, x, y, ih, tint and col or C.COL.icon)
+  else
+    draw_icon(ctx, dl, it.icon, x, y, ih, 1)
+  end
+end
+
 function TB.menu_entries(ctx, items, path)
   path = path or "m"
   if #items == 0 then ImGui.TextDisabled(ctx, "(empty)") end
+  -- with an icon on any row, every label leaves room for one; with a
+  -- colour on any, room for its strip
+  local pad, ih, strip = "", 0, false
+  for _, it in ipairs(items) do
+    if not it.sep and it.icon and it.icon ~= "" then ih = math.floor(ImGui.GetTextLineHeight(ctx) + 2) end
+    if not it.sep and colour_of(it.color) then strip = true end
+  end
+  if ih > 0 or strip then
+    local sw = ImGui.CalcTextSize(ctx, " ")
+    local room = (ih > 0 and (ih + 6) or 0) + (strip and STRIP + 2 or 0)
+    pad = (" "):rep(math.ceil(room / ((sw and sw > 0) and sw or 4)))
+  end
+  local marks = ih > 0 or strip
   for k, it in ipairs(items) do
     local key = "##" .. ID .. path .. "." .. k
     if it.menu then
-      if ImGui.BeginMenu(ctx, text_of(it) .. key) then
+      local open = ImGui.BeginMenu(ctx, pad .. text_of(it) .. key)
+      if open then
         TB.menu_entries(ctx, it.items or {}, path .. "." .. k)
         ImGui.EndMenu(ctx)
       end
+      -- (once its submenu is done, ImGui hands back the row itself)
+      if marks then row_icon(ctx, it, ih, strip) end
     elseif it.gap then
       ImGui.Dummy(ctx, 1, 4)
     elseif it.sep then
       ImGui.Separator(ctx)
     elseif TB.switch_of(it) == "menu" then
-      if ImGui.BeginMenu(ctx, "Switch toolbar" .. key) then
+      if ImGui.BeginMenu(ctx, pad .. "Switch toolbar" .. key) then
         TB.switch_entries(ctx)
         ImGui.EndMenu(ctx)
       end
+      if marks then row_icon(ctx, it, ih, strip) end
     elseif TB.switch_of(it) then
       local sw = TB.switch_of(it)
-      if ImGui.MenuItem(ctx, text_of(it) .. key, nil, sw == TB.bar_id) and sw ~= TB.bar_id and TB.switch_to then
+      if ImGui.MenuItem(ctx, pad .. text_of(it) .. key, nil, sw == TB.bar_id) and sw ~= TB.bar_id and TB.switch_to then
         TB.switch_to(sw)
       end
+      if marks then row_icon(ctx, it, ih, strip) end
+    elseif FB.kind(it) then
+      if ImGui.MenuItem(ctx, pad .. text_of(it) .. key, nil, FB.is_on(it)) then FB.run(it) end
+      if marks then row_icon(ctx, it, ih, strip) end
     else
       local id = TB.resolve(it.cmd)
       local on = id and reaper.GetToggleCommandStateEx(0, id) == 1
       local label = (it.label ~= "" and it.label) or TB.action_name(id) or ("not found: " .. tostring(it.cmd))
-      if ImGui.MenuItem(ctx, label .. key, nil, on, id ~= nil) and id then
+      if ImGui.MenuItem(ctx, pad .. label .. key, nil, on, id ~= nil) and id then
         reaper.Main_OnCommand(id, 0)
       end
+      if marks then row_icon(ctx, it, ih, strip) end
     end
   end
 end
@@ -1251,6 +1333,21 @@ function TB.colour_row(ctx, it, id)
       ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.label, 2, 0, 1.5)
     end
   end
+  -- how this button shows it: as the bar does, unless ticked otherwise
+  if colour_of(it.color) then
+    local u, i = TB.cstyle_of(it)
+    local cu, nu = ImGui.Checkbox(ctx, "Underline##" .. id .. "csu", u)
+    ImGui.SameLine(ctx, 0, 12)
+    local ci, ni = ImGui.Checkbox(ctx, "Colour the icon##" .. id .. "csi", i)
+    if cu or ci then
+      local v = (nu and "u" or "") .. (ni and "i" or "")
+      -- the same as the bar: it follows the bar again
+      if v == (TB.cstyle or "u") then it.cs = nil else it.cs = v end
+      TB.save()
+    end
+    ImGui.SameLine(ctx, 0, 12)
+    ImGui.TextDisabled(ctx, it.cs and "this button's own" or "as the bar")
+  end
 end
 
 -- What a switch can be: the menu of bars, or one bar. `pick(target)`
@@ -1279,6 +1376,9 @@ local function item_menu(ctx)
     ImGui.TextDisabled(ctx, sw == "menu" and "Toolbar switch: a menu of bars" or ("Toolbar switch: " .. text_of(it)))
   elseif it.sep then
     ImGui.TextDisabled(ctx, it.gap and "Gap" or "Separator")
+  elseif FB.kind(it) then
+    local fk = FB.kind(it)
+    ImGui.TextDisabled(ctx, (fk == "fx" and "Adds " or "Adds the FX chain ") .. text_of(it))
   else
     ImGui.TextDisabled(ctx, U.truncate(TB.action_name(TB.resolve(it.cmd))
                                        or ("not found: " .. it.cmd), 40))

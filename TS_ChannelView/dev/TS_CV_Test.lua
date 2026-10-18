@@ -6586,5 +6586,118 @@ do
   reaper.new_array = had
 end
 
+-- The TS_CV Trimmer: the trim rule, Auto trim over items, where it goes,
+-- the filters' curve, and the panel's shape.
+do
+  local TR = require("TS_CV_Trimmer")
+  local function near(a, b) return a and math.abs(a - b) < 0.01 end
+  -- RMS -24 (plain) wants the average on -18 (sine-calibrated, so -21.01
+  -- plain): +2.99; the peak at -12 against -6 allows +6, so +2.99
+  check("trim: the average decides", near(TR.trim_for(-24, -12, -18, -6), 2.99), true)
+  -- a peaky source: peak -8 allows only +2
+  check("trim: the ceiling decides", near(TR.trim_for(-30, -8, -18, -6), 2), true)
+  check("trim: clamped to +24", TR.trim_for(-90, -80, -18, -6), 24)
+  check("trim: nothing to go on", TR.trim_for(nil, nil, -18, -6), nil)
+  -- items: the loudest decides, item volume comes off
+  local t = TR.trim_from_items({ { rms = 6, pk = 9, vol = 0 }, { rms = 3, pk = 8, vol = 0 }, { rms = 10, pk = 2, vol = -2 } })
+  check("auto: the item needing least gain wins", t, 3)
+  check("auto: item volume counts", TR.trim_from_items({ { rms = 5, pk = 9, vol = 3 } }), 2)
+  check("auto: no items", TR.trim_from_items({}), nil)
+  -- the part of the source that plays, inside a time selection
+  local s, e = TR.source_bounds(10, 4, 1, 1)
+  check("bounds: whole item", s == 1 and e == 5, true)
+  s, e = TR.source_bounds(10, 4, 1, 2, 12, 20)
+  check("bounds: time selection, playrate 2", s == 5 and e == 9, true)
+  check("bounds: outside the selection", TR.source_bounds(10, 4, 0, 1, 20, 30), nil)
+  -- the curve: -3 dB at each corner, off is flat, 24 dB/oct an octave down
+  check("curve: low cut corner -3 dB", near(TR.response_db(100, 100, 4, 18000, 0, 48000), -3.01), true)
+  check("curve: off is flat", TR.response_db(30, 100, 0, 18000, 0, 48000), 0)
+  check("curve: 24 dB/oct an octave down", math.abs(TR.response_db(50, 100, 4, 18000, 0, 48000) + 24.1) < 0.2, true)
+  check("curve: high cut corner -3 dB", near(TR.response_db(5000, 20, 0, 5000, 2, 48000), -3.01), true)
+  -- where it goes: after ARA, the pre probe and the modulators
+  check("slot: empty chain", TR.slot_in({}, false), 0)
+  check("slot: after the pre probe and modulators",
+    TR.slot_in({ "JS: TS_TrackProbe", "JS: ChannelView Modulators", "VST3: Pro-Q 3", "JS: TS_TrackProbe" }, false), 2)
+  check("slot: after ARA", TR.slot_in({ "VST3: Melodyne", "JS: TS_TrackProbe", "VST3: Pro-Q 3" }, true), 2)
+  check("is: by its name", TR.is("JS: TS_CV Trimmer") and not TR.is("JS: TS_TrackProbe"), true)
+  -- each filter is off at the end of its range; the slopes have no Off
+  check("filters: low cut off at 20 Hz", TR.lc_on(20) or TR.order(TR.lc_on(20), 3), 0)
+  check("filters: low cut on above it", TR.order(TR.lc_on(21), 3), 4)
+  check("filters: high cut off at 20 kHz", TR.order(TR.hc_on(20000), 0), 0)
+  check("filters: 6 dB/oct is first order", TR.order(true, 0), 1)
+  check("filters: 48 dB/oct is eighth", TR.order(true, #TR.SLOPES - 1), 8)
+  check("filters: no Off in the slopes", TR.SLOPES[1], "6 dB/oct")
+  local U_ = require("TS_CV_Util")
+  check("name: Trimmer in ChannelView", U_.fx_label({ name = "JS: TS_CV Trimmer" }), "Trimmer")
+  check("name: an alias still wins", U_.fx_label({ name = "JS: TS_CV Trimmer", alias = "Vox in" }), "Vox in")
+
+  local TRP = require("TS_CV_TrimmerPanel")
+  local C_ = require("TS_CV_Config")
+  local tall = 6 * C_.CELL_H
+  check("panel: six rows is one column", TRP.width(tall), TRP.COL_W)
+  check("panel: three rows goes wide", TRP.width(3 * C_.CELL_H), TRP.COL_W * 2 + C_.PANEL_PAD)
+  local L = TRP.layout(0, 0, TRP.COL_W, tall - C_.HEADER_H - C_.FOOTER_H)
+  check("panel: column filters under the trims", L.filt[2] > L.trims[2] and L.filt[4] >= TRP.SPEC_MIN, true)
+  L = TRP.layout(0, 0, TRP.COL_W * 2 + C_.PANEL_PAD, 3 * C_.CELL_H - C_.HEADER_H - C_.FOOTER_H)
+  check("panel: wide filters beside", L.filt[1] >= TRP.COL_W and L.meters[4] >= 34, true)
+  check("vu: 0 VU sits at its place on the scale", math.abs(TRP.vu_pos(0) - 0.6857) < 0.01, true)
+  check("vu: the ends", TRP.vu_pos(-40) == 0 and TRP.vu_pos(10) == 1, true)
+end
+
+-- A button's own colour style over the bar's.
+do
+  local TBx = require("TS_CV_Toolbar")
+  local items = TBx.parse("40001|cv:play|Play|#4aa3df/ui;40002||Stop|#c8453c/n;40003||Rec|#d98a2f;[|cv:x|M|#8a5cc2/i;40004||A;]")
+  check("cs: both", items[1].cs, "ui")
+  check("cs: neither", items[2].cs, "")
+  check("cs: as the bar", items[3].cs, nil)
+  check("cs: a menu's", items[4].cs, "i")
+  check("cs: label kept", items[1].label .. "," .. items[2].label, "Play,Stop")
+  check("cs: round trip", TBx.serialize(items),
+    "40001|cv:play|Play|#4aa3df/ui;40002||Stop|#c8453c/n;40003||Rec|#d98a2f;[|cv:x|M|#8a5cc2/i;40004||A;]")
+  check("cs: no colour, nothing stored", TBx.serialize({ { cmd = "1", icon = "", label = "", cs = "i" } }), "1||")
+  TBx.cstyle = "u"
+  local u, i = TBx.cstyle_of(items[3]); check("cs: bar underline", tostring(u) .. tostring(i), "truefalse")
+  u, i = TBx.cstyle_of(items[1]); check("cs: own both", tostring(u) .. tostring(i), "truetrue")
+  local DRx = require("TS_CV_Drawers")
+  local web = DRx.to_web(items)
+  check("cs: to the web", web[1].cs == "ui" and web[3].cs == nil, true)
+  check("cs: back from the web", DRx.from_web(web)[2].cs, "")
+end
+
+-- Plugin and FX chain buttons on the action bars.
+do
+  local FB = require("TS_CV_FXButtons")
+  local TBx = require("TS_CV_Toolbar")
+  local id = "VST3: Pro-Q 3 (FabFilter) | odd;name~"
+  local cmd = FB.fx_cmd(id)
+  check("fxb: no bar separators in the command", cmd:find("[|;~]") == nil, true)
+  local k, w = FB.kind({ cmd = cmd })
+  check("fxb: reads back", k == "fx" and w == id, true)
+  local back = TBx.parse(TBx.serialize({ { cmd = cmd, icon = "cv:fx_eq", label = "Pro-Q" } }))
+  check("fxb: survives the stored line", select(2, FB.kind(back[1])), id)
+  local ck, cw = FB.kind({ cmd = FB.chain_cmd("Vocals\\Lead.RfxChain") })
+  check("fxb: a chain", ck == "chain" and cw == "Vocals\\Lead.RfxChain", true)
+  check("fxb: not an action", FB.kind({ cmd = "40001" }), nil)
+  check("fxb: short name", FB.short("fx", "VST3: Pro-Q 3 (FabFilter)"), "Pro-Q 3")
+  check("fxb: short, two groups", FB.short("fx", "VST: ValhallaRoom (Valhalla DSP, LLC) (32 out)"), "ValhallaRoom")
+  check("fxb: short chain", FB.short("chain", "Vocals\\Lead Vox.RfxChain"), "Lead Vox")
+  check("fxb: icon eq", FB.icon_for("fx", "VST3: Pro-Q 3 (FabFilter)"), "cv:fx_eq")
+  check("fxb: icon comp", FB.icon_for("fx", "VST3: FET Mk II (Softube)"), "cv:fx_comp")
+  check("fxb: icon reverb", FB.icon_for("fx", "VST: ValhallaRoom (Valhalla DSP, LLC)"), "cv:fx_reverb")
+  check("fxb: icon instrument by format", FB.icon_for("fx", "VST3i: Kontakt 7 (Native Instruments)"), "cv:fx_instrument")
+  check("fxb: icon de-esser before dynamics", FB.icon_for("fx", "VST3: Pro-DS (FabFilter)", { "Dynamics" }), "cv:fx_deesser")
+  check("fxb: icon by category", FB.icon_for("fx", "VST3: Thing (Acme)", { "Delay" }), "cv:fx_delay")
+  check("fxb: icon chain", FB.icon_for("chain", "x"), "cv:fx_chain")
+  check("fxb: unknown, no icon", FB.icon_for("fx", "VST3: Wobbulator (Acme)"), nil)
+  -- where it goes with nothing selected: the end, before a post probe,
+  -- never ahead of what stays first
+  check("fxb: end of the chain", FB.end_gap({ "A", "B" }, 0), 2)
+  check("fxb: before the post probe", FB.end_gap({ "JS: TS_TrackProbe", "A", "JS: TS_TrackProbe" }, 1), 2)
+  check("fxb: after the Trimmer in an empty chain", FB.end_gap({ "JS: TS_CV Trimmer" }, 1), 1)
+  local it = FB.fx_item({ ident = "VST3: Pro-Q 3 (FabFilter)", name = "VST3: Pro-Q 3 (FabFilter)", short = "Pro-Q 3" })
+  check("fxb: a new button", it.label == "Pro-Q 3" and it.icon == "cv:fx_eq" and FB.kind(it) == "fx", true)
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

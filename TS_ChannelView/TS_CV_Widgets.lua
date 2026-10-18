@@ -3123,6 +3123,16 @@ local function icon_probe(dl, x, y, sz, col)
   ImGui.DrawList_AddCircleFilled(dl, x + sz * 0.88 - r * 0.5, cy, r, col)
 end
 
+-- A meter's arc and its needle: the TS_CV Trimmer.
+local function icon_trimmer(dl, x, y, sz, col)
+  local cx, cy, r = x + sz * 0.5, y + sz * 0.78, sz * 0.40
+  ImGui.DrawList_PathClear(dl)
+  ImGui.DrawList_PathArcTo(dl, cx, cy, r, -math.pi * 0.85, -math.pi * 0.15, 12)
+  ImGui.DrawList_PathStroke(dl, col, 0, 1.3)
+  ImGui.DrawList_AddLine(dl, cx, cy, cx + r * 0.55, cy - r * 0.85, col, 1.3)
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, math.max(1.2, sz * 0.07), col)
+end
+
 -- A tablet on its side, a dot for its button: the web companion.
 local function icon_tablet(dl, x, y, sz, col)
   ImGui.DrawList_AddRect(dl, x + sz * 0.14, y + sz * 0.24,
@@ -3213,6 +3223,7 @@ W.ICONS = {
   tablet_on = icon_tablet_on,
   midi     = icon_midi,
   probe    = icon_probe,
+  trimmer  = icon_trimmer,
   chain    = icon_chain,
   play_tri = icon_play,
   mixer    = icon_mixer,

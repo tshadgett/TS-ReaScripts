@@ -27,10 +27,13 @@ local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
 local TB = require("TS_CV_Toolbar")
 local DR = require("TS_CV_Drawers")
+local FB = require("TS_CV_FXButtons")
+local B  = require("TS_CV_Browser")
+local CN = require("TS_CV_Chains")
 
 local AE = {}
 local ImGui
-function AE.attach(imgui) ImGui = imgui end
+function AE.attach(imgui) ImGui = imgui; B.attach(imgui); CN.attach(imgui) end
 
 -- the web page's button colours (CAPS in TS_ChannelView.html)
 AE.CAPS = TB.COLOURS
@@ -139,6 +142,8 @@ local function meta_of(it, web)
   local sw = TB.switch_of(it)
   if sw == "menu" then return "toolbar switch \u{00B7} menu of bars" end
   if sw then return "toolbar switch" end
+  local fk, fw = FB.kind(it)
+  if fk then return (fk == "fx" and "plugin \u{00B7} " or "FX chain \u{00B7} ") .. FB.short(fk, fw) end
   local id = TB.resolve(it.cmd)
   return TB.action_name(id) or ("not found: " .. tostring(it.cmd))
 end
@@ -528,6 +533,37 @@ local function item_props(ctx, tb, web)
         end
         ImGui.EndCombo(ctx)
       end
+    elseif FB.kind(it) then
+      local fk, fw = FB.kind(it)
+      ImGui.Text(ctx, fk == "fx" and "Plugin" or "FX chain")
+      ImGui.PushTextWrapPos(ctx, 0)
+      ImGui.TextDisabled(ctx, fw)
+      ImGui.TextDisabled(ctx, "Adds it to the selected tracks: after the plugin selected in " ..
+        "ChannelView, else at the end of the chain.")
+      ImGui.PopTextWrapPos(ctx)
+      if ImGui.Button(ctx, "Change\u{2026}##aefxchg") then
+        if fk == "chain" then st.chains = CN.list() end
+        ImGui.OpenPopup(ctx, "aefxchg")
+      end
+      if ImGui.BeginPopup(ctx, "aefxchg") then
+        local function swap(new)
+          if (it.label or "") == FB.short(fk, fw) then it.label = new.label end
+          if (it.icon or "") == "" or it.icon == (FB.icon_for(fk, fw) or "") or it.icon == "cv:fx_chain" then it.icon = new.icon end
+          it.cmd = new.cmd
+          st.label_for = nil
+          tb.save()
+        end
+        if fk == "fx" then
+          B.menu_items(ctx, nil, { pick = function(e) swap(FB.fx_item(e)) end, single = true })
+        elseif CN.has_chains(st.chains) then
+          CN.items(ctx, st.chains, function(f) swap(FB.chain_item(f)) end)
+        else
+          ImGui.TextDisabled(ctx, "No FX chains found")
+        end
+        ImGui.EndPopup(ctx)
+      end
+      ImGui.SameLine(ctx)
+      if ImGui.Button(ctx, "Add it now##aerun") then TB.run(it) end
     else
       ImGui.Text(ctx, "Action")
       local name = TB.action_name(TB.resolve(it.cmd))
@@ -543,7 +579,7 @@ local function item_props(ctx, tb, web)
     if st.label_for ~= it then st.label_for, st.label_buf = it, it.label or "" end
     ImGui.Text(ctx, "Label")
     ImGui.SetNextItemWidth(ctx, -1)
-    local hint = it.menu and "Menu" or (TB.switch_of(it) and tb.text_of({ cmd = it.cmd, label = "" }))
+    local hint = it.menu and "Menu" or ((TB.switch_of(it) or FB.kind(it)) and tb.text_of({ cmd = it.cmd, label = "" }))
                  or (TB.action_name(TB.resolve(it.cmd)) or "")
     local changed, v = ImGui.InputTextWithHint(ctx, "##aelabel", hint, st.label_buf)
     if changed then st.label_buf = v end
@@ -679,7 +715,7 @@ function AE.share(mode)
       e.pick = (e.status == "new")
       e.missing = {}
       for _, it in ipairs(TB.flatten(e.items)) do
-        if not TB.resolve(it.cmd) and not TB.switch_of(it) then e.missing[#e.missing + 1] = e.names[it.cmd] ~= "" and e.names[it.cmd] or it.cmd end
+        if not TB.resolve(it.cmd) and not TB.switch_of(it) and not FB.kind(it) then e.missing[#e.missing + 1] = e.names[it.cmd] ~= "" and e.names[it.cmd] or it.cmd end
       end
     end
     share = { mode = "import", list = list, open = true, file = file, use_places = false }
@@ -878,6 +914,62 @@ function AE.draw(ctx)
             end, nil)
             ImGui.EndPopup(ctx)
           end
+          -- a plugin or an FX chain to add with one click (TS_CV_FXButtons)
+          flow(ctx, "f_fx")
+          if ImGui.Button(ctx, "+ Plugin") then st.picked = {}; ImGui.OpenPopup(ctx, "aefxnew") end
+          measure(ctx, "f_fx")
+          if ImGui.BeginPopup(ctx, "aefxnew") then
+            -- several in a row: the menu stays open, each click a button,
+            -- a second click on one takes its button off again
+            B.menu_items(ctx, nil, {
+              pick = function(e, add)
+                local had = st.picked[e.ident]
+                if had and not add then
+                  local l, k = locate(tb.items, had)
+                  if l then table.remove(l, k); tb.save() end
+                  st.picked[e.ident] = nil
+                  if st.sel == had then st.sel = nil end
+                else
+                  local it = FB.fx_item(e)
+                  insert(tb, it)
+                  st.picked[e.ident] = it
+                end
+              end,
+              picked = function(e) return st.picked[e.ident] ~= nil end,
+            })
+            ImGui.EndPopup(ctx)
+          end
+          flow(ctx, "f_chain")
+          if ImGui.Button(ctx, "+ FX chain") then st.chains, st.cpicked = CN.list(), {}; ImGui.OpenPopup(ctx, "aechnew") end
+          measure(ctx, "f_chain")
+          if ImGui.BeginPopup(ctx, "aechnew") then
+            if CN.has_chains(st.chains) then
+              -- as "+ Plugin": stays open, a second click takes one off
+              ImGui.TextDisabled(ctx, "Click to add a button, again to take it off")
+              ImGui.Separator(ctx)
+              ImGui.PushItemFlag(ctx, ImGui.ItemFlags_AutoClosePopups, false)
+              local function add_chain(f)
+                local had = st.cpicked[f.rel]
+                if had then
+                  local l, k = locate(tb.items, had)
+                  if l then table.remove(l, k); tb.save() end
+                  st.cpicked[f.rel] = nil
+                  if st.sel == had then st.sel = nil end
+                else
+                  local it = FB.chain_item(f)
+                  insert(tb, it)
+                  st.cpicked[f.rel] = it
+                end
+              end
+              local function chain_added(f) return st.cpicked[f.rel] ~= nil end
+              CN.items_ticked(ctx, st.chains, add_chain, chain_added)
+              ImGui.PopItemFlag(ctx)
+            else
+              ImGui.TextDisabled(ctx, "No FX chains found in")
+              ImGui.TextDisabled(ctx, (CN.dir()))
+            end
+            ImGui.EndPopup(ctx)
+          end
           if not web then
             flow(ctx, "f_sep")
             if ImGui.Button(ctx, "+ Separator") then insert(tb, { sep = true }) end
@@ -920,6 +1012,7 @@ function AE.draw(ctx)
     -- window
     if tb then tb.draw_menus(ctx, "ae") end
     draw_share(ctx)
+    B.draw(ctx, nil, true)   -- the plugin search, from "+ Plugin" > Search...
     ImGui.End(ctx)
   end
   if not open then

@@ -914,7 +914,7 @@ local function draw_flyout()
       SD.draw_menu(ctx, tr); SD.draw_ctx(ctx, tr)
       RV.draw_menu(ctx, tr); RV.draw_ctx(ctx, tr)
       -- The plugin search dialog, for the IN button's "Search..."
-      B.draw(ctx, tr)
+      B.draw(ctx, tr, false)
     end
 
     if ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows)

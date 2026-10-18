@@ -1,11 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.3.2
+-- @version 2.4.0
 -- @changelog
---  Fixed: with ChannelView TCP running, REAPER's Insert FX actions did
---  nothing after a track was selected in it. Selecting a track there now
---  makes the tracks REAPER's context, as a click in REAPER's own track
---  panel does (so Delete removes tracks too, as there).
+--  The Trimmer: a first-in-the-chain plugin with VU meters, linkable
+--  trims, low and high cut over a spectrum, Auto trim from the items and
+--  Listen; added with one click from the header. Action bars: buttons
+--  that add a plugin or an FX chain (several picked at once), a colour
+--  style per button, and icons and colours on menu rows.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -77,12 +78,18 @@
 --  [nomain] TS_CV_TrackMenu.lua
 --  [nomain] TS_CV_TrackOps.lua
 --  [nomain] TS_CV_TrackStrip.lua
+--  [nomain] TS_CV_FXButtons.lua
+--  [nomain] TS_CV_Trimmer.lua
+--  [nomain] TS_CV_TrimmerPanel.lua
+--  [main]   TS_ChannelView_TrimmerAdd.lua
+--  [main]   TS_ChannelView_TrimmerAuto.lua
 --  [nomain] TS_CV_Util.lua
 --  [nomain] TS_CV_Widgets.lua
 --  [nomain] TS_CV_WebLink.lua
 --  [effect] TS_TrackProbe.jsfx
 --  [effect] TS_CV_Modulators.jsfx
 --  [effect] TS_CV_Learn.jsfx
+--  [effect] TS_CV_Trimmer.jsfx
 -- @about
 --  A dockable window showing one panel per plugin on the selected track.
 --  Each panel carries a float button, a bypass button and a set of knobs
@@ -183,6 +190,7 @@ local TM = require("TS_CV_TrackMenu")
 local TO = require("TS_CV_TrackOps")
 local CP = require("TS_CV_ColourPick")
 local FO = require("TS_CV_Focus")
+local TRM = require("TS_CV_Trimmer")
 local IC = require("TS_CV_Icons")
 local CN = require("TS_CV_Chains")
 local TP = require("TS_CV_Taps")
@@ -3241,6 +3249,57 @@ local function menu_bar()
     end
   end
 
+  -- The TS_CV Trimmer, after the probes: dim with none on the track, lit
+  -- with one. With none, a click puts one first in the chain (after an
+  -- ARA plugin, the pre probe and the modulators); with one, its menu.
+  if app.track then
+    local tw = C.ICON_SIZE + 6
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
+      local have = TRM.find(app.track)
+      if W.icon_button(ctx, "trimmer", "trimmer", C.ICON_SIZE, have ~= nil,
+          have and "TS_CV Trimmer" or "Add the TS_CV Trimmer (trim, filters, VU) first in the chain") then
+        if have then
+          ImGui.OpenPopup(ctx, "trimmermenu")
+        else
+          reaper.Undo_BeginBlock()
+          local idx = TRM.insert(app.track, TP.ara_first(app.track))
+          reaper.Undo_EndBlock("ChannelView: add TS_CV Trimmer", -1)
+          if idx then
+            rescan(true)
+          else
+            reaper.MB("ChannelView couldn't find its TS_CV Trimmer plugin\n" ..
+                      "(TS_CV_Trimmer.jsfx). Reinstalling ChannelView from ReaPack puts it back.",
+                      "ChannelView", 0)
+          end
+        end
+      end
+      if ImGui.BeginPopup(ctx, "trimmermenu") then
+        local idx = TRM.find(app.track)
+        if idx then
+          if ImGui.MenuItem(ctx, "Auto trim from the items") then
+            reaper.Undo_BeginBlock()
+            local t, why = TRM.auto_trim(app.track, function(msg)
+              return reaper.MB(msg, "Auto trim", 4) == 6
+            end, TP.ara_first(app.track))
+            reaper.Undo_EndBlock("ChannelView: auto trim", -1)
+            if not t and why ~= "cancelled" then reaper.MB("Auto trim: " .. why .. ".", "ChannelView", 0) end
+          end
+          ImGui.Separator(ctx)
+          if ImGui.MenuItem(ctx, "Remove the Trimmer") then
+            reaper.Undo_BeginBlock()
+            reaper.TrackFX_Delete(app.track, idx)
+            reaper.Undo_EndBlock("ChannelView: remove TS_CV Trimmer", -1)
+            rescan(true)
+          end
+        end
+        ImGui.EndPopup(ctx)
+      end
+      menus_right = menus_right + tw
+    end
+  end
+
   -- Action drawers (TS_CV_Drawers): lit while any is open; click for the
   -- list, to open or close each, make a new one, or organise them.
   do
@@ -4147,7 +4206,7 @@ local function frame()
     if RV.draw_menu(ctx, app.track) then rescan(true) end
     if RV.draw_ctx(ctx, app.track) then rescan(true) end
     if B.draw_menu(ctx, app.track) then rescan(true) end
-    if B.draw(ctx, app.track) then rescan(true) end
+    if B.draw(ctx, app.track, false) then rescan(true) end
     PU.draw(ctx)
     if LS.draw(ctx, function(k) return E.is_open() and E.key() == k end) then rescan(true) end
     CS.draw(ctx)

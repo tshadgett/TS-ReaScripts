@@ -1,5 +1,27 @@
 # ChannelView — changelog
 
+## 2.4.0 — the Trimmer, plugin buttons
+
+- **The Trimmer** (`TS_CV_Trimmer.jsfx`): ChannelView's own plugin for the
+  top of a chain, with its own panel. Two VU meters (sine-calibrated, 0 VU
+  reference and peak ceiling on their right-click, *Set as default*), a
+  trim per channel (±24 dB, linkable), and a low cut and a high cut at 6
+  to 48 dB/oct, each off at the end of its range, drawn over the spectrum
+  or as two knobs. **Auto** sets the trim from the track's items (average
+  on 0 VU, peaks under the ceiling, the loudest item deciding, the items
+  untouched); **Listen** sets it from what's playing. One click on the
+  header's Trimmer button puts it first in the chain; two new actions add
+  it to, or auto-trim, the selected tracks. Zero latency.
+- **Plugin and FX chain buttons** on the action bars: one click adds a
+  plugin or a chain to the selected tracks, after the plugin selected in
+  ChannelView (the panel last clicked, now outlined), without an Insert FX
+  action. *+ Plugin* and *+ FX chain* in Organise actions; pick several at
+  once. Lit while the track has it; an icon for its type. Web page too.
+- **A colour style per button**: *Underline* and *Colour the icon* under a
+  button's colour, over the bar's own setting. Desktop and web.
+- **Menus show icons and colours**: each row's icon, and its colour as a
+  strip down the row's edge. The web page's submenu rows show theirs.
+
 ## 2.3.2 — Insert FX with the TCP
 
 - Fixed: with ChannelView TCP running, REAPER's *Insert FX* actions (from

@@ -203,6 +203,8 @@ end
 -- was renamed in the chain (TS_CV_FXTree's `alias`), else the plugin's.
 function U.fx_label(fx)
   if fx and fx.alias and fx.alias ~= "" then return fx.alias end
+  -- ChannelView's own TS_CV Trimmer is just "Trimmer" here
+  if fx and fx.name and fx.name:find("TS_CV Trimmer", 1, true) then return "Trimmer" end
   return U.clean_fx_name(fx and fx.name)
 end
 

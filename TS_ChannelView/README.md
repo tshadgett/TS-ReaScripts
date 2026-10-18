@@ -384,6 +384,34 @@ outline would have nothing to stand against.
   knob. Right-click a control and set it there, or use the editor.
 * The strip along the bottom mirrors REAPER's track selection both ways.
 
+## The Trimmer
+
+ChannelView's own first-in-the-chain plugin (`TS_CV_Trimmer.jsfx`, shown as
+**Trimmer**): two VU meters, a trim for each channel, and a low cut and a
+high cut. The header's Trimmer button adds one with a click, after an ARA
+plugin, the pre probe and the modulators; with one there, it's the menu.
+*Add TS_CV Trimmer to selected tracks* does the same from the Action List.
+
+- **Meters.** VU, after the trim and the filters, sine-calibrated: a sine
+  at the 0 VU reference reads 0. The lamp lights when a peak goes over the
+  peak ceiling. Right-click a meter: the 0 VU reference (−24 to −12 dBFS,
+  or your own), *Set 0 VU to this level*, the peak ceiling, and *Set as
+  default* for new Trimmers.
+- **Trims.** ±24 dB, linked or not (the rings between them): linked, moving
+  one moves the other by the same amount.
+- **Auto.** Sets the trim from the track's items: their average on 0 VU and
+  their peaks under the ceiling, whichever needs less, the loudest item
+  deciding, inside the time selection when there is one. The items
+  themselves aren't touched. *Auto trim TS_CV Trimmer on selected tracks*
+  does a whole selection, or the session.
+- **Listen.** For a track with nothing recorded: press it, play the
+  loudest part, press Stop, and the trim is set by the same rule.
+- **Filters.** 6 to 48 dB/oct, each off at the end of its range (low cut
+  all the way left, high cut all the way right). Over the spectrum (the
+  switch by the slope lists): drag a handle, wheel over it for the slope,
+  or double-click the canvas to put the low cut (under 1 kHz) or the high
+  cut there. With the spectrum off, two knobs.
+
 ## Macros and modulators
 
 Two panels sit between the Channel panel and the plugins: **Macros** and
@@ -508,6 +536,18 @@ put them. Every bar is global, not per project.
 - **Menus.** A button can be a menu of actions, separators and further
   menus, nested as deep as you like. Clicking it always opens the menu.
   The web page shows the same menus (a sheet, with *‹ Back* for a submenu).
+- **Plugins and FX chains.** A button that adds a plugin, or an FX chain,
+  with one click — no Insert FX action in REAPER's Action List. *+ Plugin*
+  and *+ FX chain* in Organise actions: the menu stays open, each click
+  makes a button and a second click takes it off again; in *Search…*, tick
+  several and *Add* them together. A click adds it to the selected tracks
+  (the last touched one when none is): after the plugin selected in
+  ChannelView (the panel last clicked, outlined), else at the end of the
+  chain, never ahead of the Trimmer, the pre probe or the modulators. Its
+  window stays closed. The button lights while the selected track has that
+  plugin, and gets an icon for its type (EQ, compressor, reverb…). They
+  work on every bar, the web page's included; REAPER's own toolbars can't
+  hold them.
 - **Toolbar switches.** A button that puts another bar in this bar's place
   — its spot, width, docker or window position — and puts this one away;
   lit while its bar is the one showing, so a row of them copied onto each
@@ -536,8 +576,10 @@ put them. Every bar is global, not per project.
   Organise actions; the first swatch is *no colour*). Each bar shows them
   as **underlines** or as **coloured icons**, where the icon and label
   are drawn in the colour and the button fills with it while on; a
-  button with your own PNG icon keeps the underline. The web page shows
-  the same.
+  button with your own PNG icon keeps the underline. A button can go its
+  own way: *Underline* and *Colour the icon* under its colour, either,
+  both or neither. In a menu, a button's colour is a strip down its row's
+  edge, beside its icon. The web page shows the same.
 - **Organise actions** (the drawers button, a bar's right-click, or the
   *Organise actions* action, which works without ChannelView open): every
   bar by place on the left; the selected bar's buttons as a tree in the

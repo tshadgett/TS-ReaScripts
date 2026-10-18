@@ -202,6 +202,7 @@ local function enc_list(list)
   local out = {}
   for _, e in ipairs(list) do
     local ic = (e.ic and e.ic ~= "") and (',"ic":' .. enc_str(e.ic)) or ""
+    if e.cs then ic = ic .. ',"cs":' .. enc_str(e.cs) end
     if e.sp then
       out[#out + 1] = '{"sp":1}'
     elseif e.m then
@@ -225,9 +226,10 @@ function DR.from_web(arr)
         out[#out + 1] = { sep = true, gap = true }
       elseif e.m then
         out[#out + 1] = { menu = true, icon = tostring(e.ic or ""), label = tostring(e.l or ""), color = e.c or "",
-                          items = DR.from_web(e.i) }
+                          cs = type(e.cs) == "string" and e.cs or nil, items = DR.from_web(e.i) }
       elseif e.a and tostring(e.a) ~= "" then
-        out[#out + 1] = { cmd = tostring(e.a), icon = tostring(e.ic or ""), label = tostring(e.l or ""), color = e.c or "" }
+        out[#out + 1] = { cmd = tostring(e.a), icon = tostring(e.ic or ""), label = tostring(e.l or ""), color = e.c or "",
+                          cs = type(e.cs) == "string" and e.cs or nil }
       end
     end
   end
@@ -238,11 +240,11 @@ function DR.to_web(items)
   local out = {}
   for _, it in ipairs(items or {}) do
     if it.menu then
-      out[#out + 1] = { m = 1, l = it.label or "", c = it.color or "", ic = it.icon, i = DR.to_web(it.items) }
+      out[#out + 1] = { m = 1, l = it.label or "", c = it.color or "", cs = it.cs, ic = it.icon, i = DR.to_web(it.items) }
     elseif it.sep then
       out[#out + 1] = { sp = 1 }
     else
-      out[#out + 1] = { l = it.label or "", a = it.cmd or "", c = it.color or "", ic = it.icon }
+      out[#out + 1] = { l = it.label or "", a = it.cmd or "", c = it.color or "", cs = it.cs, ic = it.icon }
     end
   end
   return out

@@ -108,6 +108,9 @@ button { font: inherit; color: inherit; }
    colour, filling with it while on */
 .mbtn.tint { color: var(--tc); }
 .mbtn.tint.on { background: var(--tc); color: #0d1116; }
+.csrow { display: flex; gap: 16px; margin: 8px 0 2px; align-items: center; }
+.csrow label { display: flex; gap: 6px; align-items: center; }
+.csrow .note { margin: 0; }
 .sheet .opt .ai { margin-right: 10px; }
 .icgrid { display: flex; flex-wrap: wrap; gap: 4px; max-height: 34vh; overflow-y: auto; margin: 6px 0; }
 .icgrid .fam { width: 100%; font-size: 11px; color: var(--dim); margin: 6px 0 2px; }
@@ -658,7 +661,11 @@ async function reaper(cmds) {
   }
   return out;
 }
-const run = id => reaper(encodeURIComponent(String(id))).catch(() => {});
+// A plugin or FX chain button (ChannelView's own command, not an action
+// REAPER knows) goes through the bridge, which adds it.
+const isFxBtn = a => typeof a === "string" && (a.startsWith("_TSCV_FX:") || a.startsWith("_TSCV_CHAIN:"));
+const run = id => isFxBtn(String(id)) ? send("fxb", String(id))
+  : reaper(encodeURIComponent(String(id))).catch(() => {});
 // The master's mono switch: REAPER's "Master track: Toggle stereo/mono
 // (L+R)", read back as that action's toggle state with every poll.
 const MONO_CMD = "40917";
@@ -1775,7 +1782,7 @@ function macroText(m) {
 function flatMacros(list, out = []) {
   for (const m of list || []) {
     if (m.m) flatMacros(m.i, out);
-    else if (m.a && switchOf(m) === null) out.push(m);
+    else if (m.a && switchOf(m) === null && !isFxBtn(m.a)) out.push(m);
   }
   return out;
 }
@@ -1797,7 +1804,11 @@ function openMenu(m) {
     for (const it of items) {
       if (it.sp) { list.append(h("div", "msep")); continue; }
       if (it.m) {
-        const b = h("button", "opt sub", it.l || "Menu");
+        const b = h("button", "opt sub");
+        const mic = aiEl(it.ic, 20);
+        if (mic) b.append(mic);
+        b.append(document.createTextNode(it.l || "Menu"));
+        if (it.c) b.style.boxShadow = `inset 3px 0 0 ${it.c}`;
         b.addEventListener("click", () => { stack.push(it); draw(sh); });
         list.append(b);
         continue;
@@ -1826,6 +1837,7 @@ function openMenu(m) {
 function editMenu(i) {
   const m = macros[i];
   const col = { c: m.c || "" };
+  if (typeof m.cs === "string") col.cs = m.cs;
   openSheet(sh => {
     sh.append(h("h3", null, "Menu"));
     const lab = h("input", "fld"); lab.placeholder = "Label"; lab.value = m.l || "";
@@ -1836,10 +1848,14 @@ function editMenu(i) {
     left.addEventListener("click", () => { if (i > 0) { [macros[i - 1], macros[i]] = [macros[i], macros[i - 1]]; i--; saveMacros(); } });
     right.addEventListener("click", () => { if (i < macros.length - 1) { [macros[i + 1], macros[i]] = [macros[i], macros[i + 1]]; i++; saveMacros(); } });
     rm.addEventListener("click", () => { macros.splice(i, 1); saveMacros(); closeSheet(); });
-    ok.addEventListener("click", () => { m.l = lab.value.trim(); m.c = col.c; saveMacros(); closeSheet(); });
+    ok.addEventListener("click", () => {
+      m.l = lab.value.trim(); m.c = col.c;
+      if (typeof col.cs === "string") m.cs = col.cs; else delete m.cs;
+      saveMacros(); closeSheet();
+    });
     lab.addEventListener("keydown", e => { if (e.key === "Enter") ok.click(); });
     acts.append(left, right, rm, ok);
-    sh.append(lab, h("div", "lbl", "Colour"), sw,
+    sh.append(lab, h("div", "lbl", "Colour"), sw, csRow(col),
       h("div", "note", `${(m.i || []).length} inside. Its actions are arranged in ChannelView: Action drawers ▸ Organise actions.`), acts);
   });
 }
@@ -1869,9 +1885,11 @@ function buildMacros() {
     const b = h("button", "mbtn" + ((m.m || sw === "menu") ? " menu" : "") + (ic && !text ? " ico" : ""));
     if (ic) b.append(ic);
     if (text || !ic) b.append(h("span", "t", text));
-    const tint = webBars.cs === "i" && m.c;
+    // a button's own colour style (m.cs: "u", "i", "ui", "") over the bar's
+    const cs = typeof m.cs === "string" ? m.cs : (webBars.cs === "i" ? "i" : "u");
+    const tint = cs.includes("i") && m.c;
     if (tint) { b.classList.add("tint"); b.style.setProperty("--tc", m.c); }
-    b.style.borderBottomColor = (!tint && m.c) || "var(--border)";
+    b.style.borderBottomColor = (cs.includes("u") && m.c) || "var(--border)";
     const x = h("span", "x", "×");
     b.append(x);
     wireMacroDrag(b, i);
@@ -1983,6 +2001,31 @@ function colourRow(get, set) {
   return sw;
 }
 
+// How a button shows its colour, its own over the bar's: two ticks.
+// `o.cs` is set ("u", "i", "ui", "") or deleted (as the bar).
+function csRow(o) {
+  const row = h("div", "csrow");
+  const bar = webBars.cs === "i" ? "i" : "u";
+  const mk = (txt, f) => {
+    const l = h("label"), c = h("input");
+    c.type = "checkbox";
+    c.checked = (typeof o.cs === "string" ? o.cs : bar).includes(f);
+    l.append(c, document.createTextNode(txt));
+    return [l, c];
+  };
+  const [lu, cu] = mk("Underline", "u"), [li, ci] = mk("Colour the icon", "i");
+  const note = h("span", "note");
+  const sync = () => {
+    const v = (cu.checked ? "u" : "") + (ci.checked ? "i" : "");
+    if (v === bar) delete o.cs; else o.cs = v;
+    note.textContent = typeof o.cs === "string" ? "this button's own" : "as the bar";
+  };
+  cu.addEventListener("change", sync); ci.addEventListener("change", sync);
+  note.textContent = typeof o.cs === "string" ? "this button's own" : "as the bar";
+  row.append(lu, li, note);
+  return row;
+}
+
 function openSheet(build) {
   const sh = $("sheet");
   sh.innerHTML = "";
@@ -2056,6 +2099,7 @@ function editMacro(i) {
       if (!m.a) return;
       const clean = { l: m.l, a: m.a, c: m.c };
       if (m.ic) clean.ic = m.ic;
+      if (typeof m.cs === "string") clean.cs = m.cs;
       if (i >= 0) macros[i] = clean; else macros.push(clean);
       saveMacros(); closeSheet();
     });
@@ -2069,7 +2113,7 @@ function editMacro(i) {
     acts.append(cancel, ok);
     // Enter in either box saves, as the button does
     for (const f of [lab, act]) f.addEventListener("keydown", e => { if (e.key === "Enter") ok.click(); });
-    sh.append(lab, act, res, h("div", "lbl", "Icon"), icrow, grid, h("div", "lbl", "Colour"), sw, acts);
+    sh.append(lab, act, res, h("div", "lbl", "Icon"), icrow, grid, h("div", "lbl", "Colour"), sw, csRow(m), acts);
     setTimeout(() => lab.focus(), 50);
   });
 }

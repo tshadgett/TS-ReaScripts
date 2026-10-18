@@ -248,6 +248,10 @@ function B.open(insert_at, opts)
   st.insert_at = insert_at
   st.track     = opts and opts.track or nil
   st.input     = (opts and opts.input) and true or false
+  st.pick      = opts and opts.pick or nil
+  st.picked    = opts and opts.picked or nil
+  st.chosen    = {}           -- picking: the ones ticked, in the order ticked
+  st.single    = (opts and opts.single) and true or false
   st.query     = ""
   st.kind, st.val, st.fkey = "", nil, ""
   st.devfilt   = ""
@@ -257,9 +261,24 @@ function B.open(insert_at, opts)
   st.focus     = true
 end
 
+-- PICKING. Opened with opts.pick (B.open, B.menu_items), the plugin
+-- chosen goes to pick(entry) instead of onto a track: how the action-bar
+-- organiser makes a button that adds one (TS_CV_FXButtons).
+local active_pick = nil
+-- and, while picking, which plugins are already chosen (ticked): picking
+-- several in a row, the menu stays open and a second click takes one off
+local active_picked = nil
+local function picked(e) return active_picked ~= nil and active_picked(e) == true end
+local active_multi = false     -- several in a row: the menu stays open
+
 -- `input` puts it at the end of the input FX chain instead -- the
 -- monitoring FX chain on the master, which is where REAPER keeps those.
 local function insert(track, entry, at, input)
+  if active_pick and entry then
+    active_pick(entry)
+    remember(entry.ident)
+    return true
+  end
   if not track or not entry then return false end
   if type(at) == "table" and not input then
     reaper.Undo_BeginBlock()
@@ -436,9 +455,11 @@ local function plugin_items(ctx, track, list)
   local dl  = ImGui.GetWindowDrawList(ctx)
   local pad = badge_pad(ctx)
   for i, e in ipairs(list or {}) do
-    if ImGui.MenuItem(ctx, ("%s%s##m%d"):format(pad, e.short, i)) then
+    if active_multi then ImGui.PushItemFlag(ctx, ImGui.ItemFlags_AutoClosePopups, false) end
+    if ImGui.MenuItem(ctx, ("%s%s##m%d"):format(pad, e.short, i), nil, picked(e)) then
       if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
     end
+    if active_multi then ImGui.PopItemFlag(ctx) end
     badge(ctx, dl, e.fmt)
     if ImGui.BeginPopupContextItem(ctx, "##fxctx" .. i) then
       ImGui.TextDisabled(ctx, e.short)
@@ -464,7 +485,8 @@ end
 local function items(ctx, track)
   installed()
   if ImGui.MenuItem(ctx, "Search\u{2026}") then
-    B.open(cur.insert_at, { track = cur.track, input = cur.input })
+    B.open(cur.insert_at, { track = cur.track, input = cur.input, pick = active_pick, picked = active_picked,
+                            single = active_pick ~= nil and not active_multi })
   end
 
   local rec = {}
@@ -574,7 +596,15 @@ function B.menu_items(ctx, track, opts)
   cur.insert_at = opts and opts.insert_at or nil
   cur.track     = opts and opts.track or nil
   cur.input     = (opts and opts.input) and true or false
+  active_pick   = opts and opts.pick or nil
+  active_picked = opts and opts.picked or nil
+  active_multi  = active_pick ~= nil and not (opts and opts.single)
+  if active_multi then
+    ImGui.TextDisabled(ctx, "Click to add a button, again to take it off")
+    ImGui.Separator(ctx)
+  end
   items(ctx, track)
+  active_pick, active_picked, active_multi = nil, nil, false
   return inserted_now
 end
 
@@ -630,9 +660,11 @@ local function results_list(ctx, track, found)
     -- as plugin_items, but rows that show which one the arrow keys are on
     local dl = ImGui.GetWindowDrawList(ctx)
     for i, e in ipairs(found) do
-      if ImGui.Selectable(ctx, ("%s%s##q%d"):format(pad, e.short, i), menu.sel == i) then
+      if active_multi then ImGui.PushItemFlag(ctx, ImGui.ItemFlags_AutoClosePopups, false) end
+      if ImGui.Selectable(ctx, ("%s%s##q%d"):format(pad, e.short, i), menu.sel == i or picked(e)) then
         if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
       end
+      if active_multi then ImGui.PopItemFlag(ctx) end
       badge(ctx, dl, e.fmt)
       if ImGui.BeginPopupContextItem(ctx, "##fxqctx" .. i) then
         ImGui.TextDisabled(ctx, e.short)
@@ -719,8 +751,39 @@ function B.draw_menu(ctx, track)
 end
 
 -- Returns true on the frame a plugin was inserted.
-function B.draw(ctx, track)
+-- `picking`: true from the organiser, which draws only a search opened
+-- to pick a plugin; ChannelView's own call draws only the others.
+function B.draw(ctx, track, picking)
   if not st.open then return false end
+  if (st.pick ~= nil) ~= (picking == true) then return false end
+  active_pick = st.pick
+  local r = B._draw(ctx, track)
+  active_pick = nil
+  return r
+end
+
+-- Picking in the search dialog: a click ticks a plugin or unticks it, and
+-- Add makes a button for each ticked one, in the order they were ticked
+-- (the one the arrow keys are on, when none is ticked).
+local function chosen_has(e)
+  for k, c in ipairs(st.chosen or {}) do if c == e then return k end end
+  return nil
+end
+local function pick_chosen(fallback)
+  local list = (st.chosen and #st.chosen > 0) and st.chosen or { fallback }
+  local any = false
+  for _, e in ipairs(list) do
+    if e and active_pick then
+      active_pick(e, true)        -- true: add it, even if it's on the bar already
+      remember(e.ident)
+      any = true
+    end
+  end
+  st.chosen = {}
+  return any
+end
+
+function B._draw(ctx, track)
 
   if st.request then
     ImGui.OpenPopup(ctx, TITLE)
@@ -735,7 +798,8 @@ function B.draw(ctx, track)
   if visible then
     if st.last_q ~= st.query or st.last_v ~= st.fkey then rebuild() end
 
-    local where = st.input and "add to the input FX chain"
+    local where = st.pick and "pick the plugin for the button"
+      or st.input and "add to the input FX chain"
       or (type(st.insert_at) == "table" and "add into the container")
       or (st.insert_at and ("insert at position " .. (st.insert_at + 1)))
       or "add to the end of the chain"
@@ -883,7 +947,8 @@ function B.draw(ctx, track)
       end
       if ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
          or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter) then
-        inserted = insert(st.track or track, st.results[st.sel], st.insert_at, st.input)
+        if st.pick then inserted = pick_chosen(st.results[st.sel])
+        else inserted = insert(st.track or track, st.results[st.sel], st.insert_at, st.input) end
         if inserted then ImGui.CloseCurrentPopup(ctx); st.open = false end
       end
     end
@@ -900,8 +965,14 @@ function B.draw(ctx, track)
         -- Same badge as the cascading menu, for the same reason.
         local label = badge_pad(ctx) .. e.short
         if e.dev then label = label .. "   \u{00B7} " .. e.dev end
-        if ImGui.Selectable(ctx, label .. "##fx" .. i, st.sel == i) then
+        local ticked = st.pick and not st.single and chosen_has(e)
+        if ImGui.Selectable(ctx, (ticked and "\u{2713} " or "") .. label .. "##fx" .. i,
+            st.sel == i or ticked ~= nil) then
           st.sel = i
+          if st.pick and not st.single then
+            if ticked then table.remove(st.chosen, ticked)
+            else st.chosen[#st.chosen + 1] = e end
+          end
         end
         badge(ctx, ImGui.GetWindowDrawList(ctx), e.fmt)
         -- right-click a result: the rest of that developer, or its folders
@@ -915,7 +986,7 @@ function B.draw(ctx, track)
           folder_actions(ctx, e)
           ImGui.EndPopup(ctx)
         end
-        if ImGui.IsItemHovered(ctx)
+        if not (st.pick and not st.single) and ImGui.IsItemHovered(ctx)
            and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
           inserted = insert(st.track or track, e, st.insert_at, st.input)
           if inserted then ImGui.CloseCurrentPopup(ctx); st.open = false end
@@ -928,8 +999,10 @@ function B.draw(ctx, track)
       ImGui.EndChild(ctx)
     end
 
-    if ImGui.Button(ctx, "Add", 90) then
-      inserted = insert(st.track or track, st.results[st.sel], st.insert_at, st.input)
+    local nch = st.pick and #(st.chosen or {}) or 0
+    if ImGui.Button(ctx, (nch > 1) and ("Add %d###addbtn"):format(nch) or "Add###addbtn", 90) then
+      if st.pick then inserted = pick_chosen(st.results[st.sel])
+      else inserted = insert(st.track or track, st.results[st.sel], st.insert_at, st.input) end
       if inserted then ImGui.CloseCurrentPopup(ctx); st.open = false end
     end
     ImGui.SameLine(ctx)
