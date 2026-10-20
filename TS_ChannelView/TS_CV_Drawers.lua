@@ -832,6 +832,31 @@ end
 function DR.draw_window_bar(ctx, d)
   local w, h = ImGui.GetContentRegionAvail(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
+  -- its name, as a drawer shows its own: at the start of a row, over a
+  -- column. A right-click on it opens the bar's menu.
+  if d.name and d.name ~= "" then
+    local dl = ImGui.GetWindowDrawList(ctx)
+    local name = d.name:upper()
+    local _, th = ImGui.CalcTextSize(ctx, "X")
+    local function target(x1, y1, x2, y2)
+      if x2 - x1 < 1 or y2 - y1 < 1 then return end
+      ImGui.SetCursorScreenPos(ctx, x1, y1)
+      ImGui.InvisibleButton(ctx, "##drname_hit" .. d.id, x2 - x1, y2 - y1)
+      if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) and d.tb then d.tb.open_bg() end
+    end
+    if h > w * 1.3 then
+      target(x, y, x + w, y + th + 6)
+      ImGui.DrawList_PushClipRect(dl, x, y, x + w, y + th + 6, true)
+      ImGui.DrawList_AddText(dl, x + 2, y + 1, C.COL.header_dim, name)
+      ImGui.DrawList_PopClipRect(dl)
+      y, h = y + th + 6, h - th - 6
+    else
+      local nw = name_w(ctx, d)
+      target(x, y, x + nw, y + h)
+      ImGui.DrawList_AddText(dl, x + 2, y + math.floor((h - th) * 0.5), C.COL.header_dim, name)
+      x, w = x + nw, w - nw
+    end
+  end
   if h > w * 1.3 then
     d.tb.draw_v(ctx, x - 4, y, w + 8, h, "right")
   else

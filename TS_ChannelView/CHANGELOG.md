@@ -1,5 +1,16 @@
 # ChannelView — changelog
 
+## 2.5.1 — rack at startup, toolbar names
+
+- **ChannelView Rack can start with REAPER**: ☰ ▸ *Run when REAPER starts*
+  in the rack, separate from ChannelView's own.
+- **A toolbar in its own window shows its name** at the start of its row
+  (or over its column), as a drawer does: a docker doesn't always show
+  the window's title. Right-click the name for the bar's menu.
+- Fixed: a toolbar window sized a little short showed nothing and had no
+  right-click menu. A floating toolbar window now keeps room for a row of
+  its buttons.
+
 ## 2.5.0 — hardware looks, Rack view, EQ band shapes
 
 - **Finishes.** A faceplate, a section or a control's background can have

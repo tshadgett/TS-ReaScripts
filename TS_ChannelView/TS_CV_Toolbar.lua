@@ -663,6 +663,9 @@ local st = {
 }
 
 function TB.allow_loads(n) loads_left = math.max(loads_left, n) end
+-- Opens the bar's right-click menu (for a click on what its host draws
+-- round it: a window bar's name).
+function TB.open_bg() st.open_bg = true end
 
 -- What a button says: its own label, else the action's name cut short.
 local function text_of(it)
@@ -1117,7 +1120,17 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
   local dl = ImGui.GetWindowDrawList(ctx)
   local bh = TB.btn
   local res = { menu = false, overflow = {} }
-  if h < C.TB_MIN_H then return res end
+  -- (a little short of the usual least height still draws its buttons,
+  -- smaller: a bar squeezed by a pixel shouldn't go blank)
+  if h < 12 then
+    -- too short for a row: still the bar's right-click target
+    if w >= 1 and h >= 1 then
+      ImGui.SetCursorScreenPos(ctx, x, y)
+      ImGui.InvisibleButton(ctx, ID .. "bg", w, h)
+      if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then st.open_bg = true end
+    end
+    return res
+  end
   bh = math.min(bh, h - 4)
 
   -- Settings, hard right.

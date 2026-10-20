@@ -1,18 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.5.0
+-- @version 2.5.1
 -- @changelog
---  Hardware looks: finishes (brushed, anodised, satin, tolex, leather, wood,
---  crinkle, enamel, hammertone, checker plate...), soft and round corners,
---  ten switch styles for toggles, seventeen knob recipes built from parts
---  and a Knob look editor for your own, concentric knob recipe pairs, one
---  light with View > Lighting and View > Shadows. Rack view: the plugins
---  down a column in a window of its own, with its own layouts. Show or
---  hide the macros, modulators, sends and receives. EQ canvases draw
---  notch, band pass, tilt, flat top, sword and all pass bands and any
---  slope. Vendor colours for plugin buttons. Fixes for measuring after a
---  plugin that takes the track's channel count, the selected outline and
---  Enabled/Disabled switches. Restart the web companion after updating.
+--  ChannelView Rack can start with REAPER (its own Run when REAPER starts).
+--  A toolbar in its own window shows its name, as a drawer does. Fixed: a
+--  toolbar window sized a little short showed nothing and had no
+--  right-click menu.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -284,8 +277,11 @@ pcall(function() require("TS_CV_Learn").sweep() end)
 -- Asked for while the action context still belongs to this script, so the
 -- startup option has a real command id to write. Harmless if REAPER hasn't
 -- given us one yet -- the option then says so instead of writing a dead
--- line into __startup.lua.
-SU.init()
+-- line into __startup.lua. The rack has a block of its own (its own
+-- markers and command id), so either can start with REAPER without the
+-- other.
+local SU_ME = RACK and SU.make("ChannelView Rack", "TS_ChannelView_Rack.lua", "channelview_rack_cmd") or SU
+SU_ME.init()
 M.init(script_dir)
 SC.init(script_dir)
 RCP.init(script_dir)
@@ -3522,14 +3518,13 @@ local function menu_bar()
     -- truth, and a cached boolean is just something that can disagree
     -- with it after a hand edit. See TS_CV_Startup for why that file is
     -- treated as gingerly as it is.
-    -- (ChannelView's own: the Rack view's window doesn't write one)
-    if not RACK then
-      if not SU.checked() then SU.scan() end
-      local st, note = SU.state()
-      if ImGui.MenuItem(ctx, "Run when REAPER starts", nil, SU.on(),
+    do
+      if not SU_ME.checked() then SU_ME.scan() end
+      local st, note = SU_ME.state()
+      if ImGui.MenuItem(ctx, "Run when REAPER starts", nil, SU_ME.on(),
           st ~= "nocmd") then
         local ok, why
-        if SU.on() then ok, why = SU.remove() else ok, why = SU.add() end
+        if SU_ME.on() then ok, why = SU_ME.remove() else ok, why = SU_ME.add() end
         if not ok then
           reaper.MB("__startup.lua was NOT changed.\n\n" .. tostring(why),
                     "ChannelView", 0)
@@ -3546,7 +3541,7 @@ local function menu_bar()
   else
     -- Closed: forget what we read, so the next opening reflects any edit
     -- made to __startup.lua in the meantime.
-    SU.forget()
+    SU_ME.forget()
     SU.web(script_dir).forget()
   end
 

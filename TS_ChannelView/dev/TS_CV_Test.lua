@@ -3079,6 +3079,19 @@ do
     check("and the other way round",          SUm.classify(less2, "_RSaaa") .. "/" .. SUt.classify(less2, "_RSbbb"), "none/ours")
   end
   do
+    -- the rack's block beside ChannelView's own: neither label's markers
+    -- may be read as the other's
+    local SUm = require "TS_CV_Startup"
+    local SUr = SUm.make("ChannelView Rack", "TS_ChannelView_Rack.lua", "channelview_rack_cmd")
+    local both = SUr.fenced_add(SUm.fenced_add("-- start\n", "_RSaaa"), "_RSrrr")
+    check("rack and ChannelView blocks side by side", SUm.classify(both, "_RSaaa") .. "/" .. SUr.classify(both, "_RSrrr"), "ours/ours")
+    local a1, a2 = SUm.fenced_remove(both), SUr.fenced_remove(both)
+    check("removing ChannelView's keeps the rack's", SUm.classify(a1, "_RSaaa") .. "/" .. SUr.classify(a1, "_RSrrr"), "none/ours")
+    check("removing the rack's keeps ChannelView's", SUm.classify(a2, "_RSaaa") .. "/" .. SUr.classify(a2, "_RSrrr"), "ours/none")
+    check("rack first, then ChannelView", SUm.classify(SUm.fenced_add(SUr.fenced_add(nil, "_RSrrr"), "_RSaaa"), "_RSaaa"), "ours")
+    check("rack and ChannelView compile", load(both) ~= nil, true)
+  end
+  do
     -- the web companion's block beside ChannelView's own
     local SUm = require "TS_CV_Startup"
     local WEBs = SUm.make("ChannelView web companion", "ChannelView", "channelview_web_cmd")

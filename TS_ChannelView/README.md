@@ -71,6 +71,8 @@ the track is whichever you select in REAPER's mixer or track panel.
   ChannelView's.
 - Layouts, labels and settings are shared: change one in either window and
   the other follows.
+- **☰ ▸ Run when REAPER starts** starts the rack with REAPER, on its own:
+  ChannelView's option and the rack's are separate.
 
 ## Ganging
 
@@ -639,6 +641,8 @@ put them. Every bar is global, not per project.
 - **Bars in their own windows** are drawn by **ChannelView toolbars**
   (`TS_ChannelView_Toolbars.lua`), started for you when a bar goes in a
   window; it can run when REAPER starts (a windowed bar's right-click).
+  A bar in a window shows its name as a drawer does (at the start of a
+  row, over a column), as a docker doesn't always show a window's title.
 
 ## Panels are a fixed height and grow in columns
 
