@@ -176,10 +176,24 @@ end
 
 local function fmt_of(job, p) return UN.formatter(job.tmp, job.p, p) end
 
+-- A Mix control's fully wet end (0 or 1): the end that reads higher, or,
+-- for a control named for its dry share ("Dry Mix", "Dry"), the end that
+-- reads lower.
+local function wet_end(job, p)
+  local fmt = fmt_of(job, p)
+  local a, b = UN.at(fmt, 0), UN.at(fmt, 1)
+  local w = (a and b and a > b) and 0 or 1
+  local _, nm = reaper.TrackFX_GetParamName(job.tmp, job.p, p, "")
+  nm = (nm or ""):lower()
+  if nm:find("dry", 1, true) and not nm:find("wet", 1, true) then w = 1 - w end
+  return w
+end
+LN._wet_end = wet_end
+
 -- The control's positions when it's a switch, else nil (cached).
-local function positions(job, p)
+local function positions(job, p, max_pos)
   if job.pos_cache[p] == nil then
-    job.pos_cache[p] = UN.positions(fmt_of(job, p), 200, 24) or false
+    job.pos_cache[p] = UN.positions(fmt_of(job, p), 400, max_pos or 24) or false
   end
   return job.pos_cache[p] or nil
 end
@@ -313,10 +327,14 @@ local function plan(job)
       end
     end
     if b.shape then
-      local sw = positions(job, b.shape)
+      -- (Kirchhoff-EQ has 47 types)
+      local sw = positions(job, b.shape, 64)
       if sw then
         meta.H = {}
-        for _, r in ipairs(sw) do meta.H[#meta.H + 1] = r.norm end
+        for _, r in ipairs(sw) do
+          -- a placeholder ("Reserved") isn't a setting to measure
+          if not (r.text or ""):lower():match("^%s*reserved%s*$") then meta.H[#meta.H + 1] = r.norm end
+        end
       end
       flat[b.shape] = reaper.TrackFX_GetParamNormalized(job.tmp, job.p, b.shape)
     end
@@ -388,7 +406,7 @@ function LN.start(track, addr, key, layout, which)
   job.which = which
   for _, k in ipairs(which) do
     local b = cv.bands[k]
-    for _, f in ipairs({ "freq", "gain", "q", "shape", "on" }) do if b[f] then job.params[b[f]] = true end end
+    for _, f in ipairs({ "freq", "gain", "q", "shape", "on", "slope" }) do if b[f] then job.params[b[f]] = true end end
     job.samples[k] = {}
   end
   if cv.all_on then job.params[cv.all_on] = true end
@@ -535,11 +553,23 @@ function LN.step(job)
       end
     end
     local b, meta = job.layout.canvas.bands[st.k], job.meta[st.k]
-    local fit = ME.fit(freqs, D, meta.kind)
+    -- what the plugin calls the shape it's on (and its slope): that model
+    -- is fitted, rather than whichever happens to fit best
+    local force
+    if b.shape then
+      local t, o = ME.type_of_name(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, b.shape, "")))
+      if t then force = { type = t, order = o } end
+    end
+    local sp = force and ME.find_slope(job.tmp, job.p, b)
+    if sp then
+      force.order = ME.order_of_text(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, sp, ""))) or force.order
+    end
+    local fit = ME.fit(freqs, D, meta.kind, force)
     local sm = { s = st.s, fn = st.fn, gn = st.gn, qn = st.qn, fit = fit }
     if meta.direct and fit then
       if b.freq then sm.rep_f = (UN.parse(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, b.freq, "")))) end
       if b.q then sm.rep_q = (UN.parse(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, b.q, "")))) end
+      if b.gain then sm.rep_g = (UN.parse(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, b.gain, "")))) end
     end
     table.insert(job.samples[st.k], sm)
   end
@@ -614,9 +644,7 @@ function plan_thr(job)
   -- fully wet: the reduction undiluted
   local mix = cv.roles.Mix
   if mix then
-    local fmt = fmt_of(job, mix)
-    local a, b = UN.at(fmt, 0), UN.at(fmt, 1)
-    job.flat[mix] = (a and b and a > b) and 0 or 1
+    job.flat[mix] = wet_end(job, mix)
   end
   local _, unit = UN.at(fmt_of(job, job.thr), 0.5)
   job.by_db = (unit == "db")
@@ -648,9 +676,27 @@ function begin_thr(job)
 end
 
 local function finish_thr(job)
+  local cv = job.layout.canvas
+  -- nothing reduced at all, with a Mix mapped: its wet end may be the
+  -- other one (a mix that reads the other way round). Once more, flipped.
+  local mix = cv.roles.Mix
+  if mix and job.flat[mix] and not job.mix_flipped then
+    local any = false
+    for _, list in pairs(job.thr_pts) do
+      for _, q in ipairs(list) do if q[2] >= 1 then any = true end end
+    end
+    if not any then
+      job.mix_flipped = true
+      job.flat[mix] = 1 - job.flat[mix]
+      job.thr_pts, job.thr_ref, job.thr_raw, job.thr_read = {}, {}, nil, nil
+      job.i, job.wake = 1, 0
+      job.msg = "Trying its Mix the other way round\u{2026}"
+      begin_thr(job)
+      return
+    end
+  end
   local health = copy_health(job)
   remove_track(job)
-  local cv = job.layout.canvas
   local pts = {}
   for si, n in ipairs(LN.THR_SETTINGS) do
     local T = LN.thr_fit(job.thr_pts[si] or {})
@@ -861,9 +907,7 @@ function plan_dec(job)
   job.flat = {}
   local mix = cv.roles.Mix
   if mix then
-    local fmt = fmt_of(job, mix)
-    local a, b = UN.at(fmt, 0), UN.at(fmt, 1)
-    job.flat[mix] = (a and b and a > b) and 0 or 1
+    job.flat[mix] = wet_end(job, mix)
   end
   -- first, in the middle of its range: which end of its Mix is wet. (Not
   -- at the first point of the grid: its shortest, smallest setting can
@@ -1039,9 +1083,7 @@ function plan_sat(job)
   job.flat = {}
   local mix = R.Mix
   if mix then
-    local fmt = fmt_of(job, mix)
-    local a, b = UN.at(fmt, 0), UN.at(fmt, 1)
-    job.flat[mix] = (a and b and a > b) and 0 or 1
+    job.flat[mix] = wet_end(job, mix)
   end
   job.cal = { d = R.Drive, s = R.Style, t = R.Tone, L = LN.SAT_LEVELS, e = {} }
   job.cal.dn = sat_points(job, R.Drive, LN.SAT_KNOB)

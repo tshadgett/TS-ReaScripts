@@ -45,6 +45,33 @@ tracks are not in a range: the range is what you can see. And ctrl can
 never take the selection down to nothing, because channel view has to
 have a track to show.
 
+## Rack view
+
+**ChannelView Rack** (`TS_ChannelView_Rack.lua`, in the Actions list) is
+ChannelView in a window of its own, laid out down a column: the selected
+track's plugins top to bottom, for docking beside the arrange while
+ChannelView stays where it is. It has no fader panel, mixer or track list:
+the track is whichever you select in REAPER's mixer or track panel.
+
+- Every plugin is the column's width, and as tall as its controls need at
+  that width. A canvas (an EQ, a compressor, ReaEQ, ReaComp) spans the
+  column, with the layout's other controls in rows under it.
+- The macros and modulators are strips across the top, the sends and
+  receives strips across the foot. They stay put while the plugins scroll
+  between them. Its View menu shows or hides each of the four.
+- Containers and parallel runs are bracketed down the left; only the
+  plugins inside one move in to make room. Click a container's strip for
+  its menu. Drag a panel by its header to move the plugin.
+- Folding is its own, and so are its action bars: the four *Rack* places
+  (a bar's right-click ▸ *Place*, or ☰ ▸ Drawers ▸ *New* in the rack).
+- **A layout of its own.** A plugin can have one layout laid out across
+  for ChannelView and another laid out down for the rack: pick it from the
+  panel's *Layout* menu in the rack, and *Make … the rack's default* for
+  every instance there. Until you pick one in the rack, it uses
+  ChannelView's.
+- Layouts, labels and settings are shared: change one in either window and
+  the other follows.
+
 ## Ganging
 
 Select six tracks, touch one, and all six follow. `TS_CV_Gang.lua` is the
@@ -315,7 +342,9 @@ outline would have nothing to stand against.
   (right-click ▸ *Remove from developer*) is left out of the menu and the
   search too, so one gesture hides it everywhere; one already on a track
   keeps its panel. Shell plugins such as Waves are matched to REAPER's
-  developers, categories and folders build by build.
+  developers, categories and folders build by build. **Developers** are
+  exactly REAPER's list: JS effects have no developer there, so they are
+  found through All plugins, the search and your folders instead.
 
   **FX folders** are REAPER's own (the ones its FX browser shows), and the
   menu edits them: right-click any plugin for *Add to folder* (or a new
@@ -366,6 +395,8 @@ outline would have nothing to stand against.
   as deleting from REAPER's own FX chain.
 * *View ▸ Panel alignment* centres the panels instead of packing them
   left.
+* *View ▸ Macros*, *Modulators*, *Sends* and *Receives* show or hide those
+  panels; a hidden one gives its room to the plugins.
 * *View ▸ Colour* has a **base hue** slider: the whole palette is generated
   from one hue, so it can be brought into line with a REAPER theme without
   picking thirty colours. Bypass and warning colours deliberately don't
@@ -578,8 +609,21 @@ put them. Every bar is global, not per project.
   are drawn in the colour and the button fills with it while on; a
   button with your own PNG icon keeps the underline. A button can go its
   own way: *Underline* and *Colour the icon* under its colour, either,
-  both or neither. In a menu, a button's colour is a strip down its row's
-  edge, beside its icon. The web page shows the same.
+  both or neither. **…** beside the swatches opens ChannelView's colour
+  dialog for any other colour (palettes, a picker, the eyedropper). In a
+  menu, a button's colour is a strip down its row's edge, beside its icon.
+  The web page shows the same.
+- **Vendors.** Organise actions ▸ *Vendors…* gives each plugin developer
+  a colour, initials and a look, and every plugin button of theirs picks
+  it up, new ones included: *Colour only*, *Initials tile* (the initials
+  in a tile where the icon goes), *Colour fill* (the button's ground in
+  the colour) or *Prefix* ("IKM - Tape Machine 24"). The list shows the
+  vendors on your bars; *Scan plugins* adds every developer among your
+  installed plugins, as REAPER's FX browser lists them, with how many each
+  has; *Set up* one, or *Set up all* (each gets a colour of its own).
+  *Same as…* gives one vendor another's look (Brainworx as Plugin
+  Alliance). A colour or a PNG icon set on a button itself still wins. The
+  web page shows the same.
 - **Organise actions** (the drawers button, a bar's right-click, or the
   *Organise actions* action, which works without ChannelView open): every
   bar by place on the left; the selected bar's buttons as a tree in the
@@ -628,9 +672,10 @@ default), shared with the TCP window and the web page.
   the same background — side by side, stacked, or facing each other across
   a divider — join into one rounded shape, always the full width of their
   column. Gaps and half-gaps (right-click the empty space) can have one too.
-  Backgrounds and sections can have a **Brushed finish** and/or a
-  **Metallic finish** (ticks in the same menus), like a faceplate's. Sections in a row with the same
-  style, faceplate and finish join into one.
+  Backgrounds and sections can have a **Finish** and the **Metallic flake**
+  (in the same menus), like a faceplate's, and **Corners**: *Square*,
+  *Soft* or *Round*. Sections in a row with the same style, faceplate,
+  finish and corners join into one.
 - **Faders of any shape.** Right-click a fader ▸ Style ▸ Shape, or in the
   editor: *Direction* up or across, *Length* 2, 3 or 4 rows (columns,
   across) or *Full*, *Thickness* a whole column (row) or half of one. Up
@@ -650,7 +695,11 @@ default), shared with the TCP window and the web page.
   editor. Where a drag starts decides which turns; the wheel turns the
   inner knob, Shift+wheel the ring; double-click puts back the one under
   the pointer. Medium or large. Either half of a concentric knob or an XY
-  pad can be reversed on its own.
+  pad can be reversed on its own. Its **Style** is *Default* (a lit ring
+  round a soft dome), *Arc (flat)* (the outer value as an arc round a flat
+  knob that shows the inner one, and how it draws with the 3D effect off),
+  or any knob recipe for the outer knob with another for the inner;
+  *Customise…* edits either, with an *Outer / Inner* switch.
 - **Where they go.** Controls fill a column top to bottom, then the next,
   in the panel list's order. A fader among the controls or an XY pad takes
   every cell it covers — like merged cells in a spreadsheet — and what
@@ -832,6 +881,16 @@ the band out (flat, or off). Right-click a node for its shapes and its On
 switch, or Alt+wheel to step the shape. The nodes say what the plugin's
 own controls read.
 
+Bands can be any shape: bell, shelves, cuts at any slope up to 96 dB/oct
+and brickwall, notch, band pass, tilt shelf, flat tilt, flat top, sword and
+all pass. A plugin that names its shapes (Pro-Q's *Notch*, Kirchhoff-EQ's
+*E LMF* or *Wall LP*) is drawn by the name it shows now, and its slope is
+read from its own *Slope* control, so a change made in the plugin shows at
+once. A switch with up to 64 settings can be learned. Layouts learned
+with an earlier ChannelView draw the newer shapes without learning again,
+but learning again (*Set up this layout…* ▸ *Learn*) is worth doing for an
+EQ whose bands all drew as bells.
+
 An EQ layout can be a **dynamic EQ**: tick *Dynamics* in its setup and map
 each band's threshold, range, ratio, attack, release and dynamics switch.
 Learning holds the dynamics off; the canvas draws each dynamic band's
@@ -924,7 +983,20 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   spun-aluminium knob) and *LED ring* (a ring of lamps close round an
   encoder, lit up to the value, or out from the middle on a centred
   control, in its cap colour). Knob caps are matte, the way the skirted
-  knob's skirt is. **Faders:** *Flat* (the default), *Console*, *Rail* and
+  knob's skirt is. Then the **recipes**, built from parts: *Bakelite*,
+  *Machined*, *Red gloss*, *Chicken-head*, *Numbered skirt*, *Printed
+  skirt*, *Soft-touch*, *Chrome*, *Two-tone*, *Cream fluted*, *Coin edge*,
+  *Washer*, *Console*, *White rim*, *Numbered dial*, *British* and *Wing*.
+  The Style menu shows them all as pictures.
+- **Your own knobs.** Style ▸ **Customise…** opens the *Knob look* window:
+  start from any recipe and change its body, grip (and how many flutes or
+  grooves), top, pointer, material, colours (body, sides, rim, pointer
+  ink), tilt, skirt (its material, colour, print and size, a knurled
+  edge), washer, hex nut, inner cap, scale and **Shadow** (*Normal*, *None*
+  for a knob sitting flush, *Tall*). Apply it to this knob, this section
+  or every knob on the panel, and **Save as recipe** to have it under
+  *Your recipes* in every Style menu. Recipes are kept in
+  `TS_ChannelView_Recipes.ini` beside your layouts. **Faders:** *Flat* (the default), *Console*, *Rail* and
   *Slim* (a fine groove and a small cap, filled to the value in its
   colour — made for rows of narrow faders).
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,
@@ -938,7 +1010,11 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   when on (Amber, Green, Red, Blue, Yellow, White or the theme's), and so
   is a button row's, along with its face: *Flat*, *Lit lens* (dark tinted
   glass that glows when on), *LED window* (a lamp strip across its top) or
-  *Backlit* (a dark cap whose edge and lettering light up). Under either row of swatches, **[+]** opens the colour
+  *Backlit* (a dark cap whose edge and lettering light up). A toggle can
+  also be a **switch**: *Bat toggle*, *Paddle toggle*, *Pill rocker*, *Lit
+  rocker*, *Slide*, *Pill slider*, *Lamp button*, *Round button*, *Jewel
+  lamp* or *Guarded toggle* (a cover to lift first), lit in its colour;
+  with the 3D effect off the levers draw as the pill slider. Under either row of swatches, **[+]** opens the colour
   picker for any colour at all, with your recent colours beside it.
 - **Faceplates:** Theme, Charcoal, Gunmetal, Aluminium, Steel blue, Navy,
   Cream, Cobalt, Amber, Stone, Racing green, Oxblood and Gold — or any
@@ -948,10 +1024,12 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   started, for going back and forth between a few. The same goes for
   backgrounds and sections. Labels, values and scale ticks switch ink to
   stay readable on each, a custom colour's worked out from the colour
-  itself. In the Faceplate menu, **Brushed finish** gives
-  any of them a fine grain (aluminium has it unless you turn it off), and
-  **Metallic finish** a fine metallic flake and sheen, like metallic paint
-  — either, both or neither.
+  itself. In the Faceplate menu, **Finish** gives any of them a surface:
+  *Plain*, *Brushed* (aluminium's own unless you change it), *Anodised*,
+  *Bright*, *Satin*, *Tolex*, *Leather*, *Wood*, *Crinkle*, *Enamel*,
+  *Hammertone* or *Checker plate*, each in the faceplate's colour; the
+  **Metallic flake** (a fine flake and sheen, like metallic paint) goes
+  over any of them.
 - **Numbered scales:** knobs print numbers round their dial — **Values**
   (the plugin's own, units left off and thousands as k, so 12000 Hz reads
   12k) unless a knob's **Values** menu (or the editor's *Scale*) says **0–10** or **None**. A large knob has room for seven
@@ -968,8 +1046,12 @@ cap colour is fixed, the way hardware is. The menus stay open while you
 click through them, so you can try a few and watch the panel change.
 **View ▸ 3D effect** (on by default) lights the panels from the top left:
 a gentle gradient on the faceplates (Theme stays flat), panel edges that
-catch the light, and soft shadows under knobs, buttons and fader caps (not
-the Arc knob, which is a printed scale).
+catch the light, and shadows under knobs, switches, styled buttons and
+fader caps (not the Arc knob, which is a printed scale, nor flat buttons and
+dropdowns, which are printed on the panel). One light lights everything, so
+highlights stay put as a knob turns. **View ▸ Lighting** sets how strongly
+(a more pronounced gradient on faceplates and knobs above 100%), and **View
+▸ Shadows** how deep and far the shadows fall.
 
 Like everything else on a panel, the look is saved with the plugin's layout,
 so every instance of that plugin wears it.
@@ -1114,6 +1196,8 @@ its `_on` partner while it's on).
 | `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them |
 | `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: EQ bands, thresholds, reverb decay, saturation |
 | `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` |
+| `TS_CV_Trimmer.jsfx` | the Trimmer plugin. Goes in `Effects/` |
+| `TS_CV_Trimmer.lua`, `TS_CV_TrimmerPanel.lua` | the Trimmer's insert, auto trim and listen; its panel |
 | `TS_CV_Units.lua` | reading a plugin's values from its own text (dB, Hz, ms, ratios) |
 | `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
@@ -1121,6 +1205,15 @@ its `_on` partner while it's on).
 | `TS_CV_ColourPick.lua` | the colour picker every colour dialog shares: palettes, eyedropper, recent colours |
 | `TS_ChannelView_ToggleMixer.lua` | the *Toggle mixer view* action, for a shortcut or toolbar |
 | `TS_CV_Toolbar.lua` | an action bar: its buttons, menus, switches, icon picker |
+| `TS_CV_FXButtons.lua` | buttons that add a plugin or an FX chain |
+| `TS_CV_Vendors.lua` | a colour, initials and a look per plugin vendor |
+| `TS_CV_Finish.lua`, `textures/` | faceplate, section and background finishes, and their texture tiles (copied to `reaper_www_root/` for the web page) |
+| `TS_CV_Switches.lua` | the switch styles for toggles |
+| `TS_CV_Light.lua` | the one light and the shadows |
+| `TS_CV_KnobParts.lua` | knobs drawn from parts, for the recipes and your own looks |
+| `TS_CV_KnobEditor.lua` | the *Knob look* window |
+| `TS_CV_Recipes.lua` | your knob recipes |
+| `TS_ChannelView_Rack.lua` | **ChannelView Rack**: the plugins down a column |
 | `TS_CV_Drawers.lua` | every action bar and where it is: drawers, windows, the TCP's, the web's |
 | `TS_CV_ActionEditor.lua` | the Organise actions window, and importing and exporting bars |
 | `TS_CV_ActionIcons.lua` | drawing ChannelView's icons, and finding the one made for an action |
@@ -1138,6 +1231,7 @@ its `_on` partner while it's on).
 | `TS_CV_Diag.lua` | dumps what REAPER reports about the selected track's FX, and how much of your plugin collection the FX index resolves |
 | `dev/TS_CV_Audit.py` | checks every ImGui call against your installed ReaImGui. Not installed |
 | `TS_ChannelView_Mappings.ini` | your layouts (created on first save) |
+| `TS_ChannelView_Recipes.ini` | your knob recipes (created when you save one) |
 
 The layout library is plain text and safe to edit by hand; *Layouts ▸ Reload
 library from disk* picks up changes without restarting. Every save keeps one
@@ -1242,6 +1336,12 @@ script into the action list.
   Oversampling is in the preset bar (or ⋯), a container's options, and
   **OS** under the fader for the whole chain; lit while it's on. ⋯ also
   sets a plugin offline or brings it back.
+- **Show:** the button with the columns icon, beside the Actions button,
+  shows or hides the macros, modulators, sends and receives on this
+  device.
+- **Looks:** finishes, corners, switches, knob recipes, your own knob
+  looks and concentric pairs draw as on the desktop, lit and shadowed to
+  the desktop's Lighting and Shadows.
 - **XY pads and concentric knobs** play here too: touch the pad to put the
   dot there; on a concentric knob, start on the inner knob or the ring.
   Modulated controls carry the same marks as on the desktop.
@@ -1252,8 +1352,8 @@ script into the action list.
   the Detector tab for the drawer.
 - **Canvas layouts** of other plugins show their canvas too, with the
   layout's other controls beside it: drag an EQ node for frequency and
-  gain, double-tap it to take the band out, tap it to select it for its Q
-  and shape underneath; drag a compressor's threshold, the curve's end for
+  gain, double-tap it to take the band out, tap it to select it for its Q,
+  shape and slope underneath; drag a compressor's threshold, the curve's end for
   ratio (snapping to a switch's settings) and the envelope's nodes; the
   other kinds' handles, chips and taps work as on the desktop. They're set
   up on the desktop.
@@ -1625,6 +1725,9 @@ own **Plugin Rack.lua** and **Docked Plugin Display.lua**. That code is
 mine. The difference in approach is that Plugin Rack reparents each
 plugin's real GUI into a pane, while ChannelView draws its own controls
 instead.
+
+The Hammertone finish is made from TextureCan's *Hammered Copper* height
+map (CC0). The other finish textures are generated.
 
 Nothing here derives from TK FX Browser, TK Workbench or any other
 third-party script — I checked line by line before release.

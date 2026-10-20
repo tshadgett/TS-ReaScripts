@@ -11,7 +11,8 @@
   Drag a node: across moves the band's frequency control (a switch snaps
   to its positions), up and down its gain. The wheel over a node turns
   its Q control, Alt+wheel steps its shape switch. Right-click a node for
-  the band's shapes, its On switch and the setup. The nodes say what the plugin's own controls read.
+  the band's shapes, its On switch and the setup. The nodes say what the
+  plugin's own controls read.
 --]]
 
 local C  = require("TS_CV_Config")
@@ -412,8 +413,15 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
   local hot
   for _, b in ipairs(bands) do
     local col = u.band_colour(b.k)
-    local has_gain = b.map.gain ~= nil and (b.type == "bell" or b.type == "ls" or b.type == "hs")
-    local node_db = has_gain and math.max(-C.EQ_GAIN_RANGE, math.min(C.EQ_GAIN_RANGE, b.g or 0)) or 0
+    -- the node sits on the curve: at the band's gain for a bell, shelf or
+    -- flat top; on the 0 dB line where a tilt pivots and for the shapes
+    -- with no gain (cuts, notch, band pass, all pass) -- up and down on
+    -- those turns Q
+    local has_gain = b.map.gain ~= nil and not ME.GAINLESS[b.type]
+    local at_gain = has_gain and (b.type == "bell" or b.type == "ls" or b.type == "hs"
+      or b.type == "sword" or b.type == "flattop")
+    local q_drag = not has_gain and b.map.q ~= nil and not ME.q_positions(track, addr, b.map)
+    local node_db = at_gain and math.max(-C.EQ_GAIN_RANGE, math.min(C.EQ_GAIN_RANGE, b.g or 0)) or 0
     local nx = math.max(gx0, math.min(gx0 + gw, u.x_of(b.f, gx0, gw)))
     local ny = u.y_of(node_db, gy0, gh)
     if b.dy then
@@ -439,7 +447,8 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
       local d = ps.drag
       if not d or d.k ~= b.k then
         local mx, my = ImGui.GetMousePos(ctx)
-        d = { k = b.k, f = b.f, g = b.g or 0, mx = mx, my = my }
+        d = { k = b.k, f = b.f, g = b.g or 0, mx = mx, my = my,
+              qn = b.map.q and reaper.TrackFX_GetParamNormalized(track, addr, b.map.q) }
         ps.drag = d
       end
       local mx, my = ImGui.GetMousePos(ctx)
@@ -452,6 +461,10 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
       if has_gain and math.abs(dy) > 0.5 then
         local tg = d.g - dy / gh * (C.EQ_GAIN_RANGE * 2)
         ME.set_gain(track, addr, b.map, tg)
+      elseif q_drag and d.qn and math.abs(dy) > 0.5 then
+        -- up: narrower / more resonant
+        local v = math.max(0, math.min(1, d.qn - dy / gh))
+        reaper.TrackFX_SetParamNormalized(track, addr, b.map.q, v)
       end
       ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeAll)
     elseif ps.drag and ps.drag.k == b.k and not active then
@@ -463,8 +476,9 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
         -- Alt+wheel: the next or previous shape
         local shs = ME.shapes(track, addr, b.map)
         if shs then
-          local to = math.max(1, math.min(#shs, b.s + (wheel > 0 and 1 or -1)))
-          if to ~= b.s then ME.set_shape(track, addr, b.map, to) end
+          local cur = ME.shape_now(track, addr, b.map) or 1
+          local to = math.max(1, math.min(#shs, cur + (wheel > 0 and 1 or -1)))
+          if to ~= cur then ME.set_shape(track, addr, b.map, to) end
         end
         W.take_wheel()
       elseif wheel ~= 0 and b.map.q then
@@ -484,8 +498,12 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
         local t = ftext(track, addr, b.map[f])
         if t and t ~= "" then parts[#parts + 1] = t end
       end
+      local sl = ME.find_slope(track, addr, b.map)
+      local st = sl and ftext(track, addr, sl)
+      if st and st ~= "" then parts[#parts + 1] = st end
       local tip = ("%s  (%s)\n%s"):format(name, ME.TYPES[b.type] or b.type,
         table.concat(parts, "   "))
+      if q_drag then tip = tip .. "\nDrag up or down: Q" end
       if b.map.q then
         tip = tip .. (ME.q_positions(track, addr, b.map) and "\nWheel or right-click: Q" or "\nWheel: Q")
       end
@@ -536,13 +554,25 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
       -- the band's shape switch, setting by setting
       local shs = rb and ME.shapes(track, addr, b)
       if shs then
+        local cur = ME.shape_now(track, addr, b) or 1
         for _, sh in ipairs(shs) do
-          if ImGui.MenuItem(ctx, ME.shape_label(sh) .. "##shp" .. sh.s, nil, rb.s == sh.s) then
+          if ImGui.MenuItem(ctx, ME.shape_label(sh) .. "##shp" .. sh.s, nil, cur == sh.s) then
             ME.set_shape(track, addr, b, sh.s)
           end
         end
         ImGui.Separator(ctx)
       end
+      -- its slope, by the plugin's own names (24 dB/oct, Brickwall)
+      local sls, si, sp = ME.slopes(track, addr, b)
+      if sls and ImGui.BeginMenu(ctx, "Slope  \u{00B7}  " .. tostring(sls[si] and sls[si].text or "")) then
+        for i, r in ipairs(sls) do
+          if ImGui.MenuItem(ctx, tostring(r.text) .. "##slp" .. i, nil, i == si) then
+            reaper.TrackFX_SetParamNormalized(track, addr, sp, r.norm)
+          end
+        end
+        ImGui.EndMenu(ctx)
+      end
+      if sls then ImGui.Separator(ctx) end
       -- a Q that's a switch (Narrow / Wide): its settings, by name
       local qp = ME.q_positions(track, addr, b)
       if qp then

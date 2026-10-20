@@ -30,6 +30,8 @@ local DR = require("TS_CV_Drawers")
 local FB = require("TS_CV_FXButtons")
 local B  = require("TS_CV_Browser")
 local CN = require("TS_CV_Chains")
+local VN = require("TS_CV_Vendors")
+local CPk = require("TS_CV_ColourPick")
 
 local AE = {}
 local ImGui
@@ -587,7 +589,7 @@ local function item_props(ctx, tb, web)
     ImGui.Spacing(ctx)
     do
       ImGui.Text(ctx, "Colour")
-      tb.colour_row(ctx, it, "aecap")
+      tb.colour_row(ctx, it, "aecap", true)
       ImGui.Spacing(ctx)
     end
     do
@@ -693,6 +695,227 @@ function AE.import_status(e, list)
 end
 
 local share = nil
+-- ---------------------------------------------------------------------
+-- vendors (TS_CV_Vendors): a colour, initials and a look per plugin
+-- vendor, which every plugin button of that vendor picks up
+-- ---------------------------------------------------------------------
+
+local vend = { open = false }
+
+-- A row's colour, initials and look.
+local function vendor_settings(ctx, k, v)
+  local changed = false
+  ImGui.TableNextColumn(ctx)
+  local col = TB.colour_of(v.color) or 0x808080ff
+  if ImGui.ColorButton(ctx, "##aevc" .. k, col, ImGui.ColorEditFlags_NoTooltip, 40, 20) then
+    ImGui.OpenPopup(ctx, "aevcpop" .. k)
+  end
+  if ImGui.BeginPopup(ctx, "aevcpop" .. k) then
+    for j, hex in ipairs(VN.SUGGEST) do
+      if j > 1 and (j - 1) % 8 ~= 0 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.ColorButton(ctx, "##aevs" .. k .. "." .. j, TB.colour_of(hex), ImGui.ColorEditFlags_NoTooltip, 20, 20) then
+        v.color = hex; changed = true
+        ImGui.CloseCurrentPopup(ctx)
+      end
+    end
+    if ImGui.Button(ctx, "Any colour\u{2026}##aevany" .. k) then
+      vend.pick = { v = v, s = CPk.new_state(col >> 8) }
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    ImGui.EndPopup(ctx)
+  end
+  ImGui.TableNextColumn(ctx)
+  ImGui.SetNextItemWidth(ctx, -1)
+  local ch, txt = ImGui.InputText(ctx, "##aevi" .. k, v.init or "")
+  if ch then v.init = (txt:gsub("[;|]", "")):sub(1, 5); changed = true end
+  ImGui.TableNextColumn(ctx)
+  ImGui.SetNextItemWidth(ctx, -1)
+  if ImGui.BeginCombo(ctx, "##aevl" .. k, VN.LOOK_NAMES[v.look] or VN.LOOK_NAMES.none) then
+    for _, l in ipairs(VN.LOOKS) do
+      if ImGui.Selectable(ctx, VN.LOOK_NAMES[l], v.look == l) then v.look = l; changed = true end
+    end
+    ImGui.EndCombo(ctx)
+  end
+  return changed
+end
+
+-- "Same as…": the vendors set up with a look of their own, to take one's.
+local function same_as_menu(ctx, k, name, owns)
+  if ImGui.SmallButton(ctx, "Same as\u{2026}##aevsm" .. k) then ImGui.OpenPopup(ctx, "aevsame" .. k) end
+  W.tip(ctx, "aevsm" .. k, "Use another vendor's look for this one's plugins", ImGui.IsItemHovered(ctx), false)
+  if ImGui.BeginPopup(ctx, "aevsame" .. k) then
+    local any = false
+    for _, o in ipairs(VN.list()) do
+      if not o.same and VN.clean(o.name):lower() ~= VN.clean(name):lower() then
+        any = true
+        if ImGui.Selectable(ctx, o.name .. "##aevso" .. k) then VN.same_as(name, o.name) end
+      end
+    end
+    if not any then ImGui.TextDisabled(ctx, "Set up the other vendor first.") end
+    if owns then
+      ImGui.Separator(ctx)
+      ImGui.TextDisabled(ctx, "Its own colour and look are dropped.")
+    end
+    ImGui.EndPopup(ctx)
+  end
+end
+
+-- "Any colour…": ChannelView's colour tool (palettes, recent colours, the
+-- picker and its eyedropper) in the Vendors window itself, in place of the
+-- list until it's applied or cancelled. Drawn here rather than as a dialog
+-- of its own: a modal opened from inside this one doesn't show.
+local function vendor_colour(ctx)
+  local p = vend.pick
+  local done = false
+  local function keep(rgb)
+    p.v.color = ("#%06x"):format(rgb & 0xffffff)
+    VN.save()
+    CPk.remember(rgb)
+    done = true
+  end
+  ImGui.SeparatorText(ctx, "Colour for " .. p.v.name)
+  ImGui.BeginGroup(ctx)
+  local c = CPk.palette(ctx, p.s, "aevp")
+  if c then keep(c) end
+  if not done and #CPk.recent > 0 then
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Recent")
+    local r = CPk.recent_row(ctx, "aevp")
+    if r then keep(r) end
+  end
+  ImGui.EndGroup(ctx)
+  if not done then
+    ImGui.SameLine(ctx, 0, 24)
+    ImGui.BeginGroup(ctx)
+    CPk.any_colour(ctx, p.s, "aevp")
+    ImGui.EndGroup(ctx)
+    ImGui.Spacing(ctx)
+    if ImGui.Button(ctx, "Apply##aevp") then keep(p.s.rgb) end
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Cancel##aevp") then done = true end
+  end
+  if done then
+    CPk.release(p.s)
+    vend.pick = nil
+  end
+end
+
+local function vendors_body(ctx)
+  if vend.pick then vendor_colour(ctx) return end
+  ImGui.PushTextWrapPos(ctx, 0)
+  ImGui.TextDisabled(ctx, "Plugin buttons take their vendor's colour, and its look. A colour, or a " ..
+    "PNG icon, set on a button itself still wins.")
+  ImGui.PopTextWrapPos(ctx)
+  ImGui.Spacing(ctx)
+
+  -- the vendors set up; then the ones on your bars that aren't yet; then,
+  -- after a scan, every other vendor among your plugins
+  local rows, seen = {}, {}
+  local found = vend.found or {}
+  for _, v in ipairs(VN.list()) do
+    rows[#rows + 1] = { name = v.name, v = v }
+    seen[VN.clean(v.name):lower()] = true
+  end
+  local function more(names, kind)
+    table.sort(names, function(a, b) return a.name:lower() < b.name:lower() end)
+    for _, e in ipairs(names) do
+      local key = VN.clean(e.name):lower()
+      if not seen[key] then
+        seen[key] = true
+        rows[#rows + 1] = { name = e.name, kind = kind, n = e.n }
+      end
+    end
+  end
+  do
+    local on_bars = {}
+    for name, n in pairs(found) do on_bars[#on_bars + 1] = { name = name, n = n } end
+    more(on_bars, "bars")
+  end
+  if vend.scanned then more(VN.installed(), "installed") end
+  local unset = {}
+  for _, r in ipairs(rows) do if not r.v then unset[#unset + 1] = r.name end end
+  if #rows == 0 then
+    ImGui.TextDisabled(ctx, "No plugin buttons on your bars yet: + Plugin adds them, or Scan plugins lists every vendor.")
+  end
+
+  local changed = false
+  if ImGui.BeginTable(ctx, "aevt", 5, ImGui.TableFlags_RowBg | ImGui.TableFlags_ScrollY, 0, -30) then
+    ImGui.TableSetupScrollFreeze(ctx, 0, 1)
+    ImGui.TableSetupColumn(ctx, "Vendor", ImGui.TableColumnFlags_WidthStretch)
+    ImGui.TableSetupColumn(ctx, "Colour", ImGui.TableColumnFlags_WidthFixed, 50)
+    ImGui.TableSetupColumn(ctx, "Initials", ImGui.TableColumnFlags_WidthFixed, 60)
+    ImGui.TableSetupColumn(ctx, "Look", ImGui.TableColumnFlags_WidthFixed, 120)
+    ImGui.TableSetupColumn(ctx, "", ImGui.TableColumnFlags_WidthFixed, 132)
+    ImGui.TableHeadersRow(ctx)
+    for k, r in ipairs(rows) do
+      local v = r.v
+      local n = found[r.name] or 0
+      ImGui.TableNextRow(ctx)
+      ImGui.TableNextColumn(ctx)
+      ImGui.AlignTextToFramePadding(ctx)
+      local count = (r.kind == "installed") and ("  (" .. r.n .. " installed)") or (n > 0 and ("  (" .. n .. ")") or "")
+      if v then ImGui.Text(ctx, r.name .. count) else ImGui.TextDisabled(ctx, r.name .. count) end
+      if v and v.same then
+        -- the same as another: that one's look
+        ImGui.TableNextColumn(ctx)
+        local o = VN.get(v.name)
+        if o then ImGui.ColorButton(ctx, "##aevc" .. k, TB.colour_of(o.color) or 0x808080ff, ImGui.ColorEditFlags_NoTooltip, 40, 20) end
+        ImGui.TableNextColumn(ctx); ImGui.TableNextColumn(ctx)
+        ImGui.AlignTextToFramePadding(ctx)
+        ImGui.TextDisabled(ctx, "as " .. v.same)
+        ImGui.TableNextColumn(ctx)
+        if ImGui.SmallButton(ctx, "Own look##aevown" .. k) then VN.same_as(v.name, nil) end
+        ImGui.SameLine(ctx, 0, 4)
+        if ImGui.SmallButton(ctx, "Forget##aevf" .. k) then VN.remove(v.name) end
+      elseif v then
+        if vendor_settings(ctx, k, v) then changed = true end
+        ImGui.TableNextColumn(ctx)
+        same_as_menu(ctx, k, v.name, true)
+        ImGui.SameLine(ctx, 0, 4)
+        if ImGui.SmallButton(ctx, "Forget##aevf" .. k) then VN.remove(v.name) end
+      else
+        ImGui.TableNextColumn(ctx); ImGui.TableNextColumn(ctx); ImGui.TableNextColumn(ctx)
+        ImGui.TableNextColumn(ctx)
+        same_as_menu(ctx, k, r.name, false)
+        ImGui.SameLine(ctx, 0, 4)
+        if ImGui.SmallButton(ctx, "Set up##aevn" .. k) then VN.ensure(r.name) end
+      end
+    end
+    ImGui.EndTable(ctx)
+  end
+  if changed then VN.save() end
+  if ImGui.Button(ctx, "Close") then ImGui.CloseCurrentPopup(ctx) end
+  ImGui.SameLine(ctx, 0, 12)
+  if ImGui.Button(ctx, vend.scanned and "Scan again" or "Scan plugins") then
+    VN.rescan()
+    vend.scanned = true
+  end
+  W.tip(ctx, "aevscan", "List every vendor among your installed plugins", ImGui.IsItemHovered(ctx), false)
+  if #unset > 0 then
+    ImGui.SameLine(ctx, 0, 8)
+    if ImGui.Button(ctx, ("Set up all (%d)"):format(#unset)) then VN.ensure_all(unset) end
+    W.tip(ctx, "aevall", "A colour and initials for each vendor listed that isn't set up", ImGui.IsItemHovered(ctx), false)
+  end
+end
+
+local function draw_vendors(ctx)
+  if vend.open then
+    vend.open = false
+    ImGui.OpenPopup(ctx, "Vendors###aevendors")
+    if vend.pick then CPk.release(vend.pick.s) end
+    vend.pick = nil
+    vend.found = {}
+    for _, b in ipairs(all_bars()) do
+      if b.tb then VN.collect(b.tb.items, vend.found, FB.kind) end
+    end
+  end
+  ImGui.SetNextWindowSize(ctx, 640, 480, ImGui.Cond_Appearing)
+  if ImGui.BeginPopupModal(ctx, "Vendors###aevendors", true, 0) then
+    vendors_body(ctx)
+    ImGui.EndPopup(ctx)
+  end
+end
+
 local draw_share
 function AE.share(mode)
   st.open, st.focus = true, true
@@ -852,10 +1075,12 @@ function AE.draw(ctx)
       if ImGui.Button(ctx, "+ New bar") then ImGui.OpenPopup(ctx, "aenewdr") end
       if ImGui.BeginPopup(ctx, "aenewdr") then
         for _, s in ipairs({ "top", "left", "right", "bottom", "window", "none" }) do
+          -- this window's own sides (the rack's when it is the rack)
+          local p = (s == "window" or s == "none") and s or (DR.PFX .. s)
           local label = (s == "window") and "Toolbar in its own window"
-                        or (s == "none") and "Nowhere yet" or (DR.SIDE_NAME[s] .. " drawer")
+                        or (s == "none") and "Nowhere yet" or ((DR.SIDE_NAME[p] or s) .. " drawer")
           if ImGui.MenuItem(ctx, label .. "##aenew" .. s) then
-            local d = DR.new(s)
+            local d = DR.new(p)
             st.bar_id, st.sel = d.id, nil
             if s == "window" then DR.ensure_host() end
           end
@@ -985,6 +1210,10 @@ function AE.draw(ctx)
             import_menu(ctx, tb)
             ImGui.EndPopup(ctx)
           end
+          flow(ctx, "f_vend")
+          if ImGui.Button(ctx, "Vendors\u{2026}") then vend.open = true end
+          measure(ctx, "f_vend")
+          W.tip(ctx, "aevend", "A colour and a look per plugin vendor, for the plugin buttons", ImGui.IsItemHovered(ctx), false)
           flow(ctx, "f_cvi")
           if ImGui.Button(ctx, "ChannelView icons") then
             if tb.use_cv_icons() > 0 then tb.save() end
@@ -1012,6 +1241,7 @@ function AE.draw(ctx)
     -- window
     if tb then tb.draw_menus(ctx, "ae") end
     draw_share(ctx)
+    draw_vendors(ctx)
     B.draw(ctx, nil, true)   -- the plugin search, from "+ Plugin" > Search...
     ImGui.End(ctx)
   end

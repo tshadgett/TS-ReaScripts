@@ -1,5 +1,9 @@
 # Track Analyser — changelog
 
+## 2.5.0
+
+- No changes: the version is kept in step with ChannelView 2.5.0.
+
 ## 2.2.1 — tidier code
 
 - Code comments and the README tidied: what the code does and why, without

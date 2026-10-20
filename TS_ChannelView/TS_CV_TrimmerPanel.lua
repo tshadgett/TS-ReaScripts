@@ -58,6 +58,14 @@ function TRP.width(avail_h)
   return TRP.COL_W * 2 + C.PANEL_PAD
 end
 
+-- The Rack view: the body's height at width w -- the two columns side by
+-- side when they fit, the meters at full height; otherwise stacked.
+function TRP.rack_body_h(w)
+  local pad = C.PANEL_PAD
+  if w >= TRP.COL_W * 2 + pad then return pad * 2 + TRP.METER_H + 4 + C.CELL_H end
+  return column_need()
+end
+
 -- Where everything goes in a body at x, y, w, h: { meters = {x,y,w,h},
 -- trims = {x,y,w,h}, filt = {x,y,w,h} }.
 function TRP.layout(x, y, w, h)

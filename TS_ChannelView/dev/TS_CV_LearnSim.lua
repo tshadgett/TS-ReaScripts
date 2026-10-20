@@ -434,19 +434,22 @@ end
 -- ---------------------------------------------------------------------
 -- a compressor whose threshold reads in a dB of its own
 -- ---------------------------------------------------------------------
-for _, variant in ipairs({ "own dB", "along" }) do
+-- "dry mix": its mix is a Dry Mix (100% all dry); "mix reversed": a Mix
+-- that reads 0-100 but is all wet at 0 (found by trying it flipped)
+for _, variant in ipairs({ "own dB", "along", "dry mix", "mix reversed" }) do
   local function knob(name, lo, hi, unit) return { name = name, lo = lo, hi = hi, unit = unit } end
+  local wet_at0 = variant == "dry mix" or variant == "mix reversed"
   P = {
-    [0] = variant == "own dB" and knob("Threshold", -15, 15, "dB")
+    [0] = variant ~= "along" and knob("Threshold", -15, 15, "dB")
           or { name = "Threshold", fn = function(n) return ("%.0f"):format(n * 10) end },
     { name = "Ratio", list = { "2:1", "4:1", "10:1" } },
     knob("Make-Up", 0, 15, "dB"),
-    knob("Mix", 0, 100, "%"),
+    knob(variant == "dry mix" and "Dry Mix" or "Mix", 0, 100, "%"),
   }
   NP = 4
   -- its 0 dB is -18 dBFS (sine peak); "along": -40 at the bottom, -10 at the top
   local function true_thr(vals)
-    if variant == "own dB" then return -15 + 30 * vals[0] - 18 end
+    if variant ~= "along" then return -15 + 30 * vals[0] - 18 end
     return -40 + 30 * vals[0]
   end
   truth_gain = function(vals, level)
@@ -454,7 +457,8 @@ for _, variant in ipairs({ "own dB", "along" }) do
     local r = ({ 2, 4, 10 })[math.min(3, math.floor(vals[1] * 3) + 1)]
     local gr = level > T and (level - T) * (1 - 1 / r) or 0
     local mk = 15 * vals[2]
-    return mk - gr * vals[3]      -- a dry share dilutes it (the measuring sets it wet)
+    local wet = wet_at0 and (1 - vals[3]) or vals[3]
+    return mk - gr * wet          -- a dry share dilutes it (the measuring sets it wet)
   end
   tracks = {}
   local user = newtrack("Bus"); tracks[1] = user
@@ -466,8 +470,10 @@ for _, variant in ipairs({ "own dB", "along" }) do
   check(variant .. ": threshold measured", job.state, "done")
   local cv = layout.canvas
   local tc = M.thr_cal(cv)
-  check(variant .. ": by its reading or its position", tc and tc.n, variant ~= "own dB")
-  if variant == "own dB" then
+  check(variant .. ": by its reading or its position", tc and tc.n, variant == "along")
+  if variant == "mix reversed" then check("mix reversed: found by trying it flipped", job.mix_flipped, true) end
+  if variant == "dry mix" then check("dry mix: read the right way first", job.mix_flipped, nil) end
+  if variant ~= "along" then
     checkf(("own dB: its 0 dB is -18 dBFS (%.2f)"):format(M.thr_dbfs(cv, 0) or 0), function() return math.abs(M.thr_dbfs(cv, 0) + 18) < 0.3 end)
     checkf("own dB: back again", function() return math.abs(M.thr_from_dbfs(cv, -20) - (-2)) < 0.3 end)
   else

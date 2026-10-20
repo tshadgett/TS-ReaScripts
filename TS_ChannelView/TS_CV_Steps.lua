@@ -26,11 +26,41 @@ local S = {}
 local FILE = "TS_ChannelView_Steps.ini"
 
 local dir, data, order, dirty = nil, {}, {}, false
+-- ChannelView and its Rack view each keep a copy: what this one changed
+-- since it last read the file ([key][P<param>] = the line, or false when
+-- forgotten), so a save merges into the other's rather than over it, and a
+-- revision in ExtState that moves with every save (as TS_CV_Mappings).
+local changed, my_rev = {}, nil
+local REV_SECT, REV_KEY = "TS_ChannelView", "steps_rev"
+
+local function note(key, pk, v)
+  changed[key] = changed[key] or {}
+  changed[key][pk] = v
+  dirty = true
+end
 
 function S.init(script_dir)
   dir = script_dir
   data, order = U.read_ini(dir .. FILE)
   dirty = false
+  changed = {}
+  if reaper and reaper.GetExtState then my_rev = reaper.GetExtState(REV_SECT, REV_KEY) end
+end
+
+-- The other window saved: read the file again, this one's unsaved changes
+-- on top. True when anything was read.
+function S.sync()
+  if not (reaper and reaper.GetExtState and dir) then return false end
+  local rev = reaper.GetExtState(REV_SECT, REV_KEY)
+  if rev == my_rev then return false end
+  my_rev = rev
+  local nd, no = U.read_ini(dir .. FILE)
+  for key, ps in pairs(changed) do
+    if not nd[key] then nd[key] = {}; no[#no + 1] = key end
+    for pk, v in pairs(ps) do nd[key][pk] = v or nil end
+  end
+  data, order = nd, no
+  return true
 end
 
 -- list -> { {norm=, text=}, ... }
@@ -70,23 +100,31 @@ function S.set(key, param, list)
     order[#order + 1] = key
   end
   data[key]["P" .. param] = encode(list)
-  dirty = true
+  note(key, "P" .. param, data[key]["P" .. param])
 end
 
 function S.forget(key, param)
   if data[key] then
     data[key]["P" .. param] = nil
-    dirty = true
+    note(key, "P" .. param, false)
   end
 end
 
 function S.save()
   if not dirty or not dir then return end
+  S.sync()
   local ok = U.write_ini(dir .. FILE, data, order,
     "; ChannelView -- cached choices for stepped parameters.\n" ..
     "; Derived data, safe to delete; it is rebuilt by scanning.\n" ..
     "; P<param>=<label>|<label>|...")
-  if ok then dirty = false end
+  if ok then
+    dirty = false
+    changed = {}
+    if reaper and reaper.SetExtState then
+      my_rev = tostring(reaper.time_precise and reaper.time_precise() or os.clock()) .. ":" .. tostring(math.random(1e6))
+      reaper.SetExtState(REV_SECT, REV_KEY, my_rev, false)
+    end
+  end
   return ok
 end
 

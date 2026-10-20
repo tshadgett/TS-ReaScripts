@@ -4,9 +4,10 @@
   TS_CV_ModRack.lua -- the Macros and Modulators panels, pinned beside the
   fader panel. TS_CV_Mod.lua does the work; this draws it.
 
-  MACROS: a cell per macro, shown as one of our controls -- a knob, a
-  button, a fader, a dropdown, or an XY pad (two macros, two cells wide).
-  Its name and ◯ along the top, the lane button at its top-left.
+  MACROS: a cell per macro, shown as one of ChannelView's controls -- a
+  knob, a button, a fader, a dropdown, or an XY pad (two macros, two
+  cells wide). Its name and ◯ along the top, the lane button at its
+  top-left.
   Right-click for rename, colour, control type, a dropdown's choices, what
   it drives, remove.
 
@@ -50,6 +51,12 @@ local LANE_W, LANE_H = 13, 11
 
 local EXT = { macros = "macros_collapsed", mods = "mods_collapsed" }
 
+-- Strip mode (the Rack view): each panel is a band STRIP_W wide, as short
+-- as lets its cells fit across, and folds to a header bar rather than a
+-- slim column. EXT_PFX keeps the rack's folding apart from ChannelView's.
+MR.STRIP_W = nil
+MR.EXT_PFX = ""
+
 local open = {}         -- track..guid -> true: a tile opened for its settings
 local hist = {}         -- track..guid -> recent outputs
 local rename_buf = {}   -- guid -> text being typed
@@ -90,10 +97,10 @@ end
 -- ---------------------------------------------------------------------
 
 function MR.is_collapsed(which)
-  return reaper.GetExtState(C.EXT_SECT, EXT[which]) ~= "0"
+  return reaper.GetExtState(C.EXT_SECT, MR.EXT_PFX .. EXT[which]) ~= "0"
 end
 local function set_collapsed(which, on)
-  reaper.SetExtState(C.EXT_SECT, EXT[which], on and "1" or "0", true)
+  reaper.SetExtState(C.EXT_SECT, MR.EXT_PFX .. EXT[which], on and "1" or "0", true)
 end
 
 -- ---------------------------------------------------------------------
@@ -166,8 +173,8 @@ end
 local function macros_full(track) return MD.macros_used(track) >= MD.NM end
 local function mods_full(s) return #s.mods >= MD.NO end
 
-function MR.width_for(which, track, panel_h)
-  if not track or MR.is_collapsed(which) then return C.COLLAPSED_W end
+-- the width the cells want at this height
+local function natural_w(which, track, panel_h)
   local s = MD.scan(track)
   if which == "macros" then
     local _, groups = place_macros(s.macros, room_of(panel_h), not macros_full(track))
@@ -175,6 +182,43 @@ function MR.width_for(which, track, panel_h)
   end
   local _, cols = place_mods(track, s.mods, room_of(panel_h), not mods_full(s))
   return cols * MR.TILE_W + (cols - 1) * GAP + C.PANEL_PAD * 2
+end
+
+function MR.width_for(which, track, panel_h)
+  if not track or MR.is_collapsed(which) then return MR.STRIP_W or C.COLLAPSED_W end
+  local w = natural_w(which, track, panel_h)
+  return MR.STRIP_W and math.max(w, MR.STRIP_W) or w
+end
+
+-- Strip mode: the folded bar's height, and the least height at which the
+-- cells fit across w (or the tallest tried, when nothing does).
+function MR.bar_h() return C.HEADER_H + 2 end
+function MR.strip_h(which, track, w)
+  if not track or MR.is_collapsed(which) then return MR.bar_h() end
+  local s = MD.scan(track)
+  local rows = {}
+  if which == "macros" then
+    local tall = MR.CELL_H
+    for _, src in ipairs(s.macros) do
+      if src.kind == "xy" then tall = MR.CELL_H * 2 + GAP end
+    end
+    if #s.macros == 0 then rows[1] = ADD_H end   -- just the add tile
+    for n = 1, 8 do
+      local room = n * (MR.CELL_H + GAP) - GAP
+      if room >= tall then rows[#rows + 1] = room end
+    end
+  else
+    local tall = ADD_H
+    for _, src in ipairs(s.mods) do tall = math.max(tall, tile_h(track, src)) end
+    for k = 0, 40 do rows[#rows + 1] = tall + k * 20 end
+  end
+  local extra = C.HEADER_H + C.FOOTER_H + C.PANEL_PAD * 2
+  local h
+  for _, room in ipairs(rows) do
+    h = math.max(room, 60) + extra
+    if natural_w(which, track, h) <= w then return h end
+  end
+  return h
 end
 
 -- ---------------------------------------------------------------------
@@ -1357,6 +1401,19 @@ local TITLE = { macros = "Macros", mods = "Modulators" }
 
 local function slim(ctx, dl, which, x, y, ww, wh, n)
   local btn = C.ICON_SIZE
+  if MR.STRIP_W then
+    -- folded in a strip: a header bar, the title left and the unfold right
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_bg, 3.0)
+    local label = TITLE[which] .. (n > 0 and (" · " .. n) or "")
+    local _, th = ImGui.CalcTextSize(ctx, label)
+    ImGui.DrawList_AddText(dl, x + 6, y + (wh - th) * 0.5, C.COL.header_dim, label)
+    ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + (wh - btn) * 0.5)
+    if W.icon_button(ctx, which .. "exp", "expand", btn, false, "Show the " .. TITLE[which]:lower()) then
+      set_collapsed(which, false)
+    end
+    MR.bar_at[which] = { x + 12, y + wh * 0.5 }
+    return
+  end
   ImGui.SetCursorScreenPos(ctx, x + (ww - btn) * 0.5, y + 4)
   if W.icon_button(ctx, which .. "exp", "expand", btn, false, "Show the " .. TITLE[which]:lower()) then
     set_collapsed(which, false)
@@ -1418,7 +1475,7 @@ function MR.draw_macros(ctx, track, avail_h)
       pending_popup = nil
     end
     local used = track and MD.macros_used(track) or 0
-    if not track or ww <= C.COLLAPSED_W + 0.5 then
+    if not track or MR.is_collapsed("macros") or ww <= C.COLLAPSED_W + 0.5 then
       slim(ctx, dl, "macros", x, y, ww, wh, #s.macros)
       return
     end
@@ -1448,7 +1505,7 @@ function MR.draw_mods(ctx, track, avail_h)
     local ww, wh = ImGui.GetWindowSize(ctx)
     ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
     ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
-    if not track or ww <= C.COLLAPSED_W + 0.5 then
+    if not track or MR.is_collapsed("mods") or ww <= C.COLLAPSED_W + 0.5 then
       slim(ctx, dl, "mods", x, y, ww, wh, #s.mods)
       return
     end

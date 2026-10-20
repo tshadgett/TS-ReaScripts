@@ -38,12 +38,18 @@ function S.clear_cache() cache = {}; gr_open = {}; pages = {}; variants = {}; gr
 -- `default` is what an instance nobody has touched shows as -- false
 -- (expanded) unless a caller says otherwise. Only a departure from the
 -- default is written to the project.
+-- The project key a collapsed state is kept under, and the one for how a
+-- plugin was last left (S.last_fold): the Rack view keeps its own
+-- ("rcollapsed:", "rfold:"), so folding a panel there leaves ChannelView's
+-- alone.
+S.COLLAPSED, S.FOLD = "collapsed:", "fold:"
+
 function S.is_collapsed(guid, default)
   default = default or false
   if guid == nil or guid == "" then return false end
   local v = cache[guid]
   if v ~= nil then return v end
-  local _, str = reaper.GetProjExtState(0, NS, "collapsed:" .. guid)
+  local _, str = reaper.GetProjExtState(0, NS, S.COLLAPSED .. guid)
   if str == "1" then v = true
   elseif str == "0" then v = false
   else v = default end
@@ -57,14 +63,14 @@ function S.set_collapsed(guid, on, default)
   on = on and true or false
   cache[guid] = on
   local val = (on == default) and "" or (on and "1" or "0")
-  reaper.SetProjExtState(0, NS, "collapsed:" .. guid, val)
+  reaper.SetProjExtState(0, NS, S.COLLAPSED .. guid, val)
 end
 
 -- Whether this instance has a collapsed state of its own in the project
 -- (one written by set_collapsed), rather than just showing the default.
 function S.has_collapsed(guid)
   if guid == nil or guid == "" then return false end
-  local _, str = reaper.GetProjExtState(0, NS, "collapsed:" .. guid)
+  local _, str = reaper.GetProjExtState(0, NS, S.COLLAPSED .. guid)
   return str == "1" or str == "0"
 end
 
@@ -72,14 +78,14 @@ end
 -- instance of it that's inserted: true collapsed, false expanded, nil
 -- never touched. Kept for every project, like the layouts.
 function S.last_fold(key)
-  local v = reaper.GetExtState(NS, "fold:" .. tostring(key))
+  local v = reaper.GetExtState(NS, S.FOLD .. tostring(key))
   if v == "1" then return true elseif v == "0" then return false end
   return nil
 end
 
 function S.remember_fold(key, on)
   if not key or key == "" then return end
-  reaper.SetExtState(NS, "fold:" .. key, on and "1" or "0", true)
+  reaper.SetExtState(NS, S.FOLD .. key, on and "1" or "0", true)
 end
 
 function S.toggle_collapsed(guid, default)
@@ -133,21 +139,25 @@ end
 -- The layout variant an instance shows (TS_CV_Mappings, "<plugin> ::
 -- <name>"), per instance, saved with the project. nil for the plugin's
 -- own layout.
-function S.variant(guid)
+-- The Rack view picks its own ("rvariant:"); `pfx` reads another view's.
+S.VARIANT = "variant:"
+function S.variant(guid, pfx)
   if guid == nil or guid == "" then return nil end
-  local v = variants[guid]
+  local k = (pfx or S.VARIANT) .. guid
+  local v = variants[k]
   local now = reaper.time_precise()
-  if v == nil or now - (var_at[guid] or 0) >= SHARED_TTL then
-    local _, str = reaper.GetProjExtState(0, NS, "variant:" .. guid)
+  if v == nil or now - (var_at[k] or 0) >= SHARED_TTL then
+    local _, str = reaper.GetProjExtState(0, NS, k)
     v = str or ""
-    variants[guid], var_at[guid] = v, now
+    variants[k], var_at[k] = v, now
   end
   return v ~= "" and v or nil
 end
 function S.set_variant(guid, name)
   if guid == nil or guid == "" then return end
-  variants[guid], var_at[guid] = name or "", reaper.time_precise()
-  reaper.SetProjExtState(0, NS, "variant:" .. guid, name or "")
+  local k = S.VARIANT .. guid
+  variants[k], var_at[k] = name or "", reaper.time_precise()
+  reaper.SetProjExtState(0, NS, k, name or "")
 end
 
 -- A virtual control's setting on an instance (TS_CV_Mappings Virt<n>),
@@ -219,6 +229,12 @@ function S.layout_key(fx_name, guid, track, addr)
   local v = S.variant(guid)
   if v == S.OWN then return base end
   v = v or (M.default_variant and M.default_variant(base))
+  -- the rack, with nothing picked for it: ChannelView's pick, then its default
+  if not v and S.VARIANT ~= "variant:" then
+    local nv = S.variant(guid, "variant:")
+    if nv == S.OWN then return base end
+    v = nv or (M.default_variant and M.default_variant(base, M.DEFAULTS_SECT))
+  end
   if v then
     local k = M.variant_key(base, v)
     if M.has(k) then return k end

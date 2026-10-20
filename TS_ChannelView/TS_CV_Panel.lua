@@ -17,6 +17,7 @@ local W   = require("TS_CV_Widgets")
 local T   = require("TS_CV_FXTree")
 local M   = require("TS_CV_Mappings")
 local TL  = require("TS_CV_Tiles")
+local FN  = require("TS_CV_Finish")
 local SC  = require("TS_CV_Steps")
 local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
@@ -40,7 +41,7 @@ local P   = {}
 local ImGui
 local panel_at = {}
 
-function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui); RP.attach(imgui); TRP.attach(imgui) end
+function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui); RP.attach(imgui); TRP.attach(imgui); FN.attach(imgui) end
 
 -- An expanded panel's foot: the layout lock at its left, and the preset
 -- bar (TS_CV_PresetUI, View > Preset bar) when that's on. It's always
@@ -197,14 +198,15 @@ function P.section_style(div)
   return nil
 end
 
--- What makes two sections look the same: the style, the faceplate, and
--- whether it's brushed. Neighbouring sections that match join into one.
+-- What makes two sections look the same: the style, the faceplate, its
+-- finish and flake. Neighbouring sections that match join into one.
 function P.section_key(div)
   local kind, pl = P.section_style(div)
   if not kind then return nil end
   return kind .. "|" .. (kind == "plate" and div.cap or "") .. "|"
-         .. (M.part_brushed(kind, pl, div.brush) and "b" or "")
-         .. (M.part_metal(kind, div.metal) and "m" or "")
+         .. (M.part_finish(kind, pl, div.finish, div.brush) or "")
+         .. (M.part_metal(kind, div.metal) and "|m" or "")
+         .. (M.corners_of(div.corners) and ("|" .. div.corners) or "")
 end
 
 -- A control's own background (Back<n>): "inset", or a faceplate key.
@@ -810,9 +812,11 @@ end
 -- The only way to learn a plugin's step LABELS through the ReaScript API
 -- is to write each value into it and read back the formatted result. There
 -- is no read-only enumeration. So this sweeps the parameter once, restores
--- it, and caches the answer for the session.
+-- it, and caches the answer (on disk too: TS_CV_Steps).
 --
--- It will NOT sweep while the transport is rolling. Each write is queued
+-- By default it won't sweep in the background while the transport is
+-- rolling (C.SCAN_WHILE_PLAYING); a click on the control still does, and
+-- nothing sweeps while automation is being written. Each write is queued
 -- to the audio thread, and a frame is comparable to a buffer, so a sweep
 -- during playback can genuinely be heard. Stopped, it is inaudible and
 -- instant; playing, the control falls back to stepping up and down, which
@@ -1465,6 +1469,17 @@ local function grain(dl, bg, y0, ya, yb, spans)
   lines(hi, 3, 2); lines(lo, 7, 4)
 end
 
+-- A finish over a surface (TS_CV_Finish), laid from ox, oy. Brushed falls
+-- back to the drawn grain when there are no images (an older ReaImGui).
+local function finish_rect(ctx, dl, key, bg, x1, y1, x2, y2, ox, oy, box)
+  if not key then return end
+  if FN.image(ctx, key) then
+    FN.rect(ctx, dl, key, x1, y1, x2, y2, ox, oy, box)
+  elseif key == "brushed" then
+    grain(dl, bg, oy, y1, y2, function() return { x1, x2 } end)
+  end
+end
+
 -- Where a horizontal line at `y` is inside a shape's loops (outer and
 -- holes, flat point lists offset by ox): the even-odd rule along the line,
 -- against the vertical edges -- every edge of a traced shape is upright or
@@ -1515,7 +1530,7 @@ P._inner_spans = inner_spans    -- for the tests
 -- A shape's outline as a path, its corners rounded (radius `r`, less where
 -- an edge is too short for it): each corner is an arc from the incoming
 -- edge's tangent point to the outgoing one's.
-local function back_path(dl, ox, oy, pts, r)
+local function corner_arcs(pts, r, fn)
   local n = #pts // 2
   for m = 1, n do
     local pm = (m - 2) % n + 1
@@ -1532,9 +1547,58 @@ local function back_path(dl, ox, oy, pts, r)
     local d = math.atan(ay, ax) - a0
     while d > math.pi do d = d - 2 * math.pi end
     while d < -math.pi do d = d + 2 * math.pi end
-    ImGui.DrawList_PathArcTo(dl, ox + cx, oy + cy, rr, a0, a0 + d, 4)
+    fn(cx, cy, rr, a0, d)
   end
 end
+
+local function back_path(dl, ox, oy, pts, r)
+  corner_arcs(pts, r, function(cx, cy, rr, a0, d)
+    ImGui.DrawList_PathArcTo(dl, ox + cx, oy + cy, rr, a0, a0 + d, r > 6 and 0 or 4)
+  end)
+end
+
+-- The same outline as points, each corner's arc in a few straight pieces,
+-- for laying a finish inside rounder corners.
+local function rounded_poly(pts, r)
+  local out = {}
+  corner_arcs(pts, r, function(cx, cy, rr, a0, d)
+    local k = rr > 6 and 8 or 3
+    for i = 0, k do
+      local a = a0 + d * i / k
+      out[#out + 1] = cx + rr * math.cos(a); out[#out + 1] = cy + rr * math.sin(a)
+    end
+  end)
+  return out
+end
+
+-- Where a line at y crosses closed outlines (even-odd), left to right.
+local function poly_spans(polys, ox, y)
+  local xs = {}
+  for _, p in ipairs(polys) do
+    local n = #p // 2
+    for i = 1, n do
+      local j = i % n + 1
+      local x1, y1, x2, y2 = p[2 * i - 1], p[2 * i], p[2 * j - 1], p[2 * j]
+      if (y1 <= y) ~= (y2 <= y) then xs[#xs + 1] = ox + x1 + (y - y1) * (x2 - x1) / (y2 - y1) end
+    end
+  end
+  table.sort(xs)
+  return xs
+end
+P._poly_spans, P._rounded_poly = poly_spans, rounded_poly   -- for the tests
+
+-- The corner radius of a background or section (Corners<n>): the usual
+-- slight rounding, soft, or round -- half the shorter side, so a narrow
+-- one's ends are fully round, but never past ROUND_MAX, so a wide one
+-- doesn't round off its controls -- on a plain rectangle; any other shape
+-- is drawn soft.
+local ROUND_MAX = 28
+local function corner_r(corners, w, h, plain)
+  if corners == "round" and plain then return math.max(4, math.min(w / 2, h / 2, ROUND_MAX)) end
+  if corners == "round" or corners == "soft" then return 10 end
+  return 4
+end
+P.corner_r = corner_r
 
 -- What a shape sits on: its section's faceplate, if the control it starts
 -- from is in one, else the panel's own colour.
@@ -1546,42 +1610,70 @@ local function back_base(lay, item)
   return C.COL.panel_bg
 end
 
--- A background's key for joining: what it is and whether it's brushed,
--- so a brushed aluminium and a plain one stay two shapes.
+-- A background's key for joining: what it is, its finish and flake, so a
+-- brushed aluminium and a plain one stay two shapes. Also gives the finish
+-- (nil: plain) and whether it has the flake.
 function P.back_key(ctl)
   local kind, pl = P.back_style(ctl.back)
   if not kind then return nil end
-  local br = M.part_brushed(kind, pl, ctl.brush)
+  local fin = M.part_finish(kind, pl, ctl.finish, ctl.brush)
   local mt = M.part_metal(kind, ctl.metal)
-  return ctl.back .. (br and "/b" or "") .. (mt and "/m" or ""), br, mt
+  local cn = M.corners_of(ctl.corners)
+  return ctl.back .. (fin and ("/" .. fin) or "") .. (mt and "/m" or "") .. (cn and ("/c" .. cn) or ""), fin, mt, cn
 end
 
--- The metallic flake inside a traced shape: the shape cut into bands at
--- every corner's height, each band's insides (by the even-odd rule) filled
--- with the flake, tiled from the grid's origin so joined shapes line up.
-local function flake_shape(ctx, dl, gx0, gy0, loops, light)
+-- The metallic flake -- or, given `finish`, that finish -- inside a traced
+-- shape: the shape cut into bands at every corner's height, each band's
+-- insides (by the even-odd rule) filled, tiled from the grid's origin so
+-- joined shapes line up.
+local function flake_shape(ctx, dl, gx0, gy0, loops, light, finish, bg, r)
   local ys = {}
   for _, p in ipairs(loops) do for i = 2, #p, 2 do ys[#ys + 1] = p[i] end end
+  -- rounder corners: thin strips where the outline curves, each laid
+  -- inside the curve
+  local polys
+  if r and r > 4 then
+    polys = {}
+    for k, p in ipairs(loops) do polys[k] = rounded_poly(p, r) end
+    local n = #ys
+    for i = 1, n do
+      for dy = -r, r, 2.5 do ys[#ys + 1] = ys[i] + dy end
+    end
+  end
   table.sort(ys)
   for i = 1, #ys - 1 do
     local ya, yb = ys[i], ys[i + 1]
     if yb - ya > 0.5 then
-      local xs = loop_spans(loops, gx0, (ya + yb) / 2)
+      local xs = polys and poly_spans(polys, gx0, (ya + yb) / 2) or loop_spans(loops, gx0, (ya + yb) / 2)
       for k = 1, #xs - 1, 2 do
-        W.flake_rect(ctx, dl, xs[k] + 1, gy0 + ya, xs[k + 1] - 1, gy0 + yb, light, gx0, gy0)
+        if finish then
+          -- Bright and Satin reflect once across the whole shape
+          local box
+          if C.FINISH[finish] and C.FINISH[finish].stretch then
+            local bx1, by1, bx2, by2 = math.huge, math.huge, -math.huge, -math.huge
+            for j = 1, #loops[1], 2 do
+              bx1 = math.min(bx1, loops[1][j]); bx2 = math.max(bx2, loops[1][j])
+              by1 = math.min(by1, loops[1][j + 1]); by2 = math.max(by2, loops[1][j + 1])
+            end
+            box = { gx0 + bx1, gy0 + by1, gx0 + bx2, gy0 + by2 }
+          end
+          finish_rect(ctx, dl, finish, bg, xs[k] + 1, gy0 + ya, xs[k + 1] - 1, gy0 + yb, gx0, gy0, box)
+        else
+          W.flake_rect(ctx, dl, xs[k] + 1, gy0 + ya, xs[k + 1] - 1, gy0 + yb, light, gx0, gy0)
+        end
       end
     end
   end
 end
 
 draw_backs = function(ctx, dl, gx0, gy0, lay)
-  local rects, owner, brushed, metal = {}, {}, {}, {}
+  local rects, owner, finish, metal, corners = {}, {}, {}, {}, {}
   local function take(it)
-    local k, br, mt = P.back_key(it.ctl)
+    local k, fin, mt, cn = P.back_key(it.ctl)
     if k and it.sx then
       rects[#rects + 1] = { it.sx, it.y, it.sx + it.sw, it.y + hy(it.h), k }
       owner[#rects] = it
-      brushed[k], metal[k] = br, mt
+      finish[k], metal[k], corners[k] = fin, mt, cn
     end
   end
   for _, it in ipairs(lay.items) do take(it) end
@@ -1596,7 +1688,7 @@ draw_backs = function(ctx, dl, gx0, gy0, lay)
       if r[5] == sh.key and TL.inside(sh.outer, (r[1] + r[3]) / 2, (r[2] + r[4]) / 2) then from = owner[k] break end
     end
     local base = back_base(lay, from)
-    local kind, pl = P.back_style((sh.key:gsub("/[bm]", "")))
+    local kind, pl = P.back_style(sh.key:match("^[^/]+"))
     local fill, edge
     if kind == "plate" then
       fill, edge = pl.bg, pl.border
@@ -1604,25 +1696,28 @@ draw_backs = function(ctx, dl, gx0, gy0, lay)
       fill = U.is_light(base) and mix(base, 0x000000ff, 0.10) or mix(base, 0xffffffff, 0.05)
       edge = 0x00000040
     end
-    back_path(dl, gx0, gy0, sh.outer, 4)
+    -- its corners: a plain rectangle can have fully round ends
+    local bx1, by1, bx2, by2 = math.huge, math.huge, -math.huge, -math.huge
+    for j = 1, #sh.outer, 2 do
+      bx1 = math.min(bx1, sh.outer[j]); bx2 = math.max(bx2, sh.outer[j])
+      by1 = math.min(by1, sh.outer[j + 1]); by2 = math.max(by2, sh.outer[j + 1])
+    end
+    local r = corner_r(corners[sh.key], bx2 - bx1, by2 - by1, #sh.outer == 8 and #sh.holes == 0)
+    back_path(dl, gx0, gy0, sh.outer, r)
     ImGui.DrawList_PathFillConcave(dl, fill)
     -- a hole shows what's under the shape again
     for _, h in ipairs(sh.holes) do
-      back_path(dl, gx0, gy0, h, 4)
+      back_path(dl, gx0, gy0, h, r)
       ImGui.DrawList_PathFillConcave(dl, base)
     end
     local loops = { sh.outer }
     for _, h in ipairs(sh.holes) do loops[#loops + 1] = h end
-    if metal[sh.key] then flake_shape(ctx, dl, gx0, gy0, loops, U.is_light(fill)) end
-    if brushed[sh.key] then
-      local ya, yb = math.huge, -math.huge
-      for k = 2, #sh.outer, 2 do ya = math.min(ya, sh.outer[k]); yb = math.max(yb, sh.outer[k]) end
-      grain(dl, fill, gy0, gy0 + ya, gy0 + yb, function(ly) return inner_spans(loops, gx0, gy0, ly, 2) end)
-    end
-    back_path(dl, gx0, gy0, sh.outer, 4)
+    if finish[sh.key] then flake_shape(ctx, dl, gx0, gy0, loops, U.is_light(fill), finish[sh.key], fill, r) end
+    if metal[sh.key] then flake_shape(ctx, dl, gx0, gy0, loops, U.is_light(fill), nil, nil, r) end
+    back_path(dl, gx0, gy0, sh.outer, r)
     ImGui.DrawList_PathStroke(dl, edge, ImGui.DrawFlags_Closed, 1.0)
     for _, h in ipairs(sh.holes) do
-      back_path(dl, gx0, gy0, h, 4)
+      back_path(dl, gx0, gy0, h, r)
       ImGui.DrawList_PathStroke(dl, edge, ImGui.DrawFlags_Closed, 1.0)
     end
   end
@@ -1664,13 +1759,6 @@ function P.mod_on(track, fx, p)
 end
 function P.forget_mod(fx, p) mod_cache[fx.guid .. ":" .. p] = nil end
 
--- A link's handles on a control -- on a knob's ring, or beside a fader.
--- From a macro: its range's two ends, where the control sits at 0% (the
--- first) and at 100% (the second); they can cross, to run it backwards.
--- From a modulator: the two ends of its swing, where the control is with
--- the modulator at rest and at full; they can cross (it then works the
--- other way). `pos(v)` is where value v is drawn, `val(mx, my)`
--- the value at the pointer.
 local range_hot = {}    -- "guid:param" -> the end under the pointer
 
 -- The ends as values (the plugin's way up, not reversed), and what
@@ -1688,6 +1776,13 @@ end
 
 local function clamp01(v) return math.max(0, math.min(1, v)) end
 
+-- A link's handles on a control -- on a knob's ring, or beside a fader.
+-- From a macro: its range's two ends, where the control sits at 0% (the
+-- first) and at 100% (the second); they can cross, to run it backwards.
+-- From a modulator: the two ends of its swing, where the control is with
+-- the modulator at rest and at full; they can cross (it then works the
+-- other way). `pos(v)` is where value v is drawn, `val(mx, my)`
+-- the value at the pointer.
 local function range_ends(ctx, track, link, rev, key, pos, val)
   local ends, set_end = link_ends(track, link)
   local hot
@@ -1966,27 +2061,39 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     local kind, pl = P.section_style(s.by)
     local x1, y1 = gx0 + s.x - 3, gy0 - 3
     local x2, y2 = gx0 + s.x + s.w + 3, gy0 + lay.height + 2
+    -- its corners (Corners<n> on the divider): a section is a plain
+    -- rectangle, so round gives it fully round ends
+    local r = corner_r(M.corners_of(s.by.corners), x2 - x1, y2 - y1, true)
     local function grained(fill)
-      if M.part_metal(kind, s.by.metal) then
+      local fin = M.part_finish(kind, pl, s.by.finish, s.by.brush)
+      local mt = M.part_metal(kind, s.by.metal)
+      if r > 4 then
+        -- the finish laid inside the rounder corners
+        local loop = { { x1 + 1 - gx0, y1 + 1 - gy0, x2 - 1 - gx0, y1 + 1 - gy0,
+                         x2 - 1 - gx0, y2 - 1 - gy0, x1 + 1 - gx0, y2 - 1 - gy0 } }
+        if fin then flake_shape(ctx, dl, gx0, gy0, loop, U.is_light(fill), fin, fill, r - 1) end
+        if mt then flake_shape(ctx, dl, gx0, gy0, loop, U.is_light(fill), nil, nil, r - 1) end
+        return
+      end
+      finish_rect(ctx, dl, fin, fill, x1 + 1, y1 + 1, x2 - 1, y2 - 1, gx0, gy0)
+      if mt then
         W.flake_rect(ctx, dl, x1 + 1, y1 + 1, x2 - 1, y2 - 1, U.is_light(fill), gx0, gy0)
       end
-      if M.part_brushed(kind, pl, s.by.brush) then
-        grain(dl, fill, gy0, y1 + 2, y2 - 3, function() return { x1 + 2, x2 - 2 } end)
-      end
     end
+    local inr = math.max(0, r - 1)
     if kind == "plate" then
-      ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, pl.bg, 4.0)
+      ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, pl.bg, r)
       grained(pl.bg)
-      ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, pl.border, 4.0, 0, 1.0)
-      ImGui.DrawList_AddLine(dl, x1 + 4, y1 + 1, x2 - 4, y1 + 1, 0xffffff18, 1.0)
+      ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, pl.border, r, 0, 1.0)
+      ImGui.DrawList_AddLine(dl, x1 + math.max(4, inr), y1 + 1, x2 - math.max(4, inr), y1 + 1, 0xffffff18, 1.0)
     else
       local base = C.COL.panel_bg
       local fill = U.is_light(base) and mix(base, 0x000000ff, 0.10) or mix(base, 0xffffffff, 0.05)
-      ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, fill, 4.0)
+      ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, fill, r)
       grained(fill)
-      ImGui.DrawList_AddLine(dl, x1 + 3, y1 + 0.5, x2 - 3, y1 + 0.5, 0x00000050, 1.0)
-      ImGui.DrawList_AddLine(dl, x1 + 3, y2 - 0.5, x2 - 3, y2 - 0.5, 0xffffff18, 1.0)
-      ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, 0x00000030, 4.0, 0, 1.0)
+      ImGui.DrawList_AddLine(dl, x1 + math.max(3, inr), y1 + 0.5, x2 - math.max(3, inr), y1 + 0.5, 0x00000050, 1.0)
+      ImGui.DrawList_AddLine(dl, x1 + math.max(3, inr), y2 - 0.5, x2 - math.max(3, inr), y2 - 0.5, 0xffffff18, 1.0)
+      ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, 0x00000030, r, 0, 1.0)
     end
   end
 
@@ -2167,7 +2274,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           c1, v1, c2, v2, act = W.dual_knob(ctx, id, name, value, raw2,
             { size = (P.item_size(item) == "large") and "large" or nil, cap = W.cap_col(ctl.cap),
               dim = not T.get_enabled(track, fx.addr), mod1 = modded, mod2 = mod2,
-              shown1 = shown, shown2 = shown2, tip = tip2 })
+              shown1 = shown, shown2 = shown2, tip = tip2,
+              style = ctl.style, style2 = ctl.style2, look = ctl.look, look2 = ctl.look2 })
           -- a double-click puts back the one under the pointer: the inner
           -- knob's here, the ring's below
           if act.double_click == "inner" then
@@ -2275,13 +2383,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = st, snaps = snaps, mod = modded, ring = ring,
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = size,
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring,
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
@@ -2476,7 +2584,7 @@ end
 bg_at = function(yy)
   local pl = cur_bg.plate
   if not (pl and C.EFFECT_3D) then return C.COL.panel_bg end
-  local sh = pl.sheen or 1
+  local sh = (pl.sheen or 1) * (C.LIGHT or 100) / 100
   local split = cur_bg.y + cur_bg.h * 0.4
   if yy <= split then
     local t = math.max(0, math.min(1, (yy - cur_bg.y) / math.max(1, split - cur_bg.y)))
@@ -2488,34 +2596,42 @@ end
 
 -- The plate itself: flat, or with the 3D effect a gentle top-lit gradient
 -- -- real faceplates catch the light from above, and a flat fill reads as
--- a colour rather than a surface -- and its finish: a metallic flake and
--- sheen, a fine brushed grain (the layout's choice, or aluminium's own),
--- both or neither. The grain is lighter on a dark plate, where white lines
--- show far more. The border is drawn over it afterwards and tidies the
--- corners.
-local function draw_plate(ctx, dl, x, y, w, h, pl, brushed, metal)
+-- a colour rather than a surface -- and its finish (C.FINISHES: the
+-- layout's choice, or aluminium's own brushed grain), with the metallic
+-- flake and sheen over it if chosen. The border is drawn over it afterwards
+-- and tidies the corners.
+local function draw_plate(ctx, dl, x, y, w, h, pl, finish, metal)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, 3.0)
   -- the light falling on it (3D effect)
   if C.EFFECT_3D then
     local split = y + h * 0.4
-    local sh = pl.sheen or 1
-    W.vgrad(dl, x + 1, y + 1, x + w - 1, split, mix(pl.bg, 0xffffffff, 0.08 * sh), pl.bg)
-    W.vgrad(dl, x + 1, split, x + w - 1, y + h - 1, pl.bg, mix(pl.bg, 0x000000ff, 0.12 * sh))
+    local L = (C.LIGHT or 100) / 100
+    local sh = (pl.sheen or 1) * L
+    W.vgrad(dl, x + 1, y + 1, x + w - 1, split, mix(pl.bg, 0xffffffff, math.min(0.5, 0.08 * sh)), pl.bg)
+    W.vgrad(dl, x + 1, split, x + w - 1, y + h - 1, pl.bg, mix(pl.bg, 0x000000ff, math.min(0.6, 0.12 * sh)))
+    if L > 1 then
+      -- View > Lighting above 100%: the light across it, bright on the top
+      -- left and deep on the bottom right, and its edges falling away
+      local up = math.min(1.5, L - 1)
+      local sk = math.max(0.5, pl.sheen or 1)
+      local wa = math.floor(math.min(0x50, 0x2a * up * sk))
+      local ba = math.floor(math.min(0x80, 0x48 * up * sk))
+      W.grad4(dl, x + 1, y + 1, x + w - 1, y + h - 1,
+        U.with_alpha(0xffffffff, wa), 0xffffff00, U.with_alpha(0x000000ff, ba), 0x00000000)
+      local e = math.min(w, h) * 0.16
+      local va = math.floor(math.min(0x60, 0x30 * up))
+      local dk, cl = U.with_alpha(0x000000ff, va), 0x00000000
+      W.grad4(dl, x + w - 1 - e, y + 1, x + w - 1, y + h - 1, cl, dk, dk, cl)            -- right
+      W.grad4(dl, x + 1, y + h - 1 - e, x + w - 1, y + h - 1, cl, cl, dk, dk)            -- bottom
+      local lk = U.with_alpha(0x000000ff, math.floor(va * 0.5))
+      W.grad4(dl, x + 1, y + 1, x + 1 + e, y + h - 1, lk, cl, cl, lk)                    -- left
+    end
   end
-  -- its surface: metallic, brushed, both or neither
+  -- its surface: the finish, then the flake over it
+  finish_rect(ctx, dl, finish, pl.bg, x + 1, y + 1, x + w - 1, y + h - 1, x, y)
   if metal then
     W.flake_rect(ctx, dl, x + 1, y + 1, x + w - 1, y + h - 1, U.is_light(pl.bg), x, y)
     W.metal_sheen(dl, x, y, w, h)
-  end
-  if brushed then
-    local light = U.is_light(pl.bg)
-    local hi, lo = light and 0xffffff09 or 0xffffff04, light and 0x00000007 or 0x0000000b
-    for ly = y + 2, y + h - 2, 3 do
-      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, hi, 1.0)
-    end
-    for ly = y + 4, y + h - 2, 7 do
-      ImGui.DrawList_AddLine(dl, x + 1, ly + 0.5, x + w - 1, ly + 0.5, lo, 1.0)
-    end
   end
 end
 
@@ -2697,6 +2813,65 @@ end
 
 local draw_panel
 
+-- The Rack view (TS_ChannelView_Rack.lua) draws panels down a column:
+-- P.FILL_W, when set, is the column's width -- a panel's plate, header and
+-- foot span it, its body centred on it -- and P.RACK draws a collapsed
+-- panel as just its header strip.
+P.FILL_W = nil
+P.RACK = false
+
+-- In the rack every panel is exactly the column's width, and its height is
+-- what that width leaves it: a grid takes the fewest rows that lay it out
+-- across the column; a canvas (any EQ or compressor, ReaEQ, ReaComp)
+-- spans the column at a height of its own, its layout's other controls in
+-- rows UNDER it rather than beside it; the Trimmer stands its two columns
+-- side by side when they fit, or stacks them.
+P.RACK_ROWS_MAX = 40
+function P.rack_canvas_h(w)
+  return math.floor(math.max(240, math.min(384, w * 0.5)))
+end
+-- a grid of n rows: the panel height that holds it
+local function grid_panel_h(n, paged)
+  return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H
+         + (paged and C.TAB_STRIP_H or 0)
+end
+-- the least panel height whose grid fits across w (all of it, when
+-- nothing does)
+local function rack_grid_h(vis, w, has_meter, key, io, trace, lock)
+  local paged = P.pages(vis) ~= nil
+  if lock then return grid_panel_h(lock, paged) end
+  local h
+  for n = 1, P.RACK_ROWS_MAX do
+    h = grid_panel_h(n, paged)
+    if P.width(vis, h, false, has_meter, key, io, trace, nil, nil) <= w then return h end
+  end
+  return h
+end
+-- the space either side the input and output meters take
+local function io_w(io) return io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0 end
+
+function P.rack_height(track, fx, layout, key, w)
+  if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
+  local base = C.HEADER_H + P.footer_h()
+  if TR.is(key) then return base + TRP.rack_body_h(w) end
+  local io = P.has_io(track, fx, layout)
+  if RQ.is_eq(key) or RC.is_comp(key) then return base + P.rack_canvas_h(w - io_w(io)) end
+  local vis = P.visible(layout.controls or {}, track, fx)
+  local lock = M.locked(layout)
+  local canvas = layout.canvas
+  if canvas then
+    local ew = w - io_w(io)
+    local h = base + P.rack_canvas_h(ew)
+    if #vis > 0 then
+      -- the controls under it: their own grid's body, header and foot aside
+      h = h + rack_grid_h(vis, ew, false, nil, false, false, lock) - base
+    end
+    return h
+  end
+  local has_meter = M.meter_of(layout) ~= nil and T.reports_gr(track, fx.addr, fx.guid)
+  return rack_grid_h(vis, w, has_meter, key, io, has_meter and St.is_gr_open(fx.guid), lock)
+end
+
 -- Draws one panel at the current cursor position and advances past it.
 -- Returns a `req` table of things the caller should act on this frame:
 --   toggle_bypass, toggle_float, open_menu, open_editor, ctx_control
@@ -2726,8 +2901,12 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   local io = (not is_trim) and P.has_io(track, fx, layout)
   local canvas = (not is_eq and not is_rc and not is_trim) and layout.canvas or nil
   if canvas then meter = nil end
-  local w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
+  local nat_w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
                     St.is_gr_open(fx.guid), M.locked(layout), canvas)
+  local w = (P.FILL_W and P.FILL_W > nat_w) and P.FILL_W or nat_w
+  local off = math.floor((w - nat_w) * 0.5)
+  -- the rack: every panel the column's width, its body all of it
+  if P.RACK and P.FILL_W then w, nat_w, off = P.FILL_W, P.FILL_W, 0 end
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
@@ -2745,7 +2924,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     if is_drag_source then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, 3.0)
     elseif plate then
-      draw_plate(ctx, dl, x, y, ww, wh, plate, M.brushed(layout, plate), M.metal(layout, plate))
+      draw_plate(ctx, dl, x, y, ww, wh, plate, M.finish(layout, plate), M.metal(layout, plate))
     else
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
     end
@@ -2761,9 +2940,6 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         FB.select(track, fx.guid)
       end
     end
-    if not is_drag_source and FB.selected(track) == fx.guid then
-      ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + ww - 0.5, y + wh - 0.5, C.COL.accent, 3.0, 0, 1.6)
-    end
 
     -- the 3D effect: knobs and buttons cast shadows, the edges catch the light
     W.hw = (not is_drag_source and C.EFFECT_3D) and C.METAL_K or 0
@@ -2773,25 +2949,31 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       if req.offline and not is_drag_source then
         ImGui.DrawList_AddRectFilled(dl, x + 1, y + 1, x + ww - 1, y + wh - 1, C.COL.header_bg_off, 3.0)
       end
-      draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
+      if P.RACK then
+        draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
+      else
+        draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
+      end
     else
       draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
       local fh = P.footer_h()
+      -- the body: as wide as the panel's own layout, centred on a wider plate
+      local bx, bw = x + off, ww - (w - nat_w)
       if req.offline then
-        draw_offline(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx)
+        draw_offline(ctx, dl, bx, y + C.HEADER_H, bw, wh - C.HEADER_H - fh, track, fx)
       elseif is_trim then
-        TRP.draw(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H - fh, track, fx, req)
+        TRP.draw(ctx, dl, bx, y + C.HEADER_H, bw, wh - C.HEADER_H - fh, track, fx, req)
       elseif is_eq then
         -- The whole body becomes the draggable-node curve canvas rather
         -- than the ordinary parameter grid: a ReaEQ panel IS the EQ view,
         -- not a grid you can optionally switch away from.
         -- With input/output meters, they take the two outside edges here
         -- too, and the canvas keeps its own width between them.
-        local ex, ew = x, ww
-        if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
+        local ex, ew = bx, bw
+        if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
                           y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W,
                           wh - C.HEADER_H - fh - C.PANEL_PAD * 2, track, fx, enabled) then
-          ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
+          ex, ew = bx + C.IO_COL_W + C.PANEL_PAD, bw - (C.IO_COL_W + C.PANEL_PAD) * 2
         end
         EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H - fh, track, fx, req)
       elseif canvas then
@@ -2800,10 +2982,17 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         -- meters, they take the two outside edges, as on any panel
         local cw = MP.width(canvas.kind)
         local bh = wh - C.HEADER_H - fh
-        local ex, ew = x, ww
-        if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
+        local ex, ew = bx, bw
+        if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
                           y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
-          ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
+          ex, ew = bx + C.IO_COL_W + C.PANEL_PAD, bw - (C.IO_COL_W + C.PANEL_PAD) * 2
+        end
+        -- the rack: the canvas across the whole width, the controls under it
+        local stacked = P.RACK and P.FILL_W and true or false
+        local full_bh = bh
+        if stacked then
+          cw = ew
+          if #(layout.controls or {}) > 0 then bh = math.min(bh, P.rack_canvas_h(ew)) end
         end
         -- (a light faceplate gives the canvas a dark screen: on_screen)
         local todo = M.canvas_todo(canvas) or (canvas.kind ~= "eq" and not next(canvas.roles or {}))
@@ -2823,20 +3012,35 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
           screen(MP.draw_eq, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, layout, req)
         end
         if #(layout.controls or {}) > 0 then
-          draw_controls(ctx, dl, ex + cw - C.PANEL_PAD, y + C.HEADER_H, ew - cw + C.PANEL_PAD, wh, track, fx, layout,
-                        key, req, nil, nil)
+          if stacked then
+            -- a grid of its own under the canvas: its panel height is what
+            -- the canvas leaves, with a header and foot's worth added back
+            -- (none left: every control hidden just now)
+            if full_bh - bh >= C.CELL_H then
+              draw_controls(ctx, dl, ex, y + C.HEADER_H + bh, ew, C.HEADER_H + fh + (full_bh - bh),
+                            track, fx, layout, key, req, nil, nil)
+            end
+          else
+            draw_controls(ctx, dl, ex + cw - C.PANEL_PAD, y + C.HEADER_H, ew - cw + C.PANEL_PAD, wh, track, fx, layout,
+                          key, req, nil, nil)
+          end
         end
-      elseif is_rc and rc_body(ctx, dl, x, y, ww, wh - C.HEADER_H - fh, track, fx, req, io, enabled, plate, saved) then
+      elseif is_rc and rc_body(ctx, dl, bx, y, bw, wh - C.HEADER_H - fh, track, fx, req, io, enabled, plate, saved) then
         -- drawn: the transfer-curve canvas (one missing a parameter it
         -- needs falls through to the ordinary grid below instead)
       else
-        draw_controls(ctx, dl, x, y + C.HEADER_H, ww, wh, track, fx, layout,
+        draw_controls(ctx, dl, bx, y + C.HEADER_H, bw, wh, track, fx, layout,
                       key, req, meter, io)
       end
       if fh > 0 then draw_footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx, layout, avail_h, is_eq or is_trim, req) end
     end
     if W.hw > 0 then W.metal_edges(dl, x, y, ww, wh, W.hw) end
     W.hw = 0
+    -- the selected plugin's outline, last, so the header, footer and
+    -- edges don't cover parts of it
+    if not is_drag_source and FB.selected(track) == fx.guid then
+      ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + ww - 0.5, y + wh - 0.5, C.COL.accent, 3.0, 0, 1.6)
+    end
     if saved then pop_plate(saved) end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)

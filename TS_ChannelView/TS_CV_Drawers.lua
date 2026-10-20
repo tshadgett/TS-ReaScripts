@@ -52,13 +52,31 @@ function DR.attach(imgui) ImGui = imgui end
 DR.KEY, DR.OLD_KEY = "bars", "drawers"
 DR.REV = "bars#rev"
 DR.SIDES = { "top", "left", "right", "bottom" }
-DR.PLACES = { "top", "left", "right", "bottom", "window", "tcp1", "tcp2", "web", "none" }
+DR.PLACES = { "top", "left", "right", "bottom", "rtop", "rleft", "rright", "rbottom",
+              "window", "tcp1", "tcp2", "web", "none" }
 DR.SIDE_NAME = { top = "Top", left = "Left", right = "Right", bottom = "Bottom",
+                 rtop = "Rack \u{00B7} top", rleft = "Rack \u{00B7} left", rright = "Rack \u{00B7} right",
+                 rbottom = "Rack \u{00B7} bottom",
                  window = "Own window", tcp1 = "TCP \u{00B7} by the ruler",
                  tcp2 = "TCP \u{00B7} by the transport", web = "Web companion", none = "Nowhere" }
 DR.SINGLE = { tcp1 = true, tcp2 = true, web = true }
 DR.SINGLE_NAME = { tcp1 = "TCP toolbar", tcp2 = "TCP transport toolbar", web = "Web actions" }
-DR.DRAWER = { top = true, left = true, right = true, bottom = true }
+DR.DRAWER = { top = true, left = true, right = true, bottom = true,
+              rtop = true, rleft = true, rright = true, rbottom = true }
+-- The drawers THIS window draws: ChannelView's four sides, or the Rack
+-- view's own (DR.host("rack"): its sides are "r" + side). Draw calls name
+-- the plain side either way.
+DR.PFX = ""
+DR.MINE = { top = true, left = true, right = true, bottom = true }
+function DR.host(which)
+  if which == "rack" then
+    DR.PFX = "r"
+    DR.MINE = { rtop = true, rleft = true, rright = true, rbottom = true }
+  else
+    DR.PFX = ""
+    DR.MINE = { top = true, left = true, right = true, bottom = true }
+  end
+end
 DR.W_DEF, DR.W_MIN, DR.W_MAX = 128, 34, 360
 -- button sizes (height, px): a bar's Size
 DR.SIZES = { { "Small", 20 }, { "Normal", 24 }, { "Large", 30 }, { "Extra large", 36 } }
@@ -209,8 +227,13 @@ local function enc_list(list)
       out[#out + 1] = '{"m":1,"l":' .. enc_str(e.l or "") .. ',"c":' .. enc_str(e.c or "") .. ic
                       .. ',"i":' .. enc_list(e.i or {}) .. '}'
     else
+      local vn = ""
+      if e.vc then vn = vn .. ',"vc":' .. enc_str(e.vc) end
+      if e.vl then vn = vn .. ',"vl":' .. enc_str(e.vl) end
+      if e.vm then vn = vn .. ',"vm":' .. enc_str(e.vm) end
+      if e.vf then vn = vn .. ',"vf":1' end
       out[#out + 1] = '{"l":' .. enc_str(e.l or "") .. ',"a":' .. enc_str(e.a or "")
-                      .. ',"c":' .. enc_str(e.c or "") .. ic .. '}'
+                      .. ',"c":' .. enc_str(e.c or "") .. ic .. vn .. '}'
     end
   end
   return "[" .. table.concat(out, ",") .. "]"
@@ -244,10 +267,32 @@ function DR.to_web(items)
     elseif it.sep then
       out[#out + 1] = { sp = 1 }
     else
-      out[#out + 1] = { l = it.label or "", a = it.cmd or "", c = it.color or "", cs = it.cs, ic = it.icon }
+      local e = { l = it.label or "", a = it.cmd or "", c = it.color or "", cs = it.cs, ic = it.icon }
+      -- a plugin button's vendor look (TS_CV_Vendors), for the page to
+      -- draw: vc its colour, vl its label, vm its initials tile, vf its
+      -- fill. Worked out here; never read back.
+      local v = TB.view and TB.view(it)
+      if v and v ~= it then
+        if (it.color or "") == "" and v.color and v.color ~= "" then e.vc = v.color end
+        if v.label and v.label ~= (it.label or "") then e.vl = v.label end
+        e.vm = v.mono
+        e.vf = v.fill and 1 or nil
+      end
+      out[#out + 1] = e
     end
   end
   return out
+end
+
+-- The web bar's stored text with its vendor looks worked out again (a
+-- vendor's colour changed, or the page saved the bar without them). The
+-- text as it is when it can't be read.
+function DR.web_vendors(text)
+  if not text or text == "" then return text end
+  local arr = DR.json_decode(text)
+  if type(arr) ~= "table" then return text end
+  require("TS_CV_Vendors").load(true)
+  return enc_list(DR.to_web(DR.from_web(arr)))
 end
 
 DR.web_store = {
@@ -261,8 +306,12 @@ DR.web_store = {
       for _, e in ipairs(list) do
         if e.m then fill(e.i)
         elseif e.a and (e.l or "") == "" then
-          local n = TB.action_name(TB.resolve(e.a))
-          if n then e.l = n:match(":%s*(.+)$") or n end
+          if require("TS_CV_FXButtons").kind({ cmd = e.a }) then
+            e.l = TB.text_of({ cmd = e.a, label = "" })     -- a plugin's or chain's short name
+          else
+            local n = TB.action_name(TB.resolve(e.a))
+            if n then e.l = n:match(":%s*(.+)$") or n end
+          end
         end
       end
       return list
@@ -595,7 +644,8 @@ end
 
 function DR.open_on(side)
   local out = {}
-  for _, d in ipairs(DR.list) do if d.open and d.side == side then out[#out + 1] = d end end
+  local place = DR.PFX .. side
+  for _, d in ipairs(DR.list) do if d.open and d.side == place then out[#out + 1] = d end end
   return out
 end
 
@@ -793,14 +843,14 @@ end
 -- a frame from the window the drawers were drawn in.
 function DR.draw_menus(ctx)
   for _, d in ipairs(DR.list) do
-    if d.open and DR.DRAWER[d.side] and d.tb then d.tb.draw_menus(ctx) end
+    if d.open and DR.MINE[d.side] and d.tb then d.tb.draw_menus(ctx) end
   end
 end
 
 -- Picks still have to be polled for a bar this window doesn't draw.
 function DR.poll()
   for _, d in ipairs(DR.list) do
-    if d.tb and not (d.open and DR.DRAWER[d.side]) then d.tb.poll() end
+    if d.tb and not (d.open and DR.MINE[d.side]) then d.tb.poll() end
   end
 end
 
@@ -816,7 +866,7 @@ local rename_buf, rename_for = "", nil
 -- Which ways a bar's buttons can be aligned where it is: across for a
 -- row, up and down for both (the web's bar only across).
 function DR.aligns(d)
-  local column = d.side == "left" or d.side == "right"
+  local column = d.side == "left" or d.side == "right" or d.side == "rleft" or d.side == "rright"
   return not column or d.side == "window", d.side ~= "web"
 end
 
@@ -835,7 +885,7 @@ function DR.align_items(ctx, d)
   if updown then
     if across then ImGui.Separator(ctx) end
     for _, a in ipairs(DR.VALIGN) do
-      local column = d.side == "left" or d.side == "right"
+      local column = d.side == "left" or d.side == "right" or d.side == "rleft" or d.side == "rright"
       local cur = v == a[2] or (v == "-" and a[2] == (column and "t" or "c"))
       if ImGui.MenuItem(ctx, "Align " .. a[1]:lower() .. "##drva" .. d.id .. a[2], nil, cur) then
         d.valign = a[2]; DR.save()
@@ -859,7 +909,7 @@ function DR.drawer_menu(ctx, d, where)
       local e = DR.SINGLE[s] and DR.at(s)
       if e and e ~= d then label = label .. "  (swaps with " .. (e.name ~= "" and e.name or "its bar") .. ")" end
       if ImGui.MenuItem(ctx, label .. "##drs" .. d.id .. s, nil, d.side == s) then DR.set_place(d, s) end
-      if s == "bottom" or s == "window" or s == "web" then ImGui.Separator(ctx) end
+      if s == "bottom" or s == "rbottom" or s == "window" or s == "web" then ImGui.Separator(ctx) end
     end
     ImGui.EndMenu(ctx)
   end
@@ -932,9 +982,11 @@ function DR.header_menu(ctx)
   ImGui.Separator(ctx)
   if ImGui.BeginMenu(ctx, "New") then
     for _, s in ipairs({ "top", "left", "right", "bottom", "window" }) do
-      local label = (s == "window") and "Toolbar in its own window" or (DR.SIDE_NAME[s] .. " drawer")
+      -- this window's own sides (the rack's when it is the rack)
+      local p = (s == "window") and s or (DR.PFX .. s)
+      local label = (s == "window") and "Toolbar in its own window" or ((DR.SIDE_NAME[p] or s) .. " drawer")
       if ImGui.MenuItem(ctx, label .. "##drnew" .. s) then
-        DR.new(s)
+        DR.new(p)
         if s == "window" then DR.ensure_host() end
       end
     end

@@ -1198,7 +1198,7 @@ local function frame()
     TB2.draw_menus(ctx)
     settings_menu()
     TM.draw(ctx)
-    CP.draw(ctx)        -- the colour picker, for a fader's colour
+    CP.draw(ctx, false) -- the colour picker, for a fader's colour
     EN.draw_menus(ctx)
     LN.draw_menus(ctx)
     FO.update(ctx, ImGui, C.FOCUS_BACK)

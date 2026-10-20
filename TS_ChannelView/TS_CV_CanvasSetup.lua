@@ -14,10 +14,11 @@
   Compressor, Gate, Limiter: each role (a compressor's Threshold, Ratio,
   Knee, Attack, Hold, Release, Make-up, Mix; a gate's Threshold, Close or
   Hysteresis, Range, Ratio and times; a limiter's Threshold or Input,
-  Ceiling and Release -- TS_CV_Mappings M.ROLES) names a control, or none. No learning: the canvas takes
-  the plugin's own values. A "Compression" control is a threshold the
-  other way round: tick Reversed. So can an attack, hold or release that
-  doesn't read in time (a 1176's 1 to 7, fastest at 7).
+  Ceiling and Release -- TS_CV_Mappings M.ROLES) names a control, or
+  none. No learning: the canvas takes the plugin's own values. A
+  "Compression" control is a threshold the other way round: tick
+  Reversed. So can an attack, hold or release that doesn't read in time
+  (a 1176's 1 to 7, fastest at 7).
 
   Every change is saved as it's made. The window is modal while it's
   open; closing it during learning cancels the learning.
@@ -588,7 +589,8 @@ end
 -- the EQ page
 -- ---------------------------------------------------------------------
 
-local FIELDS = { { "freq", "Freq" }, { "gain", "Gain" }, { "q", "Q" }, { "shape", "Shape switch" }, { "on", "On" } }
+local FIELDS = { { "freq", "Freq" }, { "gain", "Gain" }, { "q", "Q" }, { "shape", "Shape switch" }, { "on", "On" },
+                 { "slope", "Slope" } }
 
 local function learned_text(b)
   if not (b.freq or b.gain) then return "needs a frequency or gain", C.COL.warn end
@@ -600,7 +602,9 @@ local function learned_text(b)
   local e = L.shapes[1]
   if not e then for _, v in pairs(L.shapes) do e = v break end end
   local t = ME.TYPES[e.type] or e.type
-  if e.order and (e.type == "hp" or e.type == "lp") then t = t .. (" %d dB/oct"):format(e.order * 6) end
+  if e.order and (e.type == "hp" or e.type == "lp") then
+    t = t .. ((e.order >= ME.BRICK) and " brickwall" or (" %d dB/oct"):format(e.order * 6))
+  end
   local n = 0
   for _ in pairs(L.shapes) do n = n + 1 end
   if n > 1 then t = t .. (" (+%d more shapes)"):format(n - 1) end
@@ -633,7 +637,7 @@ local function eq_page(ctx, layout, cv, busy)
   local changed = false
   ImGui.BeginDisabled(ctx, busy)
   local flags = ImGui.TableFlags_RowBg | ImGui.TableFlags_BordersInnerH
-  if ImGui.BeginTable(ctx, "##mpbands", 8, flags) then
+  if ImGui.BeginTable(ctx, "##mpbands", 9, flags) then
     ImGui.TableSetupColumn(ctx, "Band", ImGui.TableColumnFlags_WidthFixed, 110)
     for _, f in ipairs(FIELDS) do ImGui.TableSetupColumn(ctx, f[2], ImGui.TableColumnFlags_WidthFixed, 120) end
     ImGui.TableSetupColumn(ctx, "Learned", ImGui.TableColumnFlags_WidthFixed, 230)
@@ -1477,8 +1481,9 @@ function CS.draw(ctx)
   end
 end
 
--- A new EQ, Compressor, Gate or Limiter layout for this instance, named `name`, guessed
--- from the plugin's parameter names, then opened for setting up.
+-- A new EQ, Compressor, Gate or Limiter layout for this instance, named
+-- `name`, guessed from the plugin's parameter names, then opened for
+-- setting up.
 -- Returns its variant name, or nil when the name won't do.
 function CS.create(track, fx, base, name, kind, from)
   local k, nm = M.new_variant(base, name, from, false)

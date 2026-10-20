@@ -183,7 +183,21 @@ reaper = {
     if k == "IP_TRACKNUMBER" then return 3 end
     return 0
   end,
-  SetMediaTrackInfo_Value = function(tr, k, v) if k == "I_NCHAN" then tr.nch = v end return true end,
+  -- A plugin marked `follow` takes the track's channel count, as many
+  -- VST3s do: its pins become one per channel, each on its own.
+  SetMediaTrackInfo_Value = function(tr, k, v)
+    if k == "I_NCHAN" then
+      tr.nch = v
+      for _, f in ipairs(tr.fx) do
+        if f.follow then
+          for p = f.nin, v - 1 do f.pin_in[p] = { p < 32 and (1 << p) or 0, 0 } end
+          for p = f.nout, v - 1 do f.pin_out[p] = { p < 32 and (1 << p) or 0, 0 } end
+          f.nin, f.nout = v, v
+        end
+      end
+    end
+    return true
+  end,
   Undo_BeginBlock = function() end, Undo_EndBlock = function() end,
   PreventUIRefresh = function() end,
   ValidatePtr = function() return true end,
@@ -319,6 +333,78 @@ TP.sync(track)
 check("only the one between the probes", F(6).params[TP.P_TAPN], 1)
 check("status inside",                TP.status(track, "{C1}"), "ok")
 check("status outside",               TP.status(track, "{OUT}"), "outside")
+
+-- ---------------------------------------------------------------- a plugin added to the chain
+-- What reaches the post probe's tap pins, worked out by passing names
+-- through the top level: each output pin writes "<guid>.L", ".R" or
+-- ".x<pin>" to its channels, and a channel no output writes keeps what
+-- it had. Returns, per tap, "before L/after L" as the probe sees them, and
+-- what they should be (the measured plugin's input and output).
+local function flow()
+  index()
+  local chan = {}
+  for c = 1, 64 do chan[c] = "in" .. c end
+  local input_of, seen = {}, {}
+  for i, f in ipairs(track.fx) do
+    input_of[f.guid] = chan[1]
+    if f.name:find("TrackProbe", 1, true) and i > 1 then
+      for p = 2, 17 do
+        local m = f.pin_in[p]
+        if m then for c in pairs(TP.channels_of(m[1], m[2])) do seen[p] = chan[c] end end
+      end
+    end
+    local new = {}
+    for p = 0, f.nout - 1 do
+      local m = f.pin_out[p]
+      for c in pairs(TP.channels_of(m[1], m[2])) do
+        new[c] = f.guid .. (p == 0 and ".L" or p == 1 and ".R" or (".x" .. p))
+      end
+    end
+    for c, v in pairs(new) do chan[c] = v end
+  end
+  local rec = TP.parse_record(track.ext[TP.EXT_KEY] or "")
+  local got, want = {}, {}
+  for i, t in ipairs(rec and rec.taps or {}) do
+    local p0 = 2 + (i - 1) * 4
+    got[#got + 1] = tostring(seen[p0]) .. "/" .. tostring(seen[p0 + 2])
+    want[#want + 1] = tostring(input_of[t.guid]) .. "/" .. t.guid .. ".L"
+  end
+  return table.concat(got, " "), table.concat(want, " ")
+end
+
+reset()
+measure = { ["LA-2A"] = true, ["1176"] = true }
+package.loaded["TS_CV_Mappings"].get = function(key) return { measure = measure[key] or nil } end
+TP.invalidate()
+TP.sync(track)
+local got, want = flow()
+check("added: the taps read right to begin with", got, want)
+-- a plugin added after them, before the post probe, taking all 12 channels
+table.insert(track.fx, 6, fx("VST3: Pro-L 2 (FabFilter)", "{NEW}", 12, 12))
+got, want = flow()
+check("added: it writes over the copies", got ~= want, true)
+TP.invalidate()
+TP.sync(track)
+got, want = flow()
+check("added: the copies come through again", got, want)
+check("added: its own channels untouched", outbits(5, 0) .. "," .. outbits(5, 1) .. "," .. outbits(5, 3),
+      b(1) .. "," .. b(2) .. "," .. b(4))
+check("added: and nothing more to do", TP.sync(track), false)
+-- one added in front of a tapped plugin, that follows the track's channel
+-- count as it grows: it changes the writers, so the routing is laid again,
+-- and whatever it takes on the way is cleared
+reset()
+TP.invalidate()
+TP.sync(track)
+table.insert(track.fx, 3, fx("VST3: Saturn 2 (FabFilter)", "{FOL}", track.nch, track.nch, { follow = true }))
+TP.invalidate()
+TP.sync(track)
+got, want = flow()
+check("follower: the copies come through", got, want)
+check("follower: the track grew past it", track.nch > 12, true)
+check("follower: settles", TP.sync(track), false)
+got, want = flow()
+check("follower: still right", got, want)
 
 -- ---------------------------------------------------------------- levels
 -- Pro-C 2 reports its own reduction, so it's only ever tapped for its

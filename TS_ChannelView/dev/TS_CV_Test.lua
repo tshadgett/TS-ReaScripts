@@ -289,6 +289,24 @@ check("width for 8", P.width(8, H), 132)
 check("width for 12", P.width(12, H), 3 * C.CELL_W + 12)
 check("cols for 9 @4 rows", cols_for(9, H), 3)
 check("min width honoured", P.width(1, H), 132)
+-- the Rack view: the fewest rows that lay a grid across the column
+do
+  local ctl = {}
+  for i = 1, 12 do ctl[i] = { type = "knob", param = i - 1 } end
+  local function ph(n) return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H end
+  local cols = function(w) return math.floor((w - C.PANEL_PAD * 2) / C.CELL_W) end
+  for _, w in ipairs({ 200, 300, 700 }) do
+    local n = math.ceil(12 / cols(w))
+    local got
+    for k = 1, 40 do if P.width(ctl, ph(k)) <= w then got = ph(k) break end end
+    check("rack grid " .. w .. ": rows as the width needs", got, ph(n))
+  end
+  check("rack canvas height, narrow", P.rack_canvas_h(300), 240)
+  check("rack canvas height, wide", P.rack_canvas_h(2000), 384)
+  local TRP = require("TS_CV_TrimmerPanel")
+  check("rack trimmer side by side", TRP.one_column(TRP.rack_body_h(600)), false)
+  check("rack trimmer stacked", TRP.one_column(TRP.rack_body_h(400)), true)
+end
 check("rows at h=120", P.rows_for(120), 1)
 check("cols for 8 @1 row", cols_for(8, 120), 8)
 
@@ -656,7 +674,19 @@ else
     end
     if #list >= 600 then break end
   end
+  -- a JS effect: REAPER tags none, so no developer, whatever its name ends in
+  list[#list + 1] = { name = "JS: Delay (Lo-Fi)", ident = "delay_lofi", short = "Delay", vendor = "Lo-Fi", fmt = "JS" }
+  -- read from the tag file's own folder
+  local grp = reaper.GetResourcePath
+  reaper.GetResourcePath = function() return (TAGFILE:match("^(.*)[/\\]") or ".") end
+  IX.reset()
   local devs, cats, folds = IX.build(list)
+  check("the tag file was read", IX.tagged(), true)
+  check("a JS effect has no developer", list[#list].dev, nil)
+  local junk = false
+  for _, d in ipairs(devs) do if d.name == "Lo-Fi" then junk = true end end
+  check("no developer from a JS effect's name", junk, false)
+  reaper.GetResourcePath = grp
   
   -- the same grouping the browser does
   local by_dev, by_cat, by_fold, by_letter = {}, {}, {}, {}
@@ -841,6 +871,29 @@ local TRACKS = {
         SD.width(false, rows, H) - one, C.SEND_W + C.SEND_COL_GAP)
   check("width grows with sends",   SD.width(false, rows * 2, H) > SD.width(false, 1, H), true)
   check("but is capped",            SD.width(false, 99, H), C.SENDS_MAX_W)
+  -- strip mode (the Rack view): as wide as asked, as short as fits
+  do
+    SD.STRIP_W = 400
+    local was_c = SD.is_collapsed
+    SD.is_collapsed = function() return false end
+    local per = math.floor((400 - C.PANEL_PAD * 2 + C.SEND_COL_GAP) / (C.SEND_W + C.SEND_COL_GAP))
+    local was, wm = reaper.GetTrackNumSends, reaper.GetMasterTrack
+    reaper.GetMasterTrack = function() return 0 end
+    for _, n in ipairs({ 0, 1, per - 1, per, per * 2 + 1, 40 }) do
+      reaper.GetTrackNumSends = function() return n end
+      local h = SD.strip_h(1, 400)
+      check("strip: " .. n .. " sends fit across 400", SD.width(false, n, h), 400)
+      check("strip: " .. n .. " sends, no taller than needed",
+            P.rows_for(h), math.max(C.MIN_ROWS, math.ceil((n + 1) / per)))
+    end
+    reaper.GetTrackNumSends, reaper.GetMasterTrack = was, wm
+    SD.is_collapsed = function() return true end
+    check("strip: folded is a bar", SD.strip_h(1, 400), C.HEADER_H + 2)
+    SD.is_collapsed = was_c
+    check("strip: folded is the strip's width", SD.width(true, 0, H), 400)
+    SD.STRIP_W = nil
+    check("strip off: as before", SD.width(true, 0, H), C.COLLAPSED_W)
+  end
   for k, v in pairs(real) do reaper[k] = v end
 end
 
@@ -3277,6 +3330,7 @@ do
     "TS_ChannelView_TCP", "TS_CV_Arrange", "TS_CV_Toolbar", "TS_CV_Envelopes", "TS_CV_Actions", "TS_CV_Lanes",
     "TS_CV_Chains", "TS_CV_Taps", "TS_CV_WebLink", "TS_ChannelView_Web_Startup", "TS_CV_HwOut",
     "TS_CV_Drawers", "TS_CV_ActionEditor", "TS_ChannelView_Toolbars", "TS_ChannelView_OrganiseActions",
+    "TS_CV_Vendors",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.
@@ -3705,7 +3759,7 @@ do
   check("brush: no Brush line when unset",     t2:find("\nBrush=", 1, true) == nil, true)
   -- every knob style has a face size and a cap colour that exists
   for _, ks in ipairs(CC.KNOB_STYLES) do
-    if ks.key ~= "arc" then check("knob style " .. ks.key .. ": cap known", CC.CAP[ks.cap] ~= nil, true) end
+    if ks.key ~= "arc" then check("knob style " .. ks.key .. ": cap known", (CC.CAP[ks.cap] ~= nil or (ks.parts ~= nil and CC.custom_key(ks.cap) ~= nil)), true) end
   end
   for _, pl in ipairs(CC.PLATES) do
     if pl.bg then check("plate " .. pl.key .. ": all inks", (pl.head and pl.text and pl.dim and pl.tick and pl.border) ~= nil, true) end
@@ -3800,7 +3854,7 @@ do
     W.knob_face("dl", 50, 50, 17, 0.3, { style = "nonsense" })
   end)
   check("faces: every knob style draws", ok and true or err, true)
-  check("faces: the pointer is a polygon", (calls.poly or 0) > 0, true)
+  check("faces: the pointer is modelled from polygons", ((calls.DrawList_PathFillConcave or 0) + (calls.DrawList_PathFillConvex or 0)) > 0, true)
   reaper.new_array = nil
   calls.poly = 0
   ok = pcall(function()
@@ -4197,10 +4251,205 @@ do
   check("brush: not without a section", brc[5].brush, nil)
   check("brush: copied", MP.copy(MP.get("BrushPlug")).controls[1].brush, true)
   MP.remove("BrushPlug"); MP.save(); MP.reload()
+  -- surface finishes (Finish<n>, Finish): one per surface, Brush<n> the old
+  -- way of saying brushed
+  check("finish: every one has a label", (function()
+    for _, f in ipairs(C.FINISHES) do if not (f.key and f.label) then return false end end
+    return #C.FINISHES end)(), 12)
+  check("finish: aluminium's own", MP.finish({}, alu), "brushed")
+  check("finish: cream's own", MP.finish({}, cream), nil)
+  check("finish: chosen", MP.finish({ finish = "wood" }, cream), "wood")
+  check("finish: plain on aluminium", MP.finish({ finish = "plain" }, alu), nil)
+  check("finish: old Brush=1", MP.finish({ brush = true }, cream), "brushed")
+  check("finish: no faceplate", MP.finish({ finish = "wood" }, nil), nil)
+  check("finish: a part's chosen", MP.part_finish("inset", nil, "tolex", nil), "tolex")
+  check("finish: a part's from Brush", MP.part_finish("plate", cream, nil, true), "brushed")
+  check("finish: a part's plain", MP.part_finish("plate", alu, "plain", nil), nil)
+  check("finish: nothing to finish", MP.part_finish(nil, nil, "wood", nil), nil)
+  check("finish: unknown key dropped", MP.finish_of("glitter"), nil)
+  MP.set("FinPlug", { plate = "cream", finish = "leather", controls = {
+    { param = 0, type = "knob", label = "A", back = "cream", finish = "wood" },
+    { param = 1, type = "knob", label = "B", back = "aluminium", finish = "plain" },
+    { param = -1, type = "divider", style = "inset", finish = "hammertone" },
+    { param = 2, type = "knob", label = "C", finish = "wood" },        -- no background: not saved
+    { param = -1, type = "divider", finish = "wood" } } })             -- no section: not saved
+  MP.save(); MP.reload()
+  local fl = MP.get("FinPlug")
+  check("finish: faceplate round-trips", fl.finish, "leather")
+  check("finish: background round-trips", fl.controls[1].finish, "wood")
+  check("finish: plain round-trips", fl.controls[2].finish, "plain")
+  check("finish: section round-trips", fl.controls[3].finish, "hammertone")
+  check("finish: not without a background", fl.controls[4].finish, nil)
+  check("finish: not without a section", fl.controls[5].finish, nil)
+  check("finish: copied", MP.copy(fl).controls[1].finish, "wood")
+  check("finish: key", (P.back_key({ back = "cream", finish = "wood", metal = true })), "cream/wood/m")
+  check("finish: key, plain aluminium", (P.back_key({ back = "aluminium", finish = "plain" })), "aluminium")
+  MP.remove("FinPlug"); MP.save(); MP.reload()
+  -- every finish has its texture
+  do
+    local here = debug.getinfo(1, "S").source:match("@?(.*[\\/])") or "./"
+    local FNm = require("TS_CV_Finish")
+    FNm.init(here .. "../")
+    local missing = {}
+    for _, f in ipairs(C.FINISHES) do
+      if FNm.draws(f.key) then
+        for _, k in ipairs({ f.key, f.under }) do
+          local fh = io.open(FNm.file(k), "rb")
+          if fh then fh:close() else missing[#missing + 1] = k end
+        end
+      end
+    end
+    check("finish: textures present", table.concat(missing, ","), "")
+    check("finish: plain draws nothing", FNm.draws("plain"), false)
+  end
+  -- corners (Corners<n>): soft or round on a background or section
+  MP.set("CornPlug", { controls = {
+    { param = 0, type = "knob", label = "A", back = "cream", corners = "round" },
+    { param = -1, type = "divider", style = "inset", corners = "soft" },
+    { param = 1, type = "knob", label = "B", corners = "round" },
+    { param = 2, type = "knob", label = "C", back = "inset", corners = "square" } } })
+  MP.save(); MP.reload()
+  local cc = MP.get("CornPlug").controls
+  check("corners: background round-trips", cc[1].corners, "round")
+  check("corners: section round-trips", cc[2].corners, "soft")
+  check("corners: not without a background", cc[3].corners, nil)
+  check("corners: square is no line", cc[4].corners, nil)
+  check("corners: copied", MP.copy(MP.get("CornPlug")).controls[1].corners, "round")
+  MP.remove("CornPlug"); MP.save(); MP.reload()
+  check("corners: key", (P.back_key({ back = "cream", corners = "round" })), "cream/cround")
+  check("corners: square key unchanged", (P.back_key({ back = "cream" })), "cream")
+  check("corners: section keys differ", P.section_key({ style = "inset", corners = "soft" }) ~= P.section_key({ style = "inset" }), true)
+  check("corners: radius, square", P.corner_r(nil, 80, 40, true), 4)
+  check("corners: radius, soft", P.corner_r("soft", 80, 40, true), 10)
+  check("corners: radius, round", P.corner_r("round", 80, 40, true), 20)
+  check("corners: radius, round but wide", P.corner_r("round", 300, 400, true), 28)
+  check("corners: radius, round L shape", P.corner_r("round", 80, 40, false), 10)
+  do
+    local poly = P._rounded_poly({ 0, 0, 100, 0, 100, 60, 0, 60 }, 20)
+    local mid = P._poly_spans({ poly }, 0, 30)
+    local top = P._poly_spans({ poly }, 0, 2)
+    check("corners: spans mid-way", #mid == 2 and math.abs(mid[1]) < 0.01 and math.abs(mid[2] - 100) < 0.01, true)
+    check("corners: spans near a round corner", #top == 2 and top[1] > 8 and top[2] < 92, true)
+  end
+  -- hardware switches: a toggle's Style; a button row never takes one
+  check("switch: ten of them", #C.SWITCH_STYLES, 10)
+  MP.set("SwPlug", { controls = { { param = 0, type = "toggle", label = "A", style = "litrocker", cap = "green" } } })
+  MP.save(); MP.reload()
+  check("switch: style round-trips", MP.get("SwPlug").controls[1].style, "litrocker")
+  MP.remove("SwPlug"); MP.save(); MP.reload()
+  do
+    local row = { type = "combo", buttons = "across", nbtn = 3, style = "lens" }
+    MP.paste_look(row, MP.look_of({ type = "toggle", style = "bat", cap = "red" }))
+    check("switch: not on a button row", row.style, nil)
+    local tg = { type = "toggle" }
+    MP.paste_look(tg, MP.look_of({ type = "toggle", style = "bat", cap = "red" }))
+    check("switch: pasted onto a toggle", tg.style, "bat")
+  end
+  -- knobs built from parts: recipes in the style list, saved like any style
+  do
+    local n = 0
+    for _, st in ipairs(C.KNOB_STYLES) do if st.parts then n = n + 1 end end
+    check("parts: recipes listed", n >= 17, true)
+    MP.set("KpPlug", { controls = { { param = 0, type = "knob", label = "A", style = "bakelite", cap = "red" } } })
+    MP.save(); MP.reload()
+    check("parts: style round-trips", MP.get("KpPlug").controls[1].style, "bakelite")
+    MP.remove("KpPlug"); MP.save(); MP.reload()
+    local KPm = require("TS_CV_KnobParts")
+    check("parts: reach, plain", KPm.reach({}), 1)
+    check("parts: reach, skirt", KPm.reach({ skirt = "plain", sr = 1.5 }), 1.5)
+    check("parts: reach, wing", KPm.reach({ ptr = "wing" }), 1.4)
+    check("parts: centre, insert", KPm.centre_col({ top = "insert", insert = 0x112233ff }, 0xff0000ff), 0x112233ff)
+  end
+  -- a knob's own look (Look<n>): parts as text, and back
+  do
+    local KPm = require("TS_CV_KnobParts")
+    local look = { profile = "tapered", grip = "fluted", n = 10, mat = "gloss", col = 0xb3201eff, side = 0x6c6e72ff,
+                   tilt = 0.11, skirt = "dial", smat = "metal", sr = 1.62, sgrip = "knurled", washer = true, face = "flat",
+                   inner = { r = 0.62, col = 0x9b9b97ff, mat = "bead", screws = true }, ptr = "inset", scale = "dots" }
+    local back = KPm.decode(KPm.encode(look))
+    check("look: colour round-trips", back.col, 0xb3201eff)
+    check("look: words round-trip", back.grip .. "/" .. back.skirt .. "/" .. back.ptr .. "/" .. back.scale .. "/" .. back.face, "fluted/dial/inset/dots/flat")
+    check("look: numbers round-trip", back.n == 10 and math.abs(back.tilt - 0.11) < 1e-6 and math.abs(back.sr - 1.62) < 1e-6, true)
+    check("look: inner cap round-trips", back.inner and back.inner.screws and back.inner.mat, "bead")
+    check("look: washer", back.washer, true)
+    check("look: shadow round-trips", KPm.decode(KPm.encode({ shadow = "tall" })).shadow, "tall")
+    check("look: shadow junk ignored", KPm.decode("shadow=huge"), nil)
+    -- View > Shadows: strength scales every shadow; 0 draws none
+    do
+      local LTm = require("TS_CV_Light")
+      local calls = 0
+      local fake = setmetatable({}, { __index = function() return function() calls = calls + 1 end end })
+      LTm.attach(fake)
+      LTm.STRENGTH = 0; LTm.circle(nil, 0, 0, 20, 0.8); LTm.rect(nil, 0, 0, 10, 10, 2, 0.8)
+      check("shadows: none at 0", calls, 0)
+      LTm.STRENGTH = 1; LTm.circle(nil, 0, 0, 20, 0.8, 0)
+      check("shadows: flush = the seam only", calls, 1)
+      local _, _, s1 = LTm.offset(20, 0.8)
+      LTm.STRENGTH = 2
+      local _, _, s2 = LTm.offset(20, 0.8)
+      check("shadows: stronger reach further", math.abs(s2 - 2 * s1) < 1e-9, true)
+      check("shadows: deeper", LTm.shade(0x22, 0.8) > 0x22, true)
+      LTm.STRENGTH = 1
+    end
+    check("look: junk ignored", KPm.decode("grip=lumpy,foo=1"), nil)
+    check("look: copy is its own", (function() local c = KPm.copy(look); c.inner.r = 0.1; return look.inner.r end)(), 0.62)
+    MP.set("LookPlug", { controls = { { param = 0, type = "knob", label = "A", style = "console", look = look },
+                                       { param = 1, type = "toggle", label = "B", look = look } } })
+    MP.save(); MP.reload()
+    local lc = MP.get("LookPlug").controls
+    check("look: Look<n> round-trips", lc[1].look and lc[1].look.grip, "fluted")
+    check("look: not on a toggle", lc[2].look, nil)
+    check("look: copied with the layout", MP.copy(MP.get("LookPlug")).controls[1].look.col, 0xb3201eff)
+    local tgt = { type = "knob" }
+    MP.paste_look(tgt, MP.look_of(lc[1]))
+    check("look: pasted", tgt.look and tgt.look.skirt, "dial")
+    -- a concentric knob: an outer recipe, an inner one, and their own looks
+    MP.set("DualPlug", { controls = {
+      { param = 0, param2 = 1, type = "dual", label = "EQ", style = "british", style2 = "redgloss" },
+      { param = 2, param2 = 3, type = "dual", label = "Own", style = "british", look = look, look2 = { grip = "knurled", col = 0x112233ff } },
+      { param = 4, param2 = 5, type = "dual", label = "Flat", style = "arc", style2 = "nonsense" },
+      { param = 6, type = "knob", label = "K", style2 = "redgloss" } } })
+    MP.save(); MP.reload()
+    local dc = MP.get("DualPlug").controls
+    check("dual: outer recipe", dc[1].style, "british")
+    check("dual: inner recipe", dc[1].style2, "redgloss")
+    check("dual: own outer look", dc[2].look and dc[2].look.grip, "fluted")
+    check("dual: own inner look", dc[2].look2 and dc[2].look2.col, 0x112233ff)
+    check("dual: arc", dc[3].style, "arc")
+    check("dual: an unknown inner dropped", dc[3].style2, nil)
+    check("dual: inner only on a dual", dc[4].style2, nil)
+    check("dual: copied", MP.copy(MP.get("DualPlug")).controls[2].look2.grip, "knurled")
+    local dt = { type = "dual" }
+    MP.paste_look(dt, MP.look_of(dc[1]))
+    check("dual: pasted pair", (dt.style or "") .. "/" .. (dt.style2 or ""), "british/redgloss")
+    local kt = { type = "knob" }
+    MP.paste_look(kt, MP.look_of(dc[2]))
+    check("dual: onto a knob, the outer look", kt.look and kt.look.grip, "fluted")
+    check("dual: onto a knob, no inner", kt.style2, nil)
+    MP.remove("DualPlug")
+    MP.remove("LookPlug"); MP.save(); MP.reload()
+    -- your recipes: saved by name beside the layouts
+    local RCm = require("TS_CV_Recipes")
+    local tmpdir = os.tmpname():gsub("[^/\\]+$", "")
+    os.remove(tmpdir .. "TS_ChannelView_Recipes.ini")
+    RCm.init(tmpdir)
+    check("recipes: none to start", #RCm.list(), 0)
+    RCm.put("Desk 1176", look)
+    RCm.put("Red", { col = 0xff0000ff })
+    RCm.init(tmpdir)
+    check("recipes: saved and read back", #RCm.list() == 2 and RCm.list()[1].name, "Desk 1176")
+    check("recipes: the look", RCm.list()[1].look.grip, "fluted")
+    RCm.put("Red", { col = 0x00ff00ff })
+    check("recipes: same name replaces", #RCm.list() == 2 and RCm.list()[2].look.col, 0x00ff00ff)
+    RCm.remove("Red")
+    RCm.init(tmpdir)
+    check("recipes: removed", #RCm.list(), 1)
+    os.remove(tmpdir .. "TS_ChannelView_Recipes.ini")
+  end
   -- a brushed and a plain one of the same colour are different backgrounds
-  check("brush: key, brushed", (P.back_key({ back = "cream", brush = true })), "cream/b")
+  check("brush: key, brushed", (P.back_key({ back = "cream", brush = true })), "cream/brushed")
   check("brush: key, plain", (P.back_key({ back = "cream" })), "cream")
-  check("brush: key, aluminium's own", (P.back_key({ back = "aluminium" })), "aluminium/b")
+  check("brush: key, aluminium's own", (P.back_key({ back = "aluminium" })), "aluminium/brushed")
   check("brush: key, none", P.back_key({}), nil)
   -- the grain keeps clear of the edges, round an L and its inside corner
   local L = TL.shapes({ { 0, 0, 50, 64, "a" }, { 0, 64, 50, 128, "a" }, { 50, 64, 100, 128, "a" } }, {}, 0)
@@ -4321,7 +4570,7 @@ do
   check("metal: copied", tostring(MP.copy(l).metal) .. "/" .. tostring(MP.copy(l).controls[1].metal), "true/true")
   MP.remove("MetalPlug"); MP.save(); MP.reload()
   check("metal: key keeps metallic apart", (P.back_key({ back = "cream", metal = true })), "cream/m")
-  check("metal: key, brushed and metallic", (P.back_key({ back = "cream", metal = true, brush = true })), "cream/b/m")
+  check("metal: key, brushed and metallic", (P.back_key({ back = "cream", metal = true, brush = true })), "cream/brushed/m")
   check("metal: sections with and without don't match",
         P.section_key({ type = "divider", style = "inset", metal = true }) ~= P.section_key({ type = "divider", style = "inset" }), true)
 end
@@ -5203,6 +5452,27 @@ do
   check("variant: deleted falls back", St.layout_key(name, "{A}"), "Kontakt 7")
   St.set_variant("{A}", nil)
   check("variant: back to default clears", PROJ["TS_ChannelViewvariant:{A}"], "")
+  -- the Rack view picks apart: ChannelView's pick until it has its own
+  do
+    M.set("Kontakt 7 :: Across", { controls = {} }); M.set("Kontakt 7 :: Down", { controls = {} })
+    St.set_variant("{R}", "Across")
+    St.VARIANT, M.VIEW_DEFAULTS = "rvariant:", M.RACK_DEFAULTS_SECT
+    check("rack: follows ChannelView's pick", St.layout_key(name, "{R}"), "Kontakt 7 :: Across")
+    St.set_variant("{R}", "Down")
+    check("rack: its own pick", St.layout_key(name, "{R}"), "Kontakt 7 :: Down")
+    check("rack: kept apart", PROJ["TS_ChannelViewrvariant:{R}"], "Down")
+    St.set_variant("{R}", St.OWN)
+    check("rack: own standard", St.layout_key(name, "{R}"), "Kontakt 7")
+    St.set_variant("{R}", nil)
+    M.set_default_variant("Kontakt 7", "Down")
+    check("rack: its default beats ChannelView's pick", St.layout_key(name, "{R}"), "Kontakt 7 :: Down")
+    check("rack: default kept apart", M.default_variant("Kontakt 7", M.DEFAULTS_SECT), nil)
+    M.set_default_variant("Kontakt 7", nil)
+    St.VARIANT, M.VIEW_DEFAULTS = "variant:", M.DEFAULTS_SECT
+    check("channelview: unchanged by the rack", St.layout_key(name, "{R}"), "Kontakt 7 :: Across")
+    St.set_variant("{R}", nil)
+    M.remove("Kontakt 7 :: Across"); M.remove("Kontakt 7 :: Down")
+  end
   -- making variants: a copy, or empty with the names kept
   local src = { controls = { { type = "knob", param = 5 } }, aliases = { [5] = "Verb" }, lock = 3 }
   local k, nm = M.new_variant("Kontakt 7", " Pads ", src, false)
@@ -5546,6 +5816,57 @@ do
     if b.order then check(("mapeq: %s order"):format(b.type), r and r.order, b.order) end
   end
   check("mapeq: flat is no fit", ME.fit(fr, synth({ type = "bell", f = 1000, g = 0, q = 1 }), "gain"), nil)
+  -- the other shapes (Pro-Q, Kirchhoff): models, names, slopes
+  checkf("mapeq: notch deep at its centre", function() return ME.band_db({ type = "notch", f = 1000, q = 2 }, 1000) < -60 end)
+  checkf("mapeq: notch flat far off", function() return math.abs(ME.band_db({ type = "notch", f = 1000, q = 2 }, 20)) < 0.1 end)
+  checkf("mapeq: band pass 0 dB at centre", function() return math.abs(ME.band_db({ type = "bp", f = 1000, q = 1 }, 1000)) < 0.01 end)
+  checkf("mapeq: band pass falls away", function() return ME.band_db({ type = "bp", f = 1000, q = 1 }, 100) < -15 end)
+  checkf("mapeq: tilt half each side", function()
+    local b = { type = "tilt", f = 1000, g = 12, q = 0.7071 }
+    return math.abs(ME.band_db(b, 20) + 6) < 0.3 and math.abs(ME.band_db(b, 20000) - 6) < 0.3 end)
+  checkf("mapeq: flat tilt is a line", function()
+    local b = { type = "flattilt", f = 632, g = 10 }
+    return math.abs(ME.band_db(b, 632)) < 1e-6 and math.abs(ME.band_db(b, 1264) - 1) < 1e-6 end)
+  checkf("mapeq: flat top plateau", function() return math.abs(ME.band_db({ type = "flattop", f = 1000, g = 6, q = 0.5 }, 1000) - 6) < 0.6 end)
+  checkf("mapeq: 96 dB/oct cut", function()
+    local b = { type = "hp", f = 1000, order = 16, q = 0.7071 }
+    return math.abs(ME.band_db(b, 125) - ME.band_db(b, 250) + 96) < 2 end)
+  checkf("mapeq: all pass is flat", function() return ME.band_db({ type = "ap", f = 1000, q = 1 }, 1000) == 0 end)
+  check("mapeq: name notch", (ME.type_of_name("Notch")), "notch")
+  check("mapeq: name band pass", (ME.type_of_name("Band Pass")), "bp")
+  check("mapeq: name tilt shelf", (ME.type_of_name("Tilt Shelf")), "tilt")
+  check("mapeq: name flat tilt", (ME.type_of_name("Flat Tilt")), "flattilt")
+  check("mapeq: name low cut", (ME.type_of_name("Low Cut")), "hp")
+  check("mapeq: name high cut", (ME.type_of_name("High Cut")), "lp")
+  check("mapeq: name all pass", (ME.type_of_name("All Pass")), "ap")
+  check("mapeq: name bell", (ME.type_of_name("Bell")), "bell")
+  check("mapeq: name high shelf", (ME.type_of_name("High Shelf")), "hs")
+  check("mapeq: name brickwall", select(2, ME.type_of_name("Brickwall Low Pass")), ME.BRICK)
+  check("mapeq: name unknown", (ME.type_of_name("Vintage")), nil)
+  -- Kirchhoff-EQ's own names
+  check("mapeq: kirchhoff console bell", (ME.type_of_name("E LMF")), "bell")
+  check("mapeq: kirchhoff console cut", (ME.type_of_name("BritN HP")), "hp")
+  check("mapeq: kirchhoff wall", select(2, ME.type_of_name("Wall LP")), ME.BRICK)
+  check("mapeq: kirchhoff allpass", (ME.type_of_name("Allpass H")), "ap")
+  check("mapeq: kirchhoff tone", (ME.type_of_name("Tone Low")), "ls")
+  check("mapeq: kirchhoff valve left to measuring", (ME.type_of_name("VT Boost")), nil)
+  check("mapeq: kirchhoff slope", ME.order_of_text("12.0dB/oct %"), 2)
+  check("mapeq: slope 24", ME.order_of_text("24 dB/oct"), 4)
+  check("mapeq: slope 96", ME.order_of_text("96 dB/oct"), 16)
+  check("mapeq: slope brick", ME.order_of_text("Brickwall"), ME.BRICK)
+  check("mapeq: slope none", ME.order_of_text("Auto"), nil)
+  local fcases = {
+    { { type = "notch", f = 2500, q = 3 }, "gain", true },
+    { { type = "bp", f = 700, q = 1.2 }, "gain", true },
+    { { type = "tilt", f = 1200, g = 8, q = 0.7071 }, "gain", true },
+    { { type = "hp", f = 120, order = 2, q = 0.7071 }, "gain", false },
+  }
+  for _, c in ipairs(fcases) do
+    local b = c[1]
+    local r = ME.fit(fr, synth(b), c[2], c[3] and { type = b.type } or nil)
+    check(("mapeq: fits %s by %s"):format(b.type, c[3] and "name" or "shape"), r and r.type, b.type)
+    checkf(("mapeq: %s frequency"):format(b.type), function() return r and math.abs(math.log(r.f / b.f)) < 0.08 end)
+  end
   -- summarise: three frequencies x two gains of a proportional-Q bell
   local samples = {}
   for _, fn in ipairs({ 0, 0.5, 1 }) do
@@ -6697,6 +7018,164 @@ do
   check("fxb: after the Trimmer in an empty chain", FB.end_gap({ "JS: TS_CV Trimmer" }, 1), 1)
   local it = FB.fx_item({ ident = "VST3: Pro-Q 3 (FabFilter)", name = "VST3: Pro-Q 3 (FabFilter)", short = "Pro-Q 3" })
   check("fxb: a new button", it.label == "Pro-Q 3" and it.icon == "cv:fx_eq" and FB.kind(it) == "fx", true)
+end
+
+-- Vendors (TS_CV_Vendors): a plugin's vendor from its name, initials, the
+-- stored line, and how a plugin button shows with a vendor's look.
+do
+  local VN = require("TS_CV_Vendors")
+  check("vn: vendor", VN.of_name("VST3: Pro-Q 3 (FabFilter)"), "FabFilter")
+  check("vn: channels skipped", VN.of_name("VST: ValhallaRoom (Valhalla DSP, LLC) (32 out)"), "Valhalla DSP")
+  check("vn: 4ch skipped", VN.of_name("VST3: Thing (Acme) (4ch)"), "Acme")
+  check("vn: nested brackets", VN.of_name("VST3: UADx 1176 (Universal Audio (UADx))"), "Universal Audio")
+  check("vn: Inc. dropped", VN.of_name("VST3: Ozone 11 (iZotope, Inc.)"), "iZotope")
+  check("vn: none", VN.of_name("JS: TS_CV Trimmer"), nil)
+  check("vn: initials, capitals", VN.initials("IK Multimedia"), "IKM")
+  check("vn: initials, camel", VN.initials("FabFilter"), "FF")
+  check("vn: initials, lower", VN.initials("sonible"), "SON")
+  local l = VN.parse("FabFilter|#4AA3DF|FF|mono;Waves|bad|W|nonsense;|#000000|x|fill")
+  check("vn: parsed", #l .. l[1].color .. l[1].look .. tostring(l[2].color) .. l[2].look, "2#4aa3dfmononilnone")
+  check("vn: written", VN.serialize(l), "FabFilter|#4aa3df|FF|mono;Waves||W|none")
+  check("vn: no separators in a field", VN.serialize({ { name = "A;B|C", init = "x|y", look = "none" } }), "ABC||xy|none")
+  local v = { color = "#4aa3df", init = "FF", look = "prefix" }
+  check("vn: prefix", VN.apply({}, "Pro-Q 3", v).label, "FF - Pro-Q 3")
+  check("vn: prefix once", VN.apply({}, "FF - Pro-Q 3", v).label, "FF - Pro-Q 3")
+  check("vn: vendor colour", VN.apply({}, "x", v).color, "#4aa3df")
+  check("vn: own colour wins", VN.apply({ color = "#c8453c" }, "x", v).color, "#c8453c")
+  v.look = "mono"
+  check("vn: tile", VN.apply({ icon = "cv:fx_eq" }, "x", v).mono, "FF")
+  check("vn: no tile over a PNG", VN.apply({ icon = "eq.png" }, "x", v).mono, nil)
+  v.look = "fill"
+  check("vn: fill", VN.apply({}, "x", v).fill, true)
+  check("vn: no vendor, as it is", VN.apply({ color = "#111111" }, "x", nil).color, "#111111")
+  -- stored, and new vendors getting a colour not yet taken
+  local store = {}
+  local gx, sx = reaper.GetExtState, reaper.SetExtState
+  reaper.GetExtState = function(a, b) return store[a .. "/" .. b] or "" end
+  reaper.SetExtState = function(a, b, val) store[a .. "/" .. b] = val end
+  VN.load(true)
+  local a = VN.ensure("FabFilter")
+  local b = VN.ensure("Waves Audio Ltd")
+  check("vn: ensure", a.color ~= b.color and b.name == "Waves Audio" and b.init == "WA", true)
+  check("vn: found by another spelling", VN.get("Waves Audio Ltd.") == b, true)
+  VN.remove("FabFilter")
+  check("vn: removed", VN.get("FabFilter"), nil)
+  check("vn: stored", store["TS_ChannelView/vendors"], "Waves Audio|" .. b.color .. "|WA|none")
+  -- the same as another vendor: its look, stored as a fifth field
+  store["TS_ChannelView/vendors"] = "Plugin Alliance|#4aa3df|PA|mono"
+  VN.load(true)
+  VN.same_as("Brainworx", "Plugin Alliance")
+  check("vn: same as, stored", store["TS_ChannelView/vendors"], "Plugin Alliance|#4aa3df|PA|mono;Brainworx||BRA|none|Plugin Alliance")
+  check("vn: same as, its look", VN.get("Brainworx").init, "PA")
+  check("vn: same as, read back", VN.parse(store["TS_ChannelView/vendors"])[2].same, "Plugin Alliance")
+  VN.same_as("Brainworx", nil)
+  check("vn: own look again", VN.get("Brainworx").same == nil and VN.get("Brainworx").color ~= nil, true)
+  VN.same_as("Brainworx", "Plugin Alliance")
+  VN.remove("Plugin Alliance")
+  check("vn: forgetting one forgets those the same as it", store["TS_ChannelView/vendors"], "")
+  -- set up all: a different colour each, past the 16 suggestions
+  local names = {}
+  for i = 1, 40 do names[i] = "Vendor" .. i end
+  VN.load(true)
+  check("vn: set up all", VN.ensure_all(names), 40)
+  local cols, dup = {}, false
+  for _, v in ipairs(VN.list()) do if cols[v.color] then dup = true end cols[v.color] = true end
+  check("vn: all colours different", dup, false)
+  check("vn: set up all again, none new", VN.ensure_all(names), 0)
+  -- the installed plugins' vendors
+  local fxlist = { { "VST3: Pro-Q 3 (FabFilter)", "Pro-Q 3.vst3" }, { "VST: Pro-Q 3 (FabFilter)", "ProQ3.dll" },
+                   { "VST3: Ozone 11 (iZotope, Inc.)", "Ozone.vst3" }, { "JS: Thing", "thing" } }
+  local ge = reaper.EnumInstalledFX
+  reaper.EnumInstalledFX = function(i) local e = fxlist[i + 1]; if not e then return false end return true, e[1], e[2] end
+  package.loaded["TS_CV_Vendors"] = nil
+  require("TS_CV_FXIndex").reset()     -- no tag file here: vendors from the names
+  local VN2 = require("TS_CV_Vendors")
+  local inst = VN2.installed()
+  check("vn: installed", #inst .. inst[1].name .. inst[1].n .. inst[2].name, "2FabFilter2iZotope")
+  check("vn: ident's vendor", VN2.of_ident("Ozone.vst3"), "iZotope")
+  reaper.EnumInstalledFX = ge
+  package.loaded["TS_CV_Vendors"] = VN
+  store["TS_ChannelView/vendors"] = ""
+  VN.load(true)
+  -- the web bar carries the look worked out (vc, vl, vm, vf), and
+  -- working it out again changes nothing
+  local okd, DR = pcall(require, "TS_CV_Drawers")
+  local FB = require("TS_CV_FXButtons")
+  if okd then
+    store["TS_ChannelView/vendors"] = "FabFilter|#4aa3df|FF|mono"
+    local cmd = FB.fx_cmd("VST3: Pro-Q 3 (FabFilter)")
+    local t = DR.json_encode_list({ { l = "Pro-Q 3", a = cmd, c = "" }, { l = "Undo", a = "40029", c = "" } })
+    local w = DR.web_vendors(t)
+    local arr = DR.json_decode(w)
+    check("vn: web look", arr[1].vc .. arr[1].vm .. tostring(arr[1].vl) .. tostring(arr[2].vc), "#4aa3dfFFnilnil")
+    check("vn: web, again the same", DR.web_vendors(w), w)
+    check("vn: web, not read back", DR.from_web(arr)[1].vc, nil)
+    store["TS_ChannelView/vendors"] = "FabFilter|#4aa3df|FF|prefix"
+    check("vn: web prefix", DR.json_decode(DR.web_vendors(w))[1].vl, "FF - Pro-Q 3")
+  end
+  reaper.GetExtState, reaper.SetExtState = gx, sx
+end
+
+-- two windows on one library (ChannelView and its Rack view): each saves
+-- its own changes over the other's, not instead of them
+do
+  local gx, sx = reaper.GetExtState, reaper.SetExtState
+  local store = {}
+  reaper.GetExtState = function(a, b) return store[a .. "/" .. b] or "" end
+  reaper.SetExtState = function(a, b, v) store[a .. "/" .. b] = v end
+  local tp = reaper.time_precise
+  local tick = 0
+  reaper.time_precise = function() tick = tick + 1 return tick end
+  package.loaded["TS_CV_Mappings"] = nil
+  local A = require("TS_CV_Mappings")
+  package.loaded["TS_CV_Mappings"] = nil
+  local B = require("TS_CV_Mappings")
+  A.init("./"); B.init("./")
+  A.set("SyncPlugA", { controls = { { param = 0, type = "knob", label = "A" } } })
+  B.set("SyncPlugB", { controls = { { param = 1, type = "knob", label = "B" } } })
+  A.save(); B.save()
+  A.sync()
+  check("sync: the other window's layout arrives", A.get("SyncPlugB") and A.get("SyncPlugB").controls[1].label, "B")
+  check("sync: our own layout kept", B.get("SyncPlugA") and B.get("SyncPlugA").controls[1].label, "A")
+  B.remove("SyncPlugA"); B.save()
+  A.set("SyncPlugB", { controls = { { param = 1, type = "knob", label = "B2" } } }); A.save()
+  local C2 = (function() package.loaded["TS_CV_Mappings"] = nil; local m = require("TS_CV_Mappings"); m.init("./"); return m end)()
+  check("sync: a removal survives the other's save", C2.get("SyncPlugA") == nil or C2.has("SyncPlugA") == false, true)
+  check("sync: the later edit wins", C2.get("SyncPlugB").controls[1].label, "B2")
+  C2.remove("SyncPlugB"); C2.save()
+  package.loaded["TS_CV_Mappings"] = M
+  -- the step labels' cache, the same way
+  package.loaded["TS_CV_Steps"] = nil
+  local SA = require("TS_CV_Steps")
+  package.loaded["TS_CV_Steps"] = nil
+  local SB = require("TS_CV_Steps")
+  os.remove("./TS_ChannelView_Steps.ini")
+  SA.init("./"); SB.init("./")
+  SA.set("SyncSteps", 3, { { text = "Low" }, { text = "High" } })
+  SB.set("SyncSteps", 4, { { text = "Off" }, { text = "On" } })
+  SA.save(); SB.save(); SA.sync()
+  check("sync: steps from the other window", SA.get("SyncSteps", 4, 1) and SA.get("SyncSteps", 4, 1)[2].text, "On")
+  check("sync: own steps kept", SB.get("SyncSteps", 3, 1) and SB.get("SyncSteps", 3, 1)[1].text, "Low")
+  os.remove("./TS_ChannelView_Steps.ini")
+  package.loaded["TS_CV_Steps"] = nil
+  reaper.GetExtState, reaper.SetExtState, reaper.time_precise = gx, sx, tp
+end
+
+-- a switch's reading: words first, the value when they say nothing
+do
+  local ME = require("TS_CV_MapEQ")
+  local R = ME.switch_reads_on
+  check("switch: Disabled is off (Kirchhoff Dyn. On)", R("Band1 Dyn. On", "Disabled", 0), false)
+  check("switch: Enabled is on", R("Band1 Dyn. On", "Enabled", 1), true)
+  check("switch: On / Off", tostring(R("Dyn", "On", 1)) .. "/" .. tostring(R("Dyn", "Off", 0)), "true/false")
+  check("switch: In / Out", tostring(R("EQ", "In", 1)) .. "/" .. tostring(R("EQ", "Out", 0)), "true/false")
+  check("switch: Bypass param, Not Bypassed is on", R("Band 1 Bypass", "Not Bypassed", 0), true)
+  check("switch: Bypass param, Bypassed is off", R("Band 1 Bypass", "Bypassed", 1), false)
+  check("switch: Bypass param, Off is on", R("Bypass", "Off", 0), true)
+  check("switch: Bypassed elsewhere is off", R("Band 1 State", "Bypassed", 1), false)
+  check("switch: no words, by value", tostring(R("Dyn", "", 0.2)) .. "/" .. tostring(R("Dyn", "", 0.8)), "false/true")
+  check("switch: Off (Stereo) is off", R("Dyn", "Off (Stereo)", 0), false)
+  check("switch: Not Active is off", R("Dyn", "Not Active", 0), false)
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

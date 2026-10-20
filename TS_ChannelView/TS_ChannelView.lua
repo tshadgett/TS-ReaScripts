@@ -1,17 +1,24 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.4.0
+-- @version 2.5.0
 -- @changelog
---  The Trimmer: a first-in-the-chain plugin with VU meters, linkable
---  trims, low and high cut over a spectrum, Auto trim from the items and
---  Listen; added with one click from the header. Action bars: buttons
---  that add a plugin or an FX chain (several picked at once), a colour
---  style per button, and icons and colours on menu rows.
+--  Hardware looks: finishes (brushed, anodised, satin, tolex, leather, wood,
+--  crinkle, enamel, hammertone, checker plate...), soft and round corners,
+--  ten switch styles for toggles, seventeen knob recipes built from parts
+--  and a Knob look editor for your own, concentric knob recipe pairs, one
+--  light with View > Lighting and View > Shadows. Rack view: the plugins
+--  down a column in a window of its own, with its own layouts. Show or
+--  hide the macros, modulators, sends and receives. EQ canvases draw
+--  notch, band pass, tilt, flat top, sword and all pass bands and any
+--  slope. Vendor colours for plugin buttons. Fixes for measuring after a
+--  plugin that takes the track's channel count, the selected outline and
+--  Enabled/Disabled switches. Restart the web companion after updating.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
 --  [main]   TS_ChannelView_TCP.lua
 --  [main]   TS_ChannelView_ToggleMixer.lua
+--  [main]   TS_ChannelView_Rack.lua
 --  [main]   TS_ChannelView_Web.lua
 --  [main]   TS_ChannelView_Web_Startup.lua
 --  [webinterface] TS_ChannelView.html
@@ -20,6 +27,18 @@
 --  [webinterface] TS_ChannelView-512.png
 --  [webinterface] TS_ChannelView-maskable.png
 --  [webinterface] TS_CV_ActionIcons.json
+--  [webinterface] textures/TS_CV_finish_brushed.png > TS_CV_finish_brushed.png
+--  [webinterface] textures/TS_CV_finish_anodised.png > TS_CV_finish_anodised.png
+--  [webinterface] textures/TS_CV_finish_bright.png > TS_CV_finish_bright.png
+--  [webinterface] textures/TS_CV_finish_satin.png > TS_CV_finish_satin.png
+--  [webinterface] textures/TS_CV_finish_satin_grain.png > TS_CV_finish_satin_grain.png
+--  [webinterface] textures/TS_CV_finish_tolex.png > TS_CV_finish_tolex.png
+--  [webinterface] textures/TS_CV_finish_leather.png > TS_CV_finish_leather.png
+--  [webinterface] textures/TS_CV_finish_wood.png > TS_CV_finish_wood.png
+--  [webinterface] textures/TS_CV_finish_crinkle.png > TS_CV_finish_crinkle.png
+--  [webinterface] textures/TS_CV_finish_enamel.png > TS_CV_finish_enamel.png
+--  [webinterface] textures/TS_CV_finish_hammertone.png > TS_CV_finish_hammertone.png
+--  [webinterface] textures/TS_CV_finish_checker.png > TS_CV_finish_checker.png
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
 --  [nomain] TS_CV_Toolbar.lua
@@ -79,6 +98,25 @@
 --  [nomain] TS_CV_TrackOps.lua
 --  [nomain] TS_CV_TrackStrip.lua
 --  [nomain] TS_CV_FXButtons.lua
+--  [nomain] TS_CV_Vendors.lua
+--  [nomain] TS_CV_Finish.lua
+--  [nomain] TS_CV_Switches.lua
+--  [nomain] TS_CV_Light.lua
+--  [nomain] TS_CV_KnobParts.lua
+--  [nomain] TS_CV_KnobEditor.lua
+--  [nomain] TS_CV_Recipes.lua
+--  [nomain] textures/TS_CV_finish_brushed.png
+--  [nomain] textures/TS_CV_finish_anodised.png
+--  [nomain] textures/TS_CV_finish_bright.png
+--  [nomain] textures/TS_CV_finish_satin.png
+--  [nomain] textures/TS_CV_finish_satin_grain.png
+--  [nomain] textures/TS_CV_finish_tolex.png
+--  [nomain] textures/TS_CV_finish_leather.png
+--  [nomain] textures/TS_CV_finish_wood.png
+--  [nomain] textures/TS_CV_finish_crinkle.png
+--  [nomain] textures/TS_CV_finish_enamel.png
+--  [nomain] textures/TS_CV_finish_hammertone.png
+--  [nomain] textures/TS_CV_finish_checker.png
 --  [nomain] TS_CV_Trimmer.lua
 --  [nomain] TS_CV_TrimmerPanel.lua
 --  [main]   TS_ChannelView_TrimmerAdd.lua
@@ -104,6 +142,9 @@
 --  switches and ChannelView's own icons, as drawers in this window, in
 --  windows of their own (TS_ChannelView_Toolbars.lua), in the TCP window
 --  and on the web page -- all arranged in Organise actions.
+--
+--  Rack view: TS_ChannelView_Rack.lua shows the selected track's plugins
+--  down a column, in a window of its own to dock beside the arrange.
 --
 --  Panels are a fixed height and grow in COLUMNS: rows fall out of the
 --  window height, controls flow down a column and wrap into a new one, so
@@ -171,6 +212,7 @@ local U = require("TS_CV_Util")
 local T = require("TS_CV_FXTree")
 local M = require("TS_CV_Mappings")
 local W = require("TS_CV_Widgets")
+local SWI = require("TS_CV_Switches")
 local P = require("TS_CV_Panel")
 local E  = require("TS_CV_Editor")
 local S  = require("TS_CV_TrackStrip")
@@ -204,14 +246,36 @@ local MR = require("TS_CV_ModRack")
 local TB = require("TS_CV_Toolbar")
 local DR = require("TS_CV_Drawers")
 local AE = require("TS_CV_ActionEditor")
+local KE = require("TS_CV_KnobEditor")
+local KPm = require("TS_CV_KnobParts")
+local RCP = require("TS_CV_Recipes")
+
+-- RACK VIEW: the same ChannelView, run by TS_ChannelView_Rack.lua in a
+-- window of its own -- the track's plugins down a column, toolbars of its
+-- own on every side, no fader panel, track names or mixer (the track is
+-- whichever REAPER has selected). Everything else -- layouts, settings,
+-- the web companion -- is shared; the library merges both windows' saves
+-- (TS_CV_Mappings M.sync).
+local RACK = rawget(_G, "TS_CV_RACK") == true
+if RACK then C.WIN_TITLE = "ChannelView Rack" end
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
 CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui); ML.attach(ImGui)
-TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui)
+TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui); KE.attach(ImGui)
 -- action drawers (global, not per project), and the window that organises
 -- every action bar
 DR.load()
+if RACK then
+  DR.host("rack"); P.RACK = true
+  -- its panels fold on their own, apart from ChannelView's
+  St.COLLAPSED, St.FOLD = "rcollapsed:", "rfold:"
+  MR.EXT_PFX = "rack_"
+  -- its layouts picked apart from ChannelView's (each falls back to
+  -- ChannelView's until one is picked here)
+  St.VARIANT = "rvariant:"
+  M.VIEW_DEFAULTS = M.RACK_DEFAULTS_SECT
+end
 DR.organise = function(d, it) AE.open(d, it) end
 DR.share = function(mode) AE.share(mode) end
 -- a learning track left behind by a ChannelView stopped mid-learn
@@ -224,6 +288,8 @@ pcall(function() require("TS_CV_Learn").sweep() end)
 SU.init()
 M.init(script_dir)
 SC.init(script_dir)
+RCP.init(script_dir)
+require("TS_CV_Finish").init(script_dir)
 
 -- NOTE ON Begin/End PAIRING
 -- ReaImGui keeps Dear ImGui's PRE-1.90 convention: End() and EndChild()
@@ -279,6 +345,18 @@ local function ext_set(k, v)
   reaper.SetExtState(C.EXT_SECT, k, tostring(v), true)
 end
 
+-- The panels besides the plugins, each of which can be hidden (View
+-- menu). ChannelView and the rack choose apart.
+local AUX = {
+  { key = "macros", label = "Macros" },
+  { key = "mods",   label = "Modulators" },
+  { key = "sends",  label = "Sends" },
+  { key = "recv",   label = "Receives" },
+}
+local AUX_PFX = RACK and "rack_" or "show_"
+app.aux = {}
+for _, a in ipairs(AUX) do app.aux[a.key] = ext_get(AUX_PFX .. a.key, "1") == "1" end
+
 -- ---------------------------------------------------------------------
 -- THE SHARED PALETTE
 --
@@ -310,17 +388,22 @@ local function pal_set(h, t)
   reaper.SetExtState(PAL_SECT, "tint", string.format("%.3f", t), true)
 end
 
-local dock_id = tonumber(ext_get("dock", "0")) or 0
+local DOCK_KEY = RACK and "rack_dock" or "dock"
+local dock_id = tonumber(ext_get(DOCK_KEY, "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
 C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
 -- (stored under the key plate_texture, so saved choices still load)
 C.EFFECT_3D = ext_get("plate_texture", C.EFFECT_3D and "1" or "0") == "1"
+C.SHADOW = math.max(0, math.min(C.SHADOW_MAX, tonumber(ext_get("shadow", tostring(C.SHADOW))) or C.SHADOW))
+require("TS_CV_Light").STRENGTH = C.SHADOW / 100
+C.LIGHT = math.max(0, math.min(C.LIGHT_MAX, tonumber(ext_get("light", tostring(C.LIGHT))) or C.LIGHT))
+require("TS_CV_KnobParts").LIGHT = C.LIGHT / 100
 C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
 -- into the view you were not in is a small daily annoyance.
-C.MIXER_VIEW  = ext_get("mixer_view", "0") == "1"
+C.MIXER_VIEW  = (not RACK) and ext_get("mixer_view", "0") == "1"
 C.FLOW        = ext_get("flow", C.FLOW)
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 do
@@ -727,30 +810,35 @@ local function plate_menu(fx, key, layout)
     local now_pl = C.plate_of(layout.plate)
     custom_rows("plate", layout.plate, 150, set, "Faceplate colour", now_pl and (now_pl.bg >> 8))
   end
-  -- the grain, on whichever faceplate is chosen (the theme's has none)
+  -- the surface finish, on whichever faceplate is chosen (the theme's has none)
   ImGui.Separator(ctx)
   local plate = C.plate_of(layout.plate)
-  local on = M.brushed(layout, plate)
-  if ImGui.MenuItem(ctx, "Brushed finish##plate_brush", nil, on, plate ~= nil) then
-    local l = materialise(fx)
-    local want = not on
-    -- the faceplate's own choice is no choice at all, so it isn't saved
-    if want == (plate.brushed or false) then l.brush = nil else l.brush = want end
-    M.set(key, l); M.save()
+  local fin = M.finish(layout, plate) or "plain"
+  if ImGui.BeginMenu(ctx, "Finish##plate_finish", plate ~= nil) then
+    local dflt = (plate and plate.brushed) and "brushed" or "plain"
+    for _, f in ipairs(C.FINISHES) do
+      if ImGui.MenuItem(ctx, f.label .. "##plate_fin_" .. f.key, nil, fin == f.key) then
+        local l = materialise(fx)
+        -- the faceplate's own choice is no choice at all, so it isn't saved
+        l.brush = nil
+        l.finish = (f.key ~= dflt) and f.key or nil
+        M.set(key, l); M.save()
+      end
+    end
+    ImGui.EndMenu(ctx)
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, plate and "Brushed grain on this faceplate."
-      or "Choose a faceplate first.")
+    ImGui.SetTooltip(ctx, plate and "The faceplate's surface." or "Choose a faceplate first.")
   end
   -- and/or a metallic flake, like metallic paint
   local mt = M.metal(layout, plate)
-  if ImGui.MenuItem(ctx, "Metallic finish##plate_metal", nil, mt, plate ~= nil) then
+  if ImGui.MenuItem(ctx, "Metallic flake##plate_metal", nil, mt, plate ~= nil) then
     local l = materialise(fx)
     l.metal = (not mt) or nil
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, plate and "Metallic flake on this faceplate.\nCombines with brushed."
+    ImGui.SetTooltip(ctx, plate and "Metallic flake over the finish."
       or "Choose a faceplate first.")
   end
 end
@@ -779,7 +867,8 @@ local function toggle_colour_menu(fx, key, idx, c)
   -- in this button's colour
   ImGui.TextDisabled(ctx, "Style")
   do
-    local cur = (c.style and C.BUTTON_STYLE[c.style]) and c.style or "flat"
+    -- (a switch's style is lit in its own row below, not Flat's)
+    local cur = (c.style and (C.BUTTON_STYLE[c.style] or C.SWITCH[c.style])) and c.style or "flat"
     local lit = W.lit_col(c.cap) or C.COL.toggle_on
     local _, th = ImGui.CalcTextSize(ctx, "Ag")
     local rh = math.max(th, 20)
@@ -796,6 +885,22 @@ local function toggle_colour_menu(fx, key, idx, c)
       if not W.button_face(dl, bx1, by1, bx2, by2, 2.5, true, lit, bs.key, false) then
         ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2, lit, 2.5)
         ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 2.5, 0, 1.0)
+      end
+    end
+    -- a toggle can be a hardware switch instead, each shown on, in the
+    -- same list
+    if c.type == "toggle" then
+      local sh = 30
+      for _, sw in ipairs(C.SWITCH_STYLES) do
+        local x, y = ImGui.GetCursorScreenPos(ctx)
+        if ImGui.Selectable(ctx, "         " .. sw.label .. "##bstyle_" .. sw.key, sw.key == cur,
+            KEEP_OPEN, 150, sh) then
+          local l = materialise(fx)
+          local lc = l.controls[idx]
+          if lc then lc.style = sw.key end
+          M.set(key, l); M.save()
+        end
+        SWI.draw(ctx, dl, sw.key, x + 2, y + 1, x + 34, y + sh - 1, true, lit, not C.EFFECT_3D, "ON", false)
       end
     end
   end
@@ -859,27 +964,34 @@ local function toggle_colour_menu(fx, key, idx, c)
   end
 end
 
--- "Brushed finish" for a control's background or a divider's section:
--- a tick that saves Brush<n>, or clears it when the choice is the one the
+-- The finish of a control's background or a divider's section: a combo
+-- that saves Finish<n>, or clears it when the choice is the one the
 -- faceplate makes anyway (aluminium is brushed, an inset isn't).
 local function brush_tick(fx, key, idx, c, kind, pl, id)
-  local on = M.part_brushed(kind, pl, c.brush)
-  local ch, v = ImGui.Checkbox(ctx, "Brushed finish##" .. id, on)
-  if ch and kind then
-    local l = materialise(fx)
-    local lc = l.controls[idx]
-    if lc then
-      if v == M.part_brushed(kind, pl, nil) then lc.brush = nil else lc.brush = v end
+  local fin = M.part_finish(kind, pl, c.finish, c.brush) or "plain"
+  local f_now = C.FINISH[fin] or C.FINISH.plain
+  ImGui.SetNextItemWidth(ctx, 120)
+  if ImGui.BeginCombo(ctx, "Finish##" .. id, f_now.label) then
+    local dflt = M.part_brushed(kind, pl, nil) and "brushed" or "plain"
+    for _, f in ipairs(C.FINISHES) do
+      if ImGui.Selectable(ctx, f.label .. "##" .. id .. "_" .. f.key, fin == f.key) and kind then
+        local l = materialise(fx)
+        local lc = l.controls[idx]
+        if lc then
+          lc.brush = nil
+          lc.finish = (f.key ~= dflt) and f.key or nil
+        end
+        M.set(key, l); M.save()
+      end
     end
-    M.set(key, l); M.save()
+    ImGui.EndCombo(ctx)
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, kind and "Brushed grain."
-      or "Choose a background first.")
+    ImGui.SetTooltip(ctx, kind and "The surface." or "Choose a background first.")
   end
   -- and/or a metallic flake (Metal<n>)
   local mt = M.part_metal(kind, c.metal)
-  local mch, mv = ImGui.Checkbox(ctx, "Metallic finish##" .. id .. "_m", mt)
+  local mch, mv = ImGui.Checkbox(ctx, "Metallic flake##" .. id .. "_m", mt)
   if mch and kind then
     local l = materialise(fx)
     local lc = l.controls[idx]
@@ -887,8 +999,32 @@ local function brush_tick(fx, key, idx, c, kind, pl, id)
     M.set(key, l); M.save()
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, kind and "Metallic flake."
+    ImGui.SetTooltip(ctx, kind and "Metallic flake over the finish."
       or "Choose a background first.")
+  end
+end
+
+-- How round a background's or section's corners are (Corners<n>): the
+-- usual slight rounding, soft, or round (fully round ends).
+local CORNER_CHOICES = { { nil, "Square" }, { "soft", "Soft" }, { "round", "Round" } }
+local function corners_combo(fx, key, idx, c, kind, id)
+  local now = M.corners_of(c.corners)
+  local label = "Square"
+  for _, o in ipairs(CORNER_CHOICES) do if o[1] == now then label = o[2] end end
+  ImGui.SetNextItemWidth(ctx, 120)
+  if ImGui.BeginCombo(ctx, "Corners##" .. id, label) then
+    for _, o in ipairs(CORNER_CHOICES) do
+      if ImGui.Selectable(ctx, o[2] .. "##" .. id .. "_" .. (o[1] or "square"), now == o[1]) and kind then
+        local l = materialise(fx)
+        local lc = l.controls[idx]
+        if lc then lc.corners = o[1] end
+        M.set(key, l); M.save()
+      end
+    end
+    ImGui.EndCombo(ctx)
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, kind and "Round: fully round ends (other shapes: soft)." or "Choose a background first.")
   end
 end
 
@@ -900,7 +1036,7 @@ local function back_menu(fx, key, idx, c)
   local function set(v)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.back = v; if not v then lc.brush, lc.metal = nil, nil end end
+    if lc then lc.back = v; if not v then lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, "Behind this control")
@@ -923,7 +1059,7 @@ local function back_menu(fx, key, idx, c)
     local function cset(k, save)
       local l, pk = materialise(fx)
       local lc = l.controls[idx]
-      if lc then lc.back = k; if not k then lc.brush, lc.metal = nil, nil end end
+      if lc then lc.back = k; if not k then lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil end end
       M.set(pk, l)
       if save then M.save() end
     end
@@ -934,6 +1070,7 @@ local function back_menu(fx, key, idx, c)
   local bkind, bpl = P.back_style(c.back)
   ImGui.BeginDisabled(ctx, not bkind)
   brush_tick(fx, key, idx, c, bkind, bpl, "back_brush")
+  corners_combo(fx, key, idx, c, bkind, "back_corners")
   ImGui.EndDisabled(ctx)
   ImGui.Spacing(ctx)
   ImGui.TextWrapped(ctx, "Controls side by side or above each other with the same background join into one shape, across a divider too.")
@@ -947,7 +1084,7 @@ local function section_menu(fx, key, idx, c)
   local function set(style, cap)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.style, lc.cap = style, cap; if not style then lc.brush, lc.metal = nil, nil end end
+    if lc then lc.style, lc.cap = style, cap; if not style then lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, "The controls after this divider")
@@ -978,7 +1115,7 @@ local function section_menu(fx, key, idx, c)
       if lc then
         if k then lc.style, lc.cap = "plate", k
         elseif before_style == "inset" then lc.style, lc.cap = "inset", nil
-        else lc.style, lc.cap, lc.brush, lc.metal = nil, nil, nil, nil end
+        else lc.style, lc.cap, lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil, nil, nil end
       end
       M.set(pk, l)
       if save then M.save() end
@@ -991,11 +1128,13 @@ local function section_menu(fx, key, idx, c)
   local skind, spl = P.section_style(c)
   ImGui.BeginDisabled(ctx, not skind)
   brush_tick(fx, key, idx, c, skind, spl, "sec_brush")
+  corners_combo(fx, key, idx, c, skind, "sec_corners")
   ImGui.EndDisabled(ctx)
 end
 
 -- An XY pad's or a concentric knob's look: the colour (the pad's dot, the
 -- inner knob) and the size. Neither takes the knob styles.
+local dual_style_grid     -- a concentric knob's styles, below
 local function pad_style_menu(fx, key, idx, c)
   local dl = ImGui.GetWindowDrawList(ctx)
   local function set(fields)
@@ -1004,6 +1143,7 @@ local function pad_style_menu(fx, key, idx, c)
     if lc then for k, v in pairs(fields) do lc[k] = v or nil end end
     M.set(key, l); M.save()
   end
+  if c.type == "dual" then dual_style_grid(fx, key, idx, c) end
   ImGui.TextDisabled(ctx, (c.type == "xy") and "Dot colour" or "Inner knob colour")
   for i, cp in ipairs(C.CAPS) do
     if i > 1 then ImGui.SameLine(ctx, 0, 4) end
@@ -1052,9 +1192,168 @@ local function pad_style_menu(fx, key, idx, c)
   end
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
-  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.cap ~= nil or c.size ~= nil) then
-    set({ cap = false, size = false })
+  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.cap ~= nil or c.size ~= nil
+      or c.style ~= nil or c.look ~= nil or c.style2 ~= nil or c.look2 ~= nil) then
+    set({ cap = false, size = false, style = false, look = false, style2 = false, look2 = false })
   end
+end
+
+-- A look built from parts onto knob idx, its section (the controls
+-- between the dividers either side) or every knob on the panel; each
+-- takes its own copy, and its colour from the look.
+local function apply_look(fx, idx, look, scope)
+  local l, pk = materialise(fx)
+  local ctl = l.controls
+  local function put(c)
+    if c and (c.type == "knob" or c.type == "stepped") then c.look = KPm.copy(look); c.cap = nil end
+  end
+  if scope == "section" then
+    local function edge(c) return c.type == "divider" or c.type == "page" end
+    local a, b = idx, idx
+    while a > 1 and not edge(ctl[a - 1]) do a = a - 1 end
+    while b < #ctl and not edge(ctl[b + 1]) do b = b + 1 end
+    for i = a, b do put(ctl[i]) end
+  elseif scope == "panel" then
+    for _, c in ipairs(ctl) do put(c) end
+  else
+    put(ctl[idx])
+  end
+  M.set(pk, l); M.save()
+end
+
+-- A concentric knob's pair of looks (outer, inner) onto knob idx, its
+-- section or every concentric knob on the panel, the same way.
+local function apply_dual(fx, idx, outer, inner, scope)
+  local l, pk = materialise(fx)
+  local ctl = l.controls
+  local function put(c)
+    if c and c.type == "dual" then
+      c.look, c.look2, c.cap = KPm.copy(outer), KPm.copy(inner), nil
+      if c.style == "arc" then c.style = nil end
+    end
+  end
+  if scope == "section" then
+    local function edge(c) return c.type == "divider" or c.type == "page" end
+    local a, b = idx, idx
+    while a > 1 and not edge(ctl[a - 1]) do a = a - 1 end
+    while b < #ctl and not edge(ctl[b + 1]) do b = b + 1 end
+    for i = a, b do put(ctl[i]) end
+  elseif scope == "panel" then
+    for _, c in ipairs(ctl) do put(c) end
+  else
+    put(ctl[idx])
+  end
+  M.set(pk, l); M.save()
+end
+
+-- A concentric knob's style: the default, the flat Arc, or any parts
+-- recipe (or one of yours) for the outer knob, with another for the inner
+-- one; Customise... builds both from parts. Thumbnails as the knobs'.
+local DUAL_START = "console"      -- Customise... on the default starts here
+dual_style_grid = function(fx, key, idx, c)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local function set(fields)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then for k, v in pairs(fields) do lc[k] = v or nil end end
+    M.set(key, l); M.save()
+  end
+  local _, th = ImGui.CalcTextSize(ctx, "Ag")
+  local COLS, CS = 6, 40
+  local hov
+  local cap = W.cap_col(c.cap)
+  local keep = W.hw
+  W.hw = C.EFFECT_3D and C.METAL_K or 0          -- the thumbnails as the panel draws them
+  local function thumb(x, y, o)
+    o.cap, o.ctx = o.cap or cap, ctx
+    W.dual_face(dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.35, 0.7, o)
+  end
+  local title_x, title_y = ImGui.GetCursorScreenPos(ctx)
+  ImGui.Dummy(ctx, 10, th)
+  local items = { { key = false, label = "Default" }, { key = "arc", label = "Arc (flat)" } }
+  for _, st in ipairs(C.KNOB_STYLES) do
+    if st.parts then items[#items + 1] = { key = st.key, label = st.label } end
+  end
+  local now_label = c.look and "Your own look" or "Default"
+  for i, it in ipairs(items) do
+    if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+    local x, y = ImGui.GetCursorScreenPos(ctx)
+    local on = not c.look and ((it.key or nil) == c.style)
+    if on then now_label = it.label end
+    if ImGui.Selectable(ctx, "##dstyle_" .. i, on, KEEP_OPEN, CS, CS) then
+      set({ style = it.key, look = false })
+    end
+    if ImGui.IsItemHovered(ctx) then hov = it.label end
+    thumb(x, y, { style = it.key or nil, style2 = c.style2, look2 = c.look2 })
+  end
+  local mine = RCP.list()
+  if #mine > 0 then
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Your recipes")
+    for i, r in ipairs(mine) do
+      if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+      local x, y = ImGui.GetCursorScreenPos(ctx)
+      if ImGui.Selectable(ctx, "##dmine_" .. i, false, KEEP_OPEN, CS, CS) then
+        set({ look = KPm.copy(r.look), style = (c.style ~= "arc") and c.style or false })
+      end
+      if ImGui.IsItemHovered(ctx) then hov = r.name end
+      thumb(x, y, { look = r.look, style2 = c.style2, look2 = c.look2 })
+    end
+  end
+  -- the inner knob, once the outer is a recipe
+  local outer, inner, odef, idef = W.dual_looks(c)
+  if outer then
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Inner knob")
+    local n = 0
+    local function cell()
+      if n % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+      n = n + 1
+      return ImGui.GetCursorScreenPos(ctx)
+    end
+    for _, st in ipairs(C.KNOB_STYLES) do
+      if st.parts then
+        local x, y = cell()
+        local on = not c.look2 and (c.style2 or "softtouch") == st.key
+        if ImGui.Selectable(ctx, "##dinner_" .. st.key, on, KEEP_OPEN, CS, CS) then
+          set({ style2 = (st.key ~= "softtouch") and st.key or false, look2 = false })
+        end
+        if ImGui.IsItemHovered(ctx) then hov = "Inner: " .. st.label end
+        thumb(x, y, { style = c.style, look = c.look, style2 = st.key })
+      end
+    end
+    for i, r in ipairs(mine) do
+      local x, y = cell()
+      if ImGui.Selectable(ctx, "##dinmine_" .. i, false, KEEP_OPEN, CS, CS) then
+        set({ look2 = KPm.copy(r.look), cap = false })
+      end
+      if ImGui.IsItemHovered(ctx) then hov = "Inner: " .. r.name end
+      thumb(x, y, { style = c.style, look = c.look, look2 = r.look })
+    end
+  end
+  W.hw = keep
+  ImGui.Spacing(ctx)
+  if ImGui.Selectable(ctx, "Customise...##dstyle_custom", false, 0, 150, 0) then
+    local o_def = odef or C.KNOB_STYLE[DUAL_START]
+    local start = KPm.copy(outer or o_def.parts)
+    if not start.col then start.col = W.cap_col(o_def.cap) or 0x26282bff end
+    local in_def = idef or C.KNOB_STYLE.softtouch
+    local start2 = KPm.copy(inner or in_def.parts)
+    start2.skirt, start2.washer, start2.nut = nil, nil, nil
+    start2.col = cap or ((not c.look2) and W.cap_col(in_def.cap)) or start2.col or 0x3a3b3eff
+    local lay = M.get(key)
+    local pl = lay and C.plate_of(lay.plate)
+    KE.open({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Concentric knob"),
+              look = start, inner = start2,
+              start = (not c.look) and (odef and c.style or DUAL_START) or nil,
+              start2 = (not c.look2) and (idef and idef.key) or nil,
+              plate = pl and pl.bg or nil,
+              apply = function(o, scope, i) apply_dual(fx, idx, o, i, scope) end })
+  end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Build both knobs from parts.") end
+  ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff, "Style: " .. (hov or now_label))
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
 end
 
 local function style_menu(fx, key, idx, c)
@@ -1074,18 +1373,62 @@ local function style_menu(fx, key, idx, c)
     M.set(key, l); M.save()
   end
 
-  ImGui.TextDisabled(ctx, "Style")
-  for _, st in ipairs(list) do
-    local x, y = ImGui.GetCursorScreenPos(ctx)
-    local text = (fam == "knob") and ("        " .. st.label) or st.label
-    if ImGui.Selectable(ctx, text .. "##style_" .. st.key, st.key == cur,
-        KEEP_OPEN, 150, row_h) then
-      set({ style = (st.key ~= list[1].key) and st.key or false })
+  if fam == "knob" then
+    -- the knobs as a grid of thumbnails, each in this knob's colour; the
+    -- name of the one under the pointer (or the chosen one) above them
+    local now_def = (not c.look) and C.KNOB_STYLE[cur] or nil
+    local hov_label
+    local title_x, title_y = ImGui.GetCursorScreenPos(ctx)
+    ImGui.Dummy(ctx, 10, th)
+    local COLS, CS = 6, 40
+    for i, st in ipairs(list) do
+      if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+      local x, y = ImGui.GetCursorScreenPos(ctx)
+      if ImGui.Selectable(ctx, "##style_" .. st.key, st.key == cur and not c.look, KEEP_OPEN, CS, CS) then
+        set({ style = (st.key ~= list[1].key) and st.key or false, look = false })
+      end
+      if ImGui.IsItemHovered(ctx) then hov_label = st.label end
+      local r = CS * 0.5 - 6     -- the scale ticks sit outside this
+      W.knob_face(dl, x + CS * 0.5, y + CS * 0.5, r, 0.62,
+        { style = st.key, cap = W.cap_col(c.cap), ctx = ctx })
     end
-    if fam == "knob" then
-      local r = row_h * 0.5 - 4     -- the scale ticks sit outside this
-      W.knob_face(dl, x + 4 + r, y + row_h * 0.5, r, 0.62,
-        { style = st.key, cap = W.cap_col(c.cap) })
+    -- your recipes: looks you've saved from Customise...
+    local mine = RCP.list()
+    if #mine > 0 then
+      ImGui.Spacing(ctx)
+      ImGui.TextDisabled(ctx, "Your recipes")
+      for i, r in ipairs(mine) do
+        if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+        local x, y = ImGui.GetCursorScreenPos(ctx)
+        if ImGui.Selectable(ctx, "##myrecipe_" .. i, false, KEEP_OPEN, CS, CS) then
+          set({ look = KPm.copy(r.look), cap = false })
+        end
+        if ImGui.IsItemHovered(ctx) then hov_label = r.name end
+        W.knob_face(dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, { look = r.look, ctx = ctx })
+      end
+    end
+    ImGui.Spacing(ctx)
+    if ImGui.Selectable(ctx, "Customise...##style_custom", false, 0, 150, 0) then
+      local def = C.KNOB_STYLE[cur]
+      local start = c.look and KPm.copy(c.look) or (def and def.parts and KPm.copy(def.parts)) or {}
+      if not c.look then start.col = W.cap_col(c.cap) or (def and W.cap_col(def.cap)) or start.col or 0x26282bff
+      elseif c.cap then start.col = W.cap_col(c.cap) end
+      local lay = M.get(key)
+      local pl = lay and C.plate_of(lay.plate)
+      KE.open({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Knob"),
+                look = start, start = (not c.look and def and def.parts) and cur or nil,
+                plate = pl and pl.bg or nil,
+                apply = function(look, scope) apply_look(fx, idx, look, scope) end })
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Build this knob from parts.") end
+    ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff,
+      "Style: " .. (hov_label or (now_def and now_def.label) or (c.look and "Your own look") or ""))
+  else
+    ImGui.TextDisabled(ctx, "Style")
+    for _, st in ipairs(list) do
+      if ImGui.Selectable(ctx, st.label .. "##style_" .. st.key, st.key == cur, KEEP_OPEN, 150, row_h) then
+        set({ style = (st.key ~= list[1].key) and st.key or false })
+      end
     end
   end
 
@@ -1470,11 +1813,14 @@ local function panel_menu()
       end
       -- which one new instances (and any not set to another) use
       if cur ~= dflt then
-        if ImGui.MenuItem(ctx, "Make \"" .. U.truncate(cur or "Standard", 20) .. "\" the default") then
+        if ImGui.MenuItem(ctx, "Make \"" .. U.truncate(cur or "Standard", 20) .. "\" the "
+            .. (RACK and "rack's default" or "default")) then
           M.set_default_variant(base, cur); M.save()
         end
         if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "Used by new instances and any not set to another layout.")
+          ImGui.SetTooltip(ctx, RACK
+            and "Used in the Rack view by new instances and any not set to another layout there."
+            or "Used by new instances and any not set to another layout.")
         end
       end
       ImGui.Separator(ctx)
@@ -1762,7 +2108,7 @@ local function look_text(s)
   elseif s.fam == "fader" then
     parts[#parts + 1] = label_of(C.FADER_STYLES, s.style) or "Flat"
   elseif s.fam == "button" then
-    parts[#parts + 1] = label_of(C.BUTTON_STYLES, s.style) or "Flat"
+    parts[#parts + 1] = label_of(C.BUTTON_STYLES, s.style) or label_of(C.SWITCH_STYLES, s.style) or "Flat"
   end
   if s.cap then
     parts[#parts + 1] = label_of(s.fam == "button" and C.TOGGLE_COLS or C.CAPS, s.cap)
@@ -2531,26 +2877,18 @@ local function control_menu()
   ImGui.EndPopup(ctx)
 end
 
--- Thin colour rules top and bottom, plus a chip carrying the track's own
--- colour and name. Enough to always know which track the panels belong to,
--- without a banner taking height away from the controls -- and bracketing
--- the window means the colour is in view wherever you happen to be
--- looking, including down at the track strip.
 -- Forward: the view toggle and the double-click handlers all switch
 -- views, and they are written above the function that does it.
 local set_view
 
--- Switching views. The peak stores are keyed per strip, and the strips
--- that are about to disappear would otherwise hold their last reading
--- until you came back and found a meter frozen at a level from minutes
--- ago.
 -- The "Toggle mixer view" action (TS_ChannelView_ToggleMixer.lua) can't
 -- reach this window's keyboard -- nothing can, from inside it -- so it
 -- leaves a request in the ExtState that each frame looks for, and says
 -- which command it is so a toolbar button for it can light while the
 -- mixer is showing. The heartbeat tells it whether this window is open.
-local TOGGLE_REQ, TOGGLE_CMD, ALIVE = "toggle_mixer", "toggle_mixer_cmd", "cv_alive"
+local TOGGLE_REQ, TOGGLE_CMD, ALIVE = "toggle_mixer", "toggle_mixer_cmd", RACK and "rack_alive" or "cv_alive"
 local function show_toggle_state(on)
+  if RACK then return end      -- (the mixer's toggle is ChannelView's)
   local sec, cmd = reaper.GetExtState(C.EXT_SECT, TOGGLE_CMD):match("^(%-?%d+):(%d+)$")
   if sec and tonumber(cmd) > 0 then
     reaper.SetToggleCommandState(tonumber(sec), tonumber(cmd), on and 1 or 0)
@@ -2558,7 +2896,12 @@ local function show_toggle_state(on)
   end
 end
 
+-- Switching views. The peak stores are keyed per strip, and the strips
+-- that are about to disappear would otherwise hold their last reading
+-- until you came back and found a meter frozen at a level from minutes
+-- ago.
 function set_view(mixer)
+  if RACK then return end        -- the rack has no mixer view
   C.MIXER_VIEW = mixer and true or false
   ext_set("mixer_view", C.MIXER_VIEW and "1" or "0")
   show_toggle_state(C.MIXER_VIEW)
@@ -2571,6 +2914,11 @@ function set_view(mixer)
   W.end_paint()
 end
 
+-- Thin colour rules top and bottom, plus a chip carrying the track's own
+-- colour and name. Enough to always know which track the panels belong to,
+-- without a banner taking height away from the controls -- and bracketing
+-- the window means the colour is in view wherever you happen to be
+-- looking, including down at the track strip.
 local function track_rule(dl, x, y, w)
   if not app.track then return end
   local col = U.track_colour(app.track, 0xff)
@@ -2585,9 +2933,6 @@ local function track_rule(dl, x, y, w)
     col or C.COL.panel_border, 0)
 end
 
--- Bypasses every FX on the track at once (I_FXEN), which is a different
--- thing from bypassing one plugin and belongs where you can always see it
--- rather than inside any one panel.
 -- `mid_y` is the vertical centre of the header bar. ImGui centres a menu
 -- label in the bar itself, but the cursor inside a menu bar sits at the
 -- TOP of the row, so anything drawn by hand has to be told where the
@@ -2609,6 +2954,9 @@ local function view_toggle(ctx, mid_y)
   end
 end
 
+-- Bypasses every FX on the track at once (I_FXEN), which is a different
+-- thing from bypassing one plugin and belongs where you can always see it
+-- rather than inside any one panel.
 local function fx_bypass_button(ctx, mid_y)
   if not app.track then return end
   local on = T.chain_bypassed(app.track)
@@ -2907,6 +3255,15 @@ local function menu_bar()
   end
   if main_open then
     if ImGui.BeginMenu(ctx, "View") then
+      -- the panels besides the plugins: each can go (the rack keeps its
+      -- own choice)
+      for _, a in ipairs(AUX) do
+        if ImGui.MenuItem(ctx, a.label, nil, app.aux[a.key]) then
+          app.aux[a.key] = not app.aux[a.key]
+          ext_set(AUX_PFX .. a.key, app.aux[a.key] and "1" or "0")
+        end
+      end
+      ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
         C.SHOW_VALUES = not C.SHOW_VALUES
         ext_set("show_values", C.SHOW_VALUES and "1" or "0")
@@ -2973,6 +3330,47 @@ local function menu_bar()
       end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Gradients, lit edges and soft shadows.")
+      end
+
+      -- how strongly the light models the plates and knobs
+      if ImGui.BeginMenu(ctx, "Lighting", C.EFFECT_3D) then
+        ImGui.SetNextItemWidth(ctx, 140)
+        local lch, lv = ImGui.SliderInt(ctx, "##light", C.LIGHT, 0, C.LIGHT_MAX, "%d%%")
+        if lch then
+          C.LIGHT = lv
+          require("TS_CV_KnobParts").LIGHT = C.LIGHT / 100
+          ext_set("light", tostring(C.LIGHT))
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Above 100: studio-lit, bright top left to deep bottom right.\nCtrl+click: type a value.")
+        end
+        if ImGui.MenuItem(ctx, "Reset to 100%", nil, false, C.LIGHT ~= 100) then
+          C.LIGHT = 100
+          require("TS_CV_KnobParts").LIGHT = 1
+          ext_set("light", "100")
+        end
+        ImGui.EndMenu(ctx)
+      end
+
+      -- how deep and far the shadows fall (all of them: knobs, switches,
+      -- buttons, fader caps; and the web page's)
+      if ImGui.BeginMenu(ctx, "Shadows", C.EFFECT_3D) then
+        ImGui.SetNextItemWidth(ctx, 140)
+        local shch, shv = ImGui.SliderInt(ctx, "##shadow", C.SHADOW, 0, C.SHADOW_MAX, "%d%%")
+        if shch then
+          C.SHADOW = shv
+          require("TS_CV_Light").STRENGTH = C.SHADOW / 100
+          ext_set("shadow", tostring(C.SHADOW))
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "0: none. 200: deep and long.\nCtrl+click: type a value.")
+        end
+        if ImGui.MenuItem(ctx, "Reset to 100%", nil, false, C.SHADOW ~= 100) then
+          C.SHADOW = 100
+          require("TS_CV_Light").STRENGTH = 1
+          ext_set("shadow", "100")
+        end
+        ImGui.EndMenu(ctx)
       end
 
       if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
@@ -3114,7 +3512,7 @@ local function menu_bar()
         if ImGui.MenuItem(ctx, d[1], nil, dock_id == d[2]) then
           dock_id = d[2]
           ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_Always)
-          ext_set("dock", dock_id)
+          ext_set(DOCK_KEY, dock_id)
         end
       end
       ImGui.EndMenu(ctx)
@@ -3124,7 +3522,8 @@ local function menu_bar()
     -- truth, and a cached boolean is just something that can disagree
     -- with it after a hand edit. See TS_CV_Startup for why that file is
     -- treated as gingerly as it is.
-    do
+    -- (ChannelView's own: the Rack view's window doesn't write one)
+    if not RACK then
       if not SU.checked() then SU.scan() end
       local st, note = SU.state()
       if ImGui.MenuItem(ctx, "Run when REAPER starts", nil, SU.on(),
@@ -3186,7 +3585,7 @@ local function menu_bar()
   -- title's left limit moves past it.
   do
     local tw = C.ICON_SIZE + 10
-    if fx_left - menus_right > tw + 40 then
+    if not RACK and fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, menus_right + 6, mid_y - C.ICON_SIZE * 0.5)
       view_toggle(ctx, mid_y)
@@ -3259,13 +3658,13 @@ local function menu_bar()
       ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
       local have = TRM.find(app.track)
       if W.icon_button(ctx, "trimmer", "trimmer", C.ICON_SIZE, have ~= nil,
-          have and "TS_CV Trimmer" or "Add the TS_CV Trimmer (trim, filters, VU) first in the chain") then
+          have and "Trimmer" or "Add Trimmer") then
         if have then
           ImGui.OpenPopup(ctx, "trimmermenu")
         else
           reaper.Undo_BeginBlock()
           local idx = TRM.insert(app.track, TP.ara_first(app.track))
-          reaper.Undo_EndBlock("ChannelView: add TS_CV Trimmer", -1)
+          reaper.Undo_EndBlock("ChannelView: add Trimmer", -1)
           if idx then
             rescan(true)
           else
@@ -3290,7 +3689,7 @@ local function menu_bar()
           if ImGui.MenuItem(ctx, "Remove the Trimmer") then
             reaper.Undo_BeginBlock()
             reaper.TrackFX_Delete(app.track, idx)
-            reaper.Undo_EndBlock("ChannelView: remove TS_CV Trimmer", -1)
+            reaper.Undo_EndBlock("ChannelView: remove Trimmer", -1)
             rescan(true)
           end
         end
@@ -3424,8 +3823,8 @@ end
 
 -- A dashed placeholder at the end of the row. Deliberately not styled as
 -- a panel: it isn't a plugin, and shouldn't read as an empty one.
-local function add_tile(h)
-  local w = C.ADD_TILE_W
+local function add_tile(h, w)
+  w = w or C.ADD_TILE_W
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local pressed = ImGui.InvisibleButton(ctx, "addfx", w, h)
@@ -3566,6 +3965,87 @@ local function draw_brackets()
   -- it would trip ImGui's check on the child's bounds at EndChild)
 end
 
+-- What a panel asked for this frame (P.draw's req): acted on the same way
+-- wherever it was drawn -- the row, or the Rack view's column.
+local function panel_requests(i, fx, layout, key, req)
+    if req.toggle_bypass then
+      T.set_enabled(app.track, fx.addr, not T.get_enabled(app.track, fx.addr))
+    end
+    if req.toggle_float then
+      T.toggle_float(app.track, fx.addr)
+    end
+    if req.toggle_collapse then
+      toggle_fold(fx)
+    end
+    if req.begin_drag and not app.drag then
+      app.drag = { chain_i = i, guid = fx.guid, path = fx.path_t,
+                   what = fx.is_container and "container" or "plugin" }
+    end
+    if req.open_menu then
+      app.menu_fx = i
+      app.open_panel_menu = true
+    end
+    if req.open_editor and not M.locked(layout) then
+      E.open(app.track, fx, key, layout)
+    end
+    if req.canvas_setup then CS.open(app.track, fx, key) end
+    -- a modulator's link dropped on a control: linked, after asking
+    -- when that replaces another modulator
+    if req.mod_drop then
+      local d = req.mod_drop
+      link_source(d.mod, d.k or 1, d.path, d.param, d.label, d.was, d.centre)
+    end
+    -- the padlock: lock at the rows the panel has now, or unlock
+    if req.toggle_lock ~= nil then
+      if E.is_open() and E.key() == key then
+        reaper.MB("Close Edit parameters for " .. key .. " first: saving it would\n" ..
+                  "undo the lock.", "ChannelView", 0)
+      else
+        local l = materialise(fx)
+        l.lock = req.toggle_lock or nil
+        M.set(key, l); M.save()
+      end
+    end
+    if req.page_cap then
+      -- a page tab's colour, from its right-click picker: previewed as
+      -- you hover (not saved to disk until you pick)
+      local l = materialise(fx)
+      local c = l.controls and l.controls[req.page_cap.idx]
+      if c and c.type == "page" then
+        c.cap = req.page_cap.cap
+        M.set(key, l)
+        if req.page_cap.save then M.save() end
+      end
+    end
+    if req.grv_window then
+      local l = materialise(fx)
+      if l.meter then
+        l.meter.win = (req.grv_window ~= C.GRV_DEFAULT) and req.grv_window or nil
+      elseif RC.is_comp(key) then
+        -- ReaComp's canvas keeps its history's window in the same
+        -- place, with no meter of its own (the canvas has the meters)
+        l.meter = { on = false, win = (req.grv_window ~= RCP.WINDOW_DEFAULT) and req.grv_window or nil }
+      end
+      M.set(key, l); M.save()
+    end
+    if req.ctx_control then
+      app.ctl_menu = { fx = i, ctl = req.ctx_control }
+      local c = layout.controls and layout.controls[req.ctx_control]
+      local pn = ""
+      if c and c.param then
+        _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param, "")
+      end
+      -- starts as the name the control shows now
+      app.rename_buf = c and c.param
+        and M.display_name(key, c.param, nil, pn, false) or pn or ""
+      app.label_buf = c and c.label or ""
+      app.rng_for = nil
+      local st = c and c.param and M.get_states(key, c.param)
+      app.state_buf = { st and st[1] or "", st and st[2] or "" }
+      app.open_ctl_menu = true
+    end
+end
+
 local function panel_row(row_h, row_w)
   local pr_x, pr_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "panelrow", row_w or 0, row_h, 0,
@@ -3594,9 +4074,6 @@ local function panel_row(row_h, row_w)
     if not app.track then
       ImGui.TextDisabled(ctx, "Select a track.")
     else
-      -- Centring needs the row's full width up front, so measure first.
-      -- Only worth it when everything fits; once the panels overflow they
-      -- pack left and the row scrolls, which is the only sane behaviour.
       -- Only the panels under a bracket give up height, and only as many
       -- rows as their own brackets stack: the outermost one over them.
       local drop = {}
@@ -3606,6 +4083,9 @@ local function panel_row(row_h, row_w)
       end
       local function panel_h(i) return inner_h - (drop[i] or 0) end
 
+      -- Centring needs the row's full width up front, so measure first.
+      -- Only worth it when everything fits; once the panels overflow they
+      -- pack left and the row scrolls, which is the only sane behaviour.
       if C.ROW_ALIGN == "centre" and #app.chain > 0 then
         local total = C.PANEL_GAP + C.ADD_TILE_W
         for i, fx in ipairs(app.chain) do
@@ -3647,82 +4127,7 @@ local function panel_row(row_h, row_w)
           w         = w,
         }
 
-        if req.toggle_bypass then
-          T.set_enabled(app.track, fx.addr, not T.get_enabled(app.track, fx.addr))
-        end
-        if req.toggle_float then
-          T.toggle_float(app.track, fx.addr)
-        end
-        if req.toggle_collapse then
-          toggle_fold(fx)
-        end
-        if req.begin_drag and not app.drag then
-          app.drag = { chain_i = i, guid = fx.guid, path = fx.path_t,
-                       what = fx.is_container and "container" or "plugin" }
-        end
-        if req.open_menu then
-          app.menu_fx = i
-          app.open_panel_menu = true
-        end
-        if req.open_editor and not M.locked(layout) then
-          E.open(app.track, fx, key, layout)
-        end
-        if req.canvas_setup then CS.open(app.track, fx, key) end
-        -- a modulator's link dropped on a control: linked, after asking
-        -- when that replaces another modulator
-        if req.mod_drop then
-          local d = req.mod_drop
-          link_source(d.mod, d.k or 1, d.path, d.param, d.label, d.was, d.centre)
-        end
-        -- the padlock: lock at the rows the panel has now, or unlock
-        if req.toggle_lock ~= nil then
-          if E.is_open() and E.key() == key then
-            reaper.MB("Close Edit parameters for " .. key .. " first: saving it would\n" ..
-                      "undo the lock.", "ChannelView", 0)
-          else
-            local l = materialise(fx)
-            l.lock = req.toggle_lock or nil
-            M.set(key, l); M.save()
-          end
-        end
-        if req.page_cap then
-          -- a page tab's colour, from its right-click picker: previewed as
-          -- you hover (not saved to disk until you pick)
-          local l = materialise(fx)
-          local c = l.controls and l.controls[req.page_cap.idx]
-          if c and c.type == "page" then
-            c.cap = req.page_cap.cap
-            M.set(key, l)
-            if req.page_cap.save then M.save() end
-          end
-        end
-        if req.grv_window then
-          local l = materialise(fx)
-          if l.meter then
-            l.meter.win = (req.grv_window ~= C.GRV_DEFAULT) and req.grv_window or nil
-          elseif RC.is_comp(key) then
-            -- ReaComp's canvas keeps its history's window in the same
-            -- place, with no meter of its own (the canvas has the meters)
-            l.meter = { on = false, win = (req.grv_window ~= RCP.WINDOW_DEFAULT) and req.grv_window or nil }
-          end
-          M.set(key, l); M.save()
-        end
-        if req.ctx_control then
-          app.ctl_menu = { fx = i, ctl = req.ctx_control }
-          local c = layout.controls and layout.controls[req.ctx_control]
-          local pn = ""
-          if c and c.param then
-            _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param, "")
-          end
-          -- starts as the name the control shows now
-          app.rename_buf = c and c.param
-            and M.display_name(key, c.param, nil, pn, false) or pn or ""
-          app.label_buf = c and c.label or ""
-          app.rng_for = nil
-          local st = c and c.param and M.get_states(key, c.param)
-          app.state_buf = { st and st[1] or "", st and st[2] or "" }
-          app.open_ctl_menu = true
-        end
+        panel_requests(i, fx, layout, key, req)
       end
 
       -- Trailing tile: adds to the END of the chain. Inserting at a
@@ -3782,6 +4187,301 @@ local function panel_row(row_h, row_w)
 end
 
 -- ---------------------------------------------------------------------
+-- RACK VIEW: the column
+-- ---------------------------------------------------------------------
+-- Down the column: the macros and modulators (each a strip, when shown),
+-- the plugins in chain order, an add tile, then the sends and receives
+-- (strips too). Every strip and every plugin's
+-- plate is the column's width (P.FILL_W); its height is the least that
+-- lays its controls out within that width. The wheel scrolls the column
+-- unless a control under the pointer took it; a dragged panel drops above
+-- or below the one under the pointer.
+
+-- (the AUX panels are shown or not per view: see the View menu)
+
+-- a macro or modulator added, or something changed, in either view
+local function aux_mod_requests(ma_req, mo_req)
+  if ma_req.add_macro or mo_req.add_mod then
+    local done
+    if ma_req.add_macro then done = MD.add_macro(app.track, ma_req.add_macro, TP.ara_first(app.track))
+    else done = MD.add_mod(app.track, mo_req.add_mod, TP.ara_first(app.track)) end
+    if not done and not MD.plugin(app.track) then
+      reaper.MB("ChannelView couldn't find its ChannelView Modulators plugin\n" ..
+                "(TS_CV_Modulators.jsfx). Reinstalling ChannelView from ReaPack puts it back.",
+                "ChannelView", 0)
+    end
+    rescan(true)
+  end
+  if ma_req.changed or mo_req.changed then rescan(true) end
+end
+
+-- the rack's strips: each the column's width and as short as fits; the
+-- cursor goes on below it
+local function rack_strip(h, draw)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local _, req = draw(h)
+  ImGui.SetCursorScreenPos(ctx, x, y + h + C.PANEL_GAP)
+  return req or {}
+end
+
+local rack_fit = {}      -- guid -> { sig, h }
+local function rack_height(fx, layout, key, rack_w)
+  if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
+  local sig = table.concat({ tostring(layout), key, math.floor(rack_w), math.floor(reaper.time_precise() * 2),
+                             tostring(St.is_gr_open(fx.guid)), tostring(C.SHOW_VALUES) }, "|")
+  local hit = rack_fit[fx.guid]
+  if hit and hit.sig == sig then return hit.h end
+  local h = P.rack_height(app.track, fx, layout, key, rack_w)
+  rack_fit[fx.guid] = { sig = sig, h = h }
+  return h
+end
+
+-- where a dragged panel would land: above or below the panel under the
+-- pointer (the column's take on drop_under)
+local function rack_drop(my)
+  local rects = app.panel_rects
+  if #rects == 0 then return nil end
+  for _, r in ipairs(rects) do
+    local fx = app.chain[r.chain_i]
+    if fx and my < r.y + r.h + C.PANEL_GAP then
+      local into = fx.ancestors and fx.ancestors[#fx.ancestors] or nil
+      if my < r.y + r.h * 0.5 then
+        return { parent = fx.parent_path or {}, gap = fx.index or 0, y = r.y - C.PANEL_GAP * 0.5, into = into }
+      end
+      return { parent = fx.parent_path or {}, gap = (fx.index or 0) + 1,
+               y = r.y + r.h + C.PANEL_GAP * 0.5, into = into }
+    end
+  end
+  local last = rects[#rects]
+  return { parent = {}, gap = reaper.TrackFX_GetCount(app.track), y = last.y + last.h + C.PANEL_GAP * 0.5 }
+end
+
+-- Container and parallel brackets down the column's left edge: a gutter
+-- with a line per bracket (the outermost furthest left), its ends turning
+-- in to the panels it spans. A container also gets a strip across the
+-- column over its first panel -- its on/off square, its name, its
+-- oversampling -- which opens its menu; a parallel run is marked "=".
+local RACK_BRK_W = 9
+-- Each panel moves in by the brackets round it only: depth n (the
+-- deepest bracket row covering it, plus one) indents it n rows' worth;
+-- a panel in no bracket keeps the column's full width.
+local function rack_indents()
+  local depth = {}
+  for _, b in ipairs(app.brackets or {}) do
+    for i = b.first, b.last do depth[i] = math.max(depth[i] or 0, b.row + 1) end
+  end
+  return function(i)
+    local d = depth[i] or 0
+    return d > 0 and (d * RACK_BRK_W + 4) or 0
+  end
+end
+
+local function rack_brk_strip(b, colx, colw)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x0, y0 = ImGui.GetCursorScreenPos(ctx)
+  local h = C.BRK_ROW_H + 4
+  local lx = colx + 3 + (b.row + 0.5) * RACK_BRK_W
+  local col = C.COL.brk_container
+  local off = not T.get_enabled(app.track, b.node.addr)
+  if off then col = U.with_alpha(col, 0x80) end
+  local id = ("rbrk%d_%d_%d"):format(b.first, b.last, b.row)
+  ImGui.SetCursorScreenPos(ctx, lx - 4, y0)
+  ImGui.InvisibleButton(ctx, id, math.max(1, colx + colw - lx + 4), h,
+    ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  local hov = ImGui.IsItemHovered(ctx)
+  W.tip(ctx, id, bracket_tip(b), hov, false)
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) or ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+    app.box_for, app.open_box_menu = b.node, true
+  end
+  local my = math.floor(y0 + h * 0.5) + 0.5
+  ImGui.DrawList_AddLine(dl, lx, my, lx + 6, my, col, 1.5)
+  local sq, sx = 7, lx + 8
+  if off then ImGui.DrawList_AddRect(dl, sx + 0.5, my - 3, sx + sq - 0.5, my + 3, col, 0, 0, 1.0)
+  else ImGui.DrawList_AddRectFilled(dl, sx, my - 3.5, sx + sq, my + 3.5, col) end
+  local label = box_label(b.node)
+  local _, th = ImGui.CalcTextSize(ctx, label)
+  ImGui.DrawList_AddText(dl, sx + sq + 5, my - th * 0.5, hov and C.COL.header_text or col, label)
+  local tw = ImGui.CalcTextSize(ctx, label)
+  local os_lit = T.os_state(app.track, { addr = b.node.addr, ancestors = box_ancestors(b.node) }).lit
+  if os_lit then
+    local ox, ow, bh = sx + sq + 5 + tw + 6, W.os_width(ctx, os_lit), C.BRK_ROW_H - 1
+    ImGui.DrawList_AddRectFilled(dl, ox, my - bh * 0.5, ox + ow, my + bh * 0.5, col, 2.0)
+    W.push_small(ctx)
+    local ot = ("%dx"):format(os_lit)
+    local otw, oth = ImGui.CalcTextSize(ctx, ot)
+    ImGui.DrawList_AddText(dl, ox + (ow - otw) * 0.5, my - oth * 0.5, C.COL.panel_bg, ot)
+    W.pop_small(ctx)
+  end
+  ImGui.SetCursorScreenPos(ctx, x0, y0 + h)
+  return my
+end
+
+-- the lines, after the panels: every bracket from its top (a container's
+-- strip, or its first panel) to the foot of its last panel
+local function rack_brk_lines(colx, strip_y)
+  if (app.brk_rows or 0) == 0 then return end
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local rect = {}
+  for _, r in ipairs(app.panel_rects) do rect[r.chain_i] = r end
+  for _, b in ipairs(app.brackets) do
+    local ra, rb = rect[b.first], rect[b.last]
+    if ra and rb then
+      local box = b.kind == "container"
+      local col = box and C.COL.brk_container or C.COL.brk_parallel
+      if box and not T.get_enabled(app.track, b.node.addr) then col = U.with_alpha(col, 0x80) end
+      local lx = math.floor(colx + 3 + (b.row + 0.5) * RACK_BRK_W) + 0.5
+      local top = (box and strip_y[b]) or (math.floor(ra.y + 4) + 0.5)
+      local bot = math.floor(rb.y + rb.h - 4) + 0.5
+      ImGui.DrawList_AddLine(dl, lx, top, lx, bot, col, 1.5)
+      -- the ticks in to the panels' own edges (each is indented by its depth)
+      if not (box and strip_y[b]) then ImGui.DrawList_AddLine(dl, lx, top, ra.x - 2, top, col, 1.5) end
+      ImGui.DrawList_AddLine(dl, lx, bot, rb.x - 2, bot, col, 1.5)
+      if not box then
+        -- a parallel run: "=" across the middle of its line
+        local mid = math.floor((top + bot) * 0.5)
+        ImGui.DrawList_AddLine(dl, lx - 3, mid - 2, lx + 3, mid - 2, col, 1.5)
+        ImGui.DrawList_AddLine(dl, lx - 3, mid + 2, lx + 3, mid + 2, col, 1.5)
+        local id = ("rpar%d_%d_%d"):format(b.first, b.last, b.row)
+        ImGui.SetCursorScreenPos(ctx, lx - 4, mid - 6)
+        ImGui.InvisibleButton(ctx, id, 8, 12)
+        W.tip(ctx, id, bracket_tip(b), ImGui.IsItemHovered(ctx), false)
+      end
+    end
+  end
+end
+
+-- inside the column's child window
+local function rack_inside()
+  app.panel_rects = {}
+  local inner_w = ImGui.GetContentRegionAvail(ctx)
+  -- room for the scrollbar, so the panels don't jump when it comes and goes
+  local rack_w = math.max(120, inner_w - ImGui.GetStyleVar(ctx, ImGui.StyleVar_ScrollbarSize))
+  if not app.track then
+    ImGui.TextDisabled(ctx, "Select a track.")
+  else
+    -- the plugins, each as wide as the column (less the brackets round it)
+    if #app.chain == 0 then ImGui.TextDisabled(ctx, "No plugins on this track yet.") end
+    local colx = ImGui.GetCursorScreenPos(ctx)
+    local indent = rack_indents()
+    -- the containers starting at each panel, outermost first
+    local starts = {}
+    for _, b in ipairs(app.brackets or {}) do
+      if b.kind == "container" then
+        starts[b.first] = starts[b.first] or {}
+        table.insert(starts[b.first], b)
+      end
+    end
+    for _, l in pairs(starts) do table.sort(l, function(a, c) return a.row < c.row end) end
+    local strip_y = {}
+    for i, fx in ipairs(app.chain) do
+      local gut = indent(i)
+      local pw = rack_w - gut
+      P.FILL_W = pw
+      for _, b in ipairs(starts[i] or {}) do
+        ImGui.SetCursorScreenPos(ctx, colx, select(2, ImGui.GetCursorScreenPos(ctx)))
+        strip_y[b] = rack_brk_strip(b, colx, rack_w)
+      end
+      local layout, key = layout_for(fx)
+      local h = rack_height(fx, layout, key, pw)
+      local _, py = ImGui.GetCursorScreenPos(ctx)
+      local px = colx + gut
+      ImGui.SetCursorScreenPos(ctx, px, py)
+      local is_src = app.drag ~= nil and app.drag.guid == fx.guid
+      local w, req = P.draw(ctx, app.track, fx, layout, key, h, i, is_src)
+      app.panel_rects[#app.panel_rects + 1] = { chain_i = i, x = px, y = py, w = w, h = h }
+      panel_requests(i, fx, layout, key, req)
+      ImGui.SetCursorScreenPos(ctx, colx, py + h + C.PANEL_GAP)
+    end
+    P.FILL_W = nil
+    if #app.chain > 0 then
+      local keep_x, keep_y = ImGui.GetCursorScreenPos(ctx)
+      rack_brk_lines(colx, strip_y)
+      ImGui.SetCursorScreenPos(ctx, keep_x, keep_y)
+    end
+    if add_tile(C.HEADER_H + 12, rack_w) then B.open_menu(nil) end
+  end
+  -- the wheel scrolls the column, when no control took it
+  if ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows) then
+    local wy = ImGui.GetMouseWheel(ctx)
+    if wy ~= 0 and not W.wheel_taken() then
+      ImGui.SetScrollY(ctx, ImGui.GetScrollY(ctx) - wy * C.WHEEL_SCROLL_PX)
+    end
+  end
+  -- a panel being dragged: the drop marker across the column
+  if app.drag then
+    local _, my = ImGui.GetMousePos(ctx)
+    local drop = app.track and rack_drop(my) or nil
+    app.drop_gap = drop
+    if drop then
+      local dl = ImGui.GetWindowDrawList(ctx)
+      local wx = ImGui.GetWindowPos(ctx)
+      local ww = ImGui.GetWindowSize(ctx)
+      ImGui.DrawList_AddRectFilled(dl, wx + 2, drop.y - 1.5, wx + ww - 2, drop.y + 1.5,
+        drop.into and C.COL.brk_container or C.COL.drop_marker, 1.0)
+      if drop.into then ImGui.SetTooltip(ctx, "Into " .. box_label(drop.into)) end
+    end
+    if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+      if drop then move_to(app.drag.path, drop.parent, drop.gap, app.drag.what) end
+      app.drag, app.drop_gap = nil, nil
+    end
+  end
+end
+
+-- The column: the macros and modulators pinned across the top, the sends
+-- and receives across the foot, and between them the plugins, which
+-- scroll. The strips are as wide as the plugins (the scrollbar's room
+-- aside).
+local function rack_column(col_w, col_h)
+  local x0, y0 = ImGui.GetCursorScreenPos(ctx)
+  local rack_w = math.max(120, col_w - ImGui.GetStyleVar(ctx, ImGui.StyleVar_ScrollbarSize))
+  local top_h, foot = 0, {}
+  if app.track then
+    MR.STRIP_W, SD.STRIP_W, RV.STRIP_W = rack_w, rack_w, rack_w
+    local ma_req, mo_req = {}, {}
+    if app.aux.macros then
+      local h = MR.strip_h("macros", app.track, rack_w)
+      ma_req = rack_strip(h, function(hh) return MR.draw_macros(ctx, app.track, hh) end)
+      top_h = top_h + h + C.PANEL_GAP
+    end
+    if app.aux.mods then
+      local h = MR.strip_h("mods", app.track, rack_w)
+      mo_req = rack_strip(h, function(hh) return MR.draw_mods(ctx, app.track, hh) end)
+      top_h = top_h + h + C.PANEL_GAP
+    end
+    aux_mod_requests(ma_req, mo_req)
+    -- the master has no receives
+    if app.aux.sends then foot[#foot + 1] = { SD, SD.strip_h(app.track, rack_w) } end
+    if app.aux.recv and app.track ~= reaper.GetMasterTrack(0) then
+      foot[#foot + 1] = { RV, RV.strip_h(app.track, rack_w) }
+    end
+  end
+  local foot_h = 0
+  for _, f in ipairs(foot) do foot_h = foot_h + C.PANEL_GAP + f[2] end
+  local mid_h = math.max(100, col_h - top_h - foot_h)
+  -- the plugins
+  ImGui.SetCursorScreenPos(ctx, x0, y0 + top_h)
+  local cx0, cy0 = ImGui.GetCursorPos(ctx)
+  if ImGui.BeginChild(ctx, "rackcol", col_w, mid_h, 0,
+      ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_HorizontalScrollbar) then
+    rack_inside()
+    ImGui.EndChild(ctx)
+  else
+    W.child_skipped(ctx, col_w, mid_h, cx0, cy0)
+  end
+  -- the sends and the receives
+  local fy = y0 + top_h + mid_h
+  for _, f in ipairs(foot) do
+    ImGui.SetCursorScreenPos(ctx, x0, fy + C.PANEL_GAP)
+    local _, req = f[1].draw(ctx, app.track, f[2])
+    if req and req.changed then rescan(true) end
+    fy = fy + C.PANEL_GAP + f[2]
+  end
+  -- the column's whole height taken, as one item, for what follows
+  ImGui.SetCursorScreenPos(ctx, x0, y0)
+  ImGui.Dummy(ctx, col_w, math.max(col_h, fy - y0))
+end
+
+-- ---------------------------------------------------------------------
 -- main loop
 -- ---------------------------------------------------------------------
 
@@ -3814,6 +4514,9 @@ local function frame()
       C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
       C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
       TO.reload_fader_defaults()      -- the TCP window may have changed them
+      -- a layout saved by the other window (ChannelView / its Rack view)
+      local ms, ss = M.sync(), SC.sync()
+      if ms or ss then rescan(true) end
       C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
       C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
     end
@@ -3866,7 +4569,7 @@ local function frame()
 
   if visible then
     local d = ImGui.GetWindowDockID(ctx)
-    if d ~= dock_id then dock_id = d; ext_set("dock", d) end
+    if d ~= dock_id then dock_id = d; ext_set(DOCK_KEY, d) end
     menu_bar()
   end
   ImGui.PopStyleVar(ctx)
@@ -3876,7 +4579,7 @@ local function frame()
     set_view(not C.MIXER_VIEW)
   end
   -- the Toggle mixer view action, from a shortcut or a toolbar
-  if reaper.GetExtState(C.EXT_SECT, TOGGLE_REQ) ~= "" then
+  if not RACK and reaper.GetExtState(C.EXT_SECT, TOGGLE_REQ) ~= "" then
     reaper.DeleteExtState(C.EXT_SECT, TOGGLE_REQ, false)
     set_view(not C.MIXER_VIEW)
   end
@@ -4037,11 +4740,6 @@ local function frame()
     -- exactly, matching mixer view's total for the same track.
     local strip_h = (C.STRIP_H - spacing_y) + child_pad_y
 
-    -- And row_h (the Channel/plugin-row/Sends height) is everything
-    -- left in avail_h once strip_h AND the ItemSpacing.y between the
-    -- two of them are both spent -- so row_h + spacing_y + strip_h
-    -- lands on avail_h exactly, the same total mixer view gets, split
-    -- differently rather than shrunk.
     -- Drawers (TS_CV_Drawers): along the bottom they take their height
     -- (and one more ItemSpacing) from the row; down the sides, their
     -- width from the panels.
@@ -4053,6 +4751,11 @@ local function frame()
     local left_take  = left_w > 0 and (left_w + SIDE_GAP) or 0
     local right_take = right_w > 0 and (right_w + SIDE_GAP) or 0
 
+    -- And row_h (the Channel/plugin-row/Sends height) is everything
+    -- left in avail_h once strip_h AND the ItemSpacing.y between the
+    -- two of them are both spent -- so row_h + spacing_y + strip_h
+    -- lands on avail_h exactly, the same total mixer view gets, split
+    -- differently rather than shrunk.
     local row_h = math.max(C.CELL_H + C.HEADER_H + C.PANEL_PAD * 2,
                            avail_h - spacing_y - strip_h - bot_take)
     -- Channel pinned left, Sends and Receives pinned right, the plugin
@@ -4063,13 +4766,16 @@ local function frame()
     -- The master has no Receives panel: every track feeds it, and the
     -- list would only ever be the odd real send to the master.
     local on_master = app.track ~= nil and app.track == reaper.GetMasterTrack(0)
-    local rv_w   = on_master and 0 or RV.width_for(app.track, row_h)
-    local sd_w   = SD.width_for(app.track, row_h)
+    -- (any of the four can be hidden from the View menu)
+    local ma_on, mo_on = app.aux.macros, app.aux.mods
+    local sd_on, rv_on = app.aux.sends, app.aux.recv and not on_master
+    local rv_w   = rv_on and RV.width_for(app.track, row_h) or 0
+    local sd_w   = sd_on and SD.width_for(app.track, row_h) or 0
     -- the macros and the modulators, pinned beside the fader panel
-    local mr_w   = MR.width_for("macros", app.track, row_h) + MR.width_for("mods", app.track, row_h)
-                   + C.PANEL_GAP
-    local mid_w  = math.max(80, full_w - ch_w - mr_w - rv_w - sd_w
-                                - C.PANEL_GAP * (on_master and 3 or 4))
+    local mr_w   = (ma_on and MR.width_for("macros", app.track, row_h) or 0)
+                   + (mo_on and MR.width_for("mods", app.track, row_h) or 0)
+    local n_gaps = 1 + (ma_on and 1 or 0) + (mo_on and 1 or 0) + (sd_on and 1 or 0) + (rv_on and 1 or 0)
+    local mid_w  = math.max(80, full_w - ch_w - mr_w - rv_w - sd_w - C.PANEL_GAP * n_gaps)
 
     -- A double-click on a NAME BUTTON opens that track in channel view,
     -- in either branch below -- the button means the same thing whether
@@ -4099,7 +4805,12 @@ local function frame()
       ImGui.Dummy(ctx, 0, 0)
     end
 
-    if C.MIXER_VIEW then
+    if RACK then
+      local col_h = avail_h - bot_take
+      side_drawers(col_h)
+      rack_column(full_w, col_h)
+      bottom_drawers()
+    elseif C.MIXER_VIEW then
       -- Mixer view takes the whole upper area. The track row underneath
       -- -- strips and their name buttons together, one scrolling child
       -- -- stays: it is the one thing both views share, and losing it
@@ -4127,28 +4838,24 @@ local function frame()
     else
       side_drawers(row_h)
       CH.draw(ctx, app.track, row_h)
-      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
-      local _, ma_req = MR.draw_macros(ctx, app.track, row_h)
-      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
-      local _, mo_req = MR.draw_mods(ctx, app.track, row_h)
-      if app.track and (ma_req.add_macro or mo_req.add_mod) then
-        local ok
-        if ma_req.add_macro then ok = MD.add_macro(app.track, ma_req.add_macro, TP.ara_first(app.track))
-        else ok = MD.add_mod(app.track, mo_req.add_mod, TP.ara_first(app.track)) end
-        if not ok and not MD.plugin(app.track) then
-          reaper.MB("ChannelView couldn't find its ChannelView Modulators plugin\n" ..
-                    "(TS_CV_Modulators.jsfx). Reinstalling ChannelView from ReaPack puts it back.",
-                    "ChannelView", 0)
-        end
-        rescan(true)
+      local ma_req, mo_req = {}, {}
+      if ma_on then
+        ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+        ma_req = select(2, MR.draw_macros(ctx, app.track, row_h)) or {}
       end
-      if ma_req.changed or mo_req.changed then rescan(true) end
+      if mo_on then
+        ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+        mo_req = select(2, MR.draw_mods(ctx, app.track, row_h)) or {}
+      end
+      if app.track then aux_mod_requests(ma_req, mo_req) end
       ImGui.SameLine(ctx, 0, C.PANEL_GAP)
       panel_row(row_h, mid_w)
-      ImGui.SameLine(ctx, 0, C.PANEL_GAP)
-      local _, sd_req = SD.draw(ctx, app.track, row_h)
-      if sd_req and sd_req.changed then rescan(true) end
-      if not on_master then
+      if sd_on then
+        ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+        local _, sd_req = SD.draw(ctx, app.track, row_h)
+        if sd_req and sd_req.changed then rescan(true) end
+      end
+      if rv_on then
         ImGui.SameLine(ctx, 0, C.PANEL_GAP)
         local _, rv_req = RV.draw(ctx, app.track, row_h)
         if rv_req and rv_req.changed then rescan(true) end
@@ -4211,7 +4918,7 @@ local function frame()
     if LS.draw(ctx, function(k) return E.is_open() and E.key() == k end) then rescan(true) end
     CS.draw(ctx)
     if TM.draw(ctx) then rescan(true) end
-    CP.draw(ctx)
+    CP.draw(ctx, false)
     if CN.draw(ctx) then rescan(true) end
 
     -- Probe taps: the heartbeat that keeps them measuring, and one
@@ -4230,6 +4937,8 @@ local function frame()
   end
   -- the Organise actions window, its own window beside this one
   AE.draw(ctx)
+  -- the knob look editor (Style > Customise...), its own window too
+  KE.draw(ctx)
 
   -- The style pushes happened before Begin, so they unwind either way.
   ImGui.PopStyleVar(ctx, 1)
@@ -4243,13 +4952,6 @@ local function frame()
   end
 end
 
--- A runtime error inside a deferred function is reported by REAPER with
--- only the file and line it happened ON -- which, when a nil is handed to
--- a drawing helper, names the helper rather than the caller that produced
--- the nil. The loop runs through xpcall instead: the console gets a full
--- traceback naming every frame on the way down, the layouts are saved,
--- and the loop stops rather than throwing the same error sixty times a
--- second.
 -- While REAPER is busy on a long job (TS_CV_Busy), the window is drawn
 -- with a note and nothing else: no FX calls to contend with the job,
 -- and the ImGui context stays alive. A full frame is tried once a
@@ -4291,6 +4993,13 @@ local function timed_frame()
   BZ.note(reaper.time_precise() - now, now)
 end
 
+-- A runtime error inside a deferred function is reported by REAPER with
+-- only the file and line it happened ON -- which, when a nil is handed to
+-- a drawing helper, names the helper rather than the caller that produced
+-- the nil. The loop runs through xpcall instead: the console gets a full
+-- traceback naming every frame on the way down, the layouts are saved,
+-- and the loop stops rather than throwing the same error sixty times a
+-- second.
 function safe_frame()
   local ok, err = xpcall(timed_frame, function(e)
     return debug.traceback(tostring(e), 2)
@@ -4314,6 +5023,6 @@ reaper.atexit(function()
   reaper.DeleteExtState(C.EXT_SECT, ALIVE, false)
   show_toggle_state(false)      -- no window, no mixer showing
 end)
-reaper.DeleteExtState(C.EXT_SECT, TOGGLE_REQ, false)   -- one left from a window since closed
+if not RACK then reaper.DeleteExtState(C.EXT_SECT, TOGGLE_REQ, false) end   -- one left from a window since closed
 show_toggle_state(C.MIXER_VIEW)
 reaper.defer(safe_frame)

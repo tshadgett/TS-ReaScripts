@@ -52,10 +52,11 @@ local W  = require("TS_CV_Widgets")
 local TB = require("TS_CV_Toolbar")
 local DR = require("TS_CV_Drawers")
 local AE = require("TS_CV_ActionEditor")
+local CP = require("TS_CV_ColourPick")
 local SU = require("TS_CV_Startup").make("ChannelView toolbars", "TS_ChannelView_Toolbars.lua",
                                          "channelview_toolbars_cmd")
 
-W.attach(ImGui); TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui)
+W.attach(ImGui); TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui); CP.attach(ImGui)
 SU.init()
 
 -- the shared palette (hue and tint), as the TCP reads it
@@ -147,6 +148,17 @@ local function frame()
     elseif d.tb then d.tb.poll() end
   end
   AE.draw(ctx)
+  -- the colour dialog opened from a bar button's right-click Colour menu,
+  -- from a small window of its own: a modal needs a window to open from
+  if CP.is_open() then
+    ImGui.SetNextWindowSize(ctx, 1, 1)
+    local f = ImGui.WindowFlags_NoDecoration | ImGui.WindowFlags_NoBackground | ImGui.WindowFlags_NoInputs
+              | ImGui.WindowFlags_NoSavedSettings | ImGui.WindowFlags_NoFocusOnAppearing
+    if ImGui.Begin(ctx, "##cvcolour", nil, f) then
+      CP.draw(ctx, false)
+      ImGui.End(ctx)
+    end
+  end
   reaper.SetExtState(C.EXT_SECT, DR.HOST_ALIVE, tostring(reaper.time_precise()), false)
   if reaper.GetExtState(C.EXT_SECT, DR.HOST_QUIT) == "1" then
     reaper.DeleteExtState(C.EXT_SECT, DR.HOST_QUIT, false)

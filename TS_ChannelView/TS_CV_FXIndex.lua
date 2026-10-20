@@ -21,8 +21,10 @@
 
   Keys are plugin FILENAMES, sometimes with a "<hash" suffix for shell
   plugins, while folder items are full paths -- so everything is matched
-  on a normalised basename. JS effects aren't tagged by REAPER at all;
-  they fall back to the vendor parsed from their name, or to no developer.
+  on a normalised basename. JS effects aren't tagged by REAPER at all, so
+  they have no developer, as in REAPER's own list (the bracket at the end
+  of a JS effect's name is as often "(Lo-Fi)" as an author). Only with no
+  tag file at all does the vendor parsed from a plugin's name stand in.
 --]]
 
 local U = require("TS_CV_Util")
@@ -148,13 +150,12 @@ function IX.build(list)
 
   for _, e in ipairs(list) do
     local key = norm_key(e.ident)
-    -- REAPER's tag wins; the name-parsed vendor is the fallback, which is
-    -- what covers JS effects since REAPER doesn't tag those.
-    local d = dev_of[key] or (e.vendor ~= "" and e.vendor or nil)
+    -- REAPER's tag; the name-parsed vendor only when REAPER has no tags
+    local d = dev_of[key] or ((stats.tagged == 0 and e.vendor ~= "") and e.vendor or nil)
     -- A plugin REAPER has tagged elsewhere but not this one has been
     -- "removed from developer" in REAPER's FX browser: hide it here too,
     -- so that one gesture hides a plugin everywhere. JS effects are never
-    -- tagged, so they keep their name-parsed vendor.
+    -- tagged, and stay listed, with no developer.
     local taggable = key:match("%.vst3") or key:match("%.dll") or key:match("%.clap")
     if taggable and stats.tagged > 0 and not dev_of[key] then
       e.hidden = true
@@ -193,6 +194,14 @@ function IX.build(list)
 end
 
 function IX.stats() return stats end
+
+-- A plugin's developer as REAPER lists it, by its identifier (nil when
+-- untagged), and whether REAPER has tagged any at all.
+function IX.dev_of(ident)
+  IX.load()
+  return dev_of[norm_key(ident)]
+end
+function IX.tagged() IX.load() return stats.tagged > 0 end
 
 -- ---------------------------------------------------------------------
 -- editing your FX Folders

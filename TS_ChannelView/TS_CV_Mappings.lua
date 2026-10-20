@@ -25,12 +25,18 @@
       Buttons<n> = across | down | <how many>
       Back<n>  = inset | <faceplate>
       Brush<n> = <1|0>
+      Finish<n> = <finish>
+      Corners<n> = soft | round
+      Look<n>  = <knob parts>
+      Inner<n> = <parts recipe>     (dual: the inner knob's)
+      Look2<n> = <knob parts>       (dual: the inner knob's own look)
       Metal<n> = 1
       Scale<n> = values | ten [|cap]
       Shape<n> = v | h  |  2 | 3 | 4 | full  |  full | half
       Dual<n>  = <second param index>   (xy: its Y; dual: the inner knob)
       Plate    = <faceplate>
       Brush    = <1|0>
+      Finish   = <finish>
       Metal    = 1
       Lock     = <rows>
 
@@ -110,6 +116,17 @@
   is the faceplate's own (on for aluminium), and off for an inset.
   Metal<n>=1 gives that background (or section) a metallic flake, and
   Metal=1 the faceplate; either can go with the brushed grain, or alone.
+  Finish<n> (Finish for the faceplate) is its surface finish, a key from
+  C.FINISHES ("plain" for none); when there is one it says what Brush<n>
+  would, and Brush<n> is still read when there isn't. The metallic flake
+  goes over any finish. Corners<n> rounds that background's or section's
+  corners more than the usual slight rounding: soft, or round (ends fully
+  rounded; a shape that isn't a plain rectangle is drawn soft).
+  Look<n> is knob n's own look, built from parts (TS_CV_KnobParts.encode:
+  k=v pairs, comma separated); it's drawn in place of its Style's.
+  A concentric knob's Style is "arc" (flat), a parts recipe for its outer
+  knob, or none (the default ring); with a recipe, Inner<n> is its inner
+  knob's recipe and Look<n> / Look2<n> the outer's / inner's own looks.
   Scale<n> numbers knob n's scale: "values" prints the plugin's own values
   at its marks, "ten" 0 to 10; "|cap" prints them in the cap's colour.
   Medium and large knobs only (a small one has no room).
@@ -160,11 +177,12 @@
   be switched on and off, and the trace opened, while locked.
 
   CANVAS makes the layout a canvas of its kind (EQ, compressor, gate,
-  limiter, de-esser, delay, reverb, envelope, modulation), for any plugin: the canvas fills the panel and the layout's controls (Ctl<n>)
-  sit in columns beside it.
+  limiter, de-esser, delay, reverb, envelope, modulation), for any plugin:
+  the canvas fills the panel and the layout's controls (Ctl<n>) sit in
+  columns beside it.
       Canvas=eq|<all bands' On param, or ->
       Canvas=comp | multi|<bands> | gate | limit | deess | delay | reverb | env | mod | sat
-      Band<k>=<name>|<freq>|<gain>|<Q>|<shape switch>|<On>   (k 1..8, - for none)
+      Band<k>=<name>|<freq>|<gain>|<Q>|<shape switch>|<On>[|<slope>]   (k 1..8, - for none)
       Learn<k>=<what was learned about band k, see TS_CV_MapEQ>
       Dyn<k>=<threshold>|<range>|<ratio>|<attack>|<release>|<dynamics On>[|<reversed>]
           band k's dynamics (a dynamic EQ), each a param or -; reversed
@@ -233,6 +251,7 @@
 --]]
 
 local U = require("TS_CV_Util")
+local KP = require("TS_CV_KnobParts")
 local C = require("TS_CV_Config")
 
 local M = {}
@@ -252,6 +271,11 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Back<n>=inset|<faceplate>: control n's own background\n"
                 .. "; Brush<n>=<1|0>: grain on control n's background (a divider: its section's)\n"
                 .. "; Metal<n>=1: metallic flake on control n's background (a divider: its section's)\n"
+                .. "; Finish<n>=<plain|brushed|anodised|bright|satin|tolex|leather|wood|crinkle|enamel|hammertone|checker>:\n"
+                .. ";   the finish of control n's background (a divider: its section's)\n"
+                .. "; Corners<n>=soft|round: the corners of control n's background (a divider: its section's)\n"
+                .. "; Look<n>=<k=v,...>: knob n's own look, built from parts (profile, grip, mat, col, ptr, skirt ...)\n"
+                .. "; Inner<n>=<recipe>, Look2<n>=<k=v,...>: a concentric knob's inner knob\n"
                 .. "; Scale<n>=values|ten[|cap]: numbers round knob n (its own values, or 0-10)\n"
                 .. "; Shape<n>=v|h|<2|3|4|full>|<full|half>: fader n's direction, length and thickness\n"
                 .. "; Dual<n>=<param index>: the second parameter of an XY pad (its Y; Ctl is X)\n"
@@ -261,6 +285,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Plate=<faceplate, or #rrggbb for a colour of your own>\n"
                 .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own\n"
                 .. "; Metal=1: a metallic flake on the faceplate\n"
+                .. "; Finish=<finish>: the faceplate's finish (as Finish<n>)\n"
                 .. "; Lock=<rows>: layout locked, arranged at that many rows"
 
 local dir         = nil
@@ -269,6 +294,18 @@ local order       = {}   -- section order as read from disk
 local cache       = {}   -- plugin_key -> parsed layout
 local def_cache   = {}   -- fx guid -> generated default layout
 local dirty       = false
+-- More than one window can hold the library at once (ChannelView and its
+-- Rack view, each a script of its own): what each has changed since it
+-- last read the file, by key (true: set, false: removed), so a save merges
+-- into what the other saved rather than over it. A revision in ExtState
+-- moves with every save, so each sees the other's.
+local changed     = {}
+local my_rev      = nil
+local REV_SECT, REV_KEY = "TS_ChannelView", "maps_rev"
+local function mark(key, removed)
+  dirty = true
+  if key then changed[key] = not removed end
+end
 
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
@@ -405,6 +442,45 @@ function M.part_metal(kind, metal)
   return (kind ~= nil and metal == true) or false
 end
 
+-- A Finish line's key, or nil when it names none we know.
+local function finish_of(v)
+  v = U.trim(v or "")
+  return C.FINISH[v] and v or nil
+end
+M.finish_of = finish_of
+
+-- A Corners line: "soft" or "round"; square (the usual) is no line at all.
+local CORNERS = { soft = true, round = true }
+-- a concentric knob's inner recipe: a parts recipe's key, or nil
+local function inner_of(v)
+  v = v and U.trim(v) or ""
+  local d = v ~= "" and C.KNOB_STYLE[v]
+  return (d and d.parts) and v or nil
+end
+
+local function corners_of(v)
+  v = U.trim(v or "")
+  return CORNERS[v] and v or nil
+end
+M.corners_of = corners_of
+
+-- A layout's faceplate finish: its Finish if it has one, else brushed when
+-- Brush (or the faceplate's own grain) says so. nil: plain.
+function M.finish(layout, plate)
+  if not plate then return nil end
+  local f = layout and layout.finish
+  if f then return (f ~= "plain") and f or nil end
+  return M.brushed(layout, plate) and "brushed" or nil
+end
+
+-- ... and a control's background, or a divider's section: `finish` its
+-- Finish<n>, `brush` its Brush<n>, kind and pl as for M.part_brushed.
+function M.part_finish(kind, pl, finish, brush)
+  if not kind then return nil end
+  if finish then return (finish ~= "plain") and finish or nil end
+  return M.part_brushed(kind, pl, brush) and "brushed" or nil
+end
+
 -- Whether a control's background, or a divider's section, is brushed:
 -- `kind` and `pl` as P.back_style / P.section_style give them, `brush` the
 -- control's own Brush<n> (nil: the faceplate's own; an inset has none).
@@ -526,6 +602,10 @@ M.CANVAS_NAMES = { sat = "Saturation", eq = "EQ", comp = "Compressor", gate = "G
                    multi = "Multiband" }
 M.CANVAS_ORDER = { "eq", "comp", "multi", "gate", "limit", "deess", "sat", "delay", "reverb", "env", "mod" }
 local BAND_FIELDS = { "freq", "gain", "q", "shape", "on" }
+-- (a band's Slope control comes after them: written only when mapped, and
+-- not part of what its learning is checked against -- the slope is read
+-- live)
+M.BAND_FIELDS = { "freq", "gain", "q", "shape", "on", "slope" }
 -- a dynamic EQ band's dynamics (b.dyn), in the order Dyn<k> keeps them
 M.DYN_FIELDS = { "thr", "range", "ratio", "atk", "rel", "on" }
 M.DYN_NAMES = { thr = "Threshold", range = "Range", ratio = "Ratio", atk = "Attack", rel = "Release", on = "Dynamics On" }
@@ -563,6 +643,7 @@ function M.canvas_of(sect)
         for v in (line .. "|"):gmatch("([^|]*)|") do f[#f + 1] = v end
         local b = { name = U.trim(f[1] or "") }
         for i, key in ipairs(BAND_FIELDS) do b[key] = pnum(f[i + 1]) end
+        b.slope = pnum(f[#BAND_FIELDS + 2])
         local l = sect["Learn" .. k]
         if l and l ~= "" then
           local sig, data = l:match("^([^~]*)~(.*)$")
@@ -646,6 +727,7 @@ function M.canvas_lines(cv, out)
       if k > M.MAX_BANDS then break end
       local f = { ((b.name or ""):gsub("[|\r\n]", " ")) }
       for i, key in ipairs(BAND_FIELDS) do f[i + 1] = b[key] and tostring(b[key]) or "-" end
+      if b.slope then f[#f + 1] = tostring(b.slope) end
       out["Band" .. k] = table.concat(f, "|")
       if b.learn and b.learn_sig then out["Learn" .. k] = b.learn_sig .. "~" .. b.learn end
       if b.dyn then
@@ -695,7 +777,7 @@ function M.copy_canvas(cv)
     out.bands = {}
     for i, b in ipairs(cv.bands) do
       out.bands[i] = { name = b.name, freq = b.freq, gain = b.gain, q = b.q, shape = b.shape,
-                       on = b.on, learn = b.learn, learn_sig = b.learn_sig }
+                       on = b.on, slope = b.slope, learn = b.learn, learn_sig = b.learn_sig }
       if b.dyn then
         local d = { rev = {} }
         for _, key in ipairs(M.DYN_FIELDS) do d[key] = b.dyn[key] end
@@ -1162,7 +1244,7 @@ function M.canvas_params(cv)
   if not cv then return out end
   if cv.all_on then out[cv.all_on] = true end
   for _, b in ipairs(cv.bands or {}) do
-    for _, f in ipairs(BAND_FIELDS) do if b[f] then out[b[f]] = true end end
+    for _, f in ipairs(M.BAND_FIELDS) do if b[f] then out[b[f]] = true end end
     for _, f in ipairs(M.DYN_FIELDS) do if b.dyn and b.dyn[f] then out[b.dyn[f]] = true end end
   end
   for _, p in pairs(cv.roles or {}) do out[p] = true end
@@ -1284,6 +1366,12 @@ local function parse_section(sect)
         back    = back_of(sect["Back" .. i]),
         nbtn    = nbtn_of(sect["Buttons" .. i]),
         brush   = brush_of(sect["Brush" .. i]),
+        finish  = finish_of(sect["Finish" .. i]),
+        corners = corners_of(sect["Corners" .. i]),
+        look    = (t == "knob" or t == "stepped" or t == "dual") and KP.decode(sect["Look" .. i]) or nil,
+        -- a concentric knob's inner knob: its recipe, or its own look
+        style2  = (t == "dual") and inner_of(sect["Inner" .. i]) or nil,
+        look2   = (t == "dual") and KP.decode(sect["Look2" .. i]) or nil,
         metal   = (U.trim(sect["Metal" .. i] or "") == "1") or nil,
         scale   = scale_of(sect["Scale" .. i]),
         scale_ink = scale_ink_of(sect["Scale" .. i]),
@@ -1319,6 +1407,7 @@ local function parse_section(sect)
            levels = (U.trim(sect.Levels or "") == "1") or nil,
            plate = C.plate_key(U.trim(sect.Plate or "")),
            brush = brush_of(sect.Brush),
+           finish = finish_of(sect.Finish),
            metal = (U.trim(sect.Metal or "") == "1") or nil,
            lock = lock_of(sect.Lock) }
 end
@@ -1330,6 +1419,7 @@ local function serialize(layout)
   if layout.levels then out.Levels = "1" end
   if C.plate_key(layout.plate) then out.Plate = C.plate_key(layout.plate) end
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
+  if finish_of(layout.finish) then out.Finish = layout.finish end
   if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
   M.canvas_lines(layout.canvas, out)
@@ -1380,6 +1470,17 @@ local function serialize(layout)
     -- the grain of its background, or a divider's section, when it has one
     local styled = back_of(c.back) or (c.type == "divider" and (c.style == "inset" or c.style == "plate"))
     if styled and c.brush ~= nil then out["Brush" .. (i - 1)] = c.brush and "1" or "0" end
+    if styled and finish_of(c.finish) then out["Finish" .. (i - 1)] = c.finish end
+    if styled and corners_of(c.corners) then out["Corners" .. (i - 1)] = c.corners end
+    if c.look and (c.type == "knob" or c.type == "stepped" or c.type == "dual") then
+      local enc = KP.encode(c.look)
+      if enc and enc ~= "" then out["Look" .. (i - 1)] = enc end
+    end
+    if c.type == "dual" then
+      if inner_of(c.style2) then out["Inner" .. (i - 1)] = c.style2 end
+      local enc = c.look2 and KP.encode(c.look2)
+      if enc and enc ~= "" then out["Look2" .. (i - 1)] = enc end
+    end
     if styled and c.metal then out["Metal" .. (i - 1)] = "1" end
     -- values is the default, so it's only written to carry |cap
     local sk = scale_of(c.scale)
@@ -1696,6 +1797,32 @@ function M.reload()
   cache = {}
   def_cache = {}
   dirty = false
+  changed = {}
+  if reaper and reaper.GetExtState then my_rev = reaper.GetExtState(REV_SECT, REV_KEY) end
+end
+
+-- Another window saved the library: read it again, keeping what was
+-- changed here and not saved yet on top. Cheap when nothing moved.
+-- True when anything was read.
+function M.sync()
+  if not (reaper and reaper.GetExtState and dir) then return false end
+  local rev = reaper.GetExtState(REV_SECT, REV_KEY)
+  if rev == my_rev then return false end
+  my_rev = rev
+  local new_sec, new_order = U.read_ini(path())
+  for key, set in pairs(changed) do
+    local was = new_sec[key] ~= nil
+    if set then
+      new_sec[key] = sections[key]
+      if not was then new_order[#new_order + 1] = key end
+    elseif was then
+      new_sec[key] = nil
+      for i = #new_order, 1, -1 do if new_order[i] == key then table.remove(new_order, i) end end
+    end
+  end
+  sections, order = new_sec, new_order
+  cache, def_cache = {}, {}
+  return true
 end
 
 -- Generated defaults are cached per FX instance: building one walks every
@@ -1761,22 +1888,28 @@ end
 -- layout section -- or its absence, which means "generate one" -- is
 -- left as it is.
 M.DEFAULTS_SECT = "*default layouts*"
-function M.default_variant(base)
-  local d = sections[M.DEFAULTS_SECT]
+-- The Rack view keeps defaults of its own (a plugin may have a layout laid
+-- out across and another laid out down): VIEW_DEFAULTS is the section this
+-- window reads and writes, the rack's when it is the rack.
+M.RACK_DEFAULTS_SECT = "*rack default layouts*"
+M.VIEW_DEFAULTS = M.DEFAULTS_SECT
+function M.default_variant(base, sect)
+  local d = sections[sect or M.VIEW_DEFAULTS]
   local v = d and d[base]
   v = v and U.trim(v) or ""
   if v == "" or not M.has(M.variant_key(base, v)) then return nil end
   return v
 end
-function M.set_default_variant(base, name)
-  local d = sections[M.DEFAULTS_SECT]
+function M.set_default_variant(base, name, sect)
+  sect = sect or M.VIEW_DEFAULTS
+  local d = sections[sect]
   if not d then
     d = {}
-    sections[M.DEFAULTS_SECT] = d
-    order[#order + 1] = M.DEFAULTS_SECT
+    sections[sect] = d
+    order[#order + 1] = sect
   end
   d[base] = (name and name ~= "") and name or nil
-  dirty = true
+  mark(sect)
 end
 
 -- The variants the library has for a plugin, by name, sorted.
@@ -2003,7 +2136,7 @@ function M.set(key, layout)
   local found = false
   for _, s in ipairs(order) do if s == key then found = true break end end
   if not found then order[#order + 1] = key end
-  dirty = true
+  mark(key)
 end
 
 -- The plugin's layout switching (its own layout's Switch<n>): a list of
@@ -2029,7 +2162,7 @@ function M.set_switch_rules(base, rules, make)
   local found = false
   for _, s_ in ipairs(order) do if s_ == base then found = true break end end
   if not found then order[#order + 1] = base end
-  dirty = true
+  mark(base)
   M.save()
   return true
 end
@@ -2058,7 +2191,7 @@ function M.remove(key)
   cache[key] = nil
   sections[key] = nil
   for i = #order, 1, -1 do if order[i] == key then table.remove(order, i) end end
-  dirty = true
+  mark(key, true)
 end
 
 -- Writes the library, keeping one generation of backup: this file is the
@@ -2066,6 +2199,7 @@ end
 -- should not be able to take it out entirely.
 function M.save()
   if not dirty then return true end
+  M.sync()            -- anything another window saved meanwhile, under ours
   local src = io.open(path(), "rb")
   if src then
     local data = src:read("a"); src:close()
@@ -2073,7 +2207,14 @@ function M.save()
     if bak then bak:write(data); bak:close() end
   end
   local ok, err = U.write_ini(path(), sections, order, HEADER)
-  if ok then dirty = false end
+  if ok then
+    dirty = false
+    changed = {}
+    if reaper and reaper.SetExtState then
+      my_rev = tostring(reaper.time_precise and reaper.time_precise() or os.clock()) .. ":" .. tostring(math.random(1e6))
+      reaper.SetExtState(REV_SECT, REV_KEY, my_rev, false)
+    end
+  end
   return ok, err
 end
 
@@ -2181,6 +2322,7 @@ function M.import(entries)
     if not sections[e.key] then order[#order + 1] = e.key end
     sections[e.key] = raw_copy(e.raw)
     cache[e.key] = nil
+    changed[e.key] = true
     n = n + 1
     ::continue::
   end
@@ -2214,6 +2356,8 @@ end
 function M.look_of(c)
   return { fam = M.look_family(c), type = c.type, style = c.style, cap = c.cap, size = c.size,
            scale = c.scale, scale_ink = c.scale_ink, back = c.back, brush = c.brush, metal = c.metal,
+           finish = c.finish, corners = c.corners, look = KP.copy(c.look),
+           style2 = c.style2, look2 = KP.copy(c.look2),
            dir = c.dir, len = c.len, thin = c.thin }
 end
 
@@ -2258,6 +2402,10 @@ function M.paste_look(o, s)
     o.cap = cap_for(fam, s)
     if fam == "knob" and s.fam == "knob" then
       o.scale, o.scale_ink = s.scale, s.scale_ink
+      -- its own look, built from parts (on a concentric knob, the outer's),
+      -- and a concentric knob's inner one from another concentric knob
+      o.look = KP.copy(s.look)
+      if o.type == "dual" and s.type == "dual" then o.style2, o.look2 = s.style2, KP.copy(s.look2) end
       -- a concentric knob comes medium or large
       if not (o.type == "dual" and s.size == "small") then o.size = s.size end
     elseif fam == "xy" and s.fam == "xy" then
@@ -2269,7 +2417,9 @@ function M.paste_look(o, s)
       o.size = s.size
     end
   end
-  o.back, o.brush, o.metal = s.back, s.brush, s.metal
+  -- a hardware switch is a toggle's alone: a button row stays flat
+  if o.type ~= "toggle" and o.style and C.SWITCH[o.style] then o.style = nil end
+  o.back, o.brush, o.metal, o.finish, o.corners = s.back, s.brush, s.metal, s.finish, s.corners
   return true
 end
 
@@ -2277,7 +2427,8 @@ end
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
-                plate = layout.plate, brush = layout.brush, metal = layout.metal, lock = layout.lock }
+                plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
+                lock = layout.lock }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end
@@ -2286,7 +2437,9 @@ function M.copy(layout)
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
-                        metal = c.metal, scale = c.scale, scale_ink = c.scale_ink,
+                        metal = c.metal, finish = c.finish, corners = c.corners, look = KP.copy(c.look),
+                        style2 = c.style2, look2 = KP.copy(c.look2),
+                        scale = c.scale, scale_ink = c.scale_ink,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
                         invert2 = c.invert2,
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),

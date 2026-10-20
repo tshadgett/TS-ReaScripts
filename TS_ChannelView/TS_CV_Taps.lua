@@ -50,8 +50,9 @@
   plugin's input and output, so their levels come out too (tap_inpkN and
   the rest). A plugin wanted for its levels alone -- one that reports its
   own reduction -- gets a tap marked "levels only" (tap_nogr), which costs
-  the probe a few operations a sample instead of a filterbank. The probe only measures while
-  something keeps gmem[73] moving, which TP.update does every frame.
+  the probe a few operations a sample instead of a filterbank. The probe
+  only measures while something keeps gmem[73] moving, which TP.update
+  does every frame.
 
   THE ZERO. Each time playback stops, the pre probe plays a second of
   quiet pink noise at two levels through the chain while the post probe
@@ -772,6 +773,92 @@ local function used_channels(tr, lv)
 end
 
 -- ---------------------------------------------------------------------
+-- REAPER side: keeping the copies' channels clear
+-- ---------------------------------------------------------------------
+
+-- A plugin added to a chain whose track already carries copies can come
+-- in writing over them: one that takes the track's channel count (many
+-- VST3s do, and the copies raise it to 8 or more) maps its extra outputs
+-- onto the copies' channels, and anything after it then reads its output
+-- there instead. The copies' channels belong to the taps once laid, so
+-- whatever writes them without being one of their writers is cleared:
+-- a channel no output pin writes passes through untouched.
+
+-- Which output pin of each address may write which channel: L and R
+-- (pins 0 and 1, or 0 for both on a one-output plugin) to its "before"
+-- pairs as a writer and to its "after" pair as the measured plugin; pin
+-- ch - 1 to each channel of both pairs for a container the copies pass
+-- out through. allow[addr][ch] = pin.
+local function tap_writers(tr, taps)
+  local allow = {}
+  local function set(a, ch, pin)
+    allow[a] = allow[a] or {}
+    allow[a][ch] = pin
+  end
+  local function pair(a, ch)
+    local _, nout = io_size(tr, a)
+    set(a, ch, 0)
+    set(a, ch + 1, nout >= 2 and 1 or 0)
+  end
+  for _, t in ipairs(taps) do
+    for _, w in ipairs(t.writers or {}) do pair(w, t.pre) end
+    pair(t.addr, t.post)
+    for _, c in ipairs(t.path or {}) do
+      for _, ch in ipairs({ t.pre, t.pre + 1, t.post, t.post + 1 }) do set(c, ch, ch - 1) end
+    end
+  end
+  return allow
+end
+
+-- Every output pin between the probes (and inside the containers the
+-- copies pass through) that writes a copy's channel without being meant
+-- to: { addr, pin, ch }. `taps` need pre, post, addr, writers and path.
+local function clobbers(tr, lv, taps)
+  local chans, on_path = {}, {}
+  for _, t in ipairs(taps) do
+    for _, ch in ipairs({ t.pre, t.pre + 1, t.post, t.post + 1 }) do chans[ch] = true end
+    for _, c in ipairs(t.path or {}) do on_path[c] = true end
+  end
+  local allow = tap_writers(tr, taps)
+  local out = {}
+  local function look(a)
+    local nout
+    if (container_count(tr, a) or 0) > 0 then nout = nconf(tr, a, "container_nch_out", 2)
+    else local _, o = io_size(tr, a); nout = o end
+    for p = 0, nout - 1 do
+      local lo, hi = get_pin(tr, a, true, p)
+      for ch in pairs(TP.channels_of(lo, hi)) do
+        if chans[ch] and not (allow[a] and allow[a][ch] == p) then
+          out[#out + 1] = { addr = a, pin = p, ch = ch }
+        end
+      end
+    end
+  end
+  local function walk(items, from, to, depth)
+    for i = from, to do
+      local a = items[i]
+      if not is_probe(tr, a) then
+        look(a)
+        if on_path[a] and depth < TP.MAX_DEPTH then
+          local kids = level_items(tr, a)
+          walk(kids, 1, #kids, depth + 1)
+        end
+      end
+    end
+  end
+  walk(lv.items, lv.pre + 1, lv.post - 1, 0)
+  return out
+end
+TP._clobbers = clobbers
+
+-- Clears what clobbers found. Returns how many pins it changed.
+local function clear_clobbers(tr, lv, taps)
+  local found = clobbers(tr, lv, taps)
+  for _, c in ipairs(found) do pin_channel(tr, c.addr, true, c.pin, c.ch, false) end
+  return #found
+end
+
+-- ---------------------------------------------------------------------
 -- REAPER side: laying and lifting the routing
 -- ---------------------------------------------------------------------
 
@@ -913,6 +1000,9 @@ local function lay(tr, want, lv)
   -- New routing: whatever zeros the probe measured belonged to the old one.
   PL.set(tr, probe, "gen", 1, (math.floor(PL.get(tr, probe, "gen") or 0) + 1) % 1000000)
   PL.set(tr, lv.items[lv.pre], "arm", 1, TP.zero_on() and 1 or 0)
+  -- The channels were free when chosen; a plugin that follows the track's
+  -- channel count has taken them since the count went up.
+  clear_clobbers(tr, lv, want.taps)
   write_record(tr, want)
   return true
 end
@@ -924,10 +1014,24 @@ function TP.sync(tr)
   local want, lv = TP.desired(tr)
   if TP.same_shape(rec, want) then
     if not want then return false end
-    -- Same plugins, same places: only the latency can have moved.
+    -- Same plugins, same places: only the latency can have moved -- or a
+    -- plugin added since writes over the copies.
     local probe = lv.items[lv.post]
     local pre = lv.items[lv.pre]
     local changed = false
+    do
+      local now_taps = {}
+      for i, t in ipairs(want.taps) do
+        now_taps[i] = { pre = rec.taps[i].pre, post = rec.taps[i].post,
+                        addr = t.addr, writers = t.writers, path = t.path }
+      end
+      if #clobbers(tr, lv, now_taps) > 0 then
+        reaper.Undo_BeginBlock()
+        clear_clobbers(tr, lv, now_taps)
+        reaper.Undo_EndBlock("ChannelView: keep the measurement taps' channels clear", -1)
+        changed = true
+      end
+    end
     -- The pair named in its track's block (a new probe): every check, as
     -- gmem starts empty with REAPER, and a track can move.
     PL.name(tr, pre, probe)
@@ -1371,12 +1475,9 @@ function TP.set_mb(tr, guid, xos)
   return true
 end
 
--- Asks the probe to measure this plugin in third-octaves. One tap per
--- probe: an instance asking keeps it while it goes on asking (half a
--- second), so two open panels don't take it in turns. Returns whether it
--- has it.
 local fine_owner = {}
--- (TS_TrackProbe 1.7.0+, or one without parameters)
+-- Whether a probe can measure in third-octaves (TS_TrackProbe 1.7.0+, or
+-- one without parameters).
 function TP.probe_has_fine(tr, probe)
   if not PL.is_legacy(tr, probe) then return true end
   local ok, nm = reaper.TrackFX_GetParamName(tr, probe, TP.P_FINE, "")
@@ -1390,6 +1491,10 @@ function TP.fine_ok(tr, guid)
   if not i or not rd.probe then return false end
   return TP.probe_has_fine(tr, rd.probe) and true or "old"
 end
+-- Asks the probe to measure this plugin in third-octaves. One tap per
+-- probe: an instance asking keeps it while it goes on asking (half a
+-- second), so two open panels don't take it in turns. Returns whether it
+-- has it.
 function TP.set_fine(tr, guid, polite)
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return false end

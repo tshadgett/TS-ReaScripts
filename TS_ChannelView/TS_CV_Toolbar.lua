@@ -51,6 +51,8 @@ local U = require("TS_CV_Util")
 local W = require("TS_CV_Widgets")
 local AI = require("TS_CV_ActionIcons")
 local FB = require("TS_CV_FXButtons")
+local VN = require("TS_CV_Vendors")
+local CPk = require("TS_CV_ColourPick")
 
 local ImGui
 
@@ -99,6 +101,14 @@ TB.style = "icons"
 TB.extra_bg, TB.organise = nil, nil
 
 TB.items = {}
+
+-- Any colour: ChannelView's colour dialog. `apply(rgb)` keeps the colour.
+-- Opened from a popup that stays open (`nested`), that popup draws it
+-- (TB.draw_colour); else whoever hosts the bar does (TS_CV_ColourPick.draw).
+function TB.pick_colour(title, rgb, apply, nested)
+  CPk.open({ title = title, rgb = rgb, apply = apply, nested = nested })
+end
+function TB.draw_colour(ctx) return CPk.draw(ctx, true) end
 
 -- ---------------------------------------------------------------------
 -- pure: storage
@@ -816,10 +826,45 @@ end
 local function underline(dl, x, y, bw, bh, col)
   ImGui.DrawList_AddRectFilled(dl, x + 4, y + bh - 2.5, x + bw - 4, y + bh - 0.5, col, 1.0)
 end
+local function darken(col, k)
+  local function ch(v) return math.floor(v * k + 0.5) end
+  return (ch((col >> 24) & 0xff) << 24) | (ch((col >> 16) & 0xff) << 16) | (ch((col >> 8) & 0xff) << 8) | (col & 0xff)
+end
+local FILL_INK, FILL_INK_ON = 0xf0f0eeff, 0x15171aff
+
+-- A plugin button as its vendor shows it (TS_CV_Vendors): the colour,
+-- label, initials tile or fill its vendor gives it, under anything set on
+-- the button itself. Other buttons as they are.
+local function view(it)
+  local k, what = FB.kind(it)
+  if k ~= "fx" then return it end
+  local v = VN.get(VN.of_ident(what))
+  if not v then return it end
+  local a = VN.apply(it, text_of(it), v)
+  return setmetatable({ color = a.color, label = a.label, mono = a.mono, fill = a.fill }, { __index = it })
+end
+TB.view = view
+
+-- Initials in a tile: the vendor colour dimmed, the letters in it; lit,
+-- the tile in the colour and the letters dark. Squeezed to small type
+-- when they don't fit.
+local function mono_tile(ctx, dl, x, y, w, h, text, col, lit, hot)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, lit and col or darken(col, 0.36), 3.0)
+  local ink = lit and FILL_INK_ON or (hot and lighten(col, 0.35) or col)
+  local tw, th = ImGui.CalcTextSize(ctx, text)
+  local small = tw > w - 4
+  if small then
+    W.push_small(ctx)
+    tw, th = ImGui.CalcTextSize(ctx, text)
+  end
+  ImGui.DrawList_AddText(dl, math.floor(x + (w - tw) * 0.5 + 0.5), math.floor(y + (h - th) * 0.5 + 0.5), ink, text)
+  if small then W.pop_small(ctx) end
+end
 
 -- The TCP's look: the icon is the button (or a text button without one).
 local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
   if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, false) end
+  it = view(it)
   local hovered, held, on, id = press(ctx, i, it, x, y, bw, bh, dir)
 
   local state = (held or on) and 3 or (hovered and 2 or 1)
@@ -832,16 +877,33 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
     local alt = TB.on_icon(icon)
     if alt and image(ctx, alt) then icon, paired, state = alt, true, (held and 3 or (hovered and 2 or 1)) end
   end
-  if AI.is(icon) and AI.get(icon) then
+  local fillc = it.fill and colour_of(it.color)
+  if it.mono then
+    -- the vendor's initials as the icon (TS_CV_Vendors)
+    local col = colour_of(it.color) or C.COL.icon
+    local pad = icon_pad(bh)
+    if (hovered or held) and not on then
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, C.COL.knob_body_hi, 2.5)
+    end
+    mono_tile(ctx, dl, x + pad, y + pad, bw - pad * 2, bh - pad * 2, it.mono, col, on or held, hovered)
+    if has_caret(it) then caret(dl, x + bw - 4, y + bh - 4, dir == "up" and "up" or "down", C.COL.icon) end
+    drawn = true
+  elseif AI.is(icon) and AI.get(icon) then
     -- ChannelView's own: drawn in the bar's colours, on the accent when on
     local caret_ = has_caret(it)
     local col, tint, under = tint_of(it, false)
-    if on or hovered or held then
+    if fillc then
+      -- the vendor colour as the ground (TS_CV_Vendors)
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh,
+        (on or held) and fillc or (hovered and darken(fillc, 0.7) or darken(fillc, 0.55)), 2.5)
+      tint, under = false, false
+    elseif on or hovered or held then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh,
         on and ((tint and col) or C.COL.accent) or C.COL.knob_body_hi, 2.5)
     end
     local ink
-    if on then ink = C.COL.icon_on
+    if fillc then ink = (on or held) and FILL_INK_ON or FILL_INK
+    elseif on then ink = C.COL.icon_on
     elseif hovered or held then ink = tint and lighten(col, 0.35) or C.COL.icon_hot
     else ink = tint and col or C.COL.icon end
     local pad = icon_pad(bh)
@@ -881,12 +943,17 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
     local col, tint, under = tint_of(it, false)
     local bg = lit and ((tint and col) or C.COL.accent)
                or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
+    if fillc then
+      bg = lit and fillc or (hovered and darken(fillc, 0.7) or darken(fillc, 0.55))
+      tint, under = false, false
+    end
     ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
     ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.knob_ring, 2.5, 0, 1.0)
     local tw, th = ImGui.CalcTextSize(ctx, text)
     local room = bw - (has_caret(it) and 10 or 0)
     local ink = lit and C.COL.icon_on or ((it.menu or id) and C.COL.label or C.COL.warn)
     if tint and not lit then ink = (hovered or held) and lighten(col, 0.35) or col end
+    if fillc then ink = lit and FILL_INK_ON or FILL_INK end
     ImGui.DrawList_AddText(dl, x + (room - tw) * 0.5, y + (bh - th) * 0.5, ink, text)
     if has_caret(it) then caret(dl, x + bw - 8, y + bh * 0.5, dir == "up" and "up" or "down", ink) end
     if under then underline(dl, x, y, bw, bh, col) end
@@ -898,27 +965,46 @@ end
 -- its menu opens. Columns use it at full width.
 local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical)
   if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical) end
+  it = view(it)
   local hovered, held, on, id = press(ctx, i, it, x, y, bw, bh, dir)
   local menu_ = has_caret(it)
   local lit = on or (menu_ and held)
   local png = it.icon ~= "" and not AI.is(it.icon)
   local col, tint, under = tint_of(it, png)
+  local fillc = it.fill and colour_of(it.color)
   local bg = lit and ((tint and col) or C.COL.accent)
              or ((hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off)
+  if fillc then
+    bg = lit and fillc or (hovered and darken(fillc, 0.7) or darken(fillc, 0.55))
+    tint, under = false, false
+  end
   ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 2.5)
   ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.knob_ring, 2.5, 0, 1.0)
   local ink = lit and C.COL.icon_on or ((it.menu or id) and C.COL.label or C.COL.warn)
   if tint and not lit then ink = (hovered or held) and lighten(col, 0.35) or col end
+  if fillc then ink = lit and FILL_INK_ON or FILL_INK end
   local ih = bh - 6
   local cx = x + 6
   local right = x + bw - (menu_ and 12 or 4)
   local has_icon = false
-  if AI.is(it.icon) and AI.get(it.icon) then
+  if it.mono then
+    -- the vendor's initials, a tile where the icon goes (TS_CV_Vendors)
+    local vh = wide_icon("cv:x", bh)
+    local tw = ImGui.CalcTextSize(ctx, it.mono)
+    local mw = math.max(vh, tw + 8)
+    local ix = show_label and (x + icon_pad(bh) + 2) or (x + (bw - mw) * 0.5 - (menu_ and 3 or 0))
+    if ix + mw <= x + bw - 2 then
+      mono_tile(ctx, dl, ix, y + (bh - vh) * 0.5, mw, vh, it.mono, colour_of(it.color) or C.COL.icon, lit, hovered)
+      cx = ix + mw + 5
+      has_icon = true
+    end
+  elseif AI.is(it.icon) and AI.get(it.icon) then
     local vh = wide_icon(it.icon, bh)
     local ix = show_label and (x + icon_pad(bh) + 2) or (x + (bw - vh) * 0.5 - (menu_ and 3 or 0))
     if ix + vh <= x + bw - 2 then
       local iink = lit and C.COL.icon_on or ((hovered or held) and C.COL.icon_hot or C.COL.icon)
       if tint and not lit then iink = ink end
+      if fillc then iink = ink end
       AI.draw(dl, it.icon, ix, y + (bh - vh) * 0.5, vh, iink)
       cx = ix + vh + 5
       has_icon = true
@@ -1165,48 +1251,71 @@ function TB.label_of(it)
   return (it.label ~= "" and it.label) or TB.action_name(id) or tostring(it.cmd)
 end
 
--- A list of items as menu entries, menus as submenus to any depth: what a
--- menu button opens, and the TCP's overflow list. `path` keeps ids apart.
 -- A menu row's colour and icon, drawn into the room its label's leading
 -- spaces keep, from the row's own rectangle (the last item): the colour
 -- a strip down the row's left edge (where a bar button has its
 -- underline), the icon after it, in the colour when it colours its icon.
 local STRIP = 5
-local function row_icon(ctx, it, ih, strip)
+-- `iw`: the room an icon takes (wider than `ih` when a row has initials)
+local function row_icon(ctx, it, ih, strip, iw)
   local dl = ImGui.GetWindowDrawList(ctx)
   local x0, y0 = ImGui.GetItemRectMin(ctx)
   local _, y1 = ImGui.GetItemRectMax(ctx)
+  local has_icon = (it.icon and it.icon ~= "") or it.mono
   local col, tint, under = tint_of(it, it.icon ~= "" and not AI.is(it.icon))
-  if col and (under or not (it.icon and it.icon ~= "")) then
+  if it.mono or it.fill then under = false end
+  if col and (under or not has_icon) then
     ImGui.DrawList_AddRectFilled(dl, x0, y0 + 2, x0 + 3, y1 - 2, col, 1.0)
   end
-  if ih <= 0 or not it.icon or it.icon == "" then return end
+  if ih <= 0 or not has_icon then return end
   local x = x0 + 2 + (strip and STRIP or 0)
   local y = y0 + ((y1 - y0) - ih) * 0.5
-  if AI.is(it.icon) then
+  if it.mono then
+    W.push_small(ctx)
+    local tw = ImGui.CalcTextSize(ctx, it.mono)
+    W.pop_small(ctx)
+    mono_tile(ctx, dl, x, y, math.min(iw, math.max(ih, tw + 8)), ih, it.mono, col or C.COL.icon, false, false)
+  elseif it.fill and col and AI.is(it.icon) then
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ih, y + ih, col, 2.5)
+    AI.draw(dl, it.icon, x + 1, y + 1, ih - 2, FILL_INK_ON)
+  elseif AI.is(it.icon) then
     AI.draw(dl, it.icon, x, y, ih, tint and col or C.COL.icon)
   else
     draw_icon(ctx, dl, it.icon, x, y, ih, 1)
   end
 end
 
+-- A list of items as menu entries, menus as submenus to any depth: what a
+-- menu button opens, and the TCP's overflow list. `path` keeps ids apart.
 function TB.menu_entries(ctx, items, path)
   path = path or "m"
   if #items == 0 then ImGui.TextDisabled(ctx, "(empty)") end
   -- with an icon on any row, every label leaves room for one; with a
   -- colour on any, room for its strip
-  local pad, ih, strip = "", 0, false
-  for _, it in ipairs(items) do
-    if not it.sep and it.icon and it.icon ~= "" then ih = math.floor(ImGui.GetTextLineHeight(ctx) + 2) end
-    if not it.sep and colour_of(it.color) then strip = true end
+  local pad, ih, iw, strip = "", 0, 0, false
+  local views = {}
+  for k, it in ipairs(items) do
+    local v = it.sep and it or view(it)
+    views[k] = v
+    if not it.sep and ((it.icon and it.icon ~= "") or v.mono) then
+      ih = math.floor(ImGui.GetTextLineHeight(ctx) + 2)
+      iw = math.max(iw, ih)
+      if v.mono then
+        W.push_small(ctx)
+        iw = math.max(iw, ImGui.CalcTextSize(ctx, v.mono) + 8)
+        W.pop_small(ctx)
+      end
+    end
+    if not it.sep and colour_of(v.color) and not v.mono and not v.fill then strip = true end
   end
   if ih > 0 or strip then
     local sw = ImGui.CalcTextSize(ctx, " ")
-    local room = (ih > 0 and (ih + 6) or 0) + (strip and STRIP + 2 or 0)
+    local room = (ih > 0 and (iw + 6) or 0) + (strip and STRIP + 2 or 0)
     pad = (" "):rep(math.ceil(room / ((sw and sw > 0) and sw or 4)))
   end
   local marks = ih > 0 or strip
   for k, it in ipairs(items) do
+    local vi = views[k]
     local key = "##" .. ID .. path .. "." .. k
     if it.menu then
       local open = ImGui.BeginMenu(ctx, pad .. text_of(it) .. key)
@@ -1215,7 +1324,7 @@ function TB.menu_entries(ctx, items, path)
         ImGui.EndMenu(ctx)
       end
       -- (once its submenu is done, ImGui hands back the row itself)
-      if marks then row_icon(ctx, it, ih, strip) end
+      if marks then row_icon(ctx, vi, ih, strip, iw) end
     elseif it.gap then
       ImGui.Dummy(ctx, 1, 4)
     elseif it.sep then
@@ -1225,16 +1334,16 @@ function TB.menu_entries(ctx, items, path)
         TB.switch_entries(ctx)
         ImGui.EndMenu(ctx)
       end
-      if marks then row_icon(ctx, it, ih, strip) end
+      if marks then row_icon(ctx, vi, ih, strip, iw) end
     elseif TB.switch_of(it) then
       local sw = TB.switch_of(it)
       if ImGui.MenuItem(ctx, pad .. text_of(it) .. key, nil, sw == TB.bar_id) and sw ~= TB.bar_id and TB.switch_to then
         TB.switch_to(sw)
       end
-      if marks then row_icon(ctx, it, ih, strip) end
+      if marks then row_icon(ctx, vi, ih, strip, iw) end
     elseif FB.kind(it) then
-      if ImGui.MenuItem(ctx, pad .. text_of(it) .. key, nil, FB.is_on(it)) then FB.run(it) end
-      if marks then row_icon(ctx, it, ih, strip) end
+      if ImGui.MenuItem(ctx, pad .. text_of(vi) .. key, nil, FB.is_on(it)) then FB.run(it) end
+      if marks then row_icon(ctx, vi, ih, strip, iw) end
     else
       local id = TB.resolve(it.cmd)
       local on = id and reaper.GetToggleCommandStateEx(0, id) == 1
@@ -1242,7 +1351,7 @@ function TB.menu_entries(ctx, items, path)
       if ImGui.MenuItem(ctx, pad .. label .. key, nil, on, id ~= nil) and id then
         reaper.Main_OnCommand(id, 0)
       end
-      if marks then row_icon(ctx, it, ih, strip) end
+      if marks then row_icon(ctx, vi, ih, strip, iw) end
     end
   end
 end
@@ -1305,7 +1414,9 @@ end
 
 -- A row of colour swatches for a button, "no colour" first; a click sets
 -- it.
-function TB.colour_row(ctx, it, id)
+-- `nested`: drawn in a panel that stays open, which shows the colour
+-- dialog itself; else (a menu) the menu closes for the dialog.
+function TB.colour_row(ctx, it, id, nested)
   local dl = ImGui.GetWindowDrawList(ctx)
   do
     local x0, y0 = ImGui.GetCursorScreenPos(ctx)
@@ -1321,6 +1432,7 @@ function TB.colour_row(ctx, it, id)
     end
     if hov then ImGui.SetTooltip(ctx, "No colour") end
   end
+  local own = colour_of(it.color) ~= nil
   for k, hex in ipairs(TB.COLOURS) do
     ImGui.SameLine(ctx, 0, 4)
     if ImGui.ColorButton(ctx, "##" .. id .. k, colour_of(hex), ImGui.ColorEditFlags_NoTooltip, 20, 20) then
@@ -1328,11 +1440,31 @@ function TB.colour_row(ctx, it, id)
       TB.save()
     end
     if it.color == hex then
+      own = false
       local x0, y0 = ImGui.GetItemRectMin(ctx)
       local x1, y1 = ImGui.GetItemRectMax(ctx)
       ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.label, 2, 0, 1.5)
     end
   end
+  -- any other colour: ChannelView's colour dialog (palettes, any colour,
+  -- the eyedropper); a colour from there shows as its own swatch
+  if own then
+    ImGui.SameLine(ctx, 0, 4)
+    ImGui.ColorButton(ctx, "##" .. id .. "own", colour_of(it.color), ImGui.ColorEditFlags_NoTooltip, 20, 20)
+    local x0, y0 = ImGui.GetItemRectMin(ctx)
+    local x1, y1 = ImGui.GetItemRectMax(ctx)
+    ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.label, 2, 0, 1.5)
+  end
+  ImGui.SameLine(ctx, 0, 6)
+  if ImGui.Button(ctx, "\u{2026}##" .. id .. "more", 22, 20) and TB.pick_colour then
+    local cur = colour_of(it.color)
+    TB.pick_colour("Button colour", cur and (cur >> 8) or nil, function(rgb)
+      it.color = ("#%06x"):format(rgb & 0xffffff)
+      TB.save()
+    end, nested)
+    if not nested then ImGui.CloseCurrentPopup(ctx) end
+  end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Any colour\u{2026}") end
   -- how this button shows it: as the bar does, unless ticked otherwise
   if colour_of(it.color) then
     local u, i = TB.cstyle_of(it)
@@ -1348,6 +1480,7 @@ function TB.colour_row(ctx, it, id)
     ImGui.SameLine(ctx, 0, 12)
     ImGui.TextDisabled(ctx, it.cs and "this button's own" or "as the bar")
   end
+  if nested then TB.draw_colour(ctx) end
 end
 
 -- What a switch can be: the menu of bars, or one bar. `pick(target)`
@@ -1410,7 +1543,7 @@ local function item_menu(ctx)
       it.icon = ""; TB.save()
     end
     if ImGui.BeginMenu(ctx, "Colour") then
-      TB.colour_row(ctx, it, ID .. "col")
+      TB.colour_row(ctx, it, ID .. "col", false)
       ImGui.EndMenu(ctx)
     end
     ImGui.Separator(ctx)

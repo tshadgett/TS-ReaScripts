@@ -12,7 +12,9 @@
   into the tables kept in Learn<k>:
 
     T<s>  the model: bell, ls (low shelf), hs (high shelf), hp (high-pass),
-          lp (low-pass); and for a pass filter its order (1..4: 6..24 dB/oct)
+          lp (low-pass), notch, bp (band pass), tilt (tilt shelf), flattilt,
+          flattop, sword (a steep bell), ap (all pass: flat); and its order
+          (1..16: 6..96 dB/oct; ME.BRICK a brickwall) where it has one
     F<s>  frequency: the frequency control's position -> where the band
           really sits, Hz (one point when the band has no frequency control)
     G<s>  gain: the gain control's position -> the gain it really gives, dB
@@ -26,7 +28,14 @@
           them as they are and only the shape was learned ("quick" learning)
     K<s>  for such a band: the measured frequency over the reported one, and
           the model's Q over the reported Q -- a plugin that means bandwidth
-          or its own scale by "Q" is put right by the second
+          or its own scale by "Q" is put right by the second -- (boosts,
+          cuts), and the measured gain over the reported one
+
+  What a plugin CALLS a shape ("Notch", "Band Pass", "Tilt Shelf") and a
+  slope ("24 dB/oct", "Brickwall") is read too (ME.type_of_name,
+  ME.order_of_text): it picks the model while learning, and when the band
+  is drawn it overrides a type learned some other way (Band<k>'s Slope
+  control, when mapped, sets the order live).
 
   <s> is the shape switch's position (1 when there's no switch). The
   models are analogue prototypes evaluated in closed form (ME.band_db), so
@@ -39,7 +48,55 @@ local ME = {}
 
 ME.F_LO, ME.F_HI = 20, 20000
 ME.NBANDS = 120                       -- 1/12 octave, 20 Hz .. 20 kHz
-ME.TYPES = { bell = "Bell", ls = "Low shelf", hs = "High shelf", hp = "Low cut", lp = "High cut" }
+ME.TYPES = { bell = "Bell", ls = "Low shelf", hs = "High shelf", hp = "Low cut", lp = "High cut",
+             notch = "Notch", bp = "Band pass", tilt = "Tilt shelf", flattilt = "Flat tilt",
+             flattop = "Flat top", sword = "Sword", ap = "All pass" }
+-- the ones with no gain of their own: drawn on the 0 dB line
+ME.GAINLESS = { hp = true, lp = true, notch = true, bp = true, ap = true }
+-- the order standing for a brickwall (as steep as the canvas can show)
+ME.BRICK = 32
+ME.MAX_ORDER = 16                       -- 96 dB/oct
+
+-- What a plugin's name for a shape means: type, and an order when the
+-- name says (a brickwall); nil when it's not one we know.
+local name_cache = {}
+function ME.type_of_name(text)
+  if not text or text == "" then return nil end
+  local hit = name_cache[text]
+  if hit ~= nil then return hit[1], hit[2] end
+  local s = " " .. text:lower():gsub("[_%-/]", " "):gsub("%s+", " ") .. " "
+  local function has(...) for _, w in ipairs({ ... }) do if s:find(w) then return true end end return false end
+  local brick = has("brick", "%f[%a]wall%f[%A]") and ME.BRICK or nil
+  local t
+  if has("all ?pass") then t = "ap"
+  elseif has("flat tilt") then t = "flattilt"
+  elseif has("flat top") then t = "flattop"
+  elseif has("tilt") then t = "tilt"
+  elseif has("notch", "band ?reject", "band ?stop") then t = "notch"
+  elseif has("band ?pass", "%f[%a]bpf?%f[%A]") then t = "bp"
+  elseif has("sword") then t = "sword"
+  elseif has("low ?cut", "lo ?cut", "high ?pass", "hi ?pass", "%f[%a]hpf?%f[%A]") then t = "hp"
+  elseif has("high ?cut", "hi ?cut", "low ?pass", "lo ?pass", "%f[%a]lpf?%f[%A]") then t = "lp"
+  elseif has("low ?shelf", "lo ?shelf", "%f[%a]ls%f[%A]", "%f[%a]lsf%f[%A]", "tone low") then t = "ls"
+  elseif has("high ?shelf", "hi ?shelf", "%f[%a]hs%f[%A]", "%f[%a]hsf%f[%A]", "tone high") then t = "hs"
+  elseif has("bell", "peak", "parametric", "%f[%a]pk%f[%A]", "%f[%a]eq%f[%A]", "%f[%a][lhm]?mf%f[%A]") then t = "bell" end
+  -- (a console or valve model's own names -- "VT Boost", "Blue Low" -- are
+  -- left to the measuring)
+  name_cache[text] = { t or false, t and brick or nil }
+  if not t then return nil end
+  return t, brick
+end
+
+-- What a slope control's reading means as an order: "24 dB/oct" -> 4,
+-- "Brickwall" -> ME.BRICK; nil when it doesn't say.
+function ME.order_of_text(text)
+  if not text then return nil end
+  local s = text:lower()
+  if s:find("brick") then return ME.BRICK end
+  local v = tonumber(s:match("(%d+%.?%d*)%s*db"))
+  if not v or v <= 0 then return nil end
+  return math.max(1, math.min(ME.MAX_ORDER, math.floor(v / 6 + 0.5)))
+end
 
 -- The analyser's band centres (TS_CV_Learn.jsfx uses the same edges:
 -- 20 * 2^(i/12), i = 0..120; centres are their geometric middles).
@@ -61,38 +118,103 @@ local function hp2(x2, q) local a = 1 - x2; return (x2 * x2) / (a * a + x2 / (q 
 local function hp1(x2) return x2 / (1 + x2) end
 local BW = { [1] = {}, [2] = { 0.7071 }, [3] = { 1.0 }, [4] = { 0.5412, 1.3066 } }
 
+-- A Butterworth filter's sections for order n: the second-order sections'
+-- Qs (the steepest, highest-Q one last) and whether there's a first-order one.
+local sect_cache = {}
+local function sections(n)
+  local hit = sect_cache[n]
+  if hit then return hit end
+  local qs = {}
+  for k = math.floor(n / 2), 1, -1 do
+    qs[#qs + 1] = 1 / (2 * math.sin((2 * k - 1) * math.pi / (2 * n)))
+  end
+  sect_cache[n] = { qs = qs, odd = (n % 2) == 1 }
+  return sect_cache[n]
+end
+
+-- a pass filter's |H|^2 (high-pass at x; a low-pass is asked at 1/x)
+local function pass2(x2, order, q)
+  if order == 1 then return hp1(x2)
+  elseif order == 2 then return hp2(x2, q)
+  elseif order == 3 then return hp1(x2) * hp2(x2, q)
+  elseif order == 4 then return hp2(x2, 0.5412) * hp2(x2, q) end
+  -- steeper: Butterworth, its highest-Q section as resonant as Q says
+  local sc = sections(order)
+  local p = sc.odd and hp1(x2) or 1
+  local nq = #sc.qs
+  for k, qk in ipairs(sc.qs) do
+    p = p * hp2(x2, (k == nq) and qk * (q / 0.7071) or qk)
+  end
+  return p
+end
+
+-- how much a band-shaped thing (bell, notch, band pass) is there at x:
+-- 1 at its centre, falling away either side, steeper with a higher order
+local function band_w(x, q, order)
+  local u = (1 - x * x) * q / x
+  local p = math.max(1, (order or 2) / 2)
+  return 1 / (1 + math.abs(u) ^ (2 * p))
+end
+
+-- a steep shelf's share of its gain at x (0 below, 1 above: a high shelf)
+local function shelf_w(x, order)
+  return 1 / (1 + x ^ (-(order or 2)))
+end
+
+local function shelf_db(t, x, g, q, order)
+  if order and order ~= 2 then
+    local w = shelf_w(x, order)
+    return g * ((t == "ls") and (1 - w) or w)
+  end
+  local A = 10 ^ (g / 40)
+  local x2 = x * x
+  if t == "ls" then
+    local n = (A - x2) ^ 2 + (A / (q * q)) * x2
+    local d = (1 - A * x2) ^ 2 + (A / (q * q)) * x2
+    return db10(A * A * n / d)
+  end
+  local n = (1 - A * x2) ^ 2 + (A / (q * q)) * x2
+  local d = (A - x2) ^ 2 + (A / (q * q)) * x2
+  return db10(A * A * n / d)
+end
+
 -- One band's response in dB at f. `b`: { type, f, g, q, order }.
 function ME.band_db(b, f)
   local t, f0, q = b.type, b.f or 1000, math.max(0.05, b.q or 0.7071)
   if f0 <= 0 then return 0 end
   local x = f / f0
-  if t == "bell" or t == "ls" or t == "hs" then
-    local g = b.g or 0
+  local g = b.g or 0
+  if t == "bell" or t == "sword" then
     if g == 0 then return 0 end
+    local order = b.order or ((t == "sword") and 4 or 2)
+    -- steeper: the same peak, its skirts falling away faster
+    if order > 2 then return g * band_w(x, q, 2) ^ (order / 2) end
     local A = 10 ^ (g / 40)
     local x2 = x * x
-    if t == "bell" then
-      local a = 1 - x2
-      return db10((a * a + (A * x / q) ^ 2) / (a * a + (x / (A * q)) ^ 2))
-    elseif t == "ls" then
-      local n = (A - x2) ^ 2 + (A / (q * q)) * x2
-      local d = (1 - A * x2) ^ 2 + (A / (q * q)) * x2
-      return db10(A * A * n / d)
-    else
-      local n = (1 - A * x2) ^ 2 + (A / (q * q)) * x2
-      local d = (A - x2) ^ 2 + (A / (q * q)) * x2
-      return db10(A * A * n / d)
-    end
+    local a = 1 - x2
+    return db10((a * a + (A * x / q) ^ 2) / (a * a + (x / (A * q)) ^ 2))
+  elseif t == "ls" or t == "hs" then
+    if g == 0 then return 0 end
+    return shelf_db(t, x, g, q, b.order)
+  elseif t == "tilt" then
+    -- tipping about f: half the gain down below, half up above
+    if g == 0 then return 0 end
+    return shelf_db("hs", x, g, q, b.order) - g / 2
+  elseif t == "flattilt" then
+    -- a straight tilt across the whole range: `g` over ten octaves
+    return g * math.log(x) / (10 * math.log(2))
+  elseif t == "flattop" then
+    -- a plateau between two shelves, Q how narrow
+    if g == 0 then return 0 end
+    local w = 2 ^ (1 / q)
+    return shelf_db("hs", f / (f0 / w), g, 0.7071, b.order) + shelf_db("hs", f / (f0 * w), -g, 0.7071, b.order)
+  elseif t == "notch" then
+    return db10(1 - band_w(x, q, b.order))
+  elseif t == "bp" then
+    return db10(band_w(x, q, b.order))
   elseif t == "hp" or t == "lp" then
     if t == "lp" then x = 1 / x end
-    local x2 = x * x
-    local order = b.order or 2
-    local p = 1
-    if order == 1 then p = hp1(x2)
-    elseif order == 2 then p = hp2(x2, q)
-    elseif order == 3 then p = hp1(x2) * hp2(x2, q)
-    else p = hp2(x2, 0.5412) * hp2(x2, q) end
-    return db10(p)
+    return db10(pass2(x * x, b.order or 2, q))
   end
   return 0
 end
@@ -148,9 +270,12 @@ local function refine(b, freqs, D, fields, rounds)
 end
 
 -- The model that best explains a measured response D (dB at `freqs`).
--- `kind`: "gain" (a band with a gain control: bell or shelf) or "cut" (a
--- pass filter). `force` fixes the type (and order) when it's already
--- known. Returns { type, f, g, q, order, err }, or nil when D is flat.
+-- `kind`: "gain" (a band with a gain control: tried as a bell or shelf
+-- first, then everything else), "cut" (a pass filter) or "any". `force`
+-- fixes the type (and order) when it's already known -- from what the
+-- plugin calls the shape. Returns { type, f, g, q, order, err }, or nil
+-- when D is flat.
+local CUT_ORDERS = { 1, 2, 3, 4, 6, 8, 12, 16 }
 function ME.fit(freqs, D, kind, force)
   force = force or {}
   local n = #freqs
@@ -158,48 +283,68 @@ function ME.fit(freqs, D, kind, force)
   for i = 1, n do if math.abs(D[i]) > math.abs(vmax) then imax, vmax = i, D[i] end end
   if math.abs(vmax) < 0.4 then return nil end
   local best
-  local function try(b, fields)
+  -- (bells and shelves, the common ones, win a near tie: `bias` < 1)
+  local function try(b, fields, bias)
+    if not b then return end
     local e = refine(b, freqs, D, fields)
     b.err = e
-    if not best or e < best.err then best = b end
+    local score = e * (bias or 1)
+    if not best or score < best.score then b.score = score; best = b end
   end
-  if kind == "cut" then
-    local lo_avg = (D[1] + D[2] + D[3]) / 3
-    local hi_avg = (D[n] + D[n - 1] + D[n - 2]) / 3
-    local t = force.type or ((lo_avg < hi_avg) and "hp" or "lp")
-    local orders = force.order and { force.order } or { 1, 2, 3, 4 }
-    for _, order in ipairs(orders) do
-      local cand
-      for _, f0 in ipairs(logspace(15, 25000, 40)) do
-        local b = { type = t, order = order, f = f0, q = BW[order][#BW[order]] or 0.7071 }
+  local function grid(make, fs, qs)
+    local cand
+    for _, f0 in ipairs(fs) do
+      for _, q in ipairs(qs) do
+        local b = make(f0, q)
         b.err = err_of(b, freqs, D)
         if not cand or b.err < cand.err then cand = b end
       end
+    end
+    return cand
+  end
+  local lo_avg = (D[1] + D[2] + D[3]) / 3
+  local hi_avg = (D[n] + D[n - 1] + D[n - 2]) / 3
+  local function cuts(t)
+    local orders = force.order and { force.order } or CUT_ORDERS
+    for _, order in ipairs(orders) do
+      local cand = grid(function(f0) return { type = t, order = order, f = f0, q = (BW[order] and BW[order][#BW[order]]) or 0.7071 } end,
+        logspace(15, 25000, 40), { 0 })
       try(cand, order == 1 and { "f" } or { "f", "q" })
     end
+  end
+  local function shaped(t)
+    if t == "bell" or t == "sword" or t == "flattop" then
+      try(grid(function(f0, q) return { type = t, f = f0, g = vmax, q = q, order = force.order } end,
+        { freqs[imax] }, logspace(0.15, 10, 24)), { "f", "q", "g" }, (t == "bell") and 0.85 or 1)
+    elseif t == "ls" or t == "hs" or t == "tilt" then
+      local edge = (t == "ls") and lo_avg or hi_avg
+      if t == "tilt" then edge = hi_avg - lo_avg end
+      if math.abs(edge) < 0.2 then edge = vmax end
+      local flo, fhi = (t == "ls") and 15 or 300, (t == "ls") and 3000 or 25000
+      if t == "tilt" then flo, fhi = 40, 12000 end
+      try(grid(function(f0, q) return { type = t, f = f0, g = edge, q = q, order = force.order } end,
+        logspace(flo, fhi, 30), { 0.4, 0.55, 0.7071, 0.9, 1.2, 1.6 }), { "f", "q", "g" }, (t ~= "tilt") and 0.85 or 1)
+    elseif t == "flattilt" then
+      try({ type = t, f = 632, g = (hi_avg - lo_avg) * 10 / 9.9, q = 0.7071 }, { "f", "g" })
+    elseif t == "notch" or t == "bp" then
+      try(grid(function(f0, q) return { type = t, f = f0, q = q, order = force.order } end,
+        logspace(20, 20000, 40), { 0.3, 0.7, 1.5, 3, 6, 10 }), { "f", "q" })
+    elseif t == "hp" or t == "lp" then
+      cuts(t)
+    end
+  end
+  if force.type == "ap" then return nil end
+  if force.type then
+    shaped(force.type)
+  elseif kind == "cut" then
+    cuts((lo_avg < hi_avg) and "hp" or "lp")
   else
-    local types = force.type and { force.type } or { "bell", "ls", "hs" }
-    for _, t in ipairs(types) do
-      local cand
-      if t == "bell" then
-        for _, q in ipairs(logspace(0.15, 10, 24)) do
-          local b = { type = "bell", f = freqs[imax], g = vmax, q = q }
-          b.err = err_of(b, freqs, D)
-          if not cand or b.err < cand.err then cand = b end
-        end
-      else
-        local edge = (t == "ls") and (D[1] + D[2]) / 2 or (D[n] + D[n - 1]) / 2
-        if math.abs(edge) < 0.2 then edge = vmax end
-        local flo, fhi = (t == "ls") and 15 or 300, (t == "ls") and 3000 or 25000
-        for _, f0 in ipairs(logspace(flo, fhi, 30)) do
-          for _, q in ipairs({ 0.4, 0.55, 0.7071, 0.9, 1.2, 1.6 }) do
-            local b = { type = t, f = f0, g = edge, q = q }
-            b.err = err_of(b, freqs, D)
-            if not cand or b.err < cand.err then cand = b end
-          end
-        end
-      end
-      try(cand, { "f", "q", "g" })
+    for _, t in ipairs({ "bell", "ls", "hs" }) do shaped(t) end
+    -- a band with gain whose shape is none of those (a cut, a notch...),
+    -- when they don't explain it closely
+    if kind == "any" or not best or best.err > 0.25 then
+      cuts((lo_avg < hi_avg) and "hp" or "lp")
+      for _, t in ipairs({ "notch", "bp", "tilt", "flattop" }) do shaped(t) end
     end
   end
   return best
@@ -379,10 +524,13 @@ function ME.summarise(samples, opts)
     if opts.direct then
       -- reported values: keep the type, and how the measurement compares
       -- with what the plugin said (rep_f / rep_q on each sample)
-      local fk, qk, qc = {}, {}, {}
+      local fk, qk, qc, gk = {}, {}, {}, {}
       for _, sm in ipairs(list) do
         if sm.fit.type == t then
           if sm.rep_f and sm.rep_f > 0 then fk[#fk + 1] = sm.fit.f / sm.rep_f end
+          if sm.rep_g and math.abs(sm.rep_g) > 1 and sm.fit.g and sm.rep_g * sm.fit.g > 0 then
+            gk[#gk + 1] = sm.fit.g / sm.rep_g
+          end
           if sm.rep_q and sm.rep_q > 0 then
             -- boosts and cuts apart: a band can be narrower one way
             if (sm.fit.g or 0) < 0 then qc[#qc + 1] = sm.fit.q / sm.rep_q
@@ -393,6 +541,10 @@ function ME.summarise(samples, opts)
       local kb = median(qk)
       local kc = median(qc)
       e.K = { median(fk) or 1, kb or kc or 1, kc or kb or 1 }
+      -- the gain it really gives over what it says, only where that's not
+      -- plain (a tilt counted end to end, say)
+      local g4 = median(gk)
+      if g4 and math.abs(g4 - 1) > 0.08 then e.K[4] = g4 end
       e.F, e.G, e.Q, e.R = {}, {}, {}, {}
       if not opts.has_freq then
         -- no frequency control: where it sits is measured
@@ -508,17 +660,81 @@ ME.nearest_index = nearest_index
 
 local function norm(track, addr, p) return reaper.TrackFX_GetParamNormalized(track, addr, p) or 0 end
 
--- Whether a switch reads "on". A parameter named Bypass is on when it
--- reads off; otherwise "Off", "Out", "Bypass" or 0 is off.
+-- Whether a switch reads "on", by what it says: On / Enabled / Active /
+-- In / Yes against Off / Disabled / Inactive / Out / No ("Not ..." the
+-- other way round), else by its value. A parameter named Bypass is on
+-- when it reads off ("Not Bypassed"), and a "Bypassed" reading is off on
+-- any other.
+local SW_ON  = { on = true, enabled = true, enable = true, active = true, ["in"] = true, yes = true,
+                 ["true"] = true, ["1"] = true }
+local SW_OFF = { off = true, disabled = true, disable = true, inactive = true, out = true, no = true,
+                 ["false"] = true, ["0"] = true }
+function ME.switch_reads_on(name, txt, n)
+  local byp = (name or ""):lower():match("bypass") ~= nil
+  local r = (txt or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  local neg = false
+  local rest = r:match("^not%s+(.+)$") or r:match("^non%-?(.+)$")
+  if rest then neg, r = true, rest end
+  local word = r:match("^([%a%d]+)")
+  local engaged
+  if word and SW_ON[word] then engaged = true
+  elseif word and SW_OFF[word] then engaged = false
+  elseif r:match("^bypass") then engaged = byp     -- a bypass engaged; on anything else, off
+  else engaged = (n or 0) >= 0.5 end
+  if neg then engaged = not engaged end
+  if byp then return not engaged end
+  return engaged
+end
 function ME.switch_on(track, addr, p)
   local _, name = reaper.TrackFX_GetParamName(track, addr, p, "")
   local _, txt = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
-  local t = (txt or ""):lower()
-  local off = t:match("off") or t:match("^%s*out") or t:match("bypass") or t == "0" or t == ""
-  if t == "" then off = norm(track, addr, p) < 0.5 end
-  local lit = not off
-  if (name or ""):lower():match("bypass") then lit = not lit end
-  return lit
+  return ME.switch_reads_on(name, txt, norm(track, addr, p))
+end
+
+-- What the band's shape switch is called where it is now, as a model:
+-- type and an order when the name gives one; nil when it has no switch or
+-- the name isn't one we know.
+function ME.live_type(track, addr, b)
+  if not b.shape then return nil end
+  local _, t = reaper.TrackFX_GetFormattedParamValue(track, addr, b.shape, "")
+  return ME.type_of_name(t)
+end
+
+-- A band's slope control when none is mapped: the parameter near its
+-- frequency control named "... Slope" for the same band ("Band 3 Slope"
+-- beside "Band 3 Frequency"), or nil. Per plugin instance and band.
+local slope_cache = {}
+function ME.find_slope(track, addr, b)
+  if b.slope then return b.slope end
+  local anchor = b.freq or b.gain or b.q or b.shape
+  if not anchor then return nil end
+  local guid = (reaper.TrackFX_GetFXGUID and reaper.TrackFX_GetFXGUID(track, addr)) or tostring(addr)
+  local ck = guid .. ":" .. anchor
+  local hit = slope_cache[ck]
+  if hit ~= nil then return hit or nil end
+  local _, an = reaper.TrackFX_GetParamName(track, addr, anchor, "")
+  local num = (an or ""):lower():match("band%s*(%d+)") or (an or ""):match("(%d+)")
+  local found = false
+  local np = reaper.TrackFX_GetNumParams and reaper.TrackFX_GetNumParams(track, addr) or 0
+  for p = math.max(0, anchor - 16), math.min(np - 1, anchor + 16) do
+    local _, pn = reaper.TrackFX_GetParamName(track, addr, p, "")
+    local l = (pn or ""):lower()
+    if l:find("slope", 1, true) and not l:find("dyn", 1, true) then
+      local pnum = l:match("band%s*(%d+)") or l:match("(%d+)")
+      if pnum == num then found = p; break end
+    end
+  end
+  slope_cache[ck] = found
+  return found or nil
+end
+
+-- The order the band's slope control reads (Band<k>'s Slope, or one found
+-- by its name), or nil.
+function ME.live_order(track, addr, b)
+  local p = ME.find_slope(track, addr, b)
+  if not p then return nil end
+  local _, t = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+  return ME.order_of_text(t)
 end
 
 -- The band as it is now: { type, order, f, g, q, on, s } -- or nil when
@@ -533,9 +749,19 @@ function ME.read_band(track, addr, b, all_on)
     for _, v in pairs(L.shapes) do e = v break end
   end
   local out = { type = e.type, order = e.order, s = s }
+  -- what the plugin calls the shape it's on now overrides what was learned
+  -- (a cut learned as a shelf before the names were read; a switch whose
+  -- settings couldn't be stepped through), and its slope control sets the
+  -- order
+  local nt, norder = ME.live_type(track, addr, b)
+  local same = (not nt) or nt == e.type
+  if nt then out.type = nt; out.order = norder or (same and e.order) or nil end
+  local so = ME.live_order(track, addr, b)
+  if so then out.order = so end
   if L.D then
-    -- the plugin's own values, put right by what was measured
-    local K = e.K or { 1, 1 }
+    -- the plugin's own values, put right by what was measured (when it was
+    -- measured as this type)
+    local K = (same and e.K) or { 1, 1, 1 }
     local function val(p)
       if not p then return nil end
       local _, t = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
@@ -544,6 +770,8 @@ function ME.read_band(track, addr, b, all_on)
     out.f = (val(b.freq) or (e.F[1] and e.F[1][2]) or 1000) * (b.freq and (K[1] or 1) or 1)
     out.g = val(b.gain) or 0
     if out.g == -math.huge then out.g = -60 end
+    out.g = out.g * (K[4] or 1)
+    if ME.GAINLESS[out.type] then out.g = 0 end
     out.q = (val(b.q) or 0.7071) * (((out.g or 0) < 0 and (K[3] or K[2])) or K[2] or 1)
     out.on = true
     if b.on then out.on = ME.switch_on(track, addr, b.on) end
@@ -585,6 +813,7 @@ function ME.read_band(track, addr, b, all_on)
   else
     out.g = 0
   end
+  if ME.GAINLESS[out.type] then out.g = 0 end
   local q = ME.q_at(e.Q, out.g or 0) or 0.7071
   if b.q and e.R and #e.R > 0 then q = q * (UN.interp(e.R, norm(track, addr, b.q), true) or 1) end
   out.q = q
@@ -775,8 +1004,8 @@ end
 -- Where on the spectrum a band is heard most, for reading what it's doing:
 -- a bell at its frequency, a shelf an octave into its plateau.
 function ME.dyn_focus(rb)
-  if rb.type == "ls" then return rb.f * 0.5 end
-  if rb.type == "hs" then return rb.f * 2 end
+  if rb.type == "ls" or rb.type == "hp" then return rb.f * 0.5 end
+  if rb.type == "hs" or rb.type == "lp" or rb.type == "tilt" then return rb.f * 2 end
   return rb.f
 end
 
@@ -784,8 +1013,9 @@ end
 -- bell its bandwidth, a shelf its plateau.
 function ME.dyn_span(rb)
   local q = math.max(0.1, rb.q or 0.7071)
-  if rb.type == "ls" then return 20, rb.f * 1.2 end
-  if rb.type == "hs" then return rb.f / 1.2, 20000 end
+  if rb.type == "ls" or rb.type == "lp" then return 20, rb.f * 1.2 end
+  if rb.type == "hs" or rb.type == "hp" or rb.type == "tilt" then return rb.f / 1.2, 20000 end
+  if rb.type == "flattilt" or rb.type == "ap" then return 20, 20000 end
   local bw = 2 * math.log(1 / (2 * q) + math.sqrt(1 / (4 * q * q) + 1)) / math.log(2)
   local h = 2 ^ (math.max(1 / 3, bw) / 2)
   return rb.f / h, rb.f * h
@@ -848,10 +1078,41 @@ end
 -- text}, ... } in the switch's order -- type what that setting was learned
 -- as (nil if it wasn't), text what the plugin calls it -- or nil when the
 -- band has no shape switch.
+-- A switch's settings read from the plugin itself (when learning didn't
+-- step through them): { {norm, text, lo, hi}, ... } or nil. Per instance.
+local live_pos_cache = {}
+function ME.live_positions(track, addr, p, max_pos)
+  if not p then return nil end
+  local k = tostring((reaper.TrackFX_GetFXGUID and reaper.TrackFX_GetFXGUID(track, addr)) or addr) .. ":" .. p
+  local hit = live_pos_cache[k]
+  if hit ~= nil then return hit or nil end
+  local fmt = UN.formatter(track, addr, p)
+  if fmt(0) == nil then return nil end
+  local pos = UN.positions(fmt, 400, max_pos or 64)
+  if pos then
+    -- a placeholder at the end of a list ("Reserved") isn't a setting
+    for i = #pos, 1, -1 do
+      if (pos[i].text or ""):lower():match("^%s*reserved%s*$") then table.remove(pos, i) end
+    end
+  end
+  live_pos_cache[k] = pos or false
+  return pos
+end
+
 function ME.shapes(track, addr, b)
   if not b.shape then return nil end
   local L = ME.decode(b.learn)
-  if not (L and L.H and #L.H > 1) then return nil end
+  if not (L and L.H and #L.H > 1) then
+    -- settings the learning didn't find: as the plugin reads them now
+    local pos = ME.live_positions(track, addr, b.shape)
+    if not pos then return nil end
+    local out = {}
+    for i, r in ipairs(pos) do
+      local t, o = ME.type_of_name(r.text)
+      out[i] = { s = i, norm = r.norm, type = t, order = o, text = (r.text or ""):match("^%s*(.-)%s*$"), live = true }
+    end
+    return out
+  end
   local out = {}
   for i, n in ipairs(L.H) do
     local e = L.shapes[i]
@@ -870,7 +1131,53 @@ function ME.set_shape(track, addr, b, s)
   if not b.shape then return end
   local L = ME.decode(b.learn)
   local n = L and L.H and L.H[s]
+  if not n then
+    local pos = ME.live_positions(track, addr, b.shape)
+    n = pos and pos[s] and pos[s].norm
+  end
   if n then reaper.TrackFX_SetParamNormalized(track, addr, b.shape, n) end
+end
+
+-- Which shape setting the band is on, without reading their names: an
+-- index into ME.shapes (nil without a shape switch).
+function ME.shape_now(track, addr, b)
+  if not b.shape then return nil end
+  local L = ME.decode(b.learn)
+  local v = norm(track, addr, b.shape)
+  if L and L.H and #L.H > 1 then return nearest_index(L.H, v) end
+  local pos = ME.live_positions(track, addr, b.shape)
+  if not pos then return nil end
+  local bi, bd = 1, math.huge
+  for i, r in ipairs(pos) do local d = math.abs(r.norm - v); if d < bd then bi, bd = i, d end end
+  return bi
+end
+
+-- Which shape setting the band is on: an index into ME.shapes.
+function ME.shape_index(track, addr, b, shs)
+  local v = norm(track, addr, b.shape)
+  local bi, bd = 1, math.huge
+  for i, sh in ipairs(shs or {}) do
+    local d = math.abs(sh.norm - v)
+    if d < bd then bi, bd = i, d end
+  end
+  return bi
+end
+
+-- A band's slope settings ({norm, text, ...}) and which it's on; nil
+-- when it has no slope control.
+function ME.slopes(track, addr, b)
+  local p = ME.find_slope(track, addr, b)
+  if not p then return nil end
+  local pos = ME.live_positions(track, addr, p, 40)
+  if not pos or #pos < 2 then return nil end
+  local v = norm(track, addr, p)
+  local cur, bd = 1, math.huge
+  for i, r in ipairs(pos) do
+    if v >= r.lo - 1e-6 and v <= r.hi + 1e-6 then cur, bd = i, -1 end
+    local d = math.abs(r.norm - v)
+    if bd >= 0 and d < bd then cur, bd = i, d end
+  end
+  return pos, cur, p
 end
 
 -- What a shape setting is called in a menu: the plugin's name for it, and
@@ -878,7 +1185,7 @@ end
 function ME.shape_label(sh)
   local kind = sh.type and ME.TYPES[sh.type] or nil
   if kind and sh.order and sh.order > 0 and (sh.type == "hp" or sh.type == "lp") then
-    kind = kind .. (" %d dB/oct"):format(sh.order * 6)
+    kind = kind .. ((sh.order >= ME.BRICK) and " brickwall" or (" %d dB/oct"):format(sh.order * 6))
   end
   if sh.text == "" then return kind or ("Setting " .. sh.s) end
   if not kind or sh.text:lower():find(kind:lower(), 1, true) then return sh.text end
@@ -951,7 +1258,9 @@ local function role_of(nm)
   if nm:match("freq") or nm:match("hz") or nm:match("frq") then return "freq" end
   if nm:match("gain") or nm:match("boost") or nm:match("level") or nm:match("db") then return "gain" end
   if nm:match("%f[%a]q%f[%A]") or nm:match("width") or nm:match("bandwidth") or nm:match("bw") then return "q" end
-  if nm:match("shape") or nm:match("bell") or nm:match("peak") or nm:match("shelf") then return "shape" end
+  if nm:match("slope") then return "slope" end
+  if nm:match("shape") or nm:match("bell") or nm:match("peak") or nm:match("shelf")
+     or nm:match("%f[%a]type%f[%A]") then return "shape" end
   if nm:match("%f[%a]on%f[%A]") or nm:match("enable") or nm:match("active") or nm:match("bypass") then return "on" end
   return nil
 end

@@ -4,8 +4,9 @@
   TS_CV_Sends.lua -- the Sends and Receives panels, pinned to the right.
 
   One cell per send: the other track's name over its colour, a bypass,
-  a level knob, a mode button and a pre/post button. Plus an add control in the same
-  dashed style as the insert one, opening the same kind of hover menu.
+  a level knob, a mode button and a pre/post button. Plus an add control
+  in the same dashed style as the insert one, opening the same kind of
+  hover menu.
 
   Both panels are this one file. A receive is the same REAPER object as
   a send, seen from the other end: category 0 on the sending track,
@@ -184,7 +185,7 @@ local function make(kind)
   -- The width the panel will take, worked out before anything is drawn so
   -- the scrolling row in the middle knows how much is left for it.
   function SD.width_for(track, panel_h)
-    if SD.is_collapsed() then return C.COLLAPSED_W end
+    if SD.is_collapsed() then return SD.STRIP_W or C.COLLAPSED_W end
     local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
     return SD.width(false, n, panel_h)
   end
@@ -194,13 +195,26 @@ local function make(kind)
   -- lines up row-for-row with the parameters beside it, and the add tile is
   -- just the next cell rather than something bolted on the end.
   function SD.width(collapsed, n_sends, panel_h)
-    if collapsed then return C.COLLAPSED_W end
+    if collapsed then return SD.STRIP_W or C.COLLAPSED_W end
     local rows = P.rows_for(panel_h or 300)
     local cells = n_sends + 1                      -- +1 for the add tile
     local cols = math.max(1, math.ceil(cells / rows))
-    return math.min(C.SENDS_MAX_W,
-                    cols * C.SEND_W + (cols - 1) * C.SEND_COL_GAP
-                    + C.PANEL_PAD * 2)
+    local w = cols * C.SEND_W + (cols - 1) * C.SEND_COL_GAP + C.PANEL_PAD * 2
+    if SD.STRIP_W then return math.max(w, SD.STRIP_W) end
+    return math.min(C.SENDS_MAX_W, w)
+  end
+
+  -- Strip mode (the Rack view): the panel is a band STRIP_W wide, as
+  -- short as lets its cells fit across, and folds to a header bar.
+  SD.STRIP_W = nil
+  function SD.bar_h() return C.HEADER_H + 2 end
+  function SD.strip_h(track, w)
+    if SD.is_collapsed() then return SD.bar_h() end
+    local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
+    local base = C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD
+    local per = math.max(1, math.floor((w - C.PANEL_PAD * 2 + C.SEND_COL_GAP) / (C.SEND_W + C.SEND_COL_GAP)))
+    local rows = math.max(C.MIN_ROWS, math.ceil((n + 1) / per))
+    return base + rows * C.CELL_H
   end
 
   -- ---------------------------------------------------------------------
@@ -516,7 +530,20 @@ local function make(kind)
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
       ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
 
-      if collapsed then
+      if collapsed and SD.STRIP_W then
+        -- folded in a strip: a header bar, the title left, the unfold right
+        local btn = C.ICON_SIZE
+        ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_bg, 3.0)
+        local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
+        local label = title_of(track) .. (n > 0 and (" · " .. n) or "")
+        local _, th = ImGui.CalcTextSize(ctx, label)
+        ImGui.DrawList_AddText(dl, x + 6, y + (wh - th) * 0.5, C.COL.header_dim, label)
+        ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + (wh - btn) * 0.5)
+        if W.icon_button(ctx, ID .. "exp", "expand", btn, false,
+            "Expand " .. K.title:lower()) then
+          toggle()
+        end
+      elseif collapsed then
         local btn = C.ICON_SIZE
         ImGui.SetCursorScreenPos(ctx, x + (ww - btn) * 0.5, y + 4)
         if W.icon_button(ctx, ID .. "exp", "expand", btn, false,

@@ -59,6 +59,7 @@ local UN = require("TS_CV_Units")
 local DLY = require("TS_CV_Delay")
 local RB = require("TS_CV_ReaFX")
 local DR = require("TS_CV_Drawers")
+local KP = require("TS_CV_KnobParts")
 
 local NS = "TS_CV_WEB"
 
@@ -270,6 +271,16 @@ local function cap_hex(key)
   return hex(cp.col or C.COL.knob_fill)
 end
 
+-- A knob's parts as text (KP.encode) and the colour its body shows: its
+-- own look, else its style's when that's a parts recipe; nil otherwise.
+local function parts_of(style, look, cap)
+  local def = (not look) and style and C.KNOB_STYLE[C.KNOB_STYLE_ALIAS[style] or style] or nil
+  local p = look or (def and def.parts)
+  if not p then return nil end
+  local col = cap_hex(cap) or (look and look.col and hex(look.col)) or (def and cap_hex(def.cap)) or nil
+  return KP.encode(p), col
+end
+
 -- a toggle's or button row's lit colour, by name or custom; nil = theme's
 local function lit_hex(key)
   local t = key and C.TOGGLE_COL[key]
@@ -290,8 +301,8 @@ local function plate_json(layout)
   local pl = C.plate_of(layout.plate)
   if not pl then return nil end
   return { bg = hex(pl.bg), head = hex(pl.head), text = hex(pl.text), dim = hex(pl.dim),
-           tick = hex(pl.tick), border = hex(pl.border), brushed = M.brushed(layout, pl) or nil,
-           metal = M.metal(layout, pl) or nil,
+           tick = hex(pl.tick), border = hex(pl.border), brushed = (M.finish(layout, pl) == "brushed") or nil,
+           fin = M.finish(layout, pl), metal = M.metal(layout, pl) or nil,
            sheen = pl.sheen or 1 }
 end
 
@@ -378,6 +389,12 @@ local function mq_layout(fx, layout)
     if shs then
       o.sh = arr()
       for i, sh in ipairs(shs) do o.sh[i] = ME.shape_label(sh) end
+    end
+    -- its slope control: its settings, by name
+    local sls = ME.slopes(track, fx.addr, band)
+    if sls then
+      o.sl = arr()
+      for i, r in ipairs(sls) do o.sl[i] = tostring(r.text) end
     end
     -- a dynamic band: its threshold's span, and which controls it has
     if M.band_dynamic(band) then
@@ -698,6 +715,19 @@ local function panel_of(fx, i)
       o.st  = ctl.style
       o.cap = cap_hex(ctl.cap)
       if o.t == "knob" or o.t == "stepped" then o.sz = ctl.size end
+      -- a knob built from parts (a recipe, or its own look): the parts as
+      -- text, and the colour its body shows (TS_CV_Widgets.knob_face's)
+      if o.t == "knob" or o.t == "stepped" then
+        o.kl, o.kc = parts_of(ctl.style, ctl.look, ctl.cap)
+      elseif o.t == "dual" then
+        -- a recipe pair: the outer's parts and colour, the inner's
+        local outer, oc = parts_of(ctl.style, ctl.look, nil)
+        if outer then
+          local il, ic = parts_of(ctl.style2 or "softtouch", ctl.look2, ctl.cap)
+          if not il then il, ic = parts_of("softtouch", nil, ctl.cap) end
+          o.kl, o.kc, o.kl2, o.kc2 = outer, oc, il, ic
+        end
+      end
       if o.t == "toggle" and ctl.size == "small" then o.sz = "small" end
       if o.t == "toggle" then
         o.cap = nil
@@ -724,7 +754,9 @@ local function panel_of(fx, i)
         o.l1 = M.display_name(key, ctl.param, nil, pname, ctl.live or layout.live)
         if ctl.label and ctl.label ~= "" then o.l = ctl.label else o.l = nil end
         o.sz = (o.t == "xy") and ctl.size or ((ctl.size == "large") and "large" or nil)
-        o.st = nil
+        -- a concentric knob's flat Arc style (the page shows its recipe
+        -- pairs as the default ring)
+        o.st = (o.t == "dual" and ctl.style == "arc") and "arc" or nil
       end
       -- a fader's shape: across, its length, half-thick (TS_CV_Panel.fader_kind)
       if o.t == "fader" then
@@ -774,7 +806,9 @@ local function panel_of(fx, i)
         o.sp = { bg = hex(pl.bg), border = hex(pl.border), text = hex(pl.text), dim = hex(pl.dim), tick = hex(pl.tick) }
       end
       if o.sec then
-        o.sb = M.part_brushed(o.sec, C.plate_of(ctl.cap), ctl.brush) or nil
+        o.sf = M.part_finish(o.sec, C.plate_of(ctl.cap), ctl.finish, ctl.brush)
+        o.sb = (o.sf == "brushed") or nil
+        o.scn = M.corners_of(ctl.corners)
         o.sm = M.part_metal(o.sec, ctl.metal) or nil
       end
     elseif o.t == "page" then
@@ -794,7 +828,9 @@ local function panel_of(fx, i)
         o.bp = { bg = hex(pl.bg), border = hex(pl.border), text = hex(pl.text), dim = hex(pl.dim), tick = hex(pl.tick) }
       end
       if o.bk then
-        o.bb = M.part_brushed(o.bk == "inset" and "inset" or "plate", C.plate_of(ctl.back), ctl.brush) or nil
+        o.bf = M.part_finish(o.bk == "inset" and "inset" or "plate", C.plate_of(ctl.back), ctl.finish, ctl.brush)
+        o.bb = (o.bf == "brushed") or nil
+        o.bcn = M.corners_of(ctl.corners)
         o.bm = M.part_metal(o.bk, ctl.metal) or nil
       end
     end
@@ -1112,6 +1148,8 @@ local function build_layout()
     pal = palette(),
     fmt = format_cols(),
     tex = C.EFFECT_3D,          -- the 3D effect: the plates' light, edges and shadows
+    shk = (C.SHADOW or 100) / 100,   -- View > Shadows: their depth and reach (1 as designed)
+    lt = (C.LIGHT or 100) / 100,     -- View > Lighting: how strongly the light models things
     sr = (function() local r = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
                      return (r and r > 0) and r or 48000 end)(),
     eqr = { lo = C.EQ_FREQ_LO, hi = C.EQ_FREQ_HI, g = C.EQ_GAIN_RANGE },
@@ -1230,8 +1268,9 @@ local function mq_vals(fx, layout)
     local r = ME.read_band(track, fx.addr, b, cv.all_on)
     if r then
       local tx = {}
-      for _, f in ipairs({ "freq", "gain", "q" }) do
-        local p = b[f]
+      local sp = ME.find_slope(track, fx.addr, b)
+      local ps_ = { b.freq or false, b.gain or false, b.q or false, sp or false }
+      for _, p in ipairs(ps_) do
         local t = p and select(2, reaper.TrackFX_GetFormattedParamValue(track, fx.addr, p, ""))
         if t and t ~= "" then tx[#tx + 1] = U.trim(t) end
       end
@@ -1240,7 +1279,8 @@ local function mq_vals(fx, layout)
       local o = { k = k, t = r.type, o = r.order, f = round(r.f or 1000, 1),
                   g = round(math.max(-30, math.min(30, g)), 2), q = round(r.q or 0.7, 3),
                   e = r.on or nil, x = table.concat(tx, "   "), wq = b.q and 1 or nil,
-                  s = b.shape and r.s or nil }
+                  s = ME.shape_now(track, fx.addr, b) }
+      if sp then local _, si = ME.slopes(track, fx.addr, b); o.si = si end
       -- a Q that's a switch: its settings, and which it's on (chips, not a drag)
       local qp = b.q and ME.q_positions(track, fx.addr, b)
       if qp then
@@ -1626,7 +1666,7 @@ end
 -- name and place, which one the page shows (c), and a count that moves
 -- whenever the page's list changes (k: set from ChannelView's organiser,
 -- or a switch), so the page reloads it.
-local bars_stamp, bars_list, web_text, web_rev = nil, nil, nil, 0
+local bars_stamp, bars_list, web_text, web_rev, web_vstamp = nil, nil, nil, 0, nil
 local function bars_vals()
   local stamp = reaper.GetExtState(C.EXT_SECT, DR.REV)
   if stamp ~= bars_stamp or not bars_list then
@@ -1638,6 +1678,14 @@ local function bars_vals()
     end
   end
   local t = reaper.GetExtState(DR.WEB_NS, DR.WEB_KEY)
+  -- the plugin buttons' vendor looks (TS_CV_Vendors), put in again when
+  -- the bar or the vendors change; the page reloads the bar for it
+  local vs = reaper.GetExtState(C.EXT_SECT, "vendors")
+  if t ~= web_text or vs ~= web_vstamp then
+    web_vstamp = vs
+    local nt = DR.web_vendors(t)
+    if nt ~= t then reaper.SetExtState(DR.WEB_NS, DR.WEB_KEY, nt, true); t = nt end
+  end
   if t ~= web_text then web_text = t; web_rev = web_rev + 1 end
   local cur = DR.at("web")
   return { k = web_rev, c = cur and cur.id or 0, l = bars_list, a = cur and cur.halign or "-", cs = cur and cur.cstyle or "u" }
@@ -2063,6 +2111,15 @@ local function apply(verb, a)
     local layout = fx and M.get(St.layout_key(fx.name, fx.guid, track, fx.addr))
     local b = k and layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
     if b then ME.reset(track, fx.addr, b); TP.touched(track, fx.guid) end
+  elseif track and verb == "mql" then
+    -- mql|guid|band|setting: the band's slope to that setting
+    local fx = fx_by_guid(a[1]); local k, v = tonumber(a[2]), tonumber(a[3])
+    local layout = fx and M.get(St.layout_key(fx.name, fx.guid, track, fx.addr))
+    local b = k and layout and layout.canvas and layout.canvas.bands and layout.canvas.bands[k]
+    local sls, _, sp = b and ME.slopes(track, fx.addr, b)
+    if sls and v and sls[math.floor(v)] then
+      reaper.TrackFX_SetParamNormalized(track, fx.addr, sp, sls[math.floor(v)].norm); TP.touched(track, fx.guid)
+    end
   elseif track and verb == "mqs" then
     -- mqs|guid|band|setting: the band's shape switch to that setting
     local fx = fx_by_guid(a[1]); local k, v = tonumber(a[2]), tonumber(a[3])
@@ -2580,6 +2637,8 @@ local function work(now)
       folders_stamp = fs
     end
     C.EFFECT_3D = reaper.GetExtState("TS_ChannelView", "plate_texture") ~= "0"
+    C.SHADOW = tonumber(reaper.GetExtState("TS_ChannelView", "shadow")) or 100
+    C.LIGHT = tonumber(reaper.GetExtState("TS_ChannelView", "light")) or 100
     C.PRESET_BAR = reaper.GetExtState("TS_ChannelView", "preset_bar") ~= "0"
     TO.reload_fader_defaults()      -- the group fader looks, as ChannelView last set them
     local sv = reaper.GetExtState("TS_ChannelView", "show_values")

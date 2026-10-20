@@ -434,17 +434,24 @@ local dlg      -- { req, s, title, preview, apply, cancel }
 
 -- Opens the dialog on the next frame. `o`: { title, rgb (to start from),
 -- preview(rgb) (shows a colour on the panel while it's being chosen),
--- apply(rgb) (keeps it), cancel() (puts back what was there) }.
+-- apply(rgb) (keeps it), cancel() (puts back what was there), nested
+-- (opened from inside a popup that stays open: drawn by CP.draw(ctx,
+-- true) inside that popup, so opening it doesn't close that one) }.
 function CP.open(o)
   if dlg and dlg.cancel then dlg.cancel() end
   dlg = { req = true, s = CP.new_state(o.rgb), title = o.title or "Colour",
-          preview = o.preview, apply = o.apply, cancel = o.cancel }
+          preview = o.preview, apply = o.apply, cancel = o.cancel, nested = o.nested and true or false }
 end
 
+-- Whether a dialog is waiting for the host's top-level CP.draw (one
+-- opened nested is drawn by the popup it belongs to).
+function CP.is_open() return dlg ~= nil and not dlg.nested end
+
 -- Draws the dialog, if one is open; call once a frame from the window's
--- top level. Returns true when a colour was kept.
-function CP.draw(ctx)
-  if not dlg then return false end
+-- top level (`nested` false), and from inside a popup that opens it
+-- nested (true). Returns true when a colour was kept.
+function CP.draw(ctx, nested)
+  if not dlg or dlg.nested ~= (nested and true or false) then return false end
   if dlg.req then
     dlg.req = false
     ImGui.OpenPopup(ctx, DLG_ID)

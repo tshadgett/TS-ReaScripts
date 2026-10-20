@@ -475,8 +475,7 @@ end
 -- ---------------------------------------------------------------------
 -- REAPER's Lua API does not expose VAL2DB / DB2VAL / DB2SLIDER /
 -- SLIDER2DB -- they are not there to call, so every conversion here is
--- our own. (Worth knowing before reaching for them: plenty of forum
--- snippets reference names the Lua API doesn't actually have.)
+-- our own.
 
 U.MIN_DB = -72        -- below this a fader reads as silence
 
@@ -635,6 +634,15 @@ function U.lighten(col, amt)
   g = math.floor(g + (255 - g) * amt + 0.5)
   b = math.floor(b + (255 - b) * amt + 0.5)
   return (r << 24) | (g << 16) | (b << 8) | a
+end
+
+-- Pull a colour towards black by `amt` (0..1). Alpha is left alone.
+function U.darken(col, amt)
+  amt = 1 - math.max(0, math.min(1, amt or 0.5))
+  local r = math.floor(((col >> 24) & 0xff) * amt + 0.5)
+  local g = math.floor(((col >> 16) & 0xff) * amt + 0.5)
+  local b = math.floor(((col >>  8) & 0xff) * amt + 0.5)
+  return (r << 24) | (g << 16) | (b << 8) | (col & 0xff)
 end
 
 -- What marks the selected strip. `mode` is C.SEL_OUTLINE.

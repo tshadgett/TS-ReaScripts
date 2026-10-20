@@ -13,6 +13,9 @@
 
 local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
+local SW = require("TS_CV_Switches")
+local KP = require("TS_CV_KnobParts")
+local LT = require("TS_CV_Light")
 
 local W   = {}
 local ImGui                      -- injected by W.attach()
@@ -37,7 +40,7 @@ local A_MAX      = math.pi * 2.25    -- sweep end:   lower-right
 local A_SPAN     = A_MAX - A_MIN
 local ARC_SEGS   = 32
 
-function W.attach(imgui) ImGui = imgui end
+function W.attach(imgui) ImGui = imgui; SW.attach(imgui); KP.attach(imgui); LT.attach(imgui) end
 
 -- ---------------------------------------------------------------------
 -- The 3D effect (View > 3D effect). While a panel is drawn with it, W.hw
@@ -47,27 +50,17 @@ function W.attach(imgui) ImGui = imgui end
 -- ---------------------------------------------------------------------
 W.hw = 0
 
--- A soft shadow: three layers, each a little bigger and fainter, offset
--- down and right.
-local SHADOW = { { 2.0, 0x16 }, { 1.0, 0x1c }, { 0.0, 0x22 } }
+-- The shadows things standing on the panel cast (TS_CV_Light): a tight
+-- contact shadow round the foot, and a soft drop shadow down and right,
+-- further and softer the bigger the thing.
 function W.hw_shadow_rect(dl, x1, y1, x2, y2, rr)
-  local k = W.hw
-  if k <= 0 then return end
-  local dx, dy = 1.5 * k, 3.0 * k
-  for _, s in ipairs(SHADOW) do
-    local g = s[1] * k
-    ImGui.DrawList_AddRectFilled(dl, x1 + dx - g, y1 + dy - g, x2 + dx + g, y2 + dy + g,
-      math.floor(s[2] * math.min(1.5, k + 0.2)), (rr or 0) + g)
-  end
+  if W.hw <= 0 then return end
+  LT.rect(dl, x1, y1, x2, y2, rr, W.hw)
 end
-function W.hw_shadow_circle(dl, cx, cy, r)
-  local k = W.hw
-  if k <= 0 then return end
-  local dx, dy = 1.5 * k, 3.0 * k
-  for _, s in ipairs(SHADOW) do
-    ImGui.DrawList_AddCircleFilled(dl, cx + dx, cy + dy, r + s[1] * k,
-      math.floor(s[2] * math.min(1.5, k + 0.2)), 32)
-  end
+function W.hw_shadow_circle(dl, cx, cy, r, lift)
+  lift = lift or 1                 -- how far it stands off the panel (TS_CV_Light)
+  if W.hw <= 0 then return end
+  LT.circle(dl, cx, cy, r, W.hw, lift)
 end
 
 -- Metal flake: a 128-px tile of fine speckle -- bright and dark grains
@@ -591,49 +584,24 @@ local NOSE_HALF  = math.rad(15)        -- the nose's base, either side of the po
 local NOSE_FLAT  = 2.2                 -- half the width of the blunt tip
 local NOSE_CAP   = 0.72                -- the coloured cap's radius, of the body's
 
--- The pointer knob's outline, in the design space: u along the pointer,
--- v across it. Convex, so it fills as one polygon.
-local POINTER = { {45, 0}, {40, 3}, {30, 8}, {18, 12.5}, {5, 16}, {-10, 15.5},
-                  {-22, 11}, {-29, 5.5}, {-31, 0}, {-29, -5.5}, {-22, -11},
-                  {-10, -15.5}, {5, -16}, {18, -12.5}, {30, -8}, {40, -3} }
-local poly_buf, poly_ok = nil, true
-
 -- The shadow a hardware knob casts with the 3D effect: the shape of its
 -- body -- a disc for the round ones, the pointer for the pointer, the disc
 -- and its nose for the nose -- not a circle the size of its whole sweep.
-local shadow_buf
 local function knob_shadow(dl, style, cx, cy, k, a)
   local ca, sa = math.cos(a), math.sin(a)
   if style == "pointer" then
-    if poly_ok and type(ImGui.DrawList_AddConvexPolyFilled) == "function"
-       and type(reaper.new_array) == "function" then
-      local hk = W.hw
-      local ok = pcall(function()
-        shadow_buf = shadow_buf or reaper.new_array(#POINTER * 2)
-        for _, sh in ipairs(SHADOW) do
-          local grow = 1 + sh[1] * hk / (16 * k)          -- a little wider each layer
-          local dx, dy = 1.5 * hk, 3.0 * hk
-          for i, p in ipairs(POINTER) do
-            local u, w = p[1] * k * grow, p[2] * k * grow
-            shadow_buf[i * 2 - 1] = cx + dx + ca * u - sa * w
-            shadow_buf[i * 2]     = cy + dy + sa * u + ca * w
-          end
-          ImGui.DrawList_AddConvexPolyFilled(dl, shadow_buf, math.floor(sh[2] * math.min(1.5, hk + 0.2)))
-        end
-      end)
-      if ok then return end
-    end
-    return W.hw_shadow_circle(dl, cx, cy, 17 * k)
+    return          -- drawn with it, the shape of it (KP.pointer_body)
   elseif style == "nose" then
     W.hw_shadow_circle(dl, cx, cy, NOSE_R * k)
-    local hk = W.hw
-    local dx, dy = 1.5 * hk, 3.0 * hk
+    -- and the nose's, layer by layer as the disc's
     local R = NOSE_R * k
-    local tx, ty = cx + ca * NOSE_TIP * k + dx, cy + sa * NOSE_TIP * k + dy
-    local p1x, p1y = cx + math.cos(a + NOSE_HALF) * R + dx, cy + math.sin(a + NOSE_HALF) * R + dy
-    local p2x, p2y = cx + math.cos(a - NOSE_HALF) * R + dx, cy + math.sin(a - NOSE_HALF) * R + dy
-    ImGui.DrawList_AddTriangleFilled(dl, p1x, p1y, tx, ty, p2x, p2y,
-      math.floor(SHADOW[3][2] * math.min(1.5, hk + 0.2)))
+    for _, l in ipairs((LT.drop(R, W.hw))) do
+      local dx, dy = l[1], l[2]
+      local tx, ty = cx + ca * NOSE_TIP * k + dx, cy + sa * NOSE_TIP * k + dy
+      local p1x, p1y = cx + math.cos(a + NOSE_HALF) * R + dx, cy + math.sin(a + NOSE_HALF) * R + dy
+      local p2x, p2y = cx + math.cos(a - NOSE_HALF) * R + dx, cy + math.sin(a - NOSE_HALF) * R + dy
+      ImGui.DrawList_AddTriangleFilled(dl, p1x, p1y, tx, ty, p2x, p2y, l[4])
+    end
     return
   end
   local body = { skirted = 37, trim = 40, bar = BAR_R, fluted = FLUTE_R,
@@ -774,24 +742,57 @@ function W.mod_corner(dl, x2, y1, s, surface)
 end
 
 -- What's in the middle of a knob of this style: the dot sits on it.
-local function knob_centre_col(style, cap)
+local function knob_centre_col(style, cap, look)
+  if look then return KP.centre_col(look, cap) end
   style = C.KNOB_STYLE_ALIAS[style] or style
   if not (style and C.KNOB_STYLE[style]) or style == "arc" then return C.COL.knob_body end
   if style == "led" then return 0x2c2f33ff end
   if style == "trim" then return 0xa1a6acff end
+  if C.KNOB_STYLE[style].parts then
+    return KP.centre_col(C.KNOB_STYLE[style].parts, cap or W.cap_col(C.KNOB_STYLE[style].cap))
+  end
   local def = C.CAP[C.KNOB_STYLE[style].cap]
   return cap or (def and def.col) or C.COL.knob_fill
 end
 W.knob_centre_col = knob_centre_col
 
+-- the round styles' bodies, for View > Lighting's wash (the pointer
+-- and nose aren't discs)
+local WASH_R = { skirted = 37, trim = 40, bar = BAR_R, fluted = FLUTE_R,
+                 bezel = BEZEL_R, rbezel = BEZEL_R, hifi = HIFI_R, led = LED_KNOB }
+
 function W.knob_face(dl, cx, cy, r, value, o)
   o = o or {}
   local v = math.max(0, math.min(1, value or 0))
   local style = C.KNOB_STYLE_ALIAS[o.style] or o.style
-  if not (style and C.KNOB_STYLE[style]) or style == "arc" then
+  -- a knob's own look (Look<n>) is drawn in place of its style
+  local own = o.look
+  if not own and (not (style and C.KNOB_STYLE[style]) or style == "arc") then
     -- (the arc is a printed scale, not a knob standing on the plate: no
     -- shadow under it)
     return face_arc(dl, cx, cy, r, v, o)
+  end
+  local def = own and { parts = own, cap = "black" } or C.KNOB_STYLE[style]
+  if def.parts then
+    -- built from parts (TS_CV_KnobParts), with the scale round it
+    if o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring)
+    elseif def.parts.scale == "dots" then
+      -- a ring of printed dots, as on a console's EQ
+      local rd = r + math.max(2.5, r * 0.20)
+      for i = 0, 10 do
+        local t = A_MIN + A_SPAN * i / 10
+        ImGui.DrawList_AddCircleFilled(dl, cx + math.cos(t) * rd, cy + math.sin(t) * rd, math.max(1.0, r * 0.06), C.COL.knob_ring, 8)
+      end
+    else
+      local r0, r1 = r + 1.5, r + math.max(2.5, r * 0.26)
+      for i = 0, 10 do
+        local t = A_MIN + A_SPAN * i / 10
+        local c, s = math.cos(t), math.sin(t)
+        ImGui.DrawList_AddLine(dl, cx + c * r0, cy + s * r0, cx + c * r1, cy + s * r1, C.COL.knob_ring, 1.0)
+      end
+    end
+    return KP.draw(dl, cx, cy, r, v, def.parts, { cap = o.cap or (own and own.col) or W.cap_col(def.cap), hot = o.hot, dim = o.dim,
+      hw = W.hw, ctx = o.ctx, shadow = W.hw_shadow_circle })
   end
   if W.hw > 0 then knob_shadow(dl, style, cx, cy, r / FACE_BODY[style], A_MIN + A_SPAN * v) end
 
@@ -872,33 +873,11 @@ function W.knob_face(dl, cx, cy, r, value, o)
 
   elseif style == "pointer" then
     scale()
-    local drawn = false
-    if poly_ok and type(ImGui.DrawList_AddConvexPolyFilled) == "function"
-       and type(reaper.new_array) == "function" then
-      drawn = pcall(function()
-        poly_buf = poly_buf or reaper.new_array(#POINTER * 2)
-        for i, p in ipairs(POINTER) do
-          local u, w = p[1] * k, p[2] * k
-          poly_buf[i * 2 - 1] = cx + ca * u - sa * w
-          poly_buf[i * 2]     = cy + sa * u + ca * w
-        end
-        ImGui.DrawList_AddConvexPolyFilled(dl, poly_buf, cap)
-        if type(ImGui.DrawList_AddPolyline) == "function" then
-          ImGui.DrawList_AddPolyline(dl, poly_buf, 0x0000008c, ImGui.DrawFlags_Closed, 1.0)
-        end
-      end)
-      if not drawn then poly_ok = false end
-    end
-    if not drawn then
-      -- An older ReaImGui: a fat stroke stands in for the outline.
-      local x1, y1 = at(-28); local x2, y2 = at(42)
-      ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, cap, 20 * k)
-    end
-    local x1, y1 = at(17); local x2, y2 = at(40)
-    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, ink, math.max(1.5, 3.5 * k))
-    ImGui.DrawList_AddCircleFilled(dl, cx, cy, 17 * k, cap, 24)
-    ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 8 * k, o.hot and 0xffffff0b or 0xffffff06, 16)
-    ImGui.DrawList_AddCircle(dl, cx, cy, 17 * k, 0x00000080, 24, 1.0)
+    -- a long pointer with a round cap over its middle, modelled
+    -- (TS_CV_KnobParts.pointer_body): its shadow, sides, lit bevel and top
+    KP.pointer_body(dl, cx, cy, a, { tail = 14 * k, rt = 16.5 * k, tip = 40 * k, rp = 3.5 * k, h = 4.5 * k,
+      hub = 12 * k, l0 = 13 * k, l1 = 40 * k, ink = ink }, o.hot and U.lighten(cap, 0.07) or cap, "plastic",
+      { hw = W.hw, fd = fade })
 
   elseif style == "nose" then
     -- A neutral grey body, nose and all, with the colour only in the round
@@ -1084,6 +1063,9 @@ function W.knob_face(dl, cx, cy, r, value, o)
     local dx, dy = at(21)
     ImGui.DrawList_AddCircleFilled(dl, dx, dy, math.max(1.8, 4.5 * k), cap, 12)
   end
+  -- View > Lighting above 100%: the light washed over the whole body
+  local wr = WASH_R[style]
+  if wr and W.hw > 0 then KP.light_wash(dl, cx, cy, wr * k, fade) end
 end
 
 -- ---------------------------------------------------------------------
@@ -1218,10 +1200,10 @@ function W.knob(ctx, id, label, value, formatted, opts)
   end
 
   W.knob_face(dl, cx, cy, dial_r, value, {
-    style = opts.style, cap = opts.cap, bipolar = opts.bipolar,
+    style = opts.style, cap = opts.cap, bipolar = opts.bipolar, ctx = ctx, look = opts.look,
     dim = opts.dim, hot = hovered or active, marks = sc and sc.marks })
   if opts.mod then
-    W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap))
+    W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap, opts.look))
   end
   if opts.ring then W.mod_ring(dl, cx, cy, dial_r, opts.ring) end
   -- where the dial is, for whoever draws to it (the rack's hover lines)
@@ -1290,9 +1272,95 @@ end
 -- Drawn in a design space where the ring's edge is 40 units.
 local DUAL_RING, DUAL_IN = 40, 22.5      -- the ring's radius, the inner knob's
 
--- `o`: cap (colour), dim, hot ("outer" / "inner" / nil), mod1, mod2.
+local IN_FRAC = DUAL_IN / DUAL_RING        -- the inner knob against the outer's body
+local DUAL_INNER = "softtouch"             -- the inner knob on a recipe pair, until one is chosen
+
+-- Its style: nil the default (the dark ring, lit), "arc" the flat one, or
+-- a parts recipe for the outer knob (Style<n>) with Inner<n> the inner's;
+-- either can be your own look instead (Look<n> / Look2<n>). Flat whenever
+-- the 3D effect is off.
+function W.dual_flat(o) return W.hw <= 0 or (o ~= nil and o.style == "arc") end
+
+-- The outer and inner looks of a recipe pair, and the recipes they come
+-- from (for their colours); nil for the default and the arc.
+function W.dual_looks(o)
+  if not o or o.style == "arc" then return nil end
+  local odef = o.style and C.KNOB_STYLE[C.KNOB_STYLE_ALIAS[o.style] or o.style]
+  local outer = o.look or (odef and odef.parts)
+  if not outer then return nil end
+  local idef = (not o.look2) and (C.KNOB_STYLE[o.style2 or DUAL_INNER] or C.KNOB_STYLE[DUAL_INNER]) or nil
+  if idef and not idef.parts then idef = C.KNOB_STYLE[DUAL_INNER] end
+  local inner = o.look2 or idef.parts
+  return outer, inner, (not o.look) and odef or nil, idef
+end
+
+-- the inner knob's radius on a knob of radius r: where a grab turns it
+function W.dual_inner_r(r, o)
+  if W.dual_flat(o) then return (r - 4) * 0.62 end
+  local outer = W.dual_looks(o)
+  if outer then return IN_FRAC * r / KP.reach(outer) end
+  return IN_FRAC * r
+end
+
+-- The flat one, as the Arc knob: the outer value's arc round the outside,
+-- a flat knob inside it with the inner value's arc (in the cap colour) and
+-- two pointers, the long one the outer's, reaching out to its arc.
+local function dual_arc(dl, cx, cy, r, v1, v2, o)
+  local function fade(col) return o.dim and U.with_alpha(col, 0x66) or col end
+  local a1 = A_MIN + A_SPAN * math.max(0, math.min(1, v1 or 0))
+  local a2 = A_MIN + A_SPAN * math.max(0, math.min(1, v2 or 0))
+  local rk = r - 4
+  arc(dl, cx, cy, r - 1.5, A_MIN, A_MAX, C.COL.knob_track, 3.0)
+  arc(dl, cx, cy, r - 1.5, A_MIN, a1, fade(C.COL.knob_fill), 3.0)
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, rk, o.hot and C.COL.knob_body_hi or C.COL.knob_body, 32)
+  local ri = rk - 3
+  arc(dl, cx, cy, ri, A_MIN, A_MAX, C.COL.knob_track, 2.5)
+  arc(dl, cx, cy, ri, A_MIN, a2, fade(o.cap or C.COL.knob_fill_bi), 2.5)
+  local c1, s1, c2, s2 = math.cos(a1), math.sin(a1), math.cos(a2), math.sin(a2)
+  ImGui.DrawList_AddLine(dl, cx + c1 * (rk - 1), cy + s1 * (rk - 1), cx + c1 * (r + 1), cy + s1 * (r + 1),
+    fade(C.COL.knob_pointer), 2.0)
+  ImGui.DrawList_AddLine(dl, cx + c2 * (rk * 0.2), cy + s2 * (rk * 0.2), cx + c2 * (ri - 3), cy + s2 * (ri - 3),
+    fade(C.COL.knob_pointer), 2.0)
+  ImGui.DrawList_AddCircle(dl, cx, cy, rk, C.COL.knob_ring, 32, 1.0)
+  if o.mod2 then W.mod_dot(dl, cx, cy, math.max(2.0, rk * 0.16), C.COL.knob_body) end
+  if o.mod1 then
+    local t = A_MIN + A_SPAN * 0.5 + math.pi
+    W.mod_dot(dl, cx + math.cos(t) * (r - 1.5), cy + math.sin(t) * (r - 1.5), 2.2, C.COL.knob_body)
+  end
+  return (rk) * 0.62
+end
+
+-- A recipe pair: the outer knob drawn as any parts knob, its pointer only
+-- across the ring that shows; the inner one on it, a little over half its
+-- body, casting its shadow on it. No skirt, washer or nut on the inner.
+local function dual_recipe(dl, cx, cy, r, v1, v2, o, outer, inner, odef, idef)
+  local po = KP.copy(outer)
+  local R = r / KP.reach(po)
+  local Rt = R * (po.top_r or 1)
+  local ri = IN_FRAC * R
+  po.p0 = math.max(po.p0 or 0.30, ri / Rt + 0.10)
+  KP.draw(dl, cx, cy, r, v1, po, { cap = odef and W.cap_col(odef.cap) or nil, hot = o.hot == "outer", dim = o.dim,
+    hw = W.hw, ctx = o.ctx, shadow = W.hw_shadow_circle })
+  local pi = KP.copy(inner)
+  pi.skirt, pi.washer, pi.nut, pi.sr, pi.sgrip = nil, nil, nil, nil, nil
+  if pi.ptr == "skirtline" then pi.ptr = nil end
+  local icap = o.cap or (idef and W.cap_col(idef.cap)) or nil
+  KP.draw(dl, cx, cy, ri * KP.reach(pi), v2, pi, { cap = icap, hot = o.hot == "inner", dim = o.dim,
+    hw = W.hw, ctx = o.ctx, shadow = W.hw_shadow_circle })
+  if o.mod2 then W.mod_dot(dl, cx, cy, math.max(2.0, ri * 0.22), KP.centre_col(pi, icap)) end
+  if o.mod1 then
+    local t = A_MIN + A_SPAN * 0.5 + math.pi
+    local rm = (ri + R) * 0.5
+    W.mod_dot(dl, cx + math.cos(t) * rm, cy + math.sin(t) * rm, math.max(1.8, R * 0.065), 0x1b1c1fff)
+  end
+  return ri
+end
+
+-- `o`: cap (the inner's colour), dim, hot ("outer" / "inner" / nil), mod1,
+-- mod2, style, style2, look, look2, ctx.
 function W.dual_face(dl, cx, cy, r, v1, v2, o)
   o = o or {}
+  if W.dual_flat(o) then return dual_arc(dl, cx, cy, r, v1, v2, o) end
   local k = r / DUAL_RING
   local function fade(col) return o.dim and U.with_alpha(col, 0x70) or col end
   local a1 = A_MIN + A_SPAN * math.max(0, math.min(1, v1 or 0))
@@ -1306,27 +1374,45 @@ function W.dual_face(dl, cx, cy, r, v1, v2, o)
     local c, sn = math.cos(t), math.sin(t)
     ImGui.DrawList_AddLine(dl, cx + c * r0, cy + sn * r0, cx + c * r1, cy + sn * r1, tick, 1.0)
   end
+  local outer, inner, odef, idef = W.dual_looks(o)
+  if outer then return dual_recipe(dl, cx, cy, r, v1, v2, o, outer, inner, odef, idef) end
+  -- lit like the parts knobs (TS_CV_KnobParts): its shadows, the ring's
+  -- knurled edge catching the light on the top left, its flat top, then the
+  -- inner knob standing proud of it, casting its own shadow on the ring
+  W.hw_shadow_circle(dl, cx, cy, r)
+  local rb = o.hot == "outer" and 0x2a2c30ff or 0x1b1c1fff
   if W.hw > 0 then
-    ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.8 * k, r + 0.5 * k, U.with_alpha(0x000000ff, math.floor(0x40 * math.min(1.5, W.hw))), 36)
+    KP.lit_ring(dl, cx, cy, r, 36 * k, U.darken(rb, 0.45), U.lighten(rb, 0.16), 40, nil, fade)
+  else
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, r, fade(rb), 40)
   end
-  -- the ring: dark, knurled, turning with the first parameter
-  ImGui.DrawList_AddCircleFilled(dl, cx, cy, r, fade(o.hot == "outer" and 0x2a2c30ff or 0x1b1c1fff), 40)
   for i = 0, 35 do
     local t = a1 + i * TAU / 36
     local x1, y1 = at(t, 36.5); local x2, y2 = at(t, 39.6)
-    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0x0c0d0eff), math.max(1.0, 1.3 * k))
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, fade(0x0c0d0e90), math.max(1.0, 1.3 * k))
   end
-  ImGui.DrawList_AddCircleFilled(dl, cx - 6 * k, cy - 7 * k, 14 * k, 0xffffff06, 24)
+  if W.hw > 0 then
+    KP.flat_face(dl, cx, cy, 36 * k, rb, fade, 0.1)
+  else
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, 36 * k, fade(rb), 40)
+  end
   ImGui.DrawList_AddCircle(dl, cx, cy, r, fade(0x00000099), 40, math.max(1.0, 1.1 * k))
+  if W.hw > 0 then KP.light_wash(dl, cx, cy, r, fade) end
   local px1, py1 = at(a1, 27); local px2, py2 = at(a1, 36)
   ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, fade(0xf3f3f1ff), math.max(1.5, 4 * k))
-  -- the seam, then the inner knob in the cap colour, matte
+  -- the seam, then the inner knob in the cap colour, satin
   ImGui.DrawList_AddCircleFilled(dl, cx, cy, 24.5 * k, fade(0x0b0c0dff), 32)
   local base = o.cap or C.COL.knob_fill
   if o.hot == "inner" then base = U.lighten(base, 0.1) end
   local ri = DUAL_IN * k
-  ImGui.DrawList_AddCircleFilled(dl, cx, cy, ri, fade(base), 32)
-  ImGui.DrawList_AddCircleFilled(dl, cx - 4 * k, cy - 5 * k, 9 * k, o.hot == "inner" and 0xffffff0b or 0xffffff06, 20)
+  if W.hw > 0 then
+    W.hw_shadow_circle(dl, cx, cy, ri, 0.6)
+    KP.lit_ring(dl, cx, cy, ri, ri * 0.86, U.darken(base, 0.40), U.lighten(base, 0.12), 32, nil, fade)
+    KP.lit_disc(dl, cx, cy, ri * 0.86, base, fade, 0.22)
+    KP.light_wash(dl, cx, cy, ri, fade)
+  else
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, ri, fade(base), 32)
+  end
   ImGui.DrawList_AddCircle(dl, cx, cy, ri, fade(0x00000080), 32, math.max(1.0, 1.2 * k))
   local qx1, qy1 = at(a2, 7); local qx2, qy2 = at(a2, 19)
   ImGui.DrawList_AddLine(dl, qx1, qy1, qx2, qy2, fade(cap_ink(base)), math.max(1.5, 3.5 * k))
@@ -1383,7 +1469,8 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
   local show_value = C.SHOW_VALUES
   local room = ch - W.LABEL_H - C.LABEL_GAP - (show_value and 14 or 0)
   local cx, cy = x + cw * 0.5, y + W.LABEL_H + C.LABEL_GAP + room * 0.5
-  local ri = DUAL_IN * r / DUAL_RING
+  local look = { style = o.style, style2 = o.style2, look = o.look, look2 = o.look2 }
+  local ri = W.dual_inner_r(r, look)
   local mx, my = ImGui.GetMousePos(ctx)
   local function zone()
     local dx, dy = mx - cx, my - cy
@@ -1420,7 +1507,8 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
   end
   centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
   local hot = turning or (hovered and zone()) or nil
-  W.dual_face(dl, cx, cy, r, v1, v2, { cap = o.cap, dim = o.dim, hot = hot, mod1 = o.mod1, mod2 = o.mod2 })
+  W.dual_face(dl, cx, cy, r, v1, v2, { cap = o.cap, dim = o.dim, hot = hot, mod1 = o.mod1, mod2 = o.mod2,
+    style = o.style, style2 = o.style2, look = o.look, look2 = o.look2, ctx = ctx })
   -- where it is, for a link's rings: the ring's radius and the inner knob's
   W.last_knob = { cx = cx, cy = cy, r = r, ri = ri, dual = true }
   if show_value then
@@ -1562,6 +1650,10 @@ local function glow(dl, x1, y1, x2, y2, rr, col, steps, a0)
   end
 end
 
+-- the faced styles: only these stand off the plate and cast a shadow;
+-- a flat button (or a combo) is printed on it
+W.FACED = { lens = true, window = true, backlit = true }
+
 function W.button_face(dl, x1, y1, x2, y2, rr, on, col, style, hot)
   local w, h = x2 - x1, y2 - y1
   if style == "lens" then
@@ -1636,7 +1728,8 @@ end
 -- repeated in the value line under it.
 -- opts.on_col: the colour it lights when on (C.TOGGLE_COLS), in place of
 -- the theme's; its text goes dark or light to read on it.
--- opts.style: its face -- lens, window or backlit (W.button_face); nil flat.
+-- opts.style: its face -- lens, window or backlit (W.button_face), or a
+-- hardware switch (TS_CV_Switches: bat, rocker, lamp ...); nil flat.
 -- opts.size: "small" makes it a half-height cell that is all button, like
 -- a lit push-button on hardware -- no name above or value below, so the
 -- caller puts the name on the button when the state has no name of its own.
@@ -1676,7 +1769,29 @@ function W.toggle(ctx, id, label, value, formatted, opts)
 
   local txt = opts.text or (on and "ON" or "OFF")
   local _, th = ImGui.CalcTextSize(ctx, txt)
-  W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 3.0)
+  if SW.is(opts.style) then
+    -- a hardware switch, in the space a knob takes; in the theme's flat
+    -- look when the 3D effect is off
+    local sy1 = small and (y + 2) or (y + label_h + C.LABEL_GAP)
+    local sy2 = small and (y + ch - 2) or (sy1 + C.KNOB_D)
+    SW.draw(ctx, dl, opts.style, x + 4, sy1, x + cw - 4, sy2, on, opts.on_col or C.COL.toggle_on,
+      (W.hw or 0) <= 0, txt, hovered)
+    if opts.mod then
+      W.mod_corner(dl, x + cw - 6, sy1, 5, on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off)
+    end
+    -- what the state's called, under it (a lamp says it on its cap)
+    if not small then
+      local under = (opts.style ~= "lamp" and opts.text) or (C.SHOW_VALUES and not opts.text and formatted) or nil
+      if under then
+        W.push_small(ctx)
+        centred_text(ctx, dl, cx, sy2 + 1, under, C.COL.value, cw - 2)
+        W.pop_small(ctx)
+      end
+    end
+    W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
+    return changed, value, act, pressed
+  end
+  if W.FACED[opts.style or ""] then W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 3.0) end
   local ink, dy, gcol = W.button_face(dl, bx1, by1, bx2, by2, 3.0, on,
     opts.on_col or C.COL.toggle_on, opts.style, hovered)
   if not ink then
@@ -1775,7 +1890,9 @@ function W.button_row(ctx, id, label, value, choices, opts)
 
   local on_col = opts.on_col or C.COL.toggle_on
   local on_ink = U.is_light(on_col) and 0x0d1116ff or 0xf4f4f2ff
-  for _, r in ipairs(rects) do W.hw_shadow_rect(dl, r[1], r[2], r[3], r[4], 2.0) end
+  if W.FACED[opts.style or ""] then
+    for _, r in ipairs(rects) do W.hw_shadow_rect(dl, r[1], r[2], r[3], r[4], 2.0) end
+  end
   W.push_small(ctx)
   for i, r in ipairs(rects) do
     local lit = (i == cur)
@@ -1900,7 +2017,7 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   local cx = x + cw * 0.5
 
   centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
-  W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 3.0)
+  -- flat, so no shadow
   ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
     hovered and C.COL.knob_body_hi or C.COL.knob_body, 3.0)
   ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
@@ -1949,20 +2066,10 @@ end
 -- fader and level meter
 -- ---------------------------------------------------------------------
 
--- A vertical fader. `value` is 0..1 in REAPER's own fader taper, which the
--- caller converts to and from a volume -- the taper is not linear in dB
--- and reproducing it here by hand would put this fader subtly out of step
--- with every other one in the program.
--- `unity` is the 0..1 position of the detent mark, or nil for none.
--- Returns changed, value, act -- act.double_click meaning "put it back
--- where it started", which for a fader is unity.
 -- Faders that are mid-drag, keyed by id: false while the press has not
 -- moved, true once it has. Only used to tell a click from a drag.
 local fader_moved = {}
 
--- `look` (optional) is a panel fader's hardware style: { style, cap } --
--- "flat" (the default), "console" or "rail", and a cap colour or nil for
--- the style's usual one. The channel strip's own fader passes none.
 local FADER_CAP = { console = 28, rail = 34, slim = 9 }
 local grad_ok = true
 local function vgrad(dl, x0, y0, x1, y1, top, bot)
@@ -1985,6 +2092,14 @@ local function hgrad(dl, x0, y0, x1, y1, left, right)
   end
 end
 W.vgrad = vgrad
+-- four corners' colours: top left, top right, bottom right, bottom left
+function W.grad4(dl, x0, y0, x1, y1, tl, tr, br, bl)
+  if x1 - x0 < 0.5 or y1 - y0 < 0.5 then return end
+  if grad_ok and type(ImGui.DrawList_AddRectFilledMultiColor) == "function" then
+    if pcall(ImGui.DrawList_AddRectFilledMultiColor, dl, x0, y0, x1, y1, tl, tr, br, bl) then return end
+    grad_ok = false
+  end
+end
 -- A rectangle with its own colour at each corner: upper-left, upper-right,
 -- lower-right, lower-left. Nothing on an older ReaImGui.
 function W.hgrad4(dl, x0, y0, x1, y1, ul, ur, br, bl)
@@ -1994,6 +2109,16 @@ function W.hgrad4(dl, x0, y0, x1, y1, ul, ur, br, bl)
   end
 end
 
+-- A vertical fader. `value` is 0..1 in REAPER's own fader taper, which the
+-- caller converts to and from a volume -- the taper is not linear in dB
+-- and reproducing it here by hand would put this fader subtly out of step
+-- with every other one in the program.
+-- `unity` is the 0..1 position of the detent mark, or nil for none.
+-- Returns changed, value, act -- act.double_click meaning "put it back
+-- where it started", which for a fader is unity.
+-- `look` (optional) is a panel fader's hardware style: { style, cap } --
+-- "flat" (the default), "console" or "rail", and a cap colour or nil for
+-- the style's usual one. The channel strip's own fader passes none.
 function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   local dl = ImGui.GetWindowDrawList(ctx)
   ImGui.SetCursorScreenPos(ctx, x, y)
@@ -2346,11 +2471,6 @@ function W.level_frac(db)
   return 1 - (db / C.METER_FLOOR)
 end
 
--- `chans` is a list of dB values, one per channel, drawn side by side.
--- `chans` is a list of per-channel dB. `rms_db` draws a second, inset bar
--- inside each channel; `opts_scale` puts a labelled ladder down the RIGHT
--- of the meter, which is where a console puts it and where it doesn't sit
--- between you and the bars.
 -- The ink for one mark of the dB ladder, given the level of the bar it
 -- is about to be drawn on: dark over a lit bar, light over an unlit one.
 -- A file local rather than a closure inside the meter -- thirty strips
@@ -2359,6 +2479,10 @@ local function scale_ink(db, mark)
   return (db >= mark) and C.COL.meter_ink_lit or C.COL.meter_ink
 end
 
+-- `chans` is a list of dB values, one per channel, drawn side by side.
+-- `rms_db` draws a second, inset bar inside each channel; `opts_scale`
+-- puts a labelled ladder down the RIGHT of the meter, which is where a
+-- console puts it and where it doesn't sit between you and the bars.
 function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body, 2.0)
   ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.knob_ring, 2.0, 0, 1.0)

@@ -1,5 +1,72 @@
 # ChannelView — changelog
 
+## 2.5.0 — hardware looks, Rack view, EQ band shapes
+
+- **Finishes.** A faceplate, a section or a control's background can have
+  a surface: *Brushed*, *Anodised*, *Bright*, *Satin*, *Tolex*, *Leather*,
+  *Wood*, *Crinkle*, *Enamel*, *Hammertone* or *Checker plate*, in the
+  surface's own colour, with the *Metallic flake* over any of them.
+  Desktop and web.
+- **Corners.** Sections and backgrounds can be *Square*, *Soft* or
+  *Round*.
+- **Switches.** A toggle can be a bat or paddle toggle, a pill or lit
+  rocker, a slide or pill slider, a lamp or round button, a jewel lamp or
+  a guarded toggle, lit in its colour. With the 3D effect off they take
+  the theme's flat look.
+- **Knob recipes.** Seventeen new knob styles built from parts: Bakelite,
+  Machined, Red gloss, Chicken-head, Numbered skirt, Printed skirt,
+  Soft-touch, Chrome, Two-tone, Cream fluted, Coin edge, Washer, Console,
+  White rim, Numbered dial, British and Wing. The Style menu shows every
+  style as a picture.
+- **Your own knobs.** Style ▸ *Customise…* opens the *Knob look* window:
+  body, grip, top, pointer, material, colours, tilt, skirt and its print,
+  washer, nut, inner cap, scale and shadow, from any recipe. Apply it to a
+  knob, a section or the panel, or save it as a recipe of your own.
+- **Concentric knobs** are relit, can be *Arc (flat)*, or any recipe for
+  the outer knob with another for the inner, each customisable.
+- **One light, and shadows.** Everything is lit from the top left and
+  casts a soft shadow that grows with its size. **View ▸ Lighting** and
+  **View ▸ Shadows** set how strong. A knob's own shadow can be *None*
+  (flush) or *Tall*. Flat buttons and dropdowns cast none.
+- **Rack view** (*ChannelView Rack*): the selected track's plugins down a
+  column, in a window of its own to dock beside the arrange. Every panel
+  is the column's width; a canvas spans it, with its other controls under
+  it. Macros, modulators, sends and receives are strips pinned top and
+  foot. Container brackets, its own folding, its own action bars, and its
+  own layout choice per plugin, falling back to ChannelView's.
+- **Show or hide** the Macros, Modulators, Sends and Receives panels (View
+  menu; on the web page, the new Show button).
+- **EQ canvas band shapes.** Notch, band pass, tilt shelf, flat tilt, flat
+  top, sword and all pass bands; cuts at any slope up to 96 dB/oct and
+  brickwall. A plugin's own shape names and slope control are read live
+  (Pro-Q, Kirchhoff-EQ and its console types). Shape switches of up to 64
+  settings can be learned. Web too, with a slope picker.
+- **Two ChannelView windows** (ChannelView and the rack) share layout and
+  label edits as they're made.
+- **Vendors** (Organise actions ▸ *Vendors…*): a colour, initials and a
+  look per plugin developer, which every plugin button of theirs picks
+  up: *Colour only*, *Initials tile*, *Colour fill* or *Prefix*. *Scan
+  plugins*, *Set up all* and *Same as…*. A button's own colour or PNG icon
+  still wins. Desktop and web.
+- **Any colour** for an action button: **…** beside its swatches opens
+  ChannelView's colour dialog.
+- **Developers are REAPER's**: the add-plugin menus' *Developers* list
+  exactly what REAPER's FX browser does.
+- Fixed: a plugin that takes the track's channel count (many VST3s) could
+  write over the gain-reduction measuring copies when added, and the GR
+  meters after it read nothing.
+- Fixed: the selected plugin's outline was partly hidden under its
+  panel's header and foot.
+- Fixed: a dynamic EQ's DYN button, and band on/off switches, that read
+  *Enabled* / *Disabled* (Kirchhoff-EQ) always showed as on. *Not
+  Bypassed* and *Bypassed* now read the right way round.
+- Fixed: *Measure threshold* (and learning a reverb's decay or a
+  saturation curve) turned a *Dry Mix* control fully dry, so the plugin
+  passed the test tone untouched. A mix that turns out to work the other
+  way round is tried both ways.
+- After updating, restart ChannelView, ChannelView toolbars and the web
+  companion.
+
 ## 2.4.0 — the Trimmer, plugin buttons
 
 - **The Trimmer** (`TS_CV_Trimmer.jsfx`): ChannelView's own plugin for the

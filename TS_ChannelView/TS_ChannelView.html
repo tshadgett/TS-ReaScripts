@@ -94,6 +94,7 @@ button { font: inherit; color: inherit; }
 #nav { height: 116px; flex-shrink: 0; position: relative; background: var(--strip);
   border-bottom: 1px solid var(--border); touch-action: none; }
 #nav.hidden { display: none; }
+#route.hidden { display: none; }
 #nav canvas { position: absolute; left: 10px; right: 10px; top: 6px; bottom: 6px; width: calc(100% - 20px);
   height: calc(100% - 12px); display: block; }
 .mbtn { height: 42px; min-width: 84px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--border);
@@ -108,6 +109,16 @@ button { font: inherit; color: inherit; }
    colour, filling with it while on */
 .mbtn.tint { color: var(--tc); }
 .mbtn.tint.on { background: var(--tc); color: #0d1116; }
+/* a plugin's vendor (set in ChannelView's Vendors list): its initials in
+   a tile where the icon goes, or its colour as the button's ground */
+.vt { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
+  padding: 0 3px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--vc) 36%, #000); color: var(--vc); vertical-align: middle; flex: none; }
+.on > .vt, .tint.on > .vt { background: var(--vc); color: #15171a; }
+.mbtn .vt + .t { margin-left: 7px; }
+.opt .vt, .opt .ai { margin-right: 8px; }
+.mbtn.vfill, .opt.vfill { background: color-mix(in srgb, var(--vc) 55%, #000); color: #f0f0ee; }
+.mbtn.vfill.on, .opt.vfill.on { background: var(--vc); color: #15171a; }
 .csrow { display: flex; gap: 16px; margin: 8px 0 2px; align-items: center; }
 .csrow label { display: flex; gap: 6px; align-items: center; }
 .csrow .note { margin: 0; }
@@ -217,14 +228,21 @@ button { font: inherit; color: inherit; }
 .ph .ix { color: var(--dim); font-size: 12px; }
 /* hardware light on a faceplate (with Faceplate texture on): the box's edge
    catching the light top and left, falling away bottom and right, and the
-   knobs and buttons casting soft shadows down and to the right */
+   knobs and buttons casting soft shadows down and to the right. --hs is
+   the shadows' reach and --sa their depth (View > Shadows; 1 as designed) */
 .pnl.hw { box-shadow: inset calc(var(--hwk,1) * 1px) calc(var(--hwk,1) * 1px) 0 rgba(255,255,255,calc(0.24 * var(--hwk,1))),
   inset calc(var(--hwk,1) * -1px) calc(var(--hwk,1) * -1px) 0 rgba(0,0,0,calc(0.30 * var(--hwk,1))); }
 .pnl.hw .ph { box-shadow: inset 0 1px 0 rgba(255,255,255,0.16); }
 .pnl.hw .knob.flat svg { filter: none; }
-.pnl.hw .fdr .fcap { box-shadow: calc(1.5px * var(--hwk,1)) calc(3px * var(--hwk,1)) calc(4px * var(--hwk,1)) rgba(0,0,0,calc(0.34 + 0.1 * (var(--hwk,1) - 1))); }
-.pnl.hw .knob:not(.flat) svg:not(.scl) { filter: drop-shadow(calc(1.5px * var(--hwk,1)) calc(3px * var(--hwk,1)) calc(2.5px * var(--hwk,1)) rgba(0,0,0,calc(0.36 + 0.1 * (var(--hwk,1) - 1)))); }
-.pnl.hw .tog, .pnl.hw .cmb { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), calc(1.5px * var(--hwk,1)) calc(3px * var(--hwk,1)) calc(4px * var(--hwk,1)) rgba(0,0,0,calc(0.30 + 0.1 * (var(--hwk,1) - 1))); }
+.pnl.hw .fdr .fcap { box-shadow: calc(0.3px * var(--hs,1)) calc(0.4px * var(--hs,1)) 0 0.6px rgba(0,0,0,calc(0.38 * var(--sa,1))),
+  calc(2px * var(--hs,1)) calc(2.6px * var(--hs,1)) calc(10px * var(--hs,1)) rgba(0,0,0,calc(0.46 * var(--sa,1))); }
+.pnl.hw .knob:not(.flat) svg.flush { filter: drop-shadow(calc(0.5px * var(--hs,1)) calc(0.6px * var(--hs,1)) 0.6px rgba(0,0,0,calc(0.30 * var(--sa,1)))) !important; }
+.pnl.hw .knob:not(.flat) svg:not(.scl) { filter: drop-shadow(calc(0.5px * var(--hs,1)) calc(0.6px * var(--hs,1)) 0.6px rgba(0,0,0,calc(0.30 * var(--sa,1))))
+  drop-shadow(calc(var(--kr,20px) * 0.132 * var(--hs,1)) calc(var(--kr,20px) * 0.176 * var(--hs,1)) calc(var(--kr,20px) * 0.52 * var(--hs,1)) rgba(0,0,0,calc(0.52 * var(--sa,1)))); }
+/* only a faced button (lens, window, backlit) stands off the plate; a flat
+   one and a combo are printed on it and cast nothing */
+.pnl.hw .tog:where(.bs-lens, .bs-window, .bs-backlit), .pnl.hw .brow .bb:where(.bs-lens, .bs-window, .bs-backlit) { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), calc(0.3px * var(--hs,1)) calc(0.4px * var(--hs,1)) 0 0.6px rgba(0,0,0,calc(0.35 * var(--sa,1))),
+  calc(2px * var(--hs,1)) calc(2.6px * var(--hs,1)) calc(10px * var(--hs,1)) rgba(0,0,0,calc(0.44 * var(--sa,1))); }
 .ph .ix { margin-right: 4px; }
 /* REAPER's own wet, in the head where there's room (as the desktop's) */
 .ph .wet { flex-shrink: 0; height: 26px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent;
@@ -279,8 +297,10 @@ button { font: inherit; color: inherit; }
 .tog { margin-top: 10px; height: 38px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); font-size: 12px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .tog.on { background: var(--ton); color: var(--ton-ink, #fff); }
+.tog.sw, .tog.sw.on, .hw .tog.sw, .hw .tog.sw.on { background: none !important; border: none !important; box-shadow: none !important; height: 54px; margin-top: 2px; padding: 0; display: flex; align-items: center; justify-content: center; }
+.tog.sw svg { display: block; overflow: visible; }
 /* buttons read as buttons on any faceplate: a darker edge, a lit top */
-.tog, .cmb { border-color: rgba(0,0,0,0.55); box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 2px rgba(0,0,0,0.35); }
+.tog, .cmb { border-color: rgba(0,0,0,0.55); box-shadow: inset 0 1px 0 rgba(255,255,255,0.14); }
 .lbl.sm { font-size: 10px; height: 13px; line-height: 13px; }
 /* a section: an inset, or on a plate of its own */
 .sect { position: absolute; border-radius: 6px; border: 1px solid rgba(0,0,0,0.25); pointer-events: none; }
@@ -294,7 +314,7 @@ button { font: inherit; color: inherit; }
 .brow.down { flex-direction: column; gap: 3px; }
 .brow .bb { flex: 1 1 0; min-width: 0; border-radius: 4px; border: 1px solid rgba(0,0,0,0.55); background: var(--toff);
   color: var(--ttext); font-size: 10px; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 2px rgba(0,0,0,0.35); cursor: pointer; }
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14); cursor: pointer; }
 .brow.across .bb { height: 34px; }
 .brow.down .bb { height: 22px; flex: 0 0 22px; }
 .brow .bb.on { background: var(--ton); color: var(--ton-ink, #fff); }
@@ -753,6 +773,26 @@ function sendGrv() {
 setInterval(() => { if (grv.size || rcOpen.size) sendGrv(); }, 3000);
 setTimeout(() => { if (grv.size) sendGrv(); }, 300);
 try { showMacros = localStorage.getItem("tscv.macros") !== "0"; } catch (e) {}
+// the panels besides the plugins, each of which can be hidden (as the
+// desktop's View menu; this device's own choice)
+const SHOW_ITEMS = [["macros", "Macros"], ["mods", "Modulators"], ["sends", "Sends"], ["recv", "Receives"]];
+let showAux = { macros: true, mods: true, sends: true, recv: true };
+try { Object.assign(showAux, JSON.parse(localStorage.getItem("tscv.show") || "{}")); } catch (e) {}
+function showSheet() {
+  openSheet(sh => {
+    sh.append(h("h3", null, "Show"));
+    for (const [k, label] of SHOW_ITEMS) {
+      const o = h("button", "opt", (showAux[k] ? "✓ " : "\u2003 ") + label);
+      o.addEventListener("click", () => {
+        showAux[k] = !showAux[k];
+        try { localStorage.setItem("tscv.show", JSON.stringify(showAux)); } catch (e) {}
+        relayout();
+        showSheet();
+      });
+      sh.append(o);
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // polling
@@ -822,8 +862,11 @@ async function loadMacros() {
   } catch (e) { macros = []; }
   buildMacros();
 }
+// Not saved: the button's element, and its vendor look (ChannelView works
+// that out again when the bar is saved).
+const VSKIP = new Set(["el", "vc", "vl", "vm", "vf"]);
 function saveMacros() {
-  reaper(`SET/EXTSTATEPERSIST/${NS}/macros/` + encodeURIComponent(JSON.stringify(macros, (k, v) => k === "el" ? undefined : v))).catch(() => {});
+  reaper(`SET/EXTSTATEPERSIST/${NS}/macros/` + encodeURIComponent(JSON.stringify(macros, (k, v) => VSKIP.has(k) ? undefined : v))).catch(() => {});
   buildMacros();
 }
 
@@ -927,6 +970,178 @@ const lighten = (hex, t) => { const h = hex.replace("#", "").slice(0, 6);
     return Math.round(c + (255 - c) * t).toString(16).padStart(2, "0"); }).join(""); };
 const STYLE_ALIAS = { api: "nose" };   // "api": an older name for Round nose, still read
 const BUTTON_FACES = new Set(["lens", "window", "backlit"]);   // a button's Style (W.button_face)
+// Toggles drawn as hardware switches (the desktop's TS_CV_Switches): SVG
+// in a 40 x 36 box, lit in the toggle's colour; `flat` is the theme's
+// look (3D effect off), where the levers are pill sliders.
+const SWITCHES = new Set(["bat", "paddle", "rocker", "litrocker", "slide", "pill", "lamp", "roundbtn", "jewel", "guarded"]);
+function hexMix(a, b, t) {
+  const p = x => parseInt(x.replace("#", "").slice(0, 6), 16);
+  const A = p(a), B = p(b);
+  return "#" + [16, 8, 0].map(s => Math.round(((A >> s) & 255) + (((B >> s) & 255) - ((A >> s) & 255)) * Math.max(0, Math.min(1, t))).toString(16).padStart(2, "0")).join("");
+}
+function switchSVG(st, on, col, flat, text) {
+  const W = 40, H = 36, cx = W / 2, cy = H / 2;
+  // the upright ones fill the box's height, the pill slider its width
+  const SL = Math.min(H * 1.15, W * 1.3), SP = Math.min(W * 1.2, H * 2.4);
+  const S = ["roundbtn", "jewel", "lamp"].includes(st) ? Math.min(W, H)
+    : (st === "pill" || (flat && ["bat", "paddle", "guarded"].includes(st))) ? SP : SL;
+  const o = [], defs = [];
+  const f = v => +v.toFixed(2);
+  const rect = (x1, y1, x2, y2, fill, r = 0, extra = "") => o.push(`<rect x="${f(x1)}" y="${f(y1)}" width="${f(x2 - x1)}" height="${f(y2 - y1)}" rx="${f(Math.min(r, (x2 - x1) / 2, (y2 - y1) / 2))}" fill="${fill}" ${extra}/>`);
+  const srect = (x1, y1, x2, y2, stroke, r = 0, w = 1) => o.push(`<rect x="${f(x1)}" y="${f(y1)}" width="${f(x2 - x1)}" height="${f(y2 - y1)}" rx="${f(Math.min(r, (x2 - x1) / 2, (y2 - y1) / 2))}" fill="none" stroke="${stroke}" stroke-width="${w}"/>`);
+  const circ = (x, y, r, fill, extra = "") => o.push(`<circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" fill="${fill}" ${extra}/>`);
+  const ring = (x, y, r, stroke, w = 1) => o.push(`<circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" fill="none" stroke="${stroke}" stroke-width="${w}"/>`);
+  const poly = (pts, fill) => o.push(`<polygon points="${pts.map(p => f(p[0]) + "," + f(p[1])).join(" ")}" fill="${fill}"/>`);
+  const ngon = (x, y, r, n) => Array.from({ length: n }, (_, i) => [x + r * Math.cos(2 * Math.PI * i / n), y + r * Math.sin(2 * Math.PI * i / n)]);
+  const line = (x1, y1, x2, y2, stroke, w = 1) => o.push(`<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round"/>`);
+  const vgrad = (top, bot) => { const id = "swg" + (++gradN); defs.push(`<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top[0]}" stop-opacity="${top[1]}"/><stop offset="1" stop-color="${bot[0]}" stop-opacity="${bot[1]}"/></linearGradient>`); return `url(#${id})`; };
+  // the desktop's TS_CV_Light: a soft drop shadow down and right, further
+  // and softer the bigger the thing, and a tight contact shadow at its foot
+  const LK = METAL_K * SHADOW_K;
+  const reachOf = h => [Math.max(1.5, Math.min(12, h * 0.22)) * LK, Math.max(2, Math.min(20, h * 0.55)) * LK];
+  // the drop's layers, widest and faintest first: [dx, dy, grow, opacity]
+  // (the wide layers carry little of the darkness, the tight ones most: a long, thinning tail)
+  const layersOf = h => { const [off, soft] = reachOf(h), n = Math.max(3, Math.min(14, Math.ceil(soft / 1.3)));
+    const total = Math.min(0xe0, 0xa0 * Math.min(2, LK + 0.2)) / 255, w = [];
+    for (let i = 0; i < n; i++) w.push(Math.pow(0.2 + i / (n - 1), 1.2));
+    const sum = w.reduce((a, b) => a + b, 0), out = [];
+    for (let i = 0; i < n; i++) { const t = i / (n - 1), o = off * (1 - 0.45 * t);
+      out.push([0.6 * o, 0.8 * o, soft * Math.pow(1 - t, 1.25), (total * w[i] / sum).toFixed(3)]); }
+    return out; };
+  const contact = () => (0x30 * Math.min(1.6, METAL_K + 0.2) * Math.min(1.25, 0.6 + 0.4 * SHADOW_K) / 255).toFixed(3);
+  const shadowR = (x1, y1, x2, y2, r) => {
+    if (LK <= 0) return;
+    for (const [dx, dy, g, a] of layersOf(Math.min(x2 - x1, y2 - y1) / 2)) rect(x1 + dx - g, y1 + dy - g, x2 + dx + g, y2 + dy + g, "#000", r + g, `fill-opacity="${a}"`);
+    srect(x1 + 0.3 - 0.4, y1 + 0.4 - 0.4, x2 + 0.3 + 0.4, y2 + 0.4 + 0.4, `rgba(0,0,0,${contact()})`, r + 0.4, 1.3);
+  };
+  const shadowC = (x, y, r) => {
+    if (LK <= 0) return;
+    for (const [dx, dy, g, a] of layersOf(r)) circ(x + dx, y + dy, r + g, "#000", `fill-opacity="${a}"`);
+    ring(x + 0.3, y + 0.4, r + 0.4, `rgba(0,0,0,${contact()})`, 1.3);
+  };
+  const glowC = (x, y, r, c, a) => { for (let i = 4; i >= 1; i--) circ(x, y, r + i * 1.4, c, `fill-opacity="${(a * (5 - i) / 10).toFixed(3)}"`); };
+  const glowR = (x1, y1, x2, y2, r, c, a) => { for (let i = 4; i >= 1; i--) rect(x1 - i, y1 - i, x2 + i, y2 + i, c, r + i, `fill-opacity="${(a * (5 - i) / 10).toFixed(3)}"`); };
+  const disc = (x, y, r, base) => { circ(x, y, r, hexMix(base, "#000", 0.35)); circ(x - r * 0.06, y - r * 0.08, r * 0.92, base); circ(x - r * 0.22, y - r * 0.26, r * 0.45, "#fff", `fill-opacity="0.19"`); };
+  const lighten = (c, t) => hexMix(c, "#ffffff", t);
+  const dark = c => hexMix(c, "#000000", 0.55);
+  const markIO = (h, ink) => { line(cx, cy - h * 0.24 - S * 0.06, cx, cy - h * 0.24 + S * 0.06, ink, Math.max(1, S * 0.021)); ring(cx, cy + h * 0.24, S * 0.055, ink, Math.max(1, S * 0.02)); };
+  const lever = (yc, s, kind) => {
+    const nut = s * 0.26; shadowC(cx, yc, nut);
+    poly(ngon(cx + 0.8, yc + 1.2, nut, 6), "#4c4e50"); poly(ngon(cx, yc, nut, 6), "#a9adb2"); poly(ngon(cx - nut * 0.12, yc - nut * 0.15, nut * 0.62, 6), "#bfc2c6");
+    circ(cx, yc, nut * 0.55, "#3a3c40");
+    const dir = on ? -1 : 1, ty = yc + dir * s * 0.44, w0 = s * 0.09, w1 = kind === "paddle" ? s * 0.14 : s * 0.065;
+    poly([[cx - w0 + 2, yc + 2.5], [cx + w0 + 2, yc + 2.5], [cx + w1 + 2, ty + 2.5], [cx - w1 + 2, ty + 2.5]], "rgba(0,0,0,0.25)");
+    if (kind === "paddle") {
+      poly([[cx - w0, yc], [cx + w0, yc], [cx + w1, ty], [cx - w1, ty]], "#1c1d20");
+      rect(cx - w1, ty - (on ? 0 : s * 0.10), cx + w1, ty + (on ? s * 0.10 : 0), "#1c1d20", s * 0.04);
+      poly([[cx - w0, yc], [cx - w0 * 0.2, yc], [cx - w1 * 0.2, ty], [cx - w1, ty]], "rgba(255,255,255,0.09)");
+    } else {
+      poly([[cx - w0, yc], [cx + w0, yc], [cx + w1, ty], [cx - w1, ty]], "#9fa3a8");
+      poly([[cx - w0, yc], [cx - w0 * 0.1, yc], [cx - w1 * 0.1, ty], [cx - w1, ty]], "#e2e4e6");
+      disc(cx, ty, s * 0.095, "#d2d5d8");
+    }
+  };
+  const pill = (c, fl) => {
+    const w = S * 0.8, h = S * 0.42, x1 = cx - w / 2, y1 = cy - h / 2, x2 = cx + w / 2, y2 = cy + h / 2, r = h / 2;
+    if (!fl) shadowR(x1, y1, x2, y2, r);
+    rect(x1, y1, x2, y2, on ? c : (fl ? "#3a3d42" : "#1b1c1f"), r);
+    if (!fl) { rect(x1 + r * 0.6, y1 + 1, x2 - r * 0.6, y1 + h * 0.5, vgrad(["#000", 0.25], ["#000", 0])); srect(x1, y1, x2, y2, "rgba(0,0,0,0.63)", r); }
+    const kr = h * 0.4, kx = on ? x2 - r : x1 + r;
+    if (fl) circ(kx, cy, kr, on ? "#f2f2f2" : "#8a8d92"); else { shadowC(kx, cy, kr); disc(kx, cy, kr, "#e4e6e8"); }
+  };
+  if (st === "bat" || st === "paddle") {
+    if (flat) pill(col, true); else lever(cy, S, st);
+  } else if (st === "rocker" || st === "litrocker") {
+    const w = S * 0.52, h = S * 0.86, x1 = cx - w / 2, y1 = cy - h / 2, x2 = cx + w / 2, y2 = cy + h / 2, r = w / 2;
+    if (flat) {
+      o.push(`<clipPath id="swc${++gradN}"><rect x="${f(x1)}" y="${f(y1)}" width="${f(w)}" height="${f(h)}" rx="${f(r)}"/></clipPath>`);
+      const cp = `clip-path="url(#swc${gradN})"`;
+      rect(x1, y1, x2, cy, on ? col : "#5a5d62", 0, cp); rect(x1, cy, x2, y2, on ? "#3a3d42" : "#8a8d92", 0, cp);
+      markIO(h, "#f2f2f2");
+    } else {
+      const lit = st === "litrocker";
+      shadowR(x1, y1, x2, y2, r); rect(x1, y1, x2, y2, "#0e0e10", r);
+      const i = 2, face = lit ? (on ? col : dark(col)) : "#26272b";
+      if (lit && on) glowR(x1 + i, y1 + i, x2 - i, y2 - i, r - i, col, 0.31);
+      rect(x1 + i, y1 + i, x2 - i, y2 - i, face, r - i);
+      const press = vgrad(["#000", 0.31], ["#000", 0.06]), lift = vgrad(["#fff", 0.14], ["#fff", 0]);
+      if (on) { rect(x1 + i + 1, y1 + i + r * 0.3, x2 - i - 1, cy, press); rect(x1 + i + 1, cy, x2 - i - 1, y2 - i - r * 0.3, lift); }
+      else { rect(x1 + i + 1, y1 + i + r * 0.3, x2 - i - 1, cy, lift); rect(x1 + i + 1, cy, x2 - i - 1, y2 - i - r * 0.3, vgrad(["#000", 0.06], ["#000", 0.31])); }
+      line(x1 + i + 1, cy, x2 - i - 1, cy, "rgba(0,0,0,0.38)");
+      markIO(h, (lit && !on) ? "rgba(255,255,255,0.56)" : "rgba(255,255,255,0.88)");
+    }
+  } else if (st === "slide") {
+    if (flat) {
+      rect(cx - S * 0.07, cy - S * 0.42, cx + S * 0.07, cy + S * 0.42, "#3a3d42", S * 0.07);
+      const kh = S * 0.3, ky = on ? cy - S * 0.42 : cy + S * 0.42 - kh;
+      rect(cx - S * 0.18, ky, cx + S * 0.18, ky + kh, on ? col : "#8a8d92", 2);
+    } else {
+      const w = S * 0.44, h = S * 0.86, x1 = cx - w / 2, y1 = cy - h / 2, x2 = cx + w / 2, y2 = cy + h / 2;
+      shadowR(x1, y1, x2, y2, 2); rect(x1, y1, x2, y2, vgrad(["#c9ccd0", 1], ["#8d9195", 1]), 2); srect(x1, y1, x2, y2, "#505357", 2);
+      circ(cx, y1 + S * 0.06, S * 0.025, "#55585c"); circ(cx, y2 - S * 0.06, S * 0.025, "#55585c");
+      const sy1 = y1 + S * 0.14, sy2 = y2 - S * 0.14; rect(cx - S * 0.065, sy1, cx + S * 0.065, sy2, "#141416", 1.5);
+      const kh = (sy2 - sy1) * 0.45, ky = on ? sy1 : sy2 - kh;
+      rect(cx - S * 0.10 + 1, ky + 1.5, cx + S * 0.10 + 1, ky + kh + 1.5, "rgba(0,0,0,0.38)", 2);
+      rect(cx - S * 0.10, ky, cx + S * 0.10, ky + kh, vgrad(["#3a3c40", 1], ["#151618", 1]), 2); srect(cx - S * 0.10, ky, cx + S * 0.10, ky + kh, "#000", 2);
+    }
+  } else if (st === "pill") {
+    pill(col, flat);
+  } else if (st === "lamp") {
+    const s = S * 0.72, x1 = cx - s / 2, y1 = cy - s / 2, x2 = cx + s / 2, y2 = cy + s / 2;
+    let ink;
+    if (flat) {
+      if (on) { rect(x1, y1, x2, y2, col, 2); ink = lum(col) > 0.55 ? "#101010" : "#f6f6f4"; }
+      else { srect(x1, y1, x2, y2, "#8a8d92", 2, 1.5); ink = "#a8abb0"; }
+    } else {
+      shadowR(x1, y1, x2, y2, 3); rect(x1, y1, x2, y2, "#0e0e10", 3);
+      const i = 2;
+      if (on) { glowR(x1 + i, y1 + i, x2 - i, y2 - i, 2, col, 0.25); rect(x1 + i, y1 + i, x2 - i, y2 - i, lighten(col, 0.15), 2);
+        rect(x1 + i + s * 0.12, y1 + i + s * 0.12, x2 - i - s * 0.12, y2 - i - s * 0.12, lighten(col, 0.45), 4, `fill-opacity="0.5"`); ink = lum(col) > 0.55 ? "#141414" : "#fff"; }
+      else { rect(x1 + i, y1 + i, x2 - i, y2 - i, hexMix(col, "#000", 0.7), 2); ink = hexMix(col, "#000", 0.25); }
+      rect(x1 + i, y1 + i, x2 - i, y1 + s * 0.45, vgrad(["#fff", 0.19], ["#fff", 0]));
+    }
+    if (text) o.push(`<text x="${cx}" y="${cy + 3.5}" text-anchor="middle" font-size="${text.length > 3 ? 7.5 : 10}" font-weight="700" fill="${ink}" ${(!flat && !on) ? 'fill-opacity="0.7"' : ""}>${text.replace(/[<&]/g, "")}</text>`);
+  } else if (st === "roundbtn") {
+    const R = S * 0.38;
+    if (flat) { ring(cx, cy, R, on ? col : "#3a3d42", 2.5); circ(cx, cy, R * 0.7, on ? col : "#8a8d92"); }
+    else {
+      shadowC(cx, cy, R); disc(cx, cy, R, "#b9bcc0"); circ(cx, cy, R * 0.78, "#151618");
+      if (on) { for (let i = 3; i >= 1; i--) ring(cx, cy, R * 0.72, col, 2 + i * 1.5); ring(cx, cy, R * 0.72, lighten(col, 0.25), 2.2); }
+      const cap = on ? col : hexMix(col, "#000", 0.3);
+      circ(cx, cy, R * 0.6, hexMix(cap, "#000", 0.35)); circ(cx - R * 0.04, cy - R * 0.05, R * 0.55, cap); circ(cx - R * 0.18, cy - R * 0.22, R * 0.22, "#fff", `fill-opacity="0.25"`);
+    }
+  } else if (st === "jewel") {
+    const R = S * 0.36;
+    if (flat) { if (on) glowC(cx, cy, R * 0.6, col, 0.31); circ(cx, cy, R * 0.6, on ? col : hexMix(col, "#000", 0.55)); if (!on) ring(cx, cy, R * 0.6, "rgba(138,141,146,0.5)"); }
+    else {
+      shadowC(cx, cy, R); disc(cx, cy, R, "#c4c7cb");
+      if (on) glowC(cx, cy, R * 0.72, col, 0.38);
+      circ(cx, cy, R * 0.72, on ? lighten(col, 0.1) : hexMix(col, "#000", 0.72));
+      o.push(`<polygon points="${ngon(cx, cy, R * 0.5, 8).map(p => f(p[0]) + "," + f(p[1])).join(" ")}" fill="none" stroke="${on ? "#fff" : col}" stroke-opacity="${on ? 0.31 : 0.25}"/>`);
+      if (on) circ(cx, cy, R * 0.32, lighten(col, 0.6), `fill-opacity="0.75"`);
+      circ(cx - R * 0.25, cy - R * 0.28, R * 0.16, "#fff", `fill-opacity="${on ? 0.81 : 0.5}"`);
+    }
+  } else if (st === "guarded") {
+    const red = "#b3201e";
+    if (flat) {
+      if (on) { pill(col, true); rect(cx - S * 0.4, cy - S * 0.36, cx + S * 0.4, cy - S * 0.3, "#d23a32", 1.5); }
+      else { const w = S * 0.8, h = S * 0.4; rect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, "#6a2222", h / 2, `fill-opacity="0.38"`); srect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, "#d23a32", h / 2, 1.5); }
+    } else {
+      lever(cy + S * 0.05, S * 0.9, "bat");
+      const w = S * 0.42;
+      if (on) {
+        rect(cx - w / 2, cy - S * 0.44, cx - w / 2 + 2.5, cy + S * 0.4, red, 1); rect(cx + w / 2 - 2.5, cy - S * 0.44, cx + w / 2, cy + S * 0.4, red, 1);
+        rect(cx - w / 2, cy - S * 0.47, cx + w / 2, cy - S * 0.42, lighten(red, 0.15), 1); rect(cx - w / 2, cy + S * 0.38, cx + w / 2, cy + S * 0.42, hexMix(red, "#000", 0.3), 1);
+      } else {
+        const x1 = cx - w / 2, y1 = cy - S * 0.44, x2 = cx + w / 2, y2 = cy + S * 0.4;
+        shadowR(x1, y1, x2, y2, 2); rect(x1, y1, x2, y2, red, 2, `fill-opacity="0.85"`);
+        rect(x1 + 2, y1 + 2, x2 - 2, y1 + (y2 - y1) * 0.35, vgrad(["#fff", 0.22], ["#fff", 0])); srect(x1, y1, x2, y2, hexMix(red, "#000", 0.4), 2);
+      }
+    }
+  }
+  const k = KNOB / H;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${f(W * k)}" height="${f(H * k)}"><defs>${defs.join("")}</defs>${o.join("")}</svg>`;
+}
 let gradN = 0;
 
 function el(tag, attrs, parent) {
@@ -936,12 +1151,444 @@ function el(tag, attrs, parent) {
   return e;
 }
 
+// ---------------------------------------------------------------------------
+// Knobs built from parts (TS_CV_KnobParts): the desktop's recipes and your
+// own looks (Look<n>), sent as the same k=v text, drawn here in SVG. The
+// light stays put -- gradients outside the turning groups -- and what turns
+// with the knob (grip marks, flutes, a dial's print, the pointer) turns.
+// Drawn where the knob's radius is `r` round (cx, cy) in a 100-unit box.
+// ---------------------------------------------------------------------------
+const KP_COL = { col: 1, side: 1, insert: 1, rim: 1, ink: 1, scol: 1, sink: 1 };
+const KP_NUM = { n: 1, tilt: 1, sr: 1, top_r: 1, p0: 1, pw: 1 };
+function decodeLook(s) {
+  if (!s) return null;
+  const p = {};
+  let any = false;
+  for (const pair of String(s).split(",")) {
+    const m = /^\s*(\w+)\s*=\s*(.*?)\s*$/.exec(pair);
+    if (!m) continue;
+    const k = m[1], v = m[2];
+    if (KP_COL[k]) { if (/^#?[0-9a-f]{6}$/i.test(v)) { p[k] = "#" + v.replace("#", "").toLowerCase(); any = true; } }
+    else if (KP_NUM[k]) { const n = parseFloat(v); if (!isNaN(n)) { p[k] = n; any = true; } }
+    else if (k === "washer" || k === "nut") { if (v === "1") { p[k] = true; any = true; } }
+    else if (k.startsWith("in_")) {
+      p.inner = p.inner || {};
+      if (k === "in_r") p.inner.r = parseFloat(v) || 0.62;
+      else if (k === "in_col" && /^#?[0-9a-f]{6}$/i.test(v)) p.inner.col = "#" + v.replace("#", "");
+      else if (k === "in_mat") p.inner.mat = v === "bead" ? "bead" : null;
+      else if (k === "in_screws") p.inner.screws = v === "1";
+      any = true;
+    } else { p[k] = v; any = true; }
+  }
+  return any ? p : null;
+}
+const kpReach = p => {
+  let e = 1;
+  if (p.skirt) e = Math.max(e, p.sr || 1.42);
+  if (p.washer) e = Math.max(e, (p.skirt ? (p.sr || 1.42) : 1) * 1.14);
+  if (p.ptr === "chicken") e = Math.max(e, 1.18);
+  if (p.ptr === "wing") e = Math.max(e, 1.40);
+  return e;
+};
+const kpCentre = (p, cap) => p.inner ? (p.inner.col || "#9b9b97")
+  : p.top === "insert" ? (p.insert || "#c9ccd0") : (cap || p.col || "#26282b");
+
+const KP_AMIN = Math.PI * 0.75, KP_ASPAN = Math.PI * 1.5;
+const KP_LA = Math.atan2(-0.8, -0.6), KP_UX = Math.cos(KP_LA), KP_UY = Math.sin(KP_LA);
+const KP_SHINE = { gloss: 0.38, plastic: 0.20, matte: 0.08, rubber: 0.04, metal: 0.30, chrome: 0.45, enamel: 0.30 };
+const KP_STREAK = { gloss: 0x70, plastic: 0x26, matte: 0x0c, rubber: 0x06, metal: 0x40, chrome: 0x80, enamel: 0x40 };
+
+// the outline round two circles: a pointer's footprint (TS_CV_KnobParts hull)
+function kpHull(x1, y1, r1, x2, y2, r2, n = 8) {
+  const dx = x2 - x1, dy = y2 - y1, d = Math.max(0.01, Math.hypot(dx, dy)), a = Math.atan2(dy, dx);
+  const psi = Math.acos(Math.max(-1, Math.min(1, (r1 - r2) / d)));
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const q = a - psi + 2 * psi * i / n; pts.push([x2 + Math.cos(q) * r2, y2 + Math.sin(q) * r2]); }
+  for (let i = 0; i <= n * 2; i++) { const q = a + psi + (2 * Math.PI - 2 * psi) * i / (n * 2); pts.push([x1 + Math.cos(q) * r1, y1 + Math.sin(q) * r1]); }
+  return "M" + pts.map(q => f2(q[0]) + " " + f2(q[1])).join("L") + "Z";
+}
+
+// Draws look `p` into `parent`; returns set(v). o: cap (the body's colour,
+// over the look's), size (px, for line widths and whether numbers fit),
+// noTicks.
+function drawParts(parent, defs, cx, cy, r, p, o) {
+  const size = o.size || 40, px = 100 / size;
+  const L = layout.tex ? LIGHT_K : 1;
+  const W = "#ffffff", B = "#000000", mix = mixHex;
+  const R = r / kpReach(p);
+  const body = o.cap || p.col || "#26282b";
+  const side = p.side || mix(body, B, 0.40);
+  const ink = p.ink || (lum(body) > 0.5 ? "#1d1e20" : "#f3f3f1");
+  const Rs = p.skirt ? R * (p.sr || 1.42) : R;
+  const outer = p.washer ? Rs * 1.14 : Rs;
+  const tilt = (p.tilt || 0) * R, ty = cy - tilt;
+  const turners = [];               // [element, cx, cy, extra transform] turned by set()
+  const at = (t, rr, yy = cy) => [cx + Math.cos(t) * rr, yy + Math.sin(t) * rr];
+  const E = (tag, attrs, par = parent) => el(tag, attrs, par);
+  const grad = (kind, attrs, stops) => {
+    const id = "kp" + (++gradN);
+    const g = el(kind, Object.assign({ id }, attrs), defs);
+    for (const [off, c, op] of stops) el("stop", { offset: off, "stop-color": c, "stop-opacity": op == null ? 1 : op }, g);
+    return `url(#${id})`;
+  };
+  // toward the light: top left to bottom right
+  const lin = stops => grad("linearGradient", { x1: "0.2", y1: "0.1", x2: "0.8", y2: "0.9" }, stops);
+  const contrast = (lo, hi) => {
+    if (L === 1) return [lo, hi];
+    if (L > 1) return [mix(lo, B, Math.min(1, 0.4 * (L - 1))), mix(hi, W, Math.min(1, 0.4 * (L - 1)))];
+    const m = mix(lo, hi, 0.5); return [mix(m, lo, L), mix(m, hi, L)];
+  };
+  // a lit band: the disc of radius R0, lit on the light's side
+  const litRing = (R0, lo, hi, glint, yy = cy) => {
+    [lo, hi] = contrast(lo, hi);
+    E("circle", { cx, cy: yy, r: f2(R0), fill: lin([[0, hi], [0.5, mix(lo, hi, 0.5)], [1, lo]]) });
+    if (glint) {
+      const a0 = KP_LA + Math.PI - 0.5, a1 = KP_LA + Math.PI + 0.5, rr = R0 * 0.96;
+      const [x0, y0] = at(a0, rr, yy), [x1, y1] = at(a1, rr, yy);
+      E("path", { d: `M${f2(x0)} ${f2(y0)} A${f2(rr)} ${f2(rr)} 0 0 1 ${f2(x1)} ${f2(y1)}`, fill: "none",
+        stroke: hi, "stroke-opacity": (0.56 * glint).toFixed(2), "stroke-width": f2(Math.max(px, R0 * 0.05)) });
+    }
+  };
+  // a disc lit from the top left: darker at the bottom right, lighter toward the light
+  const litDisc = (yy, Rr, col, lift) => {
+    const dark = mix(col, B, Math.min(0.8, 0.32 * L));
+    const light = mix(col, W, Math.min(0.85, (0.06 + 0.16 * lift) * L + 0.1 * Math.max(0, L - 1)));
+    E("circle", { cx, cy: yy, r: f2(Rr), fill: grad("radialGradient", { cx: "0.41", cy: "0.38", r: "0.66" },
+      [[0, light], [0.55, col], [1, dark]]) });
+  };
+  // a flat face: an even fall of light across it, its edge lit top left
+  const flatFace = (yy, Rr, col, lift) => {
+    const up = Math.max(0, L - 1);
+    const dark = mix(col, B, Math.min(0.7, 0.14 * Math.min(1, L) + 0.18 * up));
+    const light = mix(col, W, Math.min(0.7, (0.05 + 0.10 * lift) * Math.min(1, L) + 0.12 * up));
+    E("circle", { cx, cy: yy, r: f2(Rr), fill: lin([[0, light], [1, dark]]) });
+    const w = Math.max(px, Rr * 0.05), rr = Rr - w / 2;
+    const arc = (a0, a1, c, op) => { const [x0, y0] = at(a0, rr, yy), [x1, y1] = at(a1, rr, yy);
+      E("path", { d: `M${f2(x0)} ${f2(y0)} A${f2(rr)} ${f2(rr)} 0 0 1 ${f2(x1)} ${f2(y1)}`, fill: "none", stroke: c,
+        "stroke-opacity": op, "stroke-width": f2(w) }); };
+    arc(KP_LA - 1.2, KP_LA + 1.2, W, 0.22);
+    arc(KP_LA + Math.PI - 1.2, KP_LA + Math.PI + 1.2, B, 0.19);
+  };
+  const sheen = (yy, Rr, col) => {
+    const d = KP_LA + Math.PI / 2, w = 14 * Math.PI / 180;
+    for (const s of [d, d + Math.PI]) {
+      const [x1, y1] = at(s - w, Rr, yy), [x2, y2] = at(s + w, Rr, yy);
+      E("path", { d: `M${cx} ${f2(yy)}L${f2(x1)} ${f2(y1)}L${f2(x2)} ${f2(y2)}Z`, fill: W,
+        "fill-opacity": lum(col) > 0.5 ? 0.33 : 0.15 });
+    }
+    for (const k of [0.35, 0.57, 0.79]) E("circle", { cx, cy: yy, r: f2(Rr * k), fill: "none", stroke: B, "stroke-opacity": 0.05, "stroke-width": f2(px) });
+  };
+  const chrome = (yy, Rr, col) => {
+    E("circle", { cx, cy: yy, r: f2(Rr), fill: mix(col, B, 0.55) });
+    const [x0, y0] = at(Math.PI * 1.06, Rr, yy), [x1, y1] = at(Math.PI * 1.94, Rr, yy);
+    E("path", { d: `M${f2(x0)} ${f2(y0)} A${f2(Rr)} ${f2(Rr)} 0 0 1 ${f2(x1)} ${f2(y1)}Z`, fill: mix(col, W, 0.55) });
+    E("circle", { cx: f2(cx - Rr * 0.3), cy: f2(yy - Rr * 0.45), r: f2(Rr * 0.22), fill: W, "fill-opacity": 0.44 });
+  };
+  const ring = (yy, Rr, c, op, w) => E("circle", { cx, cy: yy, r: f2(Rr), fill: "none", stroke: c, "stroke-opacity": op, "stroke-width": f2(w) });
+  // a group that turns with the knob, about (cx, yy)
+  const turning = (yy = cy, pre = "") => { const g = E("g", {}); turners.push([g, cx, yy, pre]); return g; };
+  const line = (par, x1, y1, x2, y2, c, w, op = 1) => el("line", { x1: f2(x1), y1: f2(y1), x2: f2(x2), y2: f2(y2),
+    stroke: c, "stroke-opacity": op, "stroke-width": f2(w), "stroke-linecap": "round" }, par);
+  const a0 = KP_AMIN;                // everything that turns is drawn at the value 0 and turned
+  let dial = null, nums = [];
+
+  // a turned washer, a hex nut
+  if (p.washer) { litRing(outer, "#6c7075", "#e2e4e6", 0.5); ring(cy, outer, B, 0.38, px); }
+  if (p.nut) {
+    const pts = []; for (let i = 0; i < 6; i++) pts.push(at(i * Math.PI / 3, Rs * 1.12));
+    E("path", { d: "M" + pts.map(q => f2(q[0]) + " " + f2(q[1])).join("L") + "Z", fill: "#8d9196", stroke: "rgba(0,0,0,0.44)", "stroke-width": f2(px) });
+  }
+  // the skirt
+  if (p.skirt) {
+    const scol = p.scol || mix(body, B, 0.2);
+    if (p.smat === "clear") {
+      E("circle", { cx, cy, r: f2(Rs), fill: "#e8ecef", "fill-opacity": 0.16 });
+      ring(cy, Rs - px / 2, W, 0.44, 1.2 * px); ring(cy, Rs * 0.86, W, 0.13, px);
+    } else {
+      const metal = p.smat === "metal", k = p.smat === "matte" ? 0.08 : (metal ? 0.45 : 0.14);
+      litRing(Rs, mix(scol, B, k), mix(scol, W, k), metal ? 0.6 : 0);
+      ring(cy, Rs, B, 0.44, px);
+    }
+    if (p.sgrip === "knurled") {
+      const g = turning(), nk = Math.min(90, Math.floor(Rs * 2.2 / px));
+      for (let i = 0; i < nk; i++) { const t = a0 + i * 2 * Math.PI / nk, [x1, y1] = at(t, Rs * 0.95), [x2, y2] = at(t, Rs);
+        line(g, x1, y1, x2, y2, B, px, 0.31); }
+    }
+    // its print: ticks (a dial's turn with it), numbers kept upright
+    const sink = p.sink || (lum(p.scol || "#000000") > 0.5 ? "#1a1a1a" : "#f0efe9");
+    const w = Math.max(px, R * 0.05);
+    if (p.skirt === "printed" || p.skirt === "numbered") {
+      const n = p.skirt === "printed" ? 20 : 10;
+      for (let k = 0; k <= n; k++) {
+        const t = a0 + KP_ASPAN * k / n, major = p.skirt === "numbered" || k % 5 === 0;
+        const [x1, y1] = at(t, major ? R * 1.08 : R + (Rs - R) * 0.35), [x2, y2] = at(t, Rs * 0.95);
+        line(parent, x1, y1, x2, y2, sink, w);
+      }
+    } else if (p.skirt === "dial") {
+      dial = turning();
+      const span = 300 * Math.PI / 180, top = -Math.PI / 2;
+      for (let k = 0; k <= 50; k += (Rs / px >= 30 ? 1 : 5)) {
+        const t = top - span * k / 50, major = k % 5 === 0;
+        const [x1, y1] = at(t, Rs * (major ? 0.78 : 0.86)), [x2, y2] = at(t, Rs * 0.93);
+        line(dial, x1, y1, x2, y2, sink, major ? w : Math.max(px, w * 0.6));
+      }
+    }
+    if ((p.skirt === "numbered" || p.skirt === "dial") && (Rs - R) / px >= 12) {
+      const rr = p.skirt === "dial" ? (R + Rs * 0.78) * 0.5 : (R + Rs) * 0.5;
+      for (let k = 0; k <= 10; k += 2) {
+        const tx = el("text", { "text-anchor": "middle", "dominant-baseline": "central", fill: sink,
+          "font-size": f2(9 * px), "font-family": "inherit" }, parent);
+        tx.textContent = String(k);
+        nums.push([tx, k, rr]);
+      }
+    }
+  }
+  // fins through the body (a wing knob)
+  const fy = -tilt * 0.6;
+  if (p.ptr === "wing") {
+    const g = turning(), fl = R * 1.38, fw = R * 0.20, ca = Math.cos(a0), sa = Math.sin(a0), vx = -sa * fw, vy = ca * fw;
+    const x1 = cx + ca * fl, y1 = cy + sa * fl, x2 = cx - ca * fl, y2 = cy - sa * fl;
+    const quad = (k, oy, c) => el("path", { d: `M${f2(x1 + vx * k)} ${f2(y1 + vy * k + oy)}L${f2(x1 - vx * k)} ${f2(y1 - vy * k + oy)}L${f2(x2 - vx * k)} ${f2(y2 - vy * k + oy)}L${f2(x2 + vx * k)} ${f2(y2 + vy * k + oy)}Z`, fill: c }, g);
+    quad(1, 0, side); quad(0.85, fy, body);
+    line(g, cx + ca * R * 1.02, cy + sa * R * 1.02 + fy, cx + ca * (fl - R * 0.08), cy + sa * (fl - R * 0.08) + fy, p.ink || "#f0f0ee", Math.max(1.2 * px, R * 0.07));
+    line(g, cx - ca * R * 1.02, cy - sa * R * 1.02 + fy, cx - ca * (fl - R * 0.08), cy - sa * (fl - R * 0.08) + fy, B, Math.max(px, R * 0.04), 0.56);
+  }
+  let topR = p.top_r || ({ straight: 0.93, slight: 0.86, tapered: 0.78, domed: 0.90 })[p.profile || "straight"] || 0.93;
+  if (p.grip === "fluted") topR = Math.min(topR, 0.80);
+
+  // a chicken-head: modelled as the desktop's pointer_body
+  if (p.ptr === "chicken") {
+    const mat = p.mat || "plastic", shine = KP_SHINE[mat] || 0.2;
+    const tail = R * 0.42, rt = R * 0.56, tip = R * 1.04, rp = R * 0.13, hh = R * 0.14 + tilt;
+    const ca = Math.cos(a0), sa = Math.sin(a0);
+    const hull = (grow) => kpHull(cx - ca * tail, cy - sa * tail, Math.max(0.3, rt + grow), cx + ca * tip, cy + sa * tip, Math.max(0.3, rp + grow));
+    const n = rt / px < 8 ? 2 : 4;
+    for (let j = n; j >= 1; j--) {
+      const g = turning(cy, `translate(0 ${f2(hh * j / n)}) `);
+      el("path", { d: hull(0), fill: mix(body, B, 0.30 + 0.30 * j / n) }, g);
+    }
+    const bv = Math.max(0.6 * px, rt * 0.10);
+    const [lo, hi] = contrast(mix(body, B, 0.32), mix(body, W, shine));
+    el("path", { d: hull(0), fill: lo }, turning(cy, `translate(${f2(-KP_UX * bv * 0.6)} ${f2(-KP_UY * bv * 0.6)}) `));
+    el("path", { d: hull(0), fill: hi }, turning(cy, `translate(${f2(KP_UX * bv * 0.6)} ${f2(KP_UY * bv * 0.6)}) `));
+    const steps = rt / px < 8 ? 3 : 7;
+    const dark = mix(body, B, Math.min(0.6, 0.20 * L)), light = mix(body, W, Math.min(0.8, (0.05 + 0.5 * shine) * L));
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1), off = rt * 0.22 * t;
+      const c = t < 0.3 ? mix(dark, body, t / 0.3) : mix(body, light, (t - 0.3) / 0.7);
+      el("path", { d: hull(-(bv + rt * 0.5 * t)), fill: c }, turning(cy, `translate(${f2(KP_UX * off)} ${f2(KP_UY * off)}) `));
+    }
+    // the ridge's highlight, on whichever side faces the light: redrawn as it turns
+    const sop = (KP_STREAK[mat] || 0x26) / 255;
+    const streak = E("path", { fill: W, "fill-opacity": (sop * 0.45).toFixed(3) });
+    const core = (mat === "gloss" || mat === "chrome" || mat === "enamel") ? E("path", { fill: W, "fill-opacity": sop.toFixed(3) }) : null;
+    const ig = turning();
+    const w = Math.max(1.2 * px, rt * 0.16);
+    line(ig, cx + ca * R * 0.05, cy + sa * R * 0.05 + 0.6 * px, cx + ca * R * 0.96, cy + sa * R * 0.96 + 0.6 * px, B, w + 0.8 * px, 0.44);
+    line(ig, cx + ca * R * 0.05, cy + sa * R * 0.05, cx + ca * R * 0.96, cy + sa * R * 0.96, ink, w);
+    const turnAll = a => { for (const [g, gx, gy, pre] of turners) g.setAttribute("transform", `${pre}rotate(${f2((a - a0) * 180 / Math.PI)} ${f2(gx)} ${f2(gy)})`); };
+    return v => {
+      const a = KP_AMIN + KP_ASPAN * v;
+      turnAll(a);
+      const c = Math.cos(a), s = Math.sin(a);
+      let vx = -s, vy = c; if (vx * KP_UX + vy * KP_UY < 0) { vx = -vx; vy = -vy; }
+      const so = rt * 0.34, tx = cx - c * tail, tyy = cy - s * tail;
+      const x1 = tx + c * rt * 0.15 + vx * so, y1 = tyy + s * rt * 0.15 + vy * so;
+      const x2 = cx + c * tip * 0.78 + vx * so * 0.35, y2 = cy + s * tip * 0.78 + vy * so * 0.35;
+      streak.setAttribute("d", kpHull(x1, y1, rt * 0.16, x2, y2, Math.max(0.3, rp * 0.35), 6));
+      if (core) core.setAttribute("d", kpHull(x1, y1, rt * 0.06, x2, y2, 0.3, 6));
+    };
+  }
+
+  // the body's sides
+  if (p.grip === "fluted") {
+    const g = turning(), n = p.n || 12, segs = n * 6, pts = [];
+    for (let i = 0; i < segs; i++) {
+      const t = a0 + i * 2 * Math.PI / segs;
+      const rr = R * (1 - 0.07 * Math.pow(0.5 - 0.5 * Math.cos(n * (t - a0) + Math.PI), 0.9));
+      pts.push(at(t, rr));
+    }
+    el("path", { d: "M" + pts.map(q => f2(q[0]) + " " + f2(q[1])).join("L") + "Z", fill: mix(side, B, 0.25) }, g);
+    litRing(R * 0.92, mix(side, B, 0.2), mix(side, W, p.mat === "gloss" ? 0.30 : 0.12), 0);
+  } else {
+    const shine = p.mat === "gloss" ? 0.30 : ((p.mat === "metal" || p.mat === "chrome") ? 0.35 : 0.12);
+    litRing(R, mix(side, B, 0.25), mix(side, W, shine), 0);
+    ring(cy, R, B, 0.44, px);
+  }
+  // grip marks on the sides
+  if (p.grip === "knurled" || p.grip === "ridged" || p.grip === "coin") {
+    const g = turning();
+    const n = p.grip === "knurled" ? Math.min(48, Math.floor(R * 1.6 / px))
+      : p.grip === "ridged" ? Math.min(p.n || 32, Math.max(8, Math.floor(R * 1.6 / px))) : Math.min(72, Math.floor(R * 2 / px));
+    const r0 = p.grip === "coin" ? R * 0.93 : R * topR;
+    for (let i = 0; i < n; i++) {
+      const t = a0 + i * 2 * Math.PI / n, [x1, y1] = at(t, r0), [x2, y2] = at(t, R * 0.995);
+      line(g, x1, y1, x2, y2, B, px, p.grip === "ridged" ? 0.25 : 0.28);
+    }
+  } else if (p.grip === "grooves") {
+    const g = turning(), n = p.n || 6, w = 5.5 * Math.PI / 180;
+    for (let i = 0; i < n; i++) {
+      const t = a0 + (i + 0.5) * 2 * Math.PI / n, r0 = R * topR * 0.98, r1 = R * 1.005;
+      const q = [at(t - w, r0, ty), at(t + w, r0, ty), at(t + w, r1), at(t - w, r1)];
+      el("path", { d: "M" + q.map(z => f2(z[0]) + " " + f2(z[1])).join("L") + "Z", fill: mix(side, B, 0.55) }, g);
+    }
+  }
+  // the top
+  const Rt = R * topR, mat = p.mat || "plastic";
+  if (mat === "chrome") {
+    chrome(ty, Rt, body);
+    ring(ty, Rt * 0.94, mix(body, B, 0.45), 1, Math.max(px, Rt * 0.12));
+  } else if (mat === "metal") {
+    litDisc(ty, Rt, body, 0);
+    sheen(ty, Rt * 0.92, body);
+  } else {
+    const lift = ({ plastic: 0.22, gloss: 0.9, matte: 0.08, rubber: 0.04, enamel: 0.45 })[mat] ?? 0.2;
+    if (p.face === "flat") flatFace(ty, Rt, body, lift); else litDisc(ty, Rt, body, lift);
+    if (p.profile === "domed") for (let i = 1; i <= 4; i++)
+      E("circle", { cx: f2(cx - Rt * 0.06 * i), cy: f2(ty - Rt * 0.08 * i), r: f2(Rt * (0.9 - 0.17 * i)), fill: W, "fill-opacity": 0.05 });
+    if (mat === "gloss") {
+      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(ty - Rt * 0.42), r: f2(Rt * 0.16), fill: W, "fill-opacity": 0.44 });
+      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(ty - Rt * 0.42), r: f2(Rt * 0.08), fill: W, "fill-opacity": 0.56 });
+    } else if (mat === "enamel") {
+      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(ty - Rt * 0.42), r: f2(Rt * 0.12), fill: W, "fill-opacity": 0.22 });
+    }
+  }
+  if (p.top === "insert") {
+    const ic = p.insert || "#c9ccd0";
+    litDisc(ty, Rt * 0.56, ic, 0.5);
+    if (lum(ic) > 0.5) sheen(ty, Rt * 0.5, ic);
+    ring(ty, Rt * 0.56, B, 0.5, px);
+  } else if (p.top === "recessed") {
+    ring(ty, Rt * 0.82, W, 0.16, Math.max(px, R * 0.05));
+    E("circle", { cx: f2(cx + 0.5 * px), cy: f2(ty + 0.6 * px), r: f2(Rt * 0.78), fill: "none", stroke: B, "stroke-opacity": 0.31, "stroke-width": f2(px) });
+  }
+  if (p.rim) {
+    ring(ty, Rt * 0.88, p.rim, 1, Math.max(1.5 * px, R * 0.12));
+    E("circle", { cx: f2(cx - 0.4 * px), cy: f2(ty - 0.5 * px), r: f2(Rt * 0.88), fill: "none", stroke: W, "stroke-opacity": 0.31, "stroke-width": f2(px) });
+  }
+  let screws = null;
+  if (p.inner) {
+    const ri = R * (p.inner.r || 0.62);
+    E("circle", { cx, cy: f2(ty), r: f2(ri * 1.18), fill: "#1c1d1f" });
+    litDisc(ty, ri, p.inner.col || "#9b9b97", p.inner.mat === "bead" ? 0.3 : 0.6);
+    if (p.inner.screws) {
+      screws = turning(ty);
+      const sr = (ri * 1.18 + Rt) * 0.5;
+      for (const s of [a0 + 0.7, a0 + 0.7 + Math.PI]) { const [x, y] = at(s, sr, ty);
+        el("circle", { cx: f2(x), cy: f2(y), r: f2(Math.max(0.8 * px, R * 0.04)), fill: "#303134" }, screws); }
+    }
+  }
+  if (p.face !== "flat") ring(ty, Rt, B, 0.31, px);
+  // the light over it all
+  if (p.ptr !== "wing" && L > 1) {
+    const up = L - 1;
+    E("circle", { cx, cy, r: f2(outer), fill: lin([[0, W, Math.min(0.5, 0.28 * up)], [0.5, W, 0], [1, B, Math.min(0.5, 0.25 * up)]]),
+      "pointer-events": "none" });
+  }
+  // the pointer
+  const ptr = p.ptr || "line";
+  const pw = Math.max(1.5 * px, R * (p.pw || 0.10));
+  const pg = turning(ty);
+  const pl = (r0, r1, c, w, op = 1) => { const [x1, y1] = at(a0, r0, ty), [x2, y2] = at(a0, r1, ty); line(pg, x1, y1, x2, y2, c, w, op); };
+  if (ptr === "line") pl(Rt * (p.p0 ?? 0.30), Rt * 0.92, ink, pw);
+  else if (ptr === "dot") { const [x, y] = at(a0, Rt * 0.68, ty); el("circle", { cx: f2(x), cy: f2(y), r: f2(Math.max(1.5 * px, R * 0.09)), fill: ink }, pg); }
+  else if (ptr === "inset") { pl(Rt * 0.24, Rt * 0.86, B, pw * 1.3, 0.63); pl(Rt * 0.26, Rt * 0.84, ink, Math.max(px, pw * 0.6)); }
+  else if (ptr === "notch") pl(Rt * 0.40, Rt * 0.95, mix(body, B, 0.65), pw);
+  else if (ptr === "skirtline") { const [x1, y1] = at(a0, R * 0.5), [x2, y2] = at(a0, Rs * 0.96); line(pg, x1, y1, x2, y2, ink, Math.max(1.2 * px, R * 0.07)); }
+
+  return v => {
+    const a = KP_AMIN + KP_ASPAN * v;
+    for (const [g, gx, gy, pre] of turners) {
+      // a dial's print turns the other way round its top index
+      const deg = g === dial ? 300 * v : (a - a0) * 180 / Math.PI;
+      g.setAttribute("transform", `${pre}rotate(${f2(deg)} ${f2(gx)} ${f2(gy)})`);
+    }
+    for (const [tx, k, rr] of nums) {
+      const t = p.skirt === "dial" ? -Math.PI / 2 - (300 * Math.PI / 180) * (k / 10 - v) : KP_AMIN + KP_ASPAN * k / 10;
+      const [x, y] = at(t, rr);
+      tx.setAttribute("x", f2(x)); tx.setAttribute("y", f2(y));
+    }
+  };
+}
+
+// the scale round a parts knob: ticks, or a ring of printed dots
+function partsScale(svg, p, noTicks) {
+  if (noTicks) return;
+  if (p.scale === "dots") {
+    for (let i = 0; i <= 10; i++) { const t = -135 + 27 * i, q = pt(57, t);
+      el("circle", { cx: f2(q[0]), cy: f2(q[1]), r: 2.4, fill: "var(--ring)" }, svg); }
+  } else {
+    el("path", { d: radial(11, 53, 60, A0, A1), fill: "none", stroke: "var(--ring)", "stroke-width": 3, "stroke-linecap": "round" }, svg);
+  }
+}
+
+// A knob built from parts, `size` px: { svg, set(v) }. Its own shadow
+// setting: none sits it flush (no drop shadow), tall throws a longer one.
+function makePartsKnob(size, look, cap, noTicks) {
+  const svg = el("svg", { width: size, height: size, viewBox: "0 0 100 100" });
+  svg.style.overflow = "visible";
+  svg.style.setProperty("--kr", (size * 0.4 * (look.shadow === "tall" ? 1.7 : 1)).toFixed(1) + "px");
+  if (look.shadow === "none") svg.classList.add("flush");
+  const defs = el("defs", {}, svg);
+  partsScale(svg, look, noTicks);
+  const g = el("g", {}, svg);
+  const set = drawParts(g, defs, 50, 50, 50, look, { cap, size });
+  set(0);
+  return { svg, set };
+}
+
+// A concentric knob from two recipes (TS_CV_Widgets dual_recipe): the
+// outer knob as any parts knob, its pointer only across the ring that
+// shows, the inner one on it a little over half its body.
+function makeDualParts(D, outer, oc, inner, ic, md1, md2) {
+  const svg = el("svg", { width: D, height: D, viewBox: "0 0 100 100", class: "kn" });
+  svg.style.overflow = "visible";
+  svg.style.setProperty("--kr", (D * 0.4).toFixed(1) + "px");
+  const defs = el("defs", {}, svg);
+  el("path", { d: radial(11, 53, 60, A0, A1), fill: "none", stroke: "var(--ring)", "stroke-width": 3, "stroke-linecap": "round" }, svg);
+  const po = Object.assign({}, outer), pi = Object.assign({}, inner);
+  const R = 50 / kpReach(po), Rt = R * (po.top_r || 1), ri = (22.5 / 40) * R;
+  po.p0 = Math.max(po.p0 || 0.30, ri / Rt + 0.10);
+  delete pi.skirt; delete pi.washer; delete pi.nut; delete pi.sr; delete pi.sgrip;
+  if (pi.ptr === "skirtline") delete pi.ptr;
+  const setO = drawParts(el("g", {}, svg), defs, 50, 50, 50, po, { cap: oc, size: D });
+  el("circle", { cx: 50.8, cy: 51.2, r: f2(ri * 1.04), fill: "rgba(0,0,0,0.35)" }, svg);   // the inner's shadow on it
+  const setI = drawParts(el("g", {}, svg), defs, 50, 50, ri * kpReach(pi), pi, { cap: ic, size: D });
+  if (md2) { const col = modCol(kpCentre(pi, ic)); el("circle", { cx: 50, cy: 50, r: 5.5, fill: col }, svg); }
+  if (md1) { const col = modCol("#1b1c1f"); el("circle", { cx: 50, cy: f2(50 + (ri + R) * 0.5), r: 3, fill: col }, svg); }
+  setO(0); setI(0);
+  return { svg, set(a, b) { setO(a); setI(b); }, hot() {} };
+}
+
+// View > Lighting above 100%: a knob's body washed with the light, bright
+// top left to deep bottom right, laid over it (the desktop's light_wash)
+function lightWash(svg, r) {
+  const up = LIGHT_K - 1;
+  if (!layout.tex || up <= 0) return;
+  const id = "lw" + (++gradN);
+  const defs = el("defs", {}, svg);
+  const lg = el("linearGradient", { id, x1: "0.2", y1: "0.1", x2: "0.8", y2: "0.9" }, defs);
+  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": Math.min(0.5, 0.28 * up).toFixed(3) }, lg);
+  el("stop", { offset: 0.5, "stop-color": "#fff", "stop-opacity": 0 }, lg);
+  el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": Math.min(0.5, 0.25 * up).toFixed(3) }, lg);
+  el("circle", { cx: 50, cy: 50, r, fill: `url(#${id})`, "pointer-events": "none" }, svg);
+}
+// the round hardware faces' bodies, in the knob's own units (pointer and nose aren't discs)
+const WASH_R = { skirted: 37, trim: 47, bar: 37, fluted: 38, bezel: 38, rbezel: 38, hifi: 38, led: 31 };
+
 // Builds a knob face of `size` px; returns { svg, set(v) }. noTicks: the
 // knob has a numbered scale drawn round it instead of its own ticks.
 function makeKnob(size, style, cap, bipolar, tick, noTicks) {
+  const k = makeKnob0(size, style, cap, bipolar, tick, noTicks);
+  const st = STYLE_ALIAS[style] || style;
+  if (WASH_R[st] && BODY[st]) lightWash(k.svg, WASH_R[st] * 50 / BODY[st]);
+  return k;
+}
+function makeKnob0(size, style, cap, bipolar, tick, noTicks) {
   style = STYLE_ALIAS[style] || style;
   style = BODY[style] ? style : "arc";
   const svg = el("svg", { width: size, height: size, viewBox: "0 0 100 100" });
+  svg.style.setProperty("--kr", (size * 0.4).toFixed(1) + "px");      // its shadow scales with it
   tick = tick || "var(--ring)";
   if (style === "led") {
     // the LED-ring encoder: a ring of lamps close round a dark knurled
@@ -1117,12 +1764,39 @@ function makeKnob(size, style, cap, bipolar, tick, noTicks) {
       eR.setAttribute("stroke", litL ? "rgba(0,0,0,0.4)" : "rgba(255,255,255,0.63)");
     } };
   } else if (style === "pointer") {
+    // modelled as the desktop's (KP.pointer_body): its sides showing below
+    // its top, the top lit from the top left whichever way it points (a
+    // fixed gradient clipped to it), a highlight along its ridge on the
+    // light's side, the line inlaid along it, a round cap over the middle
+    const P = "M50 5 C57 5 64 27 66 45 C68 65 61 81 50 81 C39 81 32 65 34 45 C36 27 43 5 50 5 Z";
+    const cid = "pc" + (++gradN), lid = "pl" + (++gradN);
+    const cpp = el("path", { d: P }, el("clipPath", { id: cid }, defs));
+    const lg = el("linearGradient", { id: lid, x1: "0.15", y1: "0.1", x2: "0.85", y2: "0.9" }, defs);
+    el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": 0.30 }, lg);
+    el("stop", { offset: 0.45, "stop-color": "#fff", "stop-opacity": 0 }, lg);
+    el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": 0.40 }, lg);
+    const side = el("g", {}, g);
+    el("path", { d: P, fill: mixHex(cap, "#000000", 0.55) }, side);
     rot = el("g", {}, g);
-    el("path", { d: "M50 5 C57 5 64 27 66 45 C68 65 61 81 50 81 C39 81 32 65 34 45 C36 27 43 5 50 5 Z",
-      fill: cap, stroke: "rgba(0,0,0,0.55)", "stroke-width": 1.5 }, rot);
-    el("line", { x1: 50, y1: 10, x2: 50, y2: 33, stroke: ink, "stroke-width": 3.5, "stroke-linecap": "round" }, rot);
-    el("circle", { cx: 50, cy: 50, r: 17, fill: cap, stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.5 }, g);
-    el("circle", { cx: 50, cy: 50, r: 17, fill: `url(#${id})` }, g);
+    el("path", { d: P, fill: cap, stroke: "rgba(0,0,0,0.55)", "stroke-width": 1.2 }, rot);
+    el("rect", { x: 0, y: 0, width: 100, height: 100, fill: `url(#${lid})`, "clip-path": `url(#${cid})` }, g);
+    const rot2 = el("g", {}, g);
+    const streak = el("line", { x1: 46, y1: 13, x2: 46, y2: 62, stroke: "#fff", "stroke-opacity": 0.2,
+      "stroke-width": 4, "stroke-linecap": "round" }, rot2);
+    el("line", { x1: 50, y1: 10.6, x2: 50, y2: 37.6, stroke: "rgba(0,0,0,0.45)", "stroke-width": 4.5, "stroke-linecap": "round" }, rot2);
+    el("line", { x1: 50, y1: 10, x2: 50, y2: 37, stroke: ink, "stroke-width": 3.5, "stroke-linecap": "round" }, rot2);
+    el("circle", { cx: 50.4, cy: 51.2, r: 12.5, fill: "rgba(0,0,0,0.3)" }, g);
+    el("circle", { cx: 50, cy: 50, r: 12, fill: cap, stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
+    el("circle", { cx: 50, cy: 50, r: 12, fill: `url(#${lid})` }, g);
+    return { svg, set(v) {
+      const a = A0 + (A1 - A0) * v;
+      const t = `rotate(${f2(a)} 50 50)`;
+      rot.setAttribute("transform", t); rot2.setAttribute("transform", t); cpp.setAttribute("transform", t);
+      side.setAttribute("transform", `translate(0 4) ${t}`);
+      // the highlight on whichever side of the ridge faces the light
+      const left = Math.cos(rad(a - 90 - LIGHT_D)) > 0;
+      streak.setAttribute("x1", left ? 46 : 54); streak.setAttribute("x2", left ? 46 : 54);
+    } };
   } else {
     if (tk.parentNode) svg.removeChild(tk);
     el("circle", { cx: 50, cy: 50, r: 40, fill: "#232528", stroke: "#0e0f10", "stroke-width": 2 }, g);
@@ -1340,7 +2014,7 @@ function placeFlow(ctls, halfRows, rows) {
       cuts.push(placed.filter(it => it.span && it.col < g.b && g.b < it.col + it.w).map(it => [it.r * HH - 3, (it.r + it.h) * HH + 3]));
     }
   }
-  const key = o => o.sec + "|" + (o.sp ? o.sp.bg : "") + "|" + (o.sb ? 1 : 0) + (o.sm ? "m" : "");
+  const key = o => o.sec + "|" + (o.sp ? o.sp.bg : "") + "|" + (o.sf || (o.sb ? "brushed" : "")) + (o.sm ? "m" : "") + (o.scn || "");
   for (const s2 of secs) {
     if (!(s2.by && s2.by.sec && s2.c1 > s2.c0)) continue;
     const x = left(s2.c0), w = right(s2.c1) - x;
@@ -1402,7 +2076,7 @@ function placeControls(ctls, bodyH) {
     if (opener && opener.t === "divider" && opener.sec && width > 0) {
       // the same style as the section just before, only a divider apart:
       // one section, across the divider
-      const key = o => o.sec + "|" + (o.sp ? o.sp.bg : "") + "|" + (o.sb ? 1 : 0) + (o.sm ? "m" : "");
+      const key = o => o.sec + "|" + (o.sp ? o.sp.bg : "") + "|" + (o.sf || (o.sb ? "brushed" : "")) + (o.sm ? "m" : "") + (o.scn || "");
       const prev = styled[styled.length - 1];
       if (prev && prev.x + prev.w + DIV_W === x && key(prev.by) === key(opener)) prev.w = x + width * HW - prev.x;
       else styled.push({ x, w: width * HW, by: opener });
@@ -1484,6 +2158,9 @@ function backShapes(rects, gaps, pad) {
   return shapes;
 }
 // a loop as an SVG path with rounded corners
+// Round corners never go past this, so a wide section or background keeps
+// its controls inside (the desktop's ROUND_MAX)
+const ROUND_MAX = 30;
 function roundedLoop(pts, r) {
   const n = pts.length, sg = v => v > 0 ? 1 : v < 0 ? -1 : 0;
   let d = "";
@@ -1528,6 +2205,7 @@ const ICON = {
   nav: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M6 13h4M12 13h6M6 16.5h7"/>',
   macros: '<rect x="3" y="5" width="7" height="6" rx="1"/><rect x="14" y="5" width="7" height="6" rx="1"/><rect x="3" y="14" width="7" height="6" rx="1"/><rect x="14" y="14" width="7" height="6" rx="1"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/>',
+  show: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16M16 4v16"/>',
   power: '<path d="M12 4v8M7.5 7a7 7 0 1 0 9 0"/>',
   float: '<rect x="4" y="8" width="12" height="12" rx="1"/><path d="M10 4h10v10"/>',
   collapse: '<path d="M15 6l-6 6 6 6"/>',
@@ -1660,6 +2338,7 @@ function buildTransport() {
       $("mac").classList.toggle("hidden", !showMacros);
       relayout();
     }, "Actions"),
+    iconBtn("", "show", showSheet, "Show macros, modulators, sends, receives"),
     btns.edit = iconBtn("", "edit", () => {
       macroEdit = !macroEdit;
       btns.edit.classList.toggle("on", macroEdit);
@@ -1769,12 +2448,29 @@ function openBars() {
 // What a button says: its label, else a switch's bar, else (with no icon)
 // its action.
 function macroText(m) {
+  if (m.vl) return m.vl;
   if (m.l) return m.l;
   const sw = switchOf(m);
   if (sw === "menu") return barName(webBars.c);
   if (sw !== null) return barName(sw);
   if (m.m) return "Menu";
   return aiDef(m.ic) ? "" : (m.a || "");
+}
+
+// A button's colour: its own, else its plugin vendor's.
+function macroCol(m) { return m.c || m.vc || ""; }
+// The vendor's initials as a tile, in place of a plugin button's icon.
+function vTile(m) {
+  if (!m.vm) return null;
+  const t = h("span", "vt", m.vm);
+  t.style.setProperty("--vc", macroCol(m) || "var(--dim)");
+  return t;
+}
+// The vendor's colour as a button's ground.
+function vFill(b, m) {
+  const col = macroCol(m);
+  if (m.vf && col) { b.classList.add("vfill"); b.style.setProperty("--vc", col); return true; }
+  return false;
 }
 
 // Every action on the bar, menus opened out (their toggle states are polled
@@ -1816,10 +2512,11 @@ function openMenu(m) {
       const sw = switchOf(it);
       const lit = sw !== null ? (sw === webBars.c) : macroStates[it.a] === 1;
       const b = h("button", "opt" + (lit ? " on" : ""));
-      const ic = aiEl(it.ic, 20);
+      const ic = vTile(it) || aiEl(it.ic, 20);
       if (ic) b.append(ic);
       b.append(document.createTextNode(macroText(it) || it.a));
-      if (it.c) b.style.boxShadow = `inset 3px 0 0 ${it.c}`;
+      vFill(b, it);
+      if (macroCol(it)) b.style.boxShadow = `inset 3px 0 0 ${macroCol(it)}`;
       b.addEventListener("click", () => {
         if (sw === "menu") { openBars(); return; }
         if (sw !== null) switchTo(sw); else run(it.a);
@@ -1881,15 +2578,16 @@ function buildMacros() {
       return;
     }
     const sw = switchOf(m);
-    const ic = aiEl(m.ic, 20), text = macroText(m);
+    const ic = vTile(m) || aiEl(m.ic, 20), text = macroText(m);
     const b = h("button", "mbtn" + ((m.m || sw === "menu") ? " menu" : "") + (ic && !text ? " ico" : ""));
     if (ic) b.append(ic);
     if (text || !ic) b.append(h("span", "t", text));
     // a button's own colour style (m.cs: "u", "i", "ui", "") over the bar's
     const cs = typeof m.cs === "string" ? m.cs : (webBars.cs === "i" ? "i" : "u");
-    const tint = cs.includes("i") && m.c;
-    if (tint) { b.classList.add("tint"); b.style.setProperty("--tc", m.c); }
-    b.style.borderBottomColor = (cs.includes("u") && m.c) || "var(--border)";
+    const col = macroCol(m), filled = vFill(b, m);
+    const tint = !filled && cs.includes("i") && col;
+    if (tint) { b.classList.add("tint"); b.style.setProperty("--tc", col); }
+    b.style.borderBottomColor = (cs.includes("u") && col) || "var(--border)";
     const x = h("span", "x", "×");
     b.append(x);
     wireMacroDrag(b, i);
@@ -2159,34 +2857,6 @@ async function searchActions(q, res, pick) {
   }
 }
 
-// Brushed grain on a surface of colour `bg`: a faint light line every 3
-// px and a faint dark one every 7, lighter on a dark surface, where white
-// lines show far more. As CSS background layers, or as an SVG pattern fill.
-function grainAlpha(bg) {
-  const light = lum(bg) > 0.55;
-  return { hi: light ? 0.035 : 0.015, lo: light ? 0.025 : 0.045 };
-}
-function grainCss(bg, dir) {
-  const { hi, lo } = grainAlpha(bg);
-  dir = dir || "0deg";
-  return `repeating-linear-gradient(${dir}, rgba(255,255,255,${hi}) 0 1px, transparent 1px 3px), repeating-linear-gradient(${dir}, rgba(0,0,0,${lo}) 0 1px, transparent 1px 7px)`;
-}
-// two patterns in `svg`'s defs, lined up with the grid's top (the lines
-// fall where the desktop draws them); returns their fills
-function grainFills(svg, bg) {
-  const { hi, lo } = grainAlpha(bg);
-  let defs = svg.querySelector("defs");
-  if (!defs) defs = el("defs", {}, svg);
-  const out = [];
-  for (const [col, a, step, off] of [["#fff", hi, 3, 2], ["#000", lo, 7, 4]]) {
-    const id = "grain" + (++gradN);
-    const pat = el("pattern", { id, patternUnits: "userSpaceOnUse", width: 8, height: step }, defs);
-    el("rect", { x: 0, y: off % step, width: 8, height: 1, fill: col, "fill-opacity": a }, pat);
-    out.push(`url(#${id})`);
-  }
-  return out;
-}
-
 // Metal flake: a tile of fine speckle, bright and dark grains scattered
 // evenly with no direction (brushed metal has one), the way metallic paint
 // or powder coat looks close up. Seeded, so it's the same every time and
@@ -2196,6 +2866,13 @@ const flakeCache = {};
 // The flake's strength, and the 3D effect's shadows': the desktop's
 // C.METAL_K.
 const METAL_K = 0.8;
+// View > Shadows (layout.shk): how deep and far the shadows fall, 1 as
+// designed, 0 none, 2 deep
+let SHADOW_K = 1;
+// View > Lighting (layout.lt): how strongly the light models plates and
+// knobs, 1 as designed; above it the studio-lit look
+let LIGHT_K = 1;
+const shadowAlpha = k => k <= 0 ? 0 : Math.min(2, METAL_K * k + 0.2) / Math.min(2, METAL_K + 0.2);
 // { url, css }: the tile as an image, and as a CSS background layer
 function flakeTile(light) {
   const k = light ? "l" : "d";
@@ -2226,8 +2903,48 @@ function flakeTile(light) {
 const METAL_SHEEN = `radial-gradient(140% 70% at 25% 0%, rgba(255,255,255,${(0.16 * Math.min(2, METAL_K)).toFixed(2)}), rgba(255,255,255,0) 65%),
   radial-gradient(120% 60% at 85% 100%, rgba(0,0,0,${(0.08 * Math.min(2.5, METAL_K)).toFixed(2)}), rgba(0,0,0,0) 70%)`;
 
+// A surface finish (the desktop's C.FINISHES): a tile of light and shade
+// with no colour of its own, served beside this page, so it lies over any
+// plate. Tiles repeat every FIN_TILE px from the origin given; Bright and
+// Satin are one reflection stretched over the whole surface, Satin's over
+// a tiled grain.
+const FIN_TILE = 256;
+const FIN_STRETCH = { bright: 1, satin: 1 };
+const FIN_UNDER = { satin: "satin_grain" };
+function finUrl(f) { return `url(TS_CV_finish_${f}.png)`; }
+// the CSS layers, top first
+function finLayers(f, ox, oy) {
+  if (!f || f === "plain") return [];
+  const tile = k => ({ img: finUrl(k), pos: `${ox || 0}px ${oy || 0}px`, size: `${FIN_TILE}px ${FIN_TILE}px`, rep: "repeat" });
+  const out = [FIN_STRETCH[f] ? { img: finUrl(f), pos: "0 0", size: "100% 100%", rep: "no-repeat" } : tile(f)];
+  if (FIN_UNDER[f]) out.push(tile(FIN_UNDER[f]));
+  return out;
+}
+// ... as SVG fills, bottom first: patterns from the user space's origin
+// (a stretched one: over the shape's box)
+function finFills(svg, f) {
+  if (!f || f === "plain") return [];
+  let defs = svg.querySelector("defs");
+  if (!defs) defs = el("defs", {}, svg);
+  const one = (k, stretch) => {
+    const id = "fin" + (++gradN);
+    if (stretch) {
+      const pat = el("pattern", { id, patternUnits: "objectBoundingBox", patternContentUnits: "objectBoundingBox", width: 1, height: 1 }, defs);
+      el("image", { href: `TS_CV_finish_${k}.png`, width: 1, height: 1, preserveAspectRatio: "none" }, pat);
+    } else {
+      const pat = el("pattern", { id, patternUnits: "userSpaceOnUse", width: FIN_TILE, height: FIN_TILE }, defs);
+      el("image", { href: `TS_CV_finish_${k}.png`, width: FIN_TILE, height: FIN_TILE }, pat);
+    }
+    return `url(#${id})`;
+  };
+  const out = [];
+  if (FIN_UNDER[f]) out.push(one(FIN_UNDER[f], false));
+  out.push(one(f, !!FIN_STRETCH[f]));
+  return out;
+}
+
 // A panel's background: the plate, with the 3D effect's light (the
-// gradient) and its own finish -- metallic, brushed, both or neither.
+// gradient) and its own finish, and the metallic flake over it.
 // a light faceplate (its colour more than half way to white)
 function plateLight(pl) {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(pl.bg || "");
@@ -2240,12 +2957,22 @@ function plateFill(pl) {
   const mix = (a, b, t) => { const p = x => parseInt(x.slice(1), 16);
     const A = p(a), B = p(b), out = [16, 8, 0].map(s => Math.round(((A >> s) & 255) + (((B >> s) & 255) - ((A >> s) & 255)) * t));
     return "#" + out.map(v => v.toString(16).padStart(2, "0")).join(""); };
+  const L = layout.tex ? ((typeof layout.lt === "number") ? layout.lt : 1) : 1;
   const g = layout.tex
-    ? `linear-gradient(180deg, ${mix(pl.bg, "#ffffff", 0.08 * sh)} 0%, ${pl.bg} 40%, ${mix(pl.bg, "#000000", 0.12 * sh)} 100%)`
+    ? `linear-gradient(180deg, ${mix(pl.bg, "#ffffff", Math.min(0.5, 0.08 * sh * L))} 0%, ${pl.bg} 40%, ${mix(pl.bg, "#000000", Math.min(0.6, 0.12 * sh * L))} 100%)`
     : pl.bg;
   const layers = [];
-  if (pl.brushed) layers.push(grainCss(pl.bg));
+  if (layout.tex && L > 1) {
+    // View > Lighting above 100%: the light across the plate, bright top
+    // left to deep bottom right, its edges falling away (as the desktop)
+    const up = Math.min(1.5, L - 1), sk = Math.max(0.5, pl.sheen || 1);
+    const wa = Math.min(0x50, 0x2a * up * sk) / 255, ba = Math.min(0x80, 0x48 * up * sk) / 255, va = Math.min(0x60, 0x30 * up) / 255;
+    layers.push(`radial-gradient(ellipse at 30% 25%, transparent 55%, rgba(0,0,0,${va.toFixed(3)}) 100%)`,
+      `linear-gradient(135deg, rgba(255,255,255,${wa.toFixed(3)}) 0%, transparent 50%, rgba(0,0,0,${ba.toFixed(3)}) 100%)`);
+  }
   if (pl.metal) layers.push(flakeTile(lum(pl.bg) > 0.45).css, METAL_SHEEN);
+  for (const fin of finLayers(pl.fin || (pl.brushed ? "brushed" : null), 0, 0))
+    layers.push(`${fin.img} ${fin.pos} / ${fin.size} ${fin.rep}`);
   layers.push(g);
   return layers.join(", ");
 }
@@ -2280,7 +3007,10 @@ function buildRoute() {
   // (category 1): the master has nothing to send to.
   const first = layout.outs ? [1, layout.sends || [], "Outputs", "output"] : [0, layout.sends || [], "Sends", "send"];
   // The master has no Receives section: every track feeds it.
-  const secs = layout.track.m ? [first] : [first, [-1, layout.recv || [], "Receives", "receive"]];
+  let secs = layout.track.m ? [first] : [first, [-1, layout.recv || [], "Receives", "receive"]];
+  // (either can be hidden: Show; none left, the column goes)
+  secs = secs.filter(([cat]) => cat === -1 ? showAux.recv : showAux.sends);
+  col.classList.toggle("hidden", secs.length === 0);
   for (const [cat, list, title, noun] of secs) {
     if (routeOpen[cat] === undefined) routeOpen[cat] = true;
     const sec = h("div", "rsec" + (routeOpen[cat] ? "" : " shut"));
@@ -3070,38 +3800,78 @@ function makeSlim(across, cap, bip) {
   } };
 }
 
-// A fader lying across: the same caps on their side, left the bottom.
 // A concentric knob (TS_CV_Widgets.dual_face): a dark knurled ring with a
 // white pointer for the first parameter, a matte cap-coloured knob in its
 // middle for the second. Drawn where the ring's edge is 40 units, scaled so
 // it fills the dial's size the way the other knobs' bodies do.
-function makeDual(D, cap, md1, md2) {
+function makeDual(D, cap, md1, md2, st) {
+  if (st === "arc" || !layout.tex) return makeDualArc(D, cap, md1, md2);
   const svg = el("svg", { width: D, height: D, viewBox: "0 0 100 100", class: "kn" });
   svg.style.overflow = "visible";
+  svg.style.setProperty("--kr", (D * 0.4).toFixed(1) + "px");
   const tk = el("path", { d: radial(11, 53, 60, -135, 135), fill: "none", stroke: "var(--ring)",
     "stroke-width": 3, "stroke-linecap": "round" }, svg);
+  const id = "dl" + (++gradN), id2 = "dl" + (++gradN);
+  const defs = el("defs", {}, svg);
+  // lit as the desktop's: the ring's edge catching the light top left, the inner a satin dome
+  const lg = el("linearGradient", { id, x1: "0.2", y1: "0.1", x2: "0.8", y2: "0.9" }, defs);
+  el("stop", { offset: 0, "stop-color": "#4a4d52" }, lg); el("stop", { offset: 0.5, "stop-color": "#1b1c1f" }, lg);
+  el("stop", { offset: 1, "stop-color": "#0d0e10" }, lg);
+  const rg = el("radialGradient", { id: id2, cx: "0.36", cy: "0.3", r: "0.8" }, defs);
+  el("stop", { offset: 0, "stop-color": "#fff", "stop-opacity": 0.22 }, rg);
+  el("stop", { offset: 0.55, "stop-color": "#fff", "stop-opacity": 0 }, rg);
+  el("stop", { offset: 1, "stop-color": "#000", "stop-opacity": 0.32 }, rg);
   const g = el("g", { transform: "translate(50 50) scale(1.25) translate(-50 -50)" }, svg);
-  const ring = el("circle", { cx: 50, cy: 50, r: 40, fill: "#1b1c1f" }, g);
+  el("circle", { cx: 50, cy: 50, r: 40, fill: `url(#${id})` }, g);
+  const ring = el("circle", { cx: 50, cy: 50, r: 36, fill: "#1b1c1f" }, g);
   const kn = el("g", {}, g);
-  el("path", { d: radial(36, 36.5, 39.6, 0, 350), fill: "none", stroke: "#0c0d0e", "stroke-width": 1.4 }, kn);
-  el("circle", { cx: 44, cy: 43, r: 14, fill: "rgba(255,255,255,0.025)" }, g);
+  el("path", { d: radial(36, 36.5, 39.6, 0, 350), fill: "none", stroke: "rgba(12,13,14,0.55)", "stroke-width": 1.4 }, kn);
+  el("circle", { cx: 50, cy: 50, r: 36, fill: `url(#${id2})`, opacity: 0.5 }, g);
   el("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "rgba(0,0,0,0.6)", "stroke-width": 1.2 }, g);
   const r1 = el("g", {}, g);
   el("line", { x1: 50, y1: 14, x2: 50, y2: 23, stroke: "#f3f3f1", "stroke-width": 4, "stroke-linecap": "round" }, r1);
   el("circle", { cx: 50, cy: 50, r: 24.5, fill: "#0b0c0d" }, g);
+  el("circle", { cx: 51.2, cy: 51.6, r: 23.5, fill: "rgba(0,0,0,0.35)" }, g);      // the inner's shadow on the ring
   const c = cap || PAL.knob_fill || "#4aa3df";
   const inner = el("circle", { cx: 50, cy: 50, r: 22.5, fill: c, stroke: "rgba(0,0,0,0.5)", "stroke-width": 1.2 }, g);
-  el("circle", { cx: 46, cy: 45, r: 9, fill: "rgba(255,255,255,0.025)" }, g);
+  el("circle", { cx: 50, cy: 50, r: 22.5, fill: `url(#${id2})` }, g);
   const r2 = el("g", {}, g);
   el("line", { x1: 50, y1: 31, x2: 50, y2: 43, stroke: lum(c) > 0.55 ? "#1d1e20" : "#f3f3f1", "stroke-width": 3.5, "stroke-linecap": "round" }, r2);
   if (md2) { const col = modCol(c); el("circle", { cx: 50, cy: 50, r: 6.5, fill: lum(col) > 0.55 ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)" }, g); el("circle", { cx: 50, cy: 50, r: 4.5, fill: col }, g); }
   if (md1) { const col = modCol("#1b1c1f"); el("circle", { cx: 50, cy: 81, r: 3.6, fill: lum(col) > 0.55 ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)" }, g); el("circle", { cx: 50, cy: 81, r: 2.6, fill: col }, g); }
+  lightWash(svg, 50);
   return { svg,
     set(a, b) { const t1 = -135 + 270 * a, t2 = -135 + 270 * b;
       kn.setAttribute("transform", `rotate(${f2(t1)} 50 50)`); r1.setAttribute("transform", `rotate(${f2(t1)} 50 50)`);
       r2.setAttribute("transform", `rotate(${f2(t2)} 50 50)`); },
     hot(z) { ring.setAttribute("fill", z === "outer" ? "#2a2c30" : "#1b1c1f");
       inner.setAttribute("fill", z === "inner" ? mixHex(c, "#ffffff", 0.1) : c); } };
+}
+
+// The flat concentric knob (TS_CV_Widgets dual_arc), as the Arc knob: the
+// outer value's arc round the outside, a flat knob inside with the inner
+// value's arc in the cap colour, and two pointers -- the long one the
+// outer's, reaching out to its arc.
+function makeDualArc(D, cap, md1, md2) {
+  const svg = el("svg", { width: D, height: D, viewBox: "0 0 100 100", class: "kn flat" });
+  svg.style.overflow = "visible";
+  const RK = 39, RI = 31;
+  el("path", { d: arcPath(46, A0, A1), fill: "none", stroke: "var(--track)", "stroke-width": 7 }, svg);
+  const f1 = el("path", { fill: "none", stroke: "var(--fill)", "stroke-width": 7 }, svg);
+  el("circle", { cx: 50, cy: 50, r: RK, fill: "var(--body)", stroke: "var(--ring)", "stroke-width": 2 }, svg);
+  const body = el("circle", { cx: 50, cy: 50, r: RK - 1, fill: "#fff", "fill-opacity": 0 }, svg);   // lit when hovered
+  el("path", { d: arcPath(RI, A0, A1), fill: "none", stroke: "var(--track)", "stroke-width": 6 }, svg);
+  const f2p = el("path", { fill: "none", stroke: cap || "var(--fill-bi)", "stroke-width": 6 }, svg);
+  const p1 = el("g", {}, svg), p2 = el("g", {}, svg);
+  el("line", { x1: 50, y1: 50 - (RK - 2), x2: 50, y2: 1, stroke: "var(--pointer)", "stroke-width": 5, "stroke-linecap": "round" }, p1);
+  el("line", { x1: 50, y1: 50 - RK * 0.2, x2: 50, y2: 50 - (RI - 7), stroke: "var(--pointer)", "stroke-width": 5, "stroke-linecap": "round" }, p2);
+  if (md2) { const col = modCol(cap || "#d9893a"); el("circle", { cx: 50, cy: 50, r: 5, fill: col }, svg); }
+  if (md1) { const col = modCol("#4aa3df"); el("circle", { cx: 50, cy: 96, r: 4, fill: col }, svg); }
+  return { svg,
+    set(a, b) { const t1 = A0 + (A1 - A0) * a, t2 = A0 + (A1 - A0) * b;
+      f1.setAttribute("d", arcPath(46, A0, t1)); f2p.setAttribute("d", arcPath(RI, A0, t2));
+      p1.setAttribute("transform", `rotate(${f2(t1)} 50 50)`); p2.setAttribute("transform", `rotate(${f2(t2)} 50 50)`); },
+    hot(z) { body.setAttribute("fill-opacity", z ? 0.07 : 0); } };
 }
 
 // An XY pad (TS_CV_Widgets.xypad): set into the panel, a faint grid with
@@ -3121,6 +3891,7 @@ function makeXY(W, H, cap) {
   } };
 }
 
+// A fader lying across: the same caps on their side, left the bottom.
 function makeHFader(style, cap, bip) {
   if (style === "slim") return makeSlim(true, cap, bip);
   const node = h("div", "fdr");
@@ -3556,8 +4327,8 @@ function buildPanels() {
   const mr = layout.mr;
   if (mr) {
     const mh = rowH - HEAD - 28;
-    if (mr.m && mr.m.length) row.append(buildMacrosPanel(mr, mh));
-    if (mr.o && mr.o.length) row.append(buildModsPanel(mr, mh));
+    if (showAux.macros && mr.m && mr.m.length) row.append(buildMacrosPanel(mr, mh));
+    if (showAux.mods && mr.o && mr.o.length) row.append(buildModsPanel(mr, mh));
   }
   const els = [];
   fx.forEach((p, k) => {
@@ -3758,7 +4529,12 @@ function buildPanel(p, bodyH) {
   }
   // the 3D effect: edges that catch the light, and knobs and buttons
   // casting shadows (any panel, faceplate or not)
-  if (layout.tex) { pnl.classList.add("hw"); pnl.style.setProperty("--hwk", METAL_K); }
+  if (layout.tex) {
+    SHADOW_K = (typeof layout.shk === "number") ? layout.shk : 1;
+    LIGHT_K = (typeof layout.lt === "number") ? layout.lt : 1;
+    pnl.classList.add("hw"); pnl.style.setProperty("--hwk", METAL_K);
+    pnl.style.setProperty("--hs", METAL_K * SHADOW_K); pnl.style.setProperty("--sa", shadowAlpha(SHADOW_K));
+  }
   const head = h("div", "ph");
   if (pl) { head.style.background = pl.head; head.style.borderColor = pl.border; }
   const byp = h("button", "hb"); byp.innerHTML = `<svg viewBox="0 0 24 24">${ICON.power}</svg>`;
@@ -3805,32 +4581,40 @@ function buildPanel(p, bodyH) {
     if (s.by.sec === "inset" && lum((pl && pl.bg) || PAL.panel_bg || css("--panel") || "#202327") <= 0.45) d.classList.add("dk");
     d.style.left = (gridX + s.x - 4) + "px"; d.style.top = (PAD - 4) + "px";
     d.style.width = (s.w + 8) + "px"; d.style.height = (lay.rows * CELL_H - 2) + "px";
+    // its corners (the desktop's Corners<n>): round is fully round ends
+    if (s.by.scn === "soft") d.style.borderRadius = "12px";
+    else if (s.by.scn === "round") d.style.borderRadius = Math.min((s.w + 8) / 2, ROUND_MAX) + "px";
     if (s.by.sp) { d.style.background = s.by.sp.bg; d.style.borderColor = s.by.sp.border; }
-    // its finish: brushed grain, counted down from the grid's top as the
-    // backgrounds' grain is (the box's inside starts 3 px above it: 4 up,
-    // less the 1 px border), and/or the flake, tiled from the grid's origin
+    // its finish and/or the flake over it, tiled from the grid's origin
+    // (the box's inside starts 3 px above and left of it: 4, less the
+    // 1 px border)
     const sbg = s.by.sp ? s.by.sp.bg : under;
-    const imgs = [], pos = [], size = [];
-    if (s.by.sb) { imgs.push(grainCss(sbg, "180deg")); pos.push("0 2px, 0 0"); size.push("auto, auto"); }
-    if (s.by.sm) { imgs.push(`url(${flakeTile(lum(sbg) > 0.45).url})`); pos.push(`${-(s.x - 3)}px 3px`); size.push("128px 128px"); }
+    const imgs = [], pos = [], size = [], reps = [];
+    if (s.by.sm) { imgs.push(`url(${flakeTile(lum(sbg) > 0.45).url})`); pos.push(`${-(s.x - 3)}px 3px`); size.push("128px 128px"); reps.push("repeat"); }
+    for (const sf of finLayers(s.by.sf || (s.by.sb ? "brushed" : null), -(s.x - 3), 3)) {
+      imgs.push(sf.img); pos.push(sf.pos); size.push(sf.size); reps.push(sf.rep);
+    }
     if (imgs.length) {
       d.style.backgroundImage = imgs.join(", ");
       d.style.backgroundPosition = pos.join(", ");
       d.style.backgroundSize = size.join(", ");
+      d.style.backgroundRepeat = reps.join(", ");
     }
     gb.append(d);
   }
   // controls' own backgrounds, joined with their neighbours', over the
   // sections and rules
-  // (a brushed or metallic one and a plain one of the same colour stay apart)
-  const bkRects = [], bkPlate = {}, bkGrain = {}, bkMetal = {};
+  // (one with a finish or flake and a plain one of the same colour stay apart)
+  const bkRects = [], bkPlate = {}, bkFin = {}, bkMetal = {}, bkCorners = {};
   for (const it of lay.items.concat(lay.spacers || [])) {
     const c = it.c;
     if (!c.bk || it.sx == null) continue;
-    const key = c.bk + (c.bb ? "/b" : "") + (c.bm ? "/m" : "");
+    const bf = (c.bf && c.bf !== "plain") ? c.bf : (c.bb ? "brushed" : null);
+    const key = c.bk + (bf ? "/" + bf : "") + (c.bm ? "/m" : "") + (c.bcn ? "/c" + c.bcn : "");
     bkRects.push([it.sx, it.y, it.sx + it.sw, it.y + (it.h || CELL_H * it.hu / 2), key]);
     if (c.bp) bkPlate[key] = c.bp;
-    if (c.bb) bkGrain[key] = true;
+    if (bf) bkFin[key] = bf;
+    if (c.bcn) bkCorners[key] = c.bcn;
     if (c.bm) bkMetal[key] = true;
   }
   const bkShapes = backShapes(bkRects, lay.gaps || [], 3);
@@ -3839,10 +4623,21 @@ function buildPanel(p, bodyH) {
   const bkSvg = bkShapes.length ? el("svg", { width: lay.width + 8, height: lay.rows * CELL_H + 8 }) : null;
   for (const s of bkShapes) {
     const pl = bkPlate[s.key];
-    const d = [s.outer, ...s.holes].map(l => roundedLoop(l, 6)).join(" ");
+    // its corners: round is fully round ends on a plain rectangle (any
+    // other shape: soft)
+    const xs = s.outer.map(p => p[0]), ys = s.outer.map(p => p[1]);
+    const cn = bkCorners[s.key], plain = s.outer.length === 4 && !s.holes.length;
+    const rad = cn === "round" && plain ? Math.min((Math.max(...xs) - Math.min(...xs)) / 2, (Math.max(...ys) - Math.min(...ys)) / 2, ROUND_MAX)
+      : cn ? 12 : 6;
+    const d = [s.outer, ...s.holes].map(l => roundedLoop(l, rad)).join(" ");
     el("path", { d, "fill-rule": "evenodd",
       fill: pl ? pl.bg : insetFill, stroke: pl ? pl.border : "rgba(0,0,0,0.35)", "stroke-width": 1,
       transform: "translate(4 4)" }, bkSvg);
+    if (bkFin[s.key]) {
+      // the finish, tiled from the grid's origin
+      for (const fill of finFills(bkSvg, bkFin[s.key]))
+        el("path", { d, "fill-rule": "evenodd", fill, transform: "translate(4 4)" }, bkSvg);
+    }
     if (bkMetal[s.key]) {
       // the flake, as a pattern tiled from the grid's origin
       let defs = bkSvg.querySelector("defs");
@@ -3851,10 +4646,6 @@ function buildPanel(p, bodyH) {
       const pat = el("pattern", { id, patternUnits: "userSpaceOnUse", width: 128, height: 128 }, defs);
       el("image", { href: flakeTile(lum(pl ? pl.bg : under) > 0.45).url, width: 128, height: 128 }, pat);
       el("path", { d, "fill-rule": "evenodd", fill: `url(#${id})`, transform: "translate(4 4)" }, bkSvg);
-    }
-    if (bkGrain[s.key]) {
-      for (const f of grainFills(bkSvg, pl ? pl.bg : under))
-        el("path", { d, "fill-rule": "evenodd", fill: f, transform: "translate(4 4)" }, bkSvg);
     }
   }
   if (bkSvg) { bkSvg.classList.add("bks"); bkSvg.style.left = (gridX - 4) + "px"; bkSvg.style.top = (PAD - 4) + "px"; }
@@ -3938,7 +4729,8 @@ function buildPanel(p, bodyH) {
       } else {
         const D = KNOB_D[size === "large" ? "large" : "medium"];
         const mg = Math.max(0, (CELL_H * it.hu / 2 - CELL_H - (D - KNOB)) / 2);
-        const k = makeDual(D, c.cap, c.md, c.md2);
+        const ol = c.kl && layout.tex ? decodeLook(c.kl) : null, il = ol ? decodeLook(c.kl2) : null;
+        const k = (ol && il) ? makeDualParts(D, ol, c.kc, il, c.kc2, c.md, c.md2) : makeDual(D, c.cap, c.md, c.md2, c.st);
         const box = h("div", "knob"); box.append(k.svg);
         if (c.lk) linkCorner(box, c.lk);
         if (c.lk2) linkCorner2(box, c.lk2);
@@ -3978,22 +4770,25 @@ function buildPanel(p, bodyH) {
       // it with its numbers
       const sc = size !== "small" && c.sc && c.sc.m && c.sc.m.length ? c.sc : null;
       const D = KNOB_D[size];
+      // a recipe or your own look, built from parts (TS_CV_KnobParts)
+      const look = c.kl ? decodeLook(c.kl) : null;
       const mg = Math.max(0, (CELL_H * it.hu / 2 - CELL_H - (D - KNOB)) / 2);
       let k, box = h("div", "knob");
       if (sc) {
         const W = cw - 4, H = size === "medium" ? 6 + D + 4 + 14 : 10 + D + 2 * mg;
         const s = makeScale(W, H, D, sc);
-        k = makeKnob(s.d, c.st, c.cap, c.bi, null, true);
+        k = look ? makePartsKnob(s.d, look, c.kc, true) : makeKnob(s.d, c.st, c.cap, c.bi, null, true);
         Object.assign(k.svg.style, { position: "absolute", left: s.x + "px", top: s.y + "px" });
         box.style.width = W + "px"; box.style.height = H + "px";
         box.append(k.svg, s.svg);
       } else {
-        k = makeKnob(D, c.st, c.cap, c.bi);
+        k = look ? makePartsKnob(D, look, c.kc) : makeKnob(D, c.st, c.cap, c.bi);
         box.append(k.svg);
       }
       // the arc is a printed scale, not a knob standing on the plate: no shadow
-      if (!BODY[STYLE_ALIAS[c.st] || c.st]) box.classList.add("flat");
-      if (c.md) modDot(k.svg, c.st, c.cap);
+      if (!look && !BODY[STYLE_ALIAS[c.st] || c.st]) box.classList.add("flat");
+      if (c.md) { if (look) { const col = modCol(kpCentre(look, c.kc));
+          el("circle", { cx: 50, cy: 50, r: 7, fill: col }, k.svg); } else modDot(k.svg, c.st, c.cap); }
       if (c.lk) entry.ring = linkRing(k.svg, c.lk.c);
       if (size === "small") {
         // a small name over a smaller dial: there's no hovering on a touch
@@ -4030,6 +4825,21 @@ function buildPanel(p, bodyH) {
         cur = v; k.set(v); sendV(v);
       }, { reset: () => { if (c.vn != null) { cur = c.vs || 0; k.set(cur); sendV(cur); } else send("def", p.g, c.p); } });
       entry.set = v => { cur = v; k.set(v); };
+    } else if (c.t === "toggle" && SWITCHES.has(c.st)) {
+      // a hardware switch (TS_CV_Switches), the state's name under it
+      const small = size === "small";
+      const b = h("button", "tog sw"); b.style.width = (CELL_W - 8) + "px";
+      if (small) { b.style.marginTop = "0px"; b.title = c.l || ""; }
+      if (small) cell.append(b); else cell.append(lbl, b);
+      const under = h("div", "val"); if (!small) cell.append(under);
+      if (c.md) modCorner(b, PAL.toggle_off, c.lit || PAL.toggle_on);
+      if (c.lk) linkCorner(b, c.lk);
+      let cur = 0, said = "";
+      const paint = () => { b.innerHTML = switchSVG(c.st, cur >= 0.5, c.lit || PAL.toggle_on || "#4aa3df", !layout.tex,
+        c.st === "lamp" ? (said || (small ? (c.l || "") : (cur >= 0.5 ? "ON" : "OFF"))) : ""); };
+      b.addEventListener("click", () => { cur = cur >= 0.5 ? 0 : 1; paint(); sendV(cur); });
+      entry.set = (v, x) => { cur = v; said = x || ""; paint(); under.textContent = c.st === "lamp" ? "" : (x || ""); };
+      entry.val = null;
     } else if (c.t === "toggle") {
       const b = h("button", "tog"); b.style.width = (CELL_W - 12) + "px";
       if (BUTTON_FACES.has(c.st)) b.classList.add("bs-" + c.st);
@@ -4156,15 +4966,6 @@ function nearestChoice(c, v) {
   return best;
 }
 // ---------------------------------------------------------------------------
-// adding, moving and removing plugins (top level only, as on the desktop)
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// wet: REAPER's own mix for a plugin or container, as the desktop has it --
-// a % in the head where the panel has room for it (dim at 100%, in the
-// accent when mixed back), and a slider in the panel's and the container's
-// sheets at any width
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // the group background tint (ChannelView's Group looks ▸ Background): a
 // strip, its name button and the channel panel in the track's colour at
 // the strength the bridge resolved for it (t.bt, 0..1). Held to a shade
@@ -4203,6 +5004,12 @@ function tintInks(body, col) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// wet: REAPER's own mix for a plugin or container, as the desktop has it --
+// a % in the head where the panel has room for it (dim at 100%, in the
+// accent when mixed back), and a slider in the panel's and the container's
+// sheets at any width
+// ---------------------------------------------------------------------------
 const WET_MIN_W = 230;
 const wetNow = (g, box) => {
   const l = held("wet/" + g);
@@ -4248,6 +5055,9 @@ function paintWet(P, g) {
   P.wet.classList.toggle("mix", v < 0.995);
 }
 
+// ---------------------------------------------------------------------------
+// adding, moving and removing plugins (top level only, as on the desktop)
+// ---------------------------------------------------------------------------
 function moreBtn(p) {
   const b = h("button", "hb mo"); b.innerHTML = `<svg viewBox="0 0 24 24">${ICON.more}</svg>`;
   b.setAttribute("aria-label", "Plugin menu");
@@ -5090,27 +5900,54 @@ function buildEq(p, bodyH) {
 // frequency, gain, Q); a compressor's roles as their text reads (vals.mc).
 // ---------------------------------------------------------------------------
 const MAP_EQ_W = 400, MAP_COMP_W = 440;
+// (TS_CV_MapEQ ME.band_db: the same models)
+const MQ_BRICK = 32;
+const mqSect = {};
+function mqSections(n) {
+  if (mqSect[n]) return mqSect[n];
+  const qs = []; for (let k = Math.floor(n / 2); k >= 1; k--) qs.push(1 / (2 * Math.sin((2 * k - 1) * Math.PI / (2 * n))));
+  return (mqSect[n] = { qs, odd: n % 2 === 1 });
+}
 function mqBandDb(b, f) {
-  const f0 = b.f || 1000, q = Math.max(0.05, b.q || 0.7071);
+  const f0 = b.f || 1000, q = Math.max(0.05, b.q || 0.7071), t = b.t, g = b.g || 0;
+  if (f0 <= 0) return 0;
   let x = f / f0;
   const d10 = v => 10 * Math.log10(Math.max(v, 1e-30));
-  if (b.t === "bell" || b.t === "ls" || b.t === "hs") {
-    const g = b.g || 0; if (!g) return 0;
-    const A = Math.pow(10, g / 40), x2 = x * x;
-    if (b.t === "bell") { const a = 1 - x2; return d10((a * a + Math.pow(A * x / q, 2)) / (a * a + Math.pow(x / (A * q), 2))); }
-    const k = A / (q * q) * x2;
-    if (b.t === "ls") return d10(A * A * (Math.pow(A - x2, 2) + k) / (Math.pow(1 - A * x2, 2) + k));
+  const hp1 = x2 => x2 / (1 + x2), hp2 = (x2, qq) => { const a = 1 - x2; return (x2 * x2) / (a * a + x2 / (qq * qq)); };
+  const bandW = (xx, o) => { const u = (1 - xx * xx) * q / xx, p = Math.max(1, (o || 2) / 2); return 1 / (1 + Math.pow(Math.abs(u), 2 * p)); };
+  const shelf = (tt, xx, gg, qq, o) => {
+    if (o && o !== 2) { const w = 1 / (1 + Math.pow(xx, -o)); return gg * (tt === "ls" ? 1 - w : w); }
+    const A = Math.pow(10, gg / 40), x2 = xx * xx, k = A / (qq * qq) * x2;
+    if (tt === "ls") return d10(A * A * (Math.pow(A - x2, 2) + k) / (Math.pow(1 - A * x2, 2) + k));
     return d10(A * A * (Math.pow(1 - A * x2, 2) + k) / (Math.pow(A - x2, 2) + k));
+  };
+  if (t === "bell" || t === "sword") {
+    if (!g) return 0;
+    const o = b.o || (t === "sword" ? 4 : 2);
+    if (o > 2) return g * Math.pow(bandW(x, 2), o / 2);
+    const A = Math.pow(10, g / 40), x2 = x * x, a = 1 - x2;
+    return d10((a * a + Math.pow(A * x / q, 2)) / (a * a + Math.pow(x / (A * q), 2)));
   }
-  if (b.t === "hp" || b.t === "lp") {
-    if (b.t === "lp") x = 1 / x;
-    const x2 = x * x, hp1 = x2 / (1 + x2), hp2 = qq => { const a = 1 - x2; return (x2 * x2) / (a * a + x2 / (qq * qq)); };
-    const o = b.o || 2;
-    return d10(o === 1 ? hp1 : o === 2 ? hp2(q) : o === 3 ? hp1 * hp2(q) : hp2(0.5412) * hp2(q));
+  if (t === "ls" || t === "hs") return g ? shelf(t, x, g, q, b.o) : 0;
+  if (t === "tilt") return g ? shelf("hs", x, g, q, b.o) - g / 2 : 0;
+  if (t === "flattilt") return g * Math.log2(x) / 10;
+  if (t === "flattop") { if (!g) return 0; const w = Math.pow(2, 1 / q); return shelf("hs", x * w, g, 0.7071, b.o) + shelf("hs", x / w, -g, 0.7071, b.o); }
+  if (t === "notch") return d10(1 - bandW(x, b.o));
+  if (t === "bp") return d10(bandW(x, b.o));
+  if (t === "hp" || t === "lp") {
+    if (t === "lp") x = 1 / x;
+    const x2 = x * x, o = b.o || 2;
+    if (o <= 4) return d10(o === 1 ? hp1(x2) : o === 2 ? hp2(x2, q) : o === 3 ? hp1(x2) * hp2(x2, q) : hp2(x2, 0.5412) * hp2(x2, q));
+    const sc = mqSections(o); let pr = sc.odd ? hp1(x2) : 1;
+    sc.qs.forEach((qk, k) => { pr *= hp2(x2, k === sc.qs.length - 1 ? qk * (q / 0.7071) : qk); });
+    return d10(pr);
   }
   return 0;
 }
-const MQ_TYPE = { bell: "Bell", ls: "Low shelf", hs: "High shelf", hp: "Low cut", lp: "High cut" };
+const MQ_TYPE = { bell: "Bell", ls: "Low shelf", hs: "High shelf", hp: "Low cut", lp: "High cut", notch: "Notch",
+  bp: "Band pass", tilt: "Tilt shelf", flattilt: "Flat tilt", flattop: "Flat top", sword: "Sword", ap: "All pass" };
+// the shapes with no gain of their own: their nodes on the 0 dB line, up and down there turns Q
+const MQ_GAINLESS = { hp: 1, lp: 1, notch: 1, bp: 1, ap: 1 };
 
 function buildMapped(p, bodyH) {
   const kind = p.mq ? "eq" : "comp";
@@ -5161,14 +5998,17 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
     if (ga == null && gb == null) return 0; if (ga == null) ga = gb; if (gb == null) gb = ga;
     return -(ga + (gb - ga) * t);
   };
-  const focusF = b => b.t === "ls" ? b.f / 2 : b.t === "hs" ? b.f * 2 : b.f;
+  const focusF = b => (b.t === "ls" || b.t === "hp") ? b.f / 2 : (b.t === "hs" || b.t === "lp" || b.t === "tilt") ? b.f * 2 : b.f;
   const nodeY = b => hasG(b) ? Y(Math.max(-R.g, Math.min(R.g, b.g))) : Y(0);
   const tailY = b => Y(Math.max(-R.g, Math.min(R.g, (hasG(b) ? b.g : 0) + b.d.r)));
   const F = x => R.lo * Math.pow(R.hi / R.lo, Math.max(0, Math.min(1, x / W_)));
   const top = 10, gh = ch - 20;
   const Y = db => top + gh / 2 - (db / R.g) * gh / 2;
   const G = y => (top + gh / 2 - y) / (gh / 2) * R.g;
-  const hasG = b => b.t === "bell" || b.t === "ls" || b.t === "hs";
+  // the node at the band's gain (a bell, shelf, flat top); a tilt pivots on 0 dB
+  const hasG = b => b.t === "bell" || b.t === "ls" || b.t === "hs" || b.t === "sword" || b.t === "flattop";
+  const metaOf = k => (p.mq.b || []).find(v => v.k === k) || {};
+  const dragsG = b => !MQ_GAINLESS[b.t] && !!metaOf(b.k).g;
   function bandsNow() {
     const now = Date.now();
     return st.bands.map(b => { const o = st.over.get(b.k); return (o && now - o.t < 700) ? Object.assign({}, b, o.v) : b; });
@@ -5257,7 +6097,7 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
   let stripSig = null;
   function paintStrip() {
     const b = bandsNow().find(v => v.k === st.sel);
-    const sig = b ? [b.k, b.x, b.e, b.s, b.qi, b.d ? [b.d.xt, b.d.xr, b.d.xra, b.d.xa, b.d.xl, b.d.on].join("/") : ""].join("|") : "none";
+    const sig = b ? [b.k, b.x, b.e, b.s, b.si, b.qi, b.d ? [b.d.xt, b.d.xr, b.d.xra, b.d.xa, b.d.xl, b.d.on].join("/") : ""].join("|") : "none";
     if (sig === stripSig) return;
     stripSig = sig; strip.innerHTML = "";
     if (!b) { strip.append(h("span", null, "Drag a node to move a band · tap one to select it · double-tap: flat")); return; }
@@ -5269,6 +6109,13 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
       const sel = h("select", "shp");
       meta.sh.forEach((t, i) => { const o = h("option", null, t); o.value = i + 1; if (b.s === i + 1) o.selected = true; sel.append(o); });
       sel.addEventListener("change", () => send("mqs", p.g, b.k, sel.value));
+      strip.append(sel);
+    }
+    if (meta.sl && meta.sl.length > 1) {
+      // its slope, by the plugin's own names
+      const sel = h("select", "shp");
+      meta.sl.forEach((t, i) => { const o = h("option", null, t); o.value = i + 1; if (b.si === i + 1) o.selected = true; sel.append(o); });
+      sel.addEventListener("change", () => send("mql", p.g, b.k, sel.value));
       strip.append(sel);
     }
     if (b.d) {
@@ -5347,7 +6194,7 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
     if (st.tap && st.tap.k === b.k && now - st.tap.t < 350) { st.tap = null; st.drag = null; send("mq0", p.g, b.k); return; }
     st.tap = { k: b.k, t: now };
     cv.setPointerCapture(e.pointerId);
-    st.sel = b.k; st.drag = { k: b.k, g: hasG(b) };
+    st.sel = b.k; st.drag = { k: b.k, g: dragsG(b), qy: (!dragsG(b) && b.wq && !b.qp) ? y : null, g0: b.g, y0: y };
     paintStrip(); draw();
   });
   cv.addEventListener("pointermove", e => {
@@ -5358,11 +6205,18 @@ function mapEqCanvas(p, P, hold, CW, bodyH) {
       if (b && b.d) st.over.set(b.k, { t: Date.now(), v: { d: Object.assign({}, b.d, { r }) } });
       send("mqr", p.g, st.drag.k, r.toFixed(2)); draw(); return;
     }
-    const [x, y] = pos(e), f = F(x), g = Math.max(-R.g, Math.min(R.g, G(y)));
+    const [x, y] = pos(e), f = F(x);
+    // a node off the gain line (a tilt) moves its gain by how far it's dragged
+    const g = Math.max(-R.g, Math.min(R.g, hasG({ t: (st.bands.find(v => v.k === st.drag.k) || {}).t })
+      ? G(y) : (st.drag.g0 || 0) + G(y) - G(st.drag.y0)));
     const v = { f }; if (st.drag.g) v.g = g;
     st.over.set(st.drag.k, { t: Date.now(), v });
     send("mqf", p.g, st.drag.k, f.toFixed(1));
     if (st.drag.g) send("mqg", p.g, st.drag.k, g.toFixed(2));
+    if (st.drag.qy != null && Math.abs(y - st.drag.qy) > 2) {
+      // a cut, notch, band pass: up and down is Q (up: narrower)
+      send("mqq", p.g, st.drag.k, ((st.drag.qy - y) / 300).toFixed(4)); st.drag.qy = y;
+    }
     draw();
   });
   cv.addEventListener("pointerup", () => { st.drag = null; });
@@ -6468,8 +7322,6 @@ function mapModCanvas(p, P, hold, CW, bodyH) {
   });
 }
 
-// A multiband: all bands (the crossovers, a strip per band), or one band on
-// the compressor's canvas -- tabs to switch.
 // A saturator, as the desktop draws it (TS_CV_RolePanel draw_sat): its
 // learned curve (the pill drags Drive), the music's peak riding it, where
 // it bites; its harmonics; and the drive meter -- how far the peaks are
@@ -6573,10 +7425,11 @@ function mbState(t, n) {
   return (n || 0) >= 0.5 ? "on" : "off";
 }
 
-// A multiband: each band's level going in against its threshold (measured
-// on the way in only), and ONE reduction -- the plugin's as a whole -- down
-// the side, as the desktop draws it. With bands of their own edges, only
-// those in use, numbered low to high.
+// A multiband: all bands (the crossovers, a strip per band), or one band on
+// the compressor's canvas -- tabs to switch. Each band's level going in
+// against its threshold (measured on the way in only), and ONE reduction
+// -- the plugin's as a whole -- down the side, as the desktop draws it.
+// With bands of their own edges, only those in use, numbered low to high.
 function mapMultiCanvas(p, P, hold, CW, bodyH) {
   const I = p.mc.i || {};
   if (!Object.keys(I).length) { mapSetupNote(hold, "This multiband layout has no roles yet. Set it up in ChannelView on the desktop."); return; }

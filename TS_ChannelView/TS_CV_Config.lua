@@ -97,8 +97,8 @@ C.CHILD_PAD_Y_FALLBACK = 6
 --   "column" -- fill a column top-to-bottom, then start a new column.
 --              Neighbours stay put when the dock height changes.
 --   "row"    -- fill a row left-to-right, then start a new row.
---              Reads like the Fender layout, but every control moves
---              when the dock is resized.
+--              Reads like a hardware front panel, but every control
+--              moves when the dock is resized.
 C.FLOW = "column"
 
 -- Knob sizes, in half-cells across and down (TS_CV_Panel.layout), and the
@@ -275,6 +275,8 @@ C.GR_RANGE_RELAX = 3.0    -- seconds before the scale steps back down
 -- read as a balanced pair rather than a fader with an afterthought beside
 -- it. FADER_W is just the moving part; its half is wider than that.
 C.CHANNEL_W   = 112       -- expanded width of the Channel panel (View > Strip width)
+                          -- (fader and meter take half each, and the
+                          --  meter's scale needs room for its numbers)
 -- The width of an expanded channel strip: the pinned Channel panel, every
 -- mixer strip, and the track name buttons, which share it. Set from View >
 -- Strip width; the fader and meter scale with it (TS_CV_Channel.draw_body),
@@ -285,9 +287,7 @@ function C.set_channel_w(v)
   v = math.floor(tonumber(v) or C.CHANNEL_W_DEFAULT)
   C.CHANNEL_W = math.max(C.CHANNEL_W_MIN, math.min(C.CHANNEL_W_MAX, v))
 end
-                          -- (fader and meter take half each, and the
-                          --  meter's scale needs room for its numbers)
-C.FADER_W     = 26        -- the fader's own track within its half
+C.FADER_W    = 26        -- the fader's own track within its half
 C.FADER_CAP_H = 16        -- the moving cap: big enough to grab and to
                           -- read the unity mark against
 C.GR_BAR_W = 5          -- the track's total gain-reduction bar beside it
@@ -481,22 +481,19 @@ C.RULE_H = 2
 -- sits below where TA's rule goes, since this window has a menu bar and
 -- TA does not.
 --
--- Example: with font 12.0, frame_h 20.5, itemspacing_y 4.0, and a window
--- 536 high with content start 36.5 (avail 491.5, giving WindowPadding.y
--- 8.0): 8 + 20.5 + 4 = 32.5, and TA's rule measures 32.5 below the same
--- window top. Exactly.
+-- Example: with font 12.0, frame_h 20.5, itemspacing_y 4.0 and
+-- WindowPadding.y 8.0, the rule sits 8 + 20.5 + 4 = 32.5 below the
+-- window top, which is where TA's goes.
 --
--- One half-pixel remains, and it is not ours to fix. Measured side by
--- side: the BOTTOM rules land on identical rows, and at the top TA's
--- covers three rows to our two. Both draw the same 2px rect; TA's happens
--- to straddle a pixel boundary and ours lands on one, so ours is the
--- crisper of the two. That is the two panes starting half a pixel apart
--- in the docker, not a difference in the arithmetic.
+-- The two panes can start half a pixel apart in the docker, so TA's
+-- 2px rect may straddle a pixel boundary (three rows at the top) where
+-- this one lands on one (two rows, the crisper of the two). That is not
+-- a difference in the arithmetic.
 --
--- This accepts fractions, so -0.5 here would make ours straddle the same
--- way and cover the same three rows. It trades a crisp rule for a
--- matching one; left at 0 because a blurred edge to imitate someone
--- else's rounding is a strange thing to ship.
+-- This accepts fractions, so -0.5 here would make this one straddle the
+-- same way and cover the same three rows. It trades a crisp rule for a
+-- matching one; left at 0, since a blurred edge to imitate another
+-- window's rounding is not worth having.
 C.HEADER_NUDGE = 0
 
 -- The gap a TCP spacer opens in the track strip along the bottom.
@@ -734,11 +731,11 @@ local function hsl(h, s, l, a)
 end
 C.hsl = hsl
 
--- Rebuilds C.COL in place from C.PALETTE. Call after changing BASE_HUE or
--- TINT. In place matters: other modules hold a reference to C.COL.
 -- Filled by build_palette: format -> { bg, fg }.
 C.FORMAT_COL = {}
 
+-- Rebuilds C.COL in place from C.PALETTE. Call after changing BASE_HUE or
+-- TINT. In place matters: other modules hold a reference to C.COL.
 function C.build_palette()
   C.COL = C.COL or {}
   for name, e in pairs(C.PALETTE) do
@@ -805,6 +802,16 @@ C.build_palette()
 -- the web page's), and the shadows' too.
 C.EFFECT_3D = true
 C.METAL_K = 0.8
+-- View > Shadows: how deep and far the shadows fall, in percent (100 as
+-- designed; 0 none, 200 deep). Separate from the flake's strength.
+C.SHADOW = 100
+C.SHADOW_MAX = 200
+-- View > Lighting: how strongly the light models the plates and knobs, in
+-- percent (100 as designed; more, the studio-lit look: a plate bright on
+-- the top left falling to deep on the bottom right, darker toward its
+-- edges, and each knob washed bright to dark across).
+C.LIGHT = 100
+C.LIGHT_MAX = 250
 
 C.PLATES = {
   { key = "theme",     label = "Theme" },
@@ -899,6 +906,44 @@ C.KNOB_STYLES = {
   -- a ring of dots round a small knob, lit up to the value (from the
   -- centre when the control is centred); the colour is the dots'
   { key = "led",     label = "LED ring", cap = "accent" },
+  -- knobs built from parts (TS_CV_KnobParts): their looks
+  { key = "bakelite",   label = "Bakelite",       cap = "#2a1d14",
+    parts = { profile = "tapered", grip = "fluted", n = 10, mat = "gloss" } },
+  { key = "machined",   label = "Machined",       cap = "silver",
+    parts = { grip = "knurled", mat = "metal", ptr = "notch" } },
+  { key = "redgloss",   label = "Red gloss",      cap = "red",
+    parts = { profile = "slight", mat = "gloss" } },
+  { key = "chicken",    label = "Chicken-head",   cap = "black",
+    parts = { ptr = "chicken" } },
+  { key = "numskirt",   label = "Numbered skirt", cap = "black",
+    parts = { skirt = "numbered", scol = 0x1b1c1eff, sr = 1.55 } },
+  { key = "printskirt", label = "Printed skirt",  cap = "black",
+    parts = { skirt = "printed", scol = 0xc4c6c8ff, smat = "metal", sink = 0x1a1a1aff } },
+  { key = "softtouch",  label = "Soft-touch",     cap = "#3a3b3e",
+    parts = { profile = "slight", mat = "rubber", ptr = "dot" } },
+  { key = "chrome",     label = "Chrome",         cap = "silver",
+    parts = { profile = "slight", mat = "chrome", ptr = "notch" } },
+  { key = "twotone",    label = "Two-tone",       cap = "black",
+    parts = { top = "insert", insert = 0xc9ccd0ff } },
+  { key = "creamflute", label = "Cream fluted",   cap = "cream",
+    parts = { profile = "slight", grip = "fluted", n = 12 } },
+  { key = "coin",       label = "Coin edge",      cap = "silver",
+    parts = { grip = "coin", mat = "metal" } },
+  { key = "washer",     label = "Washer",         cap = "black",
+    parts = { profile = "slight", washer = true } },
+  { key = "console",    label = "Console",        cap = "red",
+    parts = { top_r = 0.82, grip = "grooves", n = 6, side = 0x6c6e72ff, tilt = 0.11, p0 = 0.02, pw = 0.13,
+              scale = "dots", face = "flat" } },
+  { key = "whiterim",   label = "White rim",      cap = "black",
+    parts = { rim = 0xf2f2eeff, face = "flat" } },
+  { key = "dial",       label = "Numbered dial",  cap = "silver",
+    parts = { mat = "chrome", skirt = "dial", scol = 0xc8caccff, smat = "metal", sr = 1.62, sgrip = "knurled",
+              sink = 0x1c1c1cff, inner = { r = 0.62, col = 0x9b9b97ff, mat = "bead", screws = true }, ptr = "none" } },
+  { key = "british",    label = "British",        cap = "grey",
+    parts = { profile = "slight", grip = "ridged", n = 36, mat = "matte", skirt = "plain", smat = "matte", ptr = "inset",
+              face = "flat" } },
+  { key = "wing",       label = "Wing",           cap = "#1f2a5c",
+    parts = { ptr = "wing", skirt = "plain", smat = "clear", sr = 1.55, top = "recessed", tilt = 0.08 } },
 }
 -- Toggles' and button rows' faces (TS_CV_Widgets.button_face); the first,
 -- flat, is the default and what a button with no style saved is drawn as.
@@ -910,6 +955,45 @@ C.BUTTON_STYLES = {
 }
 C.BUTTON_STYLE = {}
 for _, b in ipairs(C.BUTTON_STYLES) do C.BUTTON_STYLE[b.key] = b end
+-- ... and a toggle can be a hardware switch instead (TS_CV_Switches),
+-- lit in its colour; saved in the same Style field
+C.SWITCH_STYLES = {
+  { key = "bat",       label = "Bat toggle" },
+  { key = "paddle",    label = "Paddle toggle" },
+  { key = "rocker",    label = "Pill rocker" },
+  { key = "litrocker", label = "Lit rocker" },
+  { key = "slide",     label = "Slide" },
+  { key = "pill",      label = "Pill slider" },
+  { key = "lamp",      label = "Lamp button" },
+  { key = "roundbtn",  label = "Round button" },
+  { key = "jewel",     label = "Jewel lamp" },
+  { key = "guarded",   label = "Guarded toggle" },
+}
+C.SWITCH = {}
+for _, b in ipairs(C.SWITCH_STYLES) do C.SWITCH[b.key] = b end
+
+-- Surface finishes for faceplates, sections and control backgrounds
+-- (TS_CV_Finish). Each but Plain is a small seamless tile in textures/, two
+-- channels -- white or black, and how much -- laid over the surface's own
+-- colour, so one file serves every faceplate; Bright is stretched across
+-- the surface rather than tiled. `tile`: the tile's size on screen, in
+-- pixels at 100%. The metallic flake is separate and goes over any of them.
+C.FINISHES = {
+  { key = "plain",      label = "Plain" },
+  { key = "brushed",    label = "Brushed",       tile = 256 },
+  { key = "anodised",   label = "Anodised",      tile = 256 },
+  { key = "bright",     label = "Bright",        stretch = true },
+  { key = "satin",      label = "Satin",         stretch = true, under = "satin_grain" },
+  { key = "tolex",      label = "Tolex",         tile = 256 },
+  { key = "leather",    label = "Leather",       tile = 256 },
+  { key = "wood",       label = "Wood",          tile = 256 },
+  { key = "crinkle",    label = "Crinkle",       tile = 256 },
+  { key = "enamel",     label = "Enamel",        tile = 256 },
+  { key = "hammertone", label = "Hammertone",    tile = 256 },
+  { key = "checker",    label = "Checker plate", tile = 256 },
+}
+C.FINISH = {}
+for _, f in ipairs(C.FINISHES) do C.FINISH[f.key] = f end
 
 C.FADER_STYLES = {
   { key = "flat",    label = "Flat" },
@@ -928,15 +1012,6 @@ for _, p in ipairs(C.KNOB_STYLES)  do C.KNOB_STYLE[p.key] = p end
 C.KNOB_STYLE_ALIAS = { api = "nose" }   -- an older name for Round nose, still read
 for _, p in ipairs(C.FADER_STYLES) do C.FADER_STYLE[p.key] = p end
 
--- A faceplate by key, or nil for the theme's own (or anything unknown --
--- including a faceplate no longer in the list, which leaves the layout
--- on the theme's).
---
--- Besides the list, any colour at all: a key "#rrggbb" is a CUSTOM
--- faceplate in that colour (chosen with the [+] after the swatches, see
--- TS_CV_ColourPick), with inks worked out from it the same way the list's
--- were tuned by hand -- dark on a light colour, light on a dark one, the
--- header a shade darker and the edge a shade off the face.
 local custom = {}
 
 local function mix(c, to, t)
@@ -984,6 +1059,15 @@ local function custom_plate(key)
   return p
 end
 
+-- A faceplate by key, or nil for the theme's own (or anything unknown --
+-- including a faceplate no longer in the list, which leaves the layout
+-- on the theme's).
+--
+-- Besides the list, any colour at all: a key "#rrggbb" is a CUSTOM
+-- faceplate in that colour (chosen with the [+] after the swatches, see
+-- TS_CV_ColourPick), with inks worked out from it the same way the list's
+-- were tuned by hand -- dark on a light colour, light on a dark one, the
+-- header a shade darker and the edge a shade off the face.
 function C.plate_of(key)
   if not key then return nil end
   local p = C.PLATE[key]

@@ -514,3 +514,64 @@ something that can disagree with it after a hand edit.
 The text surgery (`classify`, `fenced_add`, `fenced_remove`) is pure — it
 takes a string and returns a string — which is what the tests exercise,
 on strings, rather than on your real startup file.
+
+## Finishes: one tile for every colour
+
+Each finish is one small seamless greyscale tile in `textures/`. At load
+it becomes two images, the light grains as white-with-alpha and the dark
+as black-with-alpha, so a plate of any colour takes it with plain alpha
+drawing (ReaImGui has no blend modes). Bright and Satin are stretched over
+the shape's box instead of tiled; Satin lays a brushed grain under itself
+at half strength. Inside soft or round corners the tile is drawn in thin
+horizontal strips cut to the rounded outline, so the cheap square path is
+kept for square corners. The web page uses the same PNGs as CSS layers.
+
+## One light
+
+`TS_CV_Light.lua` owns the light (top left) and every shadow. Anything
+standing on the panel gets a contact shadow (a tight dark outline, offset
+half a pixel) and a drop shadow drawn as layers, widest and faintest
+first; reach and softness grow with the thing's height, and View ▸ Shadows
+scales the drop much more than the contact. Polygons (pointer bodies, the
+chicken-head) take the layers from `LT.drop` and draw them in their own
+shape. Highlights are fixed to the light, never to the knob's angle, which
+is why a turning knob's turning parts are drawn separately from its
+lighting.
+
+## Knobs from parts
+
+`TS_CV_KnobParts.lua` draws a knob from a parts table with DrawList
+primitives only: stacked offset discs for bevels and lit faces, polygons
+for flutes and pointers, radial strokes for knurls. Detail drops with
+size: the number of discs and strokes is scaled to the radius, and skirt
+numbers are left out under 12 px of skirt. A recipe is a `C.KNOB_STYLES`
+entry with `parts`; a customised knob saves `Look<n>=k=v,...`
+(`KP.encode` / `KP.decode`), and a concentric knob's inner one `Look2<n>`
+and `Inner<n>`.
+
+## Two windows, one library
+
+ChannelView and the rack are two scripts with a library each. Every
+change marks its key; `save()` first re-reads the file when the ExtState
+rev (`maps_rev`, `steps_rev`) has moved, lays the marked keys on top,
+writes, and bumps the rev. Each window checks the revs twice a second
+(`M.sync`, `SC.sync`) and rescans when they move. A removal is marked too,
+so the other window's save doesn't bring a deleted layout back.
+
+## The rack's own keys
+
+The rack is ChannelView run with `TS_CV_RACK = true`. Everything it keeps
+apart is a prefix: folding (`rcollapsed:`, `rfold:`), macros and
+modulators folding (`rack_`), panel visibility (`rack_<key>` against
+ChannelView's `show_<key>`), the layout picked per instance
+(`rvariant:`), the layout defaults (`*rack default layouts*`) and the bar
+places (`rtop` …). A rack lookup with nothing of its own falls back to
+ChannelView's pick and then ChannelView's default.
+
+## Switches that say what they are
+
+`ME.switch_reads_on` goes by the words first (On / Enabled / Active / In /
+Yes against Off / Disabled / Inactive / Out / No, "Not …" flipping them)
+and the value only when the text says nothing. A parameter named Bypass is
+on when it reads off. Reading "off" as a substring is not enough: it
+misses "Disabled", which many plugins use.
