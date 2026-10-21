@@ -7191,5 +7191,126 @@ do
   check("switch: Not Active is off", R("Dyn", "Not Active", 0), false)
 end
 
+-- freeze: the frozen plugins out of a track chunk
+do
+  local FZ = require("TS_CV_Freeze")
+  local U_ = require("TS_CV_Util")
+  local chunk = table.concat({
+    "<TRACK", "  NAME Vox",
+    "  <FREEZE 1 0",
+    "    <ITEM", "      <TAKEFX", "        <VST \"VST: TakeThing (X)\" x.dll 0 \"\"", "        >", "      >", "    >",
+    "    <FXCHAIN", "      BYPASS 0 0 0",
+    "      <JS TS_TrackAnalyser/TS_TrackProbe.jsfx \"\"", "      >",
+    "      <JS TS_ChannelView/TS_CV_Modulators.jsfx \"\"", "      >",
+    "      <VST \"VST3: Pro-C 3 (FabFilter)\" \"Pro-C 3.vst3\" 0 \"\" 1",
+    "        AAAA==", "      >",
+    "      <JS \"loser/3BandEQ\" \"\"", "      >",
+    "      <JS Utility/volume_pan.jsfx \"\"", "      >",
+    "      <CONTAINER Container \"Bus comp\" \"\"",
+    "        <VST \"VST: Inner (X)\" i.dll 0", "        >", "      >",
+    "    >",
+    "  >",
+    "  <FXCHAIN", "    <VST \"VST3: Pro-Q 4 (FabFilter)\" q.vst3 0", "    >", "  >",
+    ">" }, "\n")
+  local st = FZ.parse(chunk, U_.clean_fx_name)
+  check("freeze: one level", st.levels, 1)
+  check("freeze: a frozen probe counted", st.probes, 1)
+  check("freeze: the frozen chain only, in order, helpers left out", table.concat(st.fx, "|"), "Pro-C 3|3BandEQ|volume_pan|Bus comp")
+  local two = chunk:gsub("  <FXCHAIN\n    <VST", "  <FREEZE 2 0\n    <FXCHAIN\n      <VST \"VST: Later (Y)\" l.dll 0\n      >\n    >\n  >\n  <FXCHAIN\n    <VST", 1)
+  local st2 = FZ.parse(two, U_.clean_fx_name)
+  check("freeze: two levels, oldest first", st2.levels .. " " .. table.concat(st2.fx, "|"), "2 Pro-C 3|3BandEQ|volume_pan|Bus comp|Later")
+  local rec = FZ.push_level(FZ.push_level("", { { 0, "Probe" }, { 2, "Mods" } }), { { 1, "Probe" }, { 0, "JS: Mods" } })
+  check("freeze: two levels recorded", FZ.count(rec), 2)
+  local mv, rest = FZ.pop_level(rec)
+  check("freeze: last level's helpers, by slot", mv[1][1] .. mv[1][2] .. mv[2][1] .. mv[2][2], "0JS: Mods1Probe")
+  local mv1, rest1 = FZ.pop_level(rest)
+  check("freeze: the level before", #mv1 .. mv1[1][2] .. mv1[2][1] .. "/" .. FZ.count(rest1), "2Probe2/0")
+  local mv2, rest2 = FZ.pop_level(FZ.push_level(nil, { { 3, "Probe" } }))
+  check("freeze: the only level", #mv2 .. mv2[1][1] .. "/" .. rest2, "13/")
+  check("freeze: nothing recorded", #(FZ.pop_level("")) .. FZ.count(""), "00")
+  local pad = FZ.push_level("", { { 1, "Mods" } }, 2)
+  check("freeze: levels frozen elsewhere padded", FZ.count(pad), 3)
+  local mvp, restp = FZ.pop_level(pad)
+  check("freeze: ... and the padding pops empty", #mvp .. "/" .. FZ.count(restp) .. "/" .. #(FZ.pop_level(restp)), "1/2/0")
+  check("freeze: a level with no helpers still counts", FZ.count(FZ.push_level(FZ.push_level("", {}), {})), 2)
+  local old = "0\31Probe" .. "\29" .. "1\31Mods"
+  check("freeze: an older record reads as one level", FZ.count(old) .. "/" .. #(FZ.pop_level(old)), "1/2")
+  local m = FZ.match({ "Probe", "Mods", "Probe" }, { "EQ", "Probe", "Mods", "Comp", "Probe" })
+  check("freeze: left plugins found by name and order", (m[1] or 0) .. (m[2] or 0) .. (m[3] or 0), "235")
+  local m2 = FZ.match({ "Probe", "Mods" }, { "Mods" })
+  check("freeze: one went with the freeze", tostring(m2[1]) .. tostring(m2[2]), "nil1")
+  check("freeze: none", FZ.parse("<TRACK\n  <FXCHAIN\n    <VST \"VST: A\" a 0\n    >\n  >\n>").levels, 0)
+end
+
+-- ---------------------------------------------------------------------
+-- what a model misses (TS_CV_MapEQ C<s>) and the model switch (M)
+-- ---------------------------------------------------------------------
+do
+  local ME = require("TS_CV_MapEQ")
+  local M_ = require("TS_CV_Mappings")
+  local C = { { g = -10, i0 = -1, v = { -1, -2, -3 } }, { g = 5, i0 = 0, v = { 0.5, 1 } }, { g = 10, i0 = 0, v = { 1, 3 } } }
+  local function near(a, b) return math.abs(a - b) < 1e-6 end
+  local oct = function(i) return 2 ^ (i / 3) end
+  check("curve: at a gain measured", ME.curve_db(C, oct(1), 10), 3)
+  check("curve: between two gains, blended", near(ME.curve_db(C, oct(1), 7.5), 2), true)
+  check("curve: below the smallest, in proportion", near(ME.curve_db(C, oct(1), 2.5), 0.5), true)
+  check("curve: past the largest, in proportion", near(ME.curve_db(C, oct(1), 20), 6), true)
+  check("curve: between grid points", near(ME.curve_db(C, oct(0.5), 10), 2), true)
+  check("curve: past a row's end, held", ME.curve_db(C, oct(9), 10), 3)
+  check("curve: cuts their own", ME.curve_db(C, oct(1), -10), -3)
+  check("curve: flat at 0 dB", ME.curve_db(C, oct(1), 0), 0)
+  local Cb = { { g = 6, i0 = 0, v = { 0, 2 } } }
+  check("curve: a side not measured mirrors the other", ME.curve_db(Cb, oct(1), -6), -2)
+  local Cz = { { g = 0, i0 = 0, v = { -1, -4 } } }
+  check("curve: a gainless one as it is", ME.curve_db(Cz, oct(1), 0), -4)
+  local lo, hi = ME.curve_span(C)
+  check("curve: span", lo .. ".." .. hi, "-1..1")
+  local b = { type = "bell", f = 1000, g = 10, q = 1, c = C }
+  check("curve: added to the model", near(ME.band_db(b, 1000 * oct(1)) - ME.model_db(b, 1000 * oct(1)), 3), true)
+  -- encoded and back
+  local L = { D = true, Mp = 8, M = { 0, 1 }, shapes = {
+    [1] = { type = "bell", K = { 1, 1, 1 }, C = { { g = -9, i0 = -2, v = { 0, -0.5, 1.25, -0.04 } }, { g = 9, i0 = -2, v = { 0.1, 0.2 } } } },
+    [2] = { type = "ls", K = { 1, 1, 1 } } } }
+  local enc = ME.encode(L)
+  check("curve: encoded", enc:match("C1=[^;]*"), "C1=-9@-2@0,-.5,1.2,0|9@-2@.1,.2")
+  check("model: encoded", enc:match("M=[^;]*"), "M=8:0,1")
+  local L2 = ME.decode(enc)
+  local vv = {}
+  for i, x in ipairs(L2.shapes[1].C[1].v) do vv[i] = ("%.2f"):format(x) end
+  check("curve: decoded, smoothed a little", #L2.shapes[1].C .. " " .. L2.shapes[1].C[1].g .. " " .. L2.shapes[1].C[1].i0 .. " " ..
+    table.concat(vv, ","), "2 -9 -2 0.00,-0.13,0.72,0.00")
+  check("curve: a cut's, faded deep in its stop band", ME.curve_weight("hp", -12) .. " " .. ME.curve_weight("hp", -30) .. " " ..
+    ME.curve_weight("bell", -30), "0.5 0 1")
+  check("model: decoded", L2.Mp .. ":" .. table.concat(L2.M, ","), "8:0,1")
+  check("curve: none where none", L2.shapes[2].C, nil)
+  -- the slot: shape within model
+  local vals = { [3] = 0.5, [8] = 1 }
+  local fake = reaper
+  reaper = setmetatable({ TrackFX_GetParamNormalized = function(_, _, p) return vals[p] or 0 end }, { __index = fake })
+  local LL = { H = { 0, 0.5, 1 }, M = { 0, 1 }, Mp = 8, shapes = {} }
+  check("slot: shape 2 of model 2", ME.slot(nil, 0, { shape = 3 }, LL), 5)
+  check("slot: no shape switch", ME.slot(nil, 0, {}, LL), 2)
+  check("slot: no model", ME.slot(nil, 0, { shape = 3 }, { H = LL.H, shapes = {} }), 2)
+  reaper = fake
+  -- the canvas line keeps it
+  local cv = M_.canvas_of({ Canvas = "eq|-|10", Band1 = "Low|1|0|-|2|-" })
+  check("model: read", tostring(cv.all_on) .. " " .. tostring(cv.model), "nil 10")
+  local out = {}
+  M_.canvas_lines(cv, out)
+  check("model: written", out.Canvas, "eq|-|10")
+  cv = M_.canvas_of({ Canvas = "eq|5|x", Band1 = "Low|1|0|-|2|-" })
+  check("model: none on purpose", tostring(cv.model) .. " " .. tostring(cv.no_model), "nil true")
+  out = {}; M_.canvas_lines(cv, out)
+  check("model: none on purpose written", out.Canvas, "eq|5|x")
+  cv = M_.canvas_of({ Canvas = "eq|5", Band1 = "Low|1|0|-|2|-" })
+  out = {}; M_.canvas_lines(cv, out)
+  check("model: an older line as it was", out.Canvas .. " " .. tostring(cv.model), "eq|5 nil")
+  check("model: in what learning is checked against", M_.band_sig({ freq = 1 }, 10), "1,-,-,-,-,m10")
+  check("model: not without", M_.band_sig({ freq = 1 }), "1,-,-,-,-")
+  -- guessed by name
+  check("model: guessed", ME.guess_model({ "Low Freq", "EQ Model", "Out" }, {}), 1)
+  check("model: not a band's type", ME.guess_model({ "Band 1 Type", "Phase Mode" }, {}), nil)
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

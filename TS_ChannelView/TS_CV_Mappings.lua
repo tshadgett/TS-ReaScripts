@@ -621,11 +621,13 @@ local function pnum(v)
   return (n and n >= 0) and math.floor(n) or nil
 end
 
--- What a band's mapping is, as text: what its learning is checked against.
-function M.band_sig(b)
+-- What a band's mapping is, as text: what its learning is checked against
+-- (and the canvas's model switch, when it has one: every setting of it is
+-- learned).
+function M.band_sig(b, model)
   local t = {}
   for i, f in ipairs(BAND_FIELDS) do t[i] = b[f] and tostring(b[f]) or "-" end
-  return table.concat(t, ",")
+  return table.concat(t, ",") .. (model and (",m" .. model) or "")
 end
 
 function M.canvas_of(sect)
@@ -634,7 +636,11 @@ function M.canvas_of(sect)
   if kind ~= "eq" and not M.ROLES[kind] then return nil end
   local cv = { kind = kind }
   if kind == "eq" then
-    cv.all_on = pnum(rest)
+    -- eq|<all on>|<model>: "x" for the model, none on purpose (not guessed)
+    local a, m = (rest .. "|"):match("^([^|]*)|([^|]*)")
+    cv.all_on = pnum(a)
+    cv.model = pnum(m)
+    if U.trim(m or "") == "x" then cv.no_model = true end
     cv.bands = {}
     for k = 1, M.MAX_BANDS do
       local line = sect["Band" .. k]
@@ -722,7 +728,9 @@ end
 function M.canvas_lines(cv, out)
   if not cv then return end
   if cv.kind == "eq" then
-    out.Canvas = "eq" .. (cv.all_on and ("|" .. cv.all_on) or "")
+    local m = cv.model and tostring(cv.model) or (cv.no_model and "x") or nil
+    out.Canvas = "eq" .. ((cv.all_on or m) and ("|" .. (cv.all_on and tostring(cv.all_on) or "-")) or "")
+      .. (m and ("|" .. m) or "")
     for k, b in ipairs(cv.bands or {}) do
       if k > M.MAX_BANDS then break end
       local f = { ((b.name or ""):gsub("[|\r\n]", " ")) }
@@ -770,7 +778,7 @@ end
 
 function M.copy_canvas(cv)
   if not cv then return nil end
-  local out = { kind = cv.kind, all_on = cv.all_on, nb = cv.nb, nt = cv.nt, ref0 = cv.ref0, dshape = cv.dshape,
+  local out = { kind = cv.kind, all_on = cv.all_on, model = cv.model, no_model = cv.no_model, nb = cv.nb, nt = cv.nt, ref0 = cv.ref0, dshape = cv.dshape,
                  dmodes = cv.dmodes and M.dl_modes_parse(M.dl_modes_write(cv.dmodes)) or nil,
                  sat_cal = cv.sat_cal and M.sat_decode(M.sat_encode(cv.sat_cal)) or nil }
   if cv.bands then
@@ -1285,8 +1293,8 @@ function M.drop_placed(layout)
 end
 
 -- Whether band b's learning is for its mapping as it is now.
-function M.band_learned(b)
-  return b ~= nil and b.learn ~= nil and b.learn_sig == M.band_sig(b)
+function M.band_learned(b, model)
+  return b ~= nil and b.learn ~= nil and b.learn_sig == M.band_sig(b, model)
 end
 
 -- How far an EQ canvas is from usable: nil when ready, else
@@ -1296,7 +1304,7 @@ function M.canvas_todo(cv)
   local total, mapped, learned = #(cv.bands or {}), 0, 0
   for _, b in ipairs(cv.bands or {}) do
     if b.freq or b.gain then mapped = mapped + 1 end
-    if M.band_learned(b) then learned = learned + 1 end
+    if M.band_learned(b, cv.model) then learned = learned + 1 end
   end
   if total > 0 and learned == total then return nil end
   return { mapped = mapped, learned = learned, total = total }

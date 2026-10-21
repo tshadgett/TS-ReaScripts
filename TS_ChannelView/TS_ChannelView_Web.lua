@@ -1281,6 +1281,21 @@ local function mq_vals(fx, layout)
                   e = r.on or nil, x = table.concat(tx, "   "), wq = b.q and 1 or nil,
                   s = ME.shape_now(track, fx.addr, b) }
       if sp then local _, si = ME.slopes(track, fx.addr, b); o.si = si end
+      -- what the model misses (TS_CV_MapEQ C<s>), at the gain it's on: a
+      -- third of an octave a point from grid index ci, two characters a
+      -- point (1/64 dB, +/- 32 dB); the page scales it to a dragged gain
+      if r.c then
+        local lo, hi = ME.curve_span(r.c)
+        if lo then
+          local t = {}
+          for i = lo, hi do
+            local d = ME.curve_db(r.c, 2 ^ (i * ME.CURVE_STEP), g)
+            local n = math.floor(math.max(0, math.min(4095, (d + 32) * 64 + 0.5)))
+            t[#t + 1] = B64C[n // 64] .. B64C[n % 64]
+          end
+          o.ci, o.cr, o.cg = lo, table.concat(t), o.g
+        end
+      end
       -- a Q that's a switch: its settings, and which it's on (chips, not a drag)
       local qp = b.q and ME.q_positions(track, fx.addr, b)
       if qp then

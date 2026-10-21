@@ -288,7 +288,7 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
     if not playing or not ps.snap then
       ps.snap = {}
       for _, b in ipairs(bands) do
-        ps.snap[b.k] = { type = b.type, order = b.order, f = b.f, g = b.g, q = b.q, on = b.on }
+        ps.snap[b.k] = { type = b.type, order = b.order, f = b.f, g = b.g, q = b.q, on = b.on, c = b.c }
       end
     end
   else
@@ -330,7 +330,7 @@ function MP.draw_eq(ctx, dl, x, y, w, h, track, fx, layout, req)
     for _, b in ipairs(bands) do
       if b.on and b.dy and b.dy.range and b.dy.on and (b.type == "bell" or b.type == "ls" or b.type == "hs") then
         has_range = true
-        local moved = { type = b.type, order = b.order, f = b.f, q = b.q, g = (b.g or 0) + b.dy.range }
+        local moved = { type = b.type, order = b.order, f = b.f, q = b.q, g = (b.g or 0) + b.dy.range, c = b.c }
         for i = 1, n do full[i] = full[i] + ME.band_db(moved, fr_[i]) - ME.band_db(b, fr_[i]) end
       end
     end

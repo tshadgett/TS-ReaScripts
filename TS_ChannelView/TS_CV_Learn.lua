@@ -16,9 +16,14 @@
   touched.
 
   A band that reports its values in real units -- frequency in Hz, gain in
-  dB, and a Q control -- is learned QUICKLY: one measurement per shape,
-  for its type and a check of what it means by Q. The canvas then uses
-  its own readings (TS_CV_MapEQ, "D").
+  dB, and a Q control -- is learned QUICKLY: one frequency per shape, at
+  each gain, for its type and a check of what it means by Q. The canvas
+  then uses its own readings (TS_CV_MapEQ, "D"). Bands alike (the same
+  shape switch, read the same) are learned once and share it.
+
+  Every measurement also keeps what the model misses (TS_CV_MapEQ C<s>),
+  and a plugin-wide model switch (the canvas's `model`, TDR Slick EQ's EQ
+  Model) has every setting learned in turn.
 
   Runs a step per frame (LN.step) so ChannelView keeps drawing: a
   measurement takes about a second (the noise has to settle through the
@@ -345,39 +350,65 @@ local function plan(job)
       and b.q ~= nil and unit_at(job, b.q) ~= "hz" and unit_at(job, b.q) ~= "db"
       and (UN.at(fmt_of(job, b.q), 0.5)) ~= nil
   end
+  -- the model switch: every setting, the bands learned under each
+  local models = { false }
+  if cv.model then
+    local sw = positions(job, cv.model, 12)
+    if sw and #sw > 1 then
+      job.M = {}
+      for _, r in ipairs(sw) do job.M[#job.M + 1] = r.norm end
+      models = job.M
+    end
+    flat[cv.model] = reaper.TrackFX_GetParamNormalized(job.tmp, job.p, cv.model)
+  end
+  -- bands alike, learned once: quick, the same shape switch reading the
+  -- same, the same flat gain, frequency switch and off positions
+  local seen = {}
+  for _, k in ipairs(job.which) do
+    local b, meta = cv.bands[k], job.meta[k]
+    if meta.direct and b.shape and meta.H then
+      local t = {}
+      for _, r in ipairs(positions(job, b.shape, 64) or {}) do t[#t + 1] = ("%.4f=%s"):format(r.norm, r.text) end
+      local sig = table.concat(t, ";") .. "|" .. tostring(meta.flat) .. "|" .. table.concat(meta.S or {}, ",")
+        .. "|" .. table.concat(meta.O or {}, ",") .. "|" .. tostring(meta.kind)
+      if seen[sig] then meta.copy = seen[sig] else seen[sig] = k end
+    end
+  end
   job.flat = flat
   steps[1] = { ref = true }
   for _, k in ipairs(job.which) do
     local b, meta = cv.bands[k], job.meta[k]
     local shapes = meta.H or { false }
-    for si, sv in ipairs(shapes) do
-      local fpts = meta.fpts or { false }
-      if meta.direct then
-        fpts = { fpts[math.floor((#fpts + 1) / 2)] }
-      end
-      for _, fv in ipairs(fpts) do
-        local gpts = meta.gpts or { false }
-        -- quick: full boost, and full cut where there is one
-        if meta.direct then gpts = { gpts[1], (#gpts >= 4) and gpts[#gpts] or nil } end
-        for _, gv in ipairs(gpts) do
-          local set = {}
-          if sv then set[b.shape] = sv end
-          if fv then set[b.freq] = fv end
-          if gv then set[b.gain] = gv end
-          if not b.gain and meta.on_off then set[b.on] = 1 - job.flat[b.on] end
-          steps[#steps + 1] = { k = k, set = set, s = si, fn = fv or nil, gn = gv or nil }
+    for mi, mv in ipairs(meta.copy and {} or models) do
+      for si, sv in ipairs(shapes) do
+        local s = (mi - 1) * #shapes + si
+        local fpts = meta.fpts or { false }
+        if meta.direct then
+          fpts = { fpts[math.floor((#fpts + 1) / 2)] }
         end
-      end
-      -- the Q control's sweep, at the middle frequency and full gain
-      if b.q and not meta.direct then
-        local fpts2 = meta.fpts or { false }
-        local fv = fpts2[math.floor((#fpts2 + 1) / 2)]
-        for _, qv in ipairs(KNOB_PTS) do
-          local set = { [b.q] = qv }
-          if sv then set[b.shape] = sv end
-          if fv then set[b.freq] = fv end
-          if meta.gpts then set[b.gain] = meta.gpts[1] end
-          steps[#steps + 1] = { k = k, set = set, s = si, qn = qv }
+        for _, fv in ipairs(fpts) do
+          for _, gv in ipairs(meta.gpts or { false }) do
+            local set = {}
+            if mv then set[cv.model] = mv end
+            if sv then set[b.shape] = sv end
+            if fv then set[b.freq] = fv end
+            if gv then set[b.gain] = gv end
+            if not b.gain and meta.on_off then set[b.on] = 1 - job.flat[b.on] end
+            steps[#steps + 1] = { k = k, set = set, s = s, fn = fv or nil, gn = gv or nil }
+          end
+        end
+        -- the Q control's sweep, at the middle frequency and full gain
+        if b.q and not meta.direct then
+          local fpts2 = meta.fpts or { false }
+          local fv = fpts2[math.floor((#fpts2 + 1) / 2)]
+          for _, qv in ipairs(KNOB_PTS) do
+            local set = { [b.q] = qv }
+            if mv then set[cv.model] = mv end
+            if sv then set[b.shape] = sv end
+            if fv then set[b.freq] = fv end
+            if meta.gpts then set[b.gain] = meta.gpts[1] end
+            steps[#steps + 1] = { k = k, set = set, s = s, qn = qv }
+          end
         end
       end
     end
@@ -400,7 +431,7 @@ function LN.start(track, addr, key, layout, which)
   if not which then
     which = {}
     for k, b in ipairs(cv.bands or {}) do
-      if not M.band_learned(b) then which[#which + 1] = k end
+      if not M.band_learned(b, cv.model) then which[#which + 1] = k end
     end
   end
   job.which = which
@@ -410,6 +441,7 @@ function LN.start(track, addr, key, layout, which)
     job.samples[k] = {}
   end
   if cv.all_on then job.params[cv.all_on] = true end
+  if cv.model then job.params[cv.model] = true end
   -- every band's dynamics are held off while learning: theirs too
   for _, b in ipairs(cv.bands or {}) do
     for _, f in ipairs(M.DYN_FIELDS) do if b.dyn and b.dyn[f] then job.params[b.dyn[f]] = true end end
@@ -422,15 +454,33 @@ local function finish(job)
   remove_track(job)
   local cv = job.layout.canvas
   local failed = {}
+  local done = {}
   for _, k in ipairs(job.which) do
     local b, meta = cv.bands[k], job.meta[k]
-    local L, why = ME.summarise(job.samples[k], { S = meta.S, H = meta.H, Z = meta.flat, O = meta.O,
-                                                  direct = meta.direct, has_freq = b.freq ~= nil })
-    if L then
-      b.learn = ME.encode(L)
-      b.learn_sig = M.band_sig(b)
-    else
-      failed[#failed + 1] = (b.name ~= "" and b.name or ("Band " .. k)) .. ": " .. (why or "?")
+    if not meta.copy then
+      local L, why = ME.summarise(job.samples[k], { S = meta.S, H = meta.H, Z = meta.flat, O = meta.O,
+                                                    direct = meta.direct, has_freq = b.freq ~= nil,
+                                                    M = job.M, Mp = cv.model })
+      if L then
+        b.learn = ME.encode(L)
+        b.learn_sig = M.band_sig(b, cv.model)
+        done[k] = true
+      else
+        failed[#failed + 1] = (b.name ~= "" and b.name or ("Band " .. k)) .. ": " .. (why or "?")
+      end
+    end
+  end
+  -- the bands learned with another
+  for _, k in ipairs(job.which) do
+    local b, meta = cv.bands[k], job.meta[k]
+    if meta.copy then
+      if done[meta.copy] then
+        b.learn = cv.bands[meta.copy].learn
+        b.learn_sig = M.band_sig(b, cv.model)
+      else
+        failed[#failed + 1] = (b.name ~= "" and b.name or ("Band " .. k)) .. ": learned with " ..
+          (cv.bands[meta.copy].name or ("Band " .. meta.copy)) .. ", which wasn't"
+      end
     end
   end
   M.set(job.key, job.layout)
@@ -565,7 +615,8 @@ function LN.step(job)
       force.order = ME.order_of_text(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, sp, ""))) or force.order
     end
     local fit = ME.fit(freqs, D, meta.kind, force)
-    local sm = { s = st.s, fn = st.fn, gn = st.gn, qn = st.qn, fit = fit }
+    local sm = { s = st.s, fn = st.fn, gn = st.gn, qn = st.qn, fit = fit,
+                 freqs = freqs, D = D, order = force and force.order or nil }
     if meta.direct and fit then
       if b.freq then sm.rep_f = (UN.parse(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, b.freq, "")))) end
       if b.q then sm.rep_q = (UN.parse(select(2, reaper.TrackFX_GetFormattedParamValue(job.tmp, job.p, b.q, "")))) end

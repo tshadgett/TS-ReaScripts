@@ -575,3 +575,45 @@ Yes against Off / Disabled / Inactive / Out / No, "Not …" flipping them)
 and the value only when the text says nothing. A parameter named Bypass is
 on when it reads off. Reading "off" as a substring is not enough: it
 misses "Disabled", which many plugins use.
+
+## Freezing around REAPER's freeze
+
+REAPER's freeze takes every plugin up to the last one online, offline ones
+included; only offline plugins after that point stay in the chain. So
+setting the probes or ChannelView Modulators offline doesn't keep them out:
+`FZ.freeze` moves them to just after the last plugin to freeze, then takes
+everything after it offline for the action. The plugins it leaves come
+back with new FX GUIDs, so they're found again by name and order
+(`FZ.match`), and put back online only once a new `<FREEZE` block shows in
+the track chunk (`FZ.poll`, every frame). A multichannel freeze prints
+every channel the measuring taps widened the track to, so it's always
+41223 (stereo).
+
+The helpers' old slots are kept per freeze level in
+`P_EXT:TS_CV_FREEZE2` (each level led by `\30`, entries `slot\31name` by
+`\29`; an empty level for one with none, so the record counts the levels).
+`FZ.sync` compares that count with the chunk's whenever the chain's shape
+changes: an unfreeze from anywhere (REAPER's own, undo) puts the helpers
+back. Like the probes' own moves, it makes no undo point: one would sit in
+front of the unfreeze and make it unreachable.
+
+## What a model misses
+
+An EQ band's model (bell, shelf, cut…) is evaluated in closed form. What a
+measurement shows beyond it is kept as `C<s>`: the measurement less the
+band as the canvas would draw it at those settings, per gain setting, on a
+third-octave grid about the band's frequency (median over the frequencies
+measured; under 0.5 dB everywhere, not kept). It's computed after the
+band's other tables, because "as drawn" depends on them (K ratios, the G
+table). Drawing blends between the gains measured, scales in proportion
+outside them, mirrors a side never measured, holds past the ends of the
+measurement (20 Hz to 20 kHz about the band), smooths each row once on
+decode ([1 4 1]) and goes through the points with Catmull-Rom. A cut's is
+faded out from 6 to 18 dB down, where the measurement is mostly noise.
+The web page gets the row at the band's current gain (`ci`, `cr`, `cg`)
+and scales it while dragging.
+
+A plugin-wide Model switch multiplies the entries: `<s>` counts shape
+positions within model positions (`ME.slot`), and the model's parameter is
+part of the band's learning signature, so naming one asks for learning
+again.

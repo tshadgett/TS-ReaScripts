@@ -1,5 +1,32 @@
 # ChannelView — changelog
 
+## 2.5.5 — freeze, collapse all, measured EQ shapes
+
+- **Freeze.** The **❄** button in the header (ChannelView and the rack):
+  *Freeze track*, *Freeze up to* the selected plugin, and *Unfreeze*,
+  with REAPER's own freeze, in stereo. Frozen plugins stay where they
+  were, as ice strips; in the rack a *frozen above* line with an Unfreeze
+  button sits under them. The probes and ChannelView Modulators are never
+  frozen: they stay live after the frozen plugins and go back to their
+  places at any unfreeze, ChannelView's or REAPER's own.
+- **Rack: Collapse all.** The double chevron in the rack's header folds
+  every plugin; pressed again, it opens only the ones it folded. The
+  rack's chevrons point up to fold and down to open.
+- **A track left with one probe gets the other back** when ChannelView
+  shows it (unless the other is frozen and comes back with the unfreeze).
+- **EQ canvases draw what the plugin really does.** Learning keeps what a
+  shape does beyond its formula — a console type's long tail, a shelf's
+  bump or dip, a boost shaped unlike its cut (Kirchhoff-EQ's console types,
+  for one) — and the canvas and the web page draw it, smoothly, at any
+  gain.
+- **Model.** An EQ layout's setup can name a plugin-wide switch that
+  changes every band (TDR Slick EQ's *EQ Model*); ChannelView guesses it.
+  Every setting is learned, and the canvas draws the one the plugin is on.
+- Bands that are alike are learned once, so a plugin with many identical
+  bands learns much faster. Learn an EQ layout again to have these.
+- Rack: the plugins' scrollbar sits in the window's margin, right against
+  the panels.
+
 ## 2.5.1 — rack at startup, toolbar names
 
 - **ChannelView Rack can start with REAPER**: ☰ ▸ *Run when REAPER starts*

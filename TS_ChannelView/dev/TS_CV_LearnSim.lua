@@ -135,7 +135,12 @@ reaper = {
   TrackFX_SetNamedConfigParm = function() return true end,
   GetFXEnvelope = function() return nil end,
   TrackFX_FormatParamValueNormalized = function(_, _, p, n) return true, fmt(p, n) end,
-  TrackFX_GetFormattedParamValue = function(t, fx, p) return true, fmt(p, t.fx[fx + 1].vals[p] or 0) end,
+  TrackFX_GetFormattedParamValue = function(t, fx, p)
+    local vals = t.fx[fx + 1].vals
+    -- a reading that depends on another setting (a Q that reads nothing for some types)
+    if P[p] and P[p].vfn then return true, P[p].vfn(vals, vals[p] or 0) end
+    return true, fmt(p, vals[p] or 0)
+  end,
   TrackFX_SetParamNormalized = function(t, fx, p, v) t.fx[fx + 1].vals[p] = v end,
   TrackFX_GetParamNormalized = function(t, fx, p) return t.fx[fx + 1].vals[p] or 0 end,
   TrackFX_GetParamName = function(t, fx, p)
@@ -368,6 +373,114 @@ do
   check("para: bypass reads off", ME.read_band(user, 0, layout.canvas.bands[1], 6).on, true)
   user.fx[1].vals[6] = 1
   check("para: bypassed is off", ME.read_band(user, 0, layout.canvas.bands[1], 6).on, false)
+end
+
+-- ---------------------------------------------------------------------
+-- console types and a model switch: what a model misses is learned too
+-- ---------------------------------------------------------------------
+-- Two alike bands reporting Hz / dB / Q, each with a Type switch: a plain
+-- Bell, an "E High Bell" (no Q of its own, a long tail above it, cutting
+-- narrower than it boosts) and a Low Shelf; and a plugin-wide EQ Model
+-- whose "British" setting puts a dip above the shelf and a skirt on the bell.
+do
+  local function knob(name, lo, hi, unit) return { name = name, lo = lo, hi = hi, unit = unit } end
+  local function hz(n) local f = 20 * 1000 ^ n
+    return f >= 1000 and ("%.2f kHz"):format(f / 1000) or ("%.1f Hz"):format(f) end
+  local TYPES = { "Bell", "E High Bell", "Low Shelf" }
+  local function band(k0)
+    return {
+      [k0] = { name = ("Band %d Type"):format(k0 // 4 + 1), list = TYPES },
+      [k0 + 1] = { name = ("Band %d Frequency"):format(k0 // 4 + 1), fn = hz },
+      [k0 + 2] = knob(("Band %d Gain"):format(k0 // 4 + 1), -18, 18, "dB"),
+      [k0 + 3] = { name = ("Band %d Q"):format(k0 // 4 + 1), fn = function(n) return ("%.2f"):format(0.2 * 50 ^ n) end },
+    }
+  end
+  P = {}
+  for p, d in pairs(band(0)) do P[p] = d end
+  for p, d in pairs(band(4)) do P[p] = d end
+  P[8] = { name = "EQ Model", list = { "American", "British" } }
+  -- an E High Bell's Q reads nothing
+  for _, k0 in ipairs({ 0, 4 }) do
+    local qd = P[k0 + 3]
+    P[k0 + 3] = { name = qd.name, fn = qd.fn, vfn = function(vals, n)
+      local _, ti = fmt(k0, vals[k0] or 0)
+      return ti == 2 and "----" or qd.fn(n)
+    end }
+  end
+  NP = 9
+  local function one(vals, k0)
+    local _, ti = fmt(k0, vals[k0])
+    local f = 20 * 1000 ^ vals[k0 + 1]
+    local g = -18 + 36 * vals[k0 + 2]
+    local q = 0.2 * 50 ^ vals[k0 + 3]
+    local brit = vals[8] >= 0.5
+    local out = {}
+    if ti == 1 then
+      out[1] = { type = "bell", f = f, g = g, q = q }
+      if brit then out[2] = { type = "bell", f = f * 4, g = g * 0.2, q = 0.5 } end
+    elseif ti == 2 then
+      out[1] = { type = "bell", f = f, g = g, q = g < 0 and 1.6 or 1.1 }
+      out[2] = { type = "hs", f = f * 6, g = g * 0.18, q = 0.5 }
+    else
+      out[1] = { type = "ls", f = f, g = g, q = q * 0.6 }
+      if brit then out[2] = { type = "bell", f = f * 2.5, g = -g * 0.25, q = 1.2 } end
+    end
+    return out
+  end
+  truth = function(vals)
+    local b = {}
+    for _, k0 in ipairs({ 0, 4 }) do for _, x in ipairs(one(vals, k0)) do b[#b + 1] = x end end
+    return b
+  end
+  tracks = {}
+  local user = newtrack("Kit"); tracks[1] = user
+  user.fx[1] = { kind = "eq", vals = {} }
+  for p = 0, NP - 1 do user.fx[1].vals[p] = 0.5 end
+  user.fx[1].vals[0], user.fx[1].vals[4], user.fx[1].vals[8] = 0, 0, 0
+  local names = {}
+  for p = 0, NP - 1 do names[p + 1] = P[p].name end
+  local bands = ME.guess(names)
+  check("console: bands guessed", #bands, 2)
+  check("console: model guessed", ME.guess_model(names, M.canvas_params({ bands = bands })), 8)
+  local layout = { controls = {}, aliases = {}, canvas = { kind = "eq", model = 8, bands = bands } }
+  M.set("Console :: EQ", layout)
+  local job = LN.start(user, 0, "Console :: EQ", layout)
+  run(job)
+  check("console: learned", job.state, "done")
+  check("console: ready", M.canvas_todo(layout.canvas), nil)
+  local L1 = ME.decode(layout.canvas.bands[1].learn)
+  check("console: quick", L1.D, true)
+  check("console: every model learned", L1.M and #L1.M, 2)
+  check("console: shapes within models", (function() local n = 0 for _ in pairs(L1.shapes) do n = n + 1 end return n end)(), 6)
+  check("console: alike bands learned once", layout.canvas.bands[2].learn, layout.canvas.bands[1].learn)
+  checkf("console: one band's steps only", function()
+    local n = 0
+    for _, st in ipairs(job.steps) do if st.k == 2 then n = n + 1 end end
+    return n == 0
+  end)
+  check("console: the E High Bell's tail kept", L1.shapes[2].C ~= nil, true)
+  check("console: a plain bell needs none", L1.shapes[1].C, nil)
+  check("console: British bell has its skirt", L1.shapes[4].C ~= nil, true)
+  local function settings(model)
+    local t = {}
+    for _, ty in ipairs({ 0, 0.5, 0.9 }) do
+      for _, g in ipairs({ 0.85, 0.65, 0.3, 0.1 }) do
+        t[#t + 1] = { [0] = ty, [1] = 0.35, [2] = g, [3] = 0.45, [4] = 0.9, [5] = 0.7, [6] = 0.5, [8] = model }
+      end
+    end
+    return t
+  end
+  local wa = worst(user, layout, settings(0))
+  checkf(("console: American within 1 dB (%.2f)"):format(wa), function() return wa < 1 end)
+  local wb = worst(user, layout, settings(1))
+  checkf(("console: British within 1 dB (%.2f)"):format(wb), function() return wb < 1 end)
+  -- without what the model misses, the E High Bell would be well out
+  local saved = {}
+  for k, b in ipairs(layout.canvas.bands) do saved[k] = b.learn; b.learn = b.learn:gsub(";C%d+=[^;]*", "") end
+  local wn = worst(user, layout, settings(0))
+  for k, b in ipairs(layout.canvas.bands) do b.learn = saved[k] end
+  checkf(("console: and without it, not (%.2f)"):format(wn), function() return wn > 1.5 end)
+  check("console: the model switch changes the sig", M.band_learned(layout.canvas.bands[1], nil), false)
 end
 
 -- ---------------------------------------------------------------------

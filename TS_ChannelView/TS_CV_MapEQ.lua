@@ -30,6 +30,14 @@
           the model's Q over the reported Q -- a plugin that means bandwidth
           or its own scale by "Q" is put right by the second -- (boosts,
           cuts), and the measured gain over the reported one
+    C<s>  what the model misses: the measured curve less the model, at each
+          gain measured, every third of an octave either side of the band's
+          frequency (ME.curve_db). A console type's tail, a shelf's bump
+          or dip, a boost shaped unlike its cut. Kept only where it's more
+          than ME.CURVE_MIN somewhere.
+    M     the plugin-wide model switch (TDR Slick EQ's EQ Model): its
+          parameter and positions. Every setting of it is learned, so <s>
+          counts shape positions within model positions (ME.slot).
 
   What a plugin CALLS a shape ("Notch", "Band Pass", "Tilt Shelf") and a
   slope ("24 dB/oct", "Brickwall") is read too (ME.type_of_name,
@@ -178,8 +186,8 @@ local function shelf_db(t, x, g, q, order)
   return db10(A * A * n / d)
 end
 
--- One band's response in dB at f. `b`: { type, f, g, q, order }.
-function ME.band_db(b, f)
+-- One band's model response in dB at f. `b`: { type, f, g, q, order }.
+local function model_db(b, f)
   local t, f0, q = b.type, b.f or 1000, math.max(0.05, b.q or 0.7071)
   if f0 <= 0 then return 0 end
   local x = f / f0
@@ -217,6 +225,104 @@ function ME.band_db(b, f)
     return db10(pass2(x * x, b.order or 2, q))
   end
   return 0
+end
+ME.model_db = model_db
+
+-- ---------------------------------------------------------------------
+-- what a model misses (C<s>)
+-- ---------------------------------------------------------------------
+-- Rows of { g, i0, v = { dB, ... } }: at gain g, v[1] at grid index i0,
+-- a grid index i being i * ME.CURVE_STEP octaves from the band's
+-- frequency. Past a row's ends it holds its last value (what was measured
+-- ends at 20 Hz and 20 kHz, and a tail goes on). A gainless type has one
+-- row at g = 0, used as it is.
+ME.CURVE_STEP = 1 / 3
+ME.CURVE_N = 30               -- +/- ten octaves
+ME.CURVE_MIN = 0.5            -- dB: less than this everywhere isn't kept
+
+-- (between grid points a smooth curve through them: Catmull-Rom)
+local function row_at(r, xi)
+  local v, n = r.v, #r.v
+  local j = xi - r.i0 + 1
+  if j <= 1 then return v[1] end
+  if j >= n then return v[n] end
+  local a = math.floor(j)
+  local t = j - a
+  local p0, p1, p2, p3 = v[math.max(1, a - 1)], v[a], v[a + 1], v[math.min(n, a + 2)]
+  return 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t
+                + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t)
+end
+
+-- The rows of each side, by size of gain (built once per C).
+local function sides(C)
+  if C.pos then return C end
+  C.pos, C.neg = {}, {}
+  for _, r in ipairs(C) do
+    if r.g == 0 then C.zero = r
+    elseif r.g > 0 then C.pos[#C.pos + 1] = r
+    else C.neg[#C.neg + 1] = r end
+  end
+  local function by(a, b) return math.abs(a.g) < math.abs(b.g) end
+  table.sort(C.pos, by); table.sort(C.neg, by)
+  return C
+end
+
+-- What C adds at x = f / f0 for a band at gain g: between the gains
+-- measured, blended; below the smallest and past the largest, in
+-- proportion; a side not measured mirrors the other.
+function ME.curve_db(C, x, g)
+  if not C or #C == 0 or not x or x <= 0 then return 0 end
+  sides(C)
+  local xi = math.log(x) / (math.log(2) * ME.CURVE_STEP)
+  if C.zero and #C.pos == 0 and #C.neg == 0 then return row_at(C.zero, xi) end
+  g = g or 0
+  if g == 0 then return 0 end
+  local side, flip = (g > 0) and C.pos or C.neg, 1
+  if #side == 0 then side, flip = (g > 0) and C.neg or C.pos, -1 end
+  if #side == 0 then return 0 end
+  local ag = math.abs(g)
+  local lo = side[1]
+  if ag <= math.abs(lo.g) then return flip * row_at(lo, xi) * ag / math.abs(lo.g) end
+  for k = 2, #side do
+    local hi = side[k]
+    local a, b = math.abs(lo.g), math.abs(hi.g)
+    if ag <= b then
+      local t = (b > a) and (ag - a) / (b - a) or 1
+      return flip * (row_at(lo, xi) * (1 - t) + row_at(hi, xi) * t)
+    end
+    lo = hi
+  end
+  return flip * row_at(lo, xi) * ag / math.abs(lo.g)
+end
+
+-- The grid indices C's rows cover: lo, hi (nil when empty).
+function ME.curve_span(C)
+  local lo, hi
+  for _, r in ipairs(C or {}) do
+    local a, b = r.i0, r.i0 + #r.v - 1
+    lo = lo and math.min(lo, a) or a
+    hi = hi and math.max(hi, b) or b
+  end
+  return lo, hi
+end
+
+-- How much of what a cut misses is drawn where the model is at `v` dB:
+-- all of it down to -6, none past -18 (deep in a stop band a measurement
+-- is noise, and a small step there is a big one in dB).
+function ME.curve_weight(t, v)
+  if not ME.GAINLESS[t] or v >= -6 then return 1 end
+  return math.max(0, 1 - (-6 - v) / 12)
+end
+
+-- One band's response in dB at f: the model, and what it misses when
+-- that was learned (b.c, ME.read_band).
+function ME.band_db(b, f)
+  local v = model_db(b, f)
+  if b.c and b.f and b.f > 0 then
+    local w = ME.curve_weight(b.type, v)
+    if w > 0 then v = v + w * ME.curve_db(b.c, f / b.f, b.g) end
+  end
+  return v
 end
 
 -- ---------------------------------------------------------------------
@@ -386,6 +492,7 @@ function ME.encode(L)
   if L.H and #L.H > 0 then parts[#parts + 1] = "H=" .. enc_list(L.H) end
   if L.O and #L.O > 0 then parts[#parts + 1] = "O=" .. enc_list(L.O) end
   if L.D then parts[#parts + 1] = "D=1" end
+  if L.Mp and L.M and #L.M > 0 then parts[#parts + 1] = ("M=%d:%s"):format(L.Mp, enc_list(L.M)) end
   local keys = {}
   for s in pairs(L.shapes or {}) do keys[#keys + 1] = s end
   table.sort(keys)
@@ -397,6 +504,15 @@ function ME.encode(L)
     if e.Q and #e.Q > 0 then parts[#parts + 1] = ("Q%d=%s"):format(s, enc_pts(e.Q)) end
     if e.R and #e.R > 0 then parts[#parts + 1] = ("R%d=%s"):format(s, enc_pts(e.R)) end
     if e.K then parts[#parts + 1] = ("K%d=%s"):format(s, enc_list(e.K)) end
+    if e.C and #e.C > 0 then
+      local rows = {}
+      for i, r in ipairs(e.C) do
+        local v = {}
+        for j, d in ipairs(r.v) do v[j] = string.format("%.1f", d):gsub("^(%-?)0%.", "%1."):gsub("^%-?%.0$", "0") end
+        rows[i] = ("%.3g@%d@%s"):format(r.g, r.i0, table.concat(v, ","))
+      end
+      parts[#parts + 1] = ("C%d=%s"):format(s, table.concat(rows, "|"))
+    end
   end
   return table.concat(parts, ";")
 end
@@ -413,6 +529,9 @@ function ME.decode(str)
     elseif k == "H" then L.H = dec_list(v)
     elseif k == "O" then L.O = dec_list(v)
     elseif k == "D" then L.D = (v == "1")
+    elseif k == "M" then
+      local p, l = v:match("^(%d+):(.*)$")
+      if p then L.Mp, L.M = tonumber(p), dec_list(l) end
     else
       local tag, s = k:match("^(%a)(%d+)$")
       s = tonumber(s)
@@ -427,7 +546,25 @@ function ME.decode(str)
         elseif tag == "G" then e.G = dec_pts(v)
         elseif tag == "Q" then e.Q = dec_pts(v)
         elseif tag == "R" then e.R = dec_pts(v)
-        elseif tag == "K" then e.K = dec_list(v) end
+        elseif tag == "K" then e.K = dec_list(v)
+        elseif tag == "C" then
+          e.C = {}
+          for row in (v .. "|"):gmatch("([^|]*)|") do
+            local g, i0, l = row:match("^([%-%+%d%.e]+)@(%-?%d+)@(.*)$")
+            if g then
+              local vals = dec_list(l)
+              -- smoothed a little ([1 4 1]): a measurement's ripple
+              -- third-octave to third-octave isn't the plugin's
+              local sm = {}
+              for j = 1, #vals do
+                if j == 1 or j == #vals then sm[j] = vals[j]
+                else sm[j] = (vals[j - 1] + 4 * vals[j] + vals[j + 1]) / 6 end
+              end
+              if #sm > 0 then e.C[#e.C + 1] = { g = tonumber(g), i0 = tonumber(i0), v = sm } end
+            end
+          end
+          if #e.C == 0 then e.C = nil end
+        end
       end
     end
   end
@@ -462,11 +599,86 @@ local function sorted_pts(map, logy)
   return pts
 end
 
+-- A measurement at f (log-frequency interpolation; nil outside it).
+local function measured_at(freqs, D, f)
+  local n = #freqs
+  if n == 0 or f < freqs[1] or f > freqs[n] then return nil end
+  local lo, hi = 1, n
+  while hi - lo > 1 do
+    local mid = (lo + hi) // 2
+    if freqs[mid] <= f then lo = mid else hi = mid end
+  end
+  local a, b = freqs[lo], freqs[hi]
+  if b <= a then return D[lo] end
+  local t = math.log(f / a) / math.log(b / a)
+  return D[lo] + (D[hi] - D[lo]) * t
+end
+
+-- What the model misses (C<s>): each measurement less the band as the
+-- canvas will draw it at those settings (`drawn(sm)`), on the grid about
+-- that band's frequency; a gain setting's measurements (several
+-- frequencies) by their median. Nil when it's under ME.CURVE_MIN
+-- everywhere. A cut's stop band is compared no deeper than FLOOR.
+function ME.residual(e, list, drawn)
+  local by, keys = {}, {}
+  for _, sm in ipairs(list) do
+    if not sm.qn and sm.freqs and sm.D then
+      local b = drawn(sm)
+      if b and b.f and b.f > 0 then
+        local key = ME.GAINLESS[e.type] and 0 or (sm.gn or 0)
+        local slot = by[key]
+        if not slot then slot = { g = {}, at = {} }; by[key] = slot; keys[#keys + 1] = key end
+        slot.g[#slot.g + 1] = b.g or 0
+        for i = -ME.CURVE_N, ME.CURVE_N do
+          local f = b.f * 2 ^ (i * ME.CURVE_STEP)
+          local m = measured_at(sm.freqs, sm.D, f)
+          if m then
+            local r = math.max(FLOOR, m) - math.max(FLOOR, model_db(b, f))
+            slot.at[i] = slot.at[i] or {}
+            table.insert(slot.at[i], r)
+          end
+        end
+      end
+    end
+  end
+  local rows, big = {}, 0
+  for _, key in ipairs(keys) do
+    local slot = by[key]
+    local g = median(slot.g) or 0
+    if ME.GAINLESS[e.type] then g = 0 end
+    if g == 0 and not ME.GAINLESS[e.type] then goto next end
+    do
+      local lo, hi
+      for i in pairs(slot.at) do
+        lo = lo and math.min(lo, i) or i
+        hi = hi and math.max(hi, i) or i
+      end
+      if lo then
+        local v, last = {}, 0
+        for i = lo, hi do
+          local m = slot.at[i] and median(slot.at[i])
+          if m then last = m end
+          v[#v + 1] = m or last
+          big = math.max(big, math.abs(v[#v]))
+        end
+        rows[#rows + 1] = { g = g, i0 = lo, v = v }
+      end
+    end
+    ::next::
+  end
+  if #rows == 0 or big < ME.CURVE_MIN then return nil end
+  table.sort(rows, function(a, b) return a.g < b.g end)
+  return rows
+end
+
 -- `samples`: { { s = shape pos, fn = freq norm, gn = gain norm, qn = Q
--- norm (only on Q sweeps), fit = ME.fit result } }. `opts`: { kind,
--- S, H, Z, has_freq }. Returns L for ME.encode, or nil and why.
+-- norm (only on Q sweeps), fit = ME.fit result, freqs / D = the
+-- measurement, order = the order it was fitted at } }. `opts`: { kind,
+-- S, H, Z, O, direct, has_freq, M, Mp }. Returns L for ME.encode, or nil
+-- and why.
 function ME.summarise(samples, opts)
-  local L = { S = opts.S, H = opts.H, Z = opts.Z, O = opts.O, D = opts.direct or nil, shapes = {} }
+  local L = { S = opts.S, H = opts.H, Z = opts.Z, O = opts.O, D = opts.direct or nil,
+              M = opts.M, Mp = opts.M and opts.Mp or nil, shapes = {} }
   local by_s = {}
   for _, sm in ipairs(samples) do
     if sm.fit then
@@ -531,10 +743,13 @@ function ME.summarise(samples, opts)
           if sm.rep_g and math.abs(sm.rep_g) > 1 and sm.fit.g and sm.rep_g * sm.fit.g > 0 then
             gk[#gk + 1] = sm.fit.g / sm.rep_g
           end
-          if sm.rep_q and sm.rep_q > 0 then
+          -- (a Q that reads nothing for this shape -- "----" -- is drawn
+          -- from 0.7071, so that's what it's measured against)
+          local rq = (sm.rep_q and sm.rep_q > 0) and sm.rep_q or 0.7071
+          if not ME.GAINLESS[t] or sm.fit.q then
             -- boosts and cuts apart: a band can be narrower one way
-            if (sm.fit.g or 0) < 0 then qc[#qc + 1] = sm.fit.q / sm.rep_q
-            else qk[#qk + 1] = sm.fit.q / sm.rep_q end
+            if (sm.fit.g or 0) < 0 then qc[#qc + 1] = sm.fit.q / rq
+            else qk[#qk + 1] = sm.fit.q / rq end
           end
         end
       end
@@ -552,6 +767,17 @@ function ME.summarise(samples, opts)
         for _, sm in ipairs(list) do if sm.fit.type == t then fs[#fs + 1] = sm.fit.f end end
         e.F = { { 0, median(fs) or 1000 } }
       end
+      -- as ME.read_band draws it from the plugin's readings
+      local K = e.K
+      e.C = ME.residual(e, list, function(sm)
+        local g = (sm.rep_g or 0) * (K[4] or 1)
+        if sm.rep_g == -math.huge then g = -60 * (K[4] or 1) end
+        if ME.GAINLESS[t] then g = 0 end
+        local rq = (sm.rep_q and sm.rep_q > 0) and sm.rep_q or 0.7071
+        local f = sm.rep_f and sm.rep_f > 0 and sm.rep_f * (K[1] or 1) or (e.F[1] and e.F[1][2]) or 1000
+        return { type = t, order = sm.order or o, f = f, g = g,
+                 q = rq * ((g < 0 and (K[3] or K[2])) or K[2] or 1) }
+      end)
       L.shapes[s] = e
       goto continue
     end
@@ -567,6 +793,13 @@ function ME.summarise(samples, opts)
     e.R = sorted_pts(R, true)
     if #e.F == 0 then return nil, "no frequency could be measured" end
     if #e.Q == 0 then e.Q = { { 0, q0 } } end
+    -- as ME.read_band draws it from the learned tables
+    e.C = ME.residual(e, list, function(sm)
+      local f = (#e.F > 1 and sm.fn) and UN.interp(e.F, sm.fn, true) or e.F[1][2]
+      local g = (sm.gn and #e.G > 0) and UN.interp(e.G, sm.gn) or 0
+      if ME.GAINLESS[t] then g = 0 end
+      return { type = t, order = sm.order or o, f = f, g = g, q = ME.q_at(e.Q, g) or 0.7071 }
+    end)
     L.shapes[s] = e
     ::continue::
   end
@@ -660,6 +893,17 @@ ME.nearest_index = nearest_index
 
 local function norm(track, addr, p) return reaper.TrackFX_GetParamNormalized(track, addr, p) or 0 end
 
+-- Which learned entry (<s>) the band is on now: its shape switch's
+-- position, within the model switch's (M).
+function ME.slot(track, addr, b, L)
+  local h, nh = 1, 1
+  if b.shape and L.H then h, nh = nearest_index(L.H, norm(track, addr, b.shape)), #L.H end
+  if L.Mp and L.M and #L.M > 1 then
+    return (nearest_index(L.M, norm(track, addr, L.Mp)) - 1) * nh + h
+  end
+  return h
+end
+
 -- Whether a switch reads "on", by what it says: On / Enabled / Active /
 -- In / Yes against Off / Disabled / Inactive / Out / No ("Not ..." the
 -- other way round), else by its value. A parameter named Bypass is on
@@ -742,8 +986,7 @@ end
 function ME.read_band(track, addr, b, all_on)
   local L = ME.decode(b.learn)
   if not L then return nil end
-  local s = 1
-  if b.shape and L.H then s = nearest_index(L.H, norm(track, addr, b.shape)) end
+  local s = ME.slot(track, addr, b, L)
   local e = L.shapes[s] or L.shapes[1]
   if not e then
     for _, v in pairs(L.shapes) do e = v break end
@@ -756,8 +999,12 @@ function ME.read_band(track, addr, b, all_on)
   local nt, norder = ME.live_type(track, addr, b)
   local same = (not nt) or nt == e.type
   if nt then out.type = nt; out.order = norder or (same and e.order) or nil end
+  -- what the model misses, when it was learned as this type
+  if same then out.c = e.C end
   local so = ME.live_order(track, addr, b)
   if so then out.order = so end
+  -- a cut's measured shape belongs to the slope it was measured at
+  if out.c and ME.GAINLESS[out.type] and (out.order or 2) ~= (e.order or 2) then out.c = nil end
   if L.D then
     -- the plugin's own values, put right by what was measured (when it was
     -- measured as this type)
@@ -832,9 +1079,7 @@ end
 function ME.set_freq(track, addr, b, hz)
   local L = ME.decode(b.learn)
   if not (L and b.freq) then return end
-  local s = 1
-  if b.shape and L.H then s = nearest_index(L.H, norm(track, addr, b.shape)) end
-  local e = L.shapes[s] or L.shapes[1]
+  local e = L.shapes[ME.slot(track, addr, b, L)] or L.shapes[1]
   if not e then return end
   local v
   if L.D then
@@ -886,19 +1131,14 @@ function ME.set_gain(track, addr, b, db)
   local fmt = UN.formatter(track, addr, b.gain)
   local _, unit = UN.at(fmt, 0.5)
   local v
-  local s0 = 1
-  if b.shape and L.H then s0 = nearest_index(L.H, norm(track, addr, b.shape)) end
-  local e0 = L.shapes[s0] or L.shapes[1]
+  local e0 = L.shapes[ME.slot(track, addr, b, L)] or L.shapes[1]
   if unit == "db" then
     local kp, kn = 1, 1
     if not L.D and e0 then kp, kn = gain_scale(track, addr, b, e0) end
     local t = (db >= 0) and db / (kp ~= 0 and kp or 1) or db / (kn ~= 0 and kn or 1)
     v = UN.find_norm(fmt, t)
   else
-    local s = 1
-    if b.shape and L.H then s = nearest_index(L.H, norm(track, addr, b.shape)) end
-    local e = L.shapes[s] or L.shapes[1]
-    if e and e.G and #e.G > 1 then v = UN.invert(e.G, db) end
+    if e0 and e0.G and #e0.G > 1 then v = UN.invert(e0.G, db) end
   end
   if v and math.abs(v - norm(track, addr, b.gain)) > 1e-6 then
     reaper.TrackFX_SetParamNormalized(track, addr, b.gain, math.max(0, math.min(1, v)))
@@ -1334,6 +1574,31 @@ function ME.guess(names)
   table.sort(ks)
   for i = 1, math.min(#ks, 8) do out[#out + 1] = num[ks[i]] end
   return out
+end
+
+-- A plugin-wide model switch from the parameters' names (TDR Slick EQ's
+-- "EQ Model"; a "Model", "Character", "Console", "Mode" or "Type" that
+-- isn't any band's), or nil. `used`: { [param] = true } already mapped.
+-- `is_switch(p)`, when given, must agree it's a switch of a few settings.
+local MODEL_WORDS = { "%f[%a]model%f[%A]", "%f[%a]character%f[%A]", "%f[%a]console%f[%A]",
+                      "%f[%a]flavou?r%f[%A]", "^ eq mode $", "^ eq type $", "^ mode $", "^ type $", "^ style $" }
+local MODEL_NOT = { "%d", "band", "phase", "speaker", "dyn", "oversampl", "quality", "process", "stereo",
+                    "channel", "m/s", "sidechain", "side chain", "meter", "analy", "display", "scale", "solo" }
+function ME.guess_model(names, used, is_switch)
+  for p0, raw in ipairs(names) do
+    local p = p0 - 1
+    local nm = " " .. (raw or ""):lower():gsub("^%s+", ""):gsub("%s+$", "") .. " "
+    if not (used and used[p]) then
+      local bad = false
+      for _, w in ipairs(MODEL_NOT) do if nm:find(w, 1, not w:find("%", 1, true)) then bad = true break end end
+      if not bad then
+        for _, w in ipairs(MODEL_WORDS) do
+          if nm:find(w) and (not is_switch or is_switch(p)) then return p end
+        end
+      end
+    end
+  end
+  return nil
 end
 
 return ME

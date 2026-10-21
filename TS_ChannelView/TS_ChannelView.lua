@@ -1,11 +1,15 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.5.1
+-- @version 2.5.5
 -- @changelog
---  ChannelView Rack can start with REAPER (its own Run when REAPER starts).
---  A toolbar in its own window shows its name, as a drawer does. Fixed: a
---  toolbar window sized a little short showed nothing and had no
---  right-click menu.
+--  Freeze: Freeze track, Freeze up to the selected plugin and Unfreeze from
+--  the header's snowflake, frozen plugins shown where they were; the probes
+--  and ChannelView Modulators are never frozen. Rack: Collapse all, and
+--  chevrons that point up to fold. A track left with one probe gets the
+--  other back. EQ canvases draw what learning measured beyond each band's
+--  formula (console types' tails, shelves' bumps), and a plugin-wide Model
+--  switch (TDR Slick EQ) is learned at every setting. Learn an EQ layout
+--  again to have these.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -98,6 +102,7 @@
 --  [nomain] TS_CV_KnobParts.lua
 --  [nomain] TS_CV_KnobEditor.lua
 --  [nomain] TS_CV_Recipes.lua
+--  [nomain] TS_CV_Freeze.lua
 --  [nomain] textures/TS_CV_finish_brushed.png
 --  [nomain] textures/TS_CV_finish_anodised.png
 --  [nomain] textures/TS_CV_finish_bright.png
@@ -220,6 +225,8 @@ local SD = require("TS_CV_Sends")
 local RV = require("TS_CV_Receives")
 local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
+local FZ = require("TS_CV_Freeze")
+local FB = require("TS_CV_FXButtons")
 local WL = require("TS_CV_WebLink")
 local TM = require("TS_CV_TrackMenu")
 local TO = require("TS_CV_TrackOps")
@@ -268,6 +275,8 @@ if RACK then
   -- ChannelView's until one is picked here)
   St.VARIANT = "rvariant:"
   M.VIEW_DEFAULTS = M.RACK_DEFAULTS_SECT
+  -- its panels fold upwards: chevrons point up to fold, down to unfold
+  W.CHEVRONS_UPDOWN = true
 end
 DR.organise = function(d, it) AE.open(d, it) end
 DR.share = function(mode) AE.share(mode) end
@@ -439,7 +448,14 @@ local function rescan(force)
     local fh = T.hash(full)
     if fh ~= app.full_hash or app.track ~= app.full_track then
       app.full_hash, app.full_track = fh, app.track
-      if TP.keep_in_place(app.track) then
+      -- after an unfreeze (from anywhere) the helpers go back to their
+      -- slots; a lone probe gets its partner back, unless the other is
+      -- frozen and comes back with an unfreeze
+      local moved = FZ.sync(app.track)
+      FZ.forget()
+      local fz = FZ.state(app.track, U.clean_fx_name)
+      if not FZ.busy() and fz.probes == 0 and TP.complete_pair(app.track) then moved = true end
+      if TP.keep_in_place(app.track) or moved then
         full = T.collect(app.track)
         app.full_hash = T.hash(full)
       end
@@ -532,6 +548,123 @@ local function layout_for(fx)
   local key = St.layout_key(fx.name, fx.guid, app.track, fx.addr)
   local layout, is_default = M.get_or_default(key, app.track, fx.addr, fx.guid)
   return layout, key, is_default
+end
+
+-- The Rack view's Collapse all: folds every open plugin of the track and
+-- remembers which, so the button's second press opens only those (one
+-- already folded stays folded). Per track, for the session.
+local rack_folded = {}          -- track GUID -> { fx guid, ... }
+local function rack_key() return app.track and reaper.GetTrackGUID(app.track) or "" end
+-- the plugins Collapse all folded that are still here and still folded
+local function rack_folded_back()
+  local list = rack_folded[rack_key()]
+  if not list then return nil end
+  local here = {}
+  for _, fx in ipairs(app.chain or {}) do here[fx.guid] = true end
+  local out = {}
+  for _, g in ipairs(list) do
+    if here[g] and St.is_collapsed(g) then out[#out + 1] = g end
+  end
+  if #out == 0 then rack_folded[rack_key()] = nil; return nil end
+  return out
+end
+local function rack_fold_all()
+  local list = {}
+  for _, fx in ipairs(app.chain or {}) do
+    if not St.is_collapsed(fx.guid) then
+      St.set_collapsed(fx.guid, true)
+      list[#list + 1] = fx.guid
+    end
+  end
+  if #list > 0 then rack_folded[rack_key()] = list end
+end
+local function rack_unfold_all()
+  for _, g in ipairs(rack_folded_back() or {}) do St.set_collapsed(g, false) end
+  rack_folded[rack_key()] = nil
+end
+
+-- ---------------------------------------------------------------------
+-- freeze (TS_CV_Freeze): REAPER's own, with the frozen plugins shown
+-- where they were
+-- ---------------------------------------------------------------------
+local function frozen_state()
+  if not app.track then return { levels = 0, fx = {} } end
+  return FZ.state(app.track, U.clean_fx_name)
+end
+-- the top-level slot (0-based) and name of the selected plugin, or nil
+local function freeze_point()
+  local g = app.track and FB.selected(app.track)
+  if not g then return nil end
+  for _, fx in ipairs(app.chain or {}) do
+    if fx.guid == g then
+      local top = (fx.ancestors and fx.ancestors[1]) or fx
+      return fx.top_index, U.clean_fx_name(top.name or "")
+    end
+  end
+  return nil
+end
+local function do_freeze(upto)
+  local ok, why = FZ.freeze(app.track, upto)
+  if not ok and why then reaper.MB(why, "ChannelView", 0) end
+  rescan(true)
+end
+local function do_unfreeze()
+  FZ.unfreeze(app.track)
+  rescan(true)
+end
+-- The freeze menu's items (the header's button, a frozen strip's click).
+local function freeze_items(ctx, st)
+  local upto, name = freeze_point()
+  local idle = not FZ.busy()
+  if ImGui.MenuItem(ctx, "Freeze track", nil, false, idle) then do_freeze(nil) end
+  if ImGui.MenuItem(ctx, upto and ("Freeze up to " .. name) or "Freeze up to selected", nil, false, idle and upto ~= nil) then
+    do_freeze(upto)
+  end
+  if idle and not upto and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, "Click a plugin's panel first.")
+  end
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Unfreeze", nil, false, idle and st.levels > 0) then do_unfreeze() end
+end
+
+-- The frozen plugins' names, one per strip (a level with none read: one
+-- strip for it).
+local function frozen_names(st)
+  if #st.fx > 0 then return st.fx end
+  local out = {}
+  for i = 1, st.levels do out[i] = "Frozen plugins" end
+  return out
+end
+
+-- A frozen plugin's strip at x, y, w by h: ice, a snowflake and its name
+-- (across, or up the strip when it's narrow). A click opens the freeze
+-- menu, for Unfreeze.
+local function frozen_strip(ctx, id, x, y, w, h, name, st)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.InvisibleButton(ctx, id, math.max(1, w), math.max(1, h))
+  local hov = ImGui.IsItemHovered(ctx)
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) or ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+    ImGui.OpenPopup(ctx, id .. "_m")
+  end
+  if hov then ImGui.SetTooltip(ctx, name .. " (frozen)\nClick: Unfreeze") end
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, hov and C.COL.frozen_head or C.COL.frozen_bg, 3.0)
+  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, U.with_alpha(C.COL.frozen_line, 0x70), 3.0, 0, 1.0)
+  local isz = math.min(14, w - 6, h - 6)
+  if w >= h then
+    W.ICONS.freeze(dl, x + 5, y + (h - isz) * 0.5, isz, C.COL.frozen_text)
+    local _, th = ImGui.CalcTextSize(ctx, "X")
+    ImGui.DrawList_PushClipRect(dl, x, y, x + w - 4, y + h, true)
+    ImGui.DrawList_AddText(dl, x + isz + 10, y + (h - th) * 0.5, C.COL.frozen_text, name)
+    ImGui.DrawList_PopClipRect(dl)
+  else
+    W.ICONS.freeze(dl, x + (w - isz) * 0.5, y + 5, isz, C.COL.frozen_text)
+    W.vertical_text(ctx, dl, x + w * 0.5, y + isz + 10, name, C.COL.frozen_text, h - isz - 16)
+  end
+  if ImGui.BeginPopup(ctx, id .. "_m") then
+    freeze_items(ctx, st)
+    ImGui.EndPopup(ctx)
+  end
 end
 
 -- Direct manipulation (right-click a knob, Remove) has to write to the
@@ -3769,6 +3902,40 @@ local function menu_bar()
     end
   end
 
+  -- Freeze: lit while the track has frozen plugins
+  if app.track then
+    local tw = C.ICON_SIZE + 6
+    if fx_left - menus_right > tw + 40 then
+      local fst = frozen_state()
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
+      if W.icon_button(ctx, "freezebtn", "freeze", C.ICON_SIZE, fst.levels > 0,
+          fst.levels > 0 and "Frozen" or "Freeze", C.COL.frozen_text) then
+        ImGui.OpenPopup(ctx, "freezemenu")
+      end
+      if ImGui.BeginPopup(ctx, "freezemenu") then
+        freeze_items(ctx, fst)
+        ImGui.EndPopup(ctx)
+      end
+      fx_left = fx_left - tw
+    end
+  end
+
+  -- The rack: fold every plugin, or open again the ones that folded
+  if RACK and app.track then
+    local tw = C.ICON_SIZE + 6
+    if fx_left - menus_right > tw + 40 then
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
+      local back = rack_folded_back()
+      if W.icon_button(ctx, "rackfoldall", back and "expand_all" or "collapse_all", C.ICON_SIZE, false,
+          back and "Expand all" or "Collapse all") then
+        if back then rack_unfold_all() else rack_fold_all() end
+      end
+      fx_left = fx_left - tw
+    end
+  end
+
   track_title(ctx, menus_right + 12, fx_left - 12, mid_y)
 
   do
@@ -4083,6 +4250,8 @@ local function panel_row(row_h, row_w)
       -- pack left and the row scrolls, which is the only sane behaviour.
       if C.ROW_ALIGN == "centre" and #app.chain > 0 then
         local total = C.PANEL_GAP + C.ADD_TILE_W
+        local fst0 = frozen_state()
+        if fst0.levels > 0 then total = total + #frozen_names(fst0) * (26 + C.PANEL_GAP) end
         for i, fx in ipairs(app.chain) do
           local lay, k = layout_for(fx)
           local has_meter = M.meter_of(lay) ~= nil
@@ -4102,7 +4271,16 @@ local function panel_row(row_h, row_w)
 
       local row_top = select(2, ImGui.GetCursorScreenPos(ctx))
       app.brk_top = row_top
-      if #app.chain == 0 then
+      -- the frozen plugins first, as narrow strips where they were
+      local fst = frozen_state()
+      if fst.levels > 0 then
+        for k, name in ipairs(frozen_names(fst)) do
+          local sx = ImGui.GetCursorScreenPos(ctx)
+          frozen_strip(ctx, "fz" .. k, sx, row_top, 26, inner_h, name, fst)
+          ImGui.SetCursorScreenPos(ctx, sx + 26 + C.PANEL_GAP, row_top)
+        end
+      end
+      if #app.chain == 0 and fst.levels == 0 then
         ImGui.TextDisabled(ctx, "No plugins on this track yet \u{2014}")
         ImGui.SameLine(ctx)
       end
@@ -4345,19 +4523,56 @@ local function rack_brk_lines(colx, strip_y)
   end
 end
 
--- inside the column's child window
-local function rack_inside()
+-- inside the column's child window, `rack_w` wide: the column less the
+-- scrollbar's room, kept whether or not it's showing, so the panels don't
+-- jump when it comes and goes (and, showing, it sits right against them)
+local function rack_inside(rack_w)
   app.panel_rects = {}
-  local inner_w = ImGui.GetContentRegionAvail(ctx)
-  -- room for the scrollbar, so the panels don't jump when it comes and goes
-  local rack_w = math.max(120, inner_w - ImGui.GetStyleVar(ctx, ImGui.StyleVar_ScrollbarSize))
+  rack_w = math.max(120, math.min(rack_w, (ImGui.GetContentRegionAvail(ctx))))
   if not app.track then
     ImGui.TextDisabled(ctx, "Select a track.")
   else
     -- the plugins, each as wide as the column (less the brackets round it)
-    if #app.chain == 0 then ImGui.TextDisabled(ctx, "No plugins on this track yet.") end
+    if #app.chain == 0 and frozen_state().levels == 0 then
+      ImGui.TextDisabled(ctx, "No plugins on this track yet.")
+    end
     local colx = ImGui.GetCursorScreenPos(ctx)
     local indent = rack_indents()
+    -- the frozen plugins first, where they were, then a line to unfreeze at
+    local fst = frozen_state()
+    if fst.levels > 0 then
+      local _, fy = ImGui.GetCursorScreenPos(ctx)
+      for k, name in ipairs(frozen_names(fst)) do
+        frozen_strip(ctx, "rfz" .. k, colx, fy, rack_w, C.HEADER_H + 2, k .. " \u{00B7} " .. name, fst)
+        fy = fy + C.HEADER_H + 2 + C.PANEL_GAP
+      end
+      -- the line between: "frozen above", dashes, Unfreeze, on a band of
+      -- its own the column's width
+      local dl = ImGui.GetWindowDrawList(ctx)
+      local lh = 18
+      ImGui.DrawList_AddRectFilled(dl, colx, fy, colx + rack_w, fy + lh, C.COL.panel_bg, 3.0)
+      local my = math.floor(fy + lh * 0.5) + 0.5
+      W.push_small(ctx)
+      local lbl = "frozen above"
+      local lw, lth = ImGui.CalcTextSize(ctx, lbl)
+      ImGui.DrawList_AddText(dl, colx + 6, my - lth * 0.5, C.COL.frozen_text, lbl)
+      local bt = "Unfreeze"
+      local bw = ImGui.CalcTextSize(ctx, bt) + 12
+      local bx = colx + rack_w - bw - 2
+      local px = colx + lw + 12
+      while px < bx - 6 do
+        ImGui.DrawList_AddLine(dl, px, my, math.min(px + 4, bx - 6), my, C.COL.frozen_line, 1.0)
+        px = px + 7
+      end
+      ImGui.SetCursorScreenPos(ctx, bx, fy + 1)
+      if ImGui.InvisibleButton(ctx, "rfz_unfreeze", bw, lh - 2) then do_unfreeze() end
+      local bh = ImGui.IsItemHovered(ctx)
+      ImGui.DrawList_AddRectFilled(dl, bx, fy + 1, bx + bw, fy + lh - 1,
+        bh and C.COL.frozen_line or U.with_alpha(C.COL.frozen_line, 0x90), 3.0)
+      ImGui.DrawList_AddText(dl, bx + 6, my - lth * 0.5, C.COL.frozen_bg, bt)
+      W.pop_small(ctx)
+      ImGui.SetCursorScreenPos(ctx, colx, fy + lh + C.PANEL_GAP)
+    end
     -- the containers starting at each panel, outermost first
     local starts = {}
     for _, b in ipairs(app.brackets or {}) do
@@ -4424,11 +4639,21 @@ end
 
 -- The column: the macros and modulators pinned across the top, the sends
 -- and receives across the foot, and between them the plugins, which
--- scroll. The strips are as wide as the plugins (the scrollbar's room
--- aside).
+-- scroll. The strips are as wide as the plugins. The plugins' scrollbar
+-- sits in the window's own margin at the right edge (as thin as that
+-- margin), so the column keeps the same margins either side whether it's
+-- showing or not; with a drawer on the right, an 8 px one is kept room for.
+local RACK_SB = 8
 local function rack_column(col_w, col_h)
   local x0, y0 = ImGui.GetCursorScreenPos(ctx)
-  local rack_w = math.max(120, col_w - ImGui.GetStyleVar(ctx, ImGui.StyleVar_ScrollbarSize))
+  local wx = ImGui.GetWindowPos(ctx)
+  local ww = ImGui.GetWindowSize(ctx)
+  local edge = wx + ww - (ImGui.GetStyleVar(ctx, ImGui.StyleVar_WindowBorderSize) or 0)
+  local room = math.floor(edge - (x0 + col_w))
+  local margin = room >= 5 and room <= 16
+  local sb_w = margin and room or RACK_SB
+  local reach = margin and room or 0
+  local rack_w = math.max(120, col_w + reach - sb_w)
   local top_h, foot = 0, {}
   if app.track then
     MR.STRIP_W, SD.STRIP_W, RV.STRIP_W = rack_w, rack_w, rack_w
@@ -4456,13 +4681,20 @@ local function rack_column(col_w, col_h)
   -- the plugins
   ImGui.SetCursorScreenPos(ctx, x0, y0 + top_h)
   local cx0, cy0 = ImGui.GetCursorPos(ctx)
-  if ImGui.BeginChild(ctx, "rackcol", col_w, mid_h, 0,
-      ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_HorizontalScrollbar) then
-    rack_inside()
+  -- (the window clips its children half a margin in: let this one reach
+  -- the edge, so its scrollbar isn't cut)
+  ImGui.PushClipRect(ctx, x0, y0 + top_h, x0 + col_w + reach, y0 + top_h + mid_h, false)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_ScrollbarSize, sb_w)
+  local open = ImGui.BeginChild(ctx, "rackcol", col_w + reach, mid_h, 0,
+      ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_HorizontalScrollbar)
+  ImGui.PopStyleVar(ctx)
+  if open then
+    rack_inside(rack_w)
     ImGui.EndChild(ctx)
   else
-    W.child_skipped(ctx, col_w, mid_h, cx0, cy0)
+    W.child_skipped(ctx, col_w + reach, mid_h, cx0, cy0)
   end
+  ImGui.PopClipRect(ctx)
   -- the sends and the receives
   local fy = y0 + top_h + mid_h
   for _, f in ipairs(foot) do
@@ -4474,6 +4706,9 @@ local function rack_column(col_w, col_h)
   -- the column's whole height taken, as one item, for what follows
   ImGui.SetCursorScreenPos(ctx, x0, y0)
   ImGui.Dummy(ctx, col_w, math.max(col_h, fy - y0))
+  -- (reaching into the margin makes the window a few pixels wider than it
+  -- shows; it never scrolls across for them)
+  if reach > 0 and ImGui.GetScrollX(ctx) ~= 0 then ImGui.SetScrollX(ctx, 0) end
 end
 
 -- ---------------------------------------------------------------------
@@ -4494,6 +4729,7 @@ local function frame()
   P.begin_frame()
   P.begin_rects()
   MR.begin_frame()
+  if FZ.poll() then rescan(true) end
   follow_selection()
   do
     local now = reaper.time_precise()

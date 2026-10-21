@@ -1347,8 +1347,10 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   local function at(i) ImGui.SetCursorScreenPos(ctx, btn_x + (btn + gap) * i, y + 3) end
 
   at(0)
-  if W.icon_button(ctx, "col##" .. fx.guid, "collapse", btn, false,
-      "Collapse (or double-click the name)") then
+  -- (the rack draws a folded panel's header too: there it unfolds)
+  local folded = P.RACK and St.is_collapsed(fx.guid)
+  if W.icon_button(ctx, "col##" .. fx.guid, folded and "expand" or "collapse", btn, false,
+      folded and "Expand (or double-click the name)" or "Collapse (or double-click the name)") then
     req.toggle_collapse = true
   end
 

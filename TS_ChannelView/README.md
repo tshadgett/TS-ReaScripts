@@ -64,6 +64,9 @@ the track is whichever you select in REAPER's mixer or track panel.
   its menu. Drag a panel by its header to move the plugin.
 - Folding is its own, and so are its action bars: the four *Rack* places
   (a bar's right-click ▸ *Place*, or ☰ ▸ Drawers ▸ *New* in the rack).
+  Its chevrons point up to fold a panel and down to open it.
+- **Collapse all**: the double chevron in its header folds every plugin;
+  pressed again, it opens only the ones it folded.
 - **A layout of its own.** A plugin can have one layout laid out across
   for ChannelView and another laid out down for the rack: pick it from the
   panel's *Layout* menu in the rack, and *Make … the rack's default* for
@@ -73,6 +76,24 @@ the track is whichever you select in REAPER's mixer or track panel.
   the other follows.
 - **☰ ▸ Run when REAPER starts** starts the rack with REAPER, on its own:
   ChannelView's option and the rack's are separate.
+
+## Freeze
+
+The **❄** button in the header (ChannelView and the rack) freezes the
+track with REAPER's own freeze: **Freeze track**, **Freeze up to** the
+selected plugin (click its panel first), and **Unfreeze**. The freeze is
+stereo. Frozen plugins stay where they were, as ice strips at the start of
+the chain; in the rack, a *frozen above* line with an Unfreeze button sits
+under them. Click a strip for the same menu. The button is lit while the
+track has frozen plugins.
+
+ChannelView's own plugins are never frozen: the probes and ChannelView
+Modulators move to just after the plugins being frozen, so they go on
+measuring and modulating the live chain, and go back to their places at
+any unfreeze, ChannelView's or REAPER's own. With *Freeze up to*, the
+plugins after the chosen one are taken offline while REAPER freezes and
+put back online when it's done. REAPER's freeze includes the track's
+receives.
 
 ## Ganging
 
@@ -876,9 +897,11 @@ hidden track between a pair of its own measuring plugins
 setting does — every position of a switch, a range of gains (boost and cut
 separately, since many EQs differ), each shape and the Q. A band whose
 plugin reports its frequency, gain and Q needs only a quick check of each
-shape. REAPER has to be processing FX while stopped (Preferences ▸ Audio ▸
-*Run FX when stopped*, on by default). The canvas is ready once every band
-is learned; change a band's controls and it learns that band again.
+shape, at each gain; bands that are alike (the same shape switch) are
+learned once and share it. REAPER has to be processing FX while stopped
+(Preferences ▸ Audio ▸ *Run FX when stopped*, on by default). The canvas is
+ready once every band is learned; change a band's controls and it learns
+that band again.
 On the canvas, drag a node across for frequency (a switch snaps to its
 settings) and up or down for gain; the wheel turns Q; double-click takes
 the band out (flat, or off). Right-click a node for its shapes and its On
@@ -890,10 +913,18 @@ and brickwall, notch, band pass, tilt shelf, flat tilt, flat top, sword and
 all pass. A plugin that names its shapes (Pro-Q's *Notch*, Kirchhoff-EQ's
 *E LMF* or *Wall LP*) is drawn by the name it shows now, and its slope is
 read from its own *Slope* control, so a change made in the plugin shows at
-once. A switch with up to 64 settings can be learned. Layouts learned
-with an earlier ChannelView draw the newer shapes without learning again,
-but learning again (*Set up this layout…* ▸ *Learn*) is worth doing for an
-EQ whose bands all drew as bells.
+once. A switch with up to 64 settings can be learned.
+
+Learning also keeps what a shape does that no formula catches — a console
+type's long tail, a shelf's bump or dip, a boost shaped unlike its cut —
+and the canvas draws it, smoothly, at any gain. The *Learned* column in the
+setup says *measured shape* where a band has one. A plugin-wide switch that
+changes every band (TDR Slick EQ's *EQ Model*) can be named as the
+**Model** in the setup (ChannelView guesses it from the names; clear it if
+it guessed wrong): learning measures every setting of it, which takes as
+many times longer, and the canvas draws the one the plugin is on. Layouts
+learned with an earlier ChannelView keep drawing as they did; learn again
+(*Set up this layout…* ▸ *Learn*) to have the measured shapes.
 
 An EQ layout can be a **dynamic EQ**: tick *Dynamics* in its setup and map
 each band's threshold, range, ratio, attack, release and dynamics switch.
@@ -1198,6 +1229,7 @@ its `_on` partner while it's on).
 | `TS_CV_Busy.lua` | backing off while REAPER is busy |
 | `TS_CV_MapPanel.lua` | an EQ layout's canvas |
 | `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them |
+| `TS_CV_Freeze.lua` | freezing: REAPER's own, with the frozen plugins shown where they were and ChannelView's own plugins kept live |
 | `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: EQ bands, thresholds, reverb decay, saturation |
 | `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` |
 | `TS_CV_Trimmer.jsfx` | the Trimmer plugin. Goes in `Effects/` |
@@ -1620,7 +1652,9 @@ such as Melodyne, which REAPER keeps first, the first probe goes second.
 The probes are kept out of the plugin row, and the **Probes** button says
 what's there: dim with none (click it to add a pair), lit with a pair,
 teal when this track feeds TS Visualizer's spectrum, amber when one of
-the pair is missing. With any there, clicking it opens a menu: *Add the
+the pair is missing. A track left with one probe of the pair gets the other
+back when ChannelView shows it, unless the other is frozen (it comes back
+with the unfreeze). With any there, clicking it opens a menu: *Add the
 missing probe*; *In the Visualizer's spectrum* — *Not included*, *Before
 the chain* (the pre probe) or *After the chain* (the post probe); and
 *Remove the probes…*, which asks first, saying how many plugins they

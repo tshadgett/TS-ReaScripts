@@ -633,6 +633,11 @@ C.PALETTE = {
   icon_hot      = { "tint",   -2.1, 0.394, 0.935 },
   icon_on       = { "tint",   -5.7, 0.257, 0.069 },
   bypass_on     = { "alert",   -0.1, 0.645, 0.569 },
+  -- frozen plugins (TS_CV_Freeze): ice, the same whatever the hue
+  frozen_bg     = { "fixed",  205.0, 0.260, 0.180 },
+  frozen_head   = { "fixed",  205.0, 0.280, 0.225 },
+  frozen_text   = { "fixed",  205.0, 0.700, 0.780 },
+  frozen_line   = { "fixed",  205.0, 0.650, 0.660 },
   float_on      = { "solid",  -14.0, 0.661, 0.573 },
   fader_cap  = { "tint",   -2.3, 0.196, 0.820 },
   -- ReaEQ canvas chrome. Grid follows the theme like every other rule in

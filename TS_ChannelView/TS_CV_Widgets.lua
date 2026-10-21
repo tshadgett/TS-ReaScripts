@@ -3141,6 +3141,46 @@ local function icon_chevron(dl, x, y, sz, col, dir)
   ImGui.DrawList_AddLine(dl, cx - w * dir, cy, cx + w * dir, cy + h, col, 1.7)
 end
 
+-- Up (dir -1) or down (dir 1): the Rack view's fold and unfold, where
+-- panels fold upwards.
+local function icon_chevron_v(dl, x, y, sz, col, dir)
+  local cx, cy = x + sz * 0.5, y + sz * 0.5
+  local w, h = sz * 0.28, sz * 0.15
+  ImGui.DrawList_AddLine(dl, cx - w, cy - h * dir, cx, cy + h * dir, col, 1.7)
+  ImGui.DrawList_AddLine(dl, cx, cy + h * dir, cx + w, cy - h * dir, col, 1.7)
+end
+
+-- Two of the up or down chevron, one above the other: fold everything
+-- (up, dir -1) or open it again (down, dir 1).
+local function icon_chevron2(dl, x, y, sz, col, dir)
+  local gap = sz * 0.13
+  icon_chevron_v(dl, x, y - gap, sz, col, dir)
+  icon_chevron_v(dl, x, y + gap, sz, col, dir)
+end
+
+-- Set by the Rack view: its panels fold upwards, so collapse points up
+-- and expand down.
+W.CHEVRONS_UPDOWN = false
+
+-- A snowflake: three bars through the middle, each tipped with a small
+-- V at both ends.
+local function icon_freeze(dl, x, y, sz, col)
+  local cx, cy = x + sz * 0.5, y + sz * 0.5
+  local r, t = sz * 0.36, sz * 0.12
+  for k = 0, 2 do
+    local a = math.pi / 2 + k * math.pi / 3
+    local dx, dy = math.cos(a), math.sin(a)
+    ImGui.DrawList_AddLine(dl, cx - dx * r, cy - dy * r, cx + dx * r, cy + dy * r, col, 1.4)
+    for _, sgn in ipairs({ 1, -1 }) do
+      local ex, ey = cx + dx * r * 0.62 * sgn, cy + dy * r * 0.62 * sgn
+      for _, side in ipairs({ 1, -1 }) do
+        local b = a + side * math.pi / 4
+        ImGui.DrawList_AddLine(dl, ex, ey, ex + math.cos(b) * t * sgn, ey + math.sin(b) * t * sgn, col, 1.2)
+      end
+    end
+  end
+end
+
 local function icon_menu(dl, x, y, sz, col)
   local cx = x + sz * 0.5
   local r = math.max(1.0, sz * 0.075)
@@ -3359,8 +3399,15 @@ W.ICONS = {
   menu     = icon_menu,
   -- A panel folds away to the left and opens out to the right: collapse
   -- points left, expand points right.
-  collapse = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
-  expand   = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
+  collapse = function(dl, x, y, sz, col)
+    if W.CHEVRONS_UPDOWN then icon_chevron_v(dl, x, y, sz, col, -1) else icon_chevron(dl, x, y, sz, col, 1) end
+  end,
+  expand   = function(dl, x, y, sz, col)
+    if W.CHEVRONS_UPDOWN then icon_chevron_v(dl, x, y, sz, col, 1) else icon_chevron(dl, x, y, sz, col, -1) end
+  end,
+  collapse_all = function(dl, x, y, sz, col) icon_chevron2(dl, x, y, sz, col, -1) end,
+  freeze       = icon_freeze,
+  expand_all   = function(dl, x, y, sz, col) icon_chevron2(dl, x, y, sz, col,  1) end,
   prev     = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col,  1) end,
   next     = function(dl, x, y, sz, col) icon_chevron(dl, x, y, sz, col, -1) end,
   folder_full      = function(dl, x, y, sz, col) icon_folder(dl, x, y, sz, col, 0)   end,

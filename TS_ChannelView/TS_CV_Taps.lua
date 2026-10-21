@@ -1152,12 +1152,10 @@ end
 -- A pre probe in the first slot (the second behind an ARA plugin) and a
 -- post probe in the last, both idle, the way Track Analyser's own "insert
 -- probes" does it. Returns true, or false and why not.
-function TP.insert_probes(tr)
-  if find_level(tr, nil) then return true end
+local function add_pair(tr)
   local first = TP.ara_first(tr) and 1 or 0
   -- one already there (the other deleted): only the missing one is added
   local have_pre, have_post = TP.top_probes(tr)
-  reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
   local pre = have_pre or add_probe(tr, -1000 - first)    -- -1000 - n: insert at slot n
   -- a pre probe put in front of the lone post probe moves it along one
@@ -1166,8 +1164,15 @@ function TP.insert_probes(tr)
   order_cache = {}
   if pre and post then PL.name(tr, pre, post) end   -- an old probe: its role slider
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock("ChannelView: add TS_TrackProbe pair", -1)
   TP.invalidate()
+  return pre, post
+end
+
+function TP.insert_probes(tr)
+  if find_level(tr, nil) then return true end
+  reaper.Undo_BeginBlock()
+  local pre, post = add_pair(tr)
+  reaper.Undo_EndBlock("ChannelView: add TS_TrackProbe pair", -1)
   if not (pre and post) then
     return false, "REAPER couldn't load TS_TrackProbe.jsfx -- is it installed under Effects?"
   end
@@ -1268,6 +1273,18 @@ function TP.keep_in_place(tr)
   reaper.PreventUIRefresh(-1)
   if moved then TP.invalidate() end
   return moved
+end
+
+-- A track left with one probe of its pair (the other deleted) gets the
+-- other back, as the probes are kept in place. Not the master, and not a
+-- pair inside a container. No undo point, for the same reason as the
+-- moves. True if one was added.
+function TP.complete_pair(tr)
+  if not tr or tr == reaper.GetMasterTrack(0) or find_level(tr, nil) then return false end
+  local pre, post = TP.top_probes(tr)
+  if (pre ~= nil) == (post ~= nil) then return false end
+  local a, b = add_pair(tr)
+  return a ~= nil and b ~= nil
 end
 
 -- The plugin row without the top-level probes.

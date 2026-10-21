@@ -592,9 +592,9 @@ end
 local FIELDS = { { "freq", "Freq" }, { "gain", "Gain" }, { "q", "Q" }, { "shape", "Shape switch" }, { "on", "On" },
                  { "slope", "Slope" } }
 
-local function learned_text(b)
+local function learned_text(b, cv)
   if not (b.freq or b.gain) then return "needs a frequency or gain", C.COL.warn end
-  if not M.band_learned(b) then
+  if not M.band_learned(b, cv.model) then
     return b.learn and "mapping changed: learn again" or "not learned", C.COL.warn
   end
   local L = ME.decode(b.learn)
@@ -605,9 +605,12 @@ local function learned_text(b)
   if e.order and (e.type == "hp" or e.type == "lp") then
     t = t .. ((e.order >= ME.BRICK) and " brickwall" or (" %d dB/oct"):format(e.order * 6))
   end
-  local n = 0
-  for _ in pairs(L.shapes) do n = n + 1 end
-  if n > 1 then t = t .. (" (+%d more shapes)"):format(n - 1) end
+  local n, curved = 0, false
+  for _, v in pairs(L.shapes) do n = n + 1; if v.C then curved = true end end
+  local nm = (L.M and #L.M > 1) and #L.M or 1
+  if n > nm then t = t .. (" (+%d more shapes)"):format(n // nm - 1) end
+  if nm > 1 then t = t .. (" \u{00B7} %d models"):format(nm) end
+  if curved then t = t .. " \u{00B7} measured shape" end
   if L.D then t = t .. " \u{00B7} its own values"
   elseif e.Q and #e.Q > 1 then
     t = t .. (" \u{00B7} Q %.1f\u{2192}%.1f"):format(e.Q[1][2], e.Q[#e.Q][2])
@@ -661,7 +664,7 @@ local function eq_page(ctx, layout, cv, busy)
         if c2 then b[f[1]] = v; changed = true end
       end
       ImGui.TableNextColumn(ctx)
-      local t, tc = learned_text(b)
+      local t, tc = learned_text(b, cv)
       ImGui.TextColored(ctx, tc, t)
       ImGui.TableNextColumn(ctx)
       if ImGui.SmallButton(ctx, "\u{00D7}##rm" .. k) then remove = k end
@@ -694,6 +697,28 @@ local function eq_page(ctx, layout, cv, busy)
   local ca, va = picker(ctx, "allon", cv.all_on, 160)
   if ca then cv.all_on = va; changed = true end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "The whole EQ's In / On switch, if it has one") end
+  -- the plugin-wide model switch: guessed once, when none was ever set
+  if not dlg.model_tried then
+    dlg.model_tried = true
+    if not cv.model and not cv.no_model then
+      local used = M.canvas_params(cv)
+      local g = ME.guess_model(dlg.names, used, function(p)
+        local a = addr_now()
+        local pos = a and ME.live_positions(dlg.track, a, p, 12)
+        return pos ~= nil and pos ~= false and #pos > 1 and #pos <= 12
+      end)
+      if g then cv.model = g; changed = true end
+    end
+  end
+  ImGui.SameLine(ctx)
+  ImGui.Text(ctx, "  Model:")
+  ImGui.SameLine(ctx)
+  local cm, vm = picker(ctx, "model", cv.model, 160)
+  if cm then cv.model = vm; cv.no_model = (vm == nil) or nil; changed = true end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "A switch that changes every band's curves (TDR Slick EQ's EQ Model).\n" ..
+      "Learning measures each of its settings, and the canvas draws the one it's on.")
+  end
 
   -- a dynamic EQ: each band's dynamics, a tab a band
   ImGui.Spacing(ctx)
