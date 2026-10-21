@@ -44,8 +44,7 @@ local POINTERS = { { "line", "Line" }, { "dot", "Dot" }, { "inset", "Inset line"
                    { "none", "None" } }
 local MATS = { { "plastic", "Satin plastic" }, { "gloss", "Gloss" }, { "matte", "Matte" }, { "rubber", "Soft-touch" },
                { "metal", "Spun metal" }, { "chrome", "Chrome" }, { "enamel", "Enamel" } }
-local SKIRTS = { { false, "None" }, { "plain", "Plain" }, { "printed", "Printed ticks" }, { "numbered", "Numbered" },
-                 { "dial", "Numbered dial" } }
+local SKIRTS = { { false, "None" }, { "plain", "Plain" }, { "printed", "Printed ticks" }, { "dial", "Dial" } }
 local SMATS = { { "plastic", "Satin" }, { "matte", "Matte" }, { "metal", "Spun metal" }, { "clear", "Clear" } }
 local INKS = { 0xf2f2eeff, 0x1d1e20ff, 0xc8453cff, 0xe6e0d2ff, 0xd9be45ff }
 local SCOPES = { { "knob", "This knob" }, { "section", "This section" }, { "panel", "Every knob on this panel" } }
@@ -265,11 +264,6 @@ local function parts(ctx)
   swatches(ctx, "Sides", "side", caps(), "Darker", 0x6c6e72ff)
   swatches(ctx, "Pointer ink", "ink", INKS, "Auto", 0xf2f2eeff)
   swatches(ctx, "Rim", "rim", INKS, "None", 0xf2f2eeff)
-  row_label(ctx, "Tilt")
-  ImGui.SetNextItemWidth(ctx, 200)
-  ch, v = ImGui.SliderDouble(ctx, "##ke_tilt", L.tilt or 0, 0, 0.15, "%.2f")
-  if ch then L.tilt = (v > 0.001) and v or nil end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Seen a little from above: more side below the top.") end
 
   if st.pair and st.part == "inner" then
     -- no room for a skirt, washer or nut on the inner knob

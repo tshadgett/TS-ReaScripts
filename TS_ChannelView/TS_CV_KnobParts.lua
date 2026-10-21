@@ -13,12 +13,12 @@
     profile  straight | slight | tapered | domed
     grip     smooth | fluted | knurled | ridged | coin | grooves ;  n (count)
     mat      plastic | gloss | matte | rubber | metal | chrome | enamel
-    side     the sides' colour (nil: the body's, darker); tilt (0..0.15)
+    side     the sides' colour (nil: the body's, darker)
     top      flat | insert | recessed ;  insert (colour)
     face     dome (a soft rounded top) | flat (flush, evenly lit)
     rim      a ring of this colour round the top's edge
     ptr      line | dot | inset | notch | chicken | wing | skirtline | none ;  ink
-    skirt    plain | printed | numbered | dial ;  scol, smat (plastic |
+    skirt    plain | printed | dial ;  scol, smat (plastic |
              matte | metal | clear), sr (its radius, of the body's),
              sgrip (knurled), sink (its print's colour)
     washer, nut   true for a turned washer, a hex nut under the knob
@@ -320,21 +320,20 @@ function KP.reach(p)
 end
 
 -- the print on a skirt, turning with the knob
-local function skirt_print(ctx, dl, cx, cy, R, Rs, a, v, p, fd)
+local function skirt_print(dl, cx, cy, R, Rs, a, v, p, fd)
   local ink = p.sink or (U.is_light(p.scol or BLACK) and 0x1a1a1aff or 0xf0efe9ff)
   local w = math.max(1.0, R * 0.05)
-  if p.skirt == "printed" or p.skirt == "numbered" then
-    local n = (p.skirt == "printed") and 20 or 10
-    for k = 0, n do
-      local t = a + A_SPAN * (k / n - v)
-      local major = (p.skirt == "numbered") or (k % 5 == 0)
-      local r0 = major and (R * 1.08) or (R + (Rs - R) * 0.35)
+  if p.skirt == "printed" then
+    -- a scale's worth of ticks from the pointer round, turning with it
+    for k = 0, 20 do
+      local t = a + A_SPAN * k / 20
+      local r0 = (k % 5 == 0) and (R * 1.08) or (R + (Rs - R) * 0.35)
       ImGui.DrawList_AddLine(dl, cx + math.cos(t) * r0, cy + math.sin(t) * r0,
         cx + math.cos(t) * Rs * 0.95, cy + math.sin(t) * Rs * 0.95, fd(ink), w)
     end
   elseif p.skirt == "dial" then
-    -- ticks every fifth of a number, numbers 0-10 rising anticlockwise,
-    -- read against a fixed index at the top
+    -- ten steps of five ticks, rising anticlockwise, read against a fixed
+    -- index at the top
     local span = math.rad(300)
     local top = -math.pi * 0.5
     -- the fifths only where there's room for them
@@ -346,26 +345,51 @@ local function skirt_print(ctx, dl, cx, cy, R, Rs, a, v, p, fd)
         cx + math.cos(t) * Rs * 0.93, cy + math.sin(t) * Rs * 0.93, fd(ink), major and w or math.max(1.0, w * 0.6))
     end
   end
-  -- numbers, upright, when there's room for them
-  if (p.skirt == "numbered" or p.skirt == "dial") and ctx and (Rs - R) >= 12 then
-    local step = (p.skirt == "dial") and 2 or 2
-    for k = 0, 10, step do
-      local t
-      if p.skirt == "dial" then t = -math.pi * 0.5 - math.rad(300) * (k / 10 - v)
-      else t = a + A_SPAN * (k / 10 - v) end
-      -- between the body's edge and the ticks, clear of both
-      local rr = (p.skirt == "dial") and (R + Rs * 0.78) * 0.5 or (R + Rs) * 0.5
-      local s = tostring(k)
-      local tw, th = ImGui.CalcTextSize(ctx, s)
-      ImGui.DrawList_AddText(dl, cx + math.cos(t) * rr - tw * 0.5, cy + math.sin(t) * rr - th * 0.5, fd(ink), s)
+end
+
+-- A grooved side's shape (pure): n square-cut grooves, rn deep and 2 rn
+-- wide, out of a disc of radius R, the first half a step past angle a.
+-- { ri = the grooves' depth, outline = flat {x, y, ...} round the cut
+-- edge, teeth = { { t = its middle angle, pts = flat {x, y, ...} from the
+-- grooves' depth out } } }. The web page draws the same (kpNotches).
+function KP.notches(cx, cy, R, a, n, rn)
+  local ri = R - rn
+  local step = TAU / n
+  local d = math.asin(rn / R)              -- a groove's half width, as an angle at the rim
+  local rim = math.sqrt(R * R - rn * rn)
+  -- a groove's corners: at the rim and at its floor, on side s (-1, 1)
+  local function corner(tc, s, r0)
+    local ux, uy = math.cos(tc), math.sin(tc)
+    return cx + ux * r0 - uy * rn * s, cy + uy * r0 + ux * rn * s
+  end
+  local function arc(t0, t1, rr, out, rev)
+    for k = 0, 8 do
+      local t = rev and (t1 + (t0 - t1) * k / 8) or (t0 + (t1 - t0) * k / 8)
+      out[#out + 1] = cx + math.cos(t) * rr; out[#out + 1] = cy + math.sin(t) * rr
     end
   end
+  local function push(out, x, y) out[#out + 1] = x; out[#out + 1] = y end
+  local b = math.atan(rn, ri)              -- a floor corner's angle off the groove's middle
+  local outline, teeth = {}, {}
+  for i = 0, n - 1 do
+    local tc, tn = a + (i + 0.5) * step, a + (i + 1.5) * step
+    push(outline, corner(tc, -1, rim)); push(outline, corner(tc, -1, ri))
+    push(outline, corner(tc, 1, ri)); push(outline, corner(tc, 1, rim))
+    arc(tc + d, tn - d, R, outline)
+    local pts = {}
+    push(pts, corner(tc, 1, ri)); push(pts, corner(tc, 1, rim))
+    arc(tc + d, tn - d, R, pts)
+    push(pts, corner(tn, -1, rim)); push(pts, corner(tn, -1, ri))
+    arc(tc + b, tn - b, ri, pts, true)
+    teeth[#teeth + 1] = { t = (tc + tn) * 0.5, pts = pts }
+  end
+  return { ri = ri, outline = outline, teeth = teeth }
 end
 
 -- The knob `p` at (cx, cy), drawn radius r, at `value` (0..1). o: cap (the
 -- body's colour, overriding the look's), hot, dim, hw (the 3D effect's
--- strength: shadows when > 0), ctx (for numbers on a skirt), shadow (a
--- function drawing a disc's shadow).
+-- strength: shadows when > 0), shadow (a function drawing a disc's
+-- shadow).
 function KP.draw(dl, cx, cy, r, value, p, o)
   o = o or {}
   local v = math.max(0, math.min(1, value or 0))
@@ -418,23 +442,21 @@ function KP.draw(dl, cx, cy, r, value, p, o)
           cx + math.cos(t) * Rs, cy + math.sin(t) * Rs, fd(0x00000050), 1.0)
       end
     end
-    skirt_print(o.ctx, dl, cx, cy, R, Rs, a, v, p, fd)
+    skirt_print(dl, cx, cy, R, Rs, a, v, p, fd)
   end
 
   -- fins through the body (a wing knob): their sides, then their tops
-  local tilt = (p.tilt or 0) * R
   if p.ptr == "wing" then
     local fl, fw = R * 1.38, R * 0.20
     local vx, vy = -sa * fw, ca * fw
     local x1, y1, x2, y2 = cx + ca * fl, cy + sa * fl, cx - ca * fl, cy - sa * fl
     ImGui.DrawList_AddQuadFilled(dl, x1 + vx, y1 + vy, x1 - vx, y1 - vy, x2 - vx, y2 - vy, x2 + vx, y2 + vy, fd(side))
-    local fy = -tilt * 0.6
-    ImGui.DrawList_AddQuadFilled(dl, x1 + vx * 0.85, y1 + vy * 0.85 + fy, x1 - vx * 0.85, y1 - vy * 0.85 + fy,
-      x2 - vx * 0.85, y2 - vy * 0.85 + fy, x2 + vx * 0.85, y2 + vy * 0.85 + fy, fd(body))
+    ImGui.DrawList_AddQuadFilled(dl, x1 + vx * 0.85, y1 + vy * 0.85, x1 - vx * 0.85, y1 - vy * 0.85,
+      x2 - vx * 0.85, y2 - vy * 0.85, x2 + vx * 0.85, y2 + vy * 0.85, fd(body))
     -- the pointer along one fin, a slit along the other
-    ImGui.DrawList_AddLine(dl, cx + ca * R * 1.02, cy + sa * R * 1.02 + fy, cx + ca * (fl - R * 0.08), cy + sa * (fl - R * 0.08) + fy,
+    ImGui.DrawList_AddLine(dl, cx + ca * R * 1.02, cy + sa * R * 1.02, cx + ca * (fl - R * 0.08), cy + sa * (fl - R * 0.08),
       fd(p.ink or 0xf0f0eeff), math.max(1.2, R * 0.07))
-    ImGui.DrawList_AddLine(dl, cx - ca * R * 1.02, cy - sa * R * 1.02 + fy, cx - ca * (fl - R * 0.08), cy - sa * (fl - R * 0.08) + fy,
+    ImGui.DrawList_AddLine(dl, cx - ca * R * 1.02, cy - sa * R * 1.02, cx - ca * (fl - R * 0.08), cy - sa * (fl - R * 0.08),
       fd(0x00000090), math.max(1.0, R * 0.04))
   end
 
@@ -444,7 +466,7 @@ function KP.draw(dl, cx, cy, r, value, p, o)
   if p.ptr == "chicken" then
     -- a long tapered pointer with a broad round tail, modelled
     KP.pointer_body(dl, cx, cy, a, { tail = R * 0.42, rt = R * 0.56, tip = R * 1.04, rp = R * 0.13,
-      h = R * 0.14 + tilt, l0 = R * 0.05, l1 = R * 0.96, ink = ink }, body, p.mat or "plastic",
+      h = R * 0.14, l0 = R * 0.05, l1 = R * 0.96, ink = ink }, body, p.mat or "plastic",
       { hw = o.hw, fd = fd, lift = (p.shadow == "tall" and 1.7) or (p.shadow == "none" and 0) or 1 })
     return
   end
@@ -463,12 +485,23 @@ function KP.draw(dl, cx, cy, r, value, p, o)
     -- the ridges' sides, lit by the way they face, inside the scallops
     lit_ring(dl, cx, cy, R * 0.92, R * top_r * 0.98, mix(side, BLACK, 0.2),
       mix(side, WHITE, (p.mat == "gloss") and 0.30 or 0.12), n * 2, nil, fd)
+  elseif p.grip == "grooves" then
+    -- square-cut grooves out of the side's edge, turning with the knob, the
+    -- panel showing in them: the side inside them lit as usual, each tooth
+    -- between them lit by the way it faces, an outline round them
+    local shine = (p.mat == "gloss") and 0.30 or ((p.mat == "metal" or p.mat == "chrome") and 0.35 or 0.12)
+    local slo, shi = mix(side, BLACK, 0.25), mix(side, WHITE, shine)
+    local cuts = KP.notches(cx, cy, R, a, p.n or 6, R * 0.09)
+    lit_ring(dl, cx, cy, cuts.ri, R * top_r * 0.98, slo, shi, 40, nil, fd)
+    local lo, hi = contrast(slo, shi)
+    for _, t in ipairs(cuts.teeth) do poly(dl, t.pts, fd(mix(lo, hi, lit(t.t)))) end
+    for i = 1, #cuts.outline, 2 do ImGui.DrawList_PathLineTo(dl, cuts.outline[i], cuts.outline[i + 1]) end
+    ImGui.DrawList_PathStroke(dl, fd(0x00000070), ImGui.DrawFlags_Closed, 1.0)
   else
     local shine = (p.mat == "gloss") and 0.30 or ((p.mat == "metal" or p.mat == "chrome") and 0.35 or 0.12)
     lit_ring(dl, cx, cy, R, R * top_r * 0.98, mix(side, BLACK, 0.25), mix(side, WHITE, shine), 40, nil, fd)
     ImGui.DrawList_AddCircle(dl, cx, cy, R, fd(0x00000070), 40, 1.0)
   end
-  local ty = cy - tilt
   -- grip marks on the sides
   if p.grip == "knurled" then
     local nk = math.min(48, math.floor(R * 1.6))
@@ -492,94 +525,78 @@ function KP.draw(dl, cx, cy, r, value, p, o)
       ImGui.DrawList_AddLine(dl, cx + math.cos(t) * R * 0.93, cy + math.sin(t) * R * 0.93,
         cx + math.cos(t) * R, cy + math.sin(t) * R, fd(0x00000040), 1.0)
     end
-  elseif p.grip == "grooves" then
-    local n = p.n or 6
-    for i = 0, n - 1 do
-      local t = a + (i + 0.5) * TAU / n
-      local w = math.rad(5.5)
-      -- from the top's edge (up a little, when tilted) down the side to the
-      -- base: a slot darker than the side, its far wall catching the light
-      local r0, r1 = R * top_r * 0.98, R * 1.005
-      local function at(tt, rr, yy) return cx + math.cos(tt) * rr, yy + math.sin(tt) * rr end
-      local ax, ay = at(t - w, r0, ty); local bx, by = at(t + w, r0, ty)
-      local qx, qy = at(t + w, r1, cy); local px, py = at(t - w, r1, cy)
-      ImGui.DrawList_AddQuadFilled(dl, ax, ay, bx, by, qx, qy, px, py, fd(mix(side, BLACK, 0.55)))
-      local lit_side = (lit(t + math.pi * 0.5) > 0.5) and 1 or -1
-      local ex0, ey0 = at(t + lit_side * w, r0, ty); local ex1, ey1 = at(t + lit_side * w, r1, cy)
-      ImGui.DrawList_AddLine(dl, ex0, ey0, ex1, ey1, fd(mix(side, WHITE, 0.25)), 1.0)
-    end
   end
 
   -- the top
   local Rt = R * top_r
   local mat = p.mat or "plastic"
   if mat == "chrome" then
-    chrome_disc(dl, cx, ty, Rt, body, fd)
+    chrome_disc(dl, cx, cy, Rt, body, fd)
     -- its rim: a dark ring, lit along the top left
     local rr, rw = Rt * 0.94, math.max(1.0, Rt * 0.12)
-    ImGui.DrawList_AddCircle(dl, cx, ty, rr, fd(mix(body, BLACK, 0.45)), 0, rw)
-    ImGui.DrawList_PathArcTo(dl, cx, ty, rr, LIGHT_A - 1.0, LIGHT_A + 1.0, 12)
+    ImGui.DrawList_AddCircle(dl, cx, cy, rr, fd(mix(body, BLACK, 0.45)), 0, rw)
+    ImGui.DrawList_PathArcTo(dl, cx, cy, rr, LIGHT_A - 1.0, LIGHT_A + 1.0, 12)
     ImGui.DrawList_PathStroke(dl, fd(mix(body, WHITE, 0.6)), 0, rw)
   elseif mat == "metal" then
-    lit_disc(dl, cx, ty, Rt, body, fd, 0)
-    sheen(dl, cx, ty, Rt * 0.92, body, fd)
+    lit_disc(dl, cx, cy, Rt, body, fd, 0)
+    sheen(dl, cx, cy, Rt * 0.92, body, fd)
   else
     -- only gloss shines; satin plastic barely lifts toward the light
     local lift = ({ plastic = 0.22, gloss = 0.9, matte = 0.08, rubber = 0.04, enamel = 0.45 })[mat] or 0.2
-    if p.face == "flat" then flat_face(dl, cx, ty, Rt, body, fd, lift)
-    else lit_disc(dl, cx, ty, Rt, body, fd, lift) end
+    if p.face == "flat" then flat_face(dl, cx, cy, Rt, body, fd, lift)
+    else lit_disc(dl, cx, cy, Rt, body, fd, lift) end
     if p.profile == "domed" then
       for i = 1, 4 do
-        ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.06 * i, ty - Rt * 0.08 * i, Rt * (0.9 - 0.17 * i),
+        ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.06 * i, cy - Rt * 0.08 * i, Rt * (0.9 - 0.17 * i),
           fd(alpha(WHITE, 0x0c)), 32)
       end
     end
     if mat == "gloss" then
       -- a crisp highlight high on the left
-      ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.36, ty - Rt * 0.42, Rt * 0.16, fd(alpha(WHITE, 0x70)), 16)
-      ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.36, ty - Rt * 0.42, Rt * 0.08, fd(alpha(WHITE, 0x90)), 12)
+      ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.36, cy - Rt * 0.42, Rt * 0.16, fd(alpha(WHITE, 0x70)), 16)
+      ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.36, cy - Rt * 0.42, Rt * 0.08, fd(alpha(WHITE, 0x90)), 12)
     elseif mat == "enamel" then
-      ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.36, ty - Rt * 0.42, Rt * 0.12, fd(alpha(WHITE, 0x38)), 16)
+      ImGui.DrawList_AddCircleFilled(dl, cx - Rt * 0.36, cy - Rt * 0.42, Rt * 0.12, fd(alpha(WHITE, 0x38)), 16)
     end
   end
   if p.top == "insert" then
     local ic = p.insert or 0xc9ccd0ff
-    lit_disc(dl, cx, ty, Rt * 0.56, ic, fd, 0.5)
-    if U.is_light(ic) then sheen(dl, cx, ty, Rt * 0.5, ic, fd) end
-    ImGui.DrawList_AddCircle(dl, cx, ty, Rt * 0.56, fd(0x00000080), 32, 1.0)
+    lit_disc(dl, cx, cy, Rt * 0.56, ic, fd, 0.5)
+    if U.is_light(ic) then sheen(dl, cx, cy, Rt * 0.5, ic, fd) end
+    ImGui.DrawList_AddCircle(dl, cx, cy, Rt * 0.56, fd(0x00000080), 32, 1.0)
   elseif p.top == "recessed" then
-    ImGui.DrawList_AddCircle(dl, cx, ty, Rt * 0.82, fd(alpha(WHITE, 0x28)), 40, math.max(1.0, R * 0.05))
-    ImGui.DrawList_AddCircle(dl, cx + 0.5, ty + 0.6, Rt * 0.78, fd(0x00000050), 40, 1.0)
+    ImGui.DrawList_AddCircle(dl, cx, cy, Rt * 0.82, fd(alpha(WHITE, 0x28)), 40, math.max(1.0, R * 0.05))
+    ImGui.DrawList_AddCircle(dl, cx + 0.5, cy + 0.6, Rt * 0.78, fd(0x00000050), 40, 1.0)
   end
   if p.rim then
-    ImGui.DrawList_AddCircle(dl, cx, ty, Rt * 0.88, fd(p.rim), 40, math.max(1.5, R * 0.12))
-    ImGui.DrawList_AddCircle(dl, cx - 0.4, ty - 0.5, Rt * 0.88, fd(alpha(WHITE, 0x50)), 40, 1.0)
+    ImGui.DrawList_AddCircle(dl, cx, cy, Rt * 0.88, fd(p.rim), 40, math.max(1.5, R * 0.12))
+    ImGui.DrawList_AddCircle(dl, cx - 0.4, cy - 0.5, Rt * 0.88, fd(alpha(WHITE, 0x50)), 40, 1.0)
   end
   if p.inner then
     local ri = R * (p.inner.r or 0.62)
-    ImGui.DrawList_AddCircleFilled(dl, cx, ty, ri * 1.18, fd(0x1c1d1fff), 40)
-    lit_disc(dl, cx, ty, ri, p.inner.col or 0x9b9b97ff, fd, (p.inner.mat == "bead") and 0.3 or 0.6)
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, ri * 1.18, fd(0x1c1d1fff), 40)
+    lit_disc(dl, cx, cy, ri, p.inner.col or 0x9b9b97ff, fd, (p.inner.mat == "bead") and 0.3 or 0.6)
     if p.inner.screws then
       local sr = (ri * 1.18 + Rt) * 0.5
       for _, s in ipairs({ a + 0.7, a + 0.7 + math.pi }) do
-        ImGui.DrawList_AddCircleFilled(dl, cx + math.cos(s) * sr, ty + math.sin(s) * sr, math.max(0.8, R * 0.04), fd(0x303134ff), 8)
+        ImGui.DrawList_AddCircleFilled(dl, cx + math.cos(s) * sr, cy + math.sin(s) * sr, math.max(0.8, R * 0.04), fd(0x303134ff), 8)
       end
     end
   end
-  if p.face ~= "flat" then ImGui.DrawList_AddCircle(dl, cx, ty, Rt, fd(0x00000050), 0, 1.0) end
+  if p.face ~= "flat" then ImGui.DrawList_AddCircle(dl, cx, cy, Rt, fd(0x00000050), 0, 1.0) end
   -- the light over it all (round knobs; a chicken-head or wing isn't a disc)
   if p.ptr ~= "chicken" and p.ptr ~= "wing" then light_wash(dl, cx, cy, outer, fd) end
 
   -- the pointer
   local function pline(r0, r1, col, w)
-    ImGui.DrawList_AddLine(dl, cx + ca * r0, ty + sa * r0, cx + ca * r1, ty + sa * r1, fd(col), w)
+    ImGui.DrawList_AddLine(dl, cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, fd(col), w)
   end
   local ptr = p.ptr or "line"
   local pw = math.max(1.5, R * (p.pw or 0.10))
   if ptr == "line" then
     pline(Rt * (p.p0 or 0.30), Rt * 0.92, ink, pw)
   elseif ptr == "dot" then
-    ImGui.DrawList_AddCircleFilled(dl, cx + ca * Rt * 0.68, ty + sa * Rt * 0.68, math.max(1.5, R * 0.09), fd(ink), 12)
+    ImGui.DrawList_AddCircleFilled(dl, cx + ca * Rt * 0.68, cy + sa * Rt * 0.68, math.max(1.5, R * 0.09), fd(ink), 12)
   elseif ptr == "inset" then
     pline(Rt * 0.24, Rt * 0.86, 0x000000a0, pw * 1.3)
     pline(Rt * 0.26, Rt * 0.84, ink, math.max(1.0, pw * 0.6))
@@ -597,7 +614,7 @@ end
 -- in_mat, in_screws
 -- ---------------------------------------------------------------------
 local COLOUR_KEYS = { col = true, side = true, insert = true, rim = true, ink = true, scol = true, sink = true }
-local NUM_KEYS = { n = true, tilt = true, sr = true, top_r = true, p0 = true, pw = true }
+local NUM_KEYS = { n = true, sr = true, top_r = true, p0 = true, pw = true }
 local BOOL_KEYS = { washer = true, nut = true }
 local WORDS = {
   profile = { straight = 1, slight = 1, tapered = 1, domed = 1 },
@@ -606,7 +623,7 @@ local WORDS = {
   top = { flat = 1, insert = 1, recessed = 1 },
   face = { dome = 1, flat = 1 },
   ptr = { line = 1, dot = 1, inset = 1, notch = 1, chicken = 1, wing = 1, skirtline = 1, none = 1 },
-  skirt = { plain = 1, printed = 1, numbered = 1, dial = 1 },
+  skirt = { plain = 1, printed = 1, dial = 1 },
   smat = { plastic = 1, matte = 1, metal = 1, clear = 1 },
   sgrip = { knurled = 1 },
   scale = { ticks = 1, dots = 1 },
@@ -656,6 +673,8 @@ function KP.decode(str)
       elseif BOOL_KEYS[k] then
         if v == "1" then p[k] = true; any = true end
       elseif WORDS[k] then
+        -- (a numbered skirt is drawn as a printed one)
+        if k == "skirt" and v == "numbered" then v = "printed" end
         if WORDS[k][v] then p[k] = v; any = true end
       elseif k == "in_r" or k == "in_col" or k == "in_mat" or k == "in_screws" then
         p.inner = p.inner or {}

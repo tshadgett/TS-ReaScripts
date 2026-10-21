@@ -1019,14 +1019,14 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   encoder, lit up to the value, or out from the middle on a centred
   control, in its cap colour). Knob caps are matte, the way the skirted
   knob's skirt is. Then the **recipes**, built from parts: *Bakelite*,
-  *Machined*, *Red gloss*, *Chicken-head*, *Numbered skirt*, *Printed
-  skirt*, *Soft-touch*, *Chrome*, *Two-tone*, *Cream fluted*, *Coin edge*,
-  *Washer*, *Console*, *White rim*, *Numbered dial*, *British* and *Wing*.
+  *Machined*, *Red gloss*, *Chicken-head*, *Printed skirt*,
+  *Soft-touch*, *Chrome*, *Two-tone*, *Cream fluted*, *Coin edge*,
+  *Washer*, *Console*, *White rim*, *Dial*, *British* and *Wing*.
   The Style menu shows them all as pictures.
 - **Your own knobs.** Style ▸ **Customise…** opens the *Knob look* window:
   start from any recipe and change its body, grip (and how many flutes or
   grooves), top, pointer, material, colours (body, sides, rim, pointer
-  ink), tilt, skirt (its material, colour, print and size, a knurled
+  ink), skirt (its material, colour, print and size, a knurled
   edge), washer, hex nut, inner cap, scale and **Shadow** (*Normal*, *None*
   for a knob sitting flush, *Tall*). Apply it to this knob, this section
   or every knob on the panel, and **Save as recipe** to have it under

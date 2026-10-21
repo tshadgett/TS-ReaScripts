@@ -1,5 +1,18 @@
 # ChannelView — changelog
 
+## 2.5.6 — knob grooves, skirts
+
+- **Grooves are cut out of the knob.** A grooved knob (*Console*, or your
+  own looks with Grooves) has square-cut grooves out of its edge with the
+  panel showing through, rather than dark bars drawn over its side.
+- **No more tilt.** Knobs are all drawn straight from above, as
+  everything else is: *Console* and *Wing* are no longer tilted, and the
+  Knob look window's Tilt is gone (a saved look's tilt is ignored).
+- **Printed skirt ticks turn with the knob.**
+- The *Numbered skirt* recipe and skirt are gone (they had no room for
+  their numbers on a panel); a knob or look that used one is drawn with a
+  printed skirt. *Numbered dial* is now just **Dial**.
+
 ## 2.5.5 — freeze, collapse all, measured EQ shapes
 
 - **Freeze.** The **❄** button in the header (ChannelView and the rack):

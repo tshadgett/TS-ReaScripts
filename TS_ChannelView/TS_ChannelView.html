@@ -1159,7 +1159,20 @@ function el(tag, attrs, parent) {
 // Drawn where the knob's radius is `r` round (cx, cy) in a 100-unit box.
 // ---------------------------------------------------------------------------
 const KP_COL = { col: 1, side: 1, insert: 1, rim: 1, ink: 1, scol: 1, sink: 1 };
-const KP_NUM = { n: 1, tilt: 1, sr: 1, top_r: 1, p0: 1, pw: 1 };
+const KP_NUM = { n: 1, sr: 1, top_r: 1, p0: 1, pw: 1 };
+// A grooved side's outline: n square-cut grooves, rn deep and 2 rn wide,
+// out of a disc of radius R, the first half a step past angle a; flat
+// [x, y, ...] (TS_CV_KnobParts KP.notches).
+function kpNotches(cx, cy, R, a, n, rn) {
+  const ri = R - rn, step = 2 * Math.PI / n, d = Math.asin(rn / R), rim = Math.sqrt(R * R - rn * rn), out = [];
+  const corner = (tc, s, r0) => { const ux = Math.cos(tc), uy = Math.sin(tc); out.push(cx + ux * r0 - uy * rn * s, cy + uy * r0 + ux * rn * s); };
+  for (let i = 0; i < n; i++) {
+    const tc = a + (i + 0.5) * step, tn = a + (i + 1.5) * step;
+    corner(tc, -1, rim); corner(tc, -1, ri); corner(tc, 1, ri); corner(tc, 1, rim);
+    for (let k = 0; k <= 8; k++) { const t = tc + d + (tn - d - tc - d) * k / 8; out.push(cx + Math.cos(t) * R, cy + Math.sin(t) * R); }
+  }
+  return out;
+}
 function decodeLook(s) {
   if (!s) return null;
   const p = {};
@@ -1178,7 +1191,7 @@ function decodeLook(s) {
       else if (k === "in_mat") p.inner.mat = v === "bead" ? "bead" : null;
       else if (k === "in_screws") p.inner.screws = v === "1";
       any = true;
-    } else { p[k] = v; any = true; }
+    } else { p[k] = (k === "skirt" && v === "numbered") ? "printed" : v; any = true; }
   }
   return any ? p : null;
 }
@@ -1221,7 +1234,6 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
   const ink = p.ink || (lum(body) > 0.5 ? "#1d1e20" : "#f3f3f1");
   const Rs = p.skirt ? R * (p.sr || 1.42) : R;
   const outer = p.washer ? Rs * 1.14 : Rs;
-  const tilt = (p.tilt || 0) * R, ty = cy - tilt;
   const turners = [];               // [element, cx, cy, extra transform] turned by set()
   const at = (t, rr, yy = cy) => [cx + Math.cos(t) * rr, yy + Math.sin(t) * rr];
   const E = (tag, attrs, par = parent) => el(tag, attrs, par);
@@ -1290,7 +1302,7 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
   const line = (par, x1, y1, x2, y2, c, w, op = 1) => el("line", { x1: f2(x1), y1: f2(y1), x2: f2(x2), y2: f2(y2),
     stroke: c, "stroke-opacity": op, "stroke-width": f2(w), "stroke-linecap": "round" }, par);
   const a0 = KP_AMIN;                // everything that turns is drawn at the value 0 and turned
-  let dial = null, nums = [];
+  let dial = null;
 
   // a turned washer, a hex nut
   if (p.washer) { litRing(outer, "#6c7075", "#e2e4e6", 0.5); ring(cy, outer, B, 0.38, px); }
@@ -1314,15 +1326,16 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
       for (let i = 0; i < nk; i++) { const t = a0 + i * 2 * Math.PI / nk, [x1, y1] = at(t, Rs * 0.95), [x2, y2] = at(t, Rs);
         line(g, x1, y1, x2, y2, B, px, 0.31); }
     }
-    // its print: ticks (a dial's turn with it), numbers kept upright
+    // its print: ticks turning with the knob (a dial's round its own index)
     const sink = p.sink || (lum(p.scol || "#000000") > 0.5 ? "#1a1a1a" : "#f0efe9");
     const w = Math.max(px, R * 0.05);
-    if (p.skirt === "printed" || p.skirt === "numbered") {
-      const n = p.skirt === "printed" ? 20 : 10;
+    if (p.skirt === "printed") {
+      // a scale's worth of ticks from the pointer round, turning with it
+      const g = turning(), n = 20;
       for (let k = 0; k <= n; k++) {
-        const t = a0 + KP_ASPAN * k / n, major = p.skirt === "numbered" || k % 5 === 0;
+        const t = a0 + KP_ASPAN * k / n, major = k % 5 === 0;
         const [x1, y1] = at(t, major ? R * 1.08 : R + (Rs - R) * 0.35), [x2, y2] = at(t, Rs * 0.95);
-        line(parent, x1, y1, x2, y2, sink, w);
+        line(g, x1, y1, x2, y2, sink, w);
       }
     } else if (p.skirt === "dial") {
       dial = turning();
@@ -1333,25 +1346,15 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
         line(dial, x1, y1, x2, y2, sink, major ? w : Math.max(px, w * 0.6));
       }
     }
-    if ((p.skirt === "numbered" || p.skirt === "dial") && (Rs - R) / px >= 12) {
-      const rr = p.skirt === "dial" ? (R + Rs * 0.78) * 0.5 : (R + Rs) * 0.5;
-      for (let k = 0; k <= 10; k += 2) {
-        const tx = el("text", { "text-anchor": "middle", "dominant-baseline": "central", fill: sink,
-          "font-size": f2(9 * px), "font-family": "inherit" }, parent);
-        tx.textContent = String(k);
-        nums.push([tx, k, rr]);
-      }
-    }
   }
   // fins through the body (a wing knob)
-  const fy = -tilt * 0.6;
   if (p.ptr === "wing") {
     const g = turning(), fl = R * 1.38, fw = R * 0.20, ca = Math.cos(a0), sa = Math.sin(a0), vx = -sa * fw, vy = ca * fw;
     const x1 = cx + ca * fl, y1 = cy + sa * fl, x2 = cx - ca * fl, y2 = cy - sa * fl;
     const quad = (k, oy, c) => el("path", { d: `M${f2(x1 + vx * k)} ${f2(y1 + vy * k + oy)}L${f2(x1 - vx * k)} ${f2(y1 - vy * k + oy)}L${f2(x2 - vx * k)} ${f2(y2 - vy * k + oy)}L${f2(x2 + vx * k)} ${f2(y2 + vy * k + oy)}Z`, fill: c }, g);
-    quad(1, 0, side); quad(0.85, fy, body);
-    line(g, cx + ca * R * 1.02, cy + sa * R * 1.02 + fy, cx + ca * (fl - R * 0.08), cy + sa * (fl - R * 0.08) + fy, p.ink || "#f0f0ee", Math.max(1.2 * px, R * 0.07));
-    line(g, cx - ca * R * 1.02, cy - sa * R * 1.02 + fy, cx - ca * (fl - R * 0.08), cy - sa * (fl - R * 0.08) + fy, B, Math.max(px, R * 0.04), 0.56);
+    quad(1, 0, side); quad(0.85, 0, body);
+    line(g, cx + ca * R * 1.02, cy + sa * R * 1.02, cx + ca * (fl - R * 0.08), cy + sa * (fl - R * 0.08), p.ink || "#f0f0ee", Math.max(1.2 * px, R * 0.07));
+    line(g, cx - ca * R * 1.02, cy - sa * R * 1.02, cx - ca * (fl - R * 0.08), cy - sa * (fl - R * 0.08), B, Math.max(px, R * 0.04), 0.56);
   }
   let topR = p.top_r || ({ straight: 0.93, slight: 0.86, tapered: 0.78, domed: 0.90 })[p.profile || "straight"] || 0.93;
   if (p.grip === "fluted") topR = Math.min(topR, 0.80);
@@ -1359,7 +1362,7 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
   // a chicken-head: modelled as the desktop's pointer_body
   if (p.ptr === "chicken") {
     const mat = p.mat || "plastic", shine = KP_SHINE[mat] || 0.2;
-    const tail = R * 0.42, rt = R * 0.56, tip = R * 1.04, rp = R * 0.13, hh = R * 0.14 + tilt;
+    const tail = R * 0.42, rt = R * 0.56, tip = R * 1.04, rp = R * 0.13, hh = R * 0.14;
     const ca = Math.cos(a0), sa = Math.sin(a0);
     const hull = (grow) => kpHull(cx - ca * tail, cy - sa * tail, Math.max(0.3, rt + grow), cx + ca * tip, cy + sa * tip, Math.max(0.3, rp + grow));
     const n = rt / px < 8 ? 2 : 4;
@@ -1410,6 +1413,23 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
     }
     el("path", { d: "M" + pts.map(q => f2(q[0]) + " " + f2(q[1])).join("L") + "Z", fill: mix(side, B, 0.25) }, g);
     litRing(R * 0.92, mix(side, B, 0.2), mix(side, W, p.mat === "gloss" ? 0.30 : 0.12), 0);
+  } else if (p.grip === "grooves") {
+    // square-cut grooves out of the side's edge: the lit side seen
+    // through its cut outline (a mask that turns with the knob, so the
+    // light stays put), and the outline round it
+    const shine = p.mat === "gloss" ? 0.30 : ((p.mat === "metal" || p.mat === "chrome") ? 0.35 : 0.12);
+    const [lo, hi] = contrast(mix(side, B, 0.25), mix(side, W, shine));
+    const pts = kpNotches(cx, cy, R, a0, p.n || 6, R * 0.09);
+    let d = "";
+    for (let i = 0; i < pts.length; i += 2) d += (i ? "L" : "M") + f2(pts[i]) + " " + f2(pts[i + 1]);
+    d += "Z";
+    const id = "kpm" + (++gradN);
+    const m = el("mask", { id, maskUnits: "userSpaceOnUse", x: f2(cx - R * 1.2), y: f2(cy - R * 1.2), width: f2(R * 2.4), height: f2(R * 2.4) }, defs);
+    const mg = el("g", {}, m);
+    turners.push([mg, cx, cy, ""]);
+    el("path", { d, fill: "#fff" }, mg);
+    E("circle", { cx, cy, r: f2(R), fill: lin([[0, hi], [0.5, mix(lo, hi, 0.5)], [1, lo]]), mask: `url(#${id})` });
+    el("path", { d, fill: "none", stroke: B, "stroke-opacity": 0.44, "stroke-width": f2(px) }, turning());
   } else {
     const shine = p.mat === "gloss" ? 0.30 : ((p.mat === "metal" || p.mat === "chrome") ? 0.35 : 0.12);
     litRing(R, mix(side, B, 0.25), mix(side, W, shine), 0);
@@ -1425,60 +1445,53 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
       const t = a0 + i * 2 * Math.PI / n, [x1, y1] = at(t, r0), [x2, y2] = at(t, R * 0.995);
       line(g, x1, y1, x2, y2, B, px, p.grip === "ridged" ? 0.25 : 0.28);
     }
-  } else if (p.grip === "grooves") {
-    const g = turning(), n = p.n || 6, w = 5.5 * Math.PI / 180;
-    for (let i = 0; i < n; i++) {
-      const t = a0 + (i + 0.5) * 2 * Math.PI / n, r0 = R * topR * 0.98, r1 = R * 1.005;
-      const q = [at(t - w, r0, ty), at(t + w, r0, ty), at(t + w, r1), at(t - w, r1)];
-      el("path", { d: "M" + q.map(z => f2(z[0]) + " " + f2(z[1])).join("L") + "Z", fill: mix(side, B, 0.55) }, g);
-    }
   }
   // the top
   const Rt = R * topR, mat = p.mat || "plastic";
   if (mat === "chrome") {
-    chrome(ty, Rt, body);
-    ring(ty, Rt * 0.94, mix(body, B, 0.45), 1, Math.max(px, Rt * 0.12));
+    chrome(cy, Rt, body);
+    ring(cy, Rt * 0.94, mix(body, B, 0.45), 1, Math.max(px, Rt * 0.12));
   } else if (mat === "metal") {
-    litDisc(ty, Rt, body, 0);
-    sheen(ty, Rt * 0.92, body);
+    litDisc(cy, Rt, body, 0);
+    sheen(cy, Rt * 0.92, body);
   } else {
     const lift = ({ plastic: 0.22, gloss: 0.9, matte: 0.08, rubber: 0.04, enamel: 0.45 })[mat] ?? 0.2;
-    if (p.face === "flat") flatFace(ty, Rt, body, lift); else litDisc(ty, Rt, body, lift);
+    if (p.face === "flat") flatFace(cy, Rt, body, lift); else litDisc(cy, Rt, body, lift);
     if (p.profile === "domed") for (let i = 1; i <= 4; i++)
-      E("circle", { cx: f2(cx - Rt * 0.06 * i), cy: f2(ty - Rt * 0.08 * i), r: f2(Rt * (0.9 - 0.17 * i)), fill: W, "fill-opacity": 0.05 });
+      E("circle", { cx: f2(cx - Rt * 0.06 * i), cy: f2(cy - Rt * 0.08 * i), r: f2(Rt * (0.9 - 0.17 * i)), fill: W, "fill-opacity": 0.05 });
     if (mat === "gloss") {
-      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(ty - Rt * 0.42), r: f2(Rt * 0.16), fill: W, "fill-opacity": 0.44 });
-      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(ty - Rt * 0.42), r: f2(Rt * 0.08), fill: W, "fill-opacity": 0.56 });
+      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(cy - Rt * 0.42), r: f2(Rt * 0.16), fill: W, "fill-opacity": 0.44 });
+      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(cy - Rt * 0.42), r: f2(Rt * 0.08), fill: W, "fill-opacity": 0.56 });
     } else if (mat === "enamel") {
-      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(ty - Rt * 0.42), r: f2(Rt * 0.12), fill: W, "fill-opacity": 0.22 });
+      E("circle", { cx: f2(cx - Rt * 0.36), cy: f2(cy - Rt * 0.42), r: f2(Rt * 0.12), fill: W, "fill-opacity": 0.22 });
     }
   }
   if (p.top === "insert") {
     const ic = p.insert || "#c9ccd0";
-    litDisc(ty, Rt * 0.56, ic, 0.5);
-    if (lum(ic) > 0.5) sheen(ty, Rt * 0.5, ic);
-    ring(ty, Rt * 0.56, B, 0.5, px);
+    litDisc(cy, Rt * 0.56, ic, 0.5);
+    if (lum(ic) > 0.5) sheen(cy, Rt * 0.5, ic);
+    ring(cy, Rt * 0.56, B, 0.5, px);
   } else if (p.top === "recessed") {
-    ring(ty, Rt * 0.82, W, 0.16, Math.max(px, R * 0.05));
-    E("circle", { cx: f2(cx + 0.5 * px), cy: f2(ty + 0.6 * px), r: f2(Rt * 0.78), fill: "none", stroke: B, "stroke-opacity": 0.31, "stroke-width": f2(px) });
+    ring(cy, Rt * 0.82, W, 0.16, Math.max(px, R * 0.05));
+    E("circle", { cx: f2(cx + 0.5 * px), cy: f2(cy + 0.6 * px), r: f2(Rt * 0.78), fill: "none", stroke: B, "stroke-opacity": 0.31, "stroke-width": f2(px) });
   }
   if (p.rim) {
-    ring(ty, Rt * 0.88, p.rim, 1, Math.max(1.5 * px, R * 0.12));
-    E("circle", { cx: f2(cx - 0.4 * px), cy: f2(ty - 0.5 * px), r: f2(Rt * 0.88), fill: "none", stroke: W, "stroke-opacity": 0.31, "stroke-width": f2(px) });
+    ring(cy, Rt * 0.88, p.rim, 1, Math.max(1.5 * px, R * 0.12));
+    E("circle", { cx: f2(cx - 0.4 * px), cy: f2(cy - 0.5 * px), r: f2(Rt * 0.88), fill: "none", stroke: W, "stroke-opacity": 0.31, "stroke-width": f2(px) });
   }
   let screws = null;
   if (p.inner) {
     const ri = R * (p.inner.r || 0.62);
-    E("circle", { cx, cy: f2(ty), r: f2(ri * 1.18), fill: "#1c1d1f" });
-    litDisc(ty, ri, p.inner.col || "#9b9b97", p.inner.mat === "bead" ? 0.3 : 0.6);
+    E("circle", { cx, cy: f2(cy), r: f2(ri * 1.18), fill: "#1c1d1f" });
+    litDisc(cy, ri, p.inner.col || "#9b9b97", p.inner.mat === "bead" ? 0.3 : 0.6);
     if (p.inner.screws) {
-      screws = turning(ty);
+      screws = turning(cy);
       const sr = (ri * 1.18 + Rt) * 0.5;
-      for (const s of [a0 + 0.7, a0 + 0.7 + Math.PI]) { const [x, y] = at(s, sr, ty);
+      for (const s of [a0 + 0.7, a0 + 0.7 + Math.PI]) { const [x, y] = at(s, sr, cy);
         el("circle", { cx: f2(x), cy: f2(y), r: f2(Math.max(0.8 * px, R * 0.04)), fill: "#303134" }, screws); }
     }
   }
-  if (p.face !== "flat") ring(ty, Rt, B, 0.31, px);
+  if (p.face !== "flat") ring(cy, Rt, B, 0.31, px);
   // the light over it all
   if (p.ptr !== "wing" && L > 1) {
     const up = L - 1;
@@ -1488,10 +1501,10 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
   // the pointer
   const ptr = p.ptr || "line";
   const pw = Math.max(1.5 * px, R * (p.pw || 0.10));
-  const pg = turning(ty);
-  const pl = (r0, r1, c, w, op = 1) => { const [x1, y1] = at(a0, r0, ty), [x2, y2] = at(a0, r1, ty); line(pg, x1, y1, x2, y2, c, w, op); };
+  const pg = turning(cy);
+  const pl = (r0, r1, c, w, op = 1) => { const [x1, y1] = at(a0, r0, cy), [x2, y2] = at(a0, r1, cy); line(pg, x1, y1, x2, y2, c, w, op); };
   if (ptr === "line") pl(Rt * (p.p0 ?? 0.30), Rt * 0.92, ink, pw);
-  else if (ptr === "dot") { const [x, y] = at(a0, Rt * 0.68, ty); el("circle", { cx: f2(x), cy: f2(y), r: f2(Math.max(1.5 * px, R * 0.09)), fill: ink }, pg); }
+  else if (ptr === "dot") { const [x, y] = at(a0, Rt * 0.68, cy); el("circle", { cx: f2(x), cy: f2(y), r: f2(Math.max(1.5 * px, R * 0.09)), fill: ink }, pg); }
   else if (ptr === "inset") { pl(Rt * 0.24, Rt * 0.86, B, pw * 1.3, 0.63); pl(Rt * 0.26, Rt * 0.84, ink, Math.max(px, pw * 0.6)); }
   else if (ptr === "notch") pl(Rt * 0.40, Rt * 0.95, mix(body, B, 0.65), pw);
   else if (ptr === "skirtline") { const [x1, y1] = at(a0, R * 0.5), [x2, y2] = at(a0, Rs * 0.96); line(pg, x1, y1, x2, y2, ink, Math.max(1.2 * px, R * 0.07)); }
@@ -1502,11 +1515,6 @@ function drawParts(parent, defs, cx, cy, r, p, o) {
       // a dial's print turns the other way round its top index
       const deg = g === dial ? 300 * v : (a - a0) * 180 / Math.PI;
       g.setAttribute("transform", `${pre}rotate(${f2(deg)} ${f2(gx)} ${f2(gy)})`);
-    }
-    for (const [tx, k, rr] of nums) {
-      const t = p.skirt === "dial" ? -Math.PI / 2 - (300 * Math.PI / 180) * (k / 10 - v) : KP_AMIN + KP_ASPAN * k / 10;
-      const [x, y] = at(t, rr);
-      tx.setAttribute("x", f2(x)); tx.setAttribute("y", f2(y));
     }
   };
 }

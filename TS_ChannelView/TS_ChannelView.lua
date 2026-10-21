@@ -1,15 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.5.5
+-- @version 2.5.6
 -- @changelog
---  Freeze: Freeze track, Freeze up to the selected plugin and Unfreeze from
---  the header's snowflake, frozen plugins shown where they were; the probes
---  and ChannelView Modulators are never frozen. Rack: Collapse all, and
---  chevrons that point up to fold. A track left with one probe gets the
---  other back. EQ canvases draw what learning measured beyond each band's
---  formula (console types' tails, shelves' bumps), and a plugin-wide Model
---  switch (TDR Slick EQ) is learned at every setting. Learn an EQ layout
---  again to have these.
+--  Grooved knobs (Console) have their grooves cut out of the edge. Knobs
+--  are no longer tilted (Console, Wing; the Knob look window's Tilt is
+--  gone). Printed skirt ticks turn with the knob. The Numbered skirt is
+--  gone (drawn as a printed one); Numbered dial is now Dial.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

@@ -4362,7 +4362,9 @@ do
   do
     local n = 0
     for _, st in ipairs(C.KNOB_STYLES) do if st.parts then n = n + 1 end end
-    check("parts: recipes listed", n >= 17, true)
+    check("parts: recipes listed", n >= 16, true)
+    check("parts: the numbered skirt reads as the printed one", C.KNOB_STYLE_ALIAS.numskirt, "printskirt")
+    check("parts: a look's numbered skirt drawn printed", require("TS_CV_KnobParts").decode("skirt=numbered").skirt, "printed")
     MP.set("KpPlug", { controls = { { param = 0, type = "knob", label = "A", style = "bakelite", cap = "red" } } })
     MP.save(); MP.reload()
     check("parts: style round-trips", MP.get("KpPlug").controls[1].style, "bakelite")
@@ -4377,12 +4379,12 @@ do
   do
     local KPm = require("TS_CV_KnobParts")
     local look = { profile = "tapered", grip = "fluted", n = 10, mat = "gloss", col = 0xb3201eff, side = 0x6c6e72ff,
-                   tilt = 0.11, skirt = "dial", smat = "metal", sr = 1.62, sgrip = "knurled", washer = true, face = "flat",
+                   top_r = 0.84, skirt = "dial", smat = "metal", sr = 1.62, sgrip = "knurled", washer = true, face = "flat",
                    inner = { r = 0.62, col = 0x9b9b97ff, mat = "bead", screws = true }, ptr = "inset", scale = "dots" }
     local back = KPm.decode(KPm.encode(look))
     check("look: colour round-trips", back.col, 0xb3201eff)
     check("look: words round-trip", back.grip .. "/" .. back.skirt .. "/" .. back.ptr .. "/" .. back.scale .. "/" .. back.face, "fluted/dial/inset/dots/flat")
-    check("look: numbers round-trip", back.n == 10 and math.abs(back.tilt - 0.11) < 1e-6 and math.abs(back.sr - 1.62) < 1e-6, true)
+    check("look: numbers round-trip", back.n == 10 and math.abs(back.top_r - 0.84) < 1e-6 and math.abs(back.sr - 1.62) < 1e-6, true)
     check("look: inner cap round-trips", back.inner and back.inner.screws and back.inner.mat, "bead")
     check("look: washer", back.washer, true)
     check("look: shadow round-trips", KPm.decode(KPm.encode({ shadow = "tall" })).shadow, "tall")

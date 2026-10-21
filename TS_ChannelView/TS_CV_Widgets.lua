@@ -792,7 +792,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
       end
     end
     return KP.draw(dl, cx, cy, r, v, def.parts, { cap = o.cap or (own and own.col) or W.cap_col(def.cap), hot = o.hot, dim = o.dim,
-      hw = W.hw, ctx = o.ctx, shadow = W.hw_shadow_circle })
+      hw = W.hw, shadow = W.hw_shadow_circle })
   end
   if W.hw > 0 then knob_shadow(dl, style, cx, cy, r / FACE_BODY[style], A_MIN + A_SPAN * v) end
 
@@ -1340,13 +1340,13 @@ local function dual_recipe(dl, cx, cy, r, v1, v2, o, outer, inner, odef, idef)
   local ri = IN_FRAC * R
   po.p0 = math.max(po.p0 or 0.30, ri / Rt + 0.10)
   KP.draw(dl, cx, cy, r, v1, po, { cap = odef and W.cap_col(odef.cap) or nil, hot = o.hot == "outer", dim = o.dim,
-    hw = W.hw, ctx = o.ctx, shadow = W.hw_shadow_circle })
+    hw = W.hw, shadow = W.hw_shadow_circle })
   local pi = KP.copy(inner)
   pi.skirt, pi.washer, pi.nut, pi.sr, pi.sgrip = nil, nil, nil, nil, nil
   if pi.ptr == "skirtline" then pi.ptr = nil end
   local icap = o.cap or (idef and W.cap_col(idef.cap)) or nil
   KP.draw(dl, cx, cy, ri * KP.reach(pi), v2, pi, { cap = icap, hot = o.hot == "inner", dim = o.dim,
-    hw = W.hw, ctx = o.ctx, shadow = W.hw_shadow_circle })
+    hw = W.hw, shadow = W.hw_shadow_circle })
   if o.mod2 then W.mod_dot(dl, cx, cy, math.max(2.0, ri * 0.22), KP.centre_col(pi, icap)) end
   if o.mod1 then
     local t = A_MIN + A_SPAN * 0.5 + math.pi

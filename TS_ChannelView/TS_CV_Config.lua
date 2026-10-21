@@ -920,8 +920,6 @@ C.KNOB_STYLES = {
     parts = { profile = "slight", mat = "gloss" } },
   { key = "chicken",    label = "Chicken-head",   cap = "black",
     parts = { ptr = "chicken" } },
-  { key = "numskirt",   label = "Numbered skirt", cap = "black",
-    parts = { skirt = "numbered", scol = 0x1b1c1eff, sr = 1.55 } },
   { key = "printskirt", label = "Printed skirt",  cap = "black",
     parts = { skirt = "printed", scol = 0xc4c6c8ff, smat = "metal", sink = 0x1a1a1aff } },
   { key = "softtouch",  label = "Soft-touch",     cap = "#3a3b3e",
@@ -937,18 +935,18 @@ C.KNOB_STYLES = {
   { key = "washer",     label = "Washer",         cap = "black",
     parts = { profile = "slight", washer = true } },
   { key = "console",    label = "Console",        cap = "red",
-    parts = { top_r = 0.82, grip = "grooves", n = 6, side = 0x6c6e72ff, tilt = 0.11, p0 = 0.02, pw = 0.13,
+    parts = { top_r = 0.82, grip = "grooves", n = 6, side = 0x6c6e72ff, p0 = 0.02, pw = 0.13,
               scale = "dots", face = "flat" } },
   { key = "whiterim",   label = "White rim",      cap = "black",
     parts = { rim = 0xf2f2eeff, face = "flat" } },
-  { key = "dial",       label = "Numbered dial",  cap = "silver",
+  { key = "dial",       label = "Dial",           cap = "silver",
     parts = { mat = "chrome", skirt = "dial", scol = 0xc8caccff, smat = "metal", sr = 1.62, sgrip = "knurled",
               sink = 0x1c1c1cff, inner = { r = 0.62, col = 0x9b9b97ff, mat = "bead", screws = true }, ptr = "none" } },
   { key = "british",    label = "British",        cap = "grey",
     parts = { profile = "slight", grip = "ridged", n = 36, mat = "matte", skirt = "plain", smat = "matte", ptr = "inset",
               face = "flat" } },
   { key = "wing",       label = "Wing",           cap = "#1f2a5c",
-    parts = { ptr = "wing", skirt = "plain", smat = "clear", sr = 1.55, top = "recessed", tilt = 0.08 } },
+    parts = { ptr = "wing", skirt = "plain", smat = "clear", sr = 1.55, top = "recessed" } },
 }
 -- Toggles' and button rows' faces (TS_CV_Widgets.button_face); the first,
 -- flat, is the default and what a button with no style saved is drawn as.
@@ -1014,7 +1012,9 @@ C.PLATE, C.CAP, C.KNOB_STYLE, C.FADER_STYLE = {}, {}, {}, {}
 for _, p in ipairs(C.PLATES)       do C.PLATE[p.key] = p end
 for _, p in ipairs(C.CAPS)         do C.CAP[p.key] = p end
 for _, p in ipairs(C.KNOB_STYLES)  do C.KNOB_STYLE[p.key] = p end
-C.KNOB_STYLE_ALIAS = { api = "nose" }   -- an older name for Round nose, still read
+-- other names still read: api (Round nose), numskirt (drawn as Printed
+-- skirt)
+C.KNOB_STYLE_ALIAS = { api = "nose", numskirt = "printskirt" }
 for _, p in ipairs(C.FADER_STYLES) do C.FADER_STYLE[p.key] = p end
 
 local custom = {}
