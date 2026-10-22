@@ -57,16 +57,25 @@ one it's locked to, whatever
 you select (kept with the project; click it again to follow the
 selection).
 
-- Every plugin is the column's width, and as tall as its controls need at
-  that width. A canvas (an EQ, a compressor, ReaEQ, ReaComp) spans the
-  column, with the layout's other controls in rows under it.
+- Every plugin is the column's width, with the fewest rows that fit across
+  it, never fewer than its tallest control needs (a fader's length, a
+  large knob; an upright fader at least two). A layout ChannelView shows
+  too, in a rack running down then across, keeps at least the rows its
+  controls fill in ChannelView's window, so it's arranged as it is there.
+  A locked layout keeps its own rows.
+  A gain-reduction meter stands at the side as in ChannelView (click it
+  for its trace) on a panel three rows tall or more; on a shorter one it
+  lies across the top instead, 0 dB at the right and the bar growing left
+  as it pulls down, with no trace. A canvas (an EQ, a compressor, ReaEQ, ReaComp) spans the column,
+  with the layout's other controls in rows under it.
 - The macros and modulators are strips across the top, the sends and
   receives strips across the foot. They stay put while the plugins scroll
   between them. Its View menu shows or hides each of the four.
 - Containers and parallel runs are bracketed down the left; only the
   plugins inside one move in to make room. Click a container's strip for
   its menu. Drag a panel by its header to move the plugin.
-- Folding is its own, and so are its action bars: the four *Rack* places
+- Folding is its own, and so are its *View ▸ Control flow* (it starts
+  from ChannelView's) and its action bars: the four *Rack* places
   (a bar's right-click ▸ *Place*, or ☰ ▸ Drawers ▸ *New* in the rack).
   Its chevrons point up to fold a panel and down to open it.
 - **Collapse all**: the double chevron in its header folds every plugin;

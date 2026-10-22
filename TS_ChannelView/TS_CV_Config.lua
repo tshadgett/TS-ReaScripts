@@ -217,6 +217,7 @@ C.COLLAPSED_W = 30
 -- "60.0 dB" -- fits on one line, and the whole column is still well
 -- under a cell.
 C.METER_W     = 14        -- the bar
+C.GR_BAR_H    = 10        -- the rack's: lying across the top of a panel
 C.METER_COL_W = 40        -- bar plus the room its readout needs
 C.IO_COL_W    = 28        -- a plugin's input or output meter, with its readout
 C.GRV_W       = 220       -- the gain-reduction trace, when a meter is opened out

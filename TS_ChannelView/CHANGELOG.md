@@ -1,5 +1,21 @@
 # ChannelView — changelog
 
+## 2.6.2 — rack layouts
+
+- **Rack: rows.** A plugin in the rack takes the fewest rows that fit
+  across the column, and never fewer than its tallest control needs (a
+  fader's length, a large knob; an upright fader at least two), so faders
+  and large knobs keep their size. A layout ChannelView shows too, in a
+  rack running down then across, keeps at least the rows it fills in
+  ChannelView's window, so it's arranged as it is there. A locked layout
+  keeps its own rows.
+- **Rack: the gain-reduction meter on short panels.** On a panel under
+  three rows tall it lies across the top, 0 dB at the right and the bar
+  growing left as it pulls down, with no trace. On taller panels it stands
+  at the side as in ChannelView.
+- **Rack: its own Control flow.** View ▸ *Control flow* in the rack is
+  separate from ChannelView's, starting from it until you change it.
+
 ## 2.6.1 — rocker colours, bar backgrounds, large menus
 
 - **Pill rockers in colour.** A Pill rocker's colour swatches set the

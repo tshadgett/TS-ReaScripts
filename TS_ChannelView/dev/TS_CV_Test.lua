@@ -306,6 +306,34 @@ do
   local TRP = require("TS_CV_TrimmerPanel")
   check("rack trimmer side by side", TRP.one_column(TRP.rack_body_h(600)), false)
   check("rack trimmer stacked", TRP.one_column(TRP.rack_body_h(400)), true)
+  -- never fewer rows than the tallest control needs
+  check("rack: knobs need a row", P.tallest_rows({ { type = "knob" }, { type = "toggle" } }), 1)
+  check("rack: a large knob needs two", P.tallest_rows({ { type = "knob", size = "large" } }), 2)
+  check("rack: a fader its length", P.tallest_rows({ { type = "fader", len = 3 } }), 3)
+  check("rack: a full-height fader two", P.tallest_rows({ { type = "fader" } }), 2)
+  check("rack: an across fader none", P.tallest_rows({ { type = "fader", dir = "h" } }), 1)
+  -- the rows a layout fills in ChannelView: two sections of four, in a
+  -- window ten rows tall, fill four
+  local was = P.RACK_ROWS
+  local two = { { type = "divider" } }
+  for i = 1, 4 do two[#two + 1] = { type = "knob", param = i } end
+  two[#two + 1] = { type = "divider" }
+  for i = 5, 8 do two[#two + 1] = { type = "knob", param = i } end
+  P.RACK_ROWS = 10
+  check("rack: the rows ChannelView fills", P.cv_rows_used(two), 4)
+  P.RACK_ROWS = 3
+  check("rack: no more than ChannelView has", P.cv_rows_used(two), 3)
+  P.RACK_ROWS = 10
+  local fw = C.FLOW
+  C.FLOW = "column"
+  check("rack: shared layout, down then across", P.rack_from_rows(two, true), 4)
+  check("rack: rack-only layout", P.rack_from_rows(two, false), P.tallest_rows(two))
+  C.FLOW = "row"
+  check("rack: across then down", P.rack_from_rows(two, true), P.tallest_rows(two))
+  C.FLOW = fw
+  P.RACK_ROWS = nil
+  check("rack: not known", P.cv_rows_used(two), 1)
+  P.RACK_ROWS = was
 end
 check("rows at h=120", P.rows_for(120), 1)
 check("cols for 8 @1 row", cols_for(8, 120), 8)

@@ -1088,6 +1088,27 @@ local function draw_trace(ctx, dl, x, y, w, h, track, fx, meter, range, est, gr,
   W.pop_small(ctx)
 end
 
+-- The rack's gain-reduction meter: across the top, `w` wide (nothing
+-- reading yet: an empty bar).
+function P.gr_strip_h() return C.GR_BAR_H + C.PANEL_PAD end
+local function draw_meter_h(ctx, dl, x, y, w, track, fx, meter)
+  local gr = T.gain_reduction(track, fx.addr) or 0
+  local now = reaper.time_precise()
+  local peak, range = W.gr_state(fx.guid, gr, now, meter.range)
+  local est = T.gr_estimated(track, fx.addr, fx.guid)
+  local zst = est and TP.cal_status(track, fx.guid) or nil
+  W.gr_meter_h(ctx, dl, x, y, w, C.GR_BAR_H, gr, peak, range, est, zst == 0)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.InvisibleButton(ctx, "grh##" .. fx.guid, w, C.GR_BAR_H)
+  W.tip(ctx, "grh##" .. fx.guid,
+    ("Gain reduction%s\n%.2f dB, peak %.2f\nScale 0 to %g dB%s")
+    :format(est and " (estimated)" or "", gr, peak, range,
+            (range > (meter.range or 0)) and "  (expanded)" or "")
+    .. (est and ("\n\nMeasured by the probe\n" ..
+                 TP.cal_text(TP.cal_status(track, fx.guid))) or ""),
+    ImGui.IsItemHovered(ctx), false)
+end
+
 -- The gain-reduction meter, and -- when it's opened out -- its trace to
 -- the left of it, `tw` wide. Returns the width used, 0 when there's no
 -- reading to show.
@@ -1960,6 +1981,14 @@ end
 -- width the panel was allotted.
 local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, req, meter, io)
   local controls = layout.controls or {}
+  -- in the rack, on a panel under three rows, the gain-reduction meter lies
+  -- across the top, the width of the panel, and the grid starts under it
+  if meter and P.RACK and P.rack_gr_across(fx.guid) then
+    draw_meter_h(ctx, dl, x + C.PANEL_PAD, y + C.GRID_TOP_PAD, w - C.PANEL_PAD * 2, track, fx, meter)
+    y = y + P.gr_strip_h()
+    panel_h = panel_h - P.gr_strip_h()
+    meter = nil
+  end
   -- conditional controls left out, then paged: the strip under the
   -- header, then one page's controls below (the index lookup for the
   -- context menu still runs over the whole list)
@@ -2841,12 +2870,55 @@ P.FILL_W = nil
 P.RACK = false
 
 -- In the rack every panel is exactly the column's width, and its height is
--- what that width leaves it: a grid takes the fewest rows that lay it out
--- across the column; a canvas (any EQ or compressor, ReaEQ, ReaComp)
--- spans the column at a height of its own, its layout's other controls in
--- rows UNDER it rather than beside it; the Trimmer stands its two columns
--- side by side when they fit, or stacks them.
+-- what that width leaves it: a grid takes the fewest rows that fit across
+-- the column, never fewer than its tallest control needs (a fader's
+-- length, a large knob, an XY pad). When it's the layout ChannelView
+-- shows and the rack runs down then across, it takes no fewer than the
+-- rows its controls fill in ChannelView's own window (laid out at
+-- P.RACK_ROWS, which ChannelView publishes), so it's arranged as it is
+-- there; a layout only the rack shows, or one running across then down,
+-- has nothing there to follow. A canvas (any EQ or compressor, ReaEQ,
+-- ReaComp) spans the column at a height of its own, its layout's other
+-- controls in rows UNDER it rather than beside it; the Trimmer stands its
+-- two columns side by side when they fit, or stacks them.
 P.RACK_ROWS_MAX = 40
+P.RACK_ROWS = nil       -- ChannelView's own rows, when known
+
+-- The rows a grid's tallest control needs: a fader's length, a large knob,
+-- an XY pad, a button row. An upright fader is never less than two rows
+-- (a full-height one included).
+function P.tallest_rows(vis)
+  local n = 1
+  for _, c in ipairs(vis or {}) do
+    local k = P.fader_kind(c)
+    if k == "column" then n = math.max(n, 2)
+    elseif k ~= "band" and c.type ~= "divider" and c.type ~= "page" then
+      local _, h = P.cell_size(c, 2 * P.RACK_ROWS_MAX)
+      n = math.max(n, math.ceil((h or 2) / 2))
+    end
+  end
+  return n
+end
+-- The rows a grid fills in ChannelView's window: laid out at its rows
+-- (P.RACK_ROWS) and in its Control flow (P.CV_FLOW; the rack's can
+-- differ), its deepest column. 1 when they aren't known.
+P.CV_FLOW = nil
+function P.cv_rows_used(vis)
+  if not P.RACK_ROWS or #(vis or {}) == 0 then return 1 end
+  local was = C.FLOW
+  C.FLOW = P.CV_FLOW or was
+  local ok, lay = pcall(P.layout, vis, 0, P.RACK_ROWS)
+  C.FLOW = was
+  if not ok then return 1 end
+  return math.max(1, math.ceil((lay.height or 0) / C.CELL_H - 0.01))
+end
+-- The rows a rack grid starts from (`shared`: ChannelView shows the same
+-- layout).
+function P.rack_from_rows(vis, shared)
+  local n = P.tallest_rows(vis)
+  if shared and C.FLOW ~= "row" then n = math.max(n, P.cv_rows_used(vis)) end
+  return n
+end
 function P.rack_canvas_h(w)
   return math.floor(math.max(240, math.min(384, w * 0.5)))
 end
@@ -2856,21 +2928,32 @@ local function grid_panel_h(n, paged)
          + (paged and C.TAB_STRIP_H or 0)
 end
 -- the least panel height whose grid fits across w (all of it, when
--- nothing does)
-local function rack_grid_h(vis, w, has_meter, key, io, trace, lock)
+-- nothing does), from `from` rows up
+-- (has_meter: the gain-reduction meter upright at the side, `trace` its
+-- history beside it, as in ChannelView). Returns the height and the rows.
+local function rack_grid_h(vis, w, has_meter, key, io, trace, lock, from)
   local paged = P.pages(vis) ~= nil
-  if lock then return grid_panel_h(lock, paged) end
-  local h
-  for n = 1, P.RACK_ROWS_MAX do
+  if lock then return grid_panel_h(lock, paged), lock end
+  local h, n0 = nil, math.min(from or 1, P.RACK_ROWS_MAX)
+  for n = n0, P.RACK_ROWS_MAX do
     h = grid_panel_h(n, paged)
-    if P.width(vis, h, false, has_meter, key, io, trace, nil, nil) <= w then return h end
+    if P.width(vis, h, false, has_meter, key, io, trace, nil, nil) <= w then return h, n end
   end
-  return h
+  return h, P.RACK_ROWS_MAX
 end
+
+-- The rack's gain-reduction meter: upright at the side (and its trace) as
+-- in ChannelView when the panel has three rows or more; lying across the
+-- top, with no trace, when it has fewer. Kept by fx GUID by P.rack_height
+-- for the drawing to read.
+P.RACK_GR_ROWS = 3
+local gr_across = {}
+function P.rack_gr_across(guid) return gr_across[guid] == true end
 -- the space either side the input and output meters take
 local function io_w(io) return io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0 end
 
-function P.rack_height(track, fx, layout, key, w)
+-- (`shared`: ChannelView shows this layout too, P.rack_from_rows)
+function P.rack_height(track, fx, layout, key, w, shared)
   if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
   local base = C.HEADER_H + P.footer_h()
   if TR.is(key) then return base + TRP.rack_body_h(w) end
@@ -2884,12 +2967,20 @@ function P.rack_height(track, fx, layout, key, w)
     local h = base + P.rack_canvas_h(ew)
     if #vis > 0 then
       -- the controls under it: their own grid's body, header and foot aside
-      h = h + rack_grid_h(vis, ew, false, nil, false, false, lock) - base
+      h = h + (rack_grid_h(vis, ew, false, nil, false, false, lock, P.tallest_rows(vis))) - base
     end
     return h
   end
   local has_meter = M.meter_of(layout) ~= nil and T.reports_gr(track, fx.addr, fx.guid)
-  return rack_grid_h(vis, w, has_meter, key, io, has_meter and St.is_gr_open(fx.guid), lock)
+  local from = P.rack_from_rows(vis, shared)
+  if not has_meter then
+    gr_across[fx.guid] = nil
+    return (rack_grid_h(vis, w, false, key, io, false, lock, from))
+  end
+  local h, rows = rack_grid_h(vis, w, true, key, io, St.is_gr_open(fx.guid), lock, from)
+  if rows >= P.RACK_GR_ROWS then gr_across[fx.guid] = nil; return h end
+  gr_across[fx.guid] = true
+  return (rack_grid_h(vis, w, false, key, io, false, lock, from)) + P.gr_strip_h()
 end
 
 -- Draws one panel at the current cursor position and advances past it.

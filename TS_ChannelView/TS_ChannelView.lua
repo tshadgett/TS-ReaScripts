@@ -1,11 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.6.1
+-- @version 2.6.2
 -- @changelog
---  Pill rockers take a colour of their own (the cap's). A bar in its own
---  window can have its own background. A toolbar menu can have large
---  items, as the header's menus. EQ learning: bands whose shape switch
---  just says Shelf are learned on their own (learn such an EQ again).
+--  Rack: a plugin takes the fewest rows that fit across the column, never
+--  fewer than its tallest control needs (a layout ChannelView shows too,
+--  running down then across, keeps the rows it fills there). On a panel
+--  under three rows the gain-reduction meter lies across the top. The
+--  rack has its own Control flow.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -413,7 +414,8 @@ C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
 -- into the view you were not in is a small daily annoyance.
 C.MIXER_VIEW  = (not RACK) and ext_get("mixer_view", "0") == "1"
-C.FLOW        = ext_get("flow", C.FLOW)
+-- (the rack has its own, starting from ChannelView's)
+C.FLOW        = RACK and ext_get("rack_flow", ext_get("flow", C.FLOW)) or ext_get("flow", C.FLOW)
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 do
   local h, t = pal_get()
@@ -3868,10 +3870,10 @@ local function menu_bar()
       end
       if ImGui.BeginMenu(ctx, "Control flow") then
         if ImGui.MenuItem(ctx, "Down, then across", nil, C.FLOW == "column") then
-          C.FLOW = "column"; ext_set("flow", C.FLOW)
+          C.FLOW = "column"; ext_set(RACK and "rack_flow" or "flow", C.FLOW)
         end
         if ImGui.MenuItem(ctx, "Across, then down", nil, C.FLOW == "row") then
-          C.FLOW = "row"; ext_set("flow", C.FLOW)
+          C.FLOW = "row"; ext_set(RACK and "rack_flow" or "flow", C.FLOW)
         end
         ImGui.EndMenu(ctx)
       end
@@ -4538,6 +4540,27 @@ local function panel_requests(i, fx, layout, key, req)
     end
 end
 
+-- ChannelView's own panel rows, for the rack (P.RACK_ROWS: a layout
+-- ChannelView shows too keeps the rows it fills there, P.rack_from_rows):
+-- ChannelView publishes them as its window changes height, kept for when
+-- it isn't running; the rack reads them twice a second.
+local ROWS = { key = "panel_rows", said = nil, read_at = -1 }
+function ROWS.publish(inner_h)
+  local n = P.rows_for(inner_h)
+  if n ~= ROWS.said then
+    ROWS.said = n
+    reaper.SetExtState(C.EXT_SECT, ROWS.key, tostring(n), true)
+  end
+end
+function ROWS.read()
+  local now = reaper.time_precise()
+  if now - ROWS.read_at < 0.5 then return end
+  ROWS.read_at = now
+  P.RACK_ROWS = tonumber(reaper.GetExtState(C.EXT_SECT, ROWS.key))
+  local fl = reaper.GetExtState(C.EXT_SECT, "flow")
+  P.CV_FLOW = (fl == "row" or fl == "column") and fl or nil
+end
+
 local function panel_row(row_h, row_w)
   local pr_x, pr_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "panelrow", row_w or 0, row_h, 0,
@@ -4545,6 +4568,7 @@ local function panel_row(row_h, row_w)
   if ok then
     local _, inner_h = ImGui.GetContentRegionAvail(ctx)
     app.panel_rects = {}
+    if not RACK then ROWS.publish(inner_h) end
 
     -- The row's empty space is a double-click target: back to mixer
     -- view. Submitted first, so every panel and control drawn after it
@@ -4730,11 +4754,22 @@ end
 local rack_fit = {}      -- guid -> { sig, h }
 local function rack_height(fx, layout, key, rack_w)
   if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
+  ROWS.read()
   local sig = table.concat({ tostring(layout), key, math.floor(rack_w), math.floor(reaper.time_precise() * 2),
+                             tostring(P.RACK_ROWS),
                              tostring(St.is_gr_open(fx.guid)), tostring(C.SHOW_VALUES) }, "|")
   local hit = rack_fit[fx.guid]
   if hit and hit.sig == sig then return hit.h end
-  local h = P.rack_height(app.track, fx, layout, key, rack_w)
+  -- whether ChannelView shows this layout too: a switching rule puts it
+  -- up in both, otherwise ChannelView's own pick
+  local shared = St.switch_rule(fx.guid) ~= nil
+  if not shared then
+    local was = St.VARIANT
+    St.VARIANT = "variant:"
+    shared = St.chosen_key(fx.name, fx.guid) == key
+    St.VARIANT = was
+  end
+  local h = P.rack_height(app.track, fx, layout, key, rack_w, shared)
   rack_fit[fx.guid] = { sig = sig, h = h }
   return h
 end

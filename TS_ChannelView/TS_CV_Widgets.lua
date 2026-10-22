@@ -3045,6 +3045,43 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
   return bx, y, w, bar_h
 end
 
+-- The gain-reduction meter lying across (the rack's: along the top of a
+-- panel): 0 dB at the right end, the bar growing left as it pulls down,
+-- the held peak as a line, quarter ticks, the held peak's reading at the
+-- left end. Returns the bar's rectangle -- x, y, width, height.
+function W.gr_meter_h(ctx, dl, x, y, w, h, gr_db, peak_db, max_db, est, dim)
+  max_db = (max_db and max_db > 0) and max_db or 12
+  local pushed = false
+  if meter_font then ImGui.PushFont(ctx, meter_font, C.METER_FONT); pushed = true end
+  local v   = peak_db or 0
+  local txt = ((v >= 0.05) and ("%.1f"):format(v) or "\u{2013}") .. " dB"
+  local tw, th = ImGui.CalcTextSize(ctx, "-88.8 dB")
+  local bx = x + tw + 6
+  local bw = math.max(10, x + w - bx)
+  ImGui.DrawList_AddRectFilled(dl, bx, y, bx + bw, y + h, C.COL.knob_body, 2.0)
+  ImGui.DrawList_AddRect(dl, bx, y, bx + bw, y + h, C.COL.knob_ring, 2.0, 0, 1.0)
+  local ix0, ix1, iy0, iy1 = bx + 2, bx + bw - 2, y + 2, y + h - 2
+  local iw = ix1 - ix0
+  local frac = math.max(0, math.min(1, (gr_db or 0) / max_db))
+  if frac > 0.001 then
+    ImGui.DrawList_AddRectFilled(dl, ix1 - iw * frac, iy0, ix1, iy1, W.gr_fill_col(est, dim), 1.0)
+  end
+  for i = 1, 4 do
+    local tx = ix1 - iw * (i / 4)
+    local full = (i == 4)
+    ImGui.DrawList_AddLine(dl, tx, full and (y + 1) or (y + h - 4), tx, y + h - 1, C.COL.knob_ring, 1.0)
+  end
+  if peak_db and peak_db > 0.05 then
+    local px = ix1 - iw * math.max(0, math.min(1, peak_db / max_db))
+    ImGui.DrawList_AddLine(dl, px, y + 1, px, y + h - 1, C.COL.knob_pointer, 1.5)
+  end
+  local vw = ImGui.CalcTextSize(ctx, txt)
+  ImGui.DrawList_AddText(dl, bx - 6 - vw, y + (h - th) * 0.5,
+    (v >= 0.05) and C.COL.value or C.COL.header_dim, txt)
+  if pushed then ImGui.PopFont(ctx) end
+  return bx, y, bw, h
+end
+
 -- One of a plugin's level meters: its input (left of the panel) or its
 -- output (right of it), so the panel reads in the direction the audio goes.
 -- A slim bar with the held peak, and a readout under it: `readout` is the
