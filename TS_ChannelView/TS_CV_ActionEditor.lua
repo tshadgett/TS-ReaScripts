@@ -477,6 +477,14 @@ local function bar_settings(ctx, bar)
     end
     ImGui.EndGroup(ctx)
     measure(ctx, "dock")
+    -- on a line of its own: its swatches wrap to the panel's width
+    ImGui.BeginGroup(ctx)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, "Background")
+    ImGui.SameLine(ctx)
+    DR.bg_items(ctx, d, true)
+    ImGui.EndGroup(ctx)
+    measure(ctx, "bg")
   end
   if not DR.SINGLE[d.side] then
     flow(ctx, "remove", 14)
@@ -511,6 +519,11 @@ local function item_props(ctx, tb, web)
     if it.menu then
       ImGui.Text(ctx, "Menu")
       ImGui.TextDisabled(ctx, ("%d inside. Clicking it opens it."):format(#it.items))
+      if not web then
+        local chg, v = ImGui.Checkbox(ctx, "Large items##aelarge", it.large == true)
+        if chg then it.large = v or nil; tb.save() end
+        if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its items as tall as ChannelView's own header menus.") end
+      end
     elseif sw then
       ImGui.Text(ctx, "Toolbar switch")
       ImGui.PushTextWrapPos(ctx, 0)

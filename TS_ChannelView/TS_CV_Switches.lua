@@ -10,7 +10,8 @@
   with the 3D effect off, in the theme's flat look, where the lever types
   draw as a pill slider and the guarded toggle as a pill slider with its
   cover. `col` is the toggle's lit colour; the rockers, lamps, buttons and
-  sliders light in it.
+  sliders light in it. A pill rocker doesn't light: its colour (`body`,
+  the toggle's own) is the colour its cap is moulded in, black without.
 --]]
 
 local C = require("TS_CV_Config")
@@ -109,14 +110,15 @@ local function lever(dl, cx, cy, S, on, kind)
 end
 
 -- A rocker in a pill bezel, I above O; the pressed half is the one in.
-local function rocker(dl, cx, cy, S, on, lit, col)
+-- `body`: an unlit rocker's colour (nil: black).
+local function rocker(dl, cx, cy, S, on, lit, col, body)
   local w, h = S * 0.52, S * 0.86
   local x1, y1, x2, y2 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
   local rr = w / 2
   shadow_rect(dl, x1, y1, x2, y2, rr, 1)
   ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, 0x0e0e10ff, rr)
   local i = 2.0
-  local face = lit and (on and col or mix(col, BLACK, 0.55)) or 0x26272bff
+  local face = lit and (on and col or mix(col, BLACK, 0.55)) or body or 0x26272bff
   if lit and on then glow_rect(dl, x1 + i, y1 + i, x2 - i, y2 - i, rr - i, col, 0x50) end
   ImGui.DrawList_AddRectFilled(dl, x1 + i, y1 + i, x2 - i, y2 - i, face, rr - i)
   -- the pressed half sits in shadow, the other catches the light
@@ -130,6 +132,7 @@ local function rocker(dl, cx, cy, S, on, lit, col)
   end
   ImGui.DrawList_AddLine(dl, x1 + i + 1, mid, x2 - i - 1, mid, 0x00000060, 1.0)
   local ink = (lit and not on) and alpha(WHITE, 0x90) or alpha(WHITE, 0xe0)
+  if not lit and body and U.is_light(body) then ink = 0x202124d8 end
   mark_i(dl, cx, cy - h * 0.24, S * 0.06, ink)
   mark_o(dl, cx, cy + h * 0.24, S * 0.055, ink)
 end
@@ -304,8 +307,9 @@ end
 function SW.is(style) return style ~= nil and C.SWITCH[style] ~= nil end
 
 -- The switch `style` in the box x1..x2, y1..y2, on or off, lit in `col`;
--- `flat` the theme's look; `text` what a lamp button says; `hot` hovered.
-function SW.draw(ctx, dl, style, x1, y1, x2, y2, on, col, flat, text, hot)
+-- `flat` the theme's look; `text` what a lamp button says; `hot` hovered;
+-- `body` a pill rocker's own colour (nil: black).
+function SW.draw(ctx, dl, style, x1, y1, x2, y2, on, col, flat, text, hot, body)
   local cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
   local bw, bh = x2 - x1, y2 - y1
   local S = math.min(bw, bh)
@@ -313,6 +317,7 @@ function SW.draw(ctx, dl, style, x1, y1, x2, y2, on, col, flat, text, hot)
   local SL = math.min(bh * 1.15, bw * 1.3)
   local SP = math.min(bw * 1.2, bh * 2.4)
   if hot then col = U.lighten(col, 0.08) end
+  if hot and body then body = U.lighten(body, 0.08) end
   if style == "bat" or style == "paddle" then
     if flat then pill_slider(dl, cx, cy, SP, on, col, true) else lever(dl, cx, cy, SL, on, style) end
   elseif style == "rocker" or style == "litrocker" then
@@ -322,13 +327,20 @@ function SW.draw(ctx, dl, style, x1, y1, x2, y2, on, col, flat, text, hot)
       local bx1, by1, bx2, by2 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
       local rr = w / 2
       ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2, 0x3a3d42ff, rr)
-      local top = on and (style == "litrocker" and col or col) or 0x5a5d62ff
+      local top, bot = on and col or 0x5a5d62ff, on and 0x3a3d42ff or 0x8a8d92ff
+      local ink = 0xf2f2f2ff
+      if style == "rocker" and body then
+        -- its own colour, the pressed half in shadow
+        local dim = mix(body, BLACK, 0.35)
+        top, bot = on and dim or body, on and body or dim
+        if U.is_light(body) then ink = 0x202124ff end
+      end
       ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, cy, top, rr, ImGui.DrawFlags_RoundCornersTop)
-      ImGui.DrawList_AddRectFilled(dl, bx1, cy, bx2, by2, on and 0x3a3d42ff or 0x8a8d92ff, rr, ImGui.DrawFlags_RoundCornersBottom)
-      mark_i(dl, cx, cy - h * 0.24, SL * 0.06, 0xf2f2f2ff)
-      mark_o(dl, cx, cy + h * 0.24, SL * 0.05, 0xf2f2f2ff)
+      ImGui.DrawList_AddRectFilled(dl, bx1, cy, bx2, by2, bot, rr, ImGui.DrawFlags_RoundCornersBottom)
+      mark_i(dl, cx, cy - h * 0.24, SL * 0.06, ink)
+      mark_o(dl, cx, cy + h * 0.24, SL * 0.05, ink)
     else
-      rocker(dl, cx, cy, SL, on, style == "litrocker", col)
+      rocker(dl, cx, cy, SL, on, style == "litrocker", col, style == "rocker" and body or nil)
     end
   elseif style == "slide" then
     if flat then

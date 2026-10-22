@@ -121,23 +121,34 @@ function DR.serialize(list)
   if #list == 0 then return "none" end
   local out = {}
   for _, d in ipairs(list) do
-    out[#out + 1] = table.concat({ d.id, d.side, d.open and "1" or "0",
+    local f = { d.id, d.side, d.open and "1" or "0",
       tostring(math.floor(d.width or DR.W_DEF)), d.style or "both", clean(d.key or ""),
-      tostring(math.floor(d.dock or 0)), tostring(size_of(d.size)),
-      align_field(d), clean(d.name) }, "|")
+      tostring(math.floor(d.dock or 0)), tostring(size_of(d.size)), align_field(d) }
+    if DR.bg_of(d.bg) then f[#f + 1] = d.bg end
+    f[#f + 1] = clean(d.name)
+    out[#out + 1] = table.concat(f, "|")
   end
   return table.concat(out, ";")
 end
 
--- Every form: id|place|open|width|style|key|dock|size|align|name, the
--- same without align, without size too, and the older drawers-only
--- id|side|open|width|style|name.
+-- A bar window's own background (d.bg, "#rrggbb"), or nil for the theme's.
+function DR.bg_of(v)
+  return (type(v) == "string" and v:match("^#%x%x%x%x%x%x$")) and v:lower() or nil
+end
+
+-- Every form: id|place|open|width|style|key|dock|size|align|bg|name (bg
+-- only when the bar has one), the same without align, without size too,
+-- and the older drawers-only id|side|open|width|style|name.
 function DR.parse(s)
   local out = {}
   if not s or s == "" or s == "none" then return out end
   for part in (s .. ";"):gmatch("([^;]*);") do
-    local id, side, open, width, style, key, dock, size, align, name =
-      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?)|(.*)$")
+    local id, side, open, width, style, key, dock, size, align, bg, name =
+      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?)|(#%x%x%x%x%x%x)|(.*)$")
+    if not id then
+      id, side, open, width, style, key, dock, size, align, name =
+        part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?)|(.*)$")
+    end
     if not id then
       id, side, open, width, style, key, dock, size, name =
         part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|(.*)$")
@@ -160,6 +171,7 @@ function DR.parse(s)
                         dock = tonumber(dock) or 0, size = size_of(size), name = name }
       local e = out[#out]
       e.halign, e.valign, e.cstyle = align_of(align)
+      e.bg = DR.bg_of(bg)
     end
   end
   return out
@@ -225,7 +237,7 @@ local function enc_list(list)
       out[#out + 1] = '{"sp":1}'
     elseif e.m then
       out[#out + 1] = '{"m":1,"l":' .. enc_str(e.l or "") .. ',"c":' .. enc_str(e.c or "") .. ic
-                      .. ',"i":' .. enc_list(e.i or {}) .. '}'
+                      .. (e.lg and ',"lg":1' or "") .. ',"i":' .. enc_list(e.i or {}) .. '}'
     else
       local vn = ""
       if e.vo then vn = vn .. ',"vo":' .. enc_str(e.vo) end
@@ -251,7 +263,8 @@ function DR.from_web(arr)
         out[#out + 1] = { sep = true, gap = true }
       elseif e.m then
         out[#out + 1] = { menu = true, icon = tostring(e.ic or ""), label = tostring(e.l or ""), color = e.c or "",
-                          cs = type(e.cs) == "string" and e.cs or nil, items = DR.from_web(e.i) }
+                          cs = type(e.cs) == "string" and e.cs or nil, large = e.lg and true or nil,
+                          items = DR.from_web(e.i) }
       elseif e.a and tostring(e.a) ~= "" then
         out[#out + 1] = { cmd = tostring(e.a), icon = tostring(e.ic or ""), label = tostring(e.l or ""), color = e.c or "",
                           cs = type(e.cs) == "string" and e.cs or nil,
@@ -267,7 +280,8 @@ function DR.to_web(items)
   local out = {}
   for _, it in ipairs(items or {}) do
     if it.menu then
-      out[#out + 1] = { m = 1, l = it.label or "", c = it.color or "", cs = it.cs, ic = it.icon, i = DR.to_web(it.items) }
+      out[#out + 1] = { m = 1, l = it.label or "", c = it.color or "", cs = it.cs, ic = it.icon, lg = it.large and 1 or nil,
+                        i = DR.to_web(it.items) }
     elseif it.sep then
       out[#out + 1] = { sp = 1 }
     else
@@ -363,6 +377,7 @@ function DR.export_text(list, name_of)
     out[#out + 1] = "dock=" .. tostring(math.floor(d.dock or 0))
     out[#out + 1] = "size=" .. tostring(size_of(d.size))
     out[#out + 1] = "align=" .. align_field(d)
+    if DR.bg_of(d.bg) then out[#out + 1] = "bg=" .. d.bg end
     out[#out + 1] = "items=" .. TB.serialize(items)
     out[#out + 1] = "web=" .. DR.json_encode_list(DR.to_web(items))
     local seen = {}
@@ -397,6 +412,7 @@ function DR.parse_export(text)
       elseif k == "dock" then cur.dock = tonumber(v) or 0
       elseif k == "size" then cur.size = size_of(v)
       elseif k == "align" then cur.halign, cur.valign, cur.cstyle = align_of(v)
+      elseif k == "bg" then cur.bg = DR.bg_of(v)
       elseif k == "items" then cur.items = TB.parse(v ~= "" and v or "none")
       elseif k == "web" then cur.web_items = DR.from_web(DR.json_decode(v) or {})
       elseif k == "action" then
@@ -598,6 +614,7 @@ function DR.import(entries, use_places)
     d.tb.btn = d.size
     d.halign, d.valign, d.cstyle = e.halign or "-", e.valign or "-", e.cstyle or "u"
     d.tb.halign, d.tb.valign, d.tb.cstyle = d.halign, d.valign, d.cstyle
+    d.bg = DR.bg_of(e.bg)
     local items = (d.side == "web" and e.web_items) or e.items
     d.tb.items = TB.copy_items(items or {})
     d.tb.style = d.style
@@ -899,6 +916,61 @@ function DR.aligns(d)
   return not column or d.side == "window", d.side ~= "web"
 end
 
+-- A bar window's background (d.bg): the theme's, a faceplate colour, or
+-- any colour (the colour dialog). `nested`: drawn in a panel that stays
+-- open (Organise actions), else in a menu, which closes for the dialog.
+function DR.bg_items(ctx, d, nested)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local cur = DR.bg_of(d.bg)
+  local function mark()
+    local x0, y0 = ImGui.GetItemRectMin(ctx)
+    local x1, y1 = ImGui.GetItemRectMax(ctx)
+    ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.label, 2, 0, 1.5)
+  end
+  local function set(hex) d.bg = hex; DR.save() end
+  -- the swatches wrap: in a panel at its right edge (each line starting
+  -- under the first swatch), in a menu every 8
+  ImGui.BeginGroup(ctx)
+  local x0 = ImGui.GetCursorScreenPos(ctx)
+  local right = x0 + ImGui.GetContentRegionAvail(ctx)
+  local n = 0
+  local function next_to(w, gap)
+    n = n + 1
+    local fits
+    if nested then fits = select(1, ImGui.GetItemRectMax(ctx)) + gap + w <= right
+    else fits = (n - 1) % 8 ~= 0 end
+    if fits then ImGui.SameLine(ctx, 0, gap) end
+  end
+  n = 1
+  if ImGui.ColorButton(ctx, "Theme##drbg" .. d.id, C.COL.header_bg, ImGui.ColorEditFlags_NoTooltip, 18, 18) then set(nil) end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "The theme's") end
+  if not cur then mark() end
+  local listed = false
+  for _, pl in ipairs(C.PLATES) do
+    if pl.bg then
+      local hex = ("#%06x"):format(pl.bg >> 8)
+      next_to(18, 4)
+      if ImGui.ColorButton(ctx, pl.label .. "##drbg" .. d.id .. pl.key, pl.bg, ImGui.ColorEditFlags_NoTooltip, 18, 18) then set(hex) end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, pl.label) end
+      if cur == hex then mark(); listed = true end
+    end
+  end
+  if cur and not listed then
+    next_to(18, 4)
+    ImGui.ColorButton(ctx, cur:upper() .. "##drbgown" .. d.id, (tonumber(cur:sub(2), 16) << 8) | 0xff, ImGui.ColorEditFlags_NoTooltip, 18, 18)
+    mark()
+  end
+  next_to(22, 6)
+  if ImGui.Button(ctx, "\u{2026}##drbgany" .. d.id, 22, 18) and d.tb then
+    d.tb.pick_colour("Bar background", cur and tonumber(cur:sub(2), 16) or (C.COL.header_bg >> 8),
+      function(rgb) set(("#%06x"):format(rgb & 0xffffff)) end, nested)
+    if not nested then ImGui.CloseCurrentPopup(ctx) end
+  end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Any colour\u{2026}") end
+  ImGui.EndGroup(ctx)
+  if nested and d.tb and d.tb.draw_colour then d.tb.draw_colour(ctx) end
+end
+
 -- The alignment entries, for a bar's Show menu.
 function DR.align_items(ctx, d)
   local across, updown = DR.aligns(d)
@@ -944,6 +1016,10 @@ function DR.drawer_menu(ctx, d, where)
   end
   if d.tb and ImGui.BeginMenu(ctx, "Switch to##dr" .. d.id) then
     d.tb.switch_entries(ctx)
+    ImGui.EndMenu(ctx)
+  end
+  if d.side == "window" and ImGui.BeginMenu(ctx, "Background##dr" .. d.id) then
+    DR.bg_items(ctx, d, false)
     ImGui.EndMenu(ctx)
   end
   if d.side == "window" and ImGui.BeginMenu(ctx, "Dock##dr" .. d.id) then

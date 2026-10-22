@@ -1802,7 +1802,7 @@ function W.toggle(ctx, id, label, value, formatted, opts)
     local sy1 = small and (y + 2) or (y + label_h + C.LABEL_GAP)
     local sy2 = small and (y + ch - 2) or (sy1 + C.KNOB_D)
     SW.draw(ctx, dl, opts.style, x + 4, sy1, x + cw - 4, sy2, on, opts.on_col or C.COL.toggle_on,
-      (W.hw or 0) <= 0, txt, hovered)
+      (W.hw or 0) <= 0, txt, hovered, opts.on_col)
     if opts.mod then
       W.mod_corner(dl, x + cw - 6, sy1, 5, on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off)
     end

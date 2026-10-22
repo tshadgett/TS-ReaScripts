@@ -803,6 +803,62 @@ do
   M.remove("Sat :: Sat")
 end
 
+-- ---------------------------------------------------------------------
+-- a Type switch that says "Shelf" without saying which end: the low band's
+-- is a low shelf, the high band's a high shelf, so the two bands are
+-- learned apart even though their switches read the same
+-- ---------------------------------------------------------------------
+do
+  local function hz(n) local f = 20 * 1000 ^ n
+    return f >= 1000 and ("%.2f kHz"):format(f / 1000) or ("%.1f Hz"):format(f) end
+  local function band(k0, nm)
+    return {
+      [k0] = { name = nm .. " Shape", list = { "Bell", "Shelf" } },
+      [k0 + 1] = { name = nm .. " Freq", fn = hz },
+      [k0 + 2] = { name = nm .. " Gain", lo = -15, hi = 15, unit = "dB" },
+      [k0 + 3] = { name = nm .. " Q", fn = function(n) return ("%.2f"):format(0.2 * 50 ^ n) end },
+    }
+  end
+  P = {}
+  for p, d in pairs(band(0, "Lo")) do P[p] = d end
+  for p, d in pairs(band(4, "Hi")) do P[p] = d end
+  NP = 8
+  truth = function(vals)
+    local b = {}
+    for i, k0 in ipairs({ 0, 4 }) do
+      local _, ti = fmt(k0, vals[k0])
+      local f = 20 * 1000 ^ vals[k0 + 1]
+      local g = -15 + 30 * vals[k0 + 2]
+      local q = 0.2 * 50 ^ vals[k0 + 3]
+      if ti == 1 then b[#b + 1] = { type = "bell", f = f, g = g, q = q }
+      else b[#b + 1] = { type = (i == 1) and "ls" or "hs", f = f, g = g, q = 0.7071 } end
+    end
+    return b
+  end
+  tracks = {}
+  local user = newtrack("Shelves"); tracks[1] = user
+  user.fx[1] = { kind = "eq", vals = {} }
+  for p = 0, NP - 1 do user.fx[1].vals[p] = 0.5 end
+  user.fx[1].vals[0], user.fx[1].vals[4] = 0, 0
+  local layout = { controls = {}, aliases = {}, canvas = { kind = "eq", bands = {
+    { name = "Low", freq = 1, gain = 2, q = 3, shape = 0 },
+    { name = "High", freq = 5, gain = 6, q = 7, shape = 4 } } } }
+  M.set("Shelves :: EQ", layout)
+  local job = LN.start(user, 0, "Shelves :: EQ", layout)
+  run(job)
+  check("shelf: learned", job.state, "done")
+  local L1 = ME.decode(layout.canvas.bands[1].learn)
+  local L2 = ME.decode(layout.canvas.bands[2].learn)
+  check("shelf: each band measured", (function()
+    local n = 0
+    for _, st in ipairs(job.steps) do if st.k == 2 then n = n + 1 end end
+    return n > 0
+  end)(), true)
+  check("shelf: the low band's shelf is low", L1 and L1.shapes[2] and L1.shapes[2].type, "ls")
+  check("shelf: the high band's shelf is high", L2 and L2.shapes[2] and L2.shapes[2].type, "hs")
+  M.remove("Shelves :: EQ")
+end
+
 os.remove(tmpdir .. "TS_ChannelView_Mappings.ini")
 os.remove(tmpdir .. "TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and ("\nALL PASS") or ("\n" .. fails .. " FAILURES"))

@@ -603,7 +603,9 @@ put them. Every bar is global, not per project.
   **Organise actions**.
 - **Menus.** A button can be a menu of actions, separators and further
   menus, nested as deep as you like. Clicking it always opens the menu.
-  The web page shows the same menus (a sheet, with *‹ Back* for a submenu).
+  *Large items* (its right-click, or in Organise actions) gives it the
+  taller rows of ChannelView's own header menus. The web page shows the
+  same menus (a sheet, with *‹ Back* for a submenu).
 - **Plugins and FX chains.** A button that adds a plugin, or an FX chain,
   with one click — no Insert FX action in REAPER's Action List. *+ Plugin*
   and *+ FX chain* in Organise actions: the menu stays open, each click
@@ -684,6 +686,8 @@ put them. Every bar is global, not per project.
   window; it can run when REAPER starts (a windowed bar's right-click).
   A bar in a window shows its name as a drawer does (at the start of a
   row, over a column), as a docker doesn't always show a window's title.
+  **Background** (its right-click, or in Organise actions) gives it a
+  colour of its own: a faceplate colour or any colour at all.
 
 ## Panels are a fixed height and grow in columns
 
@@ -1081,8 +1085,10 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Backlit* (a dark cap whose edge and lettering light up). A toggle can
   also be a **switch**: *Bat toggle*, *Paddle toggle*, *Pill rocker*, *Lit
   rocker*, *Slide*, *Pill slider*, *Lamp button*, *Round button*, *Jewel
-  lamp* or *Guarded toggle* (a cover to lift first), lit in its colour;
-  with the 3D effect off the levers draw as the pill slider. Under either row of swatches, **[+]** opens the colour
+  lamp* or *Guarded toggle* (a cover to lift first), lit in its colour —
+  except the *Pill rocker*, which doesn't light: its colour is the colour
+  of its cap (black when it has none). With the 3D effect off the levers
+  draw as the pill slider. Under either row of swatches, **[+]** opens the colour
   picker for any colour at all, with your recent colours beside it.
 - **The look new controls start with.** Style ▸ *Use this look for new
   knobs* (or *buttons*) on any knob or toggle: new layouts, the layouts

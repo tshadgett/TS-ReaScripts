@@ -116,7 +116,9 @@ local function bar_window(d)
   local min_h = ImGui.GetFrameHeight(ctx) + 8 + C.TB_MIN_H + 6
   ImGui.SetNextWindowSize(ctx, 420, min_h + 8, ImGui.Cond_FirstUseEver)
   ImGui.SetNextWindowSizeConstraints(ctx, 60, min_h, 100000, 100000)
-  ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.header_bg)
+  -- the bar's own background (its right-click > Background), else the theme's
+  local bg = DR.bg_of(d.bg)
+  ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, bg and ((tonumber(bg:sub(2), 16) << 8) | 0xff) or C.COL.header_bg)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, 4, 4)
   local title = (d.name ~= "" and d.name or ("Toolbar " .. d.id)) .. "###cvbar" .. d.id
   local vis, open = ImGui.Begin(ctx, title, true,

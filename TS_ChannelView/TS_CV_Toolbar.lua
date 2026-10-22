@@ -147,31 +147,34 @@ end
 -- last, "|v=<look>".
 -- An FX chain button's way with the plugins already there (it.cm,
 -- TS_CV_FXButtons: "replace" or "ask"; nil adds), stored "|c=<way>".
+-- A menu whose items are large, as the header's (it.large), "|s=large".
 TB.VO = { none = true, mono = true, fill = true, prefix = true, off = true }
 local function vo_field(it)
   return ((it.vo and TB.VO[it.vo]) and ("|v=" .. it.vo) or "")
       .. ((it.cm and FB.CM[it.cm]) and ("|c=" .. it.cm) or "")
+      .. (it.large and "|s=large" or "")
 end
 -- The label part of a stored button, less its fields at the end: label,
--- vendor look, chain way.
+-- vendor look, chain way, large.
 local function vo_split(label)
-  local vo, cm
+  local vo, cm, large
   label = label or ""
   while true do
-    local l, k, v = label:match("^(.*)|([vc])=(%a+)$")
+    local l, k, v = label:match("^(.*)|([vcs])=(%a+)$")
     if not l then break end
     if k == "v" and TB.VO[v] and not vo then vo = v
     elseif k == "c" and FB.CM[v] and not cm then cm = v
+    elseif k == "s" and v == "large" and not large then large = true
     else break end
     label = l
   end
-  return label, vo, cm
+  return label, vo, cm, large
 end
 
 local function ser(items, out)
   for _, it in ipairs(items) do
     if it.menu then
-      out[#out + 1] = "[|" .. clean(it.icon) .. "|" .. clean(it.label) .. colour_field(it)
+      out[#out + 1] = "[|" .. clean(it.icon) .. "|" .. clean(it.label) .. colour_field(it) .. vo_field(it)
       ser(it.items or {}, out)
       out[#out + 1] = "]"
     elseif it.gap then out[#out + 1] = "_"
@@ -191,7 +194,7 @@ local function copy_items(src)
   local out = {}
   for i, it in ipairs(src) do
     out[i] = { sep = it.sep, gap = it.gap, cmd = it.cmd, icon = it.icon or "", label = it.label or "",
-               color = it.color, cs = it.cs, vo = it.vo, cm = it.cm, menu = it.menu, items = it.menu and copy_items(it.items or {}) or nil }
+               color = it.color, cs = it.cs, vo = it.vo, cm = it.cm, large = it.large, menu = it.menu, items = it.menu and copy_items(it.items or {}) or nil }
   end
   return out
 end
@@ -220,9 +223,11 @@ function TB.parse(s)
       if #stack > 0 then out = table.remove(stack) end
     elseif part:sub(1, 1) == "[" then
       local icon, label = part:match("^%[|?([^|]*)|?(.*)$")
+      local lab, _vo, _cm, large = vo_split(label)
+      label = lab
       local l2, col, cs = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)(/?%a*)$")
       if l2 then label = l2 end
-      local m = { menu = true, icon = icon or "", label = label or "", color = col, cs = cs_parse(cs), items = {} }
+      local m = { menu = true, icon = icon or "", label = label or "", color = col, cs = cs_parse(cs), large = large, items = {} }
       out[#out + 1] = m
       stack[#stack + 1] = out
       out = m.items
@@ -1633,6 +1638,8 @@ local function item_menu(ctx)
   ImGui.Separator(ctx)
 
   if it.menu then
+    if ImGui.MenuItem(ctx, "Large items", nil, it.large == true) then it.large = (not it.large) or nil; TB.save() end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its items as tall as ChannelView's own header menus.") end
     if ImGui.MenuItem(ctx, "Add action to it\u{2026}") then TB.pick_into(it.items, nil) end
     if ImGui.MenuItem(ctx, "Add a menu to it") then
       it.items[#it.items + 1] = new_menu(); TB.save()
@@ -1746,11 +1753,20 @@ local function pop_menu(ctx)
   if st.pop_at then
     ImGui.SetNextWindowPos(ctx, st.pop_at[1], st.pop_at[2], ImGui.Cond_Appearing, st.pop_at[3], st.pop_at[4])
   end
-  if not ImGui.BeginPopup(ctx, ID .. POP) then return end
+  -- a menu set to large items: the header's spacing and padding (the
+  -- ones ChannelView's own menus open with)
   local it = st.pop_item
-  if it and TB.switch_of(it) == "menu" then TB.switch_entries(ctx)
-  elseif it then TB.menu_entries(ctx, it.items or {}, "p") end
-  ImGui.EndPopup(ctx)
+  local large = it and it.large
+  if large then
+    ImGui.PushStyleVar(ctx, ImGui.StyleVar_ItemSpacing, 4, 4)
+    ImGui.PushStyleVar(ctx, ImGui.StyleVar_FramePadding, 6, C.MENU_PAD_Y)
+  end
+  if ImGui.BeginPopup(ctx, ID .. POP) then
+    if it and TB.switch_of(it) == "menu" then TB.switch_entries(ctx)
+    elseif it then TB.menu_entries(ctx, it.items or {}, "p") end
+    ImGui.EndPopup(ctx)
+  end
+  if large then ImGui.PopStyleVar(ctx, 2) end
 end
 
 -- The icon picker opened for any item of this bar (the organiser's too).

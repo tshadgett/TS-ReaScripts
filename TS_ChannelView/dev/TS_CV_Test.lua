@@ -3435,6 +3435,11 @@ do
     check("menu: after it", t[3].cmd, "1157")
     check("menu: round-trip", TB.serialize(t), line)
     check("menu: empty menu", TB.serialize(TB.parse("[||Empty;]")), "[||Empty;]")
+    -- a menu with large items (as the header's), beside its colour
+    local lm = TB.parse("[|m.png|Mix|#4aa3df/u|s=large;40001||A;];[||Plain;]")
+    check("menu: large read", tostring(lm[1].large) .. " " .. lm[1].label .. " " .. lm[1].color .. " " .. tostring(lm[2].large), "true Mix #4aa3df nil")
+    check("menu: large round-trip", TB.serialize(lm), "[|m.png|Mix|#4aa3df/u|s=large;40001||A;];[||Plain;]")
+    check("menu: large copied", TB.copy_items(lm)[1].large, true)
     check("menu: stray close dropped", #TB.parse("40001||;];40002||"), 2)
     check("menu: unclosed kept", #TB.parse("[||M;40001||")[1].items, 1)
     check("menu: flatten", #TB.flatten(t), 4)
@@ -3481,6 +3486,13 @@ do
     local m = DR.parse("3|sideways|1|9999|odd|k|0|X")
     check("bars: mended", m[1].side == "top" and m[1].width == DR.W_MAX and m[1].style == "both", true)
     check("bars: none", #DR.parse("none") + #DR.parse(""), 0)
+    -- a window bar's own background, before its name
+    local bgl = DR.parse("2|window|1|90|icons|drawer_2|-3|24|--|#2B3A4C|Mixing;3|window|1|90|both|drawer_3|0|24|--|#plain")
+    check("bars: background read", tostring(bgl[1].bg) .. " " .. bgl[1].name .. " " .. tostring(bgl[2].bg) .. " " .. bgl[2].name, "#2b3a4c Mixing nil #plain")
+    check("bars: background written", DR.serialize({ bgl[1] }), "2|window|1|90|icons|drawer_2|-3|24|--|#2b3a4c|Mixing")
+    check("bars: no background, as before", DR.serialize({ bgl[2] }), "3|window|1|90|both|drawer_3|0|24|--|#plain")
+    check("bars: background exported", (DR.export_text({ bgl[1] }) or ""):find("bg=#2b3a4c", 1, true) ~= nil, true)
+    check("bars: background imported", (DR.parse_export(DR.export_text({ bgl[1] })) or {})[1].bg, "#2b3a4c")
     check("bars: names lose ; and |", DR.serialize({ { id = 1, side = "top", open = true, width = 100, style = "both", key = "drawer_1", name = "a;b|c" } }),
       "1|top|1|100|both|drawer_1|0|24|--|abc")
     local mg = DR.migrate("1|top|1|128|both|Edit")

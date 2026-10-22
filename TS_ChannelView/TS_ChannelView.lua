@@ -1,15 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.6.0
+-- @version 2.6.1
 -- @changelog
---  View > Float plugins without controls (closed again at the next track
---  change unless pinned). Rack: a padlock locks it to a track. Style >
---  Value arc on any knob. Style > Use this look for new knobs / buttons.
---  The plugin's own colours in every colour menu, and Faceplate > Match
---  the plugin. Raised dropdowns. A plugin button's own vendor look. FX
---  chain buttons can replace the plugins, or ask (the probes, Trimmer and
---  Modulators stay). An EQ learn that measured noise is caught; learning
---  follows a latency change.
+--  Pill rockers take a colour of their own (the cap's). A bar in its own
+--  window can have its own background. A toolbar menu can have large
+--  items, as the header's menus. EQ learning: bands whose shape switch
+--  just says Shelf are learned on their own (learn such an EQ again).
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -1248,20 +1244,25 @@ local function toggle_colour_menu(fx, key, idx, c)
           if lc then lc.style = sw.key end
           M.set(key, l); M.save()
         end
-        SWI.draw(ctx, dl, sw.key, x + 2, y + 1, x + 34, y + sh - 1, true, lit, not C.EFFECT_3D, "ON", false)
+        SWI.draw(ctx, dl, sw.key, x + 2, y + 1, x + 34, y + sh - 1, true, lit, not C.EFFECT_3D, "ON", false,
+          W.lit_col(c.cap))
       end
     end
   end
   ImGui.Spacing(ctx)
-  ImGui.TextDisabled(ctx, "Lit colour")
+  -- a pill rocker doesn't light: its colour is its cap's (TS_CV_Switches)
+  local body_col = c.style == "rocker"
+  ImGui.TextDisabled(ctx, body_col and "Colour" or "Lit colour")
   for i, cp in ipairs(C.TOGGLE_COLS) do
     if i > 1 then ImGui.SameLine(ctx, 0, 4) end
-    local col = cp.col or C.COL.toggle_on
+    -- (a pill rocker with no colour of its own is black)
+    local plain = body_col and cp.key == "theme"
+    local col = cp.col or (plain and 0x26272bff) or C.COL.toggle_on
     if ImGui.ColorButton(ctx, cp.label .. "##tcol_" .. cp.key, col,
         ImGui.ColorEditFlags_NoTooltip, 18, 18) then
       set((cp.key ~= "theme") and cp.key or nil)
     end
-    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, cp.label) end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, plain and "Black" or cp.label) end
     if cp.key == now then
       local x0, y0 = ImGui.GetItemRectMin(ctx)
       local x1, y1 = ImGui.GetItemRectMax(ctx)
@@ -1278,7 +1279,7 @@ local function toggle_colour_menu(fx, key, idx, c)
       if save then M.save() end
     end
     local lit = W.lit_col(c.cap) or C.COL.toggle_on
-    swatch_extras("lit", c.cap, lit >> 8, "Lit colour", choose, fx)
+    swatch_extras("lit", c.cap, lit >> 8, body_col and "Rocker colour" or "Lit colour", choose, fx)
   end
   -- small: a half-height lit push-button with its name on it (buttons
   -- for a dropdown's choices have no sizes: their count sets their room)

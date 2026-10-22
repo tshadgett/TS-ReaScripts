@@ -450,8 +450,16 @@ function CP.is_open() return dlg ~= nil and not dlg.nested end
 -- Draws the dialog, if one is open; call once a frame from the window's
 -- top level (`nested` false), and from inside a popup that opens it
 -- nested (true). Returns true when a colour was kept.
+local nested_at = -1
 function CP.draw(ctx, nested)
   if not dlg or dlg.nested ~= (nested and true or false) then return false end
+  -- a panel can hold more than one place that draws it (Organise actions:
+  -- a bar's background and a button's colour): the first each frame does
+  if nested then
+    local fc = ImGui.GetFrameCount(ctx)
+    if fc == nested_at then return false end
+    nested_at = fc
+  end
   if dlg.req then
     dlg.req = false
     ImGui.OpenPopup(ctx, DLG_ID)

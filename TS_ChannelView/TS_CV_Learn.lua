@@ -363,11 +363,23 @@ local function plan(job)
     flat[cv.model] = reaper.TrackFX_GetParamNormalized(job.tmp, job.p, cv.model)
   end
   -- bands alike, learned once: quick, the same shape switch reading the
-  -- same, the same flat gain, frequency switch and off positions
+  -- same, the same flat gain, frequency switch and off positions -- and
+  -- no shelf, cut or pass that doesn't say which end it's at ("Shelf"
+  -- rather than "High Shelf": low on one band, high on the next)
   local seen = {}
   for _, k in ipairs(job.which) do
     local b, meta = cv.bands[k], job.meta[k]
-    if meta.direct and b.shape and meta.H then
+    local named = meta.direct and b.shape and meta.H and true or false
+    if named then
+      for _, r in ipairs(positions(job, b.shape, 64) or {}) do
+        local tx = (r.text or ""):lower()
+        if (tx:find("shel", 1, true) or tx:find("cut", 1, true) or tx:find("pass", 1, true)
+            or tx:find("filter", 1, true)) and not ME.type_of_name(tx) then
+          named = false break
+        end
+      end
+    end
+    if named then
       local t = {}
       for _, r in ipairs(positions(job, b.shape, 64) or {}) do t[#t + 1] = ("%.4f=%s"):format(r.norm, r.text) end
       local sig = table.concat(t, ";") .. "|" .. tostring(meta.flat) .. "|" .. table.concat(meta.S or {}, ",")

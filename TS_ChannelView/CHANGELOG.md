@@ -1,5 +1,21 @@
 # ChannelView — changelog
 
+## 2.6.1 — rocker colours, bar backgrounds, large menus
+
+- **Pill rockers in colour.** A Pill rocker's colour swatches set the
+  colour of its cap (it doesn't light); with none it stays black. The web
+  page shows it too.
+- **A background for a bar in its own window**, docked or floating: its
+  right-click ▸ *Background*, or in Organise actions — the theme's, a
+  faceplate colour or any colour at all.
+- **Large menu items.** A menu button on a bar can open with the taller
+  rows of ChannelView's own header menus: its right-click ▸ *Large items*,
+  or in Organise actions.
+- **EQ learning: a shelf that doesn't say which end it's at.** Bands whose
+  Shape switch just says *Shelf* (or *Cut*, *Pass*, *Filter*) are each
+  learned on their own, so a high band's shelf is a high shelf. Learn such
+  an EQ again (Set up this layout ▸ Learn again).
+
 ## 2.6.0 — auto-float, rack lock, value arcs, plugin colours
 
 - **Float plugins without controls.** View ▸ *Float plugins without
