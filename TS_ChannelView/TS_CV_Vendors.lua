@@ -11,7 +11,8 @@
     prefix    the initials before the label ("IKM - Tape Machine 24")
   A plugin button picks these up from its plugin's vendor, so a new one
   arrives looking right. Anything set on the button itself wins: its own
-  colour, and its own PNG icon (a tile never covers one).
+  colour, its own PNG icon (a tile never covers one), and a look of its
+  own (it.vo: one of VN.LOOKS, or "off" for no vendor look at all).
 
   The vendor is the plugin's developer as REAPER's FX browser lists it
   (TS_CV_FXIndex, from reaper-fxtags.ini); JS effects have none. Only
@@ -160,18 +161,20 @@ end
 -- How a button shows, given its own fields and its vendor's settings
 -- (nil for none): { color, label, mono, fill }. The label is the button's
 -- own text (`text`), prefixed when the look asks and it isn't already.
+-- The button's own look (it.vo) is used over the vendor's.
 function VN.apply(it, text, v)
   local out = { color = it.color, label = text, mono = nil, fill = false }
-  if not v then return out end
+  if not v or it.vo == "off" then return out end
   if not (it.color and it.color ~= "") then out.color = v.color end
   local init = (v.init and v.init ~= "") and v.init or nil
-  if v.look == "prefix" and init then
+  local look = it.vo or v.look
+  if look == "prefix" and init then
     local p = init .. " - "
     if text:sub(1, #p) ~= p then out.label = p .. text end
-  elseif v.look == "mono" and init then
+  elseif look == "mono" and init then
     local png = it.icon and it.icon ~= "" and not it.icon:match("^cv:")
     if not png then out.mono = init end
-  elseif v.look == "fill" then
+  elseif look == "fill" then
     out.fill = out.color ~= nil
   end
   return out

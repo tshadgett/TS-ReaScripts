@@ -51,7 +51,11 @@ have a track to show.
 ChannelView in a window of its own, laid out down a column: the selected
 track's plugins top to bottom, for docking beside the arrange while
 ChannelView stays where it is. It has no fader panel, mixer or track list:
-the track is whichever you select in REAPER's mixer or track panel.
+the track is whichever you select in REAPER's mixer or track panel — or,
+with the **padlock** in front of the track's name in its header bar, the
+one it's locked to, whatever
+you select (kept with the project; click it again to follow the
+selection).
 
 - Every plugin is the column's width, and as tall as its controls need at
   that width. A canvas (an EQ, a compressor, ReaEQ, ReaComp) spans the
@@ -260,6 +264,14 @@ outline would have nothing to stand against.
 * Each panel header has the chain position, the plugin name, and four icon
   buttons: collapse, bypass (power), float (opens the plugin's own window)
   and the panel menu.
+* **Float plugins without controls** (View): a plugin whose layout has no
+  controls — an instrument you'd rather play from its own window, say —
+  opens its own window when you come to its track, a moment after so
+  stepping through tracks doesn't flash windows open, and closes it when
+  you move on. While it's open, a **pin** in its panel's header keeps it
+  open across track changes. A window you opened yourself is never closed,
+  and one you close stays closed until you come back. The rack has its own
+  setting.
 * **Drag a panel by its name** to reorder the chain, into and out of FX
   containers too: dropped on the left half of a panel it lands before that
   plugin, on the right half after it, in that plugin's container. A blue
@@ -344,7 +356,9 @@ outline would have nothing to stand against.
   it makes a lane for it, which holds the control where it is; ChannelView
   switches that straight back off.
 * **FX chains.** The chain button in the header, left of the FX bypass,
-  loads an FX chain onto the track; it can also **save this track's chain**
+  loads an FX chain onto the track — after its plugins, or with *Replace
+  the existing FX* ticked, in their place (the probes, Trimmer and
+  ChannelView Modulators stay); it can also **save this track's chain**
   under a name of your own (in a folder of your FXChains folder, if you
   like) and **delete** a chain. A container's menu saves just that
   container as a chain. They're REAPER's own `.RfxChain` files, so REAPER's
@@ -601,7 +615,10 @@ put them. Every bar is global, not per project.
   window stays closed. The button lights while the selected track has that
   plugin, and gets an icon for its type (EQ, compressor, reverb…). They
   work on every bar, the web page's included; REAPER's own toolbars can't
-  hold them.
+  hold them. An FX chain button's **When clicked** (its right-click, or in
+  Organise actions) is *Add it*, *Replace the plugins* (the chain takes
+  their place; the probes, Trimmer and ChannelView Modulators stay) or
+  *Ask each time* (a click asks which, on the web page too).
 - **Toolbar switches.** A button that puts another bar in this bar's place
   — its spot, width, docker or window position — and puts this one away;
   lit while its bar is the one showing, so a row of them copied onto each
@@ -645,8 +662,11 @@ put them. Every bar is global, not per project.
   installed plugins, as REAPER's FX browser lists them, with how many each
   has; *Set up* one, or *Set up all* (each gets a colour of its own).
   *Same as…* gives one vendor another's look (Brainworx as Plugin
-  Alliance). A colour or a PNG icon set on a button itself still wins. The
-  web page shows the same.
+  Alliance). A colour or a PNG icon set on a button itself still wins, and
+  so does a look of its own: **Vendor look** (a plugin button's
+  right-click, or beside its colour in Organise actions) picks any of the
+  four for that one plugin, or *No vendor look*; *As its vendor* follows
+  the vendor again. The web page shows the same.
 - **Organise actions** (the drawers button, a bar's right-click, or the
   *Organise actions* action, which works without ChannelView open): every
   bar by place on the left; the selected bar's buttons as a tree in the
@@ -688,6 +708,10 @@ default), shared with the TCP window and the web page.
 - **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
   *Buttons down*: one button per choice, the current one lit. For 2 to 8
   choices; a column too tall for the panel shows as a dropdown.
+- **Raised dropdowns.** Right-click a dropdown ▸ Style ▸ *Raised*: the box
+  becomes a dark cap like a *Backlit* button (unlit), standing off the
+  faceplate with a shadow under it; *Flat* (the default) prints it on the
+  panel. *Apply to every dropdown on this panel* does the rest.
 - **Sections.** A divider owns the controls after it, up to
   the next divider. Right-click any of them ▸ Section to put them on an
   **inset** or on a **faceplate of their own**. To style the first group,
@@ -807,7 +831,8 @@ filter box takes the first match.
 ## Setting a plugin up
 
 Right-click a control for the quick things. The menu is in four parts:
-**Control** — what it does: *Show as*, *Name*, *Values*, *Centred fill*,
+**Control** — what it does: *Show as*, *Name*, *Values*, *Centred fill* (a
+fader's; a knob's is *Style ▸ Value arc ▸ Centred*),
 *Reverse*, *Show when*; **Look** — *Style*, *Background*, *Section* and
 *Copy / paste style*; **Automate** — macros and modulators, its
 automation lane and REAPER's parameter modulation; **Arrange** — *Insert
@@ -1023,6 +1048,14 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Soft-touch*, *Chrome*, *Two-tone*, *Cream fluted*, *Coin edge*,
   *Washer*, *Console*, *White rim*, *Dial*, *British* and *Wing*.
   The Style menu shows them all as pictures.
+- **Value arc.** Style ▸ *Value arc* puts a lit arc round any knob in place
+  of its ticks or dots: *Positive* (from the start of its travel up to the
+  value), *Negative* (from the end back to it) or *Centred* (out from the
+  middle), in the theme's fill colour; on an Arc knob it sets which way
+  its arc fills. *Centred* also makes the knob centred: an Arc or LED ring
+  face fills from the middle, and a modulator swings it both ways round
+  its setting. *The same for its section* and *For the whole panel* pass
+  it on. The web page shows it too.
 - **Your own knobs.** Style ▸ **Customise…** opens the *Knob look* window:
   start from any recipe and change its body, grip (and how many flutes or
   grooves), top, pointer, material, colours (body, sides, rim, pointer
@@ -1051,6 +1084,13 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   lamp* or *Guarded toggle* (a cover to lift first), lit in its colour;
   with the 3D effect off the levers draw as the pill slider. Under either row of swatches, **[+]** opens the colour
   picker for any colour at all, with your recent colours beside it.
+- **The look new controls start with.** Style ▸ *Use this look for new
+  knobs* (or *buttons*) on any knob or toggle: new layouts, the layouts
+  ChannelView makes for plugins you haven't set up, and controls added
+  in the editor start with it — a knob's style or own look, colours and
+  value arc (a centred knob gets *Centred*), a button's style and lit
+  colour. Layouts you've saved keep their looks. *Forget the look for new
+  knobs* (*buttons*) goes back to the plain ones.
 - **Faceplates:** Theme, Charcoal, Gunmetal, Aluminium, Steel blue, Navy,
   Cream, Cobalt, Amber, Stone, Racing green, Oxblood and Gold — or any
   colour at all: **[+] Custom colour…** after the list opens the colour
@@ -1065,6 +1105,15 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Hammertone* or *Checker plate*, each in the faceplate's colour; the
   **Metallic flake** (a fine flake and sheen, like metallic paint) goes
   over any of them.
+- **The plugin's own colours** (Windows, with js_ReaScriptAPI). Every
+  colour menu — faceplate, section, background, knob and fader caps, lit
+  colours — has a **From the plugin** row: the eyedropper reads the
+  plugin's window (it comes to the front for a moment, and closes again
+  if ChannelView opened it) and keeps its main colours and its accents
+  with the layout, one click each from then on. **Faceplate ▸ Match the
+  plugin** does the lot: the faceplate in its main colour, section
+  faceplates and backgrounds in the next ones, and its accent on buttons,
+  Arc and LED ring knobs and Slim faders.
 - **Numbered scales:** knobs print numbers round their dial — **Values**
   (the plugin's own, units left off and thousands as k, so 12000 Hz reads
   12k) unless a knob's **Values** menu (or the editor's *Scale*) says **0–10** or **None**. A large knob has room for seven
@@ -1083,7 +1132,7 @@ click through them, so you can try a few and watch the panel change.
 a gentle gradient on the faceplates (Theme stays flat), panel edges that
 catch the light, and shadows under knobs, switches, styled buttons and
 fader caps (not the Arc knob, which is a printed scale, nor flat buttons and
-dropdowns, which are printed on the panel). One light lights everything, so
+flat dropdowns, which are printed on the panel). One light lights everything, so
 highlights stay put as a knob turns. **View ▸ Lighting** sets how strongly
 (a more pronounced gradient on faceplates and knobs above 100%), and **View
 ▸ Shadows** how deep and far the shadows fall.
@@ -1229,6 +1278,8 @@ its `_on` partner while it's on).
 | `TS_CV_Busy.lua` | backing off while REAPER is busy |
 | `TS_CV_MapPanel.lua` | an EQ layout's canvas |
 | `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them |
+| `TS_CV_AutoFloat.lua` | View ▸ Float plugins without controls: opening and closing their windows |
+| `TS_CV_PluginColours.lua` | A plugin's own colours, read off its window |
 | `TS_CV_Freeze.lua` | freezing: REAPER's own, with the frozen plugins shown where they were and ChannelView's own plugins kept live |
 | `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: EQ bands, thresholds, reverb decay, saturation |
 | `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` |

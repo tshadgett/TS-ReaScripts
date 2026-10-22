@@ -228,6 +228,8 @@ local function enc_list(list)
                       .. ',"i":' .. enc_list(e.i or {}) .. '}'
     else
       local vn = ""
+      if e.vo then vn = vn .. ',"vo":' .. enc_str(e.vo) end
+      if e.cm then vn = vn .. ',"cm":' .. enc_str(e.cm) end
       if e.vc then vn = vn .. ',"vc":' .. enc_str(e.vc) end
       if e.vl then vn = vn .. ',"vl":' .. enc_str(e.vl) end
       if e.vm then vn = vn .. ',"vm":' .. enc_str(e.vm) end
@@ -252,7 +254,9 @@ function DR.from_web(arr)
                           cs = type(e.cs) == "string" and e.cs or nil, items = DR.from_web(e.i) }
       elseif e.a and tostring(e.a) ~= "" then
         out[#out + 1] = { cmd = tostring(e.a), icon = tostring(e.ic or ""), label = tostring(e.l or ""), color = e.c or "",
-                          cs = type(e.cs) == "string" and e.cs or nil }
+                          cs = type(e.cs) == "string" and e.cs or nil,
+                          vo = (type(e.vo) == "string" and TB.VO[e.vo]) and e.vo or nil,
+                          cm = (type(e.cm) == "string" and require("TS_CV_FXButtons").CM[e.cm]) and e.cm or nil }
       end
     end
   end
@@ -267,7 +271,7 @@ function DR.to_web(items)
     elseif it.sep then
       out[#out + 1] = { sp = 1 }
     else
-      local e = { l = it.label or "", a = it.cmd or "", c = it.color or "", cs = it.cs, ic = it.icon }
+      local e = { l = it.label or "", a = it.cmd or "", c = it.color or "", cs = it.cs, ic = it.icon, vo = it.vo, cm = it.cm }
       -- a plugin button's vendor look (TS_CV_Vendors), for the page to
       -- draw: vc its colour, vl its label, vm its initials tile, vf its
       -- fill. Worked out here; never read back.

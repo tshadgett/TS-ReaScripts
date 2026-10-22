@@ -565,7 +565,7 @@ local function item_props(ctx, tb, web)
         ImGui.EndPopup(ctx)
       end
       ImGui.SameLine(ctx)
-      if ImGui.Button(ctx, "Add it now##aerun") then TB.run(it) end
+      if ImGui.Button(ctx, "Add it now##aerun") then FB.run(it, (it.cm == "ask") and "add" or nil) end
     else
       ImGui.Text(ctx, "Action")
       local name = TB.action_name(TB.resolve(it.cmd))
@@ -590,6 +590,18 @@ local function item_props(ctx, tb, web)
     do
       ImGui.Text(ctx, "Colour")
       tb.colour_row(ctx, it, "aecap", true)
+      ImGui.Spacing(ctx)
+    end
+    -- a plugin's own look, over its vendor's (TS_CV_Vendors)
+    if FB.kind(it) == "fx" then
+      ImGui.Text(ctx, "Vendor look")
+      tb.vendor_look(ctx, it, "aevo")
+      ImGui.Spacing(ctx)
+    end
+    -- an FX chain: added, in place of the plugins, or asked each time
+    if FB.kind(it) == "chain" then
+      ImGui.Text(ctx, "When clicked")
+      tb.chain_mode(ctx, it, "aecm")
       ImGui.Spacing(ctx)
     end
     do

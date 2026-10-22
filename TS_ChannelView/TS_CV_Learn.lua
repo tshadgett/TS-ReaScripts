@@ -121,7 +121,8 @@ local function make_track(job)
   reaper.TrackFX_SetParam(tr, 0, 0, 0)          -- source
   reaper.TrackFX_SetParam(tr, ana, 0, 1)        -- analyser
   local _, pdc = reaper.TrackFX_GetNamedConfigParm(tr, job.p, "pdc")
-  reaper.TrackFX_SetParam(tr, ana, 2, tonumber(pdc) or 0)
+  job.lat = tonumber(pdc) or 0
+  reaper.TrackFX_SetParam(tr, ana, 2, job.lat)
   -- the copy must answer only to what this writes: no links from the
   -- original track's macros or modulators (on the hidden track they'd
   -- point at the measuring plugins, or at nothing), no LFOs, no lanes
@@ -465,6 +466,7 @@ local function finish(job)
         b.learn = ME.encode(L)
         b.learn_sig = M.band_sig(b, cv.model)
         done[k] = true
+        if L.noisy then job.noisy = true end
       else
         failed[#failed + 1] = (b.name ~= "" and b.name or ("Band " .. k)) .. ": " .. (why or "?")
       end
@@ -488,7 +490,8 @@ local function finish(job)
   if #failed > 0 then
     job.state, job.msg = "error", "Not learned \u{2014} " .. table.concat(failed, "; ")
   else
-    job.state, job.msg, job.progress = "done", "Learned.", 1
+    job.state, job.msg, job.progress = "done", job.noisy
+      and "Learned from the plugin's own readings: the measurements were noise, not the band." or "Learned.", 1
   end
 end
 
@@ -519,7 +522,23 @@ local function apply(job, set)
   end
 end
 
+-- The copy's latency as it reports it now, given to the analyser. A
+-- plugin can report it late (once it's running) or change it with a
+-- setting (a phase mode); the reference is measured again when it moves
+-- after it, or every step after would be compared out of line.
+local function sync_latency(job)
+  local _, pdc = reaper.TrackFX_GetNamedConfigParm(job.tmp, job.p, "pdc")
+  local lat = tonumber(pdc) or 0
+  if lat == job.lat then return false end
+  job.lat = lat
+  reaper.TrackFX_SetParam(job.tmp, job.ana, 2, lat)
+  return true
+end
+
 local function begin_step(job)
+  if sync_latency(job) and job.ref and not job.steps[job.i].ref then
+    table.insert(job.steps, job.i, { ref = true })
+  end
   local st = job.steps[job.i]
   apply(job, st.set)
   job.meas = (job.meas or math.random(1, 1000000)) + 1

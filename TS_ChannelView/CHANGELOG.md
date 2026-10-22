@@ -1,5 +1,50 @@
 # ChannelView — changelog
 
+## 2.6.0 — auto-float, rack lock, value arcs, plugin colours
+
+- **Float plugins without controls.** View ▸ *Float plugins without
+  controls* (the rack has its own): a plugin whose layout has no controls
+  (an instrument you'd rather play from its own window, say) has its window
+  floated when ChannelView moves to its track, and closed again at the
+  next track change unless you pin it (the pin in its panel's header). It
+  never closes a window you opened yourself. Its empty panel reads
+  *auto float*.
+- **Rack: lock to a track.** The padlock in front of the track's name keeps
+  the rack on that track whatever's selected; click it again to follow the
+  selection. Kept with the project.
+- **Value arc on any knob.** Style ▸ *Value arc*: *Positive*, *Negative* or
+  *Centred*, a lit arc round the knob in place of its ticks or dots, in the
+  theme's fill colour; for one knob, its section or the whole panel.
+  *Centred* also makes the knob centred, so a knob's *Centred fill* is now
+  here (faders keep theirs in the Control menu). The web page shows it too.
+- **The look new controls start with.** Style ▸ *Use this look for new
+  knobs* (or *buttons*): new layouts, automatic layouts and controls added
+  in the editor start with that knob's style, colours and value arc, or
+  that button's style and lit colour. *Forget the look for new …* goes back
+  to the plain ones.
+- **The plugin's own colours** (Windows, with js_ReaScriptAPI). Every
+  colour menu has a *From the plugin* row: its eyedropper reads the
+  plugin's window and keeps its main colours and accents with the layout.
+  **Faceplate ▸ Match the plugin** colours the whole panel from them.
+- **Raised dropdowns.** Style ▸ *Raised* stands a dropdown off the
+  faceplate as a dark cap, like an unlit *Backlit* button.
+- **A plugin button's own vendor look.** A plugin button on a bar can
+  choose its own look over its vendor's (right-click ▸ *Vendor look*, or
+  in Organise actions), or *No vendor look* at all.
+- **FX chains can replace the plugins.** An FX chain button's *When
+  clicked* (its right-click, or in Organise actions): *Add it*, *Replace
+  the plugins* or *Ask each time* (a menu at the button; a sheet on the web
+  page). Replacing, here and with the header's *Replace the existing FX*,
+  keeps the probes, Trimmer and ChannelView Modulators, puts the chain
+  where the plugins were, and leaves the track alone if the chain won't
+  load.
+- **EQ learning that wasn't measured right is caught.** A learn whose
+  measurements come back as noise rather than the band (Pro-Q 4, for one)
+  no longer bends the canvas: a plugin that reports its own values is
+  drawn from them, and any other EQ keeps what it had learned before.
+  Learning also follows a plugin whose latency changes as it runs. Learn
+  an EQ again if its curves look wrong.
+
 ## 2.5.6 — knob grooves, skirts
 
 - **Grooves are cut out of the knob.** A grooved knob (*Console*, or your

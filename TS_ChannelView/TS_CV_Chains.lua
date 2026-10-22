@@ -193,32 +193,19 @@ local function set_replace(on)
 end
 
 -- Adds the chain `f` (an entry from CN.list) to the end of the track's
--- FX, or in place of them when `replace`. TrackFX_AddByName takes an
+-- FX, or in place of its plugins when `replace` (TS_CV_FXButtons.replace:
+-- the probes, Trimmer and Modulators stay). TrackFX_AddByName takes an
 -- .RfxChain directly; it's given the path under FXChains first, the way
 -- REAPER names chains itself, then the full path. Returns true when
 -- anything was added; when nothing could be, the track is left as it was.
 local function add(track, f, replace)
+  if replace then return require("TS_CV_FXButtons").replace(track, f.rel) > 0 end
   local before = reaper.TrackFX_GetCount(track)
-  local kept = {}
-  if replace then
-    -- Added first and the old ones removed after, so a chain that fails
-    -- to load doesn't cost the track its existing plugins.
-    for i = 0, before - 1 do kept[#kept + 1] = reaper.TrackFX_GetFXGUID(track, i) end
-  end
-  local ok = false
   for _, name in ipairs({ f.rel, f.path }) do
     reaper.TrackFX_AddByName(track, name, false, -1)
-    if reaper.TrackFX_GetCount(track) > before then ok = true break end
+    if reaper.TrackFX_GetCount(track) > before then return true end
   end
-  if ok and replace then
-    for i = reaper.TrackFX_GetCount(track) - 1, 0, -1 do
-      local g = reaper.TrackFX_GetFXGUID(track, i)
-      for _, k in ipairs(kept) do
-        if g == k then reaper.TrackFX_Delete(track, i) break end
-      end
-    end
-  end
-  return ok
+  return false
 end
 
 function CN.load(track, f, replace)
@@ -498,6 +485,9 @@ function CN.draw(ctx)
   local rep = CN.replace_on()
   local chg, v = ImGui.Checkbox(ctx, "Replace the existing FX", rep)
   if chg then set_replace(v) end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "The chain takes the plugins' place.\nThe probes, Trimmer and ChannelView Modulators stay.")
+  end
   ImGui.Separator(ctx)
 
   local loaded = false

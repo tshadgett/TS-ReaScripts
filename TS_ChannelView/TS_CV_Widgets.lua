@@ -482,6 +482,26 @@ local function mark_ticks(dl, cx, cy, r, marks, col)
 end
 W.mark_reach = function(r) return r + math.max(2.5, r * 0.26) end
 
+-- A knob's value arc, in place of its scale's ticks or dots (Style >
+-- Value arc): the track round the travel, lit from the start ("pos"), from
+-- the end back ("neg") or out from the middle ("mid", with a mark there)
+-- to the value, in the theme's fill (its centred fill for "mid").
+local function value_arc(dl, cx, cy, r, v, mode, dim)
+  local r0, r1 = r + 1.5, r + math.max(2.5, r * 0.26)
+  local rr, w = (r0 + r1) * 0.5, math.max(2.0, (r1 - r0) * 0.8)
+  local a = A_MIN + A_SPAN * v
+  arc(dl, cx, cy, rr, A_MIN, A_MAX, C.COL.knob_track, w)
+  local col = (mode == "mid") and C.COL.knob_fill_bi or C.COL.knob_fill
+  if dim then col = U.with_alpha(col, 0x66) end
+  if mode == "neg" then arc(dl, cx, cy, rr, a, A_MAX, col, w)
+  elseif mode == "mid" then
+    local am = A_MIN + A_SPAN * 0.5
+    arc(dl, cx, cy, rr, math.min(a, am), math.max(a, am), col, w)
+    ImGui.DrawList_AddLine(dl, cx + math.cos(am) * (r0 - 1), cy + math.sin(am) * (r0 - 1),
+      cx + math.cos(am) * (r1 + 1), cy + math.sin(am) * (r1 + 1), C.COL.knob_ring, 1.0)
+  else arc(dl, cx, cy, rr, A_MIN, a, col, w) end
+end
+
 -- Light falls from the top left on every hardware face, as on the
 -- faceplate texture: the angle it comes from, in screen terms.
 local LIGHT_A = math.atan(-0.8, -0.6)
@@ -619,9 +639,13 @@ local function face_arc(dl, cx, cy, r, v, o)
     o.hot and C.COL.knob_body_hi or C.COL.knob_body, 32)
   arc(dl, cx, cy, r - 2, A_MIN, A_MAX, C.COL.knob_track, 3.0)
 
-  local fill_col = o.cap or (o.bipolar and C.COL.knob_fill_bi or C.COL.knob_fill)
+  -- its value arc's way (Style > Value arc), else centred or not
+  local mid = (o.arc == "mid") or (o.arc == nil and o.bipolar)
+  local fill_col = o.cap or (mid and C.COL.knob_fill_bi or C.COL.knob_fill)
   if o.dim then fill_col = U.with_alpha(fill_col, 0x66) end
-  if o.bipolar then
+  if o.arc == "neg" then
+    arc(dl, cx, cy, r - 2, a, A_MAX, fill_col, 3.0)
+  elseif mid then
     local a_mid = A_MIN + A_SPAN * 0.5
     if a >= a_mid then arc(dl, cx, cy, r - 2, a_mid, a, fill_col, 3.0)
     else               arc(dl, cx, cy, r - 2, a, a_mid, fill_col, 3.0) end
@@ -775,7 +799,8 @@ function W.knob_face(dl, cx, cy, r, value, o)
   local def = own and { parts = own, cap = "black" } or C.KNOB_STYLE[style]
   if def.parts then
     -- built from parts (TS_CV_KnobParts), with the scale round it
-    if o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring)
+    if o.arc then value_arc(dl, cx, cy, r, v, o.arc, o.dim)
+    elseif o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring)
     elseif def.parts.scale == "dots" then
       -- a ring of printed dots, as on a console's EQ
       local rd = r + math.max(2.5, r * 0.20)
@@ -807,7 +832,8 @@ function W.knob_face(dl, cx, cy, r, value, o)
   local tick = C.COL.knob_ring
 
   local function scale()
-    if o.marks then return end      -- a numbered scale has its own ticks
+    -- (a numbered scale has its own ticks; a value arc takes their place)
+    if o.marks or o.arc then return end
     local r0, r1 = r + 1.5, r + math.max(2.5, r * 0.26)
     for i = 0, 10 do
       local t = A_MIN + A_SPAN * i / 10
@@ -817,7 +843,8 @@ function W.knob_face(dl, cx, cy, r, value, o)
     end
   end
 
-  if o.marks then mark_ticks(dl, cx, cy, r, o.marks, tick) end
+  if o.arc then value_arc(dl, cx, cy, r, v, o.arc, o.dim)
+  elseif o.marks then mark_ticks(dl, cx, cy, r, o.marks, tick) end
 
   if style == "led" then
     -- the lamps: dark where off, the colour with a soft glow where lit
@@ -1076,7 +1103,7 @@ end
 -- label     : short name drawn above the knob
 -- value     : 0..1
 -- formatted : the plugin's own value string, drawn below
--- opts      : { bipolar, tooltip, dim, step_norm, snaps, style, cap, size, scale }
+-- opts      : { bipolar, arc, tooltip, dim, step_norm, snaps, style, cap, size, scale }
 --             style/cap: the face (see W.knob_face); nil is the theme's arc
 --             size: "small" or "large" (C.SIZES), nil for the ordinary
 --             cell. A small knob is its name in small type over a small
@@ -1200,7 +1227,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   end
 
   W.knob_face(dl, cx, cy, dial_r, value, {
-    style = opts.style, cap = opts.cap, bipolar = opts.bipolar, ctx = ctx, look = opts.look,
+    style = opts.style, cap = opts.cap, bipolar = opts.bipolar, arc = opts.arc, ctx = ctx, look = opts.look,
     dim = opts.dim, hot = hovered or active, marks = sc and sc.marks })
   if opts.mod then
     W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap, opts.look))
@@ -1937,6 +1964,11 @@ end
 --
 -- `step_norm` is one step in normalised units, from the panel's reading of
 -- TrackFX_GetParameterStepSizes; nil falls back to a plain nudge.
+-- opts.style "raised": the box drawn as a backlit button's cap (unlit),
+-- standing off the plate; a button row's faced style (lens, window,
+-- backlit) carried over to a dropdown counts as raised too. Else flat.
+function W.combo_raised(style) return style == "raised" or W.FACED[style or ""] == true end
+
 function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   opts = opts or {}
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -2017,10 +2049,19 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   local cx = x + cw * 0.5
 
   centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
-  -- flat, so no shadow
-  ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
-    hovered and C.COL.knob_body_hi or C.COL.knob_body, 3.0)
-  ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
+  if W.combo_raised(opts.style) then
+    -- raised: a backlit button's cap, unlit, standing off the plate
+    W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 3.0)
+    ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
+      hovered and U.lighten(C.COL.toggle_off, 0.06) or C.COL.toggle_off, 3.0)
+    vfill(dl, bx1 + 1, by1 + 1, bx2 - 1, by1 + (by2 - by1) * 0.5, 0xffffff12, 0xffffff00)
+    ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, 0x00000099, 3.0, 0, 1.0)
+  else
+    -- flat, so no shadow
+    ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
+      hovered and C.COL.knob_body_hi or C.COL.knob_body, 3.0)
+    ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
+  end
 
   local txt = formatted or ""
   local tw, th = ImGui.CalcTextSize(ctx, txt)
@@ -2045,10 +2086,25 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
     ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2,
       hovered and C.COL.icon_hot or U.with_alpha(C.COL.toggle_text, 0xa0))
   end
-  if opts.mod then W.mod_corner(dl, bx2, by1, 5, C.COL.knob_body) end
+  if opts.mod then W.mod_corner(dl, bx2, by1, 5, W.combo_raised(opts.style) and C.COL.toggle_off or C.COL.knob_body) end
 
   W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
   return changed, value, act, pressed
+end
+
+-- A dropdown's box, small, for a Style menu: flat or raised.
+function W.combo_swatch(dl, x1, y1, x2, y2, raised)
+  if raised then
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, C.COL.toggle_off, 2.5)
+    vfill(dl, x1 + 1, y1 + 1, x2 - 1, y1 + (y2 - y1) * 0.5, 0xffffff12, 0xffffff00)
+    ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, 0x00000099, 2.5, 0, 1.0)
+    ImGui.DrawList_AddLine(dl, x1 + 2, y2 + 1, x2, y2 + 1, 0x00000060, 1.5)
+  else
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, C.COL.knob_body, 2.5)
+    ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 2.5, 0, 1.0)
+  end
+  local ax, ay = x2 - 5, (y1 + y2) * 0.5 + 1
+  ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2, U.with_alpha(C.COL.toggle_text, 0xa0))
 end
 
 -- ---------------------------------------------------------------------
@@ -3351,6 +3407,22 @@ local function icon_lock(dl, x, y, sz, col, open, hole)
 end
 W.draw_lock = icon_lock      -- for a lit padlock in its own colours
 
+-- A push pin, leaning: its cap top right, the body, a wide collar, and
+-- the point running down to bottom left.
+local function icon_pin(dl, x, y, sz, col)
+  local ax, ay, nx, ny = -0.7071, 0.7071, 0.7071, 0.7071
+  local hx, hy = 0.70, 0.30
+  local function at(t, s) return x + sz * (hx + ax * t + nx * s), y + sz * (hy + ay * t + ny * s) end
+  local function pin_seg(t0, s0, t1, s1, w)
+    local x1, y1 = at(t0, s0); local x2, y2 = at(t1, s1)
+    ImGui.DrawList_AddLine(dl, x1, y1, x2, y2, col, math.max(1.0, sz * w))
+  end
+  pin_seg(0, -0.17, 0, 0.17, 0.12)        -- the cap
+  pin_seg(0, 0, 0.28, 0, 0.16)            -- the body
+  pin_seg(0.30, -0.24, 0.30, 0.24, 0.09)  -- the collar
+  pin_seg(0.30, 0, 0.64, 0, 0.06)         -- the point
+end
+
 -- An eyedropper: a squeeze bulb top right, a collar, and a glass tube
 -- running down to its tip bottom left.
 local function icon_dropper(dl, x, y, sz, col)
@@ -3396,6 +3468,7 @@ W.ICONS = {
   record   = icon_record,
   power    = icon_power,
   float    = icon_float,
+  pin      = icon_pin,
   menu     = icon_menu,
   -- A panel folds away to the left and opens out to the right: collapse
   -- points left, expand points right.

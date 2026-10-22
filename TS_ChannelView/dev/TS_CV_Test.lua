@@ -3412,6 +3412,18 @@ do
     check("toolbar gap", items[3].sep == true and items[3].gap == true, true)
     check("toolbar label kept", items[1].label, "Add")
     check("toolbar round-trip", TB.serialize(items), "40001|a.png|Add;-;_;40005||")
+    -- a plugin button's own vendor look, after its colour
+    local vl = TB.parse("_CVFX:VST3: Pro-Q 3||Q|#4aa3df/u|v=mono;_CVFX:VST3: Pro-L 2||L|v=off;40001||A|v=bogus")
+    check("vendor look: read", tostring(vl[1].vo) .. " " .. vl[1].color .. " " .. vl[1].label .. " " .. tostring(vl[2].vo), "mono #4aa3df Q off")
+    check("vendor look: an unknown one is label", vl[3].label .. tostring(vl[3].vo), "A|v=bogusnil")
+    check("vendor look: written", TB.serialize({ vl[1], vl[2] }), "_CVFX:VST3: Pro-Q 3||Q|#4aa3df/u|v=mono;_CVFX:VST3: Pro-L 2||L|v=off")
+    check("vendor look: copied", TB.copy_items(vl)[1].vo, "mono")
+    -- an FX chain button's way with the plugins there, beside a vendor look
+    local cw = TB.parse("_TSCV_CHAIN:a||A|c=replace;_TSCV_CHAIN:b||B|#4aa3df|v=mono|c=ask;_TSCV_CHAIN:c||C|c=nope")
+    check("chain way: read", tostring(cw[1].cm) .. " " .. tostring(cw[2].cm) .. " " .. tostring(cw[2].vo) .. " " .. cw[2].color, "replace ask mono #4aa3df")
+    check("chain way: an unknown one is label", cw[3].label .. tostring(cw[3].cm), "C|c=nopenil")
+    check("chain way: written", TB.serialize({ cw[1], cw[2] }), "_TSCV_CHAIN:a||A|c=replace;_TSCV_CHAIN:b||B|#4aa3df|v=mono|c=ask")
+    check("chain way: copied", TB.copy_items(cw)[2].cm, "ask")
 
     -- menus: "[|icon|label" ... "]", nested
     local line = "40029||Undo;[|m.png|Render;41824||;[||Stems;40001||All;-;];];1157||Snap"
@@ -4894,6 +4906,143 @@ end
 
 
 
+-- a knob's value arc (Style > Value arc): kept in the control's flags
+do
+  local MP = require "TS_CV_Mappings"
+  MP.set("ArcPlug", { controls = {
+    { param = 1, type = "knob", arc = "pos" },
+    { param = 2, type = "knob", arc = "neg", invert = true, bipolar = true },
+    { param = 3, type = "stepped", arc = "mid" },
+    { param = 4, type = "knob" } } })
+  MP.save(); MP.reload()
+  local l = MP.get("ArcPlug").controls
+  check("value arc: reads back", table.concat({ l[1].arc, l[2].arc, l[3].arc, tostring(l[4].arc) }, "|"), "pos|neg|mid|nil")
+  check("value arc: the other flags kept", tostring(l[2].invert) .. tostring(l[2].bipolar), "truetrue")
+  check("value arc: copied with the layout", MP.copy(MP.get("ArcPlug")).controls[2].arc, "neg")
+  local lk = MP.look_of(l[3])
+  local o = { type = "knob" }
+  MP.paste_look(o, lk)
+  check("value arc: pasted with a look", o.arc, "mid")
+  check("value arc: centred makes the knob centred", o.bipolar, true)
+  local o2 = { type = "knob", bipolar = true }
+  MP.paste_look(o2, MP.look_of(l[1]))
+  check("value arc: positive makes it not", tostring(o2.bipolar), "nil")
+  local o3 = { type = "knob", bipolar = true }
+  MP.paste_look(o3, MP.look_of(l[4]))
+  check("value arc: no arc leaves it as it was", o3.bipolar, true)
+end
+
+-- the plugin's own colours (Palette=, TS_CV_PluginColours)
+do
+  local MP = require "TS_CV_Mappings"
+  local PCx = require "TS_CV_PluginColours"
+  local p = MP.palette_of("#1f2530 #2a323e|#70e1fe")
+  check("palette: read", ("%06x %06x %06x"):format(p.surfaces[1], p.surfaces[2], p.accents[1]), "1f2530 2a323e 70e1fe")
+  check("palette: written", MP.palette_line(p), "#1f2530 #2a323e|#70e1fe")
+  check("palette: surfaces only", MP.palette_line(MP.palette_of("#101010")), "#101010|")
+  check("palette: none", tostring(MP.palette_of("")) .. tostring(MP.palette_line(nil)), "nilnil")
+  MP.set("PalPlug", { controls = { { param = 0, type = "knob" } }, palette = p })
+  MP.save(); MP.reload()
+  check("palette: kept with the layout", MP.palette_line(MP.get("PalPlug").palette), "#1f2530 #2a323e|#70e1fe")
+  check("palette: copied", MP.palette_line(MP.copy(MP.get("PalPlug")).palette), "#1f2530 #2a323e|#70e1fe")
+  -- a GUI: 70% dark base, 25% a raised panel, a cyan arc with soft edges
+  local function px(x, y)
+    if y < 10 and x < 40 then return (x % 2 == 0) and 0xff70e1fe or 0xff3a7a8a end
+    if y < 30 then return 0xff2a323e end
+    return 0xff1f2530
+  end
+  local s = PCx.sample(px, 100, 100)
+  check("sample: base first", ("%06x"):format(s.surfaces[1]), "1f2530")
+  check("sample: panel second", ("%06x"):format(s.surfaces[2]), "2a323e")
+  check("sample: accent from the bright core", ("%06x"):format(s.accents[1]), "70e1fe")
+end
+
+-- a dropdown's Style: flat, or raised (a button row's lit styles count)
+do
+  local Wd = require "TS_CV_Widgets"
+  check("raised dropdown", tostring(Wd.combo_raised("raised")) .. tostring(Wd.combo_raised("backlit"))
+    .. tostring(Wd.combo_raised(nil)) .. tostring(Wd.combo_raised("flat")), "truetruefalsefalse")
+end
+
+-- an FX chain replacing a track's plugins (FB.replace): ChannelView's own
+-- stay, the chain goes where the plugins began, a chain that won't load
+-- leaves the track alone
+do
+  local FBx = require "TS_CV_FXButtons"
+  local Tx = require "TS_CV_FXTree"
+  local saved, mv = {}, Tx.move
+  local fx, nid = {}, 0
+  local function mk(n) nid = nid + 1; return { name = n, guid = "{" .. nid .. "}" } end
+  local stub = {
+    TrackFX_GetCount = function() return #fx end,
+    TrackFX_GetNamedConfigParm = function(_, i, k) if k == "fx_name" and fx[i + 1] then return true, fx[i + 1].name end return false, "" end,
+    TrackFX_GetFXName = function(_, i) return true, fx[i + 1] and fx[i + 1].name or "" end,
+    TrackFX_GetFXGUID = function(_, i) return fx[i + 1] and fx[i + 1].guid end,
+    TrackFX_Delete = function(_, i) table.remove(fx, i + 1) end,
+    TrackFX_AddByName = function(_, name)
+      if name == "Drums.RfxChain" then fx[#fx + 1] = mk("VST3: Kick EQ"); fx[#fx + 1] = mk("VST3: Kick Comp") end
+      return -1
+    end,
+    GetResourcePath = function() return "/r" end,
+  }
+  for k, f in pairs(stub) do saved[k] = reaper[k]; reaper[k] = f end
+  Tx.move = function(_, src, _, gap)
+    local it = table.remove(fx, src[1] + 1)
+    table.insert(fx, (gap > src[1]) and gap or gap + 1, it)
+    return true
+  end
+  local function names() local t = {} for i, f in ipairs(fx) do t[i] = f.name end return table.concat(t, ", ") end
+  fx = { mk("JS: TS_TrackProbe (pre)"), mk("JS: TS_CV Trimmer"), mk("VST3: Pro-Q 4"), mk("VST3: Pro-C 3"),
+         mk("JS: ChannelView Modulators"), mk("JS: TS_TrackProbe (post)") }
+  check("replace: the chain in", FBx.replace(nil, "Drums.RfxChain"), 2)
+  check("replace: ours stay, the chain where the plugins began", names(),
+    "JS: TS_TrackProbe (pre), JS: TS_CV Trimmer, VST3: Kick EQ, VST3: Kick Comp, JS: ChannelView Modulators, JS: TS_TrackProbe (post)")
+  local was = names()
+  check("replace: a chain that won't load", FBx.replace(nil, "Missing.RfxChain"), 0)
+  check("replace: leaves the track as it was", names(), was)
+  fx = { mk("VST3: Pro-Q 4") }
+  FBx.replace(nil, "Drums.RfxChain")
+  check("replace: a track of plugins only", names(), "VST3: Kick EQ, VST3: Kick Comp")
+  check("chain way: tooltips", (FBx.tip({ cmd = "_TSCV_CHAIN:x", cm = "replace" }) or ""):find("Replace", 1, true) ~= nil, true)
+  Tx.move = mv
+  for k in pairs(stub) do reaper[k] = saved[k] end
+end
+
+-- the look new knobs and buttons start with (Style > Use this look for new ...)
+do
+  local MP = require "TS_CV_Mappings"
+  local KPx = require "TS_CV_KnobParts"
+  local ext = {}
+  local g, s, d = reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState
+  reaper.GetExtState = function(sec, k) return ext[sec .. k] or "" end
+  reaper.SetExtState = function(sec, k, v) ext[sec .. k] = v end
+  reaper.DeleteExtState = function(sec, k) ext[sec .. k] = nil end
+  check("new look: none to start", MP.default_look("knob"), nil)
+  local plain = MP.apply_default_look({ param = 0, type = "knob" })
+  check("new look: none leaves a knob plain", tostring(plain.style) .. tostring(plain.arc), "nilnil")
+  local look = KPx.decode("grip=grooves,n=24,mat=metal,col=#c0c0c0")
+  MP.set_default_look("knob", { type = "knob", style = "console", cap = "red", scale_ink = "cap", arc = "neg", look = look })
+  MP.set_default_look("toggle", { type = "toggle", style = "lens", cap = "green" })
+  local k = MP.apply_default_look({ param = 0, type = "knob" })
+  check("new look: knob", table.concat({ k.style, k.cap, k.scale_ink, k.arc }, "|"), "console|red|cap|neg")
+  check("new look: knob's own look", tostring(KPx.encode(k.look)), "col=#c0c0c0,grip=grooves,mat=metal,n=24")
+  local kc = MP.apply_default_look({ param = 1, type = "stepped", bipolar = true })
+  check("new look: a centred knob gets Centred", kc.arc, "mid")
+  local t = MP.apply_default_look({ param = 2, type = "toggle" })
+  check("new look: button", t.style .. "|" .. t.cap, "lens|green")
+  local f = MP.apply_default_look({ param = 3, type = "fader" })
+  check("new look: a fader as it was", tostring(f.style) .. tostring(f.cap), "nilnil")
+  MP.set_default_look("knob", { type = "knob", arc = "mid" })
+  local kp = MP.apply_default_look({ param = 0, type = "knob" })
+  check("new look: Centred default, not centred knob", kp.arc, "pos")
+  check("new look: only what it has", tostring(kp.style) .. tostring(kp.look), "nilnil")
+  MP.set_default_look("knob", nil)
+  check("new look: forgotten", MP.default_look("knob"), nil)
+  check("new look: button kept", MP.default_look("toggle").style, "lens")
+  MP.set_default_look("toggle", nil)
+  reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState = g, s, d
+end
+
 -- XY pads and concentric knobs: a second parameter (Dual<n>), their sizes,
 -- and where an XY pad goes (merged cells, over dividers like an across fader)
 do
@@ -5907,6 +6056,40 @@ do
   checkf("mapeq: direct Q correction", function() return Ld and math.abs(Ld.shapes[1].K[2] - 2) < 0.001 end)
   local Ld2 = ME.decode(ME.encode(Ld))
   check("mapeq: direct round trip", Ld2 and Ld2.D, true)
+  -- a measurement that's noise, not the band (Pro-Q 4 learned out of line)
+  do
+    local fr = ME.centres()
+    local seed = 7
+    local function meas(noisy, g)
+      local D = {}
+      for i, f in ipairs(fr) do
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        D[i] = ME.band_db({ type = "bell", f = 1000, g = g, q = 1 }, f) + (noisy and (seed / 2147483648 - 0.5) * 6 or 0)
+          + 0.8 * math.exp(-((math.log(f / 4000) / 0.7) ^ 2))      -- a gentle bump the model hasn't
+      end
+      return { s = 1, gn = (g > 0) and 1 or 0, freqs = fr, D = D, rep_f = 1000, rep_g = g, rep_q = 1,
+               fit = { type = "bell", f = noisy and 194 or 1000, g = noisy and g * 0.42 or g, q = noisy and 12 or 1 } }
+    end
+    local clean = ME.summarise({ meas(false, 12), meas(false, -12) }, { direct = true, has_freq = true })
+    local ce = clean and clean.shapes[1]
+    checkf("noise: a real shape is smooth", function() return ce and ce.C and ME.noise(ce.C) < 0.3 end)
+    check("noise: a real shape is kept", ce and ce.C ~= nil and not clean.noisy, true)
+    local rough = ME.summarise({ meas(true, 12), meas(true, -12) }, { direct = true, has_freq = true })
+    local re = rough and rough.shapes[1]
+    check("noise: read from the plugin as it is", re and table.concat(re.K, ","), "1,1,1")
+    check("noise: no measured shape", re and tostring(re.C), "nil")
+    check("noise: said so", rough and rough.noisy, 1)
+    check("noise: still a bell", re and re.type, "bell")
+    local rs = {}
+    for _, gn in ipairs({ 1, 0 }) do
+      local m = meas(true, gn == 1 and 12 or -12)
+      m.fn = 0.5; m.rep_f, m.rep_g, m.rep_q = nil, nil, nil
+      rs[#rs + 1] = m
+    end
+    local Lt, why = ME.summarise(rs, { kind = "gain", Z = 0.5 })
+    check("noise: a learned table isn't kept", tostring(Lt), "nil")
+    checkf("noise: and why", function() return (why or ""):find("noise", 1, true) ~= nil end)
+  end
   local g = ME.guess({ "Low Gain", "Low Freq", "Mid Gain", "Mid Freq", "High Gain", "HPF Freq", "Input", "EQ In" })
   check("mapeq: guess bands", #g, 4)
   check("mapeq: guess low cut first", g[1] and g[1].name, "Low cut")
@@ -7063,6 +7246,12 @@ do
   v.look = "fill"
   check("vn: fill", VN.apply({}, "x", v).fill, true)
   check("vn: no vendor, as it is", VN.apply({ color = "#111111" }, "x", nil).color, "#111111")
+  -- a button's own look over its vendor's
+  check("vn: own look", VN.apply({ vo = "prefix" }, "Pro-Q 3", v).label, "FF - Pro-Q 3")
+  check("vn: own look, not the vendor's", tostring(VN.apply({ vo = "prefix" }, "x", v).fill), "false")
+  check("vn: own tile", VN.apply({ vo = "mono" }, "x", v).mono, "FF")
+  local off = VN.apply({ vo = "off" }, "Pro-Q 3", v)
+  check("vn: no vendor look", tostring(off.color) .. tostring(off.fill) .. off.label, "nilfalsePro-Q 3")
   -- stored, and new vendors getting a colour not yet taken
   local store = {}
   local gx, sx = reaper.GetExtState, reaper.SetExtState

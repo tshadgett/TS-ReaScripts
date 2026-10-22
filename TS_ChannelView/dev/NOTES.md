@@ -617,3 +617,31 @@ A plugin-wide Model switch multiplies the entries: `<s>` counts shape
 positions within model positions (`ME.slot`), and the model's parameter is
 part of the band's learning signature, so naming one asks for learning
 again.
+
+Not every measurement is a shape. `ME.noise` is the median, over a
+shape's gain rows, of the median second difference along the row: a real
+band bends gently from one third-octave to the next (0.1 to 0.25 dB on
+Kirchhoff-EQ's and Slick EQ's console types), while a measurement that
+didn't line up with the plugin's output scatters (1.4 dB and more, seen on
+a Pro-Q 4 learn whose frequency, Q and gain ratios came out at 0.19, 12
+and 0.42). Over `ME.NOISE_MAX` (0.8): a plugin that reports its own values
+keeps the shape's type and is drawn from its readings (K = 1, no C); a
+learned-table EQ fails the learn and keeps what it had. The analyser
+compares power spectra of what went in, delayed by the plugin's latency,
+with what came out, so a wrong latency compares two different stretches of
+noise; learning re-reads the copy's `pdc` before every step and measures
+the reference again when it moves.
+
+## Reading a plugin's colours
+
+`TS_CV_PluginColours` floats the plugin's window (closing it again if it
+opened it), brings it to the front, waits for it to paint (1.5 s when it
+opened it, 0.4 s otherwise) and copies the plugin's own GUI off the screen
+with GDI: the largest child window that starts below the top of REAPER's
+window client area (the preset bar's controls are small and sit along that
+top), else the client area less a 45 px bar, clipped to its monitor. About
+160 × 160 points are sampled: surfaces are 5-bit-per-channel bins of at
+least 1 % (near ones merged), accents are hue buckets of saturated, bright
+pixels, each the average of its brightest core so anti-aliased edges don't
+pull it toward the plate. The result goes in the layout's `Palette=` line.
+Windows only: elsewhere the screen can't be read this way.

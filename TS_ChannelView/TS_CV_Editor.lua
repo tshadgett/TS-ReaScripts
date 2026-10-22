@@ -188,12 +188,12 @@ local function add_param(track, param)
   -- thing you touched rather than at the very bottom.
   local at = (st.sel_asg >= 1 and st.sel_asg <= #st.scratch.controls)
              and (st.sel_asg + 1) or (#st.scratch.controls + 1)
-  table.insert(st.scratch.controls, at, {
+  table.insert(st.scratch.controls, at, M.apply_default_look({
     param   = param,
     type    = U.guess_control_type(track, st.fx.addr, param),
     bipolar = U.guess_bipolar(nm, track, st.fx.addr, param),
     label   = "",          -- the name shows by itself; a label would hide an alias
-  })
+  }))
   st.sel_asg = at
 end
 

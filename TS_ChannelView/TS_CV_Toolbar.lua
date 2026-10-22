@@ -142,6 +142,31 @@ TB.cs_parse = cs_parse
 local function colour_field(it)
   return colour_of(it.color) and ("|" .. it.color:lower() .. cs_field(it)) or ""
 end
+-- A plugin button's own vendor look (it.vo, TS_CV_Vendors): a look of
+-- VN.LOOKS, or "off" for none at all; nil follows its vendor. Stored
+-- last, "|v=<look>".
+-- An FX chain button's way with the plugins already there (it.cm,
+-- TS_CV_FXButtons: "replace" or "ask"; nil adds), stored "|c=<way>".
+TB.VO = { none = true, mono = true, fill = true, prefix = true, off = true }
+local function vo_field(it)
+  return ((it.vo and TB.VO[it.vo]) and ("|v=" .. it.vo) or "")
+      .. ((it.cm and FB.CM[it.cm]) and ("|c=" .. it.cm) or "")
+end
+-- The label part of a stored button, less its fields at the end: label,
+-- vendor look, chain way.
+local function vo_split(label)
+  local vo, cm
+  label = label or ""
+  while true do
+    local l, k, v = label:match("^(.*)|([vc])=(%a+)$")
+    if not l then break end
+    if k == "v" and TB.VO[v] and not vo then vo = v
+    elseif k == "c" and FB.CM[v] and not cm then cm = v
+    else break end
+    label = l
+  end
+  return label, vo, cm
+end
 
 local function ser(items, out)
   for _, it in ipairs(items) do
@@ -151,7 +176,7 @@ local function ser(items, out)
       out[#out + 1] = "]"
     elseif it.gap then out[#out + 1] = "_"
     elseif it.sep then out[#out + 1] = "-"
-    else out[#out + 1] = clean(it.cmd) .. "|" .. clean(it.icon) .. "|" .. clean(it.label) .. colour_field(it) end
+    else out[#out + 1] = clean(it.cmd) .. "|" .. clean(it.icon) .. "|" .. clean(it.label) .. colour_field(it) .. vo_field(it) end
   end
 end
 
@@ -166,7 +191,7 @@ local function copy_items(src)
   local out = {}
   for i, it in ipairs(src) do
     out[i] = { sep = it.sep, gap = it.gap, cmd = it.cmd, icon = it.icon or "", label = it.label or "",
-               color = it.color, cs = it.cs, menu = it.menu, items = it.menu and copy_items(it.items or {}) or nil }
+               color = it.color, cs = it.cs, vo = it.vo, cm = it.cm, menu = it.menu, items = it.menu and copy_items(it.items or {}) or nil }
   end
   return out
 end
@@ -203,10 +228,12 @@ function TB.parse(s)
       out = m.items
     elseif part ~= "" then
       local cmd, icon, label = part:match("^([^|]*)|?([^|]*)|?(.*)$")
+      local vo, cm
+      label, vo, cm = vo_split(label)
       local l2, col, cs = (label or ""):match("^(.*)|(#%x%x%x%x%x%x)(/?%a*)$")
       if l2 then label = l2 end
       if cmd and cmd ~= "" then
-        out[#out + 1] = { cmd = cmd, icon = icon or "", label = label or "", color = col, cs = cs_parse(cs) }
+        out[#out + 1] = { cmd = cmd, icon = icon or "", label = label or "", color = col, cs = cs_parse(cs), vo = vo, cm = cm }
       end
     end
   end
@@ -657,6 +684,7 @@ end
 
 local st = {
   item_menu = nil, open_item = false, open_bg = false,
+  ask_chain = nil, open_ask = false,
   label_buf = "",
   icons_for = nil, open_icons = false, icon_list = nil, icon_filter = "",
   pop_item = nil, pop_at = nil, open_pop = false,
@@ -740,7 +768,7 @@ local function press(ctx, i, it, x, y, bw, bh, dir)
     -- a plugin or an FX chain to add (TS_CV_FXButtons): lit while the
     -- plugin is on the selected track
     W.tip(ctx, ID .. i, (it.label ~= "" and (it.label .. "\n") or "") .. FB.tip(it), hovered, false)
-    if pressed then FB.run(it) end
+    if pressed then TB.run_fx(it) end
     return hovered, held, FB.is_on(it), true
   end
   local id = TB.resolve(it.cmd)
@@ -840,8 +868,11 @@ local FILL_INK, FILL_INK_ON = 0xf0f0eeff, 0x15171aff
 -- the button itself. Other buttons as they are.
 local function view(it)
   local k, what = FB.kind(it)
-  if k ~= "fx" then return it end
-  local v = VN.get(VN.of_ident(what))
+  if k ~= "fx" or it.vo == "off" then return it end
+  local name = VN.of_ident(what)
+  local v = VN.get(name)
+  -- a look of its own, from a vendor not set up: its initials, no colour
+  if not v and it.vo and name then v = { init = VN.initials(name), look = it.vo } end
   if not v then return it end
   local a = VN.apply(it, text_of(it), v)
   return setmetatable({ color = a.color, label = a.label, mono = a.mono, fill = a.fill }, { __index = it })
@@ -1246,6 +1277,16 @@ function TB.draw_v(ctx, x, y, w, h, dir)
   ImGui.Dummy(ctx, 0, 0)
 end
 
+-- Runs a plugin or FX chain button; one that asks opens its question
+-- (drawn by TB.draw_menus).
+function TB.run_fx(it)
+  if FB.kind(it) == "chain" and it.cm == "ask" then
+    st.ask_chain, st.open_ask = it, true
+    return
+  end
+  FB.run(it)
+end
+
 -- Runs a stored item, for the settings menu's overflow list.
 function TB.run(it)
   local sw = TB.switch_of(it)
@@ -1253,7 +1294,7 @@ function TB.run(it)
     if sw ~= "menu" and TB.switch_to then TB.switch_to(sw) end
     return
   end
-  if FB.kind(it) then FB.run(it) return end
+  if FB.kind(it) then TB.run_fx(it) return end
   local id = it and TB.resolve(it.cmd)
   if id then reaper.Main_OnCommand(id, 0) end
 end
@@ -1355,7 +1396,7 @@ function TB.menu_entries(ctx, items, path)
       end
       if marks then row_icon(ctx, vi, ih, strip, iw) end
     elseif FB.kind(it) then
-      if ImGui.MenuItem(ctx, pad .. text_of(vi) .. key, nil, FB.is_on(it)) then FB.run(it) end
+      if ImGui.MenuItem(ctx, pad .. text_of(vi) .. key, nil, FB.is_on(it)) then TB.run_fx(it) end
       if marks then row_icon(ctx, vi, ih, strip, iw) end
     else
       local id = TB.resolve(it.cmd)
@@ -1496,6 +1537,66 @@ function TB.colour_row(ctx, it, id, nested)
   if nested then TB.draw_colour(ctx) end
 end
 
+-- A plugin button's look: as its vendor's, one of the vendor looks of its
+-- own, or no vendor look at all. `as_menu`: menu items (a right-click
+-- menu); else a combo.
+function TB.vendor_look(ctx, it, id, as_menu)
+  local k, what = FB.kind(it)
+  if k ~= "fx" then return end
+  local v = VN.get(VN.of_ident(what))
+  local theirs = v and (VN.LOOK_NAMES[v.look] or VN.LOOK_NAMES.none) or "not set up"
+  local choices = { { nil, "As its vendor (" .. theirs .. ")" } }
+  for _, l in ipairs(VN.LOOKS) do choices[#choices + 1] = { l, VN.LOOK_NAMES[l] } end
+  choices[#choices + 1] = { "off", "No vendor look" }
+  local function pick(c)
+    it.vo = c[1]
+    TB.save()
+  end
+  if as_menu then
+    for n, c in ipairs(choices) do
+      if ImGui.MenuItem(ctx, c[2] .. "##" .. id .. n, nil, it.vo == c[1]) then pick(c) end
+    end
+    return
+  end
+  local cur = choices[1][2]
+  for _, c in ipairs(choices) do if c[1] and c[1] == it.vo then cur = c[2] end end
+  ImGui.SetNextItemWidth(ctx, -1)
+  if ImGui.BeginCombo(ctx, "##" .. id, cur) then
+    for n, c in ipairs(choices) do
+      if ImGui.Selectable(ctx, c[2] .. "##" .. id .. n, it.vo == c[1]) then pick(c) end
+    end
+    ImGui.EndCombo(ctx)
+  end
+end
+
+-- An FX chain button's way with the plugins already there: Add, Replace
+-- the plugins, or Ask. `as_menu`: menu items; else a combo.
+function TB.chain_mode(ctx, it, id, as_menu)
+  if FB.kind(it) ~= "chain" then return end
+  local choices = { { nil, "Add it" }, { "replace", "Replace the plugins" }, { "ask", "Ask each time" } }
+  local function pick(c) it.cm = c[1]; TB.save() end
+  local tips = { "After the selected plugin, else at the end of the chain.",
+                 "The chain takes the plugins' place.\nThe probes, Trimmer and ChannelView Modulators stay.",
+                 "A click asks: add it, or replace the plugins." }
+  if as_menu then
+    for n, c in ipairs(choices) do
+      if ImGui.MenuItem(ctx, c[2] .. "##" .. id .. n, nil, it.cm == c[1]) then pick(c) end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, tips[n]) end
+    end
+    return
+  end
+  local cur = choices[1][2]
+  for _, c in ipairs(choices) do if c[1] and c[1] == it.cm then cur = c[2] end end
+  ImGui.SetNextItemWidth(ctx, -1)
+  if ImGui.BeginCombo(ctx, "##" .. id, cur) then
+    for n, c in ipairs(choices) do
+      if ImGui.Selectable(ctx, c[2] .. "##" .. id .. n, it.cm == c[1]) then pick(c) end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, tips[n]) end
+    end
+    ImGui.EndCombo(ctx)
+  end
+end
+
 -- What a switch can be: the menu of bars, or one bar. `pick(target)`
 -- gets nil for the menu, else the bar's id; `cur` ticks the current one.
 function TB.switch_targets(ctx, pick, cur)
@@ -1557,6 +1658,14 @@ local function item_menu(ctx)
     end
     if ImGui.BeginMenu(ctx, "Colour") then
       TB.colour_row(ctx, it, ID .. "col", false)
+      ImGui.EndMenu(ctx)
+    end
+    if FB.kind(it) == "fx" and ImGui.BeginMenu(ctx, "Vendor look") then
+      TB.vendor_look(ctx, it, ID .. "vo", true)
+      ImGui.EndMenu(ctx)
+    end
+    if FB.kind(it) == "chain" and ImGui.BeginMenu(ctx, "When clicked") then
+      TB.chain_mode(ctx, it, ID .. "cm", true)
       ImGui.EndMenu(ctx)
     end
     ImGui.Separator(ctx)
@@ -1866,10 +1975,27 @@ local function icon_picker(ctx, where)
   ImGui.EndPopup(ctx)
 end
 
+-- An FX chain button set to ask: Add it, or Replace the plugins.
+local function ask_menu(ctx)
+  if st.open_ask then ImGui.OpenPopup(ctx, ID .. "_askchain"); st.open_ask = false end
+  if not ImGui.BeginPopup(ctx, ID .. "_askchain") then return end
+  local it = st.ask_chain
+  if it then
+    ImGui.TextDisabled(ctx, "The FX chain " .. text_of(it))
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Add it") then FB.run(it, "add") end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "After the selected plugin, else at the end of the chain.") end
+    if ImGui.MenuItem(ctx, "Replace the plugins") then FB.run(it, "replace") end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "The probes, Trimmer and ChannelView Modulators stay.") end
+  end
+  ImGui.EndPopup(ctx)
+end
+
 -- Draws whichever toolbar popup is open. Call once a frame from the
 -- window TB.draw was called in, outside any child.
 function TB.draw_menus(ctx, where)
   if where == nil then
+    ask_menu(ctx)
     item_menu(ctx)
     bg_menu(ctx)
     pop_menu(ctx)

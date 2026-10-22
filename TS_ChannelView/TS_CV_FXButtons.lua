@@ -233,6 +233,57 @@ local function add_one(track, kind, what, parent, gap)
   return n
 end
 
+-- ChannelView's own plugins on a track, which replacing the FX leaves:
+-- the probes, the Trimmer and ChannelView Modulators.
+function FB.is_ours(name)
+  mods()
+  name = name or ""
+  return name:find("TS_TrackProbe", 1, true) ~= nil
+      or name:find("ChannelView Modulators", 1, true) ~= nil
+      or name:find("TS_CV_Modulators", 1, true) ~= nil
+      or TR.is(name)
+end
+
+-- Replaces the plugins on `track` with the chain `what` (a path under
+-- FXChains). ChannelView's own stay (FB.is_ours) and the chain goes where
+-- the plugins began, after the ones that stay first. The chain is loaded
+-- before anything goes, so one that fails leaves the track as it was.
+-- Returns how many plugins went in.
+function FB.replace(track, what)
+  mods()
+  local old = {}
+  local names = top_names(track)
+  for i, n in ipairs(names) do
+    if not FB.is_ours(n) then old[reaper.TrackFX_GetFXGUID(track, i - 1)] = true end
+  end
+  local before = #names
+  local n = add_one(track, "chain", what, {}, before)
+  if n <= 0 then return 0 end
+  local new = {}
+  for i = before, before + n - 1 do new[#new + 1] = reaper.TrackFX_GetFXGUID(track, i) end
+  for i = reaper.TrackFX_GetCount(track) - 1, 0, -1 do
+    if old[reaper.TrackFX_GetFXGUID(track, i)] then reaper.TrackFX_Delete(track, i) end
+  end
+  -- into place: after the probe, Trimmer and modulators that lead
+  names = top_names(track)
+  local first = TR.slot_in(names, false)
+  if names[first + 1] and TR.is(names[first + 1]) then first = first + 1 end
+  for k, g in ipairs(new) do
+    for i = 0, reaper.TrackFX_GetCount(track) - 1 do
+      if reaper.TrackFX_GetFXGUID(track, i) == g then
+        if i ~= first + k - 1 then T.move(track, { i }, {}, first + k - 1) end
+        break
+      end
+    end
+  end
+  return n
+end
+
+-- What an FX chain button does with the plugins already there (it.cm):
+-- nil adds the chain, "replace" replaces them (FB.replace), "ask" asks
+-- which at each click (its host asks, then calls FB.run with the answer).
+FB.CM = { replace = true, ask = true }
+
 -- The GUID of what's now at `gap` in `parent` (the first plugin added).
 local function guid_at(track, parent, gap)
   mods()
@@ -243,29 +294,36 @@ local function guid_at(track, parent, gap)
   return addr and reaper.TrackFX_GetFXGUID(track, addr) or nil
 end
 
--- A click on the button `it`. Returns how many tracks it added to.
-function FB.run(it)
+-- A click on the button `it`. `mode`: "replace" for an FX chain to
+-- replace the plugins, else it's added (nil takes the button's own,
+-- it.cm; an unanswered "ask" adds). Returns how many tracks it went on.
+function FB.run(it, mode)
   local kind, what = FB.kind(it)
   if not kind then return 0 end
   local tracks = FB.tracks()
   if #tracks == 0 then return 0 end
+  local replace = kind == "chain" and (mode or it.cm) == "replace"
   local done = 0
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
   for _, tr in ipairs(tracks) do
-    local had_sel = FB.selected(tr) ~= nil
-    local parent, gap = FB.target(tr)
-    local n = add_one(tr, kind, what, parent, gap)
-    if n > 0 then
-      done = done + 1
-      if had_sel then
-        local g = guid_at(tr, parent, gap + n - 1)
-        if g then FB.select(tr, g) end
+    if replace then
+      if FB.replace(tr, what) > 0 then done = done + 1 end
+    else
+      local had_sel = FB.selected(tr) ~= nil
+      local parent, gap = FB.target(tr)
+      local n = add_one(tr, kind, what, parent, gap)
+      if n > 0 then
+        done = done + 1
+        if had_sel then
+          local g = guid_at(tr, parent, gap + n - 1)
+          if g then FB.select(tr, g) end
+        end
       end
     end
   end
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock("ChannelView: add " .. FB.short(kind, what), -1)
+  reaper.Undo_EndBlock((replace and "ChannelView: replace FX with " or "ChannelView: add ") .. FB.short(kind, what), -1)
   if done == 0 then
     reaper.MB((kind == "fx" and "Couldn't add the plugin\n\n" or "Couldn't load the FX chain\n\n") .. what,
       "ChannelView", 0)
@@ -303,6 +361,11 @@ function FB.tip(it)
   local kind, what = FB.kind(it)
   if not kind then return nil end
   local name = FB.short(kind, what)
+  if kind == "chain" and it.cm == "replace" then
+    return "Replace the plugins with the FX chain " .. name .. "\n(the probes, Trimmer and Modulators stay)"
+  elseif kind == "chain" and it.cm == "ask" then
+    return "Add the FX chain " .. name .. "\nAsks: add it, or replace the plugins"
+  end
   return (kind == "fx" and "Add " or "Add the FX chain ") .. name ..
          "\nAfter the selected plugin, else at the end of the chain"
 end

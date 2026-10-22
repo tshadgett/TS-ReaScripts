@@ -1,11 +1,15 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.5.6
+-- @version 2.6.0
 -- @changelog
---  Grooved knobs (Console) have their grooves cut out of the edge. Knobs
---  are no longer tilted (Console, Wing; the Knob look window's Tilt is
---  gone). Printed skirt ticks turn with the knob. The Numbered skirt is
---  gone (drawn as a printed one); Numbered dial is now Dial.
+--  View > Float plugins without controls (closed again at the next track
+--  change unless pinned). Rack: a padlock locks it to a track. Style >
+--  Value arc on any knob. Style > Use this look for new knobs / buttons.
+--  The plugin's own colours in every colour menu, and Faceplate > Match
+--  the plugin. Raised dropdowns. A plugin button's own vendor look. FX
+--  chain buttons can replace the plugins, or ask (the probes, Trimmer and
+--  Modulators stay). An EQ learn that measured noise is caught; learning
+--  follows a latency change.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -99,6 +103,8 @@
 --  [nomain] TS_CV_KnobEditor.lua
 --  [nomain] TS_CV_Recipes.lua
 --  [nomain] TS_CV_Freeze.lua
+--  [nomain] TS_CV_AutoFloat.lua
+--  [nomain] TS_CV_PluginColours.lua
 --  [nomain] textures/TS_CV_finish_brushed.png
 --  [nomain] textures/TS_CV_finish_anodised.png
 --  [nomain] textures/TS_CV_finish_bright.png
@@ -222,6 +228,8 @@ local RV = require("TS_CV_Receives")
 local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
 local FZ = require("TS_CV_Freeze")
+local AF = require("TS_CV_AutoFloat")
+local PC = require("TS_CV_PluginColours")
 local FB = require("TS_CV_FXButtons")
 local WL = require("TS_CV_WebLink")
 local TM = require("TS_CV_TrackMenu")
@@ -357,6 +365,10 @@ local AUX = {
 local AUX_PFX = RACK and "rack_" or "show_"
 app.aux = {}
 for _, a in ipairs(AUX) do app.aux[a.key] = ext_get(AUX_PFX .. a.key, "1") == "1" end
+-- View > Float plugins without controls (TS_CV_AutoFloat): the rack keeps
+-- its own
+local FLOAT_KEY = RACK and "rack_float_empty" or "float_empty"
+app.float_empty = ext_get(FLOAT_KEY, "0") == "1"
 
 -- ---------------------------------------------------------------------
 -- THE SHARED PALETTE
@@ -420,7 +432,39 @@ C.build_palette()
 -- chain tracking
 -- ---------------------------------------------------------------------
 
+-- The rack locked to one track (the padlock in its header bar): it stays
+-- on that track whatever's selected. Kept with the project, by the track's
+-- GUID; a track that's gone unlocks it.
+local rack_lock = { proj = nil, guid = nil, track = nil }
+local function rack_lock_set(guid)
+  rack_lock.guid, rack_lock.track = guid, nil
+  reaper.SetProjExtState(0, C.EXT_SECT, "rack_lock", guid or "")
+end
+local function locked_track()
+  local proj = reaper.EnumProjects(-1)
+  if proj ~= rack_lock.proj then
+    rack_lock.proj = proj
+    local _, g = reaper.GetProjExtState(0, C.EXT_SECT, "rack_lock")
+    rack_lock.guid, rack_lock.track = (g ~= "") and g or nil, nil
+  end
+  if not rack_lock.guid then return nil end
+  local tr = rack_lock.track
+  if tr and reaper.ValidatePtr2(0, tr, "MediaTrack*") and reaper.GetTrackGUID(tr) == rack_lock.guid then return tr end
+  local master = reaper.GetMasterTrack(0)
+  if reaper.GetTrackGUID(master) == rack_lock.guid then rack_lock.track = master return master end
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local t = reaper.GetTrack(0, i)
+    if reaper.GetTrackGUID(t) == rack_lock.guid then rack_lock.track = t return t end
+  end
+  rack_lock_set(nil)
+  return nil
+end
+
 local function current_track()
+  if RACK then
+    local tr = locked_track()
+    if tr then return tr end
+  end
   return reaper.GetSelectedTrack2(0, 0, true)
 end
 
@@ -544,6 +588,26 @@ local function layout_for(fx)
   local key = St.layout_key(fx.name, fx.guid, app.track, fx.addr)
   local layout, is_default = M.get_or_default(key, app.track, fx.addr, fx.guid)
   return layout, key, is_default
+end
+
+-- The plugins on the track whose layout puts nothing on their panel, for
+-- View > Float plugins without controls: no controls (the spacers aside)
+-- and no canvas; never ReaEQ, ReaComp or the Trimmer (panels of their
+-- own), a container, or a plugin that's offline.
+local SPACER = { divider = true, blank = true, half_gap = true }
+local function no_controls()
+  local out = {}
+  for _, fx in ipairs(app.chain or {}) do
+    if not fx.is_container and fx.guid ~= "" and not T.get_offline(app.track, fx.addr) then
+      local layout, key = layout_for(fx)
+      local shows = (layout == nil) or layout.canvas ~= nil or RQ.is_eq(key) or RC.is_comp(key) or TRM.is(key)
+      for _, c in ipairs((layout and layout.controls) or {}) do
+        if not SPACER[c.type] then shows = true break end
+      end
+      if not shows then out[#out + 1] = fx end
+    end
+  end
+  return out
 end
 
 -- The Rack view's Collapse all: folds every open plugin of the track and
@@ -803,6 +867,118 @@ end
 
 local function hex_key(rgb) return ("#%06x"):format(rgb & 0xffffff) end
 
+-- ---------------------------------------------------------------------
+-- the plugin's own colours (TS_CV_PluginColours): read off its window
+-- into its layout's palette, offered in every colour menu (From the
+-- plugin) and put on the whole panel by Faceplate > Match the plugin
+-- ---------------------------------------------------------------------
+local pal_fail = {}     -- fx guid -> why its colours couldn't be read
+
+local function fx_by_guid(guid)
+  for _, f in ipairs(app.chain or {}) do
+    if f.guid == guid then return f end
+  end
+  return nil
+end
+
+-- a touch lighter (a dark colour) or darker (a light one)
+local function lift(rgb)
+  local r, g, b = (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff
+  local d = ((0.299 * r + 0.587 * g + 0.114 * b) < 128) and 18 or -18
+  local function ch(v) return math.max(0, math.min(255, v + d)) end
+  return (ch(r) << 16) | (ch(g) << 8) | ch(b)
+end
+
+-- The panel in the plugin's colours: the faceplate its main surface,
+-- sections on their own faceplate its second, controls' own backgrounds
+-- its third; buttons lit, and Arc and LED ring knobs and Slim faders
+-- coloured, in its first accent. Only what's there is recoloured: a
+-- section or background isn't added.
+local function match_palette(l, pal)
+  local s = pal.surfaces or {}
+  if not s[1] then return end
+  local s2 = s[2] or lift(s[1])
+  local s3 = s[3] or s2
+  local a = (pal.accents or {})[1]
+  l.plate = hex_key(s[1])
+  for _, c in ipairs(l.controls or {}) do
+    if c.type == "divider" then
+      if c.style == "plate" then c.cap = hex_key(s2) end
+    elseif c.back and c.back ~= "inset" then
+      c.back = hex_key(s3)
+    end
+    if a then
+      local ks = C.KNOB_STYLE_ALIAS[c.style] or c.style
+      if c.type == "toggle" or (c.type == "combo" and c.buttons)
+          or ((c.type == "knob" or c.type == "stepped") and not c.look and (ks == "arc" or ks == "led"))
+          or (c.type == "fader" and c.style == "slim") then
+        c.cap = hex_key(a)
+      end
+    end
+  end
+end
+
+-- Read plugin fx's colours into its layout; then `after(layout, pal)`.
+local function read_palette(fx, after)
+  local guid = fx.guid
+  pal_fail[guid] = nil
+  local function on_read(pal, why)
+    if not pal then pal_fail[guid] = why or "nothing read" return end
+    local f = fx_by_guid(guid)
+    if not f then return end
+    local l, pk = materialise(f)
+    l.palette = pal
+    if after then after(l, pal) end
+    M.set(pk, l); M.save()
+  end
+  PC.start(app.track, fx.addr, guid, on_read)
+end
+
+-- A colour menu's From the plugin row: the plugin's surfaces, then its
+-- accents, one click each, and the eyedropper that reads them (again).
+local function palette_row(fx, id, pick_key)
+  if not fx or not fx.guid or fx.guid == "" then return end
+  local layout = layout_for(fx)
+  local pal = layout and layout.palette
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.Spacing(ctx)
+  ImGui.TextDisabled(ctx, "From the plugin")
+  if not PC.supported() then
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "(Windows, with js_ReaScriptAPI)")
+    return
+  end
+  if PC.busy(fx.guid) then
+    ImGui.TextDisabled(ctx, "Reading its window\u{2026}")
+    return
+  end
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  if ImGui.Button(ctx, "##" .. id .. "_pread", 18, 18) and not PC.busy() then read_palette(fx) end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, (pal and "Read the plugin's colours again" or "Read the plugin's colours") ..
+      "\n(its window comes to the front for a moment)")
+  end
+  W.ICONS.dropper(dl, x + 3, y + 3, 12, C.COL.icon)
+  local n = 0
+  for gi, group in ipairs({ pal and pal.surfaces or {}, pal and pal.accents or {} }) do
+    for i, rgb in ipairs(group) do
+      ImGui.SameLine(ctx, 0, (i == 1 and gi == 2 and n > 0) and 10 or 4)
+      if ImGui.ColorButton(ctx, hex_key(rgb):upper() .. "##" .. id .. "_pal" .. gi .. "_" .. i,
+          (rgb << 8) | 0xff, ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+        pick_key(hex_key(rgb), true)
+        CP.remember(rgb)
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, ((gi == 1) and "Surface  " or "Accent  ") .. hex_key(rgb):upper())
+      end
+      n = n + 1
+    end
+  end
+  if pal_fail[fx.guid] then
+    ImGui.TextDisabled(ctx, "Couldn't read it: " .. pal_fail[fx.guid])
+  end
+end
+
 -- After a menu's faceplate swatches: the colour of your own it has now
 -- (when it has one), the Recent colours flyout -- every custom colour
 -- given to a faceplate, background or section since ChannelView started --
@@ -812,12 +988,14 @@ local function hex_key(rgb) return ("#%06x"):format(rgb & 0xffffff) end
 --   now:   the key chosen now
 --   pick_key(k, save): makes key k the choice (nil = none), saving if `save`
 --   from:  the colour the picker starts on when there's no custom one
-local function custom_rows(id, now, width, pick_key, title, from)
+local function custom_rows(id, now, width, pick_key, title, from, fx)
   local ck = C.custom_key(now)
   if ck then
     local pl = C.plate_of(ck)
     swatch_row("Custom  " .. pl.label, id .. "_now", true, width, pl.bg, pl.border)
   end
+  palette_row(fx, id, pick_key)
+  ImGui.Spacing(ctx)
   if ImGui.BeginMenu(ctx, "Recent colours##" .. id, #CP.recent > 0) then
     for i, rgb in ipairs(CP.recent) do
       local pl = C.plate_of(hex_key(rgb))
@@ -860,7 +1038,7 @@ end
 --   now:    the key chosen now (a name, or #rrggbb)
 --   from:   0xRRGGBB the picker starts on when there's no custom one
 --   pick_key(k, save): makes key k the choice, saving if `save`
-local function swatch_extras(id, now, from, title, pick_key)
+local function swatch_extras(id, now, from, title, pick_key, fx)
   local dl = ImGui.GetWindowDrawList(ctx)
   local ck = C.custom_key(now)
   local function outline()
@@ -902,6 +1080,7 @@ local function swatch_extras(id, now, from, title, pick_key)
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Recent  " .. k:upper()) end
     end
   end
+  palette_row(fx, id, pick_key)
 end
 
 local function plate_menu(fx, key, layout)
@@ -933,7 +1112,25 @@ local function plate_menu(fx, key, layout)
       if save then M.save() end
     end
     local now_pl = C.plate_of(layout.plate)
-    custom_rows("plate", layout.plate, 150, set, "Faceplate colour", now_pl and (now_pl.bg >> 8))
+    custom_rows("plate", layout.plate, 150, set, "Faceplate colour", now_pl and (now_pl.bg >> 8), fx)
+  end
+  -- the whole panel in the plugin's colours (read from its window first,
+  -- when they haven't been)
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Match the plugin##plate_match", nil, false, PC.supported() and not PC.busy()) then
+    local l, pk = materialise(fx)
+    if l.palette then
+      match_palette(l, l.palette)
+      M.set(pk, l); M.save()
+    else
+      read_palette(fx, match_palette)
+    end
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, not PC.supported() and "Needs Windows and js_ReaScriptAPI."
+      or "The faceplate, section faceplates and backgrounds in the plugin's own\n" ..
+         "colours, and its accent on buttons, Arc and LED ring knobs and Slim faders.\n" ..
+         "The first time, its window comes to the front for a moment to be read.")
   end
   -- the surface finish, on whichever faceplate is chosen (the theme's has none)
   ImGui.Separator(ctx)
@@ -975,6 +1172,32 @@ local function style_family(t)
   if t == "fader" then return "fader" end
   if t == "toggle" then return "toggle" end
   return nil
+end
+
+-- The look new knobs or buttons start with (M.default_look): this
+-- control's, or forget it. Ticked while this control has that look.
+local function new_look_items(fam, c, noun)
+  local d = M.default_look(fam)
+  local same = d ~= nil and (d.style or false) == (c.style or false) and (d.cap or false) == (c.cap or false)
+  if same and fam == "knob" then
+    same = (d.scale_ink or false) == (c.scale_ink or false)
+           and (KPm.encode(d.look) or "") == (KPm.encode(c.look) or "")
+           and ((d.arc ~= nil) == (c.arc ~= nil))
+  end
+  if ImGui.MenuItem(ctx, "Use this look for new " .. noun, nil, same) then
+    M.set_default_look(fam, c)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, (fam == "knob")
+      and "New and automatic layouts, and knobs added in the editor,\n" ..
+          "start with this knob's style, colours and value arc.\n" ..
+          "(A centred knob gets the Centred arc.)"
+      or "New and automatic layouts, and buttons added in the editor,\n" ..
+         "start with this button's style and lit colour.")
+  end
+  if d and ImGui.MenuItem(ctx, "Forget the look for new " .. noun) then
+    M.set_default_look(fam, nil)
+  end
 end
 
 -- A toggle has no style, only the colour it lights when on (C.TOGGLE_COLS);
@@ -1055,7 +1278,7 @@ local function toggle_colour_menu(fx, key, idx, c)
       if save then M.save() end
     end
     local lit = W.lit_col(c.cap) or C.COL.toggle_on
-    swatch_extras("lit", c.cap, lit >> 8, "Lit colour", choose)
+    swatch_extras("lit", c.cap, lit >> 8, "Lit colour", choose, fx)
   end
   -- small: a half-height lit push-button with its name on it (buttons
   -- for a dropdown's choices have no sizes: their count sets their room)
@@ -1087,6 +1310,7 @@ local function toggle_colour_menu(fx, key, idx, c)
     end
     M.set(key, l); M.save()
   end
+  if c.type == "toggle" then new_look_items("toggle", c, "buttons") end
 end
 
 -- The finish of a control's background or a divider's section: a combo
@@ -1189,7 +1413,7 @@ local function back_menu(fx, key, idx, c)
       if save then M.save() end
     end
     local now_pl = C.plate_of(c.back)
-    custom_rows("back", c.back, 170, cset, "Background colour", now_pl and (now_pl.bg >> 8))
+    custom_rows("back", c.back, 170, cset, "Background colour", now_pl and (now_pl.bg >> 8), fx)
   end
   ImGui.Separator(ctx)
   local bkind, bpl = P.back_style(c.back)
@@ -1247,7 +1471,7 @@ local function section_menu(fx, key, idx, c)
     end
     local cur = (c.style == "plate") and c.cap or nil
     local now_pl = C.plate_of(cur)
-    custom_rows("sec", cur, 170, sset, "Section colour", now_pl and (now_pl.bg >> 8))
+    custom_rows("sec", cur, 170, sset, "Section colour", now_pl and (now_pl.bg >> 8), fx)
   end
   ImGui.Separator(ctx)
   local skind, spl = P.section_style(c)
@@ -1292,7 +1516,7 @@ local function pad_style_menu(fx, key, idx, c)
       if save then M.save() end
     end
     local now_col = W.cap_col(c.cap)
-    swatch_extras("pcap", c.cap, now_col and (now_col >> 8), "Colour", choose)
+    swatch_extras("pcap", c.cap, now_col and (now_col >> 8), "Colour", choose, fx)
   end
   ImGui.Spacing(ctx)
   ImGui.TextDisabled(ctx, "Size")
@@ -1481,8 +1705,44 @@ dual_style_grid = function(fx, key, idx, c)
   ImGui.Separator(ctx)
 end
 
+-- A dropdown's look: printed flat on the faceplate, or raised (a backlit
+-- button's cap, unlit, standing off it). A button row's lit styles count
+-- as raised on a dropdown (W.combo_raised).
+local function combo_style_menu(fx, key, idx, c)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local raised = W.combo_raised(c.style)
+  local function set(v)
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.style = v end
+    M.set(key, l); M.save()
+  end
+  ImGui.TextDisabled(ctx, "Style")
+  local _, th = ImGui.CalcTextSize(ctx, "Ag")
+  local rh = math.max(th, 20)
+  for _, o in ipairs({ { false, "Flat", "Printed on the faceplate." },
+                       { true, "Raised", "A backlit button's cap, unlit, standing off the faceplate." } }) do
+    local x, y = ImGui.GetCursorScreenPos(ctx)
+    if ImGui.Selectable(ctx, "            " .. o[2] .. "##cstyle_" .. o[2], raised == o[1], KEEP_OPEN, 160, rh) then
+      set(o[1] and "raised" or nil)
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, o[3]) end
+    W.combo_swatch(dl, x + 3, y + 3, x + 41, y + rh - 3, o[1])
+  end
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Apply to every dropdown on this panel") then
+    local l = materialise(fx)
+    for _, o in ipairs(l.controls) do
+      if o.type == "combo" and not o.buttons then o.style = raised and "raised" or nil end
+    end
+    M.set(key, l); M.save()
+  end
+end
+
 local function style_menu(fx, key, idx, c)
   if c.type == "xy" or c.type == "dual" then return pad_style_menu(fx, key, idx, c) end
+  if c.type == "combo" and not c.buttons then return combo_style_menu(fx, key, idx, c) end
   local fam = style_family(c.type)
   if fam == "toggle" or c.type == "combo" then return toggle_colour_menu(fx, key, idx, c) end
   local list = (fam == "fader") and C.FADER_STYLES or C.KNOB_STYLES
@@ -1611,7 +1871,7 @@ local function style_menu(fx, key, idx, c)
     end
     local now_col = W.cap_col(cap_now)
     swatch_extras("cap", c.cap, now_col and (now_col >> 8),
-      (fam == "fader") and "Fader cap colour" or "Knob colour", choose)
+      (fam == "fader") and "Fader cap colour" or "Knob colour", choose, fx)
   end
 
   -- knobs come in three sizes (C.SIZES); the panel reflows round them
@@ -1630,6 +1890,49 @@ local function style_menu(fx, key, idx, c)
           or "Normal size.")
       end
     end
+
+    -- a value arc in place of the scale's ticks or dots (on an Arc knob,
+    -- the way its own arc fills): from the start, from the end, or out
+    -- from the middle; for this knob, its section or the whole panel.
+    -- Centred also makes the knob centred (c.bipolar): an Arc or LED ring
+    -- face fills from the middle, and a modulator swings it both ways. An
+    -- Arc or LED ring knob that's centred without an arc reads as Centred.
+    ImGui.Spacing(ctx)
+    ImGui.TextDisabled(ctx, "Value arc")
+    local ARCS = { { false, "Off", "The knob's own scale ticks or dots." },
+                   { "pos", "Positive", "Lit from the start of the travel up to the value." },
+                   { "neg", "Negative", "Lit from the end of the travel back to the value." },
+                   { "mid", "Centred", "Lit out from the middle to the value.\n" ..
+                                       "A modulator swings it both ways round its setting." } }
+    local own_face = not c.look and (cur == "arc" or cur == "led")
+    local arc_now = c.arc or ((c.bipolar and own_face) and "mid") or false
+    for i, a in ipairs(ARCS) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, a[2] .. "##varc_" .. i, arc_now == a[1], KEEP_OPEN, 64, 0) then
+        set({ arc = a[1], bipolar = (a[1] == "mid") })
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, a[3]) end
+    end
+    local function arc_to(scope)
+      local l, pk = materialise(fx)
+      local ctl = l.controls
+      local function put(o)
+        if o and (o.type == "knob" or o.type == "stepped") then o.arc, o.bipolar = c.arc, c.bipolar end
+      end
+      if scope == "section" then
+        local function edge(o) return o.type == "divider" or o.type == "page" end
+        local a, b = idx, idx
+        while a > 1 and not edge(ctl[a - 1]) do a = a - 1 end
+        while b < #ctl and not edge(ctl[b + 1]) do b = b + 1 end
+        for i = a, b do put(ctl[i]) end
+      else
+        for _, o in ipairs(ctl) do put(o) end
+      end
+      M.set(pk, l); M.save()
+    end
+    if ImGui.Selectable(ctx, "The same for its section##varc_sec", false, KEEP_OPEN, 160, 0) then arc_to("section") end
+    ImGui.SameLine(ctx, 0, 4)
+    if ImGui.Selectable(ctx, "For the whole panel##varc_all", false, KEEP_OPEN, 140, 0) then arc_to("panel") end
 
     -- the numbers round the dial are chosen under Values; their colour
     -- is a look, so it's here
@@ -1654,15 +1957,17 @@ local function style_menu(fx, key, idx, c)
       for _, o in ipairs(l.controls) do
         if style_family(o.type) == fam then
           o.style, o.cap = src.style, src.cap
-          if fam == "knob" then o.scale_ink = src.scale_ink end
+          if fam == "knob" then o.scale_ink, o.arc, o.bipolar = src.scale_ink, src.arc, src.bipolar end
           if fam == "fader" then o.dir, o.len, o.thin = src.dir, src.len, src.thin end
         end
       end
     end
     M.set(key, l); M.save()
   end
-  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale_ink ~= nil) then
-    set({ style = false, cap = false, scale_ink = false })
+  if fam == "knob" then new_look_items("knob", c, "knobs") end
+  if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale_ink ~= nil
+                     or c.arc ~= nil) then
+    set({ style = false, cap = false, scale_ink = false, arc = false })
   end
 end
 
@@ -2919,7 +3224,9 @@ local function control_menu()
     ImGui.EndMenu(ctx)
   end
 
+  -- (a knob's is its Style > Value arc's Centred)
   if not M.has_second(c) and c.type ~= "toggle" and c.type ~= "combo"
+     and c.type ~= "knob" and c.type ~= "stepped" and c.type ~= nil
      and ImGui.MenuItem(ctx, "Centred fill", nil, c.bipolar and true or false) then
     flip("bipolar")
   end
@@ -2943,7 +3250,7 @@ local function control_menu()
 
   ---------------------------------------------------------------- LOOK
   ImGui.SeparatorText(ctx, "Look")
-  local styled = style_family(c.type) or c.type == "xy" or c.type == "dual" or (c.type == "combo" and c.buttons)
+  local styled = style_family(c.type) or c.type == "xy" or c.type == "dual" or c.type == "combo"
   if styled and ImGui.BeginMenu(ctx, "Style") then
     style_menu(fx, key, idx, c)
     ImGui.EndMenu(ctx)
@@ -3128,18 +3435,34 @@ local function track_title(ctx, left_limit, right_limit, mid_y)
   local sub = ("%d plugin%s"):format(#app.chain, #app.chain == 1 and "" or "s")
 
   local chip_w, gap = 9, 7
+  -- the rack's padlock, in front: locked to this track, or following the
+  -- selection (it stays when the name doesn't fit, so it can be undone)
+  local lock_w = RACK and (C.ICON_SIZE + 6) or 0
   local nw, th = ImGui.CalcTextSize(ctx, name)
   local sw     = ImGui.CalcTextSize(ctx, sub)
-  local total  = chip_w + gap + nw + gap + sw
+  local total  = lock_w + chip_w + gap + nw + gap + sw
 
   local wx = ImGui.GetWindowPos(ctx)
   local ww = ImGui.GetWindowSize(ctx)
   local x  = wx + (ww - total) * 0.5
   if x < left_limit then x = left_limit end
-  if x + total > right_limit then return end
+  local fits = x + total <= right_limit
+  if not fits then x = left_limit end
 
   local _, cy = ImGui.GetCursorScreenPos(ctx)
   local y = (mid_y or (cy + th * 0.5)) - th * 0.5
+  if RACK and x + lock_w <= right_limit then
+    ImGui.SameLine(ctx, 0, 0)
+    ImGui.SetCursorScreenPos(ctx, x, (mid_y or (y + th * 0.5)) - C.ICON_SIZE * 0.5)
+    local locked = rack_lock.guid ~= nil
+    if W.icon_button(ctx, "racklock", locked and "lock" or "unlock", C.ICON_SIZE, locked,
+        locked and "Locked to this track\nClick: follow the selected track again"
+               or "Following the selected track\nClick: lock the rack to this track") then
+      rack_lock_set((not locked) and reaper.GetTrackGUID(app.track) or nil)
+    end
+    x = x + lock_w
+  end
+  if not fits then return end
 
   local dl = ImGui.GetWindowDrawList(ctx)
   ImGui.DrawList_AddRectFilled(dl, x, y + 1, x + chip_w, y + th - 1, col, 2.0)
@@ -3389,6 +3712,15 @@ local function menu_bar()
         end
       end
       ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Float plugins without controls", nil, app.float_empty) then
+        app.float_empty = not app.float_empty
+        ext_set(FLOAT_KEY, app.float_empty and "1" or "0")
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "A plugin whose layout has no controls opens its own window when you\n" ..
+          "come to its track, and it closes when you move on, unless you pin it\n" ..
+          "(the pin in its panel's header).")
+      end
       if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
         C.SHOW_VALUES = not C.SHOW_VALUES
         ext_set("show_values", C.SHOW_VALUES and "1" or "0")
@@ -4132,6 +4464,7 @@ local function panel_requests(i, fx, layout, key, req)
     if req.toggle_float then
       T.toggle_float(app.track, fx.addr)
     end
+    if req.toggle_pin then AF.toggle_pin(fx.guid) end
     if req.toggle_collapse then
       toggle_fold(fx)
     end
@@ -4727,6 +5060,9 @@ local function frame()
   MR.begin_frame()
   if FZ.poll() then rescan(true) end
   follow_selection()
+  AF.tick(app.float_empty and app.track or nil, no_controls)
+  PC.tick()
+  P.AUTO_FLOAT = app.float_empty
   do
     local now = reaper.time_precise()
     if now - colour_poll > 0.5 then

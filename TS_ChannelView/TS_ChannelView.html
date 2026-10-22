@@ -239,8 +239,10 @@ button { font: inherit; color: inherit; }
 .pnl.hw .knob:not(.flat) svg.flush { filter: drop-shadow(calc(0.5px * var(--hs,1)) calc(0.6px * var(--hs,1)) 0.6px rgba(0,0,0,calc(0.30 * var(--sa,1)))) !important; }
 .pnl.hw .knob:not(.flat) svg:not(.scl) { filter: drop-shadow(calc(0.5px * var(--hs,1)) calc(0.6px * var(--hs,1)) 0.6px rgba(0,0,0,calc(0.30 * var(--sa,1))))
   drop-shadow(calc(var(--kr,20px) * 0.132 * var(--hs,1)) calc(var(--kr,20px) * 0.176 * var(--hs,1)) calc(var(--kr,20px) * 0.52 * var(--hs,1)) rgba(0,0,0,calc(0.52 * var(--sa,1)))); }
-/* only a faced button (lens, window, backlit) stands off the plate; a flat
-   one and a combo are printed on it and cast nothing */
+/* only a faced button (lens, window, backlit) and a raised dropdown stand
+   off the plate; a flat one and a flat dropdown are printed on it */
+.pnl.hw .cmb.raised { box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), calc(0.3px * var(--hs,1)) calc(0.4px * var(--hs,1)) 0 0.6px rgba(0,0,0,calc(0.35 * var(--sa,1))),
+  calc(2px * var(--hs,1)) calc(2.6px * var(--hs,1)) calc(10px * var(--hs,1)) rgba(0,0,0,calc(0.44 * var(--sa,1))); }
 .pnl.hw .tog:where(.bs-lens, .bs-window, .bs-backlit), .pnl.hw .brow .bb:where(.bs-lens, .bs-window, .bs-backlit) { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), calc(0.3px * var(--hs,1)) calc(0.4px * var(--hs,1)) 0 0.6px rgba(0,0,0,calc(0.35 * var(--sa,1))),
   calc(2px * var(--hs,1)) calc(2.6px * var(--hs,1)) calc(10px * var(--hs,1)) rgba(0,0,0,calc(0.44 * var(--sa,1))); }
 .ph .ix { margin-right: 4px; }
@@ -347,6 +349,7 @@ button { font: inherit; color: inherit; }
     0 0 10px 1px color-mix(in srgb, var(--ton) 40%, transparent); }
 .cmb { margin-top: 10px; height: 38px; border-radius: 6px; border: 1px solid var(--ring); background: var(--toff);
   color: var(--ttext); font-size: 12px; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cmb.raised { border-color: rgba(0,0,0,0.6); background: linear-gradient(180deg, color-mix(in srgb, var(--toff) 88%, #fff), var(--toff)); }
 .rule { position: absolute; width: 1px; background: var(--ring); }
 .xyp { position: relative; margin: 2px auto 0; border-radius: 5px; background-color: rgba(0,0,0,0.35);
   border: 1px solid rgba(0,0,0,0.6); box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); touch-action: none; overflow: hidden;
@@ -682,10 +685,23 @@ async function reaper(cmds) {
   return out;
 }
 // A plugin or FX chain button (ChannelView's own command, not an action
-// REAPER knows) goes through the bridge, which adds it.
+// REAPER knows) goes through the bridge, which adds it. An FX chain
+// button's way with the plugins already there (m.cm, set on the desktop):
+// added, "replace" them, or "ask" here which.
 const isFxBtn = a => typeof a === "string" && (a.startsWith("_TSCV_FX:") || a.startsWith("_TSCV_CHAIN:"));
-const run = id => isFxBtn(String(id)) ? send("fxb", String(id))
-  : reaper(encodeURIComponent(String(id))).catch(() => {});
+const run = (id, m) => {
+  if (!isFxBtn(String(id))) { reaper(encodeURIComponent(String(id))).catch(() => {}); return; }
+  const way = m && String(id).startsWith("_TSCV_CHAIN:") ? m.cm : null;
+  if (way !== "ask") { send("fxb", String(id), way === "replace" ? "replace" : "add"); return; }
+  openSheet(sh => {
+    sh.append(h("h3", null, macroText(m) || "FX chain"));
+    const add = h("button", "opt", "Add it");
+    add.addEventListener("click", () => { send("fxb", String(id), "add"); closeSheet(); });
+    const rep = h("button", "opt", "Replace the plugins");
+    rep.addEventListener("click", () => { send("fxb", String(id), "replace"); closeSheet(); });
+    sh.append(add, rep, h("div", "note", "Replacing keeps the probes, Trimmer and ChannelView Modulators."));
+  });
+};
 // The master's mono switch: REAPER's "Master track: Toggle stereo/mono
 // (L+R)", read back as that action's toggle state with every poll.
 const MONO_CMD = "40917";
@@ -1584,15 +1600,31 @@ function lightWash(svg, r) {
 // the round hardware faces' bodies, in the knob's own units (pointer and nose aren't discs)
 const WASH_R = { skirted: 37, trim: 47, bar: 37, fluted: 38, bezel: 38, rbezel: 38, hifi: 38, led: 31 };
 
+// A knob's value arc, in place of its scale's ticks or dots (Style >
+// Value arc, the desktop's value_arc): the track round the travel, lit
+// from the start ("pos"), from the end back ("neg") or out from the middle
+// ("mid", with a mark there) to the value. Returns set(v).
+function valueArc(svg, mode) {
+  const R = 56.5, w = 5;
+  el("path", { d: arcPath(R, A0, A1), fill: "none", stroke: "var(--track)", "stroke-width": w }, svg);
+  const fill = el("path", { fill: "none", stroke: mode === "mid" ? "var(--fill-bi)" : "var(--fill)", "stroke-width": w }, svg);
+  if (mode === "mid") el("line", { x1: 50, y1: -11, x2: 50, y2: -2, stroke: "var(--ring)", "stroke-width": 2 }, svg);
+  return v => {
+    const a = A0 + (A1 - A0) * v;
+    fill.setAttribute("d", mode === "neg" ? arcPath(R, a, A1) : mode === "mid" ? arcPath(R, 0, a) : arcPath(R, A0, a));
+  };
+}
+
 // Builds a knob face of `size` px; returns { svg, set(v) }. noTicks: the
 // knob has a numbered scale drawn round it instead of its own ticks.
-function makeKnob(size, style, cap, bipolar, tick, noTicks) {
-  const k = makeKnob0(size, style, cap, bipolar, tick, noTicks);
+// mode: an Arc knob's value arc ("pos", "neg", "mid"), else its bipolar.
+function makeKnob(size, style, cap, bipolar, tick, noTicks, mode) {
+  const k = makeKnob0(size, style, cap, bipolar, tick, noTicks, mode);
   const st = STYLE_ALIAS[style] || style;
   if (WASH_R[st] && BODY[st]) lightWash(k.svg, WASH_R[st] * 50 / BODY[st]);
   return k;
 }
-function makeKnob0(size, style, cap, bipolar, tick, noTicks) {
+function makeKnob0(size, style, cap, bipolar, tick, noTicks, mode) {
   style = STYLE_ALIAS[style] || style;
   style = BODY[style] ? style : "arc";
   const svg = el("svg", { width: size, height: size, viewBox: "0 0 100 100" });
@@ -1632,6 +1664,7 @@ function makeKnob0(size, style, cap, bipolar, tick, noTicks) {
     } };
   }
   if (style === "arc") {
+    if (mode) bipolar = mode === "mid";
     el("circle", { cx: 50, cy: 50, r: 50, fill: "var(--body)" }, svg);
     el("path", { d: arcPath(44, A0, A1), fill: "none", stroke: "var(--track)", "stroke-width": 7 }, svg);
     const fill = el("path", { fill: "none", stroke: cap || (bipolar ? "var(--fill-bi)" : "var(--fill)"),
@@ -1642,7 +1675,7 @@ function makeKnob0(size, style, cap, bipolar, tick, noTicks) {
     el("circle", { cx: 50, cy: 50, r: 49, fill: "none", stroke: "var(--ring)", "stroke-width": 2 }, svg);
     return { svg, set(v) {
       const a = A0 + (A1 - A0) * v;
-      fill.setAttribute("d", bipolar ? arcPath(44, 0, a) : arcPath(44, A0, a));
+      fill.setAttribute("d", bipolar ? arcPath(44, 0, a) : mode === "neg" ? arcPath(44, a, A1) : arcPath(44, A0, a));
       ptr.setAttribute("transform", `rotate(${f2(a)} 50 50)`);
     } };
   }
@@ -1831,14 +1864,14 @@ function makeKnob0(size, style, cap, bipolar, tick, noTicks) {
 // the sides). sc = { m: marks 0..1, l: labels, ink: colour or null (the
 // plate's value colour) }. Returns { svg, d, x, y }: the overlay, and the
 // dial's size and top left.
-function makeScale(W, H, D, sc) {
+function makeScale(W, H, D, sc, noTicks) {
   const svg = el("svg", { class: "scl", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
   const fs = D >= 70 ? 11 : 10, chw = fs * 0.56;
   const r = D / 2, r0 = r + 2, r1 = r + Math.max(4, r * 0.26);
   const cx = W / 2, cy = Math.max(r + 2, H - (r1 * 0.7072 + 1 + fs));
   for (let i = 0; i < sc.m.length; i++) {
     const a = rad(A0 + (A1 - A0) * sc.m[i]), sx = Math.sin(a), sy = -Math.cos(a);
-    el("line", { x1: f2(cx + sx * r0), y1: f2(cy + sy * r0), x2: f2(cx + sx * r1), y2: f2(cy + sy * r1),
+    if (!noTicks) el("line", { x1: f2(cx + sx * r0), y1: f2(cy + sy * r0), x2: f2(cx + sx * r1), y2: f2(cy + sy * r1),
       stroke: "var(--ring)", "stroke-width": 1.4, "stroke-linecap": "round" }, svg);
     const t = sc.l && sc.l[i] ? String(sc.l[i]) : "";
     if (!t) continue;
@@ -2527,8 +2560,8 @@ function openMenu(m) {
       if (macroCol(it)) b.style.boxShadow = `inset 3px 0 0 ${macroCol(it)}`;
       b.addEventListener("click", () => {
         if (sw === "menu") { openBars(); return; }
-        if (sw !== null) switchTo(sw); else run(it.a);
         closeSheet();
+        if (sw !== null) switchTo(sw); else run(it.a, it);
       });
       list.append(b);
     }
@@ -2608,7 +2641,7 @@ function buildMacros() {
       } else if (m.m) openMenu(m);
       else if (sw === "menu") openBars();
       else if (sw !== null) switchTo(sw);
-      else run(m.a);
+      else run(m.a, m);
     });
     m.el = b;
     bar.append(b);
@@ -2806,6 +2839,8 @@ function editMacro(i) {
       const clean = { l: m.l, a: m.a, c: m.c };
       if (m.ic) clean.ic = m.ic;
       if (typeof m.cs === "string") clean.cs = m.cs;
+      if (typeof m.vo === "string") clean.vo = m.vo;      // its own vendor look (set on the desktop)
+      if (typeof m.cm === "string") clean.cm = m.cm;      // an FX chain's way (set on the desktop)
       if (i >= 0) macros[i] = clean; else macros.push(clean);
       saveMacros(); closeSheet();
     });
@@ -4781,17 +4816,25 @@ function buildPanel(p, bodyH) {
       // a recipe or your own look, built from parts (TS_CV_KnobParts)
       const look = c.kl ? decodeLook(c.kl) : null;
       const mg = Math.max(0, (CELL_H * it.hu / 2 - CELL_H - (D - KNOB)) / 2);
+      // a value arc in place of the ticks (an Arc knob's is its own face)
+      const va = c.va || null, arcFace = !look && !BODY[STYLE_ALIAS[c.st] || c.st];
+      const vaRing = va && !arcFace;
       let k, box = h("div", "knob");
       if (sc) {
         const W = cw - 4, H = size === "medium" ? 6 + D + 4 + 14 : 10 + D + 2 * mg;
-        const s = makeScale(W, H, D, sc);
-        k = look ? makePartsKnob(s.d, look, c.kc, true) : makeKnob(s.d, c.st, c.cap, c.bi, null, true);
+        const s = makeScale(W, H, D, sc, vaRing);
+        k = look ? makePartsKnob(s.d, look, c.kc, true) : makeKnob(s.d, c.st, c.cap, c.bi, null, true, va);
         Object.assign(k.svg.style, { position: "absolute", left: s.x + "px", top: s.y + "px" });
         box.style.width = W + "px"; box.style.height = H + "px";
         box.append(k.svg, s.svg);
       } else {
-        k = look ? makePartsKnob(D, look, c.kc) : makeKnob(D, c.st, c.cap, c.bi);
+        k = look ? makePartsKnob(D, look, c.kc, vaRing) : makeKnob(D, c.st, c.cap, c.bi, null, vaRing, va);
         box.append(k.svg);
+      }
+      if (vaRing) {
+        const upd = valueArc(k.svg, va), set0 = k.set;
+        k.set = v => { set0(v); upd(v); };
+        upd(0);
       }
       // the arc is a printed scale, not a knob standing on the plate: no shadow
       if (!look && !BODY[STYLE_ALIAS[c.st] || c.st]) box.classList.add("flat");
@@ -4891,6 +4934,8 @@ function buildPanel(p, bodyH) {
       entry.val = null;
     } else if (c.t === "combo") {
       const b = h("button", "cmb"); b.style.width = (CELL_W - 8) + "px";
+      // raised: a backlit button's cap, unlit (W.combo_raised)
+      if (c.st === "raised" || BUTTON_FACES.has(c.st)) b.classList.add("raised");
       cell.append(lbl, b);
       const tx = h("span"); b.append(tx);
       if (c.md) modCorner(b, PAL.toggle_off);

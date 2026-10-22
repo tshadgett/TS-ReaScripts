@@ -711,6 +711,7 @@ local function panel_of(fx, i)
         o.md = (own("lfo.active") or own("acs.active")) or nil
       end
       o.bi  = ctl.bipolar or nil
+      o.va  = (o.t == "knob" or o.t == "stepped") and ctl.arc or nil
       o.inv = (ctl.invert and (o.t == "knob" or o.t == "toggle" or o.t == "stepped" or o.t == "dual" or o.t == "xy")) or nil
       o.st  = ctl.style
       o.cap = cap_hex(ctl.cap)
@@ -2556,8 +2557,9 @@ local function apply(verb, a)
       layout_dirty = true
     end
   elseif verb == "fxb" then
-    -- fxb|cmd: a plugin or FX chain button on the page's Actions bar
-    require("TS_CV_FXButtons").run({ cmd = a[1] or "" })
+    -- fxb|cmd|way: a plugin or FX chain button on the page's Actions bar;
+    -- way "replace" replaces the plugins with the chain
+    require("TS_CV_FXButtons").run({ cmd = a[1] or "" }, (a[2] == "replace") and "replace" or "add")
   elseif verb == "bar" then
     -- bar|id: a toolbar switch on the page's Actions bar
     DR.load()

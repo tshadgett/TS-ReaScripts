@@ -23,6 +23,7 @@ local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
 local EQP = require("TS_CV_EQPanel")
 local TR  = require("TS_CV_Trimmer")
+local AF  = require("TS_CV_AutoFloat")
 local TRP = require("TS_CV_TrimmerPanel")
 local FB  = require("TS_CV_FXButtons")
 local RC  = require("TS_CV_ReaComp")
@@ -648,7 +649,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
     local n = #list
     changed, nv, act = W.combo(ctx, id, name, v, shown, (n >= 2) and (1 / (n - 1)) or nil,
-      { tooltip = name .. ": " .. shown, steps = list })
+      { tooltip = name .. ": " .. shown, steps = list, style = ctl.style })
   else
     changed, nv, act = W.knob(ctx, id, name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = P.VIRT_COL,
@@ -1215,8 +1216,10 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
 
   local btn = C.ICON_SIZE
   local gap = 2
-  -- collapse, bypass, float, menu
-  local n_btn = 4
+  -- collapse, bypass, float, menu; and a pin before float while its window
+  -- is one ChannelView floated itself (View > Float plugins without controls)
+  local auto = AF.is_auto(fx.guid)
+  local n_btn = auto and 5 or 4
   local btn_x = x + w - (btn + gap) * n_btn - 2
 
   -- The wet %, centred in the header: dim at 100%, in the accent colour
@@ -1361,7 +1364,19 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     req.toggle_bypass = true
   end
 
-  at(2)
+  local k = 2
+  if auto then
+    at(k); k = k + 1
+    local pinned = AF.is_pinned(fx.guid)
+    if W.icon_button(ctx, "pin##" .. fx.guid, "pin", btn, pinned,
+        pinned and "Pinned: its window stays open when you change track\nClick: unpin"
+               or "Its window closes when you change track\nClick: pin it open",
+        C.COL.float_on) then
+      req.toggle_pin = true
+    end
+  end
+
+  at(k)
   local floating = T.is_floating(track, fx.addr)
   if W.icon_button(ctx, "flt##" .. fx.guid, "float", btn, floating,
       floating and "Close plugin window" or "Open plugin window",
@@ -1369,7 +1384,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     req.toggle_float = true
   end
 
-  at(3)
+  at(k + 1)
   if W.icon_button(ctx, "mnu##" .. fx.guid, "menu", btn, false, "Panel menu") then
     req.open_menu = true
   end
@@ -2014,7 +2029,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   end
 
   if #lay.items == 0 and #lay.rules == 0 then
-    local msg = "no layout"
+    -- with View > Float plugins without controls on, its own window is
+    -- where it's played (P.AUTO_FLOAT, set by the window drawing it)
+    local msg = P.AUTO_FLOAT and "auto float" or "no layout"
     local tw, th = ImGui.CalcTextSize(ctx, msg)
     ImGui.DrawList_AddText(dl, x + w * 0.5 - tw * 0.5, y + h * 0.5 - th - 6,
       C.COL.empty_text, msg)
@@ -2318,7 +2335,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           { tooltip     = tip,
             steps       = combo_steps(track, fx.addr, p, key),
             open_now    = pending_open[id],
-            mod         = modded })
+            mod         = modded,
+            style       = ctl.style })
         pending_open[id] = nil
         if act and act.want_steps then
           -- scan right now, and open the list on the next frame once it
@@ -2383,14 +2401,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           for i = 1, #list do snaps[i] = rev and (1 - list[i].norm) or list[i].norm end
         end
         changed, nv, act = W.knob(ctx, id, label, value, shown,
-          { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
+          { bipolar = ctl.bipolar, arc = ctl.arc, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = st, snaps = snaps, mod = modded, ring = ring,
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
-          { bipolar = ctl.bipolar, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
+          { bipolar = ctl.bipolar, arc = ctl.arc, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end

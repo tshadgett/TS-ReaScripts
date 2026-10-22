@@ -39,6 +39,7 @@
       Finish   = <finish>
       Metal    = 1
       Lock     = <rows>
+      Palette  = <#rrggbb ...>|<#rrggbb ...>
 
   <type> is knob | toggle | combo | stepped | fader | xy | dual | blank |
   divider | half_gap | page. "page" is a page break: everything after it,
@@ -286,6 +287,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own\n"
                 .. "; Metal=1: a metallic flake on the faceplate\n"
                 .. "; Finish=<finish>: the faceplate's finish (as Finish<n>)\n"
+                .. "; Palette=<surfaces>|<accents>: the plugin's own colours, sampled from its window\n"
                 .. "; Lock=<rows>: layout locked, arranged at that many rows"
 
 local dir         = nil
@@ -1365,6 +1367,8 @@ local function parse_section(sect)
         -- bit 4: the second parameter reversed (an XY pad's Y, a
         -- concentric knob's inner knob); bit 1 reverses the first
         invert2 = ((f & 16) ~= 0 and (t == "xy" or t == "dual")) or nil,
+        -- bits 5-6: a knob's value arc (1 positive, 2 negative, 3 centred)
+        arc     = ({ "pos", "neg", "mid" })[(f >> 5) & 3],
         label   = U.trim(label),
         style   = (sty and sty ~= "") and (C.KNOB_STYLE_ALIAS[sty] or sty) or nil,
         -- a cap or lit colour by name, or one of your own (#rrggbb)
@@ -1417,7 +1421,35 @@ local function parse_section(sect)
            brush = brush_of(sect.Brush),
            finish = finish_of(sect.Finish),
            metal = (U.trim(sect.Metal or "") == "1") or nil,
+           palette = M.palette_of(sect.Palette),
            lock = lock_of(sect.Lock) }
+end
+
+-- Palette=: the plugin's own colours, sampled from its window (Faceplate >
+-- Match the plugin, or a menu's From the plugin row): its surfaces, most
+-- used first, then after the | its accents (arcs, LEDs). Each 0xRRGGBB.
+function M.palette_of(v)
+  v = U.trim(v or "")
+  if v == "" then return nil end
+  local sf, ac = v:match("^([^|]*)|?(.*)$")
+  local function list(str)
+    local out = {}
+    for h in (str or ""):gmatch("#?(%x%x%x%x%x%x)") do out[#out + 1] = tonumber(h, 16) end
+    return out
+  end
+  local p = { surfaces = list(sf), accents = list(ac) }
+  if #p.surfaces == 0 and #p.accents == 0 then return nil end
+  return p
+end
+
+function M.palette_line(p)
+  if not p or (#(p.surfaces or {}) == 0 and #(p.accents or {}) == 0) then return nil end
+  local function list(t)
+    local out = {}
+    for i, c in ipairs(t or {}) do out[i] = ("#%06x"):format(c & 0xffffff) end
+    return table.concat(out, " ")
+  end
+  return list(p.surfaces) .. "|" .. list(p.accents)
 end
 
 local function serialize(layout)
@@ -1430,6 +1462,7 @@ local function serialize(layout)
   if finish_of(layout.finish) then out.Finish = layout.finish end
   if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
+  out.Palette = M.palette_line(layout.palette)
   M.canvas_lines(layout.canvas, out)
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
@@ -1453,10 +1486,12 @@ local function serialize(layout)
   end
   for i, c in ipairs(layout.controls or {}) do
     -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
-    -- bit 3 live name, bit 4 the second parameter reversed.
+    -- bit 3 live name, bit 4 the second parameter reversed, bits 5-6 the
+    -- value arc.
     local flags = (c.bipolar and 1 or 0) | (c.invert and 2 or 0)
                 | (c.no_rule and 4 or 0) | (c.live and 8 or 0)
                 | ((c.invert2 and (c.type == "xy" or c.type == "dual")) and 16 or 0)
+                | ((({ pos = 1, neg = 2, mid = 3 })[c.arc or ""] or 0) << 5)
     out["Ctl" .. (i - 1)] = string.format("%d|%s|%d|%s",
       c.param or -1,
       c.type or "knob",
@@ -1974,6 +2009,62 @@ function M.get_or_default(key, track, addr, cache_id)
   return RB.ensure(track, addr, cache_id, key, d), true
 end
 
+-- The look new knobs and new buttons start with, taken from a control
+-- (its Style menu > Use this look for new knobs/buttons): for automatic
+-- layouts, new layouts and controls added in the editor. Kept in ExtState,
+-- a key per field: knob = style, look, cap, ink, arc; button = style, cap.
+local DEF_FIELDS = {
+  knob   = { "style", "look", "cap", "scale_ink", "arc" },
+  toggle = { "style", "cap" },
+}
+local function def_key(fam, f) return "default_" .. fam .. "_" .. f end
+
+function M.default_look(fam)
+  local fields = DEF_FIELDS[fam]
+  if not fields or not reaper.GetExtState
+     or reaper.GetExtState(C.EXT_SECT, def_key(fam, "on")) ~= "1" then return nil end
+  local d = {}
+  for _, f in ipairs(fields) do
+    local v = reaper.GetExtState(C.EXT_SECT, def_key(fam, f))
+    if v ~= "" then d[f] = (f == "look") and KP.decode(v) or v end
+  end
+  return d
+end
+
+-- c: the control to take the look from, or nil to forget the default.
+function M.set_default_look(fam, c)
+  local fields = DEF_FIELDS[fam]
+  if not fields then return end
+  for _, f in ipairs(fields) do
+    local v = c and c[f]
+    if f == "look" and v then v = KP.encode(v) end
+    if v and v ~= "" then reaper.SetExtState(C.EXT_SECT, def_key(fam, f), tostring(v), true)
+    else reaper.DeleteExtState(C.EXT_SECT, def_key(fam, f), true) end
+  end
+  if c then reaper.SetExtState(C.EXT_SECT, def_key(fam, "on"), "1", true)
+  else reaper.DeleteExtState(C.EXT_SECT, def_key(fam, "on"), true) end
+  def_cache = {}
+end
+
+-- Give a new control the default look of its kind. A knob's arc follows
+-- whether it's centred: a centred knob gets the Centred arc whenever the
+-- default has an arc, and the rest get the default's (Positive when the
+-- default is Centred).
+function M.apply_default_look(c)
+  local fam = (c.type == "knob" or c.type == "stepped") and "knob"
+              or (c.type == "toggle") and "toggle" or nil
+  local d = fam and M.default_look(fam)
+  if not d then return c end
+  c.style, c.cap = d.style, d.cap
+  if fam == "knob" then
+    c.look, c.scale_ink = KP.copy(d.look), d.scale_ink
+    if d.arc then
+      c.arc = c.bipolar and "mid" or ((d.arc == "mid") and "pos" or d.arc)
+    end
+  end
+  return c
+end
+
 function M.build_default(track, addr)
   local controls = {}
   local own, total = U.own_param_count(track, addr)
@@ -1981,12 +2072,12 @@ function M.build_default(track, addr)
   local n = math.min(limit, C.AUTO_DEFAULT_N)
   for p = 0, n - 1 do
     local _, nm = reaper.TrackFX_GetParamName(track, addr, p, "")
-    controls[#controls + 1] = {
+    controls[#controls + 1] = M.apply_default_look({
       param   = p,
       type    = U.guess_control_type(track, addr, p),
       bipolar = U.guess_bipolar(nm, track, addr, p),
       label   = "",      -- the plugin's own name shows by itself; a label would hide an alias
-    }
+    })
   end
   -- A compressor that reports gain reduction gets its meter by default.
   -- This is only the generated starting point -- nothing reaches the
@@ -2363,7 +2454,7 @@ end
 
 function M.look_of(c)
   return { fam = M.look_family(c), type = c.type, style = c.style, cap = c.cap, size = c.size,
-           scale = c.scale, scale_ink = c.scale_ink, back = c.back, brush = c.brush, metal = c.metal,
+           scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, back = c.back, brush = c.brush, metal = c.metal,
            finish = c.finish, corners = c.corners, look = KP.copy(c.look),
            style2 = c.style2, look2 = KP.copy(c.look2),
            dir = c.dir, len = c.len, thin = c.thin }
@@ -2409,7 +2500,9 @@ function M.paste_look(o, s)
     if fam == s.fam then o.style = s.style end
     o.cap = cap_for(fam, s)
     if fam == "knob" and s.fam == "knob" then
-      o.scale, o.scale_ink = s.scale, s.scale_ink
+      o.scale, o.scale_ink, o.arc = s.scale, s.scale_ink, s.arc
+      -- a value arc says whether the knob is centred
+      if s.arc then o.bipolar = (s.arc == "mid") or nil end
       -- its own look, built from parts (on a concentric knob, the outer's),
       -- and a concentric knob's inner one from another concentric knob
       o.look = KP.copy(s.look)
@@ -2436,7 +2529,7 @@ function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
-                lock = layout.lock }
+                lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)) }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end
@@ -2447,7 +2540,7 @@ function M.copy(layout)
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         metal = c.metal, finish = c.finish, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),
-                        scale = c.scale, scale_ink = c.scale_ink,
+                        scale = c.scale, scale_ink = c.scale_ink, arc = c.arc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
                         invert2 = c.invert2,
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),

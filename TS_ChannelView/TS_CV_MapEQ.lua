@@ -239,6 +239,7 @@ ME.model_db = model_db
 ME.CURVE_STEP = 1 / 3
 ME.CURVE_N = 30               -- +/- ten octaves
 ME.CURVE_MIN = 0.5            -- dB: less than this everywhere isn't kept
+ME.NOISE_MAX = 0.8            -- dB: a measured shape rougher than this is noise
 
 -- (between grid points a smooth curve through them: Catmull-Rom)
 local function row_at(r, xi)
@@ -671,6 +672,22 @@ function ME.residual(e, list, drawn)
   return rows
 end
 
+-- How rough a measured shape is (C<s> rows): the median, over its gains,
+-- of the median bend from one 1/3 octave to the next (|second
+-- difference|, dB). A band's real shape bends gently (a console's tail,
+-- a shelf's bump: 0.1 to 0.25); a measurement that didn't line up with
+-- the plugin's output is noise (1.4 and up).
+function ME.noise(C)
+  local per = {}
+  for _, r in ipairs(C or {}) do
+    local d = {}
+    for i = 2, #r.v - 1 do d[#d + 1] = math.abs(r.v[i + 1] - 2 * r.v[i] + r.v[i - 1]) end
+    local m = median(d)
+    if m then per[#per + 1] = m end
+  end
+  return median(per) or 0
+end
+
 -- `samples`: { { s = shape pos, fn = freq norm, gn = gain norm, qn = Q
 -- norm (only on Q sweeps), fit = ME.fit result, freqs / D = the
 -- measurement, order = the order it was fitted at } }. `opts`: { kind,
@@ -778,6 +795,11 @@ function ME.summarise(samples, opts)
         return { type = t, order = sm.order or o, f = f, g = g,
                  q = rq * ((g < 0 and (K[3] or K[2])) or K[2] or 1) }
       end)
+      -- measured noise, not the band: the plugin's own readings, as they are
+      if e.C and ME.noise(e.C) > ME.NOISE_MAX then
+        e.K, e.C = { 1, 1, 1 }, nil
+        L.noisy = (L.noisy or 0) + 1
+      end
       L.shapes[s] = e
       goto continue
     end
@@ -800,6 +822,9 @@ function ME.summarise(samples, opts)
       if ME.GAINLESS[t] then g = 0 end
       return { type = t, order = sm.order or o, f = f, g = g, q = ME.q_at(e.Q, g) or 0.7071 }
     end)
+    if e.C and ME.noise(e.C) > ME.NOISE_MAX then
+      return nil, "the measurements were noise, not the band (the plugin's latency may not be what it reports)"
+    end
     L.shapes[s] = e
     ::continue::
   end
