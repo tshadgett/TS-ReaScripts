@@ -12,24 +12,25 @@
 --]]
 
 local C   = require("TS_CV_Config")
+local ED  = require("TS_CV_Edition")
 local U   = require("TS_CV_Util")
 local W   = require("TS_CV_Widgets")
 local T   = require("TS_CV_FXTree")
 local M   = require("TS_CV_Mappings")
-local TL  = require("TS_CV_Tiles")
-local FN  = require("TS_CV_Finish")
+local TL  = ED.module("TS_CV_Tiles")
+local FN  = ED.module("TS_CV_Finish")
 local SC  = require("TS_CV_Steps")
 local St  = require("TS_CV_State")
 local RQ  = require("TS_CV_ReaEQ")
-local EQP = require("TS_CV_EQPanel")
-local TR  = require("TS_CV_Trimmer")
+local EQP = ED.module("TS_CV_EQPanel")
+local TR  = ED.module("TS_CV_Trimmer")
 local AF  = require("TS_CV_AutoFloat")
-local TRP = require("TS_CV_TrimmerPanel")
+local TRP = ED.module("TS_CV_TrimmerPanel")
 local FB  = require("TS_CV_FXButtons")
 local RC  = require("TS_CV_ReaComp")
-local CP  = require("TS_CV_CompPanel")
-local RP  = require("TS_CV_RolePanel")
-local MP  = require("TS_CV_MapPanel")
+local CP  = ED.module("TS_CV_CompPanel")
+local RP  = ED.module("TS_CV_RolePanel")
+local MP  = ED.module("TS_CV_MapPanel")
 local CK  = require("TS_CV_ColourPick")
 local TP  = require("TS_CV_Taps")
 local ML  = require("TS_CV_MidiLearn")
@@ -42,7 +43,21 @@ local P   = {}
 local ImGui
 local panel_at = {}
 
-function P.attach(imgui) ImGui = imgui; EQP.attach(imgui); CP.attach(imgui); PU.attach(imgui); MP.attach(imgui); RP.attach(imgui); TRP.attach(imgui); FN.attach(imgui) end
+-- (Pro's modules, the canvases, Trimmer and finishes, only when they're
+-- there: TS_CV_Edition)
+function P.attach(imgui)
+  ImGui = imgui; PU.attach(imgui)
+  for _, m in ipairs({ EQP, CP, MP, RP, TRP, FN }) do if m then m.attach(imgui) end end
+end
+-- Whether `key` is a plugin with a panel of its own (Pro): ReaEQ, ReaComp,
+-- the Trimmer. Without Pro, each is an ordinary plugin's panel.
+local function own_eq(key) return EQP ~= nil and RQ.is_eq(key) end
+local function own_rc(key) return CP ~= nil and RC.is_comp(key) end
+local function own_trim(key) return TR ~= nil and TR.is(key) end
+P.own_eq, P.own_rc, P.own_trim = own_eq, own_rc, own_trim
+-- a layout's canvas, when there's Pro to draw it
+local function canvas_of(layout) return MP ~= nil and layout and layout.canvas or nil end
+P.canvas_of = canvas_of
 
 -- An expanded panel's foot: the layout lock at its left, and the preset
 -- bar (TS_CV_PresetUI, View > Preset bar) when that's on. It's always
@@ -98,8 +113,6 @@ end
 -- always begins a new column -- no matter how the previous section ended,
 -- whether it filled its last column or left gaps in it. That's the whole
 -- point of a divider: "this group is finished, a new one starts here."
--- The rule is vertical in either flow, because it separates groups, and
--- that reads as a vertical break whichever way the controls run.
 --
 -- A "fader" SPLITS THE PANEL THE SAME WAY, but claims the column between
 -- the two sections for itself, at the panel's full height, rather than
@@ -113,10 +126,8 @@ end
 -- some hardware staggers its knobs -- and one that doesn't fit what's
 -- left of a strip starts the next strip, spent for nothing there.
 --
--- ROW FLOW (across, then down) fills rows of a fixed width, chosen as the
--- narrowest that gets everything into the panel's height: with ordinary
--- controls that is ceil(n / rows) cells. A half_gap is
--- an ordinary empty slot here; its half-step is a down-the-column idea.
+-- A GRID (Grid= in the layout) is placed where it says instead: see
+-- "grids" below.
 local HALF_H = C.CELL_H * 0.5
 
 -- `n` half-cells across, or down, in pixels: a whole number whenever it
@@ -167,10 +178,7 @@ function P.cell_size(ctl, half_rows)
   end
   local bw, bh = P.button_span(ctl)
   if bw and bh <= half_rows then return bw, bh, "buttons" end
-  if ctl.type == "half_gap" then
-    if C.FLOW == "row" then return 2, 2 end
-    return 2, 1
-  end
+  if ctl.type == "half_gap" then return 2, 1 end
   local sizable = ctl.type == nil or ctl.type == "knob" or ctl.type == "stepped"
     or (ctl.type == "dual" and ctl.size ~= "small")
     or (ctl.type == "toggle" and ctl.size == "small")
@@ -425,62 +433,27 @@ end
 
 P.place_flow = place_flow   -- for the tests: it must agree with the strips
 
-local function place_row(sec, x0, half_rows, items)
-  local area, widest, total_w = 0, 0, 0
-  local sizes = {}
-  for i, ctl in ipairs(sec) do
-    local w, h, kind = P.cell_size(ctl, half_rows)
-    sizes[i] = { w, h, kind }
-    area = area + w * h
-    total_w = total_w + w
-    if w > widest then widest = w end
-  end
-  local rows = half_rows // 2
-  local lim = math.max(widest, 2 * math.ceil(area / 4 / rows))
-  local placed, deepest
-  while true do
-    placed, deepest = {}, 0
-    local cx, cy, lh = 0, 0, 0
-    for i, ctl in ipairs(sec) do
-      local w, h = sizes[i][1], sizes[i][2]
-      if cx + w > lim then cy, cx, lh = cy + lh, 0, 0 end
-      placed[#placed + 1] = { ctl = ctl, x = x0 + hx(cx), y = hy(cy), w = w, h = h, kind = sizes[i][3] }
-      if cy + h > deepest then deepest = cy + h end
-      cx = cx + w
-      if h > lh then lh = h end
-    end
-    if deepest <= half_rows or lim >= total_w then break end
-    lim = lim + 1
-  end
-  for _, it in ipairs(placed) do
-    it.sx, it.sw = it.x, hx(it.w)
-    items[#items + 1] = it
-  end
-  return hx(lim), deepest
-end
-
--- `lock` is a locked layout's row count (Lock=<rows>): the arrangement it
--- had then, whatever the panel's height now.
-function P.layout(controls, panel_h, lock)
-  -- a page break has no place in a grid: a list that still has them (a
-  -- caller that didn't go through P.pages) lays out as if they weren't there
+-- A layout without a grid, down then across in `rows` rows.
+local function layout_flow(controls, rows)
+  -- a page break has no place in it (a list that still has them, from a
+  -- caller that didn't go through P.pages, lays out as if they weren't
+  -- there), and nor has a grid's section
   for _, ctl in ipairs(controls) do
-    if ctl.type == "page" then
+    if ctl.type == "page" or ctl.type == "section" then
       local rest = {}
-      for _, c in ipairs(controls) do if c.type ~= "page" then rest[#rest + 1] = c end end
+      for _, c in ipairs(controls) do
+        if c.type ~= "page" and c.type ~= "section" then rest[#rest + 1] = c end
+      end
       controls = rest
       break
     end
   end
-  local rows  = lock or P.rows_for(panel_h)
   local half_rows = rows * 2
   -- faders placed among the controls: merged-cell flow (place_flow);
   -- anything else is laid out in sections and strips
-  if C.FLOW ~= "row" then
-    for _, ctl in ipairs(controls) do
-      local k = P.fader_kind(ctl)
-      if k == "block" or k == "band" or ctl.type == "xy" then return place_flow(controls, half_rows, rows) end
-    end
+  for _, ctl in ipairs(controls) do
+    local k = P.fader_kind(ctl)
+    if k == "block" or k == "band" or ctl.type == "xy" then return place_flow(controls, half_rows, rows) end
   end
   local items, rules = {}, {}
 
@@ -522,10 +495,8 @@ function P.layout(controls, panel_h, lock)
         x = x + C.DIVIDER_W
       end
     end
-    local w, d
     local first = #items + 1
-    if C.FLOW == "row" then w, d = place_row(sec, x, half_rows, items)
-    else w, d = place_column(sec, x, half_rows, items, spacers) end
+    local w, d = place_column(sec, x, half_rows, items, spacers)
     -- a section styled by the divider in front of it
     local sp = splitters[si - 1]
     if sp and sp.type == "divider" and P.section_style(sp) and w > 0 then
@@ -547,6 +518,535 @@ function P.layout(controls, panel_h, lock)
   return { rows = rows, items = items, rules = rules, width = x, sections = styled, gaps = gaps,
            spacers = spacers,
            height = math.max(1, math.min(half_rows, deepest)) * HALF_H }
+end
+
+-- ---------------------------------------------------------------------
+-- grids
+-- ---------------------------------------------------------------------
+-- A GRID is a layout that says where everything goes (Grid= and At<n>,
+-- TS_CV_Mappings), in quarter cells: an ordinary knob is 4 x 4, a small
+-- one 4 x 2, a large one 6 x 6. A line runs from one corner of the grid
+-- to another, any way, and is only that; a section is a group, a rectangle round what's
+-- on it, with a background or none; empty space is a gap. A control
+-- smaller than its place sits in the middle of it.
+--
+-- It's drawn as it is wherever it fits. Where it doesn't (ChannelView
+-- shorter than it, a rack column narrower) it FLOWS, unless the layout is
+-- locked, when it scrolls instead. It flows in UNITS: each section (with
+-- what's on it), and the controls on no section, taken a run at a time in
+-- reading order. A unit that fits keeps its own arrangement and only
+-- moves; one that doesn't is laid out afresh, its section's background
+-- stretched round it. In ChannelView they go down then across, a unit too
+-- tall laid out down then across in the rows there are, as a layout
+-- without a grid is; in the rack across then down, a unit too wide laid
+-- out across then down. A line on no section, between two units, is
+-- drawn between them still; any other line on no section isn't.
+
+-- where each panel's grid was last drawn, on screen (TS_CV_GridEditor)
+P.grid_at = {}
+
+local function qx(n) local v = n * C.CELL_W / 4; return math.tointeger(v) or v end
+local function qy(n) local v = n * C.CELL_H / 4; return math.tointeger(v) or v end
+local function half(n) local v = n / 2; return math.tointeger(v) or v end
+P.qx, P.qy = qx, qy
+
+-- Whether a list of controls is a grid's: any of them has a place on one.
+function P.is_grid(controls)
+  for _, c in ipairs(controls or {}) do if c.at then return true end end
+  return false
+end
+
+-- A grid's size in quarter cells: its Grid line (carried on the list as
+-- `grid`), or as far as anything on it reaches.
+function P.grid_size(controls)
+  local g = controls.grid
+  local cols, rows = g and g.cols or 0, g and g.rows or 0
+  for _, c in ipairs(controls) do
+    local a = c.at
+    if a then
+      local _, _, c1, r1 = M.at_box(a)
+      cols, rows = math.max(cols, c1), math.max(rows, r1)
+    end
+  end
+  return math.ceil(cols), math.ceil(rows)
+end
+
+-- The height a panel's grid has, inside its header, foot and padding.
+local function grid_room(panel_h)
+  return panel_h - C.HEADER_H - P.footer_h() - C.GRID_TOP_PAD - C.PANEL_PAD
+end
+
+local function new_out()
+  return { items = {}, rules = {}, segs = {}, sections = {}, gaps = {}, spacers = {} }
+end
+
+-- Puts control `ctl` at c, r, w by h quarter cells (dx, dy pixels on):
+-- a control as an item, a divider as a line, a section as a rectangle.
+-- Faders, XY pads and dropdowns shown as buttons fill their place; any
+-- other control is its own size in the middle of it (a dropdown takes
+-- the place's width).
+local STRETCH = { vfader = true, hfader = true, xy = true, buttons = true }
+local function put(out, ctl, c, r, w, h, dx, dy)
+  local x, y = dx + qx(c), dy + qy(r)
+  x, y = math.tointeger(x) or x, math.tointeger(y) or y
+  local t = ctl.type
+  if t == "divider" then
+    if not ctl.no_rule then
+      -- from one end to the other, any way
+      out.segs[#out.segs + 1] = { x1 = x, y1 = y, x2 = x + qx(w), y2 = y + qy(h), col = C.edge_rgba(ctl.edge) }
+    end
+    return
+  end
+  if t == "section" then
+    if P.section_style(ctl) or C.edge_rgba(ctl.edge) then
+      out.sections[#out.sections + 1] = { x = x, y = y, w = qx(w), h = qy(h), by = ctl }
+    end
+    return
+  end
+  if t == "page" or t == "blank" or t == "half_gap" then return end
+  local nw, nh, kind = P.cell_size(ctl, 80)
+  if t == "fader" then kind = (w > h) and "hfader" or "vfader" end
+  local it = { ctl = ctl, x = x, y = y, w = half(w), h = half(h), kind = kind,
+               sx = x, sw = qx(w), sy = y, sh = qy(h) }
+  if kind == "hfader" or kind == "xy" then
+    it.pw = qx(w)
+  elseif not STRETCH[kind] then
+    if t ~= "combo" then it.x = x + half(qx(w) - hx(nw)); it.w = nw end
+    it.y = y + half(qy(h) - hy(nh))
+    it.h = nh
+  end
+  out.items[#out.items + 1] = it
+end
+
+-- The finished layout: each item on a faceplate section takes its inks
+-- (the topmost one its middle is in), and the items go in the list's
+-- order, which is how the panel finds each one's control.
+local function finish(out, controls, width, height)
+  for _, it in ipairs(out.items) do
+    local mx, my = it.sx + it.sw / 2, (it.sy or it.y) + (it.sh or hy(it.h)) / 2
+    for si = #out.sections, 1, -1 do
+      local sc = out.sections[si]
+      -- (an outline alone gives what's on it no inks of its own)
+      if P.section_style(sc.by) and mx >= sc.x and mx <= sc.x + sc.w and my >= sc.y and my <= sc.y + sc.h then
+        it.sec = si break
+      end
+    end
+  end
+  local idx = {}
+  for i, c in ipairs(controls) do idx[c] = i end
+  table.sort(out.items, function(a, b) return (idx[a.ctl] or 0) < (idx[b.ctl] or 0) end)
+  out.width, out.height = width, math.max(height, 1)
+  out.rows = math.max(1, math.ceil(height / C.CELL_H - 0.01))
+  out.grid = true
+  return out
+end
+
+local function place_grid(controls)
+  local out = new_out()
+  for _, c in ipairs(controls) do
+    local a = c.at
+    if a then put(out, c, a.c, a.r, a.w, a.h, 0, 0) end
+  end
+  local cols, rows = P.grid_size(controls)
+  return finish(out, controls, qx(cols), qy(rows))
+end
+
+-- What a grid flows in (see "grids" above): its units, and its lines on
+-- no section. A unit is a section not inside another, with what's on it
+-- -- the sections inside it, and the controls and lines whose middle is
+-- -- or a control on no section. Each: { sec, list, c0, r0, c1, r1 (what
+-- it reaches), ic0 .. ir1 (what its controls reach), ctls (its controls) }
+-- in quarter cells.
+local function within(o, s)
+  return o.c >= s.c and o.r >= s.r and o.c + o.w <= s.c + s.w and o.r + o.h <= s.r + s.h
+end
+local function units_of(controls)
+  local secs, order = {}, {}
+  for i, c in ipairs(controls) do
+    order[c] = i
+    if c.at and c.type == "section" then secs[#secs + 1] = c end
+  end
+  -- a section inside another (the earlier of two the same) is on it
+  local function host(c)
+    local best
+    for _, s in ipairs(secs) do
+      if s ~= c then
+        local a, sa = c.at, s.at
+        local on
+        if c.type == "section" then
+          on = within(a, sa) and not (within(sa, a) and order[s] > order[c])
+        else
+          local mx, my = a.c + a.w / 2, a.r + a.h / 2
+          on = mx >= sa.c and mx <= sa.c + sa.w and my >= sa.r and my <= sa.r + sa.h
+        end
+        if on and (not best or within(best.at, sa)) then best = s end
+      end
+    end
+    return best
+  end
+  local function outermost(s)
+    local h = host(s)
+    while h do s = h; h = host(s) end
+    return s
+  end
+  local units, by_sec, loose = {}, {}, {}
+  for _, c in ipairs(controls) do
+    if c.at and c.type ~= "page" then
+      local top = (c.type == "section") and outermost(c) or (host(c) and outermost(host(c)))
+      if top then
+        local u = by_sec[top]
+        if not u then u = { sec = top, list = {} }; by_sec[top] = u; units[#units + 1] = u end
+        u.list[#u.list + 1] = c
+      elseif c.type == "divider" then
+        loose[#loose + 1] = c
+      else
+        units[#units + 1] = { list = { c } }
+      end
+    end
+  end
+  local huge = math.huge
+  for _, u in ipairs(units) do
+    u.c0, u.r0, u.c1, u.r1 = huge, huge, -huge, -huge
+    u.ic0, u.ir0, u.ic1, u.ir1 = huge, huge, -huge, -huge
+    u.ctls = {}
+    for _, c in ipairs(u.list) do
+      local a = c.at
+      local b0, b1, b2, b3 = M.at_box(a)
+      u.c0, u.r0 = math.min(u.c0, b0), math.min(u.r0, b1)
+      u.c1, u.r1 = math.max(u.c1, b2), math.max(u.r1, b3)
+      if c.type ~= "divider" and c.type ~= "section" then
+        u.ctls[#u.ctls + 1] = c
+        u.ic0, u.ir0 = math.min(u.ic0, a.c), math.min(u.ir0, a.r)
+        u.ic1, u.ir1 = math.max(u.ic1, a.c + a.w), math.max(u.ir1, a.r + a.h)
+      end
+    end
+  end
+  return units, loose
+end
+P.units_of = units_of   -- for the tests
+
+-- The units in `order` (by column, or by row), the controls on no section
+-- that come one after another made one: { c0 .. r1, list, ctls, sec }.
+local function runs(units, by_row)
+  table.sort(units, function(p, q)
+    if by_row then return p.r0 < q.r0 or (p.r0 == q.r0 and p.c0 < q.c0) end
+    return p.c0 < q.c0 or (p.c0 == q.c0 and p.r0 < q.r0)
+  end)
+  local out, run = {}, nil
+  for _, u in ipairs(units) do
+    if u.sec then out[#out + 1] = u; run = nil
+    else
+      if not run then
+        run = { list = {}, ctls = {}, c0 = u.c0, r0 = u.r0, c1 = u.c1, r1 = u.r1,
+                ic0 = u.c0, ir0 = u.r0, ic1 = u.c1, ir1 = u.r1 }
+        out[#out + 1] = run
+      end
+      local c = u.list[1]
+      run.list[#run.list + 1] = c; run.ctls[#run.ctls + 1] = c
+      run.c0, run.r0 = math.min(run.c0, u.c0), math.min(run.r0, u.r0)
+      run.c1, run.r1 = math.max(run.c1, u.c1), math.max(run.r1, u.r1)
+      run.ic0, run.ir0, run.ic1, run.ir1 = run.c0, run.r0, run.c1, run.r1
+    end
+  end
+  return out
+end
+
+-- A line on no section between units p and q, p's right edge to q's left
+-- (or, `down`, p's foot to q's top), and a line to draw: whether there is.
+local function line_between(loose, p, q, down)
+  for _, d in ipairs(loose) do
+    local a = d.at
+    if not d.no_rule then
+      if not down and a.w == 0 and a.c >= p.c1 - 0.5 and a.c <= q.c0 + 0.5 then return true end
+      if down and a.h == 0 and a.r >= p.r1 - 0.5 and a.r <= q.r0 + 0.5 then return true end
+    end
+  end
+  return false
+end
+
+-- A unit as it is, its top left corner at x, y.
+local function put_unit(out, u, x, y)
+  for _, c in ipairs(u.list) do
+    local a = c.at
+    put(out, c, a.c, a.r, a.w, a.h, x - qx(u.c0), y - qy(u.r0))
+  end
+end
+
+-- A unit's background, round what its controls came to (l, r, t, b: the
+-- section's margins round them on the grid).
+local function unit_back(out, u, x, y, w, h)
+  if u.sec and (P.section_style(u.sec) or C.edge_rgba(u.sec.edge)) then
+    out.sections[#out.sections + 1] = { x = x, y = y, w = w, h = h, by = u.sec }
+  end
+end
+
+-- A control a grid has no place for yet (one added in Edit Parameters)
+-- goes on a new row under it, left to right; the place is kept.
+local SKIP_NEW = { divider = true, section = true, page = true, blank = true, half_gap = true }
+local function place_new(controls)
+  local cols, rows = P.grid_size(controls)
+  local x, y, lh = 0, rows, 0
+  for _, c in ipairs(controls) do
+    if not c.at and not SKIP_NEW[c.type] then
+      local w, h = P.cell_size(c, 80)
+      w, h = w * 2, h * 2
+      if x > 0 and x + w > math.max(cols, 16) then x, y, lh = 0, y + lh, 0 end
+      c.at = { c = x, r = y, w = w, h = h }
+      x, lh = x + w, math.max(lh, h)
+    end
+  end
+end
+
+-- Too tall for ChannelView: see "grids" above.
+local function flow_tall(controls, panel_h)
+  local avail, fit_rows = grid_room(panel_h), P.rows_for(panel_h)
+  local units, loose = units_of(controls)
+  local out, GX, GY = new_out(), qx(1), qy(1)
+  local x, y, colw, width, deepest = 0, 0, 0, 0, 0
+  local seps, prev = {}, nil
+  local function place(u, w, h)
+    if y > 0 and y + h > avail + 0.5 then
+      x, y, colw = x + colw + GX, 0, 0
+      if prev and line_between(loose, prev, u) then seps[#seps + 1] = x - GX / 2 end
+    elseif y > 0 and prev and line_between(loose, prev, u, true) then
+      out.segs[#out.segs + 1] = { x1 = x, y1 = y - GY / 2, x2 = x + math.max(colw, w), y2 = y - GY / 2 }
+    end
+    local px, py = x, y
+    y, colw = y + h + GY, math.max(colw, w)
+    width, deepest = math.max(width, x + w), math.max(deepest, py + h)
+    prev = u
+    return px, py
+  end
+  for _, u in ipairs(runs(units)) do
+    local h = qy(u.r1 - u.r0)
+    if h <= avail + 0.5 then
+      local px, py = place(u, qx(u.c1 - u.c0), h)
+      put_unit(out, u, px, py)
+    elseif #u.ctls > 0 then
+      -- too tall: down then across, in the rows there are
+      table.sort(u.ctls, function(p, q) return p.at.c < q.at.c or (p.at.c == q.at.c and p.at.r < q.at.r) end)
+      local lay = layout_flow(u.ctls, fit_rows)
+      local sa = u.sec and u.sec.at
+      local l = sa and math.max(0, qx(u.ic0 - sa.c)) or 0
+      local r = sa and math.max(0, qx(sa.c + sa.w - u.ic1)) or 0
+      local px, py = place(u, l + lay.width + r, lay.height)
+      for _, it in ipairs(lay.items) do
+        it.sx = (it.sx or it.x) + px + l
+        it.x = it.x + px + l
+        it.y = it.y + py
+        if it.sy then it.sy = it.sy + py end
+        it.sec = nil
+        out.items[#out.items + 1] = it
+      end
+      unit_back(out, u, px, py, l + lay.width + r, lay.height)
+    end
+  end
+  for _, sx in ipairs(seps) do out.segs[#out.segs + 1] = { x1 = sx, y1 = 0, x2 = sx, y2 = deepest } end
+  return finish(out, controls, width, deepest)
+end
+
+-- Places a grid in a column `avail_w` wide, as the rack does (see "grids"
+-- above), or nil for a list that isn't a grid. Locked, or narrow enough,
+-- it's the grid as it is.
+function P.layout_w(controls, avail_w, lock)
+  if not P.is_grid(controls) then return nil end
+  place_new(controls)
+  local cols = P.grid_size(controls)
+  if lock or qx(cols) <= avail_w + 0.5 then return place_grid(controls) end
+  local units, loose = units_of(controls)
+  local out, GX, GY = new_out(), qx(1), qy(1)
+  local x, y, band_h, width, height = 0, 0, 0, 0, 0
+  local prev = nil
+  local function new_band()
+    if x > 0 then y, x, band_h = y + band_h + GY, 0, 0 end
+  end
+  for _, u in ipairs(runs(units, true)) do
+    local w, h = qx(u.c1 - u.c0), qy(u.r1 - u.r0)
+    if w <= avail_w + 0.5 then
+      if x > 0 and x + GX + w > avail_w + 0.5 then new_band() end
+      if x > 0 then
+        if prev and line_between(loose, prev, u) then
+          out.segs[#out.segs + 1] = { x1 = x + GX / 2, y1 = y, x2 = x + GX / 2, y2 = y + h }
+        end
+        x = x + GX
+      end
+      put_unit(out, u, x, y)
+      x, band_h = x + w, math.max(band_h, h)
+      width, height = math.max(width, x), math.max(height, y + h)
+    elseif #u.ctls > 0 then
+      -- too wide: across then down
+      new_band()
+      local per = math.max(1, math.floor((avail_w + 0.5) / qx(1)))
+      local cx, cy, lh, used = 0, 0, 0, 0
+      table.sort(u.ctls, function(p, q) return p.at.r < q.at.r or (p.at.r == q.at.r and p.at.c < q.at.c) end)
+      for _, c in ipairs(u.ctls) do
+        local a = c.at
+        if cx > 0 and cx + a.w > per then cy, cx, lh = cy + lh, 0, 0 end
+        put(out, c, cx, cy, a.w, a.h, 0, y)
+        cx, lh = cx + a.w, math.max(lh, a.h)
+        used = math.max(used, cx)
+      end
+      local bh = qy(cy + lh)
+      unit_back(out, u, 0, y, qx(used), bh)
+      width, height = math.max(width, qx(used)), math.max(height, y + bh)
+      y, x, band_h = y + bh + GY, 0, 0
+    end
+    prev = u
+  end
+  return finish(out, controls, width, height)
+end
+
+-- Places a list of controls in a panel `panel_h` tall: a grid where it
+-- says, flowing when it doesn't fit (or as it is, scrolling, when locked:
+-- `lock`); anything else down then across in the rows the panel has, or
+-- in a locked layout's own (`lock` is its Lock=<rows>).
+function P.layout(controls, panel_h, lock)
+  if P.is_grid(controls) then
+    place_new(controls)
+    local _, rows = P.grid_size(controls)
+    if lock or qy(rows) <= grid_room(panel_h) + 0.5 then return place_grid(controls) end
+    return flow_tall(controls, panel_h)
+  end
+  return layout_flow(controls, lock or P.rows_for(panel_h))
+end
+
+-- Makes a layout without a grid into one, as it's arranged now in `rows`
+-- rows: every control where it is (whatever its Show rule says now), each
+-- divider a line down the middle of its gap (a quarter cell), the section
+-- a divider styled a rectangle of its own, and a gap with a background
+-- a section; gaps themselves go. Each page is a grid of its own. Returns
+-- true when it made one.
+local function section_from(src, style, cap, at)
+  return { param = -1, type = "section", label = "", style = style, cap = cap, brush = src.brush,
+           finish = src.finish, metal = src.metal, corners = src.corners, at = at }
+end
+function P.to_grid(layout, rows)
+  if not layout or layout.grid then return false end
+  local all = layout.controls or {}
+  local pages = P.pages(all)
+  local lists = { all }
+  if pages then
+    lists = {}
+    for i, pg in ipairs(pages) do lists[i] = pg.controls end
+  end
+  local after, instead, cols, deep = {}, {}, 0, 0
+  for _, list in ipairs(lists) do
+    local lay = layout_flow(list, rows)
+    local gaps = lay.gaps or {}
+    local function u(x)
+      local n = 0
+      for _, g in ipairs(gaps) do if g.x + g.w <= x + 0.5 then n = n + 1 end end
+      return math.floor((x - n * C.DIVIDER_W) / qx(1) + 0.5) + n
+    end
+    local function v(y) return math.floor(y / qy(1) + 0.5) end
+    local hu = math.max(1, v(lay.height))
+    local function gap_back(it)
+      local c = it.ctl
+      local kind = P.back_style(c.back)
+      local sec = kind and section_from(c, kind, kind == "plate" and c.back or nil,
+        { c = u(it.sx or it.x), r = v(it.y), w = u((it.sx or it.x) + (it.sw or hx(it.w))) - u(it.sx or it.x), h = it.h * 2 })
+      instead[c] = sec or false
+    end
+    for _, it in ipairs(lay.items) do
+      local c = it.ctl
+      if c.type == "blank" or c.type == "half_gap" then
+        gap_back(it)
+      else
+        local w = it.pw and (u(it.x + it.pw) - u(it.x)) or it.w * 2
+        c.at = { c = u(it.x), r = v(it.y), w = w, h = it.h * 2 }
+        if c.type == "knob" or c.type == "stepped" or c.type == "toggle" or c.type == "dual" then
+          c.size = P.item_size(it)
+        end
+      end
+    end
+    for _, sp in ipairs(lay.spacers or {}) do gap_back(sp) end
+    local k = 0
+    for _, c in ipairs(list) do
+      if c.type == "divider" then
+        k = k + 1
+        local g = gaps[k]
+        if g then c.at = { c = u(g.x) + 0.5, r = 0, w = 0, h = hu } end
+      end
+    end
+    for _, sc in ipairs(lay.sections or {}) do
+      local d = sc.by
+      local sec = section_from(d, d.style, d.cap, { c = u(sc.x), r = 0, w = u(sc.x + sc.w) - u(sc.x), h = hu })
+      after[d] = after[d] or {}
+      table.insert(after[d], sec)
+    end
+    cols, deep = math.max(cols, u(lay.width)), math.max(deep, hu)
+  end
+  local out = {}
+  for _, c in ipairs(all) do
+    if instead[c] ~= nil then
+      if instead[c] then out[#out + 1] = instead[c] end
+    else
+      if c.type == "divider" then
+        c.style, c.cap, c.brush, c.finish, c.metal, c.corners = nil, nil, nil, nil, nil, nil
+      end
+      out[#out + 1] = c
+      for _, sec in ipairs(after[c] or {}) do out[#out + 1] = sec end
+    end
+  end
+  -- what the dividers kept together (each column of controls between
+  -- them) a section, with no background unless it had one: it flows as
+  -- one, as it did
+  local grouped, page = {}, {}
+  local function close_page()
+    local cuts, seen = {}, {}
+    for _, c in ipairs(page) do
+      if c.type == "divider" and c.at and not seen[c.at.c] then seen[c.at.c] = true; cuts[#cuts + 1] = c.at.c end
+    end
+    table.sort(cuts)
+    if #cuts > 0 then
+      local blocks = {}
+      for i = 1, #cuts + 1 do blocks[i] = { c0 = math.huge, r0 = math.huge, c1 = -math.huge, r1 = -math.huge } end
+      for _, c in ipairs(page) do
+        local a = c.at
+        if a and c.type ~= "divider" and c.type ~= "section" then
+          local k = 1
+          while k <= #cuts and a.c + a.w / 2 > cuts[k] do k = k + 1 end
+          local b = blocks[k]
+          b.c0, b.r0 = math.min(b.c0, a.c), math.min(b.r0, a.r)
+          b.c1, b.r1 = math.max(b.c1, a.c + a.w), math.max(b.r1, a.r + a.h)
+        end
+      end
+      for _, b in ipairs(blocks) do
+        local has = b.c0 < math.huge
+        for _, c in ipairs(page) do
+          local a = c.at
+          if has and c.type == "section" and a and a.c <= b.c0 and a.r <= b.r0
+             and a.c + a.w >= b.c1 and a.r + a.h >= b.r1 then has = false end
+        end
+        if has then
+          grouped[#grouped + 1] = { param = -1, type = "section", label = "",
+            at = { c = b.c0, r = b.r0, w = b.c1 - b.c0, h = b.r1 - b.r0 } }
+        end
+      end
+    end
+    page = {}
+  end
+  local final = {}
+  for _, c in ipairs(out) do
+    if c.type == "page" then
+      close_page()
+      for _, g in ipairs(grouped) do final[#final + 1] = g end
+      grouped = {}
+    else
+      page[#page + 1] = c
+    end
+    final[#final + 1] = c
+  end
+  close_page()
+  for _, g in ipairs(grouped) do final[#final + 1] = g end
+  out = final
+  layout.grid = { cols = math.max(1, cols), rows = deep }
+  -- locked to start with: shown as it is, scrolling where it doesn't fit
+  -- (unlocked, from the padlock or the grid editor, it flows)
+  if not layout.lock then layout.lock = math.max(1, math.ceil(deep / 4)) end
+  out.grid = layout.grid
+  layout.controls = out
+  return true
 end
 
 -- ---------------------------------------------------------------------
@@ -573,7 +1073,7 @@ function P.pages(controls)
   pages[#pages + 1] = cur
   if not any then return nil end
   if #pages[1].controls == 0 and not pages[1].ctl then table.remove(pages, 1) end
-  for i, pg in ipairs(pages) do pg.n = i end
+  for i, pg in ipairs(pages) do pg.n = i; pg.controls.grid = controls and controls.grid end
   return pages
 end
 
@@ -617,6 +1117,7 @@ function P.visible(controls, track, fx)
     if vname then return St.vvalue(fx.guid, vname, base, controls) end
     return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
   end)
+  shown.grid = controls.grid
   return shown
 end
 
@@ -684,23 +1185,23 @@ end
 function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
   if collapsed then return C.COLLAPSED_W end
   -- the TS_CV Trimmer: its own panel, as wide as the strip's height needs
-  if key and TR.is(key) then return TRP.width(avail_h) end
+  if key and own_trim(key) then return TRP.width(avail_h) end
   -- an EQ or compressor canvas (any plugin): the canvas, and its layout's
   -- controls in columns beside it
-  if canvas then
+  if canvas and MP then
     local side = 0
     local n = type(n_or_controls) == "table" and #n_or_controls or (n_or_controls or 0)
     if n > 0 then
       side = P.width(n_or_controls, avail_h, false, false, nil, false, false, lock) - C.PANEL_PAD
     end
     -- with input/output meters: on the panel's two outside edges
-    return MP.width(canvas.kind) + side + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
+    return MP.width(canvas.kind, canvas) + side + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
-  if key and RQ.is_eq(key) then
+  if key and own_eq(key) then
     return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
   -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
-  if key and RC.is_comp(key) then return C.RC_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0) end
+  if key and own_rc(key) then return C.RC_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0) end
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -1146,7 +1647,8 @@ local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter, tw_, req)
     ("Gain reduction%s\n%.2f dB, peak %.2f\nScale 0 to %g dB%s\n%s")
     :format(est and " (estimated)" or "", gr, peak, range,
             (range > (meter.range or 0)) and "  (expanded)" or "",
-            St.is_gr_open(fx.guid) and "Click: close trace" or "Click: trace")
+            (not ED.PRO) and "The trace: ChannelView Pro"
+            or St.is_gr_open(fx.guid) and "Click: close trace" or "Click: trace")
     .. (est and ("\n\nMeasured by the probe\n" ..
                  TP.cal_text(TP.cal_status(track, fx.guid))) or ""),
     ImGui.IsItemHovered(ctx), false)
@@ -1510,7 +2012,7 @@ end
 -- A finish over a surface (TS_CV_Finish), laid from ox, oy. Brushed falls
 -- back to the drawn grain when there are no images (an older ReaImGui).
 local function finish_rect(ctx, dl, key, bg, x1, y1, x2, y2, ox, oy, box)
-  if not key then return end
+  if not key or not FN then return end
   if FN.image(ctx, key) then
     FN.rect(ctx, dl, key, x1, y1, x2, y2, ox, oy, box)
   elseif key == "brushed" then
@@ -1705,11 +2207,14 @@ local function flake_shape(ctx, dl, gx0, gy0, loops, light, finish, bg, r)
 end
 
 draw_backs = function(ctx, dl, gx0, gy0, lay)
+  -- (controls' own backgrounds: Pro)
+  if not TL then return end
   local rects, owner, finish, metal, corners = {}, {}, {}, {}, {}
   local function take(it)
     local k, fin, mt, cn = P.back_key(it.ctl)
     if k and it.sx then
-      rects[#rects + 1] = { it.sx, it.y, it.sx + it.sw, it.y + hy(it.h), k }
+      local y = it.sy or it.y
+      rects[#rects + 1] = { it.sx, y, it.sx + it.sw, y + (it.sh or hy(it.h)), k }
       owner[#rects] = it
       finish[k], metal[k], corners[k] = fin, mt, cn
     end
@@ -2043,6 +2548,15 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     end
   end
 
+  -- in the rack a grid layout takes the width it has (P.layout_w), and a
+  -- locked one wider than that scrolls sideways
+  local hscroll = false
+  if P.RACK and P.is_grid(page_controls) then
+    lay = P.layout_w(page_controls, grid_w, lock)
+    scroll = false
+    hscroll = lock and lay.width > grid_w + 0.5
+  end
+
   -- a locked grid too tall to fit scrolls, its scrollbar at the right
   local reg_x0 = grid_x0
   if scroll then grid_w = grid_w - (C.SCROLL_W + 2) end
@@ -2056,8 +2570,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   if lay.width < grid_w then
     grid_x0 = grid_x0 + (grid_w - lay.width) * 0.5
   end
+  local hreg_x0, hreg_w = grid_x0, grid_w
 
-  if #lay.items == 0 and #lay.rules == 0 then
+  if #lay.items == 0 and #lay.rules == 0 and #(lay.segs or {}) == 0 and #(lay.sections or {}) == 0 then
     -- with View > Float plugins without controls on, its own window is
     -- where it's played (P.AUTO_FLOAT, set by the window drawing it)
     local msg = P.AUTO_FLOAT and "auto float" or "no layout"
@@ -2077,6 +2592,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
   local gx0 = grid_x0
   local gy0 = y + C.GRID_TOP_PAD
+  P.grid_at[fx.guid] = { x = gx0, y = gy0 }
   local nparams = reaper.TrackFX_GetNumParams(track, fx.addr)
 
   -- Locked, and taller than the panel: the grid goes in a child window of
@@ -2099,16 +2615,33 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     -- the whole grid's height, so there's something to scroll
     ImGui.Dummy(ctx, 1, C.GRID_TOP_PAD + lay.height + C.PANEL_PAD)
     gy0 = gy0 - ImGui.GetScrollY(ctx)
+  elseif hscroll then
+    -- sideways, its scrollbar along the foot of the grid
+    ImGui.SetCursorScreenPos(ctx, hreg_x0 - 4, y)
+    ImGui.PushStyleColor(ctx, ImGui.Col_ChildBg, 0)
+    ImGui.PushStyleColor(ctx, ImGui.Col_ScrollbarBg, 0)
+    ImGui.PushStyleVar(ctx, ImGui.StyleVar_ScrollbarSize, C.SCROLL_W)
+    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, hreg_w + 8, h, 0,
+      ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_HorizontalScrollbar)
+    ImGui.PopStyleVar(ctx)
+    ImGui.PopStyleColor(ctx, 2)
+    if not ok then return end
+    dl = ImGui.GetWindowDrawList(ctx)
+    ImGui.Dummy(ctx, lay.width + 8, 1)
+    gx0 = gx0 - ImGui.GetScrollX(ctx)
   end
 
   -- Styled sections first, behind everything: an inset
   -- just darker than the plate it's on (lighter on a dark one), with a
   -- shadowed top edge and a lit bottom one, or a faceplate of its own.
   -- They reach a few pixels into the divider gaps on either side.
-  for _, s in ipairs(lay.sections or {}) do
+  -- (a grid's are the rectangles they were drawn as)
+  -- (Pro: without it, the theme's plain panel)
+  for _, s in ipairs(ED.PRO and lay.sections or {}) do
     local kind, pl = P.section_style(s.by)
     local x1, y1 = gx0 + s.x - 3, gy0 - 3
     local x2, y2 = gx0 + s.x + s.w + 3, gy0 + lay.height + 2
+    if s.y then x1, y1, x2, y2 = gx0 + s.x, gy0 + s.y, gx0 + s.x + s.w, gy0 + s.y + s.h end
     -- its corners (Corners<n> on the divider): a section is a plain
     -- rectangle, so round gives it fully round ends
     local r = corner_r(M.corners_of(s.by.corners), x2 - x1, y2 - y1, true)
@@ -2129,7 +2662,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       end
     end
     local inr = math.max(0, r - 1)
-    if kind == "plate" then
+    if not kind then
+      -- an outline alone (below)
+    elseif kind == "plate" then
       ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, pl.bg, r)
       grained(pl.bg)
       ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, pl.border, r, 0, 1.0)
@@ -2143,6 +2678,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       ImGui.DrawList_AddLine(dl, x1 + math.max(3, inr), y2 - 0.5, x2 - math.max(3, inr), y2 - 0.5, 0xffffff18, 1.0)
       ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, 0x00000030, r, 0, 1.0)
     end
+    -- its outline, in a colour of its own (Edge<n>)
+    local edge = C.edge_rgba(s.by.edge)
+    if edge then ImGui.DrawList_AddRect(dl, x1 + 0.5, y1 + 0.5, x2 - 0.5, y2 - 0.5, edge, r, 0, 1.0) end
   end
 
   -- Dividers first, so a control's hit area is never shadowed by a rule.
@@ -2163,6 +2701,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       ImGui.DrawList_AddLine(dl, gx0 + rx, gy0 + y,
         gx0 + rx, gy0 + lay.height - 2, C.COL.knob_ring, 1.0)
     end
+  end
+
+  -- a grid's lines, from end to end
+  for _, sg in ipairs(lay.segs or {}) do
+    -- (an upright one stops just short of its ends, whichever way it runs)
+    local d = (sg.x1 == sg.x2) and ((sg.y2 >= sg.y1) and 2 or -2) or 0
+    ImGui.DrawList_AddLine(dl, gx0 + sg.x1, gy0 + sg.y1 + d, gx0 + sg.x2, gy0 + sg.y2 - d, sg.col or C.COL.knob_ring, 1.0)
   end
 
   -- Controls' own backgrounds, over the sections and the rules: controls
@@ -2197,14 +2742,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     local id = ("c%d##%s_%d"):format(i, fx.guid, i)
 
     if ctl.type == "half_gap" then
-      -- Nothing to draw -- it's pure vertical spacing for whatever
-      -- comes after it (see P.layout). Column flow never lands one
-      -- here at all (P.layout leaves it out of lay.items entirely,
-      -- same as a divider); this guard only matters if C.FLOW is ever
-      -- "row", where half_gap isn't a stagger and P.layout falls back
-      -- to placing it like any other control -- without this, THAT
-      -- would fall through to "out of range parameter" below, since a
-      -- half_gap carries no real param.
+      -- Nothing to draw: it's spacing for whatever comes after it (see
+      -- P.layout, which normally leaves it out of lay.items). Guarded so
+      -- one that does land here doesn't fall through to "out of range
+      -- parameter" below: a half gap has no parameter.
     elseif ctl.type == "blank" then
       local _, _, act = W.blank(ctx, id)
       if act.right_click then req.ctx_control = i end
@@ -2398,7 +2939,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           local fy0 = gy0 + item.y
           -- linked: its handles sit at its edge and must win the pointer
           if link then W.allow_overlap(ctx) end
-          changed, nv, act = W.fader(ctx, id, fx0, fy0, fw, lay.height,
+          -- (on a grid, the height of its place)
+          changed, nv, act = W.fader(ctx, id, fx0, fy0, fw, lay.grid and hy(item.h) or lay.height,
             value, label .. "   " .. shown, unity, false, look)
           if modded then
             -- top right of the fader's column, against the panel under it
@@ -2571,12 +3113,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     end
   end
 
-  if scroll then
+  if scroll or hscroll then
     -- the wheel, when no control under the pointer took it this frame
     if ImGui.IsWindowHovered(ctx) and not W.wheel_taken() then
       local wheel = ImGui.GetMouseWheel(ctx)
       if wheel ~= 0 then
-        ImGui.SetScrollY(ctx, ImGui.GetScrollY(ctx) - wheel * C.CELL_H * 0.5)
+        if scroll then ImGui.SetScrollY(ctx, ImGui.GetScrollY(ctx) - wheel * C.CELL_H * 0.5)
+        else ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - wheel * C.CELL_W * 0.5) end
         W.take_wheel()
       end
     end
@@ -2870,14 +3413,13 @@ P.FILL_W = nil
 P.RACK = false
 
 -- In the rack every panel is exactly the column's width, and its height is
--- what that width leaves it: a grid takes the fewest rows that fit across
--- the column, never fewer than its tallest control needs (a fader's
--- length, a large knob, an XY pad). When it's the layout ChannelView
--- shows and the rack runs down then across, it takes no fewer than the
--- rows its controls fill in ChannelView's own window (laid out at
--- P.RACK_ROWS, which ChannelView publishes), so it's arranged as it is
--- there; a layout only the rack shows, or one running across then down,
--- has nothing there to follow. A canvas (any EQ or compressor, ReaEQ,
+-- what that width leaves it. A grid layout is as tall as it is, flowing
+-- when the column is too narrow for it (P.layout_w). Any other takes the
+-- fewest rows that fit across the column, never fewer than its tallest
+-- control needs (a fader's length, a large knob, an XY pad); when it's
+-- the layout ChannelView shows, no fewer than the rows its controls fill
+-- in ChannelView's own window (laid out at P.RACK_ROWS, which ChannelView
+-- publishes), so it's arranged as it is there. A canvas (any EQ or compressor, ReaEQ,
 -- ReaComp) spans the column at a height of its own, its layout's other
 -- controls in rows UNDER it rather than beside it; the Trimmer stands its
 -- two columns side by side when they fit, or stacks them.
@@ -2899,16 +3441,11 @@ function P.tallest_rows(vis)
   end
   return n
 end
--- The rows a grid fills in ChannelView's window: laid out at its rows
--- (P.RACK_ROWS) and in its Control flow (P.CV_FLOW; the rack's can
--- differ), its deepest column. 1 when they aren't known.
-P.CV_FLOW = nil
+-- The rows a layout fills in ChannelView's window: laid out at its rows
+-- (P.RACK_ROWS), its deepest column. 1 when they aren't known.
 function P.cv_rows_used(vis)
   if not P.RACK_ROWS or #(vis or {}) == 0 then return 1 end
-  local was = C.FLOW
-  C.FLOW = P.CV_FLOW or was
   local ok, lay = pcall(P.layout, vis, 0, P.RACK_ROWS)
-  C.FLOW = was
   if not ok then return 1 end
   return math.max(1, math.ceil((lay.height or 0) / C.CELL_H - 0.01))
 end
@@ -2916,10 +3453,12 @@ end
 -- layout).
 function P.rack_from_rows(vis, shared)
   local n = P.tallest_rows(vis)
-  if shared and C.FLOW ~= "row" then n = math.max(n, P.cv_rows_used(vis)) end
+  if shared then n = math.max(n, P.cv_rows_used(vis)) end
   return n
 end
-function P.rack_canvas_h(w)
+-- (a canvas layout's own: its `h`)
+function P.rack_canvas_h(w, cv)
+  if cv and cv.h then return cv.h end
   return math.floor(math.max(240, math.min(384, w * 0.5)))
 end
 -- a grid of n rows: the panel height that holds it
@@ -2952,26 +3491,64 @@ function P.rack_gr_across(guid) return gr_across[guid] == true end
 -- the space either side the input and output meters take
 local function io_w(io) return io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0 end
 
+-- How tall a grid is across `avail` in the rack: each page's, the
+-- tallest; with the tab strip, and without.
+local function rack_grid_tall(vis, avail, lock)
+  local pages = P.pages(vis)
+  local lists = { vis }
+  if pages then
+    lists = {}
+    for i, pg in ipairs(pages) do lists[i] = pg.controls end
+  end
+  local tall = 0
+  for _, list in ipairs(lists) do
+    local lay = P.layout_w(list, avail, lock)
+    if lay then
+      local sb = (lock and lay.width > avail + 0.5) and C.SCROLL_W + 2 or 0
+      tall = math.max(tall, lay.height + sb)
+    end
+  end
+  return tall + (pages and C.TAB_STRIP_H or 0), tall
+end
+
 -- (`shared`: ChannelView shows this layout too, P.rack_from_rows)
 function P.rack_height(track, fx, layout, key, w, shared)
   if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
   local base = C.HEADER_H + P.footer_h()
-  if TR.is(key) then return base + TRP.rack_body_h(w) end
+  if own_trim(key) then return base + TRP.rack_body_h(w) end
   local io = P.has_io(track, fx, layout)
-  if RQ.is_eq(key) or RC.is_comp(key) then return base + P.rack_canvas_h(w - io_w(io)) end
+  if own_eq(key) or own_rc(key) then return base + P.rack_canvas_h(w - io_w(io)) end
   local vis = P.visible(layout.controls or {}, track, fx)
   local lock = M.locked(layout)
-  local canvas = layout.canvas
+  local canvas = canvas_of(layout)
   if canvas then
     local ew = w - io_w(io)
-    local h = base + P.rack_canvas_h(ew)
-    if #vis > 0 then
+    local h = base + P.rack_canvas_h(ew, canvas)
+    if #vis > 0 and P.is_grid(vis) then
+      -- the controls under it, a grid: as tall as it is across the width
+      h = h + C.GRID_TOP_PAD + C.PANEL_PAD + (rack_grid_tall(vis, ew - C.PANEL_PAD * 2, lock))
+    elseif #vis > 0 then
       -- the controls under it: their own grid's body, header and foot aside
       h = h + (rack_grid_h(vis, ew, false, nil, false, false, lock, P.tallest_rows(vis))) - base
     end
     return h
   end
   local has_meter = M.meter_of(layout) ~= nil and T.reports_gr(track, fx.addr, fx.guid)
+  if P.is_grid(vis) then
+    -- as tall as the grid is in the width it has (each page's, the
+    -- tallest), its meter at the side or across the top as below
+    local function grid_h(meter, trace)
+      local avail = w - C.PANEL_PAD * 2 - io_w(io)
+      if meter then avail = avail - C.METER_COL_W - C.PANEL_PAD - (trace and C.GRV_W + C.PANEL_PAD or 0) end
+      local all, tall = rack_grid_tall(vis, avail, lock)
+      return base + C.GRID_TOP_PAD + C.PANEL_PAD + all, tall
+    end
+    if not has_meter then gr_across[fx.guid] = nil; return (grid_h(false)) end
+    local h, tall = grid_h(true, St.is_gr_open(fx.guid))
+    if tall >= P.RACK_GR_ROWS * C.CELL_H - 0.5 then gr_across[fx.guid] = nil; return h end
+    gr_across[fx.guid] = true
+    return (grid_h(false)) + P.gr_strip_h()
+  end
   local from = P.rack_from_rows(vis, shared)
   if not has_meter then
     gr_across[fx.guid] = nil
@@ -2997,11 +3574,11 @@ end
 draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local req = { is_drag_source = is_drag_source }
   local collapsed = St.is_collapsed(fx.guid)
-  local is_eq = RQ.is_eq(key)
+  local is_eq = own_eq(key)
   -- ReaComp's panel is its own canvas, with its own meters beside it
-  local is_rc = RC.is_comp(key)
+  local is_rc = own_rc(key)
   -- the TS_CV Trimmer: meters, trims and filters of its own
-  local is_trim = TR.is(key)
+  local is_trim = own_trim(key)
   -- ReaEQ has nothing to meter -- T.reports_gr would already say no for
   -- it, but skipping the check entirely is one fewer FX-parameter scan
   -- for the one plugin type that's never going to answer yes.
@@ -3010,7 +3587,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   -- input/output meters: on any panel, a canvas's or ReaComp's included
   -- (their own strip beside the curve is the reduction only)
   local io = (not is_trim) and P.has_io(track, fx, layout)
-  local canvas = (not is_eq and not is_rc and not is_trim) and layout.canvas or nil
+  local canvas = (not is_eq and not is_rc and not is_trim) and canvas_of(layout) or nil
   if canvas then meter = nil end
   local nat_w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
                     St.is_gr_open(fx.guid), M.locked(layout), canvas)
@@ -3028,7 +3605,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     local ww, wh = ImGui.GetWindowSize(ctx)
     panel_at[fx.guid] = { x + ww * 0.5, y + C.HEADER_H * 0.5 }
     local enabled = T.get_enabled(track, fx.addr)
-    local plate = C.plate_of(layout.plate)
+    -- (a faceplate of its own: Pro; else the theme's panel)
+    local plate = ED.PRO and C.plate_of(layout.plate) or nil
     local saved = plate and push_plate(plate)
     cur_bg.plate, cur_bg.y, cur_bg.h = plate, y, wh
 
@@ -3091,7 +3669,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         -- any plugin's EQ or compressor layout: the canvas, then the
         -- layout's own controls in columns beside it; with input/output
         -- meters, they take the two outside edges, as on any panel
-        local cw = MP.width(canvas.kind)
+        local cw = MP.width(canvas.kind, canvas)
         local bh = wh - C.HEADER_H - fh
         local ex, ew = bx, bw
         if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
@@ -3103,7 +3681,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         local full_bh = bh
         if stacked then
           cw = ew
-          if #(layout.controls or {}) > 0 then bh = math.min(bh, P.rack_canvas_h(ew)) end
+          if #(layout.controls or {}) > 0 then bh = math.min(bh, P.rack_canvas_h(ew, canvas)) end
         end
         -- (a light faceplate gives the canvas a dark screen: on_screen)
         local todo = M.canvas_todo(canvas) or (canvas.kind ~= "eq" and not next(canvas.roles or {}))

@@ -93,13 +93,6 @@ C.TRACKROW_PAD_Y = 4
 -- TRACKROW_PAD_Y applied.
 C.CHILD_PAD_Y_FALLBACK = 6
 
--- Control flow within a panel:
---   "column" -- fill a column top-to-bottom, then start a new column.
---              Neighbours stay put when the dock height changes.
---   "row"    -- fill a row left-to-right, then start a new row.
---              Reads like a hardware front panel, but every control
---              moves when the dock is resized.
-C.FLOW = "column"
 
 -- Knob sizes, in half-cells across and down (TS_CV_Panel.layout), and the
 -- knob's diameter at each. Medium is one whole cell, the ordinary
@@ -1080,6 +1073,13 @@ function C.plate_of(key)
   if p then return p.bg and p or nil end
   local ck = C.custom_key(key)
   return ck and custom_plate(ck) or nil
+end
+
+-- A line's or a section outline's colour (Edge<n>: a faceplate's name or
+-- #rrggbb) as 0xRRGGBBAA, or nil.
+function C.edge_rgba(key)
+  local p = C.plate_of(key)
+  return p and p.bg or nil
 end
 
 -- A faceplate's key as saved (a custom colour in lower case), or nil.

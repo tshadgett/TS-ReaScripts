@@ -51,7 +51,8 @@ local U = require("TS_CV_Util")
 local W = require("TS_CV_Widgets")
 local AI = require("TS_CV_ActionIcons")
 local FB = require("TS_CV_FXButtons")
-local VN = require("TS_CV_Vendors")
+-- (vendor looks: Pro)
+local VN = require("TS_CV_Edition").module("TS_CV_Vendors")
 local CPk = require("TS_CV_ColourPick")
 
 local ImGui
@@ -873,7 +874,7 @@ local FILL_INK, FILL_INK_ON = 0xf0f0eeff, 0x15171aff
 -- the button itself. Other buttons as they are.
 local function view(it)
   local k, what = FB.kind(it)
-  if k ~= "fx" or it.vo == "off" then return it end
+  if k ~= "fx" or it.vo == "off" or not VN then return it end
   local name = VN.of_ident(what)
   local v = VN.get(name)
   -- a look of its own, from a vendor not set up: its initials, no colour
@@ -1548,6 +1549,11 @@ end
 function TB.vendor_look(ctx, it, id, as_menu)
   local k, what = FB.kind(it)
   if k ~= "fx" then return end
+  if not VN then
+    local ED = require("TS_CV_Edition")
+    if as_menu then ED.item(ImGui, ctx, "Vendor looks") else ImGui.TextDisabled(ctx, "Vendor looks: ChannelView Pro") end
+    return
+  end
   local v = VN.get(VN.of_ident(what))
   local theirs = v and (VN.LOOK_NAMES[v.look] or VN.LOOK_NAMES.none) or "not set up"
   local choices = { { nil, "As its vendor (" .. theirs .. ")" } }

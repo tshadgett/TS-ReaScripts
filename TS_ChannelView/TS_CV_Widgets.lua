@@ -13,11 +13,25 @@
 
 local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
-local SW = require("TS_CV_Switches")
+local ED = require("TS_CV_Edition")
+local SW = ED.switches()
 local KP = require("TS_CV_KnobParts")
-local LT = require("TS_CV_Light")
+local LT = ED.light()
 
 local W   = {}
+
+-- Standard draws a plugin's controls plainly: the default Arc knob, the
+-- Flat button, no colours or looks of their own (those are Pro:
+-- TS_CV_Edition). The options a control is drawn with, so.
+local PLAIN = { style = true, look = true, cap = true, on_col = true, arc = true,
+                style2 = true, look2 = true, cap2 = true }
+local function plain(o)
+  if ED.PRO or not o then return o end
+  local p = {}
+  for k, v in pairs(o) do if not PLAIN[k] then p[k] = v end end
+  return p
+end
+W.plain = plain
 local ImGui                      -- injected by W.attach()
 
 -- The band a cell reserves above its control for the parameter name.
@@ -1126,7 +1140,7 @@ end
 -- known: the knob lands only on those, which matters when a plugin reports
 -- a fine step but names only a few positions along it.
 function W.knob(ctx, id, label, value, formatted, opts)
-  opts = opts or {}
+  opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local sz = C.SIZES[opts.size or "medium"] or C.SIZES.medium
@@ -1482,7 +1496,7 @@ local dual_grab = {}   -- id -> "outer" / "inner": which one this drag turns
 -- act.double_click is "outer" or "inner" (the one under the pointer).
 -- `o`: size, cap, dim, mod1, mod2, shown1, shown2, tip.
 function W.dual_knob(ctx, id, label, v1, v2, o)
-  o = o or {}
+  o = plain(o or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local sz = (o.size == "large") and C.SIZES.large or C.SIZES.medium
@@ -1561,7 +1575,7 @@ end
 -- (centre lines drawn stronger).
 local xy_fine = {}
 function W.xypad(ctx, id, x, y, w, h, vx, vy, label, o)
-  o = o or {}
+  o = plain(o or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   ImGui.SetCursorScreenPos(ctx, x, y)
   W.allow_overlap(ctx)
@@ -1761,7 +1775,7 @@ end
 -- a lit push-button on hardware -- no name above or value below, so the
 -- caller puts the name on the button when the state has no name of its own.
 function W.toggle(ctx, id, label, value, formatted, opts)
-  opts = opts or {}
+  opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local small = opts.size == "small"
@@ -1861,7 +1875,7 @@ end
 -- Labels are in the small type, shortened to fit; the full one is in the
 -- tooltip of whichever button is under the pointer.
 function W.button_row(ctx, id, label, value, choices, opts)
-  opts = opts or {}
+  opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local cw, ch = opts.w or C.CELL_W, opts.h or C.CELL_H
@@ -1970,7 +1984,7 @@ end
 function W.combo_raised(style) return style == "raised" or W.FACED[style or ""] == true end
 
 function W.combo(ctx, id, label, value, formatted, step_norm, opts)
-  opts = opts or {}
+  opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local cw, ch = C.CELL_W, C.CELL_H
@@ -2433,6 +2447,7 @@ end
 -- thin, unity, look, tip, mod (the surface for the modulation mark, or
 -- nil for none) }. Returns changed, value, act.
 function W.param_fader(ctx, id, x, y, w, h, value, label, shown, o)
+  o = plain(o)
   local dl = ImGui.GetWindowDrawList(ctx)
   local changed, act
   if o.dir == "h" then

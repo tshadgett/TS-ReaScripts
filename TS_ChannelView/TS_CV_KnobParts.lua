@@ -29,7 +29,7 @@
 --]]
 
 local U = require("TS_CV_Util")
-local LT = require("TS_CV_Light")
+local LT = require("TS_CV_Edition").light()
 
 local KP = {}
 local ImGui

@@ -14,6 +14,8 @@
 local NS = "TS_ChannelView"
 
 local S = {}
+-- (Pro: the gain-reduction trace, other layouts, switching rules)
+local ED = require("TS_CV_Edition")
 
 local cache = {}   -- guid -> bool, so a frame doesn't hit ProjExtState per panel
 
@@ -97,7 +99,7 @@ end
 -- trace (TS_CV_Panel). Per instance, like collapsed: you want to watch the
 -- vocal's compressor, not every copy of that compressor in the project.
 function S.is_gr_open(guid)
-  if guid == nil or guid == "" then return false end
+  if guid == nil or guid == "" or not ED.PRO then return false end
   local v = gr_open[guid]
   local now = reaper.time_precise()
   if v ~= nil and now - (gr_at[guid] or 0) < SHARED_TTL then return v end
@@ -108,7 +110,7 @@ function S.is_gr_open(guid)
 end
 
 function S.set_gr_open(guid, on)
-  if guid == nil or guid == "" then return end
+  if guid == nil or guid == "" or not ED.PRO then return end
   on = on and true or false
   gr_open[guid], gr_at[guid] = on, reaper.time_precise()
   reaper.SetProjExtState(0, NS, "grview:" .. guid, on and "1" or "")
@@ -212,6 +214,9 @@ function S.layout_key(fx_name, guid, track, addr)
   local U = require("TS_CV_Util")
   local M = require("TS_CV_Mappings")
   local base = U.plugin_key(fx_name)
+  -- other layouts and switching rules are Pro: without it, every instance
+  -- shows the plugin's own
+  if not ED.PRO then return base end
   if track and addr and guid then
     local rules = M.switch_rules and M.switch_rules(base)
     local was = rule_on[guid]

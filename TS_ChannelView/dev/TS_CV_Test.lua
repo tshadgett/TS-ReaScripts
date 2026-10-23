@@ -324,16 +324,300 @@ do
   P.RACK_ROWS = 3
   check("rack: no more than ChannelView has", P.cv_rows_used(two), 3)
   P.RACK_ROWS = 10
-  local fw = C.FLOW
-  C.FLOW = "column"
-  check("rack: shared layout, down then across", P.rack_from_rows(two, true), 4)
+  check("rack: shared layout", P.rack_from_rows(two, true), 4)
   check("rack: rack-only layout", P.rack_from_rows(two, false), P.tallest_rows(two))
-  C.FLOW = "row"
-  check("rack: across then down", P.rack_from_rows(two, true), P.tallest_rows(two))
-  C.FLOW = fw
   P.RACK_ROWS = nil
   check("rack: not known", P.cv_rows_used(two), 1)
   P.RACK_ROWS = was
+end
+
+-- grids: placed where they say, flowing in units (sections, and runs of
+-- controls on none) where they don't fit
+do
+  local QX, QY = P.qx, P.qy
+  local function ph(n) return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H end
+  local function K(c, r, extra)
+    local k = { type = "knob", param = c, at = { c = c, r = r, w = 4, h = 4 } }
+    for kk, v in pairs(extra or {}) do k[kk] = v end
+    return k
+  end
+  -- two sections: four knobs 2 x 2, a divider, a knob over a fader
+  local g = { K(0, 0), K(0, 4), K(4, 0), K(4, 4),
+              { type = "divider", at = { c = 8.5, r = 0, w = 0, h = 8 } },
+              K(9, 0), { type = "fader", param = 20, at = { c = 13, r = 0, w = 4, h = 8 } },
+              { type = "section", at = { c = 0, r = 0, w = 8, h = 8 } },
+              { type = "section", at = { c = 9, r = 0, w = 8, h = 8 } } }
+  g.grid = { cols = 17, rows = 8 }
+  check("grid: is one", P.is_grid(g), true)
+  check("grid: size", table.concat({ P.grid_size(g) }, "x"), "17x8")
+  local lay = P.layout(g, ph(2))
+  check("grid: fits, as it is", lay.items[3].x .. "," .. lay.items[3].y, QX(4) .. ",0")
+  check("grid: width and height", lay.width .. "/" .. lay.height, QX(17) .. "/" .. QY(8))
+  check("grid: the divider a line", #lay.segs .. ":" .. lay.segs[1].x1 .. "-" .. lay.segs[1].y2, "1:" .. QX(8.5) .. "-" .. QY(8))
+  check("grid: a section with no background drawn as nothing", #lay.sections, 0)
+  local us = P.units_of(g)
+  check("grid: units, a section and what's on it", #us .. " " .. #us[1].list .. " " .. #us[2].list, "2 5 3")
+  check("grid: a fader fills its place", lay.items[6].kind .. " " .. lay.items[6].h, "vfader 4")
+  check("grid: items in list order", lay.items[5].ctl == g[6], true)
+  -- one row: the first unit (two rows) and the second (two) both flow
+  local l1 = P.layout(g, ph(1))
+  check("grid: too short flows", l1.height, C.CELL_H)
+  check("grid: first section down then across", l1.items[2].x .. "," .. l1.items[2].y, C.CELL_W .. ",0")
+  check("grid: locked, as it is", P.layout(g, ph(1), 1).height, QY(8))
+  -- a unit that fits keeps its arrangement and moves along; a line on no
+  -- section between two units is drawn between them still
+  local g2 = { K(0, 0), K(0, 4), { type = "divider", at = { c = 4.5, r = 0, w = 0, h = 8 } }, K(5, 0) }
+  g2.grid = { cols = 9, rows = 8 }
+  local l2 = P.layout(g2, ph(1))
+  check("grid: controls on no section flow together", l2.items[3].x .. "," .. #l2.segs, (2 * C.CELL_W) .. ",0")
+  g2[#g2 + 1] = { type = "section", at = { c = 0, r = 0, w = 4, h = 8 } }
+  g2[#g2 + 1] = { type = "section", style = "inset", at = { c = 5, r = 0, w = 4, h = 4 } }
+  l2 = P.layout(g2, ph(1))
+  check("grid: sections, the tall one flows", l2.items[2].x .. "," .. l2.items[2].y, C.CELL_W .. ",0")
+  check("grid: the next moves along", l2.items[3].x, 2 * C.CELL_W + QX(1))
+  check("grid: the line between them too", l2.segs[1].x1, 2 * C.CELL_W + QX(0.5))
+  check("grid: its background with it", l2.sections[1].x .. "," .. l2.sections[1].w, (2 * C.CELL_W + QX(1)) .. "," .. QX(4))
+  -- a section inside another goes with it
+  local nest = { K(0, 0), { type = "section", at = { c = 0, r = 0, w = 8, h = 8 } }, { type = "section", at = { c = 0, r = 0, w = 4, h = 4 } } }
+  check("grid: a section on a section is on it", #P.units_of(nest) .. " " .. #P.units_of(nest)[1].list, "1 3")
+  -- the rack: narrower than the grid, units wrap whole
+  local lw = P.layout_w(g, QX(9))
+  check("rack grid: second section on a new line", lw.items[5].x .. "," .. lw.items[5].y, "0," .. (QY(8) + QY(1)))
+  check("rack grid: as it is when it fits", P.layout_w(g, QX(17)).height, QY(8))
+  check("rack grid: locked, as it is", P.layout_w(g, QX(9), 1).width, QX(17))
+  check("rack grid: not a grid", P.layout_w({ { type = "knob" } }, 100), nil)
+  -- a unit wider than the column: across then down
+  local wide = { K(0, 0), K(4, 0), K(8, 0), K(12, 0) }
+  local lw2 = P.layout_w(wide, QX(8))
+  check("rack grid: too wide, across then down", lw2.items[3].x .. "," .. lw2.items[3].y, "0," .. QY(4))
+  check("rack grid: its height", lw2.height, QY(8))
+  -- a knob smaller than its place sits in the middle of it
+  local big = { K(0, 0) }
+  big[1].at.w, big[1].at.h = 6, 6
+  local lb = P.layout(big, ph(3))
+  check("grid: medium knob centred in 6x6", lb.items[1].x .. "," .. lb.items[1].w, ((QX(6) - C.CELL_W) / 2) .. ",2")
+  big[1].size = "large"
+  check("grid: a large knob fills it", P.layout(big, ph(3)).items[1].w, 3)
+  -- a section: a rectangle, and its inks for what's on it
+  local sg = { { type = "section", style = "inset", at = { c = 0, r = 0, w = 8, h = 4 } }, K(0, 0), K(4, 0), K(8, 0) }
+  local ls = P.layout(sg, ph(2))
+  check("grid: a section's rectangle", ls.sections[1].w .. "x" .. ls.sections[1].h .. "@" .. ls.sections[1].y, QX(8) .. "x" .. QY(4) .. "@0")
+  check("grid: on it, and not", tostring(ls.items[1].sec) .. tostring(ls.items[3].sec), "1nil")
+  -- a line any way: diagonal, drawn from either end
+  local dg = { K(0, 0), { type = "divider", at = { c = 4, r = 8, w = 4, h = -8 } } }
+  check("grid: a line's far end counts", table.concat({ P.grid_size(dg) }, "x"), "8x8")
+  local ld = P.layout(dg, ph(2))
+  check("grid: a line drawn any way", ld.segs[1].x1 .. "," .. ld.segs[1].y1 .. ">" .. ld.segs[1].x2 .. "," .. ld.segs[1].y2,
+    QX(4) .. "," .. QY(8) .. ">" .. QX(8) .. ",0")
+  check("grid: a line's place read back", M.at_line(M.at_of("4,8,4,-8", true)) .. " " .. tostring(M.at_of("4,8,4,-8")), "4,8,4,-8 nil")
+  check("grid: a line going off the grid", M.at_of("4,8,-5,0", true), nil)
+  -- a section with an outline and no background: drawn, gives no inks
+  local eg = { { type = "section", edge = "#ff0000", at = { c = 0, r = 0, w = 8, h = 4 } }, K(0, 0) }
+  local le = P.layout(eg, ph(2))
+  check("grid: an outline alone drawn", #le.sections .. " " .. tostring(le.items[1].sec), "1 nil")
+  -- a control with no place yet goes under the grid
+  local np = { K(0, 0), { type = "knob", param = 9 } }
+  P.layout(np, ph(3))
+  check("grid: a new control placed under it", np[2].at.c .. "," .. np[2].at.r, "0,4")
+  -- making one from a layout without a grid
+  local flat = { controls = {
+    { type = "knob", param = 0 }, { type = "knob", param = 1 }, { type = "knob", param = 2 }, { type = "knob", param = 3 },
+    { type = "divider", style = "inset" },
+    { type = "knob", param = 4 }, { type = "blank", back = "inset" }, { type = "knob", param = 5 },
+  } }
+  local before = P.layout(flat.controls, ph(2))
+  check("to grid: made", P.to_grid(flat, 2), true)
+  check("to grid: not twice", P.to_grid(flat, 2), false)
+  local fc = flat.controls
+  check("to grid: knobs where they were", fc[3].at.c .. "," .. fc[3].at.r .. " " .. fc[4].at.c .. "," .. fc[4].at.r, "4,0 4,4")
+  check("to grid: the divider down its gap", fc[5].at.c .. "/" .. fc[5].at.w .. "/" .. fc[5].at.h, "8.5/0/8")
+  check("to grid: its section after it", fc[6].type .. " " .. fc[6].style .. " " .. fc[6].at.c .. "," .. fc[6].at.w, "section inset 9,8")
+  check("to grid: the divider unstyled", fc[5].style, nil)
+  check("to grid: a gap's background a section", fc[8].type .. " " .. fc[8].at.c .. "," .. fc[8].at.r, "section 9,4")
+  check("to grid: last knob", fc[9].at.c .. "," .. fc[9].at.r, "13,0")
+  check("to grid: size", flat.grid.cols .. "x" .. flat.grid.rows, "17x8")
+  check("to grid: what the divider kept together a section", fc[10].type .. " " .. tostring(fc[10].style) .. " " .. M.at_line(fc[10].at), "section nil 0,0,8,8")
+  check("to grid: not where one was already", fc[11], nil)
+  local after = P.layout(flat.controls, ph(2))
+  check("to grid: the first block as it was", after.items[4].x .. "," .. after.items[4].y, before.items[4].x .. "," .. before.items[4].y)
+  -- the file
+  local gk = "GridPlug"
+  M.set(gk, { grid = { cols = 17, rows = 8 }, controls = {
+    { param = 0, type = "knob", label = "", at = { c = 0, r = 0, w = 4, h = 4 } },
+    { param = -1, type = "divider", label = "", at = { c = 8.5, r = 0, w = 0, h = 8 } },
+    { param = -1, type = "section", label = "", style = "plate", cap = "cream", corners = "soft",
+      at = { c = 9, r = 0, w = 8, h = 8 }, edge = "#FF8800" },
+    { param = -1, type = "divider", label = "", at = { c = 0, r = 8, w = 8, h = -8 }, edge = "cream" } } })
+  M.save(); M.reload()
+  local gb = M.get(gk)
+  check("grid file: a section's outline", gb.controls[3].edge, "#ff8800")
+  check("grid file: a line any way", M.at_line(gb.controls[4].at), "0,8,8,-8")
+  check("grid file: a line's colour, a faceplate's", gb.controls[4].edge, "cream")
+  check("grid file: drawn in it", P.layout(gb.controls, ph(2)).segs[2].col, C.PLATE.cream.bg)
+  check("grid file: Grid", gb.grid.cols .. "x" .. gb.grid.rows, "17x8")
+  check("grid file: on the controls too", gb.controls.grid == gb.grid, true)
+  check("grid file: At", M.at_line(gb.controls[2].at), "8.5,0,0,8")
+  check("grid file: a section and its style", gb.controls[3].type .. " " .. gb.controls[3].style .. " " .. gb.controls[3].cap .. " " .. gb.controls[3].corners, "section plate cream soft")
+  check("grid file: copied", M.copy(gb).controls[2].at.c .. " " .. M.copy(gb).grid.cols .. " " .. M.copy(gb).controls.grid.rows, "8.5 17 8")
+  check("grid file: is_grid", M.is_grid(gb), true)
+  check("grid file: bad At", M.at_of("1,2,x,4"), nil)
+  M.remove(gk); M.save()
+end
+
+-- the grid editor: shown as a grid, saved with the first change, undone
+do
+  local GE = require("TS_CV_GridEditor")
+  local T = GE._t
+  local key = "GridEdPlug"
+  M.set(key, { controls = { { param = 0, type = "knob", label = "" }, { param = 1, type = "knob", label = "" },
+                            { param = -1, type = "divider", label = "" }, { param = 2, type = "knob", label = "" } } })
+  M.save()
+  GE.open({}, { addr = 0, guid = "ge1", name = "VST: GridEd" }, key, M.get(key), 4, { rows = 1 })
+  check("grid editor: shown as a grid", T.cur().grid ~= nil, true)
+  check("grid editor: made a grid as it opened", M.get(key).grid ~= nil, true)
+  check("grid editor: the control it opened on", T.sel(), 4)
+  local c = T.cur().controls[1]
+  T.edit(function() c.at.r = 4 end)
+  check("grid editor: the move saved", M.get(key).controls[1].at.r, 4)
+  check("grid editor: the grid grew", M.get(key).grid.rows, 8)
+  T.undo()
+  check("grid editor: undo the move", M.get(key).controls[1].at.r, 0)
+  T.undo()
+  check("grid editor: undo, as it was before it opened", M.get(key).grid, nil)
+  T.redo(); T.redo()
+  check("grid editor: redo", M.get(key).controls[1].at.r, 4)
+  -- the sheet's changes: on the grid being edited, saved by watch, one step
+  T.cur().controls[1].label = "Dr"
+  T.watch()
+  check("grid editor: a sheet change saved", M.get(key).controls[1].label, "Dr")
+  T.cur().controls[1].label = "Drive"
+  T.watch()
+  check("grid editor: typing goes on saving", M.get(key).controls[1].label, "Drive")
+  T.undo()
+  check("grid editor: typing is one step", M.get(key).controls[1].label, "")
+  T.redo()
+  -- changed elsewhere (a menu of the panel's): shown, and a step too
+  local lib = M.get(key)
+  lib.controls[2].back = "inset"
+  M.set(key, lib)
+  T.sync()
+  check("grid editor: a change elsewhere shown", T.cur().controls[2].back, "inset")
+  T.undo()
+  check("grid editor: and undone", M.get(key).controls[2].back, nil)
+  check("grid editor: the label kept", M.get(key).controls[1].label, "Drive")
+  check("grid editor: no going on another", T.free(0, 4, 4, 4, nil), false)
+  check("grid editor: room beside it", T.free(4, 4, 4, 4, nil), true)
+  local k = { type = "knob" }
+  check("grid editor: a knob dragged big", table.concat({ T.fit(k, 7, 7) }, "x") .. tostring(k.size), "6x6large")
+  check("grid editor: dragged flat, small", table.concat({ T.fit(k, 4, 2) }, "x") .. tostring(k.size), "4x2small")
+  check("grid editor: back to medium", table.concat({ T.fit(k, 4, 4) }, "x") .. tostring(k.size), "4x4nil")
+  local f = { type = "fader" }
+  check("grid editor: a fader dragged wide", table.concat({ T.fit(f, 10, 3) }, "x") .. tostring(f.dir), "10x3h")
+  T.insert("col", 0)
+  check("grid editor: a column inserted", T.cur().controls[1].at.c .. " " .. T.cur().controls[3].at.c, "4 12.5")
+  T.delete("col", 0)
+  check("grid editor: and deleted", T.cur().controls[1].at.c .. " " .. T.cur().controls[3].at.c, "0 8.5")
+  T.delete("col", 8)
+  -- (the two sections are what the divider kept together, made as it opened)
+  check("grid editor: a column, its control and divider gone", #T.cur().controls, 4)
+  T.fit_grid()
+  check("grid editor: fitted to what's on it", M.get(key).grid.cols .. "x" .. M.get(key).grid.rows, "9x8")
+  T.add(5)
+  local added = M.get(key).controls[#M.get(key).controls]
+  check("grid editor: added where it first fits", added.param .. " " .. M.at_line(added.at), "5 0,0,4,4")
+  T.add(5)
+  check("grid editor: not twice", #M.get(key).controls, 5)
+  GE.close()
+  M.remove(key); M.save()
+end
+-- a canvas layout's controls beside it: a grid too, edited in the grid editor
+do
+  local GE = require("TS_CV_GridEditor")
+  local T = GE._t
+  local key = "GridCanvasPlug"
+  M.set(key, { canvas = { kind = "eq", bands = {} }, controls = { { param = 0, type = "knob", label = "" },
+                                                                   { param = 1, type = "knob", label = "" } } })
+  M.save()
+  GE.open({}, { addr = 0, guid = "ge3", name = "VST: GridCanvas" }, key, M.get(key), nil, { rows = 2 })
+  local l = M.get(key)
+  check("canvas grid: made a grid as it opened", M.is_grid(l), true)
+  check("canvas grid: the canvas kept", l.canvas and l.canvas.kind, "eq")
+  check("canvas grid: its controls placed", M.at_line(l.controls[1].at) .. " " .. M.at_line(l.controls[2].at), "0,0,4,4 0,4,4,4")
+  M.reload()
+  check("canvas grid: read back", M.is_grid(M.get(key)) and M.get(key).canvas.kind, "eq")
+  -- the canvas's own size: ChannelView's width, the rack's height
+  local cl = M.get(key)
+  cl.canvas.w, cl.canvas.h = 520, 300
+  M.set(key, cl); M.save(); M.reload()
+  local cv2 = M.get(key).canvas
+  check("canvas size: read back", cv2.w .. "x" .. cv2.h, "520x300")
+  check("canvas size: its width in ChannelView", require("TS_CV_MapPanel").width("eq", cv2), 520)
+  check("canvas size: its height in the rack", P.rack_canvas_h(800, cv2) .. " " .. P.rack_canvas_h(800, nil), "300 384")
+  check("canvas size: copied", M.copy(M.get(key)).canvas.w, 520)
+  GE.close()
+  M.remove(key); M.save()
+end
+-- several selected in the grid editor: aligned, spaced, copied, pasted,
+-- their shared settings made on all
+do
+  local GE = require("TS_CV_GridEditor")
+  local E_ = require("TS_CV_Editor")
+  local T = GE._t
+  local key = "GridMultiPlug"
+  local v = E_.new_virtual("knob", {})
+  v.at = { c = 0, r = 4, w = 4, h = 4 }
+  M.set(key, { grid = { cols = 24, rows = 8 }, controls = {
+    { param = 0, type = "knob", label = "", at = { c = 0, r = 0, w = 4, h = 4 } },
+    { param = 1, type = "knob", label = "", at = { c = 5, r = 1, w = 4, h = 4 } },
+    { param = 2, type = "knob", label = "", at = { c = 16, r = 2, w = 4, h = 4 } }, v } })
+  M.save()
+  GE.open({}, { addr = 0, guid = "ge4", name = "VST: GridMulti" }, key, M.get(key), nil, { rows = 2 })
+  local function places()
+    local t = {}
+    for i = 1, 3 do t[i] = T.cur().controls[i].at.c .. "," .. T.cur().controls[i].at.r end
+    return table.concat(t, " ")
+  end
+  T.select(1); T.pick(2); T.pick(3)
+  check("multi: three picked", table.concat(T.picked(), ","), "1,2,3")
+  T.toggle(2)
+  check("multi: Ctrl+click takes one out", table.concat(T.picked(), ","), "1,3")
+  T.pick(2)
+  T.arrange("top")
+  check("multi: aligned to the top", places(), "0,0 5,0 16,0")
+  T.arrange("across")
+  check("multi: spaced evenly across", places(), "0,0 8,0 16,0")
+  T.undo()
+  check("multi: undone in one step", places(), "0,0 5,0 16,0")
+  T.arrange("left")
+  check("multi: no room to align, nothing moved", places() .. " " .. tostring(T.warn() ~= nil), "0,0 5,0 16,0 true")
+  T.arrange("bottom")
+  check("multi: aligned to the bottom", places(), "0,0 5,0 16,0")
+  -- shared settings: made on all
+  local c = T.cur().controls[1]
+  local before = T.deep(c)
+  c.bipolar = true
+  c.size = "small"
+  T.spread(c, before, T.picked())
+  check("multi: a setting made on all", tostring(T.cur().controls[2].bipolar) .. " " .. tostring(T.cur().controls[3].bipolar), "true true")
+  check("multi: a size made on all, each its own size", T.cur().controls[3].size .. " " .. T.cur().controls[3].at.h, "small 2")
+  -- copy and paste: a parameter on the panel isn't pasted, a virtual one is, renamed
+  T.select(1); T.copy(); T.paste()
+  check("multi: a parameter on the panel not pasted", tostring(T.warn() ~= nil) .. " " .. #T.cur().controls, "true 4")
+  T.select(4); T.copy(); T.paste()
+  local pasted = T.cur().controls[#T.cur().controls]
+  check("multi: a virtual pasted, a name of its own", #T.cur().controls .. " " .. M.vname_of(pasted), "5 Amount 2")
+  check("multi: pasted where it fits, selected", tostring(T.free(pasted.at.c, pasted.at.r, 4, 4, pasted)) .. " " .. table.concat(T.picked(), ","), "true 5")
+  T.select(1); T.pick(5); T.remove()
+  check("multi: both taken off", #T.cur().controls, 3)
+  -- a line any way: its ends move with columns put in or taken out
+  T.edit(function(l) l.controls[#l.controls + 1] = { param = -1, type = "divider", label = "", at = { c = 0, r = 8, w = 8, h = -8 } } end)
+  local ln = function() return M.at_line(T.cur().controls[#T.cur().controls].at) end
+  T.insert("col", 4)
+  check("multi: a column in, the line's far end moves", ln(), "0,8,12,-8")
+  T.delete("col", 4)
+  check("multi: and out again", ln(), "0,8,8,-8")
+  GE.close()
+  M.remove(key); M.save()
 end
 check("rows at h=120", P.rows_for(120), 1)
 check("cols for 8 @1 row", cols_for(8, 120), 8)
@@ -1579,28 +1863,6 @@ check("doubled divider = two rules", #P.layout(ctrls("kk||kk"), H4).rules, 2)
 check("trailing divider counted",    #P.layout(ctrls("kk|"), H4).rules, 1)
 check("only a divider places nothing", #P.layout(ctrls("|"), H4).items, 0)
 
--- A divider is vertical in either flow. In row-major it marks a column
--- boundary, so the gutter applies to that column in every row and the
--- rule lines up down the whole grid.
-local saved_flow = C.FLOW
-C.FLOW = "row"
-l = P.layout(ctrls("kkkk|kkkk"), H)
-check("row-major divider: items",   #l.items, 8)
-check("row-major divider: one rule", #l.rules, 1)
-check("row-major width has a gutter",
-      l.width, 2 * C.CELL_W + C.DIVIDER_W)
-check("row-major rows line up", (function()
-  -- every item left of the rule must be left of it in EVERY row
-  local rx = l.rules[1]
-  for _, it in ipairs(l.items) do
-    local left = it.x + C.CELL_W <= rx + 1
-    local right = it.x >= rx
-    if not (left or right) then return false end   -- nothing straddles it
-  end
-  return true
-end)(), true)
-check("row-major rule has height",  l.height > 0, true)
-C.FLOW = saved_flow
 
 -- auto-ranging scale
 W.clear_peaks()
@@ -3395,6 +3657,13 @@ do
       for alias, mod in src:gmatch("local%s+([%w_]+)%s*=%s*require%s*%(?%s*[\"\']([%w_]+)[\"\']") do
         if mod:match("^TS_CV_") then bind[alias] = mod end
       end
+      -- Pro's modules, by way of TS_CV_Edition (ED.module("X"), and its
+      -- stand-ins for the Light and the Switches)
+      for alias, mod in src:gmatch("local%s+([%w_]+)%s*=%s*[^\n]-%.module%s*%(%s*[\"\']([%w_]+)[\"\']") do
+        bind[alias] = mod
+      end
+      for alias in src:gmatch("local%s+([%w_]+)%s*=%s*[^\n]-%.switches%s*%(") do bind[alias] = "TS_CV_Switches" end
+      for alias in src:gmatch("local%s+([%w_]+)%s*=%s*[^\n]-%.light%s*%(") do bind[alias] = "TS_CV_Light" end
 
       for alias, fn in src:gmatch("([%w_]+)%.([%w_]+)%s*%(") do
         local mod = bind[alias]
@@ -4062,14 +4331,13 @@ do
       return ctl
     end
     -- the baseline was recorded at the original 58 px column
-    local rows_for, flow, cw0 = P.rows_for, C.FLOW, C.CELL_W
+    local rows_for, cw0 = P.rows_for, C.CELL_W
     P.rows_for = function(r) return r end
     C.set_cell_w(58)
     for ci, case in ipairs(FX.cases) do
       local bad
-      for _, fl in ipairs({ "column", "row" }) do
+      for _, fl in ipairs({ "column" }) do
         for rows = 1, 6 do
-          C.FLOW = fl
           local ctl = parse(case.ctl)
           local idx = {}
           for i, c in ipairs(ctl) do idx[c] = i end
@@ -4098,15 +4366,14 @@ do
       end
       check("layout baseline: " .. case.name:sub(1, 22), bad or "same", "same")
     end
-    P.rows_for, C.FLOW, C.CELL_W = rows_for, flow, cw0
+    P.rows_for, C.CELL_W = rows_for, cw0
   end
 end
 
 -- The half-cell grid with sizes in it (nothing in the baseline has one).
 do
-  local rows_for, flow, cw0 = P.rows_for, C.FLOW, C.CELL_W
+  local rows_for, cw0 = P.rows_for, C.CELL_W
   P.rows_for = function(r) return r end
-  C.FLOW = "column"
   C.set_cell_w(58)
   local function pos(ctl, rows)
     local lay = P.layout(ctl, rows)
@@ -4122,13 +4389,6 @@ do
   check("sizes: a large that won't fit below wraps", (pos({ S"medium", S"large" }, 2)), "0,0/2x2 58,0/3x3 w145")
   check("sizes: small, gap, small", (pos({ S"small", { type = "half_gap" }, S"small" }, 2)), "0,0/2x1 0,64/2x1 w58")
   check("sizes: unknown size is medium", (pos({ S"huge" }, 2)), "0,0/2x2 w58")
-  C.FLOW = "row"
-  check("sizes: row flow fits a large", (pos({ S"large", S"medium", S"medium" }, 3)), "0,0/3x3 0,96/2x2 58,96/2x2 w116")
-  local _, lay = pos({ S"large", S"large", S"large" }, 2)
-  check("sizes: row flow widens until everything fits", lay.width, 261)
-  local _, lay1 = pos({ S"large", S"large" }, 1)
-  check("sizes: row flow, larges in one row are medium", lay1.width, 116)
-  C.FLOW = "column"
   check("sizes: a toggle has no large", (pos({ { type = "toggle", size = "large" } }, 3)), "0,0/2x2 w58")
   check("sizes: small toggles share a cell", (pos({ { type = "toggle", size = "small" }, { type = "toggle", size = "small" } }, 3)), "0,0/2x1 0,32/2x1 w58")
   check("sizes: a stepped knob does", (pos({ { type = "stepped", size = "small" } }, 3)), "0,0/2x1 w58")
@@ -4166,7 +4426,7 @@ do
   check("sizes: item_size small", P.item_size({ w = 2, h = 1 }), "small")
   check("sizes: item_size large", P.item_size({ w = 3, h = 3 }), "large")
   check("sizes: item_size ordinary", P.item_size({ w = 2, h = 2 }), nil)
-  P.rows_for, C.FLOW, C.CELL_W = rows_for, flow, cw0
+  P.rows_for, C.CELL_W = rows_for, cw0
   -- the Size line in the layout file
   local MP = require("TS_CV_Mappings")
   local k = "SizedPlug"
@@ -7541,6 +7801,87 @@ do
   -- guessed by name
   check("model: guessed", ME.guess_model({ "Low Freq", "EQ Model", "Out" }, {}), 1)
   check("model: not a band's type", ME.guess_model({ "Band 1 Type", "Phase Mode" }, {}), nil)
+end
+
+-- The grid editor's window, drawn a frame at a time with a stand-in
+-- ImGui (every call answered, nothing shown): its sheets, the Edit
+-- parameters parts drawn in them, and the panel's own menus (hooks), for
+-- the panel, a control, a divider and a section. Last, as the fake stays.
+do
+  local GE = require("TS_CV_GridEditor")
+  local E_ = require("TS_CV_Editor")
+  local T = GE._t
+  local answers = {
+    Begin = function() return true, true end, BeginChild = function() return true end,
+    CollapsingHeader = function() return true end, BeginPopup = function() return true end,
+    GetFrameHeight = function() return 20 end,
+    Combo = function(_, _, cur) return false, cur end, Checkbox = function(_, _, v) return false, v end,
+    InputText = function(_, _, v) return false, v end, InputTextWithHint = function(_, _, _, v) return false, v end,
+    SliderDouble = function(_, _, v) return false, v end, GetMousePos = function() return 0, 0 end,
+    CalcTextSize = function(_, t) return #(t or "") * 6, 13 end, GetCursorScreenPos = function() return 0, 0 end,
+    GetCursorPosX = function() return 0 end, GetContentRegionAvail = function() return 800, 600 end,
+    GetItemRectMax = function() return 100, 100 end, GetItemRectMin = function() return 0, 0 end,
+    GetWindowPos = function() return 0, 0 end, GetWindowSize = function() return 400, 400 end,
+    GetKeyMods = function() return 0 end,
+  }
+  local fake = setmetatable(answers, { __index = function(_, k)
+    if not k:match("^DrawList_") and not k:match("^Viewport_") and k:match("^%u%a*_%u") then return 0 end
+    return function() return false end
+  end })
+  GE.attach(fake); E_.attach(fake)
+  local real = reaper
+  reaper = setmetatable({
+    ValidatePtr2 = function() return true end,
+    TrackFX_GetFXGUID = function() return "ge2" end,
+    TrackFX_GetNumParams = function() return 4 end,
+    TrackFX_GetParamName = function(_, _, p) return true, "P" .. p end,
+  }, { __index = real })
+  local called = {}
+  local function rec(name) return function() called[name] = (called[name] or 0) + 1 end end
+  GE.hooks = { ready = function() return true end, style = rec("style"), back = rec("back"), look = rec("look"),
+               plate = rec("plate"), section = rec("section"), colour = rec("colour") }
+  local key = "GridEdSheet"
+  M.set(key, { controls = { { param = 0, type = "knob", label = "" }, { param = -1, type = "divider", label = "" },
+                            { param = 1, type = "toggle", label = "" } } })
+  GE.open({}, { addr = 0, guid = "ge2", name = "VST: GridSheet" }, key, M.get(key), nil, { rows = 1 })
+  local function frame(sel)
+    T.select(sel)
+    local ok, err = pcall(GE.draw, "ctx")
+    return ok and "ok" or tostring(err)
+  end
+  check("grid sheet: the panel's", frame(nil), "ok")
+  check("grid sheet: a knob's", frame(1), "ok")
+  check("grid sheet: a button's", frame(3), "ok")
+  check("grid sheet: a divider's", frame(2), "ok")
+  T.cur().controls[#T.cur().controls + 1] = { param = -1, type = "section", label = "", style = "inset", at = { c = 0, r = 0, w = 4, h = 4 } }
+  T.watch()
+  check("grid sheet: a section's", frame(#T.cur().controls), "ok")
+  T.cur().controls[#T.cur().controls + 1] = E_.new_virtual("combo", T.cur().controls)
+  T.cur().controls[#T.cur().controls].at = { c = 12, r = 0, w = 8, h = 4 }
+  T.watch()
+  check("grid sheet: a virtual control's", frame(#T.cur().controls), "ok")
+  T.select(1); T.pick(3)
+  local okm, errm = pcall(GE.draw, "ctx")
+  check("grid sheet: several selected", okm and "ok" or tostring(errm), "ok")
+  check("grid sheet: the panel's menus drawn", (called.style or 0) > 0 and (called.back or 0) > 0 and (called.look or 0) > 0
+    and (called.plate or 0) > 0 and (called.section or 0) > 0 and (called.colour or 0) > 0, true)
+  -- a new layout from the header: a copy, then an empty one, each edited next
+  local St = require("TS_CV_State")
+  local real_sv = St.set_variant
+  local shown
+  St.set_variant = function(_, nm) shown = nm end
+  local k1 = T.new_layout("Mix", false)
+  check("grid header: a copy made and edited", tostring(k1 == T.key()) .. " " .. shown .. " " .. #M.get(k1).controls,
+    "true Mix " .. #M.get(key).controls)
+  local k2 = T.new_layout("Bare", true)
+  check("grid header: an empty one", #M.get(k2).controls, 0)
+  check("grid header: not a name twice", T.new_layout("Mix", false), nil)
+  St.set_variant = real_sv
+  M.remove(k1); M.remove(k2)
+  GE.close()
+  GE.hooks = nil
+  reaper = real
+  M.remove(key); M.save()
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

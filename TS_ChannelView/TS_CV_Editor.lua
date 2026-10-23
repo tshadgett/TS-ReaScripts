@@ -29,6 +29,10 @@ local TP = require("TS_CV_Taps")
 local RQ = require("TS_CV_ReaEQ")
 local RC = require("TS_CV_ReaComp")
 local St = require("TS_CV_State")
+-- (Pro: virtual controls, Show when, switching rules, other layouts,
+-- canvases -- greyed or left out here without it; what a layout has of
+-- them is kept)
+local ED = require("TS_CV_Edition")
 
 local E = {}
 local ImGui
@@ -36,9 +40,12 @@ local ImGui
 local TITLE = "Setup Edit Parameters"
 
 local TYPES       = { "knob", "toggle", "combo", "stepped", "fader", "xy", "dual", "blank", "half_gap", "divider", "page" }
+-- on a grid (the grid editor's sheet) a gap is empty space and a divider
+-- or section is drawn on the grid: the controls only
+local GRID_TYPES  = { "knob", "toggle", "combo", "stepped", "fader", "xy", "dual" }
 local TYPE_NAMES = { knob = "Knob", toggle = "Button", combo = "Dropdown", stepped = "Stepped knob",
                      fader = "Fader", xy = "XY pad", dual = "Concentric knob", blank = "Gap",
-                     half_gap = "Half gap", divider = "Divider", page = "Page" }
+                     half_gap = "Half gap", divider = "Divider", page = "Page", section = "Section" }
 -- the virtual controls (TS_CV_Mappings Virt<n>): no parameter behind
 -- them, drawn as the type they're kept as
 local VIRT_KINDS = { "toggle", "combo", "knob" }
@@ -347,12 +354,16 @@ local function draw_assigned(ctx, track, list_w, list_h)
       "Select it below to name and colour the tab.")
   end
   ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Virtual", 60) then
+  ImGui.BeginDisabled(ctx, not ED.PRO)
+  local add_virt = ImGui.Button(ctx, ED.PRO and "Virtual" or "Virtual (Pro)", ED.PRO and 60 or 0)
+  ImGui.EndDisabled(ctx)
+  if not ED.PRO then ED.note(ImGui, ctx) end
+  if add_virt then
     local at = (sel >= 1 and sel < n) and (sel + 1) or (n + 1)
     table.insert(st.scratch.controls, at, E.new_virtual("toggle", st.scratch.controls))
     st.sel_asg = at
   end
-  if ImGui.IsItemHovered(ctx) then
+  if ED.PRO and ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
       "A button, selector or knob with no parameter behind it.\n" ..
       "Rules can follow it; each instance keeps its own setting.")
@@ -704,9 +715,11 @@ end
 
 local function draw_entry_editor(ctx)
   local c = st.scratch.controls[st.sel_asg]
-  ImGui.SeparatorText(ctx, "Selected control")
-  -- the column keeps its width whatever is selected
-  ImGui.Dummy(ctx, COL_W, 0)
+  if not st.grid then
+    ImGui.SeparatorText(ctx, "Selected control")
+    -- the column keeps its width whatever is selected
+    ImGui.Dummy(ctx, COL_W, 0)
+  end
   if not c then
     ImGui.TextDisabled(ctx, "Nothing selected.")
     return
@@ -773,7 +786,8 @@ local function draw_entry_editor(ctx)
   end
   -- a control without a scale of numbers: the plugin's own values, or yours
   local function values_row(p)
-    if not p or p < 0 then return end
+    -- (not for several at once: a range is the parameter's)
+    if not p or p < 0 or st.multi then return end
     row_name("Values")
     local has = st.scratch.ranges and st.scratch.ranges[p]
     ImGui.SetNextItemWidth(ctx, 100)
@@ -793,13 +807,14 @@ local function draw_entry_editor(ctx)
   local two = c.type == "xy" or c.type == "dual"
   local virt = M.is_virtual(c)
 
-  -- what it controls
-  if is_param and not virt then
+  -- what it controls (several at once, in the grid editor: what they
+  -- share, so none of what makes each its own)
+  if is_param and not virt and not st.multi then
     row_name((c.type == "xy") and "X parameter" or (c.type == "dual") and "Ring" or "Parameter")
     ImGui.Text(ctx, ("%s  %s"):format(tostring(c.param), pname))
   end
   -- an XY pad's Y or a concentric knob's inner knob (Dual<n>)
-  if two and st.track and st.fx then
+  if two and st.track and st.fx and not st.multi then
     local n = reaper.TrackFX_GetNumParams(st.track, st.fx.addr)
     local names = {}
     for p = 0, n - 1 do
@@ -814,27 +829,37 @@ local function draw_entry_editor(ctx)
       or "The inner knob's parameter.")
   end
 
-  -- what it is
-  row_name("Type")
+  -- what it is (on a grid: a control, and a virtual one stays virtual,
+  -- having no parameter chosen to become)
+  local types = st.grid and (virt and {} or GRID_TYPES) or TYPES
+  local vkinds = ((st.multi or not ED.PRO) and not virt) and {} or VIRT_KINDS
+  local show_type = not ((st.multi or not ED.PRO) and virt)
+  if show_type then row_name("Type") end
   local cur = 0
-  for i, t in ipairs(TYPES) do if t == c.type then cur = i - 1 break end end
+  for i, t in ipairs(types) do if t == c.type then cur = i - 1 break end end
   if virt then
-    for i, t in ipairs(VIRT_KINDS) do if t == c.type then cur = #TYPES + i - 1 end end
+    for i, t in ipairs(vkinds) do if t == c.type then cur = #types + i - 1 end end
   end
   local tnames = {}
-  for i, t in ipairs(TYPES) do tnames[i] = TYPE_NAMES[t] or t end
-  for _, t in ipairs(VIRT_KINDS) do tnames[#tnames + 1] = VIRT_NAMES[t] end
-  ImGui.SetNextItemWidth(ctx, FIELD_W)
-  local tch, ti = ImGui.Combo(ctx, "##type", cur, table.concat(tnames, "\0") .. "\0")
-  if tch and ti >= #TYPES then
+  for i, t in ipairs(types) do tnames[i] = TYPE_NAMES[t] or t end
+  for _, t in ipairs(vkinds) do tnames[#tnames + 1] = VIRT_NAMES[t] end
+  local tch, ti = false, cur
+  if show_type then
+    ImGui.SetNextItemWidth(ctx, FIELD_W)
+    tch, ti = ImGui.Combo(ctx, "##type", cur, table.concat(tnames, "\0") .. "\0")
+  end
+  -- (picking what it is already changes nothing: a virtual one picked
+  -- again would otherwise start over)
+  if tch and ti == cur then tch = false end
+  if tch and ti >= #types then
     -- a virtual one: its name and settings kept where they can be
-    local kind = VIRT_KINDS[ti - #TYPES + 1]
+    local kind = vkinds[ti - #types + 1]
     local nv = E.new_virtual(kind, st.scratch.controls)
     if virt then
       nv.label = c.label
       if kind == "combo" and c.type == "combo" then nv.virtual.choices = c.virtual.choices end
     end
-    local keep = { show = c.show, back = c.back, brush = c.brush, metal = c.metal, finish = c.finish, corners = c.corners }
+    local keep = { show = c.show, back = c.back, brush = c.brush, metal = c.metal, finish = c.finish, corners = c.corners, at = c.at }
     for k in pairs(c) do c[k] = nil end
     for k, v in pairs(nv) do c[k] = v end
     for k, v in pairs(keep) do c[k] = v end
@@ -847,7 +872,7 @@ local function draw_entry_editor(ctx)
       c.param = (st.sel_avail and st.sel_avail >= 0) and st.sel_avail or 0
       virt = false
     end
-    c.type = TYPES[ti + 1] or "knob"
+    c.type = types[ti + 1] or "knob"
     -- sizes don't carry between an XY pad and anything else; a concentric
     -- knob is never small; a second parameter starts as the next one along
     if (c.type == "xy") ~= (was == "xy") or (c.type == "dual" and c.size == "small") then c.size = nil end
@@ -862,7 +887,7 @@ local function draw_entry_editor(ctx)
   -- its names. A live name overrides both; they stay as they are, just
   -- greyed, so turning live off again brings them back.
   local live = is_param and not virt and (c.live or st.scratch.live) or false
-  if virt then
+  if virt and not st.multi and ED.PRO then
     -- its name (what rules find it by), its settings, where it starts
     row_name("Name")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
@@ -915,14 +940,16 @@ local function draw_entry_editor(ctx)
         c.nbtn = c.buttons and math.max(2, #M.vchoices(c)) or nil
       end
     elseif c.type == "knob" then
-      row_name("Size")
-      local now = 1
-      for i, k in ipairs(C.SIZE_LIST) do if k == (c.size or "medium") then now = i - 1 end end
-      ImGui.SetNextItemWidth(ctx, FIELD_W)
-      local sch, si = ImGui.Combo(ctx, "##vsize", now, SIZES_COMBO)
-      if sch then
-        local k = C.SIZE_LIST[si + 1]
-        c.size = (k ~= "medium") and k or nil
+      if not st.grid then  -- (on a grid: the size of its place)
+        row_name("Size")
+        local now = 1
+        for i, k in ipairs(C.SIZE_LIST) do if k == (c.size or "medium") then now = i - 1 end end
+        ImGui.SetNextItemWidth(ctx, FIELD_W)
+        local sch, si = ImGui.Combo(ctx, "##vsize", now, SIZES_COMBO)
+        if sch then
+          local k = C.SIZE_LIST[si + 1]
+          c.size = (k ~= "medium") and k or nil
+        end
       end
     end
     row_name("Starts at")
@@ -978,7 +1005,7 @@ local function draw_entry_editor(ctx)
       end
     end
   end
-  if is_param and not virt then
+  if is_param and not virt and not st.multi then
     if live then ImGui.BeginDisabled(ctx, true) end
     row_name("Alias")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
@@ -1001,23 +1028,27 @@ local function draw_entry_editor(ctx)
   -- its size and shape
   if virt then
     if c.type == "toggle" then
-      row_name("Size")
-      ImGui.SetNextItemWidth(ctx, FIELD_W)
-      local sch, si = ImGui.Combo(ctx, "##tsize", (c.size == "small") and 0 or 1, TOGGLE_SIZES_COMBO)
-      if sch then c.size = (si == 0) and "small" or nil end
+      if not st.grid then  -- (on a grid: the size of its place)
+        row_name("Size")
+        ImGui.SetNextItemWidth(ctx, FIELD_W)
+        local sch, si = ImGui.Combo(ctx, "##tsize", (c.size == "small") and 0 or 1, TOGGLE_SIZES_COMBO)
+        if sch then c.size = (si == 0) and "small" or nil end
+      end
     end
   elseif c.type == "knob" or c.type == "stepped" then
-    row_name("Size")
-    local now = 1
-    for i, k in ipairs(C.SIZE_LIST) do if k == (c.size or "medium") then now = i - 1 end end
-    ImGui.SetNextItemWidth(ctx, FIELD_W)
-    local sch, si = ImGui.Combo(ctx, "##size", now, SIZES_COMBO)
-    if sch then
-      local k = C.SIZE_LIST[si + 1]
-      c.size = (k ~= "medium") and k or nil
+    if not st.grid then  -- (on a grid: the size of its place)
+      row_name("Size")
+      local now = 1
+      for i, k in ipairs(C.SIZE_LIST) do if k == (c.size or "medium") then now = i - 1 end end
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local sch, si = ImGui.Combo(ctx, "##size", now, SIZES_COMBO)
+      if sch then
+        local k = C.SIZE_LIST[si + 1]
+        c.size = (k ~= "medium") and k or nil
+      end
+      tip("Small: half height, value in the tooltip; two stack in a cell.\n" ..
+        "Large: half again as big.")
     end
-    tip("Small: half height, value in the tooltip; two stack in a cell.\n" ..
-      "Large: half again as big.")
     -- numbers round the dial (Scale<n>; values unless it says otherwise),
     -- then what the values read as (Range<p>) -- the right-click's Values.
     -- Their colour is a look: right-click > Style.
@@ -1034,11 +1065,13 @@ local function draw_entry_editor(ctx)
       "Not on small knobs.")
     values_row(c.param)
   elseif c.type == "toggle" then
-    row_name("Size")
-    ImGui.SetNextItemWidth(ctx, FIELD_W)
-    local sch, si = ImGui.Combo(ctx, "##tsize", (c.size == "small") and 0 or 1, TOGGLE_SIZES_COMBO)
-    if sch then c.size = (si == 0) and "small" or nil end
-    tip("Small: half height, all button; two stack in a cell.")
+    if not st.grid then  -- (on a grid: the size of its place)
+      row_name("Size")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local sch, si = ImGui.Combo(ctx, "##tsize", (c.size == "small") and 0 or 1, TOGGLE_SIZES_COMBO)
+      if sch then c.size = (si == 0) and "small" or nil end
+      tip("Small: half height, all button; two stack in a cell.")
+    end
   elseif c.type == "combo" and c.param and st.track and st.fx then
     -- a dropdown can show its choices as buttons instead (2 to C.BUTTONS_MAX)
     local P = require("TS_CV_Panel")
@@ -1064,22 +1097,27 @@ local function draw_entry_editor(ctx)
       or ("Only for 2 to %d choices."):format(C.BUTTONS_MAX))
   elseif c.type == "fader" then
     values_row(c.param)
-    -- a fader's shape (Shape<n>): which way, how long, how thick
-    row_name("Direction")
-    ImGui.SetNextItemWidth(ctx, FIELD_W)
-    local dch, di = ImGui.Combo(ctx, "##way", c.dir == "h" and 1 or 0, "Up\0Across\0")
-    if dch then c.dir = (di == 1) and "h" or nil end
-    row_name("Length")
-    ImGui.SetNextItemWidth(ctx, FIELD_W)
-    local lch, li = ImGui.Combo(ctx, "##len", c.len and (c.len - 2) or 3, "2\0" .. "3\0" .. "4\0Full\0")
-    if lch then c.len = (li < 3) and (li + 2) or nil end
-    tip("In rows (across: columns), or full height (across: full width).")
-    row_name("Thickness")
-    ImGui.SetNextItemWidth(ctx, FIELD_W)
-    local tch2, ti2 = ImGui.Combo(ctx, "##thick", c.thin and 1 or 0, "Full\0Half\0")
-    if tch2 then c.thin = (ti2 == 1) or nil end
-    tip("A whole column (across: row), or half for faders side by side.")
-  elseif c.type == "xy" then
+    -- a fader's shape (Shape<n>): which way, how long, how thick (on a
+    -- grid its place says which way and how long)
+    if not st.grid then
+      row_name("Direction")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local dch, di = ImGui.Combo(ctx, "##way", c.dir == "h" and 1 or 0, "Up\0Across\0")
+      if dch then c.dir = (di == 1) and "h" or nil end
+      row_name("Length")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local lch, li = ImGui.Combo(ctx, "##len", c.len and (c.len - 2) or 3, "2\0" .. "3\0" .. "4\0Full\0")
+      if lch then c.len = (li < 3) and (li + 2) or nil end
+      tip("In rows (across: columns), or full height (across: full width).")
+    end
+    if not st.grid then  -- (on a grid: the size of its place)
+      row_name("Thickness")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local tch2, ti2 = ImGui.Combo(ctx, "##thick", c.thin and 1 or 0, "Full\0Half\0")
+      if tch2 then c.thin = (ti2 == 1) or nil end
+      tip("A whole column (across: row), or half for faders side by side.")
+    end
+  elseif c.type == "xy" and not st.grid then
     row_name("Size")
     local list = { "2x2", "3x2", "2x3", "3x3" }
     local now = 0
@@ -1090,10 +1128,12 @@ local function draw_entry_editor(ctx)
     tip("Columns \u{00d7} rows.")
   elseif c.type == "dual" then
     values_row(c.param)
-    row_name("Size")
-    ImGui.SetNextItemWidth(ctx, FIELD_W)
-    local sch, si = ImGui.Combo(ctx, "##dsize", (c.size == "large") and 1 or 0, "Medium\0Large\0")
-    if sch then c.size = (si == 1) and "large" or nil end
+    if not st.grid then  -- (on a grid: the size of its place)
+      row_name("Size")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local sch, si = ImGui.Combo(ctx, "##dsize", (c.size == "large") and 1 or 0, "Medium\0Large\0")
+      if sch then c.size = (si == 1) and "large" or nil end
+    end
   end
 
   -- a page break: the tab's name and its stripe's colour
@@ -1144,9 +1184,10 @@ local function draw_entry_editor(ctx)
     end
     tip("An inset or faceplate behind the controls up to the next divider.")
     -- (its finish, flake and corners are a look: right-click > Section)
-  elseif c.type ~= "page" then
+  elseif c.type ~= "page" and not st.grid then
     -- its own background (an inset or a faceplate), joined with neighbours'
-    -- (a page break draws nothing of its own, so it has none)
+    -- (a page break draws nothing of its own, so it has none; on a grid
+    -- the grid editor's sheet has it in full)
     local names, keys = { "None", "Inset" }, { "", "inset" }
     for _, pl in ipairs(C.PLATES) do
       if pl.bg then names[#names + 1] = pl.label; keys[#keys + 1] = pl.key end
@@ -1171,7 +1212,7 @@ local function draw_entry_editor(ctx)
 
   -- shown only while a parameter, or one of the layout's virtual
   -- controls, reads a given way (Show<n>)
-  if c.type ~= "page" and st.track and st.fx then
+  if c.type ~= "page" and st.track and st.fx and ED.PRO then
     local tr, addr = st.track, st.fx.addr
     local list = source_list(tr, addr, st.scratch.controls, c, "Always")
     row_name("Show when")
@@ -1238,7 +1279,7 @@ local function draw_entry_editor(ctx)
 
   -- a button's own words for its two states, for this plugin everywhere
   -- (States<p>), as the right-click's Name > State names
-  if is_param and not virt and c.type == "toggle" then
+  if is_param and not virt and c.type == "toggle" and not st.multi then
     st.scratch.states = st.scratch.states or {}
     local sn = st.scratch.states[c.param] or { "", "" }
     local function hint(v)
@@ -1309,7 +1350,7 @@ end
 -- Copy to new and New empty make a variant from what's in the editor
 -- (unsaved edits go to the new one, the old one is left as it was).
 local function draw_layout_row(ctx, track)
-  if RQ.is_eq(st.key) or RC.is_comp(st.key) then return end
+  if RQ.is_eq(st.key) or RC.is_comp(st.key) or not ED.PRO then return end
   local base, cur = M.split_variant(st.key)
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, "Layout")
@@ -1386,17 +1427,20 @@ end
 -- layout is being edited -- so it's saved as it's changed, apart from
 -- the layout's own Save.
 local function draw_switch_rules(ctx, track)
-  if RQ.is_eq(st.key) or RC.is_comp(st.key) or not (track and st.fx) then return end
+  if RQ.is_eq(st.key) or RC.is_comp(st.key) or not (track and st.fx) or not ED.PRO then return end
   local base = M.split_variant(st.key)
   local rules = M.copy_rules(M.switch_rules(base)) or {}
-  local label = (st.rules_open and "\u{25BE}" or "\u{25B8}") .. "  Switch layouts automatically"
-    .. ((#rules > 0) and ("  (%d)"):format(#rules) or "")
-  if ImGui.Button(ctx, label .. "##swr") then st.rules_open = not st.rules_open end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Show another layout while a parameter or virtual control\n" ..
-      "reads a given way. First match wins.")
+  -- (in the grid editor, a window of their own: always open)
+  if not st.grid then
+    local label = (st.rules_open and "\u{25BE}" or "\u{25B8}") .. "  Switch layouts automatically"
+      .. ((#rules > 0) and ("  (%d)"):format(#rules) or "")
+    if ImGui.Button(ctx, label .. "##swr") then st.rules_open = not st.rules_open end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Show another layout while a parameter or virtual control\n" ..
+        "reads a given way. First match wins.")
+    end
+    if not st.rules_open then return end
   end
-  if not st.rules_open then return end
   local addr = st.fx.addr
   local changed, drop = false, nil
   -- the layouts a rule can put up
@@ -1450,6 +1494,119 @@ local function draw_switch_rules(ctx, track)
   end
 end
 
+-- Panel-level, so it sits above the lists rather than inside them: a
+-- plugin has one gain reduction, not one per parameter. The three
+-- choices on one line; what goes with a ticked one on the lines under.
+local function draw_meters(ctx)
+  local meter_on, measure_on = false, false
+  local first = true
+  -- (narrow, in the grid editor's sheet: one to a line)
+  local function next_tick() if not first and not st.narrow then ImGui.SameLine(ctx, 0, 18) end first = false end
+  if st.reports_gr then
+    next_tick()
+    meter_on = (st.scratch.meter ~= nil) and st.scratch.meter.on or false
+    local mch, mv = ImGui.Checkbox(ctx, "Gain reduction meter", meter_on)
+    if mch then
+      st.scratch.meter = st.scratch.meter or { range = C.MAX_GR_DB }
+      st.scratch.meter.on = mv
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Shows the plugin's own gain reduction on the panel.")
+    end
+  elseif not RQ.is_eq(st.key) then
+    -- Not offered for ReaEQ: an EQ has no reduction to measure.
+    next_tick()
+    measure_on = st.scratch.measure == true
+    local mch, mv = ImGui.Checkbox(ctx, "Measure gain reduction (estimated)", measure_on)
+    if mch then
+      st.scratch.measure = mv or nil
+      st.scratch.meter = st.scratch.meter or { range = C.MAX_GR_DB }
+      st.scratch.meter.on = mv
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Estimates gain reduction (the plugin doesn't report it)\n" ..
+        "via the track's TS_TrackProbe pair. At 50% mix it reads about half.")
+    end
+  end
+  -- Input and output meters: any plugin, reporting or not, measured by
+  -- the track's probes from the same copies the reduction is.
+  next_tick()
+  local lch, lv = ImGui.Checkbox(ctx, "Input/output meters", st.scratch.levels == true)
+  if lch then st.scratch.levels = lv or nil end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx,
+      "Input and output meters, and the level change (RMS).\n" ..
+      "Measured by the track's TS_TrackProbe pair.")
+  end
+  -- For plugins that rename their own parameters.
+  next_tick()
+  local lvch, lvv = ImGui.Checkbox(ctx, "Live parameter names", st.scratch.live and true or false)
+  if lvch then st.scratch.live = lvv or nil end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx,
+      "Show the plugin's current parameter names, not saved labels.\n" ..
+      "For plugins that rename them (Softube Console 1, Flow).")
+  end
+
+  -- what goes with them
+  if (meter_on or measure_on) and st.scratch.meter then
+    ImGui.SetNextItemWidth(ctx, 120)
+    local rch, rv = ImGui.SliderDouble(ctx, "full scale",
+      st.scratch.meter.range or C.MAX_GR_DB, 3, 40, "%.0f dB")
+    if rch then st.scratch.meter.range = rv end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "How much reduction fills the strip.\n" ..
+        "Small for a bus compressor, large for a limiter.")
+    end
+  end
+  if measure_on then
+    -- Where this instance stands.
+    local status = st.track and TP.status(st.track, st.fx.guid) or "ok"
+    if status == "no_probes" then
+      ImGui.TextDisabled(ctx, "This track has no TS_TrackProbe pair to measure with.")
+      ImGui.SameLine(ctx)
+      if ImGui.SmallButton(ctx, "Add probes") then
+        local ok, why = TP.insert_probes(st.track)
+        if not ok then reaper.MB(why, "ChannelView", 0) end
+      end
+    elseif status == "outside" then
+      ImGui.TextDisabled(ctx, "Not between this track's probes, so not measured here.")
+    elseif status == "parallel" then
+      ImGui.TextDisabled(ctx, "Not measured while it runs in parallel.")
+    end
+    -- The zero: global, since it's how the probes behave on every track.
+    local zch, zv = ImGui.Checkbox(ctx, "Measure the zero while stopped (all tracks)", TP.zero_on())
+    if zch then TP.set_zero_on(zv) end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "On stop, plays a second of quiet noise to learn \"no reduction\"\n" ..
+        "(needs \"Run FX when stopped\"). Can swallow a note played while stopped.")
+    end
+    if st.track and st.fx then
+      local cs = TP.cal_status(st.track, st.fx.guid)
+      if cs then ImGui.TextDisabled(ctx, TP.cal_text(cs)) end
+    end
+  end
+  if st.scratch.levels and st.track and st.fx then
+    local status = TP.status(st.track, st.fx.guid)
+    if status == "no_probes" then
+      ImGui.TextDisabled(ctx, "Input/output meters need a TS_TrackProbe pair:")
+      ImGui.SameLine(ctx)
+      if ImGui.SmallButton(ctx, "Add probes##lv") then
+        local ok, why = TP.insert_probes(st.track)
+        if not ok then reaper.MB(why, "ChannelView", 0) end
+      end
+    elseif status == "outside" then
+      ImGui.TextDisabled(ctx, "Input/output meters: not between this track's probes.")
+    elseif status == "parallel" then
+      ImGui.TextDisabled(ctx, "Input/output meters: not measured while it runs in parallel.")
+    end
+  end
+
+end
+
 -- Where the plugin being edited is now: its track still there, and the
 -- plugin found by its GUID (it may have moved in the chain). Updates
 -- st.fx.addr; false when either has gone.
@@ -1461,6 +1618,30 @@ local function still_there()
     if fx.guid == st.fx.guid then st.fx.addr = fx.addr; return true end
   end
   return false
+end
+
+-- The editor's parts for the grid editor's sheet (TS_CV_GridEditor),
+-- drawn with `env` as their state: scratch (the layout being edited),
+-- sel_asg (the control), params, track, fx, key, reports_gr; grid and
+-- narrow set. Its own fields (text being typed) stay in it between frames.
+local function embedded(env, fn, ...)
+  local saved = st
+  st = env
+  local ok, err = pcall(fn, ...)
+  st = saved
+  if not ok then error(err, 0) end
+end
+-- the selected control's settings
+function E.entry_for(ctx, env)
+  embedded(env, function() poll_vpick(); draw_entry_editor(ctx) end)
+end
+-- the meters and live names
+function E.meters_for(ctx, env) embedded(env, draw_meters, ctx) end
+-- the plugin's layout switching
+function E.rules_for(ctx, env) embedded(env, draw_switch_rules, ctx, env.track) end
+-- how many switching rules the plugin has
+function E.rule_count(key)
+  return #(M.switch_rules((M.split_variant(key))) or {})
 end
 
 -- `_selected` is the track selected now, which is not necessarily the
@@ -1519,7 +1700,7 @@ function E.draw(ctx, _selected)
     end
     draw_layout_row(ctx, track)
     -- an EQ or Compressor layout's canvas: its own setup page
-    if st.scratch and st.scratch.canvas then
+    if st.scratch and st.scratch.canvas and ED.PRO then
       ImGui.SameLine(ctx, 0, 16)
       local kind = st.scratch.canvas.kind == "eq" and "EQ"
                    or ((M.CANVAS_NAMES[st.scratch.canvas.kind] or "compressor"):lower())
@@ -1550,114 +1731,7 @@ function E.draw(ctx, _selected)
     end
     draw_switch_rules(ctx, track)
 
-    -- Panel-level, so it sits above the lists rather than inside them: a
-    -- plugin has one gain reduction, not one per parameter. The three
-    -- choices on one line; what goes with a ticked one on the lines under.
-    local meter_on, measure_on = false, false
-    local first = true
-    local function next_tick() if not first then ImGui.SameLine(ctx, 0, 18) end first = false end
-    if st.reports_gr then
-      next_tick()
-      meter_on = (st.scratch.meter ~= nil) and st.scratch.meter.on or false
-      local mch, mv = ImGui.Checkbox(ctx, "Gain reduction meter", meter_on)
-      if mch then
-        st.scratch.meter = st.scratch.meter or { range = C.MAX_GR_DB }
-        st.scratch.meter.on = mv
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "Shows the plugin's own gain reduction on the panel.")
-      end
-    elseif not RQ.is_eq(st.key) then
-      -- Not offered for ReaEQ: an EQ has no reduction to measure.
-      next_tick()
-      measure_on = st.scratch.measure == true
-      local mch, mv = ImGui.Checkbox(ctx, "Measure gain reduction (estimated)", measure_on)
-      if mch then
-        st.scratch.measure = mv or nil
-        st.scratch.meter = st.scratch.meter or { range = C.MAX_GR_DB }
-        st.scratch.meter.on = mv
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx,
-          "Estimates gain reduction (the plugin doesn't report it)\n" ..
-          "via the track's TS_TrackProbe pair. At 50% mix it reads about half.")
-      end
-    end
-    -- Input and output meters: any plugin, reporting or not, measured by
-    -- the track's probes from the same copies the reduction is.
-    next_tick()
-    local lch, lv = ImGui.Checkbox(ctx, "Input/output meters", st.scratch.levels == true)
-    if lch then st.scratch.levels = lv or nil end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx,
-        "Input and output meters, and the level change (RMS).\n" ..
-        "Measured by the track's TS_TrackProbe pair.")
-    end
-    -- For plugins that rename their own parameters.
-    next_tick()
-    local lvch, lvv = ImGui.Checkbox(ctx, "Live parameter names", st.scratch.live and true or false)
-    if lvch then st.scratch.live = lvv or nil end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx,
-        "Show the plugin's current parameter names, not saved labels.\n" ..
-        "For plugins that rename them (Softube Console 1, Flow).")
-    end
-
-    -- what goes with them
-    if (meter_on or measure_on) and st.scratch.meter then
-      ImGui.SetNextItemWidth(ctx, 120)
-      local rch, rv = ImGui.SliderDouble(ctx, "full scale",
-        st.scratch.meter.range or C.MAX_GR_DB, 3, 40, "%.0f dB")
-      if rch then st.scratch.meter.range = rv end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx,
-          "How much reduction fills the strip.\n" ..
-          "Small for a bus compressor, large for a limiter.")
-      end
-    end
-    if measure_on then
-      -- Where this instance stands.
-      local status = st.track and TP.status(st.track, st.fx.guid) or "ok"
-      if status == "no_probes" then
-        ImGui.TextDisabled(ctx, "This track has no TS_TrackProbe pair to measure with.")
-        ImGui.SameLine(ctx)
-        if ImGui.SmallButton(ctx, "Add probes") then
-          local ok, why = TP.insert_probes(st.track)
-          if not ok then reaper.MB(why, "ChannelView", 0) end
-        end
-      elseif status == "outside" then
-        ImGui.TextDisabled(ctx, "Not between this track's probes, so not measured here.")
-      elseif status == "parallel" then
-        ImGui.TextDisabled(ctx, "Not measured while it runs in parallel.")
-      end
-      -- The zero: global, since it's how the probes behave on every track.
-      local zch, zv = ImGui.Checkbox(ctx, "Measure the zero while stopped (all tracks)", TP.zero_on())
-      if zch then TP.set_zero_on(zv) end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx,
-          "On stop, plays a second of quiet noise to learn \"no reduction\"\n" ..
-          "(needs \"Run FX when stopped\"). Can swallow a note played while stopped.")
-      end
-      if st.track and st.fx then
-        local cs = TP.cal_status(st.track, st.fx.guid)
-        if cs then ImGui.TextDisabled(ctx, TP.cal_text(cs)) end
-      end
-    end
-    if st.scratch.levels and st.track and st.fx then
-      local status = TP.status(st.track, st.fx.guid)
-      if status == "no_probes" then
-        ImGui.TextDisabled(ctx, "Input/output meters need a TS_TrackProbe pair:")
-        ImGui.SameLine(ctx)
-        if ImGui.SmallButton(ctx, "Add probes##lv") then
-          local ok, why = TP.insert_probes(st.track)
-          if not ok then reaper.MB(why, "ChannelView", 0) end
-        end
-      elseif status == "outside" then
-        ImGui.TextDisabled(ctx, "Input/output meters: not between this track's probes.")
-      elseif status == "parallel" then
-        ImGui.TextDisabled(ctx, "Input/output meters: not measured while it runs in parallel.")
-      end
-    end
+    draw_meters(ctx)
 
     ImGui.Separator(ctx)
 

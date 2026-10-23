@@ -1,51 +1,26 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 2.6.2
+-- @version 3.0.0
 -- @changelog
---  Rack: a plugin takes the fewest rows that fit across the column, never
---  fewer than its tallest control needs (a layout ChannelView shows too,
---  running down then across, keeps the rows it fills there). On a panel
---  under three rows the gain-reduction meter lies across the top. The
---  rack has its own Control flow.
+--  ChannelView now comes in two parts: ChannelView (free, here) and
+--  ChannelView Pro, an add-on from its own ReaPack link. Pro has grid
+--  layouts and the grid editor, the rack, the web companion, canvases and
+--  the hardware looks; layouts made with it still work without it, drawn
+--  plainly. The Control flow menu is gone: controls flow down then
+--  across (in Pro's rack, across then down). See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
 --  [main]   TS_ChannelView_TCP.lua
 --  [main]   TS_ChannelView_ToggleMixer.lua
---  [main]   TS_ChannelView_Rack.lua
---  [main]   TS_ChannelView_Web.lua
---  [main]   TS_ChannelView_Web_Startup.lua
---  [webinterface] TS_ChannelView.html
---  [webinterface] TS_ChannelView.webapp.json
---  [webinterface] TS_ChannelView-192.png
---  [webinterface] TS_ChannelView-512.png
---  [webinterface] TS_ChannelView-maskable.png
 --  [webinterface] TS_CV_ActionIcons.json
---  [webinterface] textures/TS_CV_finish_brushed.png > TS_CV_finish_brushed.png
---  [webinterface] textures/TS_CV_finish_anodised.png > TS_CV_finish_anodised.png
---  [webinterface] textures/TS_CV_finish_bright.png > TS_CV_finish_bright.png
---  [webinterface] textures/TS_CV_finish_satin.png > TS_CV_finish_satin.png
---  [webinterface] textures/TS_CV_finish_satin_grain.png > TS_CV_finish_satin_grain.png
---  [webinterface] textures/TS_CV_finish_tolex.png > TS_CV_finish_tolex.png
---  [webinterface] textures/TS_CV_finish_leather.png > TS_CV_finish_leather.png
---  [webinterface] textures/TS_CV_finish_wood.png > TS_CV_finish_wood.png
---  [webinterface] textures/TS_CV_finish_crinkle.png > TS_CV_finish_crinkle.png
---  [webinterface] textures/TS_CV_finish_enamel.png > TS_CV_finish_enamel.png
---  [webinterface] textures/TS_CV_finish_hammertone.png > TS_CV_finish_hammertone.png
---  [webinterface] textures/TS_CV_finish_checker.png > TS_CV_finish_checker.png
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
 --  [nomain] TS_CV_Toolbar.lua
 --  [nomain] TS_CV_Browser.lua
 --  [nomain] TS_CV_Mod.lua
 --  [nomain] TS_CV_Units.lua
---  [nomain] TS_CV_Delay.lua
 --  [nomain] TS_CV_ReaFX.lua
---  [nomain] TS_CV_MapEQ.lua
---  [nomain] TS_CV_MapPanel.lua
---  [nomain] TS_CV_Learn.lua
---  [nomain] TS_CV_CanvasSetup.lua
---  [nomain] TS_CV_RolePanel.lua
 --  [nomain] TS_CV_ModRack.lua
 --  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_MidiLearn.lua
@@ -59,11 +34,10 @@
 --  [nomain] TS_CV_ColourPick.lua
 --  [nomain] TS_CV_Channel.lua
 --  [nomain] TS_CV_Config.lua
+--  [nomain] TS_CV_Edition.lua
 --  [nomain] TS_CV_Editor.lua
 --  [nomain] TS_CV_Envelopes.lua
---  [nomain] TS_CV_EQPanel.lua
 --  [nomain] TS_CV_ReaComp.lua
---  [nomain] TS_CV_CompPanel.lua
 --  [nomain] TS_CV_Focus.lua
 --  [nomain] TS_CV_FXIndex.lua
 --  [nomain] TS_CV_FXTree.lua
@@ -86,45 +60,19 @@
 --  [nomain] TS_CV_State.lua
 --  [nomain] TS_CV_Steps.lua
 --  [nomain] TS_CV_Taps.lua
---  [nomain] TS_CV_Tiles.lua
 --  [nomain] TS_CV_Trace.lua
 --  [nomain] TS_CV_TrackMenu.lua
 --  [nomain] TS_CV_TrackOps.lua
 --  [nomain] TS_CV_TrackStrip.lua
 --  [nomain] TS_CV_FXButtons.lua
---  [nomain] TS_CV_Vendors.lua
---  [nomain] TS_CV_Finish.lua
---  [nomain] TS_CV_Switches.lua
---  [nomain] TS_CV_Light.lua
 --  [nomain] TS_CV_KnobParts.lua
---  [nomain] TS_CV_KnobEditor.lua
---  [nomain] TS_CV_Recipes.lua
 --  [nomain] TS_CV_Freeze.lua
 --  [nomain] TS_CV_AutoFloat.lua
---  [nomain] TS_CV_PluginColours.lua
---  [nomain] textures/TS_CV_finish_brushed.png
---  [nomain] textures/TS_CV_finish_anodised.png
---  [nomain] textures/TS_CV_finish_bright.png
---  [nomain] textures/TS_CV_finish_satin.png
---  [nomain] textures/TS_CV_finish_satin_grain.png
---  [nomain] textures/TS_CV_finish_tolex.png
---  [nomain] textures/TS_CV_finish_leather.png
---  [nomain] textures/TS_CV_finish_wood.png
---  [nomain] textures/TS_CV_finish_crinkle.png
---  [nomain] textures/TS_CV_finish_enamel.png
---  [nomain] textures/TS_CV_finish_hammertone.png
---  [nomain] textures/TS_CV_finish_checker.png
---  [nomain] TS_CV_Trimmer.lua
---  [nomain] TS_CV_TrimmerPanel.lua
---  [main]   TS_ChannelView_TrimmerAdd.lua
---  [main]   TS_ChannelView_TrimmerAuto.lua
 --  [nomain] TS_CV_Util.lua
 --  [nomain] TS_CV_Widgets.lua
 --  [nomain] TS_CV_WebLink.lua
 --  [effect] TS_TrackProbe.jsfx
 --  [effect] TS_CV_Modulators.jsfx
---  [effect] TS_CV_Learn.jsfx
---  [effect] TS_CV_Trimmer.jsfx
 -- @about
 --  A dockable window showing one panel per plugin on the selected track.
 --  Each panel carries a float button, a bypass button and a set of knobs
@@ -132,16 +80,15 @@
 --  assign to a panel is remembered per plugin, so the same plugin always
 --  comes up looking the same wherever it turns up.
 --
---  On a tablet: TS_ChannelView_Web.lua and the TS_ChannelView.html page put
---  the same panels in a browser, through REAPER's own web interface.
+--  ChannelView Pro, an add-on installed from its own ReaPack link (the same
+--  version as this), adds grid layouts and the grid editor, the Rack view,
+--  the web companion, canvases, hardware looks and the rest the README
+--  marks (Pro). Layouts made with it still work here, drawn plainly.
 --
 --  Action bars: buttons for any REAPER action, with menus, toolbar
 --  switches and ChannelView's own icons, as drawers in this window, in
 --  windows of their own (TS_ChannelView_Toolbars.lua), in the TCP window
 --  and on the web page -- all arranged in Organise actions.
---
---  Rack view: TS_ChannelView_Rack.lua shows the selected track's plugins
---  down a column, in a window of its own to dock beside the arrange.
 --
 --  Panels are a fixed height and grow in COLUMNS: rows fall out of the
 --  window height, controls flow down a column and wrap into a new one, so
@@ -209,7 +156,10 @@ local U = require("TS_CV_Util")
 local T = require("TS_CV_FXTree")
 local M = require("TS_CV_Mappings")
 local W = require("TS_CV_Widgets")
-local SWI = require("TS_CV_Switches")
+-- Standard, or with Pro (TS_CV_Edition): Pro's modules are there only with
+-- it; without, those called from many places are stand-ins doing nothing
+local ED = require("TS_CV_Edition")
+local SWI = ED.switches()
 local P = require("TS_CV_Panel")
 local E  = require("TS_CV_Editor")
 local S  = require("TS_CV_TrackStrip")
@@ -217,7 +167,7 @@ local St = require("TS_CV_State")
 local B  = require("TS_CV_Browser")
 local PU = require("TS_CV_PresetUI")
 local LS = require("TS_CV_Share")
-local CS = require("TS_CV_CanvasSetup")
+local CS = ED.module("TS_CV_CanvasSetup", ED.stub({ TIPS = {} }))
 local SC = require("TS_CV_Steps")
 local CH = require("TS_CV_Channel")
 local SD = require("TS_CV_Sends")
@@ -226,20 +176,19 @@ local MX = require("TS_CV_Mixer")
 local SU = require("TS_CV_Startup")
 local FZ = require("TS_CV_Freeze")
 local AF = require("TS_CV_AutoFloat")
-local PC = require("TS_CV_PluginColours")
+local PC = ED.module("TS_CV_PluginColours", ED.stub())
 local FB = require("TS_CV_FXButtons")
 local WL = require("TS_CV_WebLink")
 local TM = require("TS_CV_TrackMenu")
 local TO = require("TS_CV_TrackOps")
 local CP = require("TS_CV_ColourPick")
 local FO = require("TS_CV_Focus")
-local TRM = require("TS_CV_Trimmer")
+local TRM = ED.module("TS_CV_Trimmer")
 local IC = require("TS_CV_Icons")
 local CN = require("TS_CV_Chains")
 local TP = require("TS_CV_Taps")
 local RQ = require("TS_CV_ReaEQ")
 local RC = require("TS_CV_ReaComp")
-local RCP = require("TS_CV_CompPanel")
 local BZ = require("TS_CV_Busy")
 local ML = require("TS_CV_MidiLearn")
 local MD = require("TS_CV_Mod")
@@ -247,9 +196,9 @@ local MR = require("TS_CV_ModRack")
 local TB = require("TS_CV_Toolbar")
 local DR = require("TS_CV_Drawers")
 local AE = require("TS_CV_ActionEditor")
-local KE = require("TS_CV_KnobEditor")
+local KE = ED.module("TS_CV_KnobEditor", ED.stub())
 local KPm = require("TS_CV_KnobParts")
-local RCP = require("TS_CV_Recipes")
+local RCP = ED.module("TS_CV_Recipes", ED.stub({ list = function() return {} end }))
 
 -- RACK VIEW: the same ChannelView, run by TS_ChannelView_Rack.lua in a
 -- window of its own -- the track's plugins down a column, toolbars of its
@@ -264,6 +213,7 @@ W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImG
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
 CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui); ML.attach(ImGui)
 TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui); KE.attach(ImGui)
+if ED.PRO then require("TS_CV_GridEditor").attach(ImGui) end
 -- action drawers (global, not per project), and the window that organises
 -- every action bar
 DR.load()
@@ -295,7 +245,7 @@ SU_ME.init()
 M.init(script_dir)
 SC.init(script_dir)
 RCP.init(script_dir)
-require("TS_CV_Finish").init(script_dir)
+if ED.PRO then require("TS_CV_Finish").init(script_dir) end
 
 -- NOTE ON Begin/End PAIRING
 -- ReaImGui keeps Dear ImGui's PRE-1.90 convention: End() and EndChild()
@@ -405,17 +355,15 @@ C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
 C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
 -- (stored under the key plate_texture, so saved choices still load)
-C.EFFECT_3D = ext_get("plate_texture", C.EFFECT_3D and "1" or "0") == "1"
+C.EFFECT_3D = ED.PRO and ext_get("plate_texture", C.EFFECT_3D and "1" or "0") == "1" or false
 C.SHADOW = math.max(0, math.min(C.SHADOW_MAX, tonumber(ext_get("shadow", tostring(C.SHADOW))) or C.SHADOW))
-require("TS_CV_Light").STRENGTH = C.SHADOW / 100
+ED.light().STRENGTH = C.SHADOW / 100
 C.LIGHT = math.max(0, math.min(C.LIGHT_MAX, tonumber(ext_get("light", tostring(C.LIGHT))) or C.LIGHT))
 require("TS_CV_KnobParts").LIGHT = C.LIGHT / 100
 C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
 -- into the view you were not in is a small daily annoyance.
 C.MIXER_VIEW  = (not RACK) and ext_get("mixer_view", "0") == "1"
--- (the rack has its own, starting from ChannelView's)
-C.FLOW        = RACK and ext_get("rack_flow", ext_get("flow", C.FLOW)) or ext_get("flow", C.FLOW)
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 do
   local h, t = pal_get()
@@ -598,7 +546,7 @@ local function no_controls()
   for _, fx in ipairs(app.chain or {}) do
     if not fx.is_container and fx.guid ~= "" and not T.get_offline(app.track, fx.addr) then
       local layout, key = layout_for(fx)
-      local shows = (layout == nil) or layout.canvas ~= nil or RQ.is_eq(key) or RC.is_comp(key) or TRM.is(key)
+      local shows = (layout == nil) or P.canvas_of(layout) ~= nil or P.own_eq(key) or P.own_rc(key) or P.own_trim(key)
       for _, c in ipairs((layout and layout.controls) or {}) do
         if not SPACER[c.type] then shows = true break end
       end
@@ -935,7 +883,7 @@ end
 -- A colour menu's From the plugin row: the plugin's surfaces, then its
 -- accents, one click each, and the eyedropper that reads them (again).
 local function palette_row(fx, id, pick_key)
-  if not fx or not fx.guid or fx.guid == "" then return end
+  if not fx or not fx.guid or fx.guid == "" or not ED.PRO then return end
   local layout = layout_for(fx)
   local pal = layout and layout.palette
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -1439,7 +1387,7 @@ local function section_menu(fx, key, idx, c)
     if lc then lc.style, lc.cap = style, cap; if not style then lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil end end
     M.set(key, l); M.save()
   end
-  ImGui.TextDisabled(ctx, "The controls after this divider")
+  ImGui.TextDisabled(ctx, c.type == "section" and "The section it's on" or "The controls after this divider")
   if ImGui.Selectable(ctx, "None##sec_none", now == "none", KEEP_OPEN, 170, 0) then set(nil, nil) end
   if ImGui.Selectable(ctx, "Inset##sec_inset", now == "inset", KEEP_OPEN, 170, 0) then set("inset", nil) end
   if ImGui.IsItemHovered(ctx) then
@@ -2213,7 +2161,7 @@ local function panel_menu()
     local rule = St.switch_rule(fx.guid)
     local _, cur = M.split_variant(rule and St.chosen_key(fx.name, fx.guid) or key)
     local title = "Layout: " .. (shown and U.truncate(shown, 20) or "Standard") .. (rule and "  \u{00B7} auto" or "")
-    if ImGui.BeginMenu(ctx, title .. "###fxlayout") then
+    if ED.menu(ImGui, ctx, ED.PRO and (title .. "###fxlayout") or "Other layouts") then
       local rules = M.switch_rules(base)
       if rules then
         local r = rules[rule or 0]
@@ -2324,11 +2272,28 @@ local function panel_menu()
       ImGui.EndMenu(ctx)
     end
   end
-  if ImGui.MenuItem(ctx, "Edit parameters\u{2026}", nil, false, not locked) then
-    E.open(app.track, fx, key, layout)
+  -- Standard's editor is Edit parameters; Pro's the grid editor (but for
+  -- a panel of its own: ReaEQ's, ReaComp's, the Trimmer's)
+  local own_panel = P.own_eq(key) or P.own_rc(key) or P.own_trim(key)
+  if not ED.PRO or own_panel then
+    if ImGui.MenuItem(ctx, "Edit parameters\u{2026}", nil, false, not locked) then
+      E.open(app.track, fx, key, layout)
+    end
+    locked_tip()
   end
-  locked_tip()
-  if ImGui.BeginMenu(ctx, "Faceplate", not locked) then
+  -- the grid editor (TS_CV_GridEditor): the layout as a grid, live
+  -- (a canvas layout's: the controls beside the canvas)
+  if not own_panel then
+    if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+      require("TS_CV_GridEditor").open(app.track, fx, key, layout, nil,
+        { rows = M.locked(layout) or (RACK and P.RACK_ROWS) or app.cv_rows or 2, index = app.menu_fx, cv_h = app.cv_h,
+          rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
+    end
+    if ED.PRO and ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "The layout as a grid: drag parameters onto it, move and resize them.")
+    end
+  end
+  if ED.menu(ImGui, ctx, "Faceplate", not locked) then
     plate_menu(fx, key, layout)
     ImGui.EndMenu(ctx)
   end
@@ -3090,6 +3055,53 @@ local function automate_items(fx, c)
   param_mod_item(fx, c)
 end
 
+-- The grid editor's sheet draws the panel's own menus (TS_CV_GridEditor
+-- GE.hooks): for the plugin it's editing while ChannelView shows its
+-- track with the same layout, so they work on the same list.
+if ED.PRO then
+require("TS_CV_GridEditor").hooks = (function()
+  local function live(fx)
+    for _, f in ipairs(app.chain or {}) do if f.guid == fx.guid then return f end end
+    return nil
+  end
+  return {
+    ready = function(track, fx, key)
+      local f = (track == app.track) and live(fx)
+      if not f then return false end
+      local _, k = layout_for(f)
+      return k == key
+    end,
+    style    = function(fx, key, idx, c) style_menu(live(fx), key, idx, c) end,
+    back     = function(fx, key, idx, c) back_menu(live(fx), key, idx, c) end,
+    section  = function(fx, key, idx, c) section_menu(live(fx), key, idx, c) end,
+    look     = function(fx, key, layout, idx, c, locked) look_items(live(fx), key, layout, idx, c, locked) end,
+    plate    = function(fx, key, layout) plate_menu(live(fx), key, layout) end,
+    -- a colour for control idx's `field` (a line's or a section
+    -- outline's, Edge<n>): none (`none`), a faceplate's, the plugin's own,
+    -- recent ones, or one of your own -- the same choices as a background
+    colour   = function(fx, key, idx, c, field, title, none)
+      local f = live(fx)
+      local function cset(k, save)
+        local l, pk = materialise(f)
+        local lc = l.controls[idx]
+        if lc then lc[field] = k end
+        M.set(pk, l)
+        if save then M.save() end
+      end
+      local now = c[field]
+      if swatch_row(none, field .. "_none", now == nil, 170, 0, C.COL.panel_border) then cset(nil, true) end
+      for _, pl in ipairs(C.PLATES) do
+        if pl.bg and swatch_row(pl.label, field .. "_" .. pl.key, now == pl.key, 170, pl.bg, pl.border) then
+          cset(pl.key, true)
+        end
+      end
+      local now_pl = C.plate_of(now)
+      custom_rows(field, now, 170, cset, title, now_pl and (now_pl.bg >> 8), f)
+    end,
+  }
+end)()
+end
+
 local function control_menu()
   if not ImGui.BeginPopup(ctx, "ctlmenu") then return end
   local cm = app.ctl_menu
@@ -3116,7 +3128,12 @@ local function control_menu()
         M.set(key, l); M.save()
       end
       ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then E.open(app.track, fx, key, layout, idx) end
+      if not ED.PRO and ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then E.open(app.track, fx, key, layout, idx) end
+      if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+        require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
+          { rows = M.locked(layout) or (RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
+          rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
+      end
     end
     plugin_sub(fx)
     ImGui.EndPopup(ctx)
@@ -3246,7 +3263,7 @@ local function control_menu()
     ImGui.SetTooltip(ctx, "Flip the direction on screen only.")
   end
 
-  if ImGui.BeginMenu(ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then
+  if ED.menu(ImGui, ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then
     show_when_menu(fx, key, layout, idx, c)
     ImGui.EndMenu(ctx)
   end
@@ -3254,32 +3271,42 @@ local function control_menu()
   ---------------------------------------------------------------- LOOK
   ImGui.SeparatorText(ctx, "Look")
   local styled = style_family(c.type) or c.type == "xy" or c.type == "dual" or c.type == "combo"
-  if styled and ImGui.BeginMenu(ctx, "Style") then
+  if styled and ED.menu(ImGui, ctx, "Style") then
     style_menu(fx, key, idx, c)
     ImGui.EndMenu(ctx)
   end
   -- its own background, over its section's; neighbours with the same one
   -- join into one shape
-  if c.type ~= "divider" and ImGui.BeginMenu(ctx, "Background") then
+  if c.type ~= "divider" and ED.menu(ImGui, ctx, "Background") then
     back_menu(fx, key, idx, c)
     ImGui.EndMenu(ctx)
   end
   -- the section this control is in belongs to the divider in front of it
   -- (dividers aren't on the panel to right-click, so it's offered here)
+  -- (on a grid, the section rectangle it's on, the topmost)
   local div_idx
-  for k = idx - 1, 1, -1 do
-    local o = layout.controls[k]
-    if o.type == "divider" then div_idx = k break end
-    if P.fader_kind(o) == "column" then break end
+  if layout.grid and c.at then
+    local mx, my = c.at.c + c.at.w / 2, c.at.r + c.at.h / 2
+    for k = #layout.controls, 1, -1 do
+      local o = layout.controls[k]
+      local a = o.type == "section" and o.at
+      if a and mx >= a.c and mx <= a.c + a.w and my >= a.r and my <= a.r + a.h then div_idx = k break end
+    end
+  else
+    for k = idx - 1, 1, -1 do
+      local o = layout.controls[k]
+      if o.type == "divider" then div_idx = k break end
+      if P.fader_kind(o) == "column" then break end
+    end
   end
-  if ImGui.BeginMenu(ctx, "Section", div_idx ~= nil) then
+  if ED.menu(ImGui, ctx, "Section", div_idx ~= nil) then
     section_menu(fx, key, div_idx, layout.controls[div_idx])
     ImGui.EndMenu(ctx)
   end
-  if not div_idx and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, "Needs a divider first:\nArrange > Insert before > Divider.")
+  if ED.PRO and not div_idx and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, layout.grid and "Not on a section." or "Needs a divider first:\nArrange > Insert before > Divider.")
   end
-  if ImGui.BeginMenu(ctx, "Copy / paste style") then
+  if ED.menu(ImGui, ctx, "Copy / paste style") then
     look_items(fx, key, layout, idx, c, false)
     ImGui.EndMenu(ctx)
   end
@@ -3289,7 +3316,8 @@ local function control_menu()
 
   ------------------------------------------------------------- ARRANGE
   ImGui.SeparatorText(ctx, "Arrange")
-  if ImGui.BeginMenu(ctx, "Insert before") then
+  -- (a grid's gaps are its empty space)
+  if not layout.grid and ImGui.BeginMenu(ctx, "Insert before") then
     for _, g in ipairs({ { "blank", "Gap" }, { "half_gap", "Half gap" }, { "divider", "Divider" } }) do
       if ImGui.MenuItem(ctx, g[2]) then
         local l = commit()
@@ -3305,8 +3333,13 @@ local function control_menu()
     M.set(key, l); M.save()
   end
   ImGui.Separator(ctx)
-  if ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then
+  if not ED.PRO and ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then
     E.open(app.track, fx, key, layout, idx)
+  end
+  if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+    require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
+      { rows = M.locked(layout) or (RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
+          rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
   end
   plugin_sub(fx)
   ImGui.EndPopup(ctx)
@@ -3784,16 +3817,16 @@ local function menu_bar()
         ImGui.SetTooltip(ctx, "Preset controls along each panel's foot.")
       end
 
-      if ImGui.MenuItem(ctx, "3D effect", nil, C.EFFECT_3D) then
+      if ED.item(ImGui, ctx, "3D effect", nil, C.EFFECT_3D) then
         C.EFFECT_3D = not C.EFFECT_3D
         ext_set("plate_texture", C.EFFECT_3D and "1" or "0")
       end
-      if ImGui.IsItemHovered(ctx) then
+      if ED.PRO and ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Gradients, lit edges and soft shadows.")
       end
 
       -- how strongly the light models the plates and knobs
-      if ImGui.BeginMenu(ctx, "Lighting", C.EFFECT_3D) then
+      if ED.menu(ImGui, ctx, "Lighting", C.EFFECT_3D) then
         ImGui.SetNextItemWidth(ctx, 140)
         local lch, lv = ImGui.SliderInt(ctx, "##light", C.LIGHT, 0, C.LIGHT_MAX, "%d%%")
         if lch then
@@ -3814,12 +3847,12 @@ local function menu_bar()
 
       -- how deep and far the shadows fall (all of them: knobs, switches,
       -- buttons, fader caps; and the web page's)
-      if ImGui.BeginMenu(ctx, "Shadows", C.EFFECT_3D) then
+      if ED.menu(ImGui, ctx, "Shadows", C.EFFECT_3D) then
         ImGui.SetNextItemWidth(ctx, 140)
         local shch, shv = ImGui.SliderInt(ctx, "##shadow", C.SHADOW, 0, C.SHADOW_MAX, "%d%%")
         if shch then
           C.SHADOW = shv
-          require("TS_CV_Light").STRENGTH = C.SHADOW / 100
+          ED.light().STRENGTH = C.SHADOW / 100
           ext_set("shadow", tostring(C.SHADOW))
         end
         if ImGui.IsItemHovered(ctx) then
@@ -3827,7 +3860,7 @@ local function menu_bar()
         end
         if ImGui.MenuItem(ctx, "Reset to 100%", nil, false, C.SHADOW ~= 100) then
           C.SHADOW = 100
-          require("TS_CV_Light").STRENGTH = 1
+          ED.light().STRENGTH = 1
           ext_set("shadow", "100")
         end
         ImGui.EndMenu(ctx)
@@ -3865,15 +3898,6 @@ local function menu_bar()
         end
         if ImGui.MenuItem(ctx, "Centred", nil, C.ROW_ALIGN == "centre") then
           C.ROW_ALIGN = "centre"; ext_set("row_align", C.ROW_ALIGN)
-        end
-        ImGui.EndMenu(ctx)
-      end
-      if ImGui.BeginMenu(ctx, "Control flow") then
-        if ImGui.MenuItem(ctx, "Down, then across", nil, C.FLOW == "column") then
-          C.FLOW = "column"; ext_set(RACK and "rack_flow" or "flow", C.FLOW)
-        end
-        if ImGui.MenuItem(ctx, "Across, then down", nil, C.FLOW == "row") then
-          C.FLOW = "row"; ext_set(RACK and "rack_flow" or "flow", C.FLOW)
         end
         ImGui.EndMenu(ctx)
       end
@@ -3951,7 +3975,7 @@ local function menu_bar()
       ImGui.EndMenu(ctx)
     end
     -- the web companion, with a dot of its strip's colour
-    local web_open = ImGui.BeginMenu(ctx, "Web companion   ")
+    local web_open = ED.menu(ImGui, ctx, "Web companion   ")
     do
       local col = web_look()
       if col then
@@ -4110,7 +4134,8 @@ local function menu_bar()
   -- The TS_CV Trimmer, after the probes: dim with none on the track, lit
   -- with one. With none, a click puts one first in the chain (after an
   -- ARA plugin, the pre probe and the modulators); with one, its menu.
-  if app.track then
+  -- (the Trimmer: Pro)
+  if app.track and TRM then
     local tw = C.ICON_SIZE + 6
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
@@ -4515,10 +4540,10 @@ local function panel_requests(i, fx, layout, key, req)
       local l = materialise(fx)
       if l.meter then
         l.meter.win = (req.grv_window ~= C.GRV_DEFAULT) and req.grv_window or nil
-      elseif RC.is_comp(key) then
+      elseif P.own_rc(key) then
         -- ReaComp's canvas keeps its history's window in the same
         -- place, with no meter of its own (the canvas has the meters)
-        l.meter = { on = false, win = (req.grv_window ~= RCP.WINDOW_DEFAULT) and req.grv_window or nil }
+        l.meter = { on = false, win = (req.grv_window ~= require("TS_CV_CompPanel").WINDOW_DEFAULT) and req.grv_window or nil }
       end
       M.set(key, l); M.save()
     end
@@ -4547,6 +4572,7 @@ end
 local ROWS = { key = "panel_rows", said = nil, read_at = -1 }
 function ROWS.publish(inner_h)
   local n = P.rows_for(inner_h)
+  app.cv_rows, app.cv_h = n, inner_h
   if n ~= ROWS.said then
     ROWS.said = n
     reaper.SetExtState(C.EXT_SECT, ROWS.key, tostring(n), true)
@@ -4557,8 +4583,6 @@ function ROWS.read()
   if now - ROWS.read_at < 0.5 then return end
   ROWS.read_at = now
   P.RACK_ROWS = tonumber(reaper.GetExtState(C.EXT_SECT, ROWS.key))
-  local fl = reaper.GetExtState(C.EXT_SECT, "flow")
-  P.CV_FLOW = (fl == "row" or fl == "column") and fl or nil
 end
 
 local function panel_row(row_h, row_w)
@@ -4894,6 +4918,11 @@ end
 local function rack_inside(rack_w)
   app.panel_rects = {}
   rack_w = math.max(120, math.min(rack_w, (ImGui.GetContentRegionAvail(ctx))))
+  -- its width, for the grid editor's In the rack (opened from ChannelView too)
+  if math.floor(rack_w) ~= app.rack_w then
+    app.rack_w = math.floor(rack_w)
+    reaper.SetExtState(C.EXT_SECT, "rack_width", tostring(app.rack_w), false)
+  end
   if not app.track then
     ImGui.TextDisabled(ctx, "Select a track.")
   else
@@ -5538,6 +5567,22 @@ local function frame()
   AE.draw(ctx)
   -- the knob look editor (Style > Customise...), its own window too
   KE.draw(ctx)
+  -- the grid editor (Edit layout...), and the menu of a control
+  -- right-clicked in it
+  do
+    local GE = ED.module("TS_CV_GridEditor", ED.stub())
+    GE.draw(ctx)
+    local m = GE.take_menu()
+    if m then
+      for i, f in ipairs(app.chain or {}) do
+        if f.guid == m.guid then
+          app.ctl_menu = { fx = i, ctl = m.idx }
+          app.open_ctl_menu = true
+          break
+        end
+      end
+    end
+  end
 
   -- The style pushes happened before Begin, so they unwind either way.
   ImGui.PopStyleVar(ctx, 1)

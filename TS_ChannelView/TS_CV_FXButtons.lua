@@ -155,7 +155,20 @@ end
 local T, TR, TP
 local function mods()
   T  = T  or require("TS_CV_FXTree")
-  TR = TR or require("TS_CV_Trimmer")
+  -- (the Trimmer is Pro; without it, what's needed here of it: telling one
+  -- that's on a track, and the slot after the probes and the modulators)
+  TR = TR or require("TS_CV_Edition").module("TS_CV_Trimmer") or {
+    is = function(n) return type(n) == "string" and n:find("TS_CV Trimmer", 1, true) ~= nil end,
+    slot_in = function(names, ara_first)
+      local slot = (ara_first and #names > 0) and 1 or 0
+      while slot < #names do
+        local n = names[slot + 1] or ""
+        if n:find("TS_TrackProbe", 1, true) or n:find("ChannelView Modulators", 1, true)
+           or n:find("TS_CV_Learn", 1, true) then slot = slot + 1 else break end
+      end
+      return slot
+    end,
+  }
   TP = TP or require("TS_CV_Taps")
 end
 

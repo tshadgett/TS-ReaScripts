@@ -30,7 +30,9 @@ local DR = require("TS_CV_Drawers")
 local FB = require("TS_CV_FXButtons")
 local B  = require("TS_CV_Browser")
 local CN = require("TS_CV_Chains")
-local VN = require("TS_CV_Vendors")
+-- (vendor looks: Pro)
+local ED = require("TS_CV_Edition")
+local VN = ED.module("TS_CV_Vendors")
 local CPk = require("TS_CV_ColourPick")
 
 local AE = {}
@@ -924,6 +926,7 @@ local function vendors_body(ctx)
 end
 
 local function draw_vendors(ctx)
+  if not VN then return end
   if vend.open then
     vend.open = false
     ImGui.OpenPopup(ctx, "Vendors###aevendors")
@@ -1236,7 +1239,10 @@ function AE.draw(ctx)
             ImGui.EndPopup(ctx)
           end
           flow(ctx, "f_vend")
-          if ImGui.Button(ctx, "Vendors\u{2026}") then vend.open = true end
+          ImGui.BeginDisabled(ctx, not VN)
+          if ImGui.Button(ctx, VN and "Vendors\u{2026}" or "Vendors\u{2026}  (Pro)") then vend.open = true end
+          ImGui.EndDisabled(ctx)
+          if not VN then ED.note(ImGui, ctx) end
           measure(ctx, "f_vend")
           W.tip(ctx, "aevend", "A colour and a look per plugin vendor, for the plugin buttons", ImGui.IsItemHovered(ctx), false)
           flow(ctx, "f_cvi")

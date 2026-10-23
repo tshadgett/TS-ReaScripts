@@ -1,5 +1,55 @@
 # ChannelView — changelog
 
+## 3.0.0 — ChannelView Pro, grid layouts
+
+ChannelView now comes in two parts. **ChannelView** stays free and on
+ReaPack. **ChannelView Pro** is an add-on, installed from its own ReaPack
+link beside it; the two must be the same version. Pro has grid layouts and
+the grid editor, the rack, the web companion, the canvases (EQ, compressor
+and the rest, ReaEQ's and ReaComp's), knob and button styles and colours,
+faceplates, finishes, sections and backgrounds, lighting and shadows, the
+plugin's own colours, vendor looks, more than one layout per plugin and
+switching between them, Show when rules and virtual controls, the TS_CV
+Trimmer and the gain-reduction trace. The README marks them **(Pro)**.
+
+### ChannelView
+
+- **Layouts made with Pro work here.** A grid is drawn as it is, Show
+  rules and virtual controls work, and nothing Pro keeps in a layout is
+  lost when it's saved. Knobs show as the default Arc and buttons flat, so
+  a layout styled in 2.x looks plain until Pro is installed, when its
+  looks come back.
+- **Pro's menu items** are shown greyed and marked (Pro).
+- **The Control flow menu is gone.** A panel's controls flow down then
+  across (in Pro's rack, across then down).
+
+### ChannelView Pro
+
+- **Grid layouts.** A layout can be a grid: every control has a place of
+  its own, in quarter cells (an ordinary knob is 4 × 4), and ChannelView,
+  the rack and the web page all show it as it is. Where it doesn't fit, it
+  flows a section at a time, or, locked (the default), scrolls. Sections
+  are groups: a rectangle round some controls with a fill, an outline, or
+  both, each in any colour. Lines run from any corner of the grid to any
+  other, in any colour. Empty space is the gap.
+- **The grid editor** (*Edit layout…*, from the panel's menu or a control's
+  right-click), in a window of its own, takes the place of Edit
+  parameters. Drag parameters, lines, sections and virtual controls onto
+  the grid; drag to move, the corner to resize (a control's size and a
+  fader's length come from what you draw); insert and delete rows and
+  columns. Everything about what's selected is on the right: settings,
+  style, background, Show when, and for the panel, lock, meters, faceplate
+  and layout switching. Select several (Ctrl/Shift+click, a box, Select
+  all) to move, align, distribute, copy, paste or change them together.
+  *In ChannelView* and *In the rack* preview the panel at a height or
+  width you choose, at the rack's real width to start with, and say when
+  the rack shows another of the plugin's layouts. *New layout…* makes a
+  copy, an empty one or one with a canvas. Every change is saved as you
+  make it, with Undo and Redo. A layout that isn't a grid becomes one as
+  it opens, arranged as it was.
+- **Canvas layouts:** the controls beside the canvas are a grid too, and
+  the canvas has its own width in ChannelView and height in the rack.
+
 ## 2.6.2 — rack layouts
 
 - **Rack: rows.** A plugin in the rack takes the fewest rows that fit

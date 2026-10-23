@@ -15,6 +15,26 @@ the selected track.
     │ [MASTER][1 Kick In][2 Snr Top][3 OH L][4 Bass DI][5 Gtr L]  ···  │
     └──────────────────────────────────────────────────────────────────┘
 
+## Standard and Pro
+
+ChannelView comes in two parts. **ChannelView** is free (MIT) and on
+ReaPack. **ChannelView Pro** is an add-on to it, installed from its own
+ReaPack link (see *Installing*); the two must be the same version. Parts of
+this guide marked **(Pro)** need it.
+
+Pro adds grid layouts and the grid editor (*Edit layout*), the Rack view,
+the web companion, canvases (EQ, compressor and the rest, for any plugin,
+and ReaEQ's and ReaComp's), knob and button styles and colours, faceplates,
+finishes, sections and backgrounds, the 3D effect's lighting and shadows,
+the plugin's own colours, vendor looks, more than one layout per plugin and
+switching between them, Show when rules and virtual controls, the TS_CV
+Trimmer and the gain-reduction trace.
+
+Without Pro, everything else works as described, and a layout made with Pro
+still works: its grid, Show rules and virtual controls are drawn as they
+are, its knobs as the default Arc and its buttons flat, and nothing in it is
+lost when it's saved. Pro's menu items are there, greyed and marked (Pro).
+
 ## Two views
 
 A toggle in the header swaps the upper area between them, as does a
@@ -45,7 +65,7 @@ tracks are not in a range: the range is what you can see. And ctrl can
 never take the selection down to nothing, because channel view has to
 have a track to show.
 
-## Rack view
+## Rack view (Pro)
 
 **ChannelView Rack** (`TS_ChannelView_Rack.lua`, in the Actions list) is
 ChannelView in a window of its own, laid out down a column: the selected
@@ -57,10 +77,13 @@ one it's locked to, whatever
 you select (kept with the project; click it again to follow the
 selection).
 
-- Every plugin is the column's width, with the fewest rows that fit across
-  it, never fewer than its tallest control needs (a fader's length, a
-  large knob; an upright fader at least two). A layout ChannelView shows
-  too, in a rack running down then across, keeps at least the rows its
+- Every plugin is the column's width. A grid layout (see *Grid layouts*)
+  is as tall as its grid; in a column narrower than it, its sections wrap
+  onto new lines whole, and one wider than the column runs across then
+  down (locked, it scrolls sideways instead). Any other layout takes the
+  fewest rows that fit across the column, never fewer than its tallest
+  control needs (a fader's length, a large knob; an upright fader at least
+  two). A layout ChannelView shows too keeps at least the rows its
   controls fill in ChannelView's window, so it's arranged as it is there.
   A locked layout keeps its own rows.
   A gain-reduction meter stands at the side as in ChannelView (click it
@@ -74,8 +97,7 @@ selection).
 - Containers and parallel runs are bracketed down the left; only the
   plugins inside one move in to make room. Click a container's strip for
   its menu. Drag a panel by its header to move the plugin.
-- Folding is its own, and so are its *View ▸ Control flow* (it starts
-  from ChannelView's) and its action bars: the four *Rack* places
+- Folding is its own, and so are its action bars: the four *Rack* places
   (a bar's right-click ▸ *Place*, or ☰ ▸ Drawers ▸ *New* in the rack).
   Its chevrons point up to fold a panel and down to open it.
 - **Collapse all**: the double chevron in its header folds every plugin;
@@ -323,7 +345,7 @@ outline would have nothing to stand against.
   project, so collapsing the reverb on the drum bus leaves the vocal's
   alone. ChannelView also remembers it per plugin: a plugin you last left
   collapsed comes in collapsed when you add it to the track you're on.
-* **ReaComp** gets a panel of its own, as ReaEQ does: a transfer curve
+* **(Pro) ReaComp** gets a panel of its own, as ReaEQ does: a transfer curve
   you drag. The threshold is a line across it (drag it up or down); the
   grips on its edges widen the knee, which turns the line into a band as
   wide as the knee and rounds the curve's corner; the curve's right-hand
@@ -461,7 +483,7 @@ outline would have nothing to stand against.
   knob. Right-click a control and set it there, or use the editor.
 * The strip along the bottom mirrors REAPER's track selection both ways.
 
-## The Trimmer
+## The Trimmer (Pro)
 
 ChannelView's own first-in-the-chain plugin (`TS_CV_Trimmer.jsfx`, shown as
 **Trimmer**): two VU meters, a trim for each channel, and a low cut and a
@@ -664,7 +686,7 @@ put them. Every bar is global, not per project.
   dialog for any other colour (palettes, a picker, the eyedropper). In a
   menu, a button's colour is a strip down its row's edge, beside its icon.
   The web page shows the same.
-- **Vendors.** Organise actions ▸ *Vendors…* gives each plugin developer
+- **(Pro) Vendors.** Organise actions ▸ *Vendors…* gives each plugin developer
   a colour, initials and a look, and every plugin button of theirs picks
   it up, new ones included: *Colour only*, *Initials tile* (the initials
   in a tile where the icon goes), *Colour fill* (the button's ground in
@@ -703,9 +725,104 @@ put them. Every bar is global, not per project.
 Rows fall out of the window height. Controls flow down a column and wrap
 into a new one, so a panel never scrolls vertically — the row of panels
 scrolls sideways instead. Make the dock taller and panels get narrower;
-make it shorter and they spread out. *View ▸ Control flow* switches
-between filling down-then-across (stable when you resize) and
-across-then-down (reads like a hardware strip).
+make it shorter and they spread out. A grid layout keeps its own
+arrangement instead (below).
+
+## Grid layouts (Pro)
+
+A layout can be a grid: every control has a place of its own on it, in
+quarter cells (an ordinary knob is 4 × 4, a small one 4 × 2, a large one
+6 × 6), and ChannelView, the rack and the web page all show it as it is.
+**Edit layout** makes a layout a grid as it opens it, keeping the
+arrangement it has now, in the rows the panel has: each control where it
+is, each divider a line, each column of controls between dividers a
+section, and a gap's background a section. The gaps themselves become
+empty space. Undo puts it back.
+
+- **Sections and lines.** A section is a group: a rectangle round some
+  controls, with an inset, a faceplate or a colour of your own behind
+  them, or none, and an outline, or none. A line is only a line, from one
+  corner of the grid to another, any way, in the theme's colour or
+  another. An outline's or a line's colour offers what a background
+  does: the faceplates', the plugin's own (From the plugin), recent
+  ones, or one of your own.
+- **Locked to start with.** A layout made a grid is locked: where it
+  doesn't fit it scrolls, up and down in ChannelView, sideways in the
+  rack. Unlock it (the padlock in the panel's foot, or **Locked** in the
+  grid editor) to have it flow instead.
+- **Too small for it, unlocked.** Where the grid doesn't fit (ChannelView
+  shorter than it, a rack column narrower) it flows: each section, with what's
+  on it, as one, and the controls on no section a run at a time. One that
+  fits keeps its arrangement and only moves; one that doesn't is laid out
+  afresh, its background stretched round it. In ChannelView they go down
+  then across, in the rack across then down. A line between two of them
+  is drawn between them still.
+- A control added to a grid layout goes on a new row under it.
+
+**Edit layout…** (the panel's ☰ menu, or a control's right-click) opens
+the grid editor, a window of its own. A layout that isn't a grid yet
+becomes one as it opens, arranged as it was (**Undo** puts it back).
+
+- **On the left**, the plugin's parameters (find one by name) and what
+  else a layout can hold: a line, a section, a virtual knob, button or
+  selector. Drag any of them onto the grid, or double-click a parameter to
+  put it where it first fits. With **Learn** ticked, touching a control in
+  the plugin's own window puts it on the panel. A parameter already on the
+  panel is greyed: click it to select it there, drag it to move it.
+- **In the middle**, the panel as it is, with the grid over it in quarter
+  cells. Drag a control to move it, and its corner to resize it: a knob
+  steps small, medium and large, a fader goes upright or across, a
+  dropdown takes any width, a section any size. A section shows as an
+  outline: drag it by its edge, and what's on it goes with it (inside it,
+  the grid works as anywhere else). To draw lines, click **Line** on the
+  left, then press on one corner of the grid and let go on another, any
+  way; click Line again (or right-click the grid) to stop. Drag a line's
+  end to move it, or the line to move it all. Two controls can't share a place unless
+  they have Show rules (they take turns). Drag a control back to the
+  list, or use **Take it off the panel** on the right, to remove it. The
+  numbers under and beside the grid insert or delete a column or row of
+  cells; **+** adds one at the end.
+- **On the right**, everything about what's selected. For a control: its
+  type, its alias and label, its values and scale, state names,
+  Show when, a virtual control's name, choices and actions, then its
+  **Style**, **Background** and **Copy and paste the style**, as its
+  right-click has them (automation stays on the right-click). Its size
+  (a knob's or a button's, a fader's length, thickness and way) is what
+  you draw it on the grid. A control that changes shape (a dropdown shown
+  as buttons, say) takes its own size where it is, if there's room. For a
+  section, **Outline** and **Fill**, side by side: click either for its
+  choices (the fill's finish and corners too). For a line, **Colour**. With nothing
+  selected, the panel itself: locked, fit the grid to what's on it, the
+  meters and live names, the faceplate, and **Switch layouts
+  automatically…**. The look menus work while ChannelView shows the
+  plugin's track.
+- **In ChannelView** and **In the rack** show the panel at a window height
+  or a column width of your choosing, flowing as it would there.
+- **Layout**, at the top: the plugin's layouts. The one picked is the one
+  this instance shows, and the one you edit. **New layout…** makes
+  another, under a name you give it: a copy of this one, empty (your
+  parameter names come with it), or **With a canvas** (an EQ, compressor
+  or other canvas, this layout's controls beside it), which opens the
+  canvas's setup.
+- On a canvas layout (an EQ, compressor or other canvas), the grid is the
+  controls beside the canvas, or under it in the rack. **Set up the
+  canvas…** on the right opens the canvas's own setup. **In ChannelView**
+  has a **Canvas width** too, and **In the rack** a **Canvas height**: the
+  canvas's own size for this layout (**Reset**: the usual).
+- **Several at once.** Ctrl+click adds a control to the selection or
+  takes it out, Shift+click adds it; drag a box on empty grid round what
+  you want (Ctrl+drag adds to it), Ctrl+click or Shift+click in the
+  parameter list, or **Select all**. Drag any of them and they all move,
+  as they are; drag them to the list to take them all off the panel. On
+  the right: **Align** (left, centre, right, top, middle, bottom),
+  **Distribute** (equal gaps across or down, three or more), and the
+  settings the controls share (size, scale, Show when, centred, reverse,
+  style, background), made on all of them. **Copy** and **Paste** make
+  copies where they first fit, here or in another of the plugin's
+  layouts: a virtual control gets a name of its own, and a parameter
+  already on the panel isn't pasted.
+- Every change is saved as you make it. **Undo** and **Redo** step back
+  and forward through what you've done since the window opened.
 
 ## Panel layout: sizes, button rows and sections
 
@@ -713,7 +830,8 @@ Controls sit on a grid of half-cells. An ordinary control is one cell;
 **View ▸ Control spacing** sets how wide a column is (46–64 px, 50 by
 default), shared with the TCP window and the web page.
 
-- **Sizes.** Right-click a knob ▸ Style ▸ Size: *Small* is half height — a
+- **Sizes.** *Size* in the editor (with Pro, also right-click a knob ▸
+  Style ▸ Size): *Small* is half height — a
   small dial under its name in small type, the value in the tooltip — so two
   stack in one cell; *Large* is half again as big. A toggle can be *Small*
   too: a half-height lit push-button with its name on it. A large knob in a
@@ -721,15 +839,15 @@ default), shared with the TCP window and the web page.
 - **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
   *Buttons down*: one button per choice, the current one lit. For 2 to 8
   choices; a column too tall for the panel shows as a dropdown.
-- **Raised dropdowns.** Right-click a dropdown ▸ Style ▸ *Raised*: the box
+- **(Pro) Raised dropdowns.** Right-click a dropdown ▸ Style ▸ *Raised*: the box
   becomes a dark cap like a *Backlit* button (unlit), standing off the
   faceplate with a shadow under it; *Flat* (the default) prints it on the
   panel. *Apply to every dropdown on this panel* does the rest.
-- **Sections.** A divider owns the controls after it, up to
+- **(Pro) Sections.** A divider owns the controls after it, up to
   the next divider. Right-click any of them ▸ Section to put them on an
   **inset** or on a **faceplate of their own**. To style the first group,
   start the panel with a divider with *Line* off.
-- **Backgrounds.** Right-click a control ▸ Background for an inset or a
+- **(Pro) Backgrounds.** Right-click a control ▸ Background for an inset or a
   faceplate behind that one control, over its section's. Neighbours with
   the same background — side by side, stacked, or facing each other across
   a divider — join into one rounded shape, always the full width of their
@@ -779,7 +897,7 @@ default), shared with the TCP window and the web page.
   right-click a tab for its colour. Dividers inside a page split its
   columns as usual. The panel is as wide as its widest page, and keeps
   the page it's on with the project.
-- **Show when.** A control can be shown only while another parameter of
+- **(Pro) Show when.** A control can be shown only while another parameter of
   the plugin — on the panel or not — reads a given way: *is*, *is not*,
   *is above*, *is below* or *is between*. Set it in the editor's *Show
   when* row: pick the parameter, then the comparison and the value, from
@@ -792,7 +910,7 @@ default), shared with the TCP window and the web page.
   dropdown, stepped knob or virtual control on the layout; anything else
   opens the editor at that control. Conditional controls are marked ◐ in
   the editor's panel list.
-- **Virtual controls.** A layout can have controls of its own that drive
+- **(Pro) Virtual controls.** A layout can have controls of its own that drive
   no parameter: a **button** (two named states), a **selector** (choices,
   as chips or a dropdown) or a **knob**. Add one with the editor's
   *Virtual* button; change its kind under *Type*. They're drawn in violet,
@@ -846,14 +964,15 @@ filter box takes the first match.
 Right-click a control for the quick things. The menu is in four parts:
 **Control** — what it does: *Show as*, *Name*, *Values*, *Centred fill* (a
 fader's; a knob's is *Style ▸ Value arc ▸ Centred*),
-*Reverse*, *Show when*; **Look** — *Style*, *Background*, *Section* and
-*Copy / paste style*; **Automate** — macros and modulators, its
+*Reverse*, *Show when* (Pro); **Look** (Pro) — *Style*, *Background*,
+*Section* and *Copy / paste style*; **Automate** — macros and modulators, its
 automation lane and REAPER's parameter modulation; **Arrange** — *Insert
 before* a gap, half-gap or divider, and *Remove from panel*. *Plugin ▸*
 at the foot collapses, moves or opens the whole plugin. Everything under
 Control is in the editor too; looks are set from the right-click only.
 *Edit parameters…* from a control opens the editor with that control
-selected.
+selected. With Pro, **Edit layout…** (see *Grid layouts*) takes its
+place.
 
 The panel menu (**=**) is in three parts: **Layout** (which layout, *Edit
 parameters…*, *Faceplate*, *Meters*, *Reset layout* — auto-fill, clear,
@@ -876,7 +995,7 @@ starting point.
 Nothing is written until you hit **Save** — and Save changes the panel of
 every instance on that layout, which the dialog says at the top.
 
-### More than one layout for a plugin
+### More than one layout for a plugin (Pro)
 
 A plugin's layout is shared by every instance of it, which is usually what
 you want. When it isn't — a Kontakt with a piano on one track and strings
@@ -911,7 +1030,7 @@ you've changes you haven't saved), and *Copy to new layout* / *New empty
 layout*, which work from what's in the editor — unsaved changes go to the
 new layout and the one you started from is left as it was.
 
-### Canvas layouts for any plugin
+### Canvas layouts for any plugin (Pro)
 
 ReaEQ and ReaComp have canvases of their own. Any other plugin of the right
 kind can have one too, as a layout: panel menu **=** ▸ *Layout* ▸ **New
@@ -1043,9 +1162,10 @@ tooltip, the numbers round the dial and the web page. *The plugin's own*
 goes back. The same is in the editor's *Values* row. For a knob, *Values*
 also holds the **numbers round the dial**: *None*, *Values* or *0–10*.
 
-## Hardware looks
+## Hardware looks (Pro)
 
-Right-click a knob or fader ▸ **Style** to give it a hardware face, and the
+Everything here is Pro except **Track faders** and **Background tint**, at
+the end. Right-click a knob or fader ▸ **Style** to give it a hardware face, and the
 panel's **=** menu ▸ **Faceplate** to change the panel behind it.
 
 - **Knobs:** *Arc* (the theme's own, and the default), *Skirted*, *Pointer*,
@@ -1270,6 +1390,9 @@ its `_on` partner while it's on).
 | `TS_CV_Util.lua` | name cleaning, INI, parameter helpers |
 | `TS_CV_FXTree.lua` | container-aware FX chain walk |
 | `TS_CV_Mappings.lua` | the layout library |
+| `TS_CV_Edition.lua` | Standard or Pro: finds Pro's files, and greys Pro's menu items without them |
+| `TS_CV_Pro.lua` | ChannelView Pro's package; Standard looks for it (Pro) |
+| `TS_CV_GridEditor.lua` | the grid editor (*Edit layout*) (Pro) |
 | `TS_CV_Widgets.lua` | knob / button / stepped-value drawing |
 | `TS_CV_Panel.lua` | one plugin's panel |
 | `TS_CV_Editor.lua` | the Setup Edit Parameters dialog |
@@ -1286,20 +1409,20 @@ its `_on` partner while it's on).
 | `TS_CV_Mod.lua` | macros and modulators: the plugin, the links, ranges and swings |
 | `TS_CV_ModRack.lua` | the Macros and Modulators panels |
 | `TS_CV_Modulators.jsfx` | the ChannelView Modulators plugin. Goes in `Effects/` |
-| `TS_CV_CanvasSetup.lua` | setting up a canvas layout for any plugin |
-| `TS_CV_RolePanel.lua` | the canvases for gates, limiters, multiband, de-essers, saturation, delays, reverbs, modulation and envelopes |
-| `TS_CV_Delay.lua` | the delay canvas's model: every delay as echo lines or taps |
+| `TS_CV_CanvasSetup.lua` | setting up a canvas layout for any plugin (Pro) |
+| `TS_CV_RolePanel.lua` | the canvases for gates, limiters, multiband, de-essers, saturation, delays, reverbs, modulation and envelopes (Pro) |
+| `TS_CV_Delay.lua` | the delay canvas's model: every delay as echo lines or taps (Pro) |
 | `TS_CV_ReaFX.lua` | ReaDelay's and ReaVerbate's canvases, and adding and removing ReaDelay taps |
 | `TS_CV_Busy.lua` | backing off while REAPER is busy |
-| `TS_CV_MapPanel.lua` | an EQ layout's canvas |
-| `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them |
+| `TS_CV_MapPanel.lua` | an EQ layout's canvas (Pro) |
+| `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them (Pro) |
 | `TS_CV_AutoFloat.lua` | View ▸ Float plugins without controls: opening and closing their windows |
-| `TS_CV_PluginColours.lua` | A plugin's own colours, read off its window |
+| `TS_CV_PluginColours.lua` | A plugin's own colours, read off its window (Pro) |
 | `TS_CV_Freeze.lua` | freezing: REAPER's own, with the frozen plugins shown where they were and ChannelView's own plugins kept live |
-| `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: EQ bands, thresholds, reverb decay, saturation |
-| `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` |
-| `TS_CV_Trimmer.jsfx` | the Trimmer plugin. Goes in `Effects/` |
-| `TS_CV_Trimmer.lua`, `TS_CV_TrimmerPanel.lua` | the Trimmer's insert, auto trim and listen; its panel |
+| `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: EQ bands, thresholds, reverb decay, saturation (Pro) |
+| `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` (Pro) |
+| `TS_CV_Trimmer.jsfx` | the Trimmer plugin. Goes in `Effects/` (Pro) |
+| `TS_CV_Trimmer.lua`, `TS_CV_TrimmerPanel.lua` | the Trimmer's insert, auto trim and listen; its panel (Pro) |
 | `TS_CV_Units.lua` | reading a plugin's values from its own text (dB, Hz, ms, ratios) |
 | `TS_TrackProbe.jsfx` | the probe that measures it (shared with Track Analyser). Goes in `Effects/` |
 | `TS_CV_Sends.lua` | the pinned Sends panel and its add menu |
@@ -1308,14 +1431,14 @@ its `_on` partner while it's on).
 | `TS_ChannelView_ToggleMixer.lua` | the *Toggle mixer view* action, for a shortcut or toolbar |
 | `TS_CV_Toolbar.lua` | an action bar: its buttons, menus, switches, icon picker |
 | `TS_CV_FXButtons.lua` | buttons that add a plugin or an FX chain |
-| `TS_CV_Vendors.lua` | a colour, initials and a look per plugin vendor |
-| `TS_CV_Finish.lua`, `textures/` | faceplate, section and background finishes, and their texture tiles (copied to `reaper_www_root/` for the web page) |
-| `TS_CV_Switches.lua` | the switch styles for toggles |
-| `TS_CV_Light.lua` | the one light and the shadows |
+| `TS_CV_Vendors.lua` | a colour, initials and a look per plugin vendor (Pro) |
+| `TS_CV_Finish.lua`, `textures/` | faceplate, section and background finishes, and their texture tiles (copied to `reaper_www_root/` for the web page) (Pro) |
+| `TS_CV_Switches.lua` | the switch styles for toggles (Pro) |
+| `TS_CV_Light.lua` | the one light and the shadows (Pro) |
 | `TS_CV_KnobParts.lua` | knobs drawn from parts, for the recipes and your own looks |
-| `TS_CV_KnobEditor.lua` | the *Knob look* window |
-| `TS_CV_Recipes.lua` | your knob recipes |
-| `TS_ChannelView_Rack.lua` | **ChannelView Rack**: the plugins down a column |
+| `TS_CV_KnobEditor.lua` | the *Knob look* window (Pro) |
+| `TS_CV_Recipes.lua` | your knob recipes (Pro) |
+| `TS_ChannelView_Rack.lua` | **ChannelView Rack**: the plugins down a column (Pro) |
 | `TS_CV_Drawers.lua` | every action bar and where it is: drawers, windows, the TCP's, the web's |
 | `TS_CV_ActionEditor.lua` | the Organise actions window, and importing and exporting bars |
 | `TS_CV_ActionIcons.lua` | drawing ChannelView's icons, and finding the one made for an action |
@@ -1325,9 +1448,9 @@ its `_on` partner while it's on).
 | `TS_CV_Startup.lua` | the Run-when-REAPER-starts option, and the `__startup.lua` surgery |
 | `TS_CV_State.lua` | per-instance view state (collapsed), saved in the project |
 | `TS_CV_Steps.lua` | cached choices for stepped parameters (derived, deletable) |
-| `TS_ChannelView_Web.lua` | the web companion's bridge — see *On a tablet* |
-| `TS_ChannelView.html` | the web companion's page. Goes in `reaper_www_root/` |
-| `TS_ChannelView.webapp.json`, `TS_ChannelView-*.png` | what lets a tablet install the page as an app, and its icons. Go in `reaper_www_root/` |
+| `TS_ChannelView_Web.lua` | the web companion's bridge — see *On a tablet* (Pro) |
+| `TS_ChannelView.html` | the web companion's page. Goes in `reaper_www_root/` (Pro) |
+| `TS_ChannelView.webapp.json`, `TS_ChannelView-*.png` | what lets a tablet install the page as an app, and its icons. Go in `reaper_www_root/` (Pro) |
 | `dev/TS_CV_Test.lua` | offline tests — see `dev/NOTES.md`. Not installed |
 | `dev/NOTES.md` | developer notes: how parts of it work and the pitfalls behind them. Not installed |
 | `TS_CV_Diag.lua` | dumps what REAPER reports about the selected track's FX, and how much of your plugin collection the FX index resolves |
@@ -1352,7 +1475,7 @@ and importing them asks first. A layout you've locked here isn't replaced
 is kept as the `.bak`. The file is an ordinary layout library, so a whole
 `TS_ChannelView_Mappings.ini` imports too.
 
-## On a tablet: the web companion
+## On a tablet: the web companion (Pro)
 
 `TS_ChannelView.html` puts ChannelView in a browser — built for an iPad in
 landscape beside the desk, and fine in any modern browser. It shows the
@@ -1513,9 +1636,15 @@ waiting. The web companion backs off the same way.
 
 ## Installing
 
-Actions ▸ Show action list ▸ New action ▸ Load ReaScript… ▸ `TS_ChannelView.lua`.
-Needs the **ReaImGui** extension (ReaPack). SWS is optional — it only powers
-*Layouts ▸ Show the library file*. For the tablet page, see *On a tablet* above.
+**ChannelView:** Extensions ▸ ReaPack ▸ Browse packages ▸ *TS_ChannelView*
+(the TS-ReaScripts repository) ▸ Install, then run it from the Actions
+list. Needs the **ReaImGui** extension (ReaPack). SWS is optional — it only
+powers *Layouts ▸ Show the library file*.
+
+**ChannelView Pro:** Extensions ▸ ReaPack ▸ Import repositories ▸ paste the
+link that comes with Pro, then Browse packages ▸ *ChannelView Pro* ▸
+Install, beside ChannelView. Keep the two on the same version: update them
+together. For the tablet page, see *On a tablet* above.
 
 ## Stepped parameters
 
@@ -1767,7 +1896,7 @@ own reduction; those are tapped for their levels alone. Gain reduction and
 levels together share the limit of four plugins per track. On a canvas the
 two meters run down the panel's left and right edges.
 
-### The gain-reduction trace
+### The gain-reduction trace (Pro)
 
 **Click a gain-reduction meter** and it opens out into a trace beside it:
 the plugin's own output waveform, its input faintly behind, and its

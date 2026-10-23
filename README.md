@@ -6,7 +6,7 @@ what the mix as a whole is doing.
 
 | | |
 |---|---|
-| **[ChannelView](TS_ChannelView/)** | A docked channel strip: one editable control panel per plugin on the selected track. Pick the parameters you actually reach for, lay them out once, and every instance of that plugin comes up the same way. Gain reduction meters for every compressor, including ones that don't report it. Also on a tablet, through REAPER's web interface. |
+| **[ChannelView](TS_ChannelView/)** | A docked channel strip: one editable control panel per plugin on the selected track. Pick the parameters you actually reach for, lay them out once, and every instance of that plugin comes up the same way. Gain reduction meters for every compressor, including ones that don't report it. **ChannelView Pro**, an add-on with its own ReaPack link, adds grid layouts, the rack, a tablet page, canvases and hardware looks. |
 | **[Track Analyser](TS_TrackAnalyser/)** | A docked two-panel display showing what your processing is *doing* — the measured magnitude response of whatever sits between two probes, drawn over the spectrum, plus a before/after waveform with gain reduction over it. Nothing is modelled; both panels read the audio. |
 | **[TS_Visualizer](TS_Visualizer/)** | A docked metering window: LUFS, goniometer, oscilloscope, spectrum, spectrogram, a Dynamics plot of loudness against PSR with targets, and a per-track spectrum overlay. A fork of Junki Kim's JKK_Visualizer, sharing the other tools' colour controls. |
 | **[TS_360LinkFollow](TS_360LinkFollow/)** | For the SSL UF8 / UC1: hide a track in REAPER and its SSL 360 Link strip leaves the 360 Plug-in Mixer and the UF8; show it and the strip comes back. A background toggle that sets 360 Link offline on hidden tracks. |
@@ -46,8 +46,6 @@ Download the repo, then:
 - `TS_TrackAnalyser/*.lua` → `REAPER/Scripts/TS_TrackAnalyser/`
 - `TS_TrackAnalyser/TS_TrackProbe.jsfx` → `REAPER/Effects/TS_TrackAnalyser/`
   (ChannelView needs it too; one copy is enough)
-- `TS_ChannelView/TS_ChannelView.html` → `REAPER/reaper_www_root/` (the
-  tablet page; optional — see ChannelView's README)
 - `TS_Visualizer/*.lua` → `REAPER/Scripts/TS_Visualizer/`, and
   `TS_Visualizer/TS_Visualizer.jsfx` → `REAPER/Effects/TS_Visualizer/`
 - `TS_360LinkFollow/TS_360LinkFollow.lua` → `REAPER/Scripts/` (load it as an
@@ -90,7 +88,7 @@ warning. The script says so plainly when it happens.
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Use it, change it, ship it; just keep the
-copyright notice.
+copyright notice. ChannelView Pro isn't in this repo and isn't MIT.
 
 ## Credits
 

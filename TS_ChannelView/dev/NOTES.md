@@ -645,3 +645,34 @@ least 1 % (near ones merged), accents are hue buckets of saturated, bright
 pixels, each the average of its brightest core so anti-aliased edges don't
 pull it toward the plate. The result goes in the layout's `Palette=` line.
 Windows only: elsewhere the screen can't be read this way.
+
+## Standard and Pro
+
+ChannelView (TS_ChannelView.lua's @provides, the public TS-ReaScripts repo)
+and ChannelView Pro (TS_CV_Pro.lua's @provides, a private repo with its own
+ReaPack link) are two packages that must be the same release. ReaPack puts
+them in Scripts/TS-ReaScripts/TS_ChannelView/ and
+Scripts/TS-ChannelView-Pro/TS_ChannelView/; TS_CV_Edition adds both to
+package.path as it loads, and Pro's own entry scripts add Standard's.
+
+- `ED.PRO` is TS_CV_Pro's table when it's there and its RELEASE matches
+  `ED.RELEASE`; a mismatch is ignored and named in the greyed items'
+  tooltip. Bump both together.
+- A Pro module is reached only through `ED.module(name, stub)`: nil, or the
+  stub (`ED.stub`, every name a no-op) for modules called from many places.
+  `ED.light()` and `ED.switches()` are the Light and Switches with plain
+  stand-ins. A direct `require` of a Pro module outside an `ED.PRO` branch
+  breaks Standard; TS_CV_StandardTest catches it.
+- Pro menu items go through `ED.item` / `ED.menu`, which grey them with
+  "(Pro)" and a tooltip without Pro.
+- Widgets' `plain(o)` takes a control's style, look, cap colour and arc off
+  without Pro, so a styled layout draws with the Arc knob and Flat button.
+  The layout itself keeps them.
+- `TS_CV_EDITION = "standard"` (a global set before anything loads) forces
+  Standard: `lua5.4 dev/TS_CV_StandardTest.lua` loads every module in
+  Standard's @provides with Pro's blocked, then checks what Standard does
+  with a layout Pro made.
+- One working copy holds both in REAPER's own folders. The Pro repo's
+  `tools/split.sh` copies Pro's files into it and Standard's into a
+  portable REAPER, and TS-ReaScripts' `tools/sync-from-reaper.sh` leaves
+  out everything in the Pro repo's `pro-files.txt`.

@@ -309,7 +309,8 @@ function DR.web_vendors(text)
   if not text or text == "" then return text end
   local arr = DR.json_decode(text)
   if type(arr) ~= "table" then return text end
-  require("TS_CV_Vendors").load(true)
+  local VN = require("TS_CV_Edition").module("TS_CV_Vendors")
+  if VN then VN.load(true) end
   return enc_list(DR.to_web(DR.from_web(arr)))
 end
 

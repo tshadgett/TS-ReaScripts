@@ -132,6 +132,21 @@
   at its marks, "ten" 0 to 10; "|cap" prints them in the cap's colour.
   Medium and large knobs only (a small one has no room).
 
+  GRIDS: Grid=<columns>x<rows> makes the layout a grid, measured in
+  quarter cells (an ordinary knob is 4 x 4, a small one 4 x 2, a large
+  one 6 x 6), and At<n>=<column>,<row>,<width>,<height> puts control n
+  on it. A divider is a line from <column>,<row> to <column + width>,
+  <row + height>, any way (width and height may be below 0), and its
+  ends may be at a half. A "section" control (Ctl<n>=-1|section|0|) is a
+  group, a rectangle round the controls on it, styled with the same
+  lines as a divider's section (Style<n> inset or plate|<faceplate>,
+  Brush, Finish, Metal, Corners) or with none, and Edge<n> for an outline
+  (a faceplate's colour or #rrggbb); a line's Edge<n> is its colour.
+  Empty space
+  is a gap: a grid has no blank or half_gap. Controls whose Show rules
+  take turns can share a place. A layout without Grid is laid out down
+  then across, as before (TS_CV_Panel P.layout).
+
   VARIANTS: a section named "<plugin> :: <name>" is another layout for
   the same plugin, picked per instance from the panel's menu (Layout).
   Which instance shows which is kept with the project, not here.
@@ -261,7 +276,7 @@ local FILE_NAME  = "TS_ChannelView_Mappings.ini"
 local BAK_NAME   = "TS_ChannelView_Mappings.bak.ini"
 local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Ctl<n>=<param index>|<type>|<bipolar 0|1>|<label>\n"
-                .. ";   type: knob | toggle | combo | stepped | fader | xy | dual | blank | divider | half_gap | page\n"
+                .. ";   type: knob | toggle | combo | stepped | fader | xy | dual | blank | divider | half_gap | page | section\n"
                 .. ";   label overrides the alias for that one slot only\n"
                 .. "; Alias<param>=<your name for that parameter, used everywhere>\n"
                 .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>\n"
@@ -288,7 +303,12 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Metal=1: a metallic flake on the faceplate\n"
                 .. "; Finish=<finish>: the faceplate's finish (as Finish<n>)\n"
                 .. "; Palette=<surfaces>|<accents>: the plugin's own colours, sampled from its window\n"
-                .. "; Lock=<rows>: layout locked, arranged at that many rows"
+                .. "; Lock=<rows>: layout locked, arranged at that many rows (a grid: never flows, scrolls instead)\n"
+                .. "; Grid=<columns>x<rows>: the layout is a grid, in quarter cells (an ordinary knob is 4x4)\n"
+                .. "; At<n>=<column>,<row>,<width>,<height>: control n's place on the grid, in quarter cells\n"
+                .. ";   (a divider: a line to <column + width>,<row + height>, either way; a section: its rectangle)\n"
+                .. "; Edge<n>=<faceplate, or #rrggbb>: section n's outline, or line n's colour\n"
+                .. "; CanvasW=<px>, CanvasH=<px>: a canvas layout's canvas, its width in ChannelView, its height in the rack"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -311,7 +331,7 @@ end
 
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
-                     xy = true, dual = true, page = true }
+                     xy = true, dual = true, page = true, section = true }
 
 -- ---------------------------------------------------------------------
 
@@ -465,6 +485,42 @@ local function corners_of(v)
   return CORNERS[v] and v or nil
 end
 M.corners_of = corners_of
+
+-- At<n>=c,r,w,h: a place on a grid, in quarter cells; nil when it isn't one.
+-- (a line's runs from c, r to c + w, r + h, either way: w and h may be
+-- below 0; anything else's are its size)
+local function at_of(v, line)
+  local c, r, w, h = U.trim(v or ""):match("^(%-?[%d%.]+)%s*,%s*(%-?[%d%.]+)%s*,%s*(%-?[%d%.]+)%s*,%s*(%-?[%d%.]+)$")
+  c, r, w, h = tonumber(c), tonumber(r), tonumber(w), tonumber(h)
+  if not (c and r and w and h) or c < 0 or r < 0 then return nil end
+  if line then
+    if (w == 0 and h == 0) or c + w < 0 or r + h < 0 then return nil end
+  elseif w < 0 or h < 0 or (w <= 0 and h <= 0) then
+    return nil
+  end
+  return { c = c, r = r, w = w, h = h }
+end
+-- the corners of a place, whichever way a line runs: c0, r0, c1, r1
+function M.at_box(a)
+  return math.min(a.c, a.c + a.w), math.min(a.r, a.r + a.h), math.max(a.c, a.c + a.w), math.max(a.r, a.r + a.h)
+end
+M.at_of = at_of
+local function num(n) return (math.tointeger(n) and tostring(math.tointeger(n))) or ("%g"):format(n) end
+function M.at_line(at)
+  if not at then return nil end
+  return num(at.c) .. "," .. num(at.r) .. "," .. num(at.w) .. "," .. num(at.h)
+end
+-- Grid=<columns>x<rows>, in quarter cells; nil when the layout isn't a grid.
+local function grid_of(v)
+  local w, h = U.trim(v or ""):match("^(%d+)%s*[xX]%s*(%d+)$")
+  w, h = tonumber(w), tonumber(h)
+  if not (w and h) or w < 1 or h < 1 then return nil end
+  return { cols = math.min(w, 400), rows = math.min(h, 400) }
+end
+M.grid_of = grid_of
+-- Whether a layout is a grid (a canvas layout's: the controls beside
+-- the canvas).
+function M.is_grid(layout) return layout ~= nil and layout.grid ~= nil end
 
 -- A layout's faceplate finish: its Finish if it has one, else brushed when
 -- Brush (or the faceplate's own grain) says so. nil: plain.
@@ -724,6 +780,11 @@ function M.canvas_of(sect)
       end
     end
   end
+  -- its size: ChannelView's width, the rack's height (pixels; none: the
+  -- usual)
+  local cw, chh = tonumber(U.trim(sect.CanvasW or "")), tonumber(U.trim(sect.CanvasH or ""))
+  cv.w = (cw and cw >= 160 and cw <= 2000) and math.floor(cw) or nil
+  cv.h = (chh and chh >= 100 and chh <= 1200) and math.floor(chh) or nil
   return cv
 end
 
@@ -776,11 +837,14 @@ function M.canvas_lines(cv, out)
       if p then out["Role" .. r] = tostring(p) .. ((cv.rev and cv.rev[r]) and "|rev" or "") end
     end
   end
+  if cv.w then out.CanvasW = tostring(math.floor(cv.w)) end
+  if cv.h then out.CanvasH = tostring(math.floor(cv.h)) end
 end
 
 function M.copy_canvas(cv)
   if not cv then return nil end
   local out = { kind = cv.kind, all_on = cv.all_on, model = cv.model, no_model = cv.no_model, nb = cv.nb, nt = cv.nt, ref0 = cv.ref0, dshape = cv.dshape,
+                w = cv.w, h = cv.h,
                  dmodes = cv.dmodes and M.dl_modes_parse(M.dl_modes_write(cv.dmodes)) or nil,
                  sat_cal = cv.sat_cal and M.sat_decode(M.sat_encode(cv.sat_cal)) or nil }
   if cv.bands then
@@ -1387,7 +1451,10 @@ local function parse_section(sect)
         metal   = (U.trim(sect["Metal" .. i] or "") == "1") or nil,
         scale   = scale_of(sect["Scale" .. i]),
         scale_ink = scale_ink_of(sect["Scale" .. i]),
-        show    = (t ~= "page") and M.show_of(sect["Show" .. i]) or nil,
+        show    = (t ~= "page" and t ~= "section") and M.show_of(sect["Show" .. i]) or nil,
+        at      = at_of(sect["At" .. i], t == "divider"),
+        -- a section's outline or a line's colour: a faceplate's or your own
+        edge    = (t == "section" or t == "divider") and C.plate_key(U.trim(sect["Edge" .. i] or "")) or nil,
         virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i], sect["VAct" .. i]) or nil,
       }
       -- a virtual selector shown as chips: one for each of its choices
@@ -1412,6 +1479,9 @@ local function parse_section(sect)
     end
     i = i + 1
   end
+  -- a grid's size goes with its controls, for the panel to lay out
+  local grid = grid_of(sect.Grid)
+  controls.grid = grid
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
            canvas = M.canvas_of(sect), switch = M.switch_of(sect),
            live = (U.trim(sect.Live or "") == "1") or nil,
@@ -1422,7 +1492,8 @@ local function parse_section(sect)
            finish = finish_of(sect.Finish),
            metal = (U.trim(sect.Metal or "") == "1") or nil,
            palette = M.palette_of(sect.Palette),
-           lock = lock_of(sect.Lock) }
+           lock = lock_of(sect.Lock),
+           grid = grid }
 end
 
 -- Palette=: the plugin's own colours, sampled from its window (Faceplate >
@@ -1462,6 +1533,7 @@ local function serialize(layout)
   if finish_of(layout.finish) then out.Finish = layout.finish end
   if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
+  if layout.grid then out.Grid = math.floor(layout.grid.cols) .. "x" .. math.floor(layout.grid.rows) end
   out.Palette = M.palette_line(layout.palette)
   M.canvas_lines(layout.canvas, out)
   if layout.meter then
@@ -1511,7 +1583,7 @@ local function serialize(layout)
     if shape_line(c) then out["Shape" .. (i - 1)] = shape_line(c) end
     if back_of(c.back) then out["Back" .. (i - 1)] = back_of(c.back) end
     -- the grain of its background, or a divider's section, when it has one
-    local styled = back_of(c.back) or (c.type == "divider" and (c.style == "inset" or c.style == "plate"))
+    local styled = back_of(c.back) or ((c.type == "divider" or c.type == "section") and (c.style == "inset" or c.style == "plate"))
     if styled and c.brush ~= nil then out["Brush" .. (i - 1)] = c.brush and "1" or "0" end
     if styled and finish_of(c.finish) then out["Finish" .. (i - 1)] = c.finish end
     if styled and corners_of(c.corners) then out["Corners" .. (i - 1)] = c.corners end
@@ -1534,7 +1606,9 @@ local function serialize(layout)
     if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
-    if c.show and c.type ~= "page" then out["Show" .. (i - 1)] = M.show_line(c.show) end
+    if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
+    if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
+    if (c.type == "section" or c.type == "divider") and C.plate_key(c.edge) then out["Edge" .. (i - 1)] = C.plate_key(c.edge) end
     if c.virtual and (c.param or -1) < 0 then
       out["Virt" .. (i - 1)] = M.virt_line(c.virtual)
       local va = M.vact_line(c.virtual.actions, #(M.vchoices(c) or {}))
@@ -2529,7 +2603,8 @@ function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
-                lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)) }
+                lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)),
+                grid = layout.grid and { cols = layout.grid.cols, rows = layout.grid.rows } or nil }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end
@@ -2542,13 +2617,15 @@ function M.copy(layout)
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
-                        invert2 = c.invert2,
+                        invert2 = c.invert2, edge = c.edge,
+                        at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),
                                             norm = c.show.norm, norm2 = c.show.norm2,
                                             tol = c.show.tol } or nil,
                         virtual = c.virtual and { start = c.virtual.start, choices = { table.unpack(c.virtual.choices or {}) },
                                                   actions = c.virtual.actions and M.vact_of(M.vact_line(c.virtual.actions, 64)) or nil } or nil }
   end
+  out.controls.grid = out.grid
   for p, n in pairs(layout.aliases or {}) do out.aliases[p] = n end
   out.canvas = M.copy_canvas(layout.canvas)
   out.switch = M.copy_rules(layout.switch)
