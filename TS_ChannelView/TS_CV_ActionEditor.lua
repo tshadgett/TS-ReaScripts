@@ -985,13 +985,12 @@ draw_share = function(ctx)
   ImGui.SetNextWindowSize(ctx, 420, 0, ImGui.Cond_Appearing)
   local visible, open = ImGui.BeginPopupModal(ctx, title, true, ImGui.WindowFlags_AlwaysAutoResize)
   if not visible then
-    if not open then share = nil
-    -- closed before it was ever shown (a change of focus closes popups):
-    -- opened again
-    elseif not share.shown then share.open = true end
+    -- closed with its x: gone. Closed any other way, it was a change of
+    -- focus (the window coming forward, or REAPER's own file dialog
+    -- handing it back), which closes popups: opened again
+    if not open then share = nil else share.open = true end
     return
   end
-  share.shown = true
   local d = share
   local function close() share = nil; ImGui.CloseCurrentPopup(ctx) end
   if d.mode == "import" then

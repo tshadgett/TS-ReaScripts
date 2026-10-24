@@ -1,14 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.1.0
+-- @version 3.1.1
 -- @changelog
---  Bypass modulation: a power button for each modulator and one for all,
---  and an action for a key or toolbar button. Smart folders list their
---  plugins, and a search can be saved as one. Large submenus (was Large
---  items) draws a menu's submenus as the bar's buttons. The probes leave
---  a sidechain alone: their spare inputs start unplugged, and a plugin
---  routed onto the taps' channels on purpose keeps its routing. With Pro,
---  ReaGate and ReaLimit start with canvases. See the CHANGELOG.
+--  Organise actions: Import shows its list of bars again after you pick a
+--  file (3.1.0 opened the file picker and then nothing).
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

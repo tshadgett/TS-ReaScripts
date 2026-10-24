@@ -1,5 +1,11 @@
 # ChannelView — changelog
 
+## 3.1.1 — Import fixed
+
+- **Organise actions ▸ Import…** shows its list of bars again after you
+  pick a file (3.1.0 opened the file picker and then nothing). ChannelView
+  Pro moves to 3.1.1 with it, unchanged: update both.
+
 ## 3.1.0 — bypass modulation, smart folders
 
 Update ChannelView and ChannelView Pro together.
