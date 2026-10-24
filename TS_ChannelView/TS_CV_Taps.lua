@@ -747,6 +747,21 @@ local function container_used(tr, c, used)
   end
 end
 
+-- The channels the track's sends read and its receives arrive on (hardware
+-- outputs too), into `used`.
+local function routing_channels(tr, used)
+  for i = 0, reaper.GetTrackNumSends(tr, 0) - 1 do
+    TP.send_channels(reaper.GetTrackSendInfo_Value(tr, 0, i, "I_SRCCHAN"), used)
+  end
+  for i = 0, reaper.GetTrackNumSends(tr, 1) - 1 do
+    TP.send_channels(reaper.GetTrackSendInfo_Value(tr, 1, i, "I_SRCCHAN"), used)
+  end
+  for i = 0, reaper.GetTrackNumSends(tr, -1) - 1 do
+    TP.send_channels(reaper.GetTrackSendInfo_Value(tr, -1, i, "I_DSTCHAN"), used)
+  end
+  return used
+end
+
 -- Every channel something at this level reads or writes, plus sends and
 -- receives at the top.
 local function used_channels(tr, lv)
@@ -755,21 +770,162 @@ local function used_channels(tr, lv)
   -- set: neither makes a channel unusable -- items_used skips them.)
   items_used(tr, lv.items, used)
   if not lv.caddr then
-    for i = 0, reaper.GetTrackNumSends(tr, 0) - 1 do
-      TP.send_channels(reaper.GetTrackSendInfo_Value(tr, 0, i, "I_SRCCHAN"), used)
-    end
-    for i = 0, reaper.GetTrackNumSends(tr, 1) - 1 do
-      TP.send_channels(reaper.GetTrackSendInfo_Value(tr, 1, i, "I_SRCCHAN"), used)
-    end
-    for i = 0, reaper.GetTrackNumSends(tr, -1) - 1 do
-      TP.send_channels(reaper.GetTrackSendInfo_Value(tr, -1, i, "I_DSTCHAN"), used)
-    end
+    routing_channels(tr, used)
   else
     local ok, ni = reaper.TrackFX_GetNamedConfigParm(tr, lv.caddr, "container_nch_in")
     local ok2, no = reaper.TrackFX_GetNamedConfigParm(tr, lv.caddr, "container_nch_out")
     for c = 1, math.max(tonumber(ok and ni or 0) or 0, tonumber(ok2 and no or 0) or 0) do used[c] = true end
   end
   return used
+end
+
+-- ---------------------------------------------------------------------
+-- REAPER side: plugins kept at the channels they had
+-- ---------------------------------------------------------------------
+
+-- Many VST3s follow their track's channel count (REAPER's channel_config
+-- 0): Pro-C 3 is stereo on a 2-channel track, quad on 4, 9.1.6 on 16. So
+-- when the copies need more channels, such a plugin would change layout
+-- and REAPER would wire every pin afresh: its sidechain pins move up past
+-- the new main inputs, and a sidechain routed to it stops arriving. Before
+-- a level gets more channels, each plugin there that follows the count is
+-- held at the count the level had (channel_config N), as is one added
+-- later; the record (P_EXT:TS_CV_HOLD) keeps that count and who was held,
+-- per level ("TOP", or a container's GUID), so removing the probes puts
+-- them back. The probes and ChannelView's own plugins are never held.
+local HOLD_KEY = "P_EXT:TS_CV_HOLD"
+
+local function read_holds(tr)
+  local ok, s = reaper.GetSetMediaTrackInfo_String(tr, HOLD_KEY, "", false)
+  local t = {}
+  for e in ((ok and s) or ""):gmatch("[^;]+") do
+    local key, n0, gs = e:match("^([^|]+)|(%d+)|(.*)$")
+    if key then
+      local held = {}
+      for g in gs:gmatch("[^,]+") do held[g] = true end
+      t[key] = { n0 = tonumber(n0), held = held }
+    end
+  end
+  return t
+end
+
+local function write_holds(tr, t)
+  local parts = {}
+  for key, h in pairs(t) do
+    local gs = {}
+    for g in pairs(h.held) do gs[#gs + 1] = g end
+    table.sort(gs)
+    parts[#parts + 1] = key .. "|" .. math.floor(h.n0) .. "|" .. table.concat(gs, ",")
+  end
+  table.sort(parts)
+  reaper.GetSetMediaTrackInfo_String(tr, HOLD_KEY, table.concat(parts, ";"), true)
+end
+
+-- Whether a plugin takes its level's channel count (channel_config 0).
+local function follows_count(tr, a)
+  local ok, v = reaper.TrackFX_GetNamedConfigParm(tr, a, "channel_config")
+  return ok and tonumber((v or ""):match("^%s*(%-?%d+)")) == 0
+end
+
+local function own_plugin(tr, a)
+  if is_probe(tr, a) then return true end
+  local n = fx_name(tr, a)
+  return n:find("ChannelView Modulators", 1, true) ~= nil or n:find("TS_CV_Modulators", 1, true) ~= nil
+end
+
+-- Holds each plugin among `items` that follows the count at h.n0, noting
+-- it in h.held. True when it held any.
+local function hold_items(tr, items, h)
+  local any = false
+  for _, a in ipairs(items) do
+    if not own_plugin(tr, a) and follows_count(tr, a) then
+      reaper.TrackFX_SetNamedConfigParm(tr, a, "channel_config", tostring(h.n0))
+      h.held[fx_guid(tr, a)] = true
+      any = true
+    end
+  end
+  return any
+end
+
+-- A level's channel count (the track's, `caddr` nil, or a container's).
+local function level_nch(tr, caddr)
+  if caddr then return nconf(tr, caddr, "container_nch", 2) end
+  return math.floor(reaper.GetMediaTrackInfo_Value(tr, "I_NCHAN"))
+end
+
+-- Gives a level at least `want` channels, its plugins held first.
+local function widen(tr, caddr, want)
+  local n = level_nch(tr, caddr)
+  if n >= want then return end
+  local t = read_holds(tr)
+  local key = caddr and fx_guid(tr, caddr) or "TOP"
+  local h = t[key] or { n0 = n, held = {} }
+  t[key] = h
+  hold_items(tr, level_items(tr, caddr), h)
+  write_holds(tr, t)
+  if caddr then reaper.TrackFX_SetNamedConfigParm(tr, caddr, "container_nch", tostring(want))
+  else reaper.SetMediaTrackInfo_Value(tr, "I_NCHAN", want) end
+end
+
+-- A plugin added since a level was widened, that follows the count, held
+-- too (one undo step, only when there's one). True when it held any.
+local function keep_held(tr)
+  local t = read_holds(tr)
+  if not next(t) then return false end
+  local map
+  local todo = {}
+  for key, h in pairs(t) do
+    local caddr
+    if key ~= "TOP" then
+      map = map or guid_map(tr)
+      caddr = map[key]
+    end
+    if key == "TOP" or caddr then
+      for _, a in ipairs(level_items(tr, caddr)) do
+        if not own_plugin(tr, a) and follows_count(tr, a) then todo[#todo + 1] = { a, h } end
+      end
+    end
+  end
+  if #todo == 0 then return false end
+  reaper.Undo_BeginBlock()
+  for _, e in ipairs(todo) do hold_items(tr, { e[1] }, e[2]) end
+  write_holds(tr, t)
+  reaper.Undo_EndBlock("ChannelView: keep plugins at the track's channels", -1)
+  return true
+end
+
+-- Taking the probes out: each level back to the channels it had, and the
+-- plugins held there following it again. A level something else now
+-- reads or writes above that count (a receive, a plugin's pins, a send)
+-- keeps its channels and its plugins stay held.
+local function release_holds(tr)
+  local t = read_holds(tr)
+  if not next(t) then return end
+  local map = guid_map(tr)
+  for key, h in pairs(t) do
+    local caddr = (key ~= "TOP") and map[key] or nil
+    if key == "TOP" or caddr then
+      local items, used = {}, {}
+      for _, a in ipairs(level_items(tr, caddr)) do
+        if not own_plugin(tr, a) and not h.held[fx_guid(tr, a)] then items[#items + 1] = a end
+      end
+      items_used(tr, items, used)
+      if not caddr then routing_channels(tr, used) end
+      local top = 0
+      for ch in pairs(used) do top = math.max(top, ch) end
+      if top <= h.n0 then
+        if level_nch(tr, caddr) > h.n0 then
+          if caddr then reaper.TrackFX_SetNamedConfigParm(tr, caddr, "container_nch", tostring(h.n0))
+          else reaper.SetMediaTrackInfo_Value(tr, "I_NCHAN", h.n0) end
+        end
+        for _, a in ipairs(level_items(tr, caddr)) do
+          if h.held[fx_guid(tr, a)] then reaper.TrackFX_SetNamedConfigParm(tr, a, "channel_config", "0") end
+        end
+        t[key] = nil
+      end
+    end
+  end
+  write_holds(tr, t)
 end
 
 -- ---------------------------------------------------------------------
@@ -968,15 +1124,9 @@ local function lay(tr, want, lv)
     t.pre, t.post = pairs_[i * 2 - 1], pairs_[i * 2]
     top = math.max(top, t.post + 1)
   end
-  -- Room for them: the track's channel count, or the container's.
-  if not lv.caddr then
-    local n = reaper.GetMediaTrackInfo_Value(tr, "I_NCHAN")
-    if n < top then reaper.SetMediaTrackInfo_Value(tr, "I_NCHAN", top + (top % 2)) end
-  else
-    local ok, n = reaper.TrackFX_GetNamedConfigParm(tr, lv.caddr, "container_nch")
-    n = tonumber(ok and n or 2) or 2
-    if n < top then reaper.TrackFX_SetNamedConfigParm(tr, lv.caddr, "container_nch", tostring(top + (top % 2))) end
-  end
+  -- Room for them: the track's channel count, or the container's (its
+  -- plugins held at the count they had).
+  widen(tr, lv.caddr, top + (top % 2))
   -- And in every container on the way: channels, and pins to carry them.
   for _, c in ipairs(order) do
     local need_in, need_out = 0, 0
@@ -984,9 +1134,7 @@ local function lay(tr, want, lv)
       need_in = math.max(need_in, t.pre + 1)
       need_out = math.max(need_out, t.pre + 1, t.post + 1)
     end
-    if nconf(tr, c, "container_nch", 2) < top then
-      reaper.TrackFX_SetNamedConfigParm(tr, c, "container_nch", tostring(top + (top % 2)))
-    end
+    widen(tr, c, top + (top % 2))
     grow_pins(tr, c, "container_nch_in", false, need_in)
     grow_pins(tr, c, "container_nch_out", true, need_out)
     for _, t in ipairs(conts[c]) do path_pins(tr, c, t, true) end
@@ -1024,6 +1172,8 @@ end
 -- Brings one track into line with what's wanted. Returns true when it
 -- changed anything.
 function TP.sync(tr)
+  -- a plugin added to a widened level comes in held, like the others
+  local held_new = keep_held(tr)
   local rec = read_record(tr)
   local want, lv = TP.desired(tr)
   -- something routed onto the copies' channels on purpose: laid again,
@@ -1038,9 +1188,17 @@ function TP.sync(tr)
     for _, c in ipairs(clobbers(tr, lv, now_taps)) do
       if not c.auto then move = true; break end
     end
+    -- or a send or receive put on them since: the receive would mix into
+    -- the copies, the send carry them
+    if not move then
+      local routed = routing_channels(tr, {})
+      for _, t in ipairs(now_taps) do
+        if routed[t.pre] or routed[t.pre + 1] or routed[t.post] or routed[t.post + 1] then move = true; break end
+      end
+    end
   end
   if not move and TP.same_shape(rec, want) then
-    if not want then return false end
+    if not want then return held_new end
     -- Same plugins, same places: only the latency can have moved -- or a
     -- plugin added since writes over the copies.
     local probe = lv.items[lv.post]
@@ -1080,7 +1238,7 @@ function TP.sync(tr)
     -- also arms routing that was laid without it.
     PL.set(tr, pre, "arm", 1, TP.zero_on() and 1 or 0)
     if changed then write_record(tr, rec) end
-    return false
+    return held_new
   end
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
@@ -1390,6 +1548,7 @@ function TP.remove_probes(tr)
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
   lift(tr, read_record(tr))
+  release_holds(tr)
   local lv = find_level(tr, nil)
   if lv and lv.caddr then
     -- a pair inside a container: the later one first, so the other's

@@ -1904,9 +1904,18 @@ them until it's reopened, and both work with them.
 
 Nothing is inserted next to the plugin. ChannelView routes a copy of what
 goes in and what comes out on spare channels, from 5/6 up, skipping any
-pair a plugin, send or receive already uses. The post probe compares the
+pair a plugin, send or receive already uses; one routed onto theirs later
+moves them to free channels. The post probe compares the
 two in ten bands. Up to four plugins per track. What was changed is written
 on the track (`P_EXT:TS_CV_TAPS`) and taken out exactly when you untick it.
+
+When the copies need more channels than the track has, ChannelView raises
+its channel count. Plugins that follow the track's channel count (many
+VST3s: Pro-C 3 is stereo on a 2-channel track and 9.1.6 on 16) are held
+at the count the track had first, so their layout and pins, a sidechain
+included, stay as they were. One added later is held too. Removing the
+probes puts the channel count back and lets them follow it again, unless
+something else on the track now uses the channels above.
 
 A plugin inside a container is measured too, however deep it sits. Each
 container on the way gets the extra pins to carry the copies out. Pins are

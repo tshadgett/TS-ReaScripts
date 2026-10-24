@@ -1,5 +1,24 @@
 # ChannelView — changelog
 
+## 3.1.3 — the taps leave sidechains alone
+
+- **Plugins keep their layout when the taps need more channels.** To make
+  room for the measurement taps (gain reduction, I/O meters), ChannelView
+  raises the track's channel count. Many VST3s follow that count:
+  Pro-C 3 and Pro-Q 4 are stereo on a 2-channel track and 9.1.6 on 16.
+  So they changed layout, REAPER wired every pin afresh, and a sidechain
+  routed to them stopped arriving (their sidechain pins moved up past the
+  new main inputs). Now each plugin that follows the count is held at the
+  count the track had before the taps (Plug-in bus size in its pin
+  connector), and so is one added later; its pins stay as they were.
+  Removing the probes puts the channel count back and lets them follow it
+  again, unless something else on the track now uses the channels above.
+- **A send or receive routed onto the taps' channels** moves the taps to
+  free channels, so it doesn't mix into the copies.
+- A plugin that already changed layout before this update keeps its
+  wiring: set its Plug-in bus size and sidechain pins back once by hand.
+- ChannelView Pro moves to 3.1.3 with it, unchanged.
+
 ## 3.1.2 — the web companion's layouts
 
 - **ChannelView Pro: the web companion reads your layouts.** Installed

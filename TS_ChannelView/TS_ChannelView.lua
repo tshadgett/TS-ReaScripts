@@ -1,9 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.1.2
+-- @version 3.1.3
 -- @changelog
---  No changes here: the version moves to 3.1.2 with ChannelView Pro, whose
---  web companion now reads your layouts. Update both.
+--  The measurement taps leave your sidechains alone. When they need more
+--  channels, plugins that follow the track's channel count (Pro-C 3,
+--  Pro-Q 4 and other surround VST3s) are held at the count the track had,
+--  so their layout and pins don't change; removing the probes puts it
+--  back. A send or receive routed onto the taps' channels moves them.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

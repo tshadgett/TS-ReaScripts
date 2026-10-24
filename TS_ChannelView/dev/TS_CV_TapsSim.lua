@@ -99,6 +99,16 @@ end
 local function F(addr) index(); return amap[addr] end
 extstate = {}
 
+-- A surround VST3 that follows the track (Pro-C 3): main inputs, then as
+-- many sidechain inputs, one output per channel; every pin wired afresh,
+-- each to its own channel -- so a sidechain on 3/4 no longer arrives.
+function relayout(f, nch)
+  f.nin, f.nout = nch * 2, nch
+  f.pin_in, f.pin_out = {}, {}
+  for p = 0, f.nin - 1 do f.pin_in[p] = { p < 32 and (1 << p) or 0, 0 } end
+  for p = 0, f.nout - 1 do f.pin_out[p] = { p < 32 and (1 << p) or 0, 0 } end
+end
+
 local projext = {}
 local probe_old = false
 local now_t = 0
@@ -116,6 +126,10 @@ reaper = {
     local f = F(a)
     if not f then return false, "" end
     if k == "pdc" then return true, tostring(f.pdc or 0) end
+    if k == "channel_config" then
+      if not f.cc then return false, "" end
+      return true, tostring(f.held or 0) .. " -1 2"
+    end
     if k == "parallel" then return true, tostring(f.par or 0) end
     if f.kids then
       if k == "container_count" then return true, tostring(#f.kids) end
@@ -140,6 +154,12 @@ reaper = {
   -- channel (pin k to k + 1), which TS_CV_Taps must clear.
   TrackFX_SetNamedConfigParm = function(tr, a, k, v)
     local f = F(a)
+    if f and f.cc and k == "channel_config" then
+      local n = tonumber(tostring(v):match("^%s*(%-?%d+)")) or 0
+      f.held = (n > 0) and n or nil
+      if not f.held then relayout(f, track.nch) end
+      return true
+    end
     if not (f and f.kids) then return false end
     v = tonumber(v)
     if k == "container_nch" then f.nch = v
@@ -189,6 +209,7 @@ reaper = {
     if k == "I_NCHAN" then
       tr.nch = v
       for _, f in ipairs(tr.fx) do
+        if f.cc and not f.held then relayout(f, v) end
         if f.follow then
           for p = f.nin, v - 1 do f.pin_in[p] = { p < 32 and (1 << p) or 0, 0 } end
           for p = f.nout, v - 1 do f.pin_out[p] = { p < 32 and (1 << p) or 0, 0 } end
@@ -199,6 +220,7 @@ reaper = {
     return true
   end,
   Undo_BeginBlock = function() end, Undo_EndBlock = function() end,
+  TrackFX_Delete = function(tr, a) index(); table.remove(tr.fx, a + 1); return true end,
   PreventUIRefresh = function() end,
   ValidatePtr = function() return true end,
   gmem_attach = function() end, gmem_write = function(i, v) gmem[i] = v end,
@@ -841,6 +863,73 @@ do
   check("complete: only the pre probe",   added .. " " .. order(), "1 N1 EQ POST")
   check("complete: roles",                (F(0).params[TP.P_ROLE] or 0) .. (F(2).params[TP.P_ROLE] or 0), "01")
   reaper.GetTrackStateChunk, reaper.TrackFX_AddByName, reaper.TrackFX_CopyToTrack = nil, nil, nil
+end
+
+-- a receive put on the copies' channels after they were laid: the taps
+-- move to channels nothing uses
+reset()
+TP.invalidate()
+TP.sync(track)
+do
+  local was = TP.parse_record(track.ext[TP.EXT_KEY]).taps[1].post
+  track.recv[1].dst = was - 1          -- onto that pair
+  TP.invalidate()
+  check("receive on the copies: laid again",  TP.sync(track), true)
+  local r = TP.parse_record(track.ext[TP.EXT_KEY])
+  local clash = false
+  for _, t in ipairs(r.taps) do
+    for _, ch in ipairs({ t.pre, t.pre + 1, t.post, t.post + 1 }) do if ch == was or ch == was + 1 then clash = true end end
+  end
+  check("receive on the copies: moved off it", clash, false)
+  got, want = flow()
+  check("receive on the copies: the copies come through", got, want)
+  check("receive on the copies: then settles", TP.sync(track), false)
+end
+
+-- ------------------------------------------------- plugins held at their channels
+-- A surround VST3 that follows the track (Pro-C 3), its sidechain on 3/4:
+-- widening the track for the copies must not change its layout.
+reset()
+do
+  local pc = fx("VST3: Pro-C 3 (FabFilter)", "{PC3}", 4, 2, { cc = true })
+  pc.pin_in[2], pc.pin_in[3] = { b(3), 0 }, { b(4), 0 }
+  table.insert(track.fx, 2, pc)
+  TP.invalidate()
+  TP.sync(track)
+  local function find(g) index(); for a, f in pairs(amap) do if f.guid == g then return a, f end end end
+  local _, f = find("{PC3}")
+  check("held: the track grew",                track.nch > 4, true)
+  check("held: its layout kept",               f.nin .. " " .. f.nout .. " " .. tostring(f.held), "4 2 4")
+  check("held: its sidechain still on 3/4",    f.pin_in[2][1] .. " " .. f.pin_in[3][1], b(3) .. " " .. b(4))
+  check("held: recorded",                      track.ext["P_EXT:TS_CV_HOLD"], "TOP|4|{PC3}")
+  -- one added later, following the widened track: held at the same count
+  table.insert(track.fx, 3, fx("VST3: Pro-Q 4 (FabFilter)", "{PQ4}", track.nch * 2, track.nch, { cc = true }))
+  TP.invalidate()
+  check("held: a later one, at the next check", TP.sync(track), true)
+  local _, q = find("{PQ4}")
+  check("held: the later one too",             tostring(q.held), "4")
+  check("held: both recorded",                 track.ext["P_EXT:TS_CV_HOLD"], "TOP|4|{PC3},{PQ4}")
+  check("held: then nothing to do",            TP.sync(track), false)
+  -- the probes taken out: the track back to 4, both following it again
+  TP.remove_probes(track)
+  local _, f2 = find("{PC3}")
+  check("released: the track back to 4",       track.nch, 4)
+  check("released: following again",          tostring(f2.held), "nil")
+  check("released: the record gone",           track.ext["P_EXT:TS_CV_HOLD"], "")
+end
+-- ... unless something else now uses the channels above: the receive
+-- moved up to 17/18 while the taps were in
+reset()
+do
+  local pc = fx("VST3: Pro-C 3 (FabFilter)", "{PC3}", 4, 2, { cc = true })
+  table.insert(track.fx, 2, pc)
+  TP.invalidate()
+  TP.sync(track)
+  local grown = track.nch
+  track.recv[1].dst = 16
+  TP.remove_probes(track)
+  check("kept: channels stay for the receive", track.nch, grown)
+  check("kept: still held",                    tostring(pc.held), "4")
 end
 
 -- ---------------------------------------------------------------- records
