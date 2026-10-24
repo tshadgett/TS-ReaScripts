@@ -36,6 +36,7 @@ local dev_of   = {}    -- norm key -> developer
 local cats_of  = {}    -- norm key -> { category, ... }
 local fold_of  = {}    -- norm key -> { [folder id] = true }
 local folders  = {}    -- ordered { id, name }
+local smart    = {}    -- folder id -> its search (a smart folder)
 local stats    = { tagged = 0, folders = 0, resolved = 0, total = 0 }
 
 -- ---------------------------------------------------------------------
@@ -94,11 +95,19 @@ local function load_tags(res)
   end
 end
 
+-- A smart folder (Type 1048576) holds a search, not plugins: Item0 is
+-- what was typed in the browser's filter, and it lists whatever matches
+-- (IX.smart_match).
+IX.SMART = "1048576"
+
 local function load_folders(res)
   local lines = read_lines(res .. "/reaper-fxfolders.ini")
   if not lines then return end
 
-  local names, section = {}, nil
+  -- [Folders] lists them in order: Name<pos> and Id<pos>, the id naming
+  -- its [Folder<id>] section
+  local names, ids, section = {}, {}, nil
+  local items, types = {}, {}       -- [fid] = { [n] = ... }
   for _, line in ipairs(lines) do
     local sect = line:match("^%[(.-)%]%s*$")
     if sect then
@@ -106,27 +115,39 @@ local function load_folders(res)
     elseif section == "Folders" then
       local n, v = line:match("^Name(%d+)=(.*)$")
       if n then names[tonumber(n)] = U.trim(v) end
+      local p, id = line:match("^Id(%d+)=(%d+)")
+      if p then ids[tonumber(p)] = tonumber(id) end
     else
-      local fid = section and section:match("^Folder(%d+)$")
+      local fid = tonumber(section and section:match("^Folder(%d+)$") or "")
       if fid then
-        local item = line:match("^Item%d+=(.*)$")
-        if item and item ~= "" then
-          local key = norm_key(item)
-          fold_of[key] = fold_of[key] or {}
-          fold_of[key][tonumber(fid)] = true
-        end
+        local n, item = line:match("^Item(%d+)=(.*)$")
+        if n then items[fid] = items[fid] or {}; items[fid][tonumber(n)] = item end
+        local tn, ty = line:match("^Type(%d+)=(.*)$")
+        if tn then types[fid] = types[fid] or {}; types[fid][tonumber(tn)] = U.trim(ty) end
+      end
+    end
+  end
+  for fid, list in pairs(items) do
+    for n, item in pairs(list) do
+      if (types[fid] or {})[n] == IX.SMART then
+        if item ~= "" then smart[fid] = item end
+      elseif item ~= "" then
+        local key = norm_key(item)
+        fold_of[key] = fold_of[key] or {}
+        fold_of[key][fid] = true
       end
     end
   end
 
-  for id, name in pairs(names) do
+  for pos, name in pairs(names) do
+    local id = ids[pos] or pos
     -- Separator rows ("--------") are dividers in REAPER's own tree, not
     -- folders anyone wants to filter by.
     if name ~= "" and not name:match("^%-+$") then
-      folders[#folders + 1] = { id = id, name = name }
+      folders[#folders + 1] = { id = id, name = name, pos = pos, smart = smart[id] }
     end
   end
-  table.sort(folders, function(a, b) return a.id < b.id end)
+  table.sort(folders, function(a, b) return a.pos < b.pos end)
   stats.folders = #folders
 end
 
@@ -165,6 +186,15 @@ function IX.build(list)
     e.cats    = cats_of[key]
     e.folders = fold_of[key]
     e.key     = key
+    -- and the smart folders whose search it matches
+    for fid, q in pairs(smart) do
+      if IX.smart_match(q, e.name, e.ident) then
+        local f = {}
+        for k in pairs(e.folders or {}) do f[k] = true end
+        f[fid] = true
+        e.folders = f
+      end
+    end
 
     if dev_of[key] then stats.resolved = stats.resolved + 1 end
     if d then dev_count[d] = (dev_count[d] or 0) + 1 end
@@ -194,6 +224,61 @@ function IX.build(list)
 end
 
 function IX.stats() return stats end
+
+-- A search as REAPER's FX browser filter takes it, split into terms:
+-- words, or "quoted phrases"; OR between two terms, NOT before one, AND
+-- (or nothing) for both. Returns a list of OR'd groups, each a list of
+-- { text, neg }.
+function IX.smart_parse(q)
+  local toks = {}
+  local s = tostring(q or "")
+  local i = 1
+  while i <= #s do
+    local c = s:sub(i, i)
+    if c:match("%s") then i = i + 1
+    elseif c == '"' then
+      local j = s:find('"', i + 1, true) or (#s + 1)
+      toks[#toks + 1] = { text = s:sub(i + 1, j - 1), quoted = true }
+      i = j + 1
+    else
+      local j = s:find("[%s\"]", i) or (#s + 1)
+      toks[#toks + 1] = { text = s:sub(i, j - 1) }
+      i = j
+    end
+  end
+  local groups, cur, neg = {}, {}, false
+  for _, t in ipairs(toks) do
+    if not t.quoted and t.text == "OR" then
+      if #cur > 0 then groups[#groups + 1] = cur end
+      cur, neg = {}, false
+    elseif not t.quoted and t.text == "AND" then
+      -- (as two words side by side)
+    elseif not t.quoted and t.text == "NOT" then
+      neg = not neg
+    elseif t.text ~= "" then
+      cur[#cur + 1] = { text = t.text:lower(), neg = neg }
+      neg = false
+    end
+  end
+  if #cur > 0 then groups[#groups + 1] = cur end
+  return groups
+end
+
+-- Whether a plugin (its name as REAPER lists it, and its file) is in a
+-- smart folder with search `q`: any group whose terms all match (a NOT
+-- term: doesn't), each a plain, case-blind match in the name or file.
+function IX.smart_match(q, name, ident)
+  local hay = (tostring(name or "") .. "\n" .. tostring(ident or "")):lower()
+  for _, g in ipairs(IX.smart_parse(q)) do
+    local ok = true
+    for _, t in ipairs(g) do
+      local hit = hay:find(t.text, 1, true) ~= nil
+      if hit == t.neg then ok = false; break end
+    end
+    if ok then return true end
+  end
+  return false
+end
 
 -- A plugin's developer as REAPER lists it, by its identifier (nil when
 -- untagged), and whether REAPER has tagged any at all.
@@ -348,11 +433,43 @@ function IX.is_separator(e)
   return e.name == "" or e.name:match("^%-+$") ~= nil
 end
 
--- Your folders as the menus list them: separators ("------") left out.
+-- Makes folder `id` a smart folder with search `q` (what it held goes).
+function IX.set_smart(m, id, q)
+  local f = m.folders[id]
+  q = U.trim(tostring(q or ""))
+  if not f or q == "" then return false end
+  f.items, f.types = { q }, { IX.SMART }
+  return true
+end
+
+-- A smart folder's search, or nil.
+function IX.smart_of(m, id)
+  return IX.is_smart(m, id) and m.folders[id].items[1] or nil
+end
+
+-- Renames folder `id`.
+function IX.folder_rename(m, id, name)
+  name = U.trim(tostring(name or ""))
+  if name == "" then return false end
+  for _, e in ipairs(m.order) do
+    if e.id == id then e.name = name; return true end
+  end
+  return false
+end
+
+-- Whether folder `id` is a smart folder (a search: plugins aren't put in
+-- one, they match it).
+function IX.is_smart(m, id)
+  local f = m.folders[id]
+  return f ~= nil and f.types[1] == IX.SMART
+end
+
+-- Your folders as the menus list them: separators ("------") and smart
+-- folders left out.
 function IX.folder_list(m)
   local out = {}
   for _, e in ipairs(m.order) do
-    if e.name ~= "" and not e.name:match("^%-+$") then out[#out + 1] = e end
+    if e.name ~= "" and not e.name:match("^%-+$") and not IX.is_smart(m, e.id) then out[#out + 1] = e end
   end
   return out
 end
@@ -387,7 +504,7 @@ end
 
 -- Forget what was read, so the next look reads the files afresh.
 function IX.reset()
-  built, dev_of, cats_of, fold_of, folders = false, {}, {}, {}, {}
+  built, dev_of, cats_of, fold_of, folders, smart = false, {}, {}, {}, {}, {}
   stats = { tagged = 0, folders = 0, resolved = 0, total = 0 }
 end
 

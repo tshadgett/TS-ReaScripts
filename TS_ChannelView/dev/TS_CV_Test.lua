@@ -3589,6 +3589,50 @@ do
     "[Folders]", "Id0=0", "Id1=2", "Id2=1", "Name0=Favourites", "Name1=-----", "Name2=Chains", "NbFolders=3", "" }, "\n")
   local fm = FI.parse_folders(INI)
   check("folders: in their order", #fm.order .. " " .. fm.order[1].name .. "/" .. fm.order[3].name, "3 Favourites/Chains")
+  -- smart folders: a search, as the browser's filter takes it
+  check("smart: words, all of them", FI.smart_match("pro q", "VST3: Pro-Q 3 (FabFilter)", "Pro-Q 3.vst3"), true)
+  check("smart: not every word", FI.smart_match("pro comp", "VST3: Pro-Q 3 (FabFilter)", "Pro-Q 3.vst3"), false)
+  check("smart: OR", FI.smart_match("saturn OR pro-q", "VST3: Pro-Q 3 (FabFilter)", ""), true)
+  check("smart: NOT", FI.smart_match("fabfilter NOT pro-q", "VST3: Pro-Q 3 (FabFilter)", ""), false)
+  check("smart: a phrase", tostring(FI.smart_match('"pro-q 3"', "VST3: Pro-Q 3 (FabFilter)", "")) ..
+        tostring(FI.smart_match('"q pro"', "VST3: Pro-Q 3 (FabFilter)", "")), "truefalse")
+  check("smart: the file name too", FI.smart_match("vst3", "JS: x", "C:/a/Thing.vst3"), true)
+  check("smart: case-blind", FI.smart_match("EQ", "VST3: ReaEQ (Cockos)", ""), true)
+  do
+    local dir = os.tmpname(); os.remove(dir); os.execute('mkdir -p "' .. dir .. '"')
+    local fh = io.open(dir .. "/reaper-fxfolders.ini", "w")
+    fh:write(table.concat({
+      "[Folder3]", "Item0=C:\\VST3\\Saturn 2.vst3", "Nb=1", "Type0=3", "",
+      "[Folder7]", "Item0=reaeq OR pro-q", "Nb=1", "Type0=1048576", "",
+      "[Folders]", "Id0=7", "Id1=3", "Name0=EQs", "Name1=Mine", "NbFolders=2", "" }, "\n"))
+    fh:close()
+    local grp = reaper.GetResourcePath
+    reaper.GetResourcePath = function() return dir end
+    FI.reset()
+    local items = { { name = "VST3: Pro-Q 3 (FabFilter)", ident = "Pro-Q 3.vst3" },
+                    { name = "VST3: Saturn 2 (FabFilter)", ident = "Saturn 2.vst3" },
+                    { name = "VST: ReaEQ (Cockos)", ident = "reaeq.dll" } }
+    local _, _, folds = FI.build(items)
+    local by = {}
+    for _, f in ipairs(folds) do by[#by + 1] = f.name .. "=" .. f.count end
+    check("smart: listed, in the browser's order, with what matches", table.concat(by, ","), "EQs=2,Mine=1")
+    check("smart: a plugin in it", tostring(items[1].folders and items[1].folders[7]) .. " " ..
+          tostring(items[2].folders and items[2].folders[7]) .. " " .. tostring(items[2].folders and items[2].folders[3]) ..
+          " " .. tostring(items[3].folders and items[3].folders[7]), "true nil true true")
+    local m2 = FI.read_folders and FI.parse_folders(io.open(dir .. "/reaper-fxfolders.ini"):read("a"))
+    check("smart: not offered to put a plugin in", #FI.folder_list(m2) .. " " .. tostring(FI.is_smart(m2, 7)), "1 true")
+    -- made, and its search changed
+    local id = FI.folder_new(m2, "Comps")
+    check("smart: made from a search", tostring(FI.set_smart(m2, id, " comp NOT multi ")) .. " " .. FI.smart_of(m2, id), "true comp NOT multi")
+    check("smart: renamed", tostring(FI.folder_rename(m2, id, "Compressors")) .. " " .. m2.order[#m2.order].name, "true Compressors")
+    local back = FI.parse_folders(FI.write_folders(m2))
+    check("smart: written as REAPER writes one", tostring(FI.is_smart(back, id)) .. " " .. FI.smart_of(back, id) .. " " .. #back.folders[id].items,
+          "true comp NOT multi 1")
+    check("smart: no empty search", FI.set_smart(m2, id, "  "), false)
+    reaper.GetResourcePath = grp
+    FI.reset()
+    os.remove(dir .. "/reaper-fxfolders.ini"); os.remove(dir)
+  end
   check("folders: separators left out of the menu", #FI.folder_list(fm), 2)
   check("folders: has, by file name", FI.folder_has(fm, 0, "C:/Other/pro-c_2.vst3"), true)
   check("folders: kind of a VST3", FI.kind_of("VST3: Pro-C 2 (FabFilter)") .. FI.kind_of("JS: x") .. FI.kind_of("CLAP: y"), "327")
@@ -7726,6 +7770,26 @@ do
   check("freeze: a level with no helpers still counts", FZ.count(FZ.push_level(FZ.push_level("", {}), {})), 2)
   local old = "0\31Probe" .. "\29" .. "1\31Mods"
   check("freeze: an older record reads as one level", FZ.count(old) .. "/" .. #(FZ.pop_level(old)), "1/2")
+  -- a freeze in progress elsewhere (the web bridge, or ChannelView): this
+  -- one leaves that track alone until it's done or a minute and a half on
+  do
+    local ext, real = {}, reaper
+    reaper = setmetatable({
+      GetExtState = function(ns, k) return ext[ns .. "/" .. k] or "" end,
+      SetExtState = function(ns, k, v) ext[ns .. "/" .. k] = v end,
+      DeleteExtState = function(ns, k) ext[ns .. "/" .. k] = nil end,
+      GetTrackGUID = function(t) return "{" .. t.name .. "}" end,
+    }, { __index = real })
+    local A, B = { name = "A" }, { name = "B" }
+    check("freeze elsewhere: none", tostring(FZ.busy(A)), "false")
+    ext["TS_ChannelView/freeze_pending"] = "{A}|" .. os.time()
+    check("freeze elsewhere: that track busy, not another", tostring(FZ.busy(A)) .. " " .. tostring(FZ.busy(B)), "true false")
+    check("freeze elsewhere: no freeze over it", select(2, FZ.freeze(A)), "A freeze is still finishing.")
+    check("freeze elsewhere: no sync under it", tostring(FZ.sync(A)), "false")
+    ext["TS_ChannelView/freeze_pending"] = "{A}|" .. (os.time() - 120)
+    check("freeze elsewhere: stale after 90 s", tostring(FZ.busy(A)), "false")
+    reaper = real
+  end
   local m = FZ.match({ "Probe", "Mods", "Probe" }, { "EQ", "Probe", "Mods", "Comp", "Probe" })
   check("freeze: left plugins found by name and order", (m[1] or 0) .. (m[2] or 0) .. (m[3] or 0), "235")
   local m2 = FZ.match({ "Probe", "Mods" }, { "Mods" })
@@ -7878,10 +7942,163 @@ do
   check("grid header: not a name twice", T.new_layout("Mix", false), nil)
   St.set_variant = real_sv
   M.remove(k1); M.remove(k2)
+  -- ReaGate's canvas, drawn: the curve, the envelope with its pre-open,
+  -- the detector filters along the foot
+  do
+    local CPm = require("TS_CV_CompPanel")
+    CPm.attach(fake)
+    require("TS_CV_RolePanel").attach(fake)   -- the detector filters are its filter panel
+    local reads = { [0] = "-30.0 dB", "3 ms", "200 ms", "10 ms", "50 ms", "8000 Hz", "120 Hz", "0", "0",
+                    "-inf dB", "+0.0 dB", "-inf dB", "-6.0 dB", "0", "0 ms" }
+    local real2 = reaper
+    reaper = setmetatable({
+      TrackFX_GetParamNormalized = function(_, _, p) return 0.3 end,
+      TrackFX_GetFormattedParamValue = function(_, _, p) return true, reads[p] or "0" end,
+      TrackFX_FormatParamValueNormalized = function(_, _, p) return true, reads[p] or "0" end,
+      TrackFX_GetEnabled = function() return true end,
+      TrackFX_GetNumParams = function() return 24 end,
+      Master_GetTempo = function() return 120 end,
+    }, { __index = real2 })
+    answers.DrawList_AddRect = nil
+    local cv = { kind = "gate", rev = {}, roles = { Threshold = 0, Attack = 1, Release = 2, Preopen = 3, Hold = 4,
+                 Lowpass = 5, Hipass = 6, Hysteresis = 12, Preview = 13, RMS = 14 } }
+    local okd, errd = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "rg-draw", name = "VST: ReaGate (Cockos)" }, {}, cv)
+    check("reagate: its canvas draws", okd and "ok" or tostring(errd), "ok")
+    -- the same filter panel under a delay's echoes
+    local dcv = { kind = "delay", rev = {}, roles = { Time = 1, Feedback = 2, LowCut = 6, HighCut = 5 } }
+    local okdl, errdl = pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 600, 400, {},
+      { addr = 0, guid = "dl-draw", name = "VST: SomeDelay" }, {}, dcv)
+    check("delay: its canvas draws, with its filters", okdl and "ok" or tostring(errdl), "ok")
+    -- ReaLimit's, with its options
+    local RBm = require("TS_CV_ReaFX")
+    reaper.TrackFX_GetNamedConfigParm = function(_, _, k)
+      if k == "vst_chunk" then return true, RBm.b64enc(string.pack("<i4<i4", 3, 1) .. ("\0"):rep(40)) end
+      return false, ""
+    end
+    local lcv = { kind = "limit", rev = {}, roles = { Threshold = 0, Ceiling = 1, Release = 2 } }
+    local okl, errl = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 260, {}, { addr = 0, guid = "rl-draw", name = "VST: ReaLimit (Cockos)" }, {}, lcv)
+    check("realimit: its canvas draws, with its options", okl and "ok" or tostring(errl), "ok")
+    reaper = real2
+  end
+  -- a bar's menu with Large items: its submenu rows drawn as the bar's
+  -- buttons, an action row as a menu row
+  do
+    local TBm = require("TS_CV_Toolbar")
+    TBm.attach(fake)
+    local items = { { menu = true, icon = "", label = "Pads", large = true,
+                      items = { { menu = true, icon = "", label = "Sub", items = {} },
+                                { cmd = "40001", icon = "", label = "A" } } } }
+    local bar = TBm.make("TestLargeBar", "tlb", {}, { stamp = function() return 1 end,
+      load = function() return items end, save = function() end })
+    answers.InvisibleButton = function() return true end
+    answers.GetTextLineHeight = function() return 13 end
+    answers.GetCursorPosY = function() return 0 end
+    rawset(reaper, "GetToggleCommandStateEx", function() return 0 end)
+    local painted = 0
+    answers.DrawList_AddRect = function() painted = painted + 1 end
+    local ok1, e1 = pcall(bar.draw_v, "ctx", 0, 0, 200, 400, "right")
+    local before = painted
+    local ok2, e2 = pcall(bar.draw_menus, "ctx")
+    check("large menu: drawn", (ok1 and ok2) and "ok" or tostring(e1 or e2), "ok")
+    check("large menu: its submenu row is a button", painted - before, 1)
+    answers.InvisibleButton, answers.GetTextLineHeight, answers.GetCursorPosY, answers.DrawList_AddRect = nil, nil, nil, nil
+  end
   GE.close()
   GE.hooks = nil
   reaper = real
   M.remove(key); M.save()
+end
+
+-- ReaGate's and ReaLimit's default canvases: roles found by name
+do
+  local RB = require("TS_CV_ReaFX")
+  -- as REAPER 7 lists them (dev/TS_CV_ParamDump.lua)
+  local gate = { [0] = "Threshold", "Attack", "Release", "Pre-open", "Hold", "Lowpass", "Hipass",
+                 "SignIn", "AudIn", "Dry", "Wet", "Noise level", "Hysteresis", "Preview Filter", "RMS size",
+                 "Send MIDI", "Midi Note", "Midi Channel", "Invert Wet", "Multichannel Mode", "Metering Index",
+                 "Bypass", "Wet", "Delta" }
+  local r = RB.roles_by_name("reagate", gate)
+  check("reagate: roles by name", ("%s %s %s %s %s %s %s %s %s %s"):format(r.Threshold, r.Attack, r.Hold, r.Release,
+        r.Hysteresis, r.Preopen, r.Lowpass, r.Hipass, r.Preview, r.RMS), "0 1 4 2 12 3 5 6 13 14")
+  local lim = { [0] = "Threshold", "Ceiling", "Release", "Bypass", "Wet", "Delta" }
+  local l = RB.roles_by_name("realimit", lim)
+  check("realimit: roles by name", ("%s %s %s"):format(l.Threshold, l.Ceiling, l.Release), "0 1 2")
+  check("reagate: the kinds", tostring(RB.kind("ReaGate")) .. " " .. tostring(RB.kind("ReaLimit")), "reagate realimit")
+  local real = reaper
+  reaper = setmetatable({
+    TrackFX_GetNumParams = function() return 24 end,
+    TrackFX_GetParamName = function(_, _, p) return true, gate[p] end,
+  }, { __index = real })
+  local ED = require("TS_CV_Edition")
+  local was = ED.PRO
+  local function dflt()
+    local controls = {}
+    for p = 0, 7 do controls[#controls + 1] = { param = p, type = "knob", label = "" } end
+    return { controls = controls, aliases = {} }
+  end
+  ED.PRO = { RELEASE = ED.RELEASE }
+  local d = RB.default_canvas({}, 0, "rg-test", "reagate", dflt())
+  local ps = {}
+  for _, c in ipairs(d.controls) do ps[#ps + 1] = c.param end
+  check("reagate: a gate canvas", d.canvas and d.canvas.kind, "gate")
+  check("reagate: nothing beside it (RMS size is on the canvas)", table.concat(ps, ","), "")
+  check("reagate: a saved layout's own canvas left alone",
+        RB.default_canvas({}, 0, "rg-test", "reagate", { controls = {}, canvas = { kind = "comp" } }).canvas.kind, "comp")
+  -- ReaLimit's options in its state: version 3, then the flags word
+  local state = string.pack("<i4<i4", 3, 0) .. ("\0"):rep(40)
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k) if k == "vst_chunk" then return true, RB.b64enc(state) end return false, "" end
+  reaper.TrackFX_SetNamedConfigParm = function(_, _, k, v) if k == "vst_chunk" then state = RB.b64dec(v) end return true end
+  reaper.Undo_BeginBlock = function() end; reaper.Undo_EndBlock = function() end
+  check("realimit: options read", RB.limit_flags({}, 0, nil), 0)
+  RB.set_limit_flag({}, 0, nil, "truepeak", true); RB.set_limit_flag({}, 0, nil, "lowlat", true)
+  check("realimit: true peak and low latency set", RB.limit_flags({}, 0, nil), 65)
+  RB.set_limit_flag({}, 0, nil, "truepeak", false)
+  check("realimit: and one cleared, the rest kept", tostring(RB.limit_flags({}, 0, nil)) .. " " .. #state, "64 48")
+  state = string.pack("<i4<i4", 4, 0) .. ("\0"):rep(40)
+  check("realimit: a state it doesn't know left alone", tostring(RB.set_limit_flag({}, 0, nil, "truepeak", true)) ..
+        " " .. tostring(RB.limit_flags({}, 0, nil)), "false nil")
+  ED.PRO = nil
+  local s2 = RB.default_canvas({}, 0, "rg-test", "reagate", dflt())
+  check("reagate: without Pro, every control and no canvas", #s2.controls .. " " .. tostring(s2.canvas), "8 nil")
+  ED.PRO = was
+  reaper = real
+end
+
+-- ChannelView and Pro at different versions: which one to update, said
+-- once for each pair; Pro's own scripts (the Rack, the web bridge) won't start
+do
+  local ED = require("TS_CV_Edition")
+  local was, ext, boxes, real = ED.mismatch, {}, {}, reaper
+  reaper = setmetatable({
+    GetExtState = function(ns, k) return ext[ns .. "/" .. k] or "" end,
+    SetExtState = function(ns, k, v) ext[ns .. "/" .. k] = v end,
+    ShowMessageBox = function(m) boxes[#boxes + 1] = m return 1 end,
+  }, { __index = real })
+  ED.mismatch = "3.0.0"
+  check("edition: Pro behind", ED.behind(), "ChannelView Pro")
+  check("edition: says so", ED.mismatch_text():find("Update ChannelView Pro:", 1, true) ~= nil, true)
+  ED.mismatch = "9.0.0"
+  check("edition: ChannelView behind", ED.behind(), "ChannelView")
+  check("edition: 3.10 is after 3.9", (function() ED.mismatch = "3.10.0"; local r = ED.behind(); return r end)(), "ChannelView")
+  ED.mismatch = "3.0.0"
+  ED.warn_mismatch(); ED.warn_mismatch()
+  check("edition: once for a pair", #boxes, 1)
+  ED.warn_mismatch(true)
+  check("edition: again when asked", #boxes, 2)
+  ED.mismatch = nil
+  check("edition: matched, nothing", tostring(ED.behind()) .. " " .. tostring(ED.mismatch_text()), "nil nil")
+  -- Pro's check, against ChannelView's own @version
+  local PRO = dofile(HERE .. "../TS_CV_Pro.lua")
+  local real_std = PRO.standard_release
+  PRO.standard_release = function() return PRO.RELEASE end
+  check("pro check: same version runs", PRO.check("The Rack"), true)
+  PRO.standard_release = function() return "3.0.0" end
+  check("pro check: older ChannelView stops it", PRO.check("The Rack"), false)
+  check("pro check: names ChannelView", boxes[#boxes]:find("Update ChannelView:", 1, true) ~= nil and
+        boxes[#boxes]:find("the rack won't start", 1, true) ~= nil, true)
+  PRO.standard_release = real_std
+  check("pro check: reads ChannelView's @version", PRO.standard_release(), ED.RELEASE)
+  ED.mismatch, reaper = was, real
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

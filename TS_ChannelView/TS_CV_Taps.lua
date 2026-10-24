@@ -777,12 +777,13 @@ end
 -- ---------------------------------------------------------------------
 
 -- A plugin added to a chain whose track already carries copies can come
--- in writing over them: one that takes the track's channel count (many
--- VST3s do, and the copies raise it to 8 or more) maps its extra outputs
--- onto the copies' channels, and anything after it then reads its output
--- there instead. The copies' channels belong to the taps once laid, so
--- whatever writes them without being one of their writers is cleared:
--- a channel no output pin writes passes through untouched.
+-- in writing over them, two ways:
+--   * it takes the track's channel count (many VST3s do, and the copies
+--     raise it to 8 or more), and REAPER maps each extra output to its
+--     own channel. Nobody chose that: those pins are cleared (a channel
+--     no output pin writes passes through untouched).
+--   * someone routed it there on purpose. That's left alone: the taps
+--     move to other free channels instead (TP.sync lays them again).
 
 -- Which output pin of each address may write which channel: L and R
 -- (pins 0 and 1, or 0 for both on a one-output plugin) to its "before"
@@ -813,6 +814,9 @@ end
 -- Every output pin between the probes (and inside the containers the
 -- copies pass through) that writes a copy's channel without being meant
 -- to: { addr, pin, ch }. `taps` need pre, post, addr, writers and path.
+-- A pin is REAPER's own mapping when it writes only its own channel (pin
+-- p to channel p + 1) on a plugin with as many outputs as its level has
+-- channels: `auto` in what clobbers returns.
 local function clobbers(tr, lv, taps)
   local chans, on_path = {}, {}
   for _, t in ipairs(taps) do
@@ -821,7 +825,7 @@ local function clobbers(tr, lv, taps)
   end
   local allow = tap_writers(tr, taps)
   local out = {}
-  local function look(a)
+  local function look(a, nch)
     local nout
     if (container_count(tr, a) or 0) > 0 then nout = nconf(tr, a, "container_nch_out", 2)
     else local _, o = io_size(tr, a); nout = o end
@@ -829,33 +833,41 @@ local function clobbers(tr, lv, taps)
       local lo, hi = get_pin(tr, a, true, p)
       for ch in pairs(TP.channels_of(lo, hi)) do
         if chans[ch] and not (allow[a] and allow[a][ch] == p) then
-          out[#out + 1] = { addr = a, pin = p, ch = ch }
+          local bl, bh = TP.bit(ch)
+          local auto = ch == p + 1 and lo == bl and hi == bh and nout >= nch
+          out[#out + 1] = { addr = a, pin = p, ch = ch, auto = auto }
         end
       end
     end
   end
-  local function walk(items, from, to, depth)
+  local function walk(items, from, to, depth, nch)
     for i = from, to do
       local a = items[i]
       if not is_probe(tr, a) then
-        look(a)
+        look(a, nch)
         if on_path[a] and depth < TP.MAX_DEPTH then
           local kids = level_items(tr, a)
-          walk(kids, 1, #kids, depth + 1)
+          walk(kids, 1, #kids, depth + 1, nconf(tr, a, "container_nch", 2))
         end
       end
     end
   end
-  walk(lv.items, lv.pre + 1, lv.post - 1, 0)
+  local nch = lv.caddr and nconf(tr, lv.caddr, "container_nch", 2)
+              or reaper.GetMediaTrackInfo_Value(tr, "I_NCHAN")
+  walk(lv.items, lv.pre + 1, lv.post - 1, 0, nch)
   return out
 end
 TP._clobbers = clobbers
 
--- Clears what clobbers found. Returns how many pins it changed.
+-- Clears what clobbers found that REAPER mapped by itself. Returns how
+-- many pins it changed, and how many it left (routed on purpose).
 local function clear_clobbers(tr, lv, taps)
   local found = clobbers(tr, lv, taps)
-  for _, c in ipairs(found) do pin_channel(tr, c.addr, true, c.pin, c.ch, false) end
-  return #found
+  local cleared = 0
+  for _, c in ipairs(found) do
+    if c.auto then pin_channel(tr, c.addr, true, c.pin, c.ch, false); cleared = cleared + 1 end
+  end
+  return cleared, #found - cleared
 end
 
 -- ---------------------------------------------------------------------
@@ -992,6 +1004,8 @@ local function lay(tr, want, lv)
     end
     PL.set(tr, probe, "lag", i, t.lag or 0)
   end
+  -- the taps not in use: unplugged
+  for p = 2 + #want.taps * 4, 2 + TP.MAX_TAPS * 4 - 1 do set_pin(tr, probe, false, p, 0, 0) end
   PL.name(tr, lv.items[lv.pre], probe)
   PL.set(tr, probe, "tap_n", 1, #want.taps)
   if TP.probe_has_levels(tr, probe) then
@@ -1012,7 +1026,20 @@ end
 function TP.sync(tr)
   local rec = read_record(tr)
   local want, lv = TP.desired(tr)
-  if TP.same_shape(rec, want) then
+  -- something routed onto the copies' channels on purpose: laid again,
+  -- on channels it doesn't use
+  local move = false
+  if want and TP.same_shape(rec, want) then
+    local now_taps = {}
+    for i, t in ipairs(want.taps) do
+      now_taps[i] = { pre = rec.taps[i].pre, post = rec.taps[i].post,
+                      addr = t.addr, writers = t.writers, path = t.path }
+    end
+    for _, c in ipairs(clobbers(tr, lv, now_taps)) do
+      if not c.auto then move = true; break end
+    end
+  end
+  if not move and TP.same_shape(rec, want) then
     if not want then return false end
     -- Same plugins, same places: only the latency can have moved -- or a
     -- plugin added since writes over the copies.
@@ -1025,7 +1052,8 @@ function TP.sync(tr)
         now_taps[i] = { pre = rec.taps[i].pre, post = rec.taps[i].post,
                         addr = t.addr, writers = t.writers, path = t.path }
       end
-      if #clobbers(tr, lv, now_taps) > 0 then
+      local found = clobbers(tr, lv, now_taps)
+      if #found > 0 then
         reaper.Undo_BeginBlock()
         clear_clobbers(tr, lv, now_taps)
         reaper.Undo_EndBlock("ChannelView: keep the measurement taps' channels clear", -1)
@@ -1109,10 +1137,17 @@ TP.PROBE_PATHS = {
   "JS: TS_TrackProbe",
 }
 
+-- A new probe's tap pins come unplugged: REAPER connects inputs 3..18 to
+-- channels 3..18, which reads (in the pin connector) as if the probe used
+-- 3/4, a sidechain's usual pair. They're only read, and only once a tap
+-- is laid (lay points them at the copies' channels).
 local function add_probe(tr, pos)
   for _, nm in ipairs(TP.PROBE_PATHS) do
     local idx = reaper.TrackFX_AddByName(tr, nm, false, pos)
-    if idx and idx >= 0 then return idx end
+    if idx and idx >= 0 then
+      for p = 2, 2 + TP.MAX_TAPS * 4 - 1 do set_pin(tr, idx, false, p, 0, 0) end
+      return idx
+    end
   end
   return nil
 end

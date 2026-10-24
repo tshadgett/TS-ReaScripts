@@ -3436,6 +3436,18 @@ local function icon_speaker(dl, x, y, sz, col)
   ImGui.DrawList_PathArcTo(dl, x + sz * 0.58, cy, sz * 0.26, -0.95, 0.95, 8)
   ImGui.DrawList_PathStroke(dl, col, 0, 1.2)
 end
+-- Headphones: a band over the top, a cup at each end. Listening to
+-- something other than the output (a detector's filters, say).
+local function icon_headphones(dl, x, y, sz, col)
+  local cx, cy = x + sz * 0.5, y + sz * 0.56
+  local r = sz * 0.34
+  ImGui.DrawList_PathClear(dl)
+  ImGui.DrawList_PathArcTo(dl, cx, cy, r, math.pi, math.pi * 2, 16)
+  ImGui.DrawList_PathStroke(dl, col, 0, math.max(1.3, sz * 0.09))
+  local cw, ch = sz * 0.16, sz * 0.30
+  ImGui.DrawList_AddRectFilled(dl, cx - r - cw * 0.5, cy - sz * 0.02, cx - r + cw * 0.5, cy + ch, col, sz * 0.05)
+  ImGui.DrawList_AddRectFilled(dl, cx + r - cw * 0.5, cy - sz * 0.02, cx + r + cw * 0.5, cy + ch, col, sz * 0.05)
+end
 local function icon_stereo(dl, x, y, sz, col)
   local r = sz * 0.22
   ImGui.DrawList_AddCircle(dl, x + sz * 0.5 - r * 0.6, y + sz * 0.5, r, col, 18, 1.4)
@@ -3507,6 +3519,7 @@ W.ICONS = {
   mono     = icon_mono,
   stereo   = icon_stereo,
   speaker  = icon_speaker,
+  headphones = icon_headphones,
   tablet   = icon_tablet,
   tablet_on = icon_tablet_on,
   midi     = icon_midi,

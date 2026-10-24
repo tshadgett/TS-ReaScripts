@@ -759,6 +759,7 @@ local function press(ctx, i, it, x, y, bw, bh, dir)
     local open = st.pop_item == it and ImGui.IsPopupOpen(ctx, ID .. POP)
     if pressed then
       st.pop_item, st.pop_at, st.open_pop = it, anchor(x, y, bw, bh, dir), true
+      st.pop_bh = bh
     end
     W.tip(ctx, ID .. i, (not open) and (sw and "Switch toolbar" or text_of(it)) or nil, hovered, false)
     return hovered, held or open, false, sw and true or nil
@@ -1003,10 +1004,10 @@ end
 -- A drawer's look: a button with an icon (when it has one) and, when
 -- `show_label`, its label beside it; a menu has a caret pointing where
 -- its menu opens. Columns use it at full width.
-local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical)
-  if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical) end
-  it = view(it)
-  local hovered, held, on, id = press(ctx, i, it, x, y, bw, bh, dir)
+-- A button's face at x, y, bw by bh: its ground, border, icon, label and
+-- (a menu's) caret, lit when `on`. `it` is its view. Shared by a bar's
+-- buttons and a large menu's submenu rows.
+local function paint_wide(ctx, dl, it, x, y, bw, bh, show_label, dir, hovered, held, on, id)
   local menu_ = has_caret(it)
   local lit = on or (menu_ and held)
   local png = it.icon ~= "" and not AI.is(it.icon)
@@ -1088,6 +1089,13 @@ local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical
   end
   if menu_ then caret(dl, x + bw - 7, y + bh * 0.5, dir, ink) end
   if under then underline(dl, x, y, bw, bh, col) end
+end
+
+local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical)
+  if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical) end
+  it = view(it)
+  local hovered, held, on, id = press(ctx, i, it, x, y, bw, bh, dir)
+  paint_wide(ctx, dl, it, x, y, bw, bh, show_label, dir, hovered, held, on, id)
 end
 
 -- Pure: where each button of a row-wise bar goes. `ws` are the buttons'
@@ -1345,6 +1353,9 @@ local function row_icon(ctx, it, ih, strip, iw)
   end
 end
 
+-- The bar's button height while a large menu is drawn (pop_menu), else nil.
+local menu_large = nil
+
 -- A list of items as menu entries, menus as submenus to any depth: what a
 -- menu button opens, and the TCP's overflow list. `path` keeps ids apart.
 function TB.menu_entries(ctx, items, path)
@@ -1374,17 +1385,33 @@ function TB.menu_entries(ctx, items, path)
     pad = (" "):rep(math.ceil(room / ((sw and sw > 0) and sw or 4)))
   end
   local marks = ih > 0 or strip
+  -- in a large menu, a submenu's row is a button like the bar's, as tall
+  -- (`ext` over and under its text), with room made for it by a Dummy
+  -- either side: items, not cursor moves, so the window grows to them
+  local th = ImGui.GetTextLineHeight(ctx)
+  local ext = menu_large and math.max(0, math.floor((menu_large - th) * 0.5))
+  local room = ext and math.max(0, ext - 4)
   for k, it in ipairs(items) do
     local vi = views[k]
     local key = "##" .. ID .. path .. "." .. k
     if it.menu then
+      if ext then ImGui.Dummy(ctx, 1, room) end
       local open = ImGui.BeginMenu(ctx, pad .. text_of(it) .. key)
       if open then
         TB.menu_entries(ctx, it.items or {}, path .. "." .. k)
         ImGui.EndMenu(ctx)
       end
       -- (once its submenu is done, ImGui hands back the row itself)
-      if marks then row_icon(ctx, vi, ih, strip, iw) end
+      if ext then
+        local x0, y0 = ImGui.GetItemRectMin(ctx)
+        local x1, y1 = ImGui.GetItemRectMax(ctx)
+        local ty = y0 + ((y1 - y0) - th) * 0.5
+        local fy0, fy1 = ty - ext, ty + th + ext
+        local hov = ImGui.IsMouseHoveringRect(ctx, x0, fy0, x1, fy1)
+        paint_wide(ctx, ImGui.GetWindowDrawList(ctx), vi, x0, fy0, x1 - x0, fy1 - fy0,
+                   true, "right", hov, false, open, nil)
+        ImGui.Dummy(ctx, 1, room)
+      elseif marks then row_icon(ctx, vi, ih, strip, iw) end
     elseif it.gap then
       ImGui.Dummy(ctx, 1, 4)
     elseif it.sep then
@@ -1644,8 +1671,8 @@ local function item_menu(ctx)
   ImGui.Separator(ctx)
 
   if it.menu then
-    if ImGui.MenuItem(ctx, "Large items", nil, it.large == true) then it.large = (not it.large) or nil; TB.save() end
-    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its items as tall as ChannelView's own header menus.") end
+    if ImGui.MenuItem(ctx, "Large submenus", nil, it.large == true) then it.large = (not it.large) or nil; TB.save() end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its submenus shown as buttons, like this bar's.") end
     if ImGui.MenuItem(ctx, "Add action to it\u{2026}") then TB.pick_into(it.items, nil) end
     if ImGui.MenuItem(ctx, "Add a menu to it") then
       it.items[#it.items + 1] = new_menu(); TB.save()
@@ -1759,20 +1786,16 @@ local function pop_menu(ctx)
   if st.pop_at then
     ImGui.SetNextWindowPos(ctx, st.pop_at[1], st.pop_at[2], ImGui.Cond_Appearing, st.pop_at[3], st.pop_at[4])
   end
-  -- a menu set to large items: the header's spacing and padding (the
-  -- ones ChannelView's own menus open with)
+  -- a menu set to Large submenus: its submenus' rows (and theirs) drawn as
+  -- the bar's buttons, as tall (TB.menu_entries)
   local it = st.pop_item
-  local large = it and it.large
-  if large then
-    ImGui.PushStyleVar(ctx, ImGui.StyleVar_ItemSpacing, 4, 4)
-    ImGui.PushStyleVar(ctx, ImGui.StyleVar_FramePadding, 6, C.MENU_PAD_Y)
-  end
   if ImGui.BeginPopup(ctx, ID .. POP) then
+    menu_large = it and it.large and (st.pop_bh or TB.btn) or nil
     if it and TB.switch_of(it) == "menu" then TB.switch_entries(ctx)
     elseif it then TB.menu_entries(ctx, it.items or {}, "p") end
+    menu_large = nil
     ImGui.EndPopup(ctx)
   end
-  if large then ImGui.PopStyleVar(ctx, 2) end
 end
 
 -- The icon picker opened for any item of this bar (the organiser's too).

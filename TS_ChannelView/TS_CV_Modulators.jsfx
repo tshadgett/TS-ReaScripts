@@ -62,6 +62,11 @@ noindex: true
   A project saved without these loads them at 0: nothing moved, every
   link and lane where it was.
 
+    240       Bypass all: every modulator held at rest (Output 0, Output
+              bipolar 0.5), so each control it drives sits where it's set.
+              Macros carry on.
+    240 + n   Modulator n's bypass, the same for that one alone.
+
   The idea of macros and modulators living in the chain, linked by
   REAPER's parameter modulation, comes from Saxmand's FX Modulator
   Linking (Jesper Ankarfeldt), with thanks.
@@ -308,6 +313,15 @@ slider237:mx8a_amt=0<-1,1000000,0.0001>-Mod 8 moved by 1: amount
 slider238:mx8b_src=0<0,24,1>-Mod 8 moved by 2: source
 slider239:mx8b_tgt=0<0,1515,1>-Mod 8 moved by 2: target
 slider240:mx8b_amt=0<-1,1000000,0.0001>-Mod 8 moved by 2: amount
+slider241:byp_all=0<0,1,1{Off,On}>-Bypass all modulators
+slider242:m1_byp=0<0,1,1{Off,On}>-Mod 1 Bypass
+slider243:m2_byp=0<0,1,1{Off,On}>-Mod 2 Bypass
+slider244:m3_byp=0<0,1,1{Off,On}>-Mod 3 Bypass
+slider245:m4_byp=0<0,1,1{Off,On}>-Mod 4 Bypass
+slider246:m5_byp=0<0,1,1{Off,On}>-Mod 5 Bypass
+slider247:m6_byp=0<0,1,1{Off,On}>-Mod 6 Bypass
+slider248:m7_byp=0<0,1,1{Off,On}>-Mod 7 Bypass
+slider249:m8_byp=0<0,1,1{Off,On}>-Mod 8 Bypass
 
 in_pin:Input L
 in_pin:Input R
@@ -479,7 +493,7 @@ m1_type == 1 ? (
 m1_smooth > 0 ? (
   sm[0] += (u - sm[0]) * (1 - exp(-dt / (m1_smooth * m1_smooth * 0.5)));
 ) : sm[0] = u;
-m1_type >= 1 ? (
+m1_type >= 1 && byp_all < 0.5 && m1_byp < 0.5 ? (
   m1_out = max(0, min(1, m1_depth * sm[0]));
   m1_outb = max(0, min(1, 0.5 + m1_depth * (sm[0] - 0.5)));
 ) : (
@@ -539,7 +553,7 @@ m2_type == 1 ? (
 m2_smooth > 0 ? (
   sm[1] += (u - sm[1]) * (1 - exp(-dt / (m2_smooth * m2_smooth * 0.5)));
 ) : sm[1] = u;
-m2_type >= 1 ? (
+m2_type >= 1 && byp_all < 0.5 && m2_byp < 0.5 ? (
   m2_out = max(0, min(1, m2_depth * sm[1]));
   m2_outb = max(0, min(1, 0.5 + m2_depth * (sm[1] - 0.5)));
 ) : (
@@ -599,7 +613,7 @@ m3_type == 1 ? (
 m3_smooth > 0 ? (
   sm[2] += (u - sm[2]) * (1 - exp(-dt / (m3_smooth * m3_smooth * 0.5)));
 ) : sm[2] = u;
-m3_type >= 1 ? (
+m3_type >= 1 && byp_all < 0.5 && m3_byp < 0.5 ? (
   m3_out = max(0, min(1, m3_depth * sm[2]));
   m3_outb = max(0, min(1, 0.5 + m3_depth * (sm[2] - 0.5)));
 ) : (
@@ -659,7 +673,7 @@ m4_type == 1 ? (
 m4_smooth > 0 ? (
   sm[3] += (u - sm[3]) * (1 - exp(-dt / (m4_smooth * m4_smooth * 0.5)));
 ) : sm[3] = u;
-m4_type >= 1 ? (
+m4_type >= 1 && byp_all < 0.5 && m4_byp < 0.5 ? (
   m4_out = max(0, min(1, m4_depth * sm[3]));
   m4_outb = max(0, min(1, 0.5 + m4_depth * (sm[3] - 0.5)));
 ) : (
@@ -719,7 +733,7 @@ m5_type == 1 ? (
 m5_smooth > 0 ? (
   sm[4] += (u - sm[4]) * (1 - exp(-dt / (m5_smooth * m5_smooth * 0.5)));
 ) : sm[4] = u;
-m5_type >= 1 ? (
+m5_type >= 1 && byp_all < 0.5 && m5_byp < 0.5 ? (
   m5_out = max(0, min(1, m5_depth * sm[4]));
   m5_outb = max(0, min(1, 0.5 + m5_depth * (sm[4] - 0.5)));
 ) : (
@@ -779,7 +793,7 @@ m6_type == 1 ? (
 m6_smooth > 0 ? (
   sm[5] += (u - sm[5]) * (1 - exp(-dt / (m6_smooth * m6_smooth * 0.5)));
 ) : sm[5] = u;
-m6_type >= 1 ? (
+m6_type >= 1 && byp_all < 0.5 && m6_byp < 0.5 ? (
   m6_out = max(0, min(1, m6_depth * sm[5]));
   m6_outb = max(0, min(1, 0.5 + m6_depth * (sm[5] - 0.5)));
 ) : (
@@ -839,7 +853,7 @@ m7_type == 1 ? (
 m7_smooth > 0 ? (
   sm[6] += (u - sm[6]) * (1 - exp(-dt / (m7_smooth * m7_smooth * 0.5)));
 ) : sm[6] = u;
-m7_type >= 1 ? (
+m7_type >= 1 && byp_all < 0.5 && m7_byp < 0.5 ? (
   m7_out = max(0, min(1, m7_depth * sm[6]));
   m7_outb = max(0, min(1, 0.5 + m7_depth * (sm[6] - 0.5)));
 ) : (
@@ -899,7 +913,7 @@ m8_type == 1 ? (
 m8_smooth > 0 ? (
   sm[7] += (u - sm[7]) * (1 - exp(-dt / (m8_smooth * m8_smooth * 0.5)));
 ) : sm[7] = u;
-m8_type >= 1 ? (
+m8_type >= 1 && byp_all < 0.5 && m8_byp < 0.5 ? (
   m8_out = max(0, min(1, m8_depth * sm[7]));
   m8_outb = max(0, min(1, 0.5 + m8_depth * (sm[7] - 0.5)));
 ) : (

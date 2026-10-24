@@ -263,6 +263,7 @@ check("probe tap 1 before L = 5",     inbits(5, 2), b(5))
 check("probe tap 1 after R = 8",      inbits(5, 5), b(8))
 check("probe tap 2 before L = 9",     inbits(5, 6), b(9))
 check("probe tap 2 after R = 12",     inbits(5, 9), b(12))
+check("unused taps unplugged",        inbits(5, 10) .. "," .. inbits(5, 17), "0,0")
 check("track grows to 12 channels",   track.nch, 12)
 check("Pro-C 2 untouched",            outbits(4, 0) .. "," .. outbits(4, 1), b(1) .. "," .. b(2))
 check("a record on the track",        (track.ext[TP.EXT_KEY] or ""):sub(1, 3), "v1|")
@@ -405,6 +406,20 @@ check("follower: the track grew past it", track.nch > 12, true)
 check("follower: settles", TP.sync(track), false)
 got, want = flow()
 check("follower: still right", got, want)
+-- one routed onto a copy's channel on purpose (not REAPER's own mapping):
+-- left as it is, and the taps move to other channels
+reset()
+TP.invalidate()
+TP.sync(track)
+local ch_was = TP.parse_record(track.ext[TP.EXT_KEY]).taps[1].post
+local eq_was = F(1).pin_out[0][1]
+F(1).pin_out[0] = { eq_was | b(ch_was), 0 }
+TP.invalidate()
+check("routed on purpose: laid again", TP.sync(track), true)
+local ch_now = TP.parse_record(track.ext[TP.EXT_KEY]).taps[1].post
+check("routed on purpose: its pin kept", F(1).pin_out[0][1] & b(ch_was), b(ch_was))
+check("routed on purpose: the taps moved", ch_now ~= ch_was and ch_now + 1 ~= ch_was, true)
+check("routed on purpose: settles", TP.sync(track), false)
 
 -- ---------------------------------------------------------------- levels
 -- Pro-C 2 reports its own reduction, so it's only ever tapped for its
@@ -727,6 +742,8 @@ do
   check("ARA: asked for slot 2, then the end", table.concat(asked, ","), "-1001,-1")
   check("ARA: Melodyne still first",     F(0).guid, "{MEL}")
   check("ARA: pre probe second, post last", (F(1).params[TP.P_ROLE] or 0) .. "," .. (F(3).params[TP.P_ROLE] or 0), "0,1")
+  check("new probes: tap pins unplugged", inbits(1, 2) .. "," .. inbits(1, 17) .. "," .. inbits(3, 2), "0,0,0")
+  check("new probes: main pins kept",   inbits(1, 0) .. "," .. inbits(1, 1), b(1) .. "," .. b(2))
   check("ARA: the pair is found",        TP.status(track, "{J}"), "ok")
   check("ARA: Melodyne outside it",      TP.status(track, "{MEL}"), "outside")
   reaper.GetTrackStateChunk, reaper.TrackFX_AddByName = nil, nil

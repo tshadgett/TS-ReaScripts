@@ -413,6 +413,75 @@ local function remove_folder(f)
   end
 end
 
+-- ---------------------------------------------------------------------
+-- smart folders: a search saved as a folder, or one's search changed
+-- ---------------------------------------------------------------------
+-- A smart folder lists whatever its search matches, here and in REAPER's
+-- own browser, which reads the search its way (IX.smart_match): so the
+-- window shows that, not this picker's looser search.
+local smart_ed = nil   -- { id (nil for a new one), name, q, focus }
+
+-- Opens the window for folder `f` (a smart folder), or a new one from
+-- search `q`.
+function B.edit_smart(f, q)
+  if f then
+    smart_ed = { id = f.id, name = f.name, q = IX.smart_of(folder_model(), f.id) or "", focus = true }
+  else
+    smart_ed = { name = q or "", q = q or "", focus = true }
+  end
+end
+
+local SMART_SHOWN = 8
+
+local function draw_smart(ctx)
+  local e = smart_ed
+  if not e then return end
+  ImGui.SetNextWindowSize(ctx, 360, 0, ImGui.Cond_Appearing)
+  local visible, open = ImGui.Begin(ctx, (e.id and "Smart folder" or "New smart folder") .. "###tscv_smartfold",
+    true, ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoDocking)
+  if visible then
+    ImGui.Text(ctx, "Name")
+    ImGui.SetNextItemWidth(ctx, 340)
+    local _, nm = ImGui.InputText(ctx, "##sfname", e.name)
+    e.name = nm
+    ImGui.Text(ctx, "Search")
+    if e.focus then ImGui.SetKeyboardFocusHere(ctx); e.focus = false end
+    ImGui.SetNextItemWidth(ctx, 340)
+    local _, q = ImGui.InputText(ctx, "##sfq", e.q)
+    e.q = q
+    ImGui.TextDisabled(ctx, "Every word, OR between choices, NOT to leave one out, \"a phrase\".")
+    ImGui.Separator(ctx)
+    -- what it lists, as REAPER will
+    local hits = {}
+    if U.trim(e.q) ~= "" then
+      for _, it in ipairs(installed()) do
+        if IX.smart_match(e.q, it.name, it.ident) then hits[#hits + 1] = it end
+      end
+      table.sort(hits, function(a, b) return a.short:lower() < b.short:lower() end)
+    end
+    ImGui.TextDisabled(ctx, #hits == 1 and "1 plugin matches" or (#hits .. " plugins match"))
+    for k = 1, math.min(#hits, SMART_SHOWN) do ImGui.Text(ctx, "  " .. hits[k].short) end
+    if #hits > SMART_SHOWN then ImGui.TextDisabled(ctx, ("  \u{2026}and %d more"):format(#hits - SMART_SHOWN)) end
+    ImGui.Separator(ctx)
+    local ok = U.trim(e.name) ~= "" and U.trim(e.q) ~= ""
+    if not ok then ImGui.BeginDisabled(ctx) end
+    if ImGui.Button(ctx, "Save", 90) then
+      edit_folders(function(mm)
+        local id = e.id
+        if id and not mm.folders[id] then return false end
+        if id then IX.folder_rename(mm, id, e.name) else id = IX.folder_new(mm, U.trim(e.name)) end
+        return IX.set_smart(mm, id, e.q)
+      end)
+      smart_ed = nil
+    end
+    if not ok then ImGui.EndDisabled(ctx) end
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Cancel", 90) then smart_ed = nil end
+    ImGui.End(ctx)
+  end
+  if not open then smart_ed = nil end
+end
+
 -- A plugin's right-click menu: add it to a folder, take it out of one.
 local function folder_actions(ctx, e)
   local kind = IX.kind_of(e.name)
@@ -544,6 +613,9 @@ local function items(ctx, track)
           if #members == 0 then ImGui.TextDisabled(ctx, "Empty") end
           plugin_items(ctx, track, members)
           ImGui.Separator(ctx)
+          if IX.is_smart(fm, f.id) and ImGui.MenuItem(ctx, "Change its search\u{2026}##sfe" .. f.id) then
+            B.edit_smart(f)
+          end
           if ImGui.MenuItem(ctx, "Remove this folder\u{2026}##rmf" .. f.id) then remove_folder(f) end
           ImGui.EndMenu(ctx)
         end
@@ -565,6 +637,7 @@ local function items(ctx, track)
       if f then
         ImGui.TextDisabled(ctx, f.name)
         ImGui.Separator(ctx)
+        if IX.is_smart(fm, f.id) and ImGui.MenuItem(ctx, "Change its search\u{2026}") then B.edit_smart(f) end
         if ImGui.MenuItem(ctx, "Remove folder") then remove_folder(f) end
       end
       ImGui.EndPopup(ctx)
@@ -743,6 +816,10 @@ function B.draw_menu(ctx, track)
         ImGui.CloseCurrentPopup(ctx)
       end
     end
+    if not inserted_now then
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Save as a smart folder\u{2026}") then B.edit_smart(nil, U.trim(menu.query)) end
+    end
   else
     items(ctx, track)
   end
@@ -754,6 +831,7 @@ end
 -- `picking`: true from the organiser, which draws only a search opened
 -- to pick a plugin; ChannelView's own call draws only the others.
 function B.draw(ctx, track, picking)
+  if not picking then draw_smart(ctx) end
   if not st.open then return false end
   if (st.pick ~= nil) ~= (picking == true) then return false end
   active_pick = st.pick
@@ -1018,6 +1096,14 @@ function B._draw(ctx, track)
       if ImGui.SmallButton(ctx, "clear filter") then set_filter("", nil) end
     else
       ImGui.TextDisabled(ctx, ("%d of %d"):format(n, #installed()))
+    end
+    if U.trim(st.query) ~= "" then
+      ImGui.SameLine(ctx)
+      if ImGui.SmallButton(ctx, "save as smart folder") then
+        B.edit_smart(nil, U.trim(st.query))
+        ImGui.CloseCurrentPopup(ctx)
+        st.open = false
+      end
     end
 
     ImGui.EndPopup(ctx)

@@ -522,9 +522,9 @@ local function item_props(ctx, tb, web)
       ImGui.Text(ctx, "Menu")
       ImGui.TextDisabled(ctx, ("%d inside. Clicking it opens it."):format(#it.items))
       if not web then
-        local chg, v = ImGui.Checkbox(ctx, "Large items##aelarge", it.large == true)
+        local chg, v = ImGui.Checkbox(ctx, "Large submenus##aelarge", it.large == true)
         if chg then it.large = v or nil; tb.save() end
-        if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its items as tall as ChannelView's own header menus.") end
+        if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its submenus shown as buttons, like the bar's.") end
       end
     elseif sw then
       ImGui.Text(ctx, "Toolbar switch")
@@ -946,7 +946,9 @@ end
 
 local draw_share
 function AE.share(mode)
-  st.open, st.focus = true, true
+  -- the window, brought forward only when it isn't open already (focusing
+  -- it closes the dialog this opens)
+  if not st.open then st.open, st.focus = true, true end
   if mode == "export" then
     local list = {}
     for _, b in ipairs(all_bars()) do list[#list + 1] = { d = b.d, pick = true } end
@@ -978,13 +980,18 @@ local STATUS = { new = "new", differs = "replaces yours", same = "same as yours"
 draw_share = function(ctx)
   if not share then return end
   local title = share.mode == "import" and "Import action bars###cvaeshare" or "Export action bars###cvaeshare"
-  if share.open then ImGui.OpenPopup(ctx, title); share.open = false end
+  -- opened once the window has taken the focus it asked for (AE.share)
+  if share.open and not st.focus then ImGui.OpenPopup(ctx, title); share.open = false end
   ImGui.SetNextWindowSize(ctx, 420, 0, ImGui.Cond_Appearing)
   local visible, open = ImGui.BeginPopupModal(ctx, title, true, ImGui.WindowFlags_AlwaysAutoResize)
   if not visible then
-    if not open then share = nil end
+    if not open then share = nil
+    -- closed before it was ever shown (a change of focus closes popups):
+    -- opened again
+    elseif not share.shown then share.open = true end
     return
   end
+  share.shown = true
   local d = share
   local function close() share = nil; ImGui.CloseCurrentPopup(ctx) end
   if d.mode == "import" then

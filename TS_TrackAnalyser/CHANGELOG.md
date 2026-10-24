@@ -1,5 +1,13 @@
 # Track Analyser — changelog
 
+## 2.5.1 — probe pins
+
+- **Insert probes leaves a new probe's tap inputs unplugged.** REAPER
+  connected them to channels 3 and up, so the pin connector showed the
+  probe on 3/4, a sidechain's usual pair, though it never used them.
+  ChannelView points them where it needs them when it lays a tap. Probes
+  already on your tracks are left as they are.
+
 ## 2.5.0
 
 - No changes: the version is kept in step with ChannelView 2.5.0.

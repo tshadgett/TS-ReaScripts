@@ -948,6 +948,35 @@ function MD.mx_ok(track, slot)
   return slot ~= nil and (reaper.TrackFX_GetNumParams(track, slot) or 0) >= MD.MX_BASE + MD.NO * MD.MX_SLOTS * 3
 end
 
+-- ---------------------------------------------------------------------
+-- bypass
+-- ---------------------------------------------------------------------
+-- The plugin's parameter after the matrix holds every modulator at rest
+-- (the controls they drive sit where they're set), and one per modulator
+-- holds that one: to hear the track with and without its movement.
+-- Macros carry on. Parameters, so they can be automated or mapped.
+MD.BYPASS = MD.MX_BASE + MD.NO * MD.MX_SLOTS * 3
+function MD.bypass_param(j) return MD.BYPASS + (j or 0) end
+
+-- Whether the plugin on this track has them (an older copy may not).
+function MD.bypass_ok(track, slot)
+  return slot ~= nil and (reaper.TrackFX_GetNumParams(track, slot) or 0) > MD.BYPASS + MD.NO
+end
+
+-- Whether all (j nil) or modulator j alone is bypassed.
+function MD.bypassed(track, slot, j)
+  if not MD.bypass_ok(track, slot) then return false end
+  local p = (j == nil) and MD.BYPASS or MD.bypass_param(j)
+  return (reaper.TrackFX_GetParam(track, slot, p) or 0) >= 0.5
+end
+
+-- Bypasses all (j nil) or modulator j, or (on false) lets it move again.
+function MD.set_bypass(track, slot, j, on)
+  if not MD.bypass_ok(track, slot) then return false end
+  reaper.TrackFX_SetParam(track, slot, MD.bypass_param(j), on and 1 or 0)
+  return true
+end
+
 -- A source's code, and back: macro i -> i, modulator j -> 16 + j. An XY
 -- pad's second macro is i + 1.
 function MD.mx_code_of(src, k)

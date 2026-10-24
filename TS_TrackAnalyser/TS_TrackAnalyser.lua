@@ -2,9 +2,10 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.5.0
+-- @version 2.5.1
 -- @changelog
---  No changes: version kept in step with ChannelView 2.5.0.
+--  Insert probes leaves a new probe's tap inputs unplugged, so the pin
+--  connector no longer shows it on 3/4 and up.
 -- @about
 --  # Track Analyser
 --

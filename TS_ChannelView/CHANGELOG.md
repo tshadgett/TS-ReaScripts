@@ -1,5 +1,63 @@
 # ChannelView — changelog
 
+## 3.1.0 — bypass modulation, smart folders
+
+Update ChannelView and ChannelView Pro together.
+
+### ChannelView
+
+- **Bypass modulation, to compare.** The Modulators panel has a power
+  button in its header for all of them and one on each modulator: held,
+  each control a modulator drives sits where it's set, so you hear the
+  track without the movement. Macros carry on. The rack's strips have
+  the same buttons. *TS_ChannelView_BypassModulation* is an action for a
+  key or a toolbar button (lit while the selected track's modulators are
+  bypassed); it works with ChannelView closed. They're parameters of the
+  track's ChannelView Modulators plugin, so they can be automated or
+  mapped. Reopen a project you had open while updating for the buttons
+  to appear.
+- **Smart folders.** An FX folder that's a smart folder (a search saved
+  in REAPER's FX browser) now lists the plugins its search matches, in
+  the + menu and the picker. *Save as a smart folder…* at the foot of
+  the quick-search menu, or beside the count in the search dialog, saves
+  your search as one; *Change its search…* in its submenu or right-click
+  edits it, with the plugins it matches listed as you type. REAPER's own
+  browser shows a new one after a restart.
+- **FX folders** are named and ordered as REAPER's FX browser has them
+  (a folder could show another's name).
+- **Large submenus** (it was *Large items*, and had no effect): a menu's
+  submenus are drawn as the bar's buttons, the same height, background
+  and border.
+- **ChannelView and Pro at different versions:** ChannelView says which
+  one to update, once, and on a button in its header until they match
+  (Pro is off meanwhile). The tooltip on Pro's greyed menu items says the
+  same.
+- **Organise actions ▸ Export…** opens its list of bars (it did nothing).
+- **The probes leave a sidechain alone.** A new probe's spare inputs (for
+  the gain-reduction taps) start unplugged, so the pin connector no
+  longer shows it on 3/4. And a plugin you've routed onto the channels
+  the taps use keeps its routing: the taps move to free channels
+  instead.
+
+### ChannelView Pro
+
+- **ReaGate and ReaLimit start with canvases** (Set up the canvas…
+  changes them, as for any other). ReaGate's draws its pre-open before
+  the attack, has its RMS time as a slider under the envelope, and its
+  detector filters in a panel along the foot, drawn as a delay's are:
+  drag the high-pass and low-pass, and the headphones button lets you
+  hear what the detector hears. ReaLimit's has *True peak*, *Constant
+  gain* and *Low latency* as buttons above its release (they're kept in
+  ReaLimit's own settings, not as parameters).
+- **The Rack and the web companion** won't start with ChannelView at
+  another version: they say which one to update.
+- **A gate's close line** is taken by its grip, in the middle, so the
+  threshold's line can always be taken anywhere else.
+- **The web page:** frozen plugins show where they were, as ice strips;
+  tap one to unfreeze. The ❄ beside OS under the fader freezes the
+  track, or up to one of its plugins, or unfreezes it. The Modulators
+  panel has the bypass buttons too.
+
 ## 3.0.0 — ChannelView Pro, grid layouts
 
 ChannelView now comes in two parts. **ChannelView** stays free and on

@@ -218,6 +218,26 @@ end
 -- to put back online once REAPER's freeze is in the track.
 local pending = nil
 
+-- ChannelView and its web bridge each freeze on their own, so a freeze in
+-- progress is also noted for the other: its track's GUID and when. Until
+-- it's seen through (or a minute and a half has gone), the other leaves
+-- that track's helpers where the freeze put them.
+local NS, PENDING_KEY = "TS_ChannelView", "freeze_pending"
+local function note_pending(track)
+  reaper.SetExtState(NS, PENDING_KEY, ("%s|%d"):format(reaper.GetTrackGUID(track), os.time()), false)
+end
+local function clear_pending() reaper.DeleteExtState(NS, PENDING_KEY, false) end
+local function elsewhere(track)
+  if pending or not track then return false end
+  local g, t = reaper.GetExtState(NS, PENDING_KEY):match("^(.-)|(%d+)$")
+  return g ~= nil and g == reaper.GetTrackGUID(track) and os.time() - tonumber(t) < 90
+end
+
+-- What a freeze has to say when it's done (the plugins REAPER froze that
+-- it was asked to leave): a message box, unless set to say it elsewhere
+-- (the web bridge tells the page).
+FZ.notify = nil
+
 local function finish(p)
   local track = p.track
   local map = FZ.match(p.after, chain_names(track))
@@ -232,8 +252,9 @@ local function finish(p)
   end
   FZ.forget()
   if missing > 0 then
-    reaper.MB(("REAPER froze %d plugin%s it was asked to leave as well. Unfreeze puts them back.")
-      :format(missing, missing == 1 and "" or "s"), "ChannelView", 0)
+    local msg = ("REAPER froze %d plugin%s it was asked to leave as well. Unfreeze puts them back.")
+      :format(missing, missing == 1 and "" or "s")
+    if FZ.notify then FZ.notify(msg) else reaper.MB(msg, "ChannelView", 0) end
   end
 end
 
@@ -243,15 +264,17 @@ end
 function FZ.poll()
   local p = pending
   if not p then return false end
-  if not reaper.ValidatePtr(p.track, "MediaTrack*") then pending = nil return true end
+  if not reaper.ValidatePtr(p.track, "MediaTrack*") then pending = nil; clear_pending() return true end
   if levels_now(p.track) > p.levels or reaper.time_precise() - p.t0 > 90 then
     pending = nil
+    clear_pending()
     finish(p)
     return true
   end
   return false
 end
-function FZ.busy() return pending ~= nil end
+-- A freeze in progress here, or (given the track) on it from elsewhere.
+function FZ.busy(track) return pending ~= nil or elsewhere(track) end
 
 -- Puts back the helpers recorded for the levels the track no longer has:
 -- unfrozen from ChannelView or from anywhere else (REAPER's own Unfreeze,
@@ -261,7 +284,7 @@ function FZ.busy() return pending ~= nil end
 -- would come before the unfreeze in the undo history and make it
 -- unreachable. True if the record changed.
 function FZ.sync(track)
-  if not track or pending then return false end
+  if not track or pending or elsewhere(track) then return false end
   local _, rec = reaper.GetSetMediaTrackInfo_String(track, EXT, "", false)
   if not rec or rec == "" then return false end
   local have, n = levels_now(track), FZ.count(rec)
@@ -283,7 +306,7 @@ end
 -- plugin at `upto` (0-based). Returns true, or false and why.
 function FZ.freeze(track, upto)
   if not track then return false, "No track." end
-  if pending then return false, "A freeze is still finishing." end
+  if pending or elsewhere(track) then return false, "A freeze is still finishing." end
   FZ.sync(track)
   local n = reaper.TrackFX_GetCount(track)
   -- the last plugin to freeze: the chosen one, or the last that isn't a helper
@@ -328,6 +351,7 @@ function FZ.freeze(track, upto)
   on_track(track, CMD_STEREO)
   reaper.Undo_EndBlock(upto and "ChannelView: freeze up to a plugin" or "ChannelView: freeze track", -1)
   pending = p
+  note_pending(track)
   FZ.poll()
   FZ.forget()
   return true

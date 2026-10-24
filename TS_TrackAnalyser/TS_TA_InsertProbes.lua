@@ -3,7 +3,7 @@
 -- @title TS_TA_InsertProbes
 -- @description Track Analyser -- put a probe at each end of the chain
 -- @author Tim Shadgett
--- @version 1.0.0
+-- @version 1.0.1
 -- MIT licence -- see LICENSE in the TS-ReaScripts repository.
 --========================================================
 --
@@ -70,6 +70,19 @@ NAMES[#NAMES + 1] = PROBE
 
 local resolved = nil
 
+-- THE TAP PINS COME UNPLUGGED. Beyond its left and right, the probe has
+-- sixteen inputs for ChannelView's taps (pins 2..17), and REAPER connects
+-- a new plugin's inputs to the channels of the same number. In the pin
+-- connector that reads as the probe using 3/4 and up -- a sidechain's
+-- usual pair -- though it only reads them, and only once ChannelView lays
+-- a tap (which points them where it needs). So a new probe starts with
+-- them unplugged. A probe already on a track is left as it is.
+local TAP_PINS = 16
+
+local function unplugTaps(tr, idx)
+  for pin = 2, 1 + TAP_PINS do r.TrackFX_SetPinMappings(tr, idx, 0, pin, 0, 0) end
+end
+
 -- Adds a probe at the end of the track's chain and returns its index, or
 -- nil plus a reason.
 local function addProbe(tr)
@@ -78,6 +91,7 @@ local function addProbe(tr)
     local idx = r.TrackFX_AddByName(tr, nm, false, -1)
     if idx and idx >= 0 then
       resolved = nm
+      unplugTaps(tr, idx)
       return idx
     end
   end

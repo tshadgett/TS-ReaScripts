@@ -534,6 +534,23 @@ MD.remove(TR, MD.find(TR, "o1"))
 check("lfo removed", MD.find(TR, "o1"), nil)
 check("its link removed", eq.cfg["param.3.plink.active"], "0")
 check("type off", MD.field(TR, 1, 1, "type"), 0)
+-- bypass: all, or one modulator, as the plugin's parameters
+do
+  local slot = MD.plugin(TR)
+  local was = TR.fx[slot + 1].params
+  check("bypass: after the matrix", MD.BYPASS, 240)
+  TR.fx[slot + 1].params = 249
+  check("bypass: none to start", tostring(MD.bypassed(TR, slot)) .. " " .. tostring(MD.bypassed(TR, slot, 1)), "false false")
+  MD.set_bypass(TR, slot, nil, true)
+  check("bypass: all", tostring(MD.bypassed(TR, slot)) .. " " .. tostring(MD.bypassed(TR, slot, 1)), "true false")
+  MD.set_bypass(TR, slot, nil, false); MD.set_bypass(TR, slot, 2, true)
+  check("bypass: one", tostring(MD.bypassed(TR, slot)) .. " " .. tostring(MD.bypassed(TR, slot, 2)), "false true")
+  MD.set_bypass(TR, slot, 2, false)
+  TR.fx[slot + 1].params = 240
+  check("bypass: an older plugin hasn't it", tostring(MD.bypass_ok(TR, slot)) .. " " .. tostring(MD.set_bypass(TR, slot, nil, true)), "false false")
+  TR.fx[slot + 1].params = was
+end
+
 -- remove everything: the plugin stays (it has a lane with automation)
 for _, src in ipairs(MD.scan(TR).list) do MD.remove(TR, src) end
 check("all gone", #MD.scan(TR).list, 0)

@@ -29,7 +29,7 @@
 local ED = {}
 
 -- the release both editions are; Pro must be the same
-ED.RELEASE = "3.0.0"
+ED.RELEASE = "3.1.0"
 
 -- where ReaPack puts each edition's files, under REAPER's Scripts
 ED.STANDARD_DIR = "TS-ReaScripts/TS_ChannelView/"
@@ -89,13 +89,44 @@ function ED.switches()
                                           draw = function() end }
 end
 
+-- Pro installed at another version (ED.mismatch, its release): what to
+-- say, naming the one that's behind.
+local function newer(a, b)
+  local x, y = {}, {}
+  for d in a:gmatch("%d+") do x[#x + 1] = tonumber(d) end
+  for d in b:gmatch("%d+") do y[#y + 1] = tonumber(d) end
+  for i = 1, math.max(#x, #y) do
+    if (x[i] or 0) ~= (y[i] or 0) then return (x[i] or 0) > (y[i] or 0) end
+  end
+  return false
+end
+-- The one to update: "ChannelView" or "ChannelView Pro".
+function ED.behind()
+  if not ED.mismatch then return nil end
+  return newer(ED.mismatch, ED.RELEASE) and "ChannelView" or "ChannelView Pro"
+end
+function ED.mismatch_text()
+  if not ED.mismatch then return nil end
+  local pro_newer = ED.behind() == "ChannelView"
+  return ("ChannelView is %s and ChannelView Pro is %s. They have to be the same version, " ..
+          "so Pro is switched off for now.\n\nUpdate %s: Extensions > ReaPack > Synchronize packages%s, " ..
+          "then restart ChannelView."):format(ED.RELEASE, ED.mismatch,
+          pro_newer and "ChannelView" or "ChannelView Pro",
+          pro_newer and "" or " (Pro comes from its own ReaPack link: check it's still in ReaPack's repositories)")
+end
+-- The message box, once for each pair of versions (or every time, `always`).
+function ED.warn_mismatch(always)
+  if not ED.mismatch then return end
+  local pair = ED.RELEASE .. "|" .. ED.mismatch
+  if not always and reaper.GetExtState("TS_ChannelView", "edition_warned") == pair then return end
+  reaper.SetExtState("TS_ChannelView", "edition_warned", pair, true)
+  reaper.ShowMessageBox(ED.mismatch_text(), "ChannelView", 0)
+end
+
 ED.NOTE = "In ChannelView Pro."
 function ED.note(ImGui, ctx)
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-    ImGui.SetTooltip(ctx, ED.mismatch
-      and ("In ChannelView Pro. The Pro installed is for ChannelView " .. ED.mismatch ..
-           ",\nnot this one (" .. ED.RELEASE .. "): update both together.")
-      or ED.NOTE)
+    ImGui.SetTooltip(ctx, ED.mismatch and ("In ChannelView Pro. " .. ED.mismatch_text()) or ED.NOTE)
   end
 end
 

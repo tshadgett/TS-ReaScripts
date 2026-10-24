@@ -1336,9 +1336,12 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + w - 0.5, y + h - 0.5,
     (isopen or lit) and src.col or C.COL.panel_border, 4, 0, lit and 2.0 or 1.0)
   ImGui.DrawList_AddRectFilled(dl, x + 6, y + 6, x + 14, y + 14, src.col, 2)
+  -- held at rest: this one bypassed, or all of them
+  local own_byp = MD.bypassed(track, src.slot, src.j)
+  local held = own_byp or MD.bypassed(track, src.slot)
   ImGui.SetCursorScreenPos(ctx, x, y)
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, "name##" .. src.guid, w - 24, HEAD,
+  ImGui.InvisibleButton(ctx, "name##" .. src.guid, w - 42, HEAD,
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then open[key] = not isopen or nil end
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
@@ -1347,8 +1350,18 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   end
   W.tip(ctx, "name##" .. src.guid, isopen and "Click: close\nRight-click: more"
     or "Click: settings\nRight-click: lanes, rename, colour, remove", ImGui.IsItemHovered(ctx), false)
-  local nm = U.truncate(src.name, 20)
-  ImGui.DrawList_AddText(dl, x + 19, y + 3, C.COL.header_text, nm)
+  local nm = U.truncate(src.name, 18)
+  ImGui.DrawList_AddText(dl, x + 19, y + 3, held and C.COL.header_dim or C.COL.header_text, nm)
+  if MD.bypass_ok(track, src.slot) then
+    ImGui.SetCursorScreenPos(ctx, x + w - 38, y + 2)
+    if W.icon_button(ctx, "byp##" .. src.guid, "power", C.ICON_SIZE, own_byp,
+        own_byp and "Bypassed: the controls it drives sit where they're set\nClick: move them again"
+        or (held and "All the modulators are bypassed (the panel's header)"
+            or "Bypass: hold it still, to hear the track without it"),
+        C.COL.bypass_on) then
+      MD.set_bypass(track, src.slot, src.j, not own_byp)
+    end
+  end
   -- a dot for each source moving it (THE MATRIX)
   do
     local slots = MD.mx_ok(track, src.slot) and mx_slots(track, src) or {}
@@ -1372,7 +1385,8 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   end
   local links = s.by_mod[src.guid] or {}
   W.push_small(ctx)
-  ImGui.DrawList_AddText(dl, x + 8, y + HEAD - 1, C.COL.header_dim, U.truncate(sub_text(track, src, #links), 34))
+  local sub = held and ("bypassed \u{00B7} " .. sub_text(track, src, #links)) or sub_text(track, src, #links)
+  ImGui.DrawList_AddText(dl, x + 8, y + HEAD - 1, held and C.COL.bypass_on or C.COL.header_dim, U.truncate(sub, 34))
   W.pop_small(ctx)
   link_handle(ctx, dl, src, 1, x + w - 12, y + 9, 5.5)
   local bx, by, bw = x + 6, y + HEAD + SUB + 2, w - 12
@@ -1398,6 +1412,21 @@ end
 -- ---------------------------------------------------------------------
 
 local TITLE = { macros = "Macros", mods = "Modulators" }
+local function btn_size() return C.ICON_SIZE end
+
+-- A toolbar button for the Bypass modulation action
+-- (TS_ChannelView_BypassModulation.lua) lit while this track's modulators
+-- are bypassed: the action says which command it is.
+local lit_was = nil
+local function light_action(on)
+  if on == lit_was then return end
+  lit_was = on
+  local sec, cmd = reaper.GetExtState(C.EXT_SECT, "bypass_mods_cmd"):match("^(%-?%d+):(%d+)$")
+  if sec and tonumber(cmd) > 0 then
+    reaper.SetToggleCommandState(tonumber(sec), tonumber(cmd), on and 1 or 0)
+    reaper.RefreshToolbar2(tonumber(sec), tonumber(cmd))
+  end
+end
 
 local function slim(ctx, dl, which, x, y, ww, wh, n)
   local btn = C.ICON_SIZE
@@ -1423,7 +1452,8 @@ local function slim(ctx, dl, which, x, y, ww, wh, n)
   MR.bar_at[which] = { x + ww * 0.5, y + wh * 0.4 }
 end
 
-local function frame_of(ctx, dl, which, x, y, ww, wh, foot)
+-- `extra(bx, by)`, when given, draws a button left of the fold button.
+local function frame_of(ctx, dl, which, x, y, ww, wh, foot, extra)
   local btn = C.ICON_SIZE
   ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + C.HEADER_H, C.COL.header_bg, 0)
   ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + ww, y + C.HEADER_H, C.COL.panel_border, 1.0)
@@ -1433,6 +1463,7 @@ local function frame_of(ctx, dl, which, x, y, ww, wh, foot)
   if W.icon_button(ctx, which .. "col", "collapse", btn, false, "Fold the " .. TITLE[which]:lower() .. " away") then
     set_collapsed(which, true)
   end
+  if extra then extra(x + ww - 2 * btn - 7, y + 3) end
   -- the foot, as every panel's: how many are in use, centred
   local fh = C.FOOTER_H
   local fy = y + wh - fh
@@ -1500,6 +1531,7 @@ end
 function MR.draw_mods(ctx, track, avail_h)
   return draw_child(ctx, "mods", track, avail_h, function(req)
     local s = MD.scan(track)
+    if track then light_action(MD.bypassed(track, s.mods[1] and s.mods[1].slot)) end
     local dl = ImGui.GetWindowDrawList(ctx)
     local x, y = ImGui.GetWindowPos(ctx)
     local ww, wh = ImGui.GetWindowSize(ctx)
@@ -1509,7 +1541,18 @@ function MR.draw_mods(ctx, track, avail_h)
       slim(ctx, dl, "mods", x, y, ww, wh, #s.mods)
       return
     end
-    frame_of(ctx, dl, "mods", x, y, ww, wh, ("%d of %d used"):format(#s.mods, MD.NO))
+    local slot = s.mods[1] and s.mods[1].slot
+    frame_of(ctx, dl, "mods", x, y, ww, wh, ("%d of %d used"):format(#s.mods, MD.NO),
+      MD.bypass_ok(track, slot) and function(bx, by)
+        local on = MD.bypassed(track, slot)
+        ImGui.SetCursorScreenPos(ctx, bx, by)
+        if W.icon_button(ctx, "modsbyp", "power", btn_size(), on,
+            on and "All bypassed: every control they drive sits where it's set\nClick: move them again"
+            or "Bypass all: hold every modulator still, to hear the track without them",
+            C.COL.bypass_on) then
+          MD.set_bypass(track, slot, nil, not on)
+        end
+      end or nil)
     local gx, gy = x + C.PANEL_PAD, y + C.HEADER_H + C.PANEL_PAD
     local placed, _, add = place_mods(track, s.mods, room_of(wh), not mods_full(s))
     for _, p in ipairs(placed) do

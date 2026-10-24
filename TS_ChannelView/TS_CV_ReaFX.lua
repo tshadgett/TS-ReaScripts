@@ -2,7 +2,10 @@
 -- Not a package of its own: installed by TS_ChannelView.lua's @provides.
 --[[
   TS_CV_ReaFX.lua -- ReaDelay's and ReaVerbate's own canvases: no setup,
-  their controls known by name.
+  their controls known by name. And ReaGate's and ReaLimit's default
+  canvases: a gate and a limiter canvas their default layout starts with,
+  its roles found by name, which Set up the canvas can change like any
+  other's once it's saved.
 
   A layout for either (its saved one, or the generated default) is given
   its canvas here, in memory, every time it's fetched (M.get_or_default):
@@ -29,7 +32,87 @@ function RB.kind(key)
   local base = M.split_variant and select(1, M.split_variant(key or "")) or key
   if base == "ReaDelay" then return "readelay" end
   if base == "ReaVerbate" then return "reaverbate" end
+  if base == "ReaGate" then return "reagate" end
+  if base == "ReaLimit" then return "realimit" end
   return nil
+end
+
+-- ReaGate and ReaLimit: the canvas each default layout starts with, and
+-- each role's control by the start of its name (case-blind; "Pre-open"
+-- isn't the threshold, so a name has to START with the word).
+RB.DEFAULT_CANVAS = {
+  reagate  = { kind = "gate", roles = { Threshold = "threshold", Attack = "attack", Hold = "hold",
+                                        Release = "release", Hysteresis = "hyster", Preopen = "pre-open",
+                                        Lowpass = "lowpass", Hipass = "hipass", Preview = "preview",
+                                        RMS = "rms size" },
+               side = {} },
+  realimit = { kind = "limit", roles = { Threshold = "threshold", Ceiling = "ceiling", Release = "release" },
+               anywhere = { Ceiling = true } },
+}
+
+-- Role -> parameter for `kind` from the plugin's parameter names
+-- (`names[p]`, 0-based).
+function RB.roles_by_name(kind, names)
+  local d = RB.DEFAULT_CANVAS[kind]
+  local out = {}
+  if not d then return out end
+  for role, word in pairs(d.roles) do
+    for p = 0, #names do
+      local nm = (names[p] or ""):lower()
+      local hit = (d.anywhere and d.anywhere[role]) and nm:find(word, 1, true) or nm:sub(1, #word) == word
+      if hit then out[role] = p; break end
+    end
+  end
+  return out
+end
+
+local name_cache = {}
+local function param_names(track, addr, guid)
+  local np = reaper.TrackFX_GetNumParams(track, addr) or 0
+  local c = guid and name_cache[guid]
+  if c and c.np == np then return c.names end
+  local names = {}
+  for p = 0, np - 1 do
+    local _, nm = reaper.TrackFX_GetParamName(track, addr, p, "")
+    names[p] = nm or ""
+  end
+  if guid then name_cache[guid] = { np = np, names = names } end
+  return names
+end
+
+-- A default layout (never a saved one) for ReaGate or ReaLimit, given its
+-- canvas: the roles found, and beside the canvas only the controls it
+-- doesn't already show.
+function RB.default_canvas(track, addr, guid, kind, layout)
+  local d = RB.DEFAULT_CANVAS[kind]
+  if not (d and layout) or layout.canvas then return layout end
+  -- canvases are Pro: without it the default keeps every control
+  if not require("TS_CV_Edition").PRO then return layout end
+  local roles = RB.roles_by_name(kind, param_names(track, addr, guid))
+  if not roles.Threshold then return layout end
+  layout.canvas = { kind = d.kind, roles = roles, rev = {} }
+  if d.side then
+    -- beside it, the controls named (the rest stay in the plugin's window)
+    local names, keep = param_names(track, addr, guid), {}
+    for _, word in ipairs(d.side) do
+      for p = 0, #names do
+        if (names[p] or ""):lower():sub(1, #word) == word then
+          keep[#keep + 1] = M.apply_default_look({ param = p, type = "knob", label = "" })
+          break
+        end
+      end
+    end
+    layout.controls = keep
+    return layout
+  end
+  local shown = {}
+  for _, p in pairs(roles) do shown[p] = true end
+  local keep = {}
+  for _, c in ipairs(layout.controls or {}) do
+    if not shown[c.param] then keep[#keep + 1] = c end
+  end
+  layout.controls = keep
+  return layout
 end
 
 -- the tap count, from the parameters' names (kept while the count of
@@ -57,6 +140,7 @@ function RB.tap_base(k) return 2 + (k - 1) * 10 end
 function RB.ensure(track, addr, guid, key, layout)
   local kind = RB.kind(key)
   if not kind or not layout then return layout end
+  if RB.DEFAULT_CANVAS[kind] then return layout end     -- (theirs: RB.default_canvas)
   local want = (kind == "readelay") and "delay" or "reverb"
   local cv = layout.canvas
   if cv and cv.kind ~= want then return layout end
@@ -154,6 +238,43 @@ local function rewrite(track, addr, label, fn)
   reaper.Undo_BeginBlock()
   local done = reaper.TrackFX_SetNamedConfigParm(track, addr, "vst_chunk", RB.b64enc(RB.state_join(head, new)))
   reaper.Undo_EndBlock(label, -1)
+  return done
+end
+
+-- ---------------------------------------------------------------------
+-- ReaLimit's options that aren't parameters
+-- ---------------------------------------------------------------------
+-- Its state is a version (3) then a flags word, little-endian: 1 true
+-- peak, 2 constant gain, 64 low latency (else high performance). Read and
+-- set there; a state that doesn't start that way is left alone.
+RB.LIMIT_FLAGS = { truepeak = 1, constgain = 2, lowlat = 64 }
+
+local flag_cache = {}
+function RB.limit_flags(track, addr, guid)
+  local now = reaper.time_precise()
+  local c = guid and flag_cache[guid]
+  if c and now - c.t < 0.5 then return c.v end
+  local ok, b64 = reaper.TrackFX_GetNamedConfigParm(track, addr, "vst_chunk")
+  local raw = ok and RB.b64dec(b64) or ""
+  local v = nil
+  if #raw >= 8 and string.unpack("<i4", raw, 1) == 3 then v = string.unpack("<i4", raw, 5) end
+  if guid then flag_cache[guid] = { t = now, v = v } end
+  return v
+end
+
+-- One of them on or off (`name` a key of RB.LIMIT_FLAGS). One undo step.
+function RB.set_limit_flag(track, addr, guid, name, on)
+  local bit = RB.LIMIT_FLAGS[name]
+  local ok, b64 = reaper.TrackFX_GetNamedConfigParm(track, addr, "vst_chunk")
+  local raw = ok and RB.b64dec(b64) or ""
+  if not bit or #raw < 8 or string.unpack("<i4", raw, 1) ~= 3 then return false end
+  local v = string.unpack("<i4", raw, 5)
+  v = on and (v | bit) or (v & ~bit)
+  raw = raw:sub(1, 4) .. string.pack("<i4", v) .. raw:sub(9)
+  reaper.Undo_BeginBlock()
+  local done = reaper.TrackFX_SetNamedConfigParm(track, addr, "vst_chunk", RB.b64enc(raw))
+  reaper.Undo_EndBlock("ReaLimit: " .. name .. (on and " on" or " off"), -1)
+  if guid then flag_cache[guid] = nil end
   return done
 end
 

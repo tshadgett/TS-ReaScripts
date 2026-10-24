@@ -120,7 +120,7 @@ selected plugin (click its panel first), and **Unfreeze**. The freeze is
 stereo. Frozen plugins stay where they were, as ice strips at the start of
 the chain; in the rack, a *frozen above* line with an Unfreeze button sits
 under them. Click a strip for the same menu. The button is lit while the
-track has frozen plugins.
+track has frozen plugins. The tablet page has them too (see *On a tablet*).
 
 ChannelView's own plugins are never frozen: the probes and ChannelView
 Modulators move to just after the plugins being frozen, so they go on
@@ -420,7 +420,15 @@ outline would have nothing to stand against.
   in *Folders* to remove it (its plugins stay installed), or use *Remove
   this folder…* inside it; the name box and **[+]** at the foot of the list
   make a new one. A backup of REAPER's folders file is kept before each
-  change.
+  change. **Smart folders** (a saved search in REAPER's browser) list
+  every plugin their search matches, as REAPER's do: words all present,
+  *OR* between alternatives, *NOT* to leave out, "quotes" for a phrase.
+  They're searches, so plugins aren't added to or removed from them. To
+  make one, type a search and pick *Save as a smart folder…* (in the
+  search dialog, *save as smart folder*): name it, adjust the search, and
+  the window lists what it will match. Right-click a smart folder, or open
+  it, for *Change its search…*. REAPER's own browser picks up a new one
+  when REAPER next starts.
 
   The menu's first item opens a **search dialog** for when you know the name
   and typing is quicker: any words you type must all match somewhere in the
@@ -544,6 +552,16 @@ or a velocity hold as fits). MIDI passes through untouched. Click a tile's
 name to open its settings; every setting has a small lane button for its
 automation lane.
 
+**Bypass, to compare.** The power button in a tile's name row holds that
+modulator still; the one in the Modulators panel's header holds all of
+them. Bypassed, every control a modulator drives sits where it's set, so
+you hear the track with and without the movement; macros carry on. The
+**TS_ChannelView_BypassModulation** action does the same for the selected
+tracks, from a shortcut or a toolbar button (lit while they're bypassed).
+Each bypass is a parameter of ChannelView Modulators, so it can be
+automated too, and works with ChannelView closed. The web page has the
+same buttons.
+
 **Linking.** Drag the ◯ on a macro or modulator onto any control, or
 right-click a control ▸ *Link to a macro or modulator*. One source can
 drive as many controls as you like; a control takes one source, and
@@ -634,8 +652,8 @@ put them. Every bar is global, not per project.
   **Organise actions**.
 - **Menus.** A button can be a menu of actions, separators and further
   menus, nested as deep as you like. Clicking it always opens the menu.
-  *Large items* (its right-click, or in Organise actions) gives it the
-  taller rows of ChannelView's own header menus. The web page shows the
+  *Large submenus* (its right-click, or in Organise actions) shows the
+  submenus inside it as buttons like the bar's own. The web page shows the
   same menus (a sheet, with *‹ Back* for a submenu).
 - **Plugins and FX chains.** A button that adds a plugin, or an FX chain,
   with one click — no Insert FX action in REAPER's Action List. *+ Plugin*
@@ -1032,7 +1050,17 @@ new layout and the one you started from is left as it was.
 
 ### Canvas layouts for any plugin (Pro)
 
-ReaEQ and ReaComp have canvases of their own. Any other plugin of the right
+ReaEQ and ReaComp have canvases of their own, and ReaGate and ReaLimit
+start with a gate and a limiter canvas already set up (Set up the canvas…
+changes it, as for any other): ReaGate's with its pre-open drawn before the
+attack, its RMS time a slider under the envelope, and its detector filters
+in a panel along the foot, drawn as a delay's filters are (drag the
+high-pass and low-pass; the headphones button lets you hear what it
+listens to); ReaLimit's with its *True peak*, *Constant gain* and *Low
+latency* options as buttons above its release (they're kept in ReaLimit's
+own settings, not as parameters, so they can't be automated). A gate's line for where it
+closes is dragged by its grip, in the middle, so the threshold's line can
+always be taken anywhere else. Any other plugin of the right
 kind can have one too, as a layout: panel menu **=** ▸ *Layout* ▸ **New
 canvas layout** ▸ *EQ*, *Compressor*, *Multiband*, *Gate*, *Limiter*,
 *De-esser*, *Saturation*, *Delay*, *Reverb*, *Modulation* or *Envelope*.
@@ -1429,6 +1457,7 @@ its `_on` partner while it's on).
 | `TS_CV_Share.lua` | importing and exporting layouts (*Layouts ▸ Import / Export*) |
 | `TS_CV_ColourPick.lua` | the colour picker every colour dialog shares: palettes, eyedropper, recent colours |
 | `TS_ChannelView_ToggleMixer.lua` | the *Toggle mixer view* action, for a shortcut or toolbar |
+| `TS_ChannelView_BypassModulation.lua` | the *Bypass modulation* action: every modulator on the selected tracks held still, or moving again |
 | `TS_CV_Toolbar.lua` | an action bar: its buttons, menus, switches, icon picker |
 | `TS_CV_FXButtons.lua` | buttons that add a plugin or an FX chain |
 | `TS_CV_Vendors.lua` | a colour, initials and a look per plugin vendor (Pro) |
@@ -1561,6 +1590,10 @@ script into the action list.
   Oversampling is in the preset bar (or ⋯), a container's options, and
   **OS** under the fader for the whole chain; lit while it's on. ⋯ also
   sets a plugin offline or brings it back.
+- **Freeze:** frozen plugins show where they were, as ice strips at the
+  start of the chain; tap one to unfreeze. The **❄** beside **OS** under
+  the fader freezes the track, or up to one of its plugins, or unfreezes
+  it, as the desktop's button does.
 - **Show:** the button with the columns icon, beside the Actions button,
   shows or hides the macros, modulators, sends and receives on this
   device.
@@ -1644,7 +1677,10 @@ powers *Layouts ▸ Show the library file*.
 **ChannelView Pro:** Extensions ▸ ReaPack ▸ Import repositories ▸ paste the
 link that comes with Pro, then Browse packages ▸ *ChannelView Pro* ▸
 Install, beside ChannelView. Keep the two on the same version: update them
-together. For the tablet page, see *On a tablet* above.
+together. If they differ, ChannelView says which one to update (once, and
+on a button in its header until then) and runs without Pro meanwhile; the
+Rack and the web companion say so and don't start. For the tablet page,
+see *On a tablet* above.
 
 ## Stepped parameters
 

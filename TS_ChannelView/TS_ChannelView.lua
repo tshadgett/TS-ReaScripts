@@ -1,18 +1,20 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.0.0
+-- @version 3.1.0
 -- @changelog
---  ChannelView now comes in two parts: ChannelView (free, here) and
---  ChannelView Pro, an add-on from its own ReaPack link. Pro has grid
---  layouts and the grid editor, the rack, the web companion, canvases and
---  the hardware looks; layouts made with it still work without it, drawn
---  plainly. The Control flow menu is gone: controls flow down then
---  across (in Pro's rack, across then down). See the CHANGELOG.
+--  Bypass modulation: a power button for each modulator and one for all,
+--  and an action for a key or toolbar button. Smart folders list their
+--  plugins, and a search can be saved as one. Large submenus (was Large
+--  items) draws a menu's submenus as the bar's buttons. The probes leave
+--  a sidechain alone: their spare inputs start unplugged, and a plugin
+--  routed onto the taps' channels on purpose keeps its routing. With Pro,
+--  ReaGate and ReaLimit start with canvases. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
 --  [main]   TS_ChannelView_TCP.lua
 --  [main]   TS_ChannelView_ToggleMixer.lua
+--  [main]   TS_ChannelView_BypassModulation.lua
 --  [webinterface] TS_CV_ActionIcons.json
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
@@ -208,6 +210,12 @@ local RCP = ED.module("TS_CV_Recipes", ED.stub({ list = function() return {} end
 -- (TS_CV_Mappings M.sync).
 local RACK = rawget(_G, "TS_CV_RACK") == true
 if RACK then C.WIN_TITLE = "ChannelView Rack" end
+
+-- ChannelView Pro at another version: said once for each pair of
+-- versions (and in the header while it lasts). The Rack is Pro's, so it
+-- says so every time and doesn't start.
+if RACK and ED.mismatch then ED.warn_mismatch(true) do return end end
+ED.warn_mismatch()
 
 W.attach(ImGui); P.attach(ImGui); E.attach(ImGui); S.attach(ImGui); B.attach(ImGui)
 CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attach(ImGui); IC.attach(ImGui)
@@ -440,7 +448,7 @@ local function rescan(force)
       local moved = FZ.sync(app.track)
       FZ.forget()
       local fz = FZ.state(app.track, U.clean_fx_name)
-      if not FZ.busy() and fz.probes == 0 and TP.complete_pair(app.track) then moved = true end
+      if not FZ.busy(app.track) and fz.probes == 0 and TP.complete_pair(app.track) then moved = true end
       if TP.keep_in_place(app.track) or moved then
         full = T.collect(app.track)
         app.full_hash = T.hash(full)
@@ -621,7 +629,7 @@ end
 -- The freeze menu's items (the header's button, a frozen strip's click).
 local function freeze_items(ctx, st)
   local upto, name = freeze_point()
-  local idle = not FZ.busy()
+  local idle = not FZ.busy(app.track)
   if ImGui.MenuItem(ctx, "Freeze track", nil, false, idle) then do_freeze(nil) end
   if ImGui.MenuItem(ctx, upto and ("Freeze up to " .. name) or "Freeze up to selected", nil, false, idle and upto ~= nil) then
     do_freeze(upto)
@@ -4062,6 +4070,28 @@ local function menu_bar()
   local function hairline(x)
     ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx), x, mid_y - 7, x, mid_y + 7,
       C.COL.panel_border, 1.0)
+  end
+
+  -- Pro at another version: which to update, first after the menus; the
+  -- whole message on hover, and again in a box on a click
+  if ED.mismatch then
+    local lbl = "Update " .. (ED.behind() == "ChannelView" and "ChannelView" or "Pro")
+    local tw_, th_ = ImGui.CalcTextSize(ctx, lbl)
+    local bw = tw_ + 14
+    if fx_left - menus_right > bw + 50 then
+      local bx, by = menus_right + 6, mid_y - C.ICON_SIZE * 0.5
+      ImGui.SameLine(ctx, 0, 0)
+      ImGui.SetCursorScreenPos(ctx, bx, by)
+      if ImGui.InvisibleButton(ctx, "edmismatch", bw, C.ICON_SIZE) then ED.warn_mismatch(true) end
+      local hov = ImGui.IsItemHovered(ctx)
+      local dl = ImGui.GetWindowDrawList(ctx)
+      ImGui.DrawList_AddRectFilled(dl, bx, by, bx + bw, by + C.ICON_SIZE,
+        hov and C.COL.warn or U.with_alpha(C.COL.warn, 0x55), 3.0)
+      ImGui.DrawList_AddRect(dl, bx, by, bx + bw, by + C.ICON_SIZE, C.COL.warn, 3.0, 0, 1.0)
+      ImGui.DrawList_AddText(dl, bx + 7, by + (C.ICON_SIZE - th_) * 0.5, C.COL.header_text, lbl)
+      W.tip(ctx, "edmismatch", ED.mismatch_text() .. "\n\nClick: this message in a box.", hov, false)
+      menus_right = menus_right + bw + 8
+    end
   end
 
   -- The view toggle sits on the left, straight after the menus; the

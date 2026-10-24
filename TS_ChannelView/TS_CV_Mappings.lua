@@ -557,7 +557,8 @@ M.COMP_ROLES = { "Threshold", "Input", "Ratio", "Knee", "Attack", "Hold", "Relea
 -- the roles each kind of role canvas has, in the order setup lists them
 M.ROLES = {
   comp  = M.COMP_ROLES,
-  gate  = { "Threshold", "Close", "Hysteresis", "Range", "Ratio", "Attack", "Hold", "Release" },
+  gate  = { "Threshold", "Close", "Hysteresis", "Range", "Ratio", "Preopen", "Attack", "Hold", "Release",
+            "Hipass", "Lowpass", "Preview", "RMS" },
   limit = { "Threshold", "Input", "Ceiling", "Release" },
   deess = { "Frequency", "Low", "High", "Width", "Threshold", "Range" },
   delay = { "Time", "Note", "Rhythm", "Sync", "Multiplier", "Feedback", "Mode", "PingPong", "TimeR", "NoteR",
@@ -2065,7 +2066,8 @@ end
 -- That way an unconfigured plugin still shows something useful without
 -- silently filling the library with machine-made layouts.
 -- ReaDelay and ReaVerbate get their own canvas (TS_CV_ReaFX), and by
--- default nothing beside it but ReaVerbate's dry and width.
+-- default nothing beside it but ReaVerbate's dry and width; ReaGate's
+-- and ReaLimit's defaults start with a gate and a limiter canvas.
 function M.get_or_default(key, track, addr, cache_id)
   local RB = require("TS_CV_ReaFX")
   local saved = M.get(key)
@@ -2078,6 +2080,8 @@ function M.get_or_default(key, track, addr, cache_id)
     elseif kind == "reaverbate" then
       d = { controls = { { param = 1, type = "knob", label = "" }, { param = 4, type = "knob", label = "", bipolar = true } }, aliases = {} }
     else d = M.build_default(track, addr) end
+    -- ReaGate's and ReaLimit's start with a canvas
+    if RB.DEFAULT_CANVAS[kind or ""] then d = RB.default_canvas(track, addr, cache_id, kind, d) end
     def_cache[id] = d
   end
   return RB.ensure(track, addr, cache_id, key, d), true
