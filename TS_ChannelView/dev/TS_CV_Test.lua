@@ -8098,6 +8098,7 @@ do
         boxes[#boxes]:find("the rack won't start", 1, true) ~= nil, true)
   PRO.standard_release = real_std
   check("pro check: reads ChannelView's @version", PRO.standard_release(), ED.RELEASE)
+  check("pro check: ChannelView's folder holds its layouts", (PRO.standard_dir() or ""):gsub("\\", "/"):match("/$") ~= nil, true)
   ED.mismatch, reaper = was, real
 end
 

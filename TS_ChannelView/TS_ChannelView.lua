@@ -1,9 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.1.1
+-- @version 3.1.2
 -- @changelog
---  Organise actions: Import shows its list of bars again after you pick a
---  file (3.1.0 opened the file picker and then nothing).
+--  No changes here: the version moves to 3.1.2 with ChannelView Pro, whose
+--  web companion now reads your layouts. Update both.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

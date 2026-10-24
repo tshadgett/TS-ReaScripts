@@ -1,5 +1,15 @@
 # ChannelView — changelog
 
+## 3.1.2 — the web companion's layouts
+
+- **ChannelView Pro: the web companion reads your layouts.** Installed
+  from ReaPack, it looked for them in Pro's own folder rather than
+  ChannelView's, so the page showed default layouts, and it took out
+  the measurement taps ChannelView put in for a plugin's I/O meters or
+  gain reduction: the meters flickered and the undo history filled with
+  "route" and "remove measurement taps". ChannelView itself is
+  unchanged; it moves to 3.1.2 with Pro. Update both.
+
 ## 3.1.1 — Import fixed
 
 - **Organise actions ▸ Import…** shows its list of bars again after you
