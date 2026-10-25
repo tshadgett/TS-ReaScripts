@@ -731,7 +731,8 @@ put them. Every bar is global, not per project.
 - **Organise actions** (the drawers button, a bar's right-click, or the
   *Organise actions* action, which works without ChannelView open): every
   bar by place on the left; the selected bar's buttons as a tree in the
-  middle — drag rows to reorder, drop onto a menu to put it inside, + adds
+  middle — drag rows to reorder, drop onto a menu to put it inside,
+  Alt+click a row to remove it, + adds
   actions, menus, switches, separators and gaps, *Import* copies a REAPER
   toolbar or menu; the selected button's label, icon, action and (web)
   colour on the right, with *Copy to* another bar. The web companion's

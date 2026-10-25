@@ -1,16 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.2.0
+-- @version 3.2.1
 -- @changelog
---  For a small screen: View > Auto-hide this header gives its room to the
---  panels and slides it out over them from the window's top edge, and a
---  fader panel too short for its fader shows the volume as a knob with
---  the level meter round it. Alt+click a panel's name to remove the
---  plugin. A left-hand action bar's top button takes clicks on its icon
---  again. With Pro: drag a canvas panel's edge (or the Trimmer's) to size
---  it or fold its controls away, a red bin when dragging a control off in
---  Edit layout, and ReaEQ's canvas shows bands of its "alt" types. See
---  the CHANGELOG.
+--  Organise actions: Alt+click a row to remove it (a menu with things in
+--  it asks first). See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

@@ -113,6 +113,21 @@ local function locate(items, target)
 end
 AE.locate = locate
 
+-- Takes `it` off the bar (asking first for a menu with things in it);
+-- the selection goes with it when it was it or inside it.
+local function remove_item(tb, it)
+  local l, k = locate(tb.items, it)
+  if not l then return end
+  local ok = not (it.menu and #it.items > 0)
+      or reaper.MB(("Remove the menu \"%s\" and everything in it?"):format(TB.text_of(it)), "ChannelView", 4) == 6
+  if not ok then return end
+  if st.sel == it or (it.menu and st.sel and locate(it.items, st.sel)) then st.sel = nil end
+  table.remove(l, k)
+  tb.save()
+end
+
+local COL_BAD = 0xd0473fff
+
 -- Where something new goes: into the selected menu when it's open, else
 -- after the selection, else at the end.
 local function insert_point(tb)
@@ -160,7 +175,12 @@ local function draw_rows(ctx, tb, list, depth, x, w, web)
     ImGui.InvisibleButton(ctx, ("aer%s.%d"):format(tostring(it):sub(-8), k), math.max(1, w), ROW_H)
     local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
     local ix = x + 6 + depth * INDENT
-    if ImGui.IsItemClicked(ctx, 0) then
+    -- Alt+click: off the bar (taken after the rows are drawn: drop_rows)
+    local alt = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Alt) ~= 0
+    local kill = alt and hov and not st.drag
+    if kill and ImGui.IsItemClicked(ctx, 0) then
+      st.kill = it
+    elseif ImGui.IsItemClicked(ctx, 0) then
       local mx = ImGui.GetMousePos(ctx)
       if it.menu and mx >= ix + 8 and mx < ix + 22 then
         st.expanded[it] = not st.expanded[it]
@@ -168,11 +188,14 @@ local function draw_rows(ctx, tb, list, depth, x, w, web)
       st.sel = it
     end
     if it.menu and hov and ImGui.IsMouseDoubleClicked(ctx, 0) then st.expanded[it] = not st.expanded[it] end
-    if act and not st.drag and ImGui.IsMouseDragging(ctx, 0, 5) then
+    if act and not alt and not st.drag and ImGui.IsMouseDragging(ctx, 0, 5) then
       st.drag = { it = it, list = list, k = k }
     end
     local dragged = st.drag and st.drag.it == it
-    if st.sel == it then
+    if kill then
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + ROW_H, (COL_BAD & 0xffffff00) | 0x55, 2)
+      ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + w - 0.5, y + ROW_H - 0.5, COL_BAD, 2, 0, 1.0)
+    elseif st.sel == it then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + ROW_H, U.with_alpha(C.COL.accent, 0x77), 2)
     elseif hov and not st.drag then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + ROW_H, C.COL.knob_body_hi, 2)
@@ -195,6 +218,11 @@ local function draw_rows(ctx, tb, list, depth, x, w, web)
     end
     local lx = ix + 26
     local _, th = ImGui.CalcTextSize(ctx, "X")
+    -- the bin, in the meta's place, while Alt is held over the row
+    local function bin()
+      ImGui.DrawList_AddRectFilled(dl, x + w - 24, y + 3, x + w - 4, y + ROW_H - 3, COL_BAD, 3)
+      W.ICONS.bin(dl, x + w - 21, y + 5, 14, 0xffffffff)
+    end
     if it.sep and not it.menu then
       local meta = meta_of(it, web)
       if it.gap or web then
@@ -203,7 +231,8 @@ local function draw_rows(ctx, tb, list, depth, x, w, web)
         ImGui.DrawList_AddLine(dl, lx, cy, lx + 160, cy, C.COL.panel_border, 1.0)
       end
       local mw = ImGui.CalcTextSize(ctx, meta)
-      ImGui.DrawList_AddText(dl, x + w - mw - 8, cy - th * 0.5, C.COL.header_dim, meta)
+      if kill then bin()
+      else ImGui.DrawList_AddText(dl, x + w - mw - 8, cy - th * 0.5, C.COL.header_dim, meta) end
     else
       if it.color and it.color ~= "" then
         local hex = it.color:match("^#(%x%x%x%x%x%x)$")
@@ -221,7 +250,8 @@ local function draw_rows(ctx, tb, list, depth, x, w, web)
       ImGui.DrawList_AddText(dl, lx, cy - th * 0.5, ink, label)
       local meta = meta_of(it, web)
       local room = x + w - 8 - (lx + ImGui.CalcTextSize(ctx, label) + 20)
-      if room > 30 then
+      if kill then bin()
+      elseif room > 30 then
         meta = U.truncate(meta, math.max(4, math.floor(room / 6.5)))
         local mw = ImGui.CalcTextSize(ctx, meta)
         ImGui.DrawList_AddText(dl, x + w - mw - 8, cy - th * 0.5, C.COL.header_dim, meta)
@@ -653,14 +683,8 @@ local function item_props(ctx, tb, web)
     ImGui.EndPopup(ctx)
   end
   ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Remove##aerm") then
-    local l, k = locate(tb.items, it)
-    if l then
-      local ok = not (it.menu and #it.items > 0)
-          or reaper.MB(("Remove the menu \"%s\" and everything in it?"):format(TB.text_of(it)), "ChannelView", 4) == 6
-      if ok then table.remove(l, k); st.sel = nil; tb.save() end
-    end
-  end
+  if ImGui.Button(ctx, "Remove##aerm") then remove_item(tb, it) end
+  W.tip(ctx, "aerm", "Or Alt+click its row", ImGui.IsItemHovered(ctx), false)
 end
 
 -- ---------------------------------------------------------------------
@@ -1147,6 +1171,11 @@ function AE.draw(ctx)
           end
           if tb then
             draw_rows(ctx, tb, tb.items, 0, x, w, web)
+            if st.kill then
+              local it = st.kill
+              st.kill = nil
+              remove_item(tb, it)
+            end
             drop(ctx, tb, x, w)
           end
           ImGui.Dummy(ctx, 0, 4)

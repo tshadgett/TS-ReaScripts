@@ -1,5 +1,21 @@
 # ChannelView — changelog
 
+## 3.2.1
+
+- **Organise actions: Alt+click a row to remove it.** While Alt is held,
+  the row under the pointer shows red with a bin. A menu with things in
+  it asks first, as the Remove button does.
+
+### ChannelView Pro
+
+- **Edge sizing works on ReaComp, ReaGate and ReaLimit,** and any canvas
+  that reaches the panel's edge: the canvas took the pointer, so the edge
+  never showed its resize cursor. A plugin still on its automatic layout
+  keeps its new size (sizing it makes the layout the plugin's own).
+- **The web companion no longer stops when a ReaGate is added.** Its
+  canvas's newer roles (pre-open, the detector filters, RMS) stopped the
+  bridge with an error.
+
 ## 3.2.0 — for a small screen
 
 ### ChannelView

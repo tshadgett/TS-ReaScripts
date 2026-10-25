@@ -3609,16 +3609,30 @@ local function ctl_room(track, fx, layout, key, ww, wh, canvas, io)
   return math.max(0, P.width(vis, wh, false, false, nil, false, false, M.locked(layout)) - C.PANEL_PAD)
 end
 
+-- A button on a panel's edge, in a window of its own: the canvas under it
+-- is an item submitted first, and the first item under the pointer takes
+-- the hover; a child window on top takes it from all of them.
+-- Returns hovered, active.
+local function edge_button(ctx, id, x, y, w, h)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  local hov, act = false, false
+  local flags = ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse
+    | ImGui.WindowFlags_NoBackground | ImGui.WindowFlags_NoNav
+  if ImGui.BeginChild(ctx, "##e" .. id, w, h, 0, flags) then
+    ImGui.InvisibleButton(ctx, id, w, h)
+    hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+    ImGui.EndChild(ctx)
+  end
+  return hov, act
+end
+
 size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track)
   local rack = P.RACK
   local gx, gy, gw, gh
   if rack then gx, gy, gw, gh = x + 10, y + wh - 5, ww - 20, 5
   else gx, gy, gw, gh = x + ww - 5, y + C.HEADER_H, 5, wh - C.HEADER_H end
   if gw < 4 or gh < 4 then return end
-  ImGui.SetCursorScreenPos(ctx, gx, gy)
-  W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, "szgrip##" .. fx.guid, gw, gh)
-  local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+  local hov, act = edge_button(ctx, "szgrip##" .. fx.guid, gx, gy, gw, gh)
   local function get()
     if canvas then
       if rack then return P.rack_canvas_h(ww - io_w(io), canvas) end
@@ -3654,6 +3668,8 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
                                         or ("Drag: the " .. (is_trim and "panel's" or "canvas's") .. " width"))
       .. ("  (%d px)"):format(math.floor(get())) .. fold_tip .. "\nDouble-click: the usual size", hov, act)
   end
+  -- a plugin still on its generated default: nothing to put back
+  if hov and ImGui.IsMouseDoubleClicked(ctx, 0) and not M.get(key) then size_drag = nil return end
   if hov and ImGui.IsMouseDoubleClicked(ctx, 0) then
     put(nil)
     if canvas then if rack then canvas.fold_rack = nil else canvas.fold = nil end end
@@ -3663,6 +3679,9 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
   end
   if act and ImGui.IsMouseDown(ctx, 0) then
     if not size_drag or size_drag.guid ~= fx.guid then
+      -- a generated default is made again whenever the chain is scanned,
+      -- so the size would be lost: it becomes the plugin's layout first
+      if not M.get(key) then M.set(key, layout) end
       size_drag = { guid = fx.guid, v0 = get() }
       -- the controls' room, and whether they're folded now
       if canvas then
@@ -3705,10 +3724,7 @@ local function fold_tab_rect(x, y, ww, wh)
 end
 fold_tab = function(ctx, dl, fx, x, y, ww, wh)
   local tx, ty, tw, th = fold_tab_rect(x, y, ww, wh)
-  ImGui.SetCursorScreenPos(ctx, tx, ty)
-  W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, "foldtab##" .. fx.guid, tw, th)
-  local hov = ImGui.IsItemHovered(ctx)
+  local hov = edge_button(ctx, "foldtab##" .. fx.guid, tx, ty, tw, th)
   if hov then fold_out[fx.guid] = reaper.time_precise() end
   local lit = hov or fold_out[fx.guid] ~= nil
   ImGui.DrawList_AddRectFilled(dl, tx, ty, tx + tw, ty + th,
