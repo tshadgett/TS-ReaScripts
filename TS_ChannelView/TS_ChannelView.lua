@@ -1,12 +1,16 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.1.3
+-- @version 3.2.0
 -- @changelog
---  The measurement taps leave your sidechains alone. When they need more
---  channels, plugins that follow the track's channel count (Pro-C 3,
---  Pro-Q 4 and other surround VST3s) are held at the count the track had,
---  so their layout and pins don't change; removing the probes puts it
---  back. A send or receive routed onto the taps' channels moves them.
+--  For a small screen: View > Auto-hide this header gives its room to the
+--  panels and slides it out over them from the window's top edge, and a
+--  fader panel too short for its fader shows the volume as a knob with
+--  the level meter round it. Alt+click a panel's name to remove the
+--  plugin. A left-hand action bar's top button takes clicks on its icon
+--  again. With Pro: drag a canvas panel's edge (or the Trimmer's) to size
+--  it or fold its controls away, a red bin when dragging a control off in
+--  Edit layout, and ReaEQ's canvas shows bands of its "alt" types. See
+--  the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -322,6 +326,12 @@ for _, a in ipairs(AUX) do app.aux[a.key] = ext_get(AUX_PFX .. a.key, "1") == "1
 -- its own
 local FLOAT_KEY = RACK and "rack_float_empty" or "float_empty"
 app.float_empty = ext_get(FLOAT_KEY, "0") == "1"
+-- Auto-hide the header (for a small screen): the panels take its room,
+-- and it slides out over them while the pointer is at the window's top
+-- edge or on it. ChannelView and the rack each keep their own.
+app.hide_key = RACK and "rack_header_hide" or "header_hide"
+app.header_hide = ext_get(app.hide_key, "0") == "1"
+app.header_out = nil      -- when the hidden header last had the pointer
 
 -- ---------------------------------------------------------------------
 -- THE SHARED PALETTE
@@ -3758,6 +3768,14 @@ local function menu_bar()
         app.float_empty = not app.float_empty
         ext_set(FLOAT_KEY, app.float_empty and "1" or "0")
       end
+      if ImGui.MenuItem(ctx, "Auto-hide this header", nil, app.header_hide) then
+        app.header_hide = not app.header_hide
+        ext_set(app.hide_key, app.header_hide and "1" or "0")
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "For a small screen: the panels take the header's room, and it slides\n"
+          .. "out over them while the pointer is at the window's top edge.")
+      end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "A plugin whose layout has no controls opens its own window when you\n" ..
           "come to its track, and it closes when you move on, unless you pin it\n" ..
@@ -4363,6 +4381,43 @@ local function menu_bar()
   ImGui.EndMenuBar(ctx)
 end
 
+-- The hidden header (app.header_hide): while the pointer is in the top few
+-- pixels of the window, on the header itself, or in a menu it opened, the
+-- header is drawn over the panels in a child of its own; a moment after
+-- the pointer leaves, it folds away again. Drawn last, so it sits on top.
+-- (a field of app: this file is at Lua's limit of locals)
+function app.header_overlay()
+  if not app.header_hide then return end
+  local HIDE_EDGE, HIDE_LINGER = 6, 0.35
+  local wx, wy = ImGui.GetWindowPos(ctx)
+  local ww = ImGui.GetWindowSize(ctx)
+  local mx, my = ImGui.GetMousePos(ctx)
+  local now = reaper.time_precise()
+  local hh = ImGui.GetFontSize(ctx) + 2 * C.MENU_PAD_Y
+  local inside = mx >= wx and mx <= wx + ww
+  local at_edge = inside and my >= wy and my <= wy + HIDE_EDGE
+    and ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows | ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+  local on_it = app.header_out and inside and my >= wy and my <= wy + hh
+  local menu = app.header_out and ImGui.IsPopupOpen(ctx, "", ImGui.PopupFlags_AnyPopupId | ImGui.PopupFlags_AnyPopupLevel)
+  if at_edge or on_it or menu then app.header_out = now end
+  if not app.header_out then
+    -- the edge it comes out from: a hairline, so it can be found
+    ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx), wx + ww * 0.5 - 20, wy + 1.5, wx + ww * 0.5 + 20, wy + 1.5,
+      C.COL.knob_ring, 2.0)
+    return
+  end
+  if now - app.header_out > HIDE_LINGER then app.header_out = nil; return end
+  ImGui.SetCursorScreenPos(ctx, wx, wy)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_FramePadding, 6, C.MENU_PAD_Y)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, 0, 0)
+  if ImGui.BeginChild(ctx, "##cvhdrout", ww, hh, 0,
+      ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse) then
+    menu_bar()
+    ImGui.EndChild(ctx)
+  end
+  ImGui.PopStyleVar(ctx, 2)
+end
+
 -- ---------------------------------------------------------------------
 -- panel row
 -- ---------------------------------------------------------------------
@@ -4524,6 +4579,7 @@ local function panel_requests(i, fx, layout, key, req)
     if req.toggle_collapse then
       toggle_fold(fx)
     end
+    if req.remove then app.remove_ask = fx end
     if req.begin_drag and not app.drag then
       app.drag = { chain_i = i, guid = fx.guid, path = fx.path_t,
                    what = fx.is_container and "container" or "plugin" }
@@ -5152,6 +5208,13 @@ local function frame()
   P.begin_rects()
   MR.begin_frame()
   if FZ.poll() then rescan(true) end
+  -- an Alt+click on a plugin's header last frame: asked here, before
+  -- anything is drawn from the chain it changes
+  if app.remove_ask then
+    local fx = app.remove_ask
+    app.remove_ask = nil
+    if reaper.MB(("Remove %s from the chain?"):format(U.fx_label(fx)), "ChannelView", 1) == 1 then remove_fx(fx) end
+  end
   follow_selection()
   AF.tick(app.float_empty and app.track or nil, no_controls)
   PC.tick()
@@ -5216,7 +5279,10 @@ local function frame()
   -- so nothing below the header inherits the header's padding.
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_FramePadding, 6, C.MENU_PAD_Y)
 
-  local wflags = ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_NoScrollWithMouse
+  local wflags = ImGui.WindowFlags_NoScrollWithMouse
+  -- hidden, the header is a child of its own drawn over the panels at the
+  -- end of the frame (app.header_overlay)
+  if not app.header_hide then wflags = wflags | ImGui.WindowFlags_MenuBar end
   -- C.WIN_NO_SCROLLBAR is not decoration: the header measurement below
   -- relies on there being no bottom decoration to subtract.
   if C.WIN_NO_SCROLLBAR then wflags = wflags | ImGui.WindowFlags_NoScrollbar end
@@ -5226,7 +5292,7 @@ local function frame()
   if visible then
     local d = ImGui.GetWindowDockID(ctx)
     if d ~= dock_id then dock_id = d; ext_set(DOCK_KEY, d) end
-    menu_bar()
+    if not app.header_hide then menu_bar() end
   end
   ImGui.PopStyleVar(ctx)
 
@@ -5297,6 +5363,9 @@ local function frame()
       -- Analyser's own rule lands. Clamping to content start instead
       -- would push the rule down below the menu bar.
       ry = math.max(ry, wy)
+      -- the header hidden: the rule at the window's top, the panels
+      -- straight under it -- the header's room is theirs
+      if app.header_hide then ry = wy + 3 end
 
       track_rule(dl, cx, ry, rule_w)
       -- step the cursor past the rule so the panel borders clear it
@@ -5588,6 +5657,7 @@ local function frame()
     -- that is following a control being dragged has to sit above every
     -- panel, popup and menu regardless of what was drawn when.
     MR.overlay(ctx, (not C.MIXER_VIEW) and app.track or nil, P.panel_at)
+    app.header_overlay()
     W.draw_tip(ctx)
     ImGui.End(ctx)
   end

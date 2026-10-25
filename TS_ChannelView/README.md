@@ -308,6 +308,8 @@ outline would have nothing to stand against.
   plugin, on the right half after it, in that plugin's container. A blue
   line shows where it will land (violet when it's going into a container);
   the move goes through REAPER's undo.
+* **Alt+click a panel's name** to remove the plugin from the chain, as in
+  REAPER's FX chain. ChannelView asks first; Undo puts it back.
 * **Parallel FX and containers.** A bracket over the panels marks what runs
   together: a parallel group (marked `||`) and each FX container (marked
   with a small square, in a colour of its own). Panels only drop as far as
@@ -328,6 +330,14 @@ outline would have nothing to stand against.
   can't miss it. Outlined **OS** means the plugin is oversampled from
   around it (its container or the chain), or is set to a rate REAPER
   already runs at. REAPER applies a change when playback next starts.
+* **Auto-hide this header** (View): for a small screen. The panels take
+  the header's room, and the header slides out over them while the
+  pointer is at the window's top edge (a short line marks it), staying
+  while you're on it or in one of its menus. The rack has its own setting.
+* **A short fader panel.** When the panel is too short for the fader to
+  be of use, the volume becomes a knob with the level meter as a ring
+  round it (left inside, right outside, a tick at the peak hold).
+  Double-click it for unity, right-click for the fader's menu.
 * **Strip width.** View ▸ *Strip width* sets how wide the fader panel,
   every mixer strip and the track name buttons are, from 72 to 240 px
   (112 by default). The meter grows and shrinks with it, the fader a
@@ -797,7 +807,8 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   way; click Line again (or right-click the grid) to stop. Drag a line's
   end to move it, or the line to move it all. Two controls can't share a place unless
   they have Show rules (they take turns). Drag a control back to the
-  list, or use **Take it off the panel** on the right, to remove it. The
+  list, or use **Take it off the panel** on the right, to remove it: over
+  the list, it turns red and the list shows a bin and *Release to remove*. The
   numbers under and beside the grid insert or delete a column or row of
   cells; **+** adds one at the end.
 - **On the right**, everything about what's selected. For a control: its
@@ -826,7 +837,14 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   controls beside the canvas, or under it in the rack. **Set up the
   canvas…** on the right opens the canvas's own setup. **In ChannelView**
   has a **Canvas width** too, and **In the rack** a **Canvas height**: the
-  canvas's own size for this layout (**Reset**: the usual).
+  canvas's own size for this layout (**Reset**: the usual). You can also
+  drag the panel's right edge in ChannelView, or its bottom edge in the
+  rack, on any canvas panel, ReaEQ's and ReaComp's own included, and on
+  the TS_CV Trimmer's panel; double-click the edge for the usual size.
+  Keep dragging a canvas layout's edge in past the canvas and the controls
+  beside it (under it in the rack) fold away: a small tab on the edge
+  brings them out over the next panel while the pointer is on it or on
+  them. Drag the edge back out to unfold them.
 - **Several at once.** Ctrl+click adds a control to the selection or
   takes it out, Shift+click adds it; drag a box on empty grid round what
   you want (Ctrl+drag adds to it), Ctrl+click or Shift+click in the

@@ -309,6 +309,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. ";   (a divider: a line to <column + width>,<row + height>, either way; a section: its rectangle)\n"
                 .. "; Edge<n>=<faceplate, or #rrggbb>: section n's outline, or line n's colour\n"
                 .. "; CanvasW=<px>, CanvasH=<px>: a canvas layout's canvas, its width in ChannelView, its height in the rack"
+                .. "; CanvasFold=1, CanvasFoldRack=1: its controls folded away, popping out from the panel's edge"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -689,6 +690,12 @@ function M.band_sig(b, model)
   return table.concat(t, ",") .. (model and (",m" .. model) or "")
 end
 
+-- A size in pixels from the library, between lo and hi, or nil.
+local function size_px(v, lo, hi)
+  local n = tonumber(U.trim(v or ""))
+  return (n and n >= lo and n <= hi) and math.floor(n) or nil
+end
+
 function M.canvas_of(sect)
   local raw = U.trim(sect.Canvas or "")
   local kind, rest = raw:match("^(%a+)%s*|?%s*(.*)$")
@@ -786,6 +793,10 @@ function M.canvas_of(sect)
   local cw, chh = tonumber(U.trim(sect.CanvasW or "")), tonumber(U.trim(sect.CanvasH or ""))
   cv.w = (cw and cw >= 160 and cw <= 2000) and math.floor(cw) or nil
   cv.h = (chh and chh >= 100 and chh <= 1200) and math.floor(chh) or nil
+  -- its controls folded away (they pop out from the panel's edge): in
+  -- ChannelView, in the rack
+  cv.fold = (U.trim(sect.CanvasFold or "") == "1") or nil
+  cv.fold_rack = (U.trim(sect.CanvasFoldRack or "") == "1") or nil
   return cv
 end
 
@@ -840,12 +851,14 @@ function M.canvas_lines(cv, out)
   end
   if cv.w then out.CanvasW = tostring(math.floor(cv.w)) end
   if cv.h then out.CanvasH = tostring(math.floor(cv.h)) end
+  if cv.fold then out.CanvasFold = "1" end
+  if cv.fold_rack then out.CanvasFoldRack = "1" end
 end
 
 function M.copy_canvas(cv)
   if not cv then return nil end
   local out = { kind = cv.kind, all_on = cv.all_on, model = cv.model, no_model = cv.no_model, nb = cv.nb, nt = cv.nt, ref0 = cv.ref0, dshape = cv.dshape,
-                w = cv.w, h = cv.h,
+                w = cv.w, h = cv.h, fold = cv.fold, fold_rack = cv.fold_rack,
                  dmodes = cv.dmodes and M.dl_modes_parse(M.dl_modes_write(cv.dmodes)) or nil,
                  sat_cal = cv.sat_cal and M.sat_decode(M.sat_encode(cv.sat_cal)) or nil }
   if cv.bands then
@@ -1485,6 +1498,10 @@ local function parse_section(sect)
   controls.grid = grid
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
            canvas = M.canvas_of(sect), switch = M.switch_of(sect),
+           -- ReaEQ's and ReaComp's own canvases: their width in ChannelView,
+           -- height in the rack (a canvas layout keeps them in its canvas)
+           own_w = (not sect.Canvas) and size_px(sect.CanvasW, 160, 2000) or nil,
+           own_h = (not sect.Canvas) and size_px(sect.CanvasH, 100, 1200) or nil,
            live = (U.trim(sect.Live or "") == "1") or nil,
            measure = (U.trim(sect.Measure or "") == "1") or nil,
            levels = (U.trim(sect.Levels or "") == "1") or nil,
@@ -1537,6 +1554,10 @@ local function serialize(layout)
   if layout.grid then out.Grid = math.floor(layout.grid.cols) .. "x" .. math.floor(layout.grid.rows) end
   out.Palette = M.palette_line(layout.palette)
   M.canvas_lines(layout.canvas, out)
+  if not layout.canvas then
+    if layout.own_w then out.CanvasW = tostring(math.floor(layout.own_w)) end
+    if layout.own_h then out.CanvasH = tostring(math.floor(layout.own_h)) end
+  end
   if layout.meter then
     out.Meter = string.format("%d|%g", layout.meter.on and 1 or 0,
                               layout.meter.range or C.MAX_GR_DB)
@@ -2606,6 +2627,7 @@ end
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels,
+                own_w = layout.own_w, own_h = layout.own_h,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
                 lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)),
                 grid = layout.grid and { cols = layout.grid.cols, rows = layout.grid.rows } or nil }

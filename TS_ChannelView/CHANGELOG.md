@@ -1,5 +1,41 @@
 # ChannelView — changelog
 
+## 3.2.0 — for a small screen
+
+### ChannelView
+
+- **Auto-hide this header** (View): for a laptop screen. The panels take
+  the header's room, and the header slides out over them while the
+  pointer is at the window's top edge, staying while you're on it or in
+  one of its menus. ChannelView and the rack each have the setting.
+- **A short fader panel shows a volume knob.** When the panel is too short
+  for its fader to be of use, the volume is a knob with the level meter
+  as a ring round it (left inside, right outside, a tick at the peak
+  hold). Double-click for unity, right-click for the fader's menu.
+- **Alt+click a panel's name** to remove the plugin from the chain, as in
+  REAPER's FX chain. ChannelView asks first; Undo puts it back.
+- **A left-hand action bar's top button** takes clicks on its icon (only
+  the space beside the icon did).
+
+### ChannelView Pro
+
+- **Drag a canvas panel's edge to size it:** the right edge in
+  ChannelView sets the canvas's width, the bottom edge in the rack its
+  height (the same as Edit layout's Canvas width and height).
+  Double-click the edge for the usual size. ReaEQ's and ReaComp's own
+  canvases have it too, and so does the TS_CV Trimmer's panel.
+- **Fold a canvas layout's controls away:** keep dragging its edge in past
+  the canvas and the controls beside it (under it in the rack) fold
+  away, leaving the canvas. A tab on the edge brings them out over the
+  next panel while the pointer is on it or on them. Drag back out to
+  unfold.
+- **Taking a control off in Edit layout is plainer:** dragged back over
+  the list, it turns red, and the list shows a bin and *Release to
+  remove*.
+- **ReaEQ's canvas shows every band that's on.** Bands of ReaEQ's "alt"
+  types (Band (alt), Band (alt 2): the Basic 11 band presets use them)
+  read as off and weren't drawn.
+
 ## 3.1.3 — the taps leave sidechains alone
 
 - **Plugins keep their layout when the taps need more channels.** To make

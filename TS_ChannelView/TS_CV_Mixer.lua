@@ -650,9 +650,12 @@ function MX.row_pad_y(ctx, pad_x)
   -- unconditionally below, whether or not BeginChild itself returns
   -- true, since the push happened regardless of that.
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, pad_x, C.TRACKROW_PAD_Y)
+  -- NoInputs: it's a real window, 40 by 100 at the top left of the row,
+  -- and would otherwise take the pointer from whatever is drawn there
+  -- (a left-hand action bar's top button)
   local ok = ImGui.BeginChild(ctx, "mxpadprobe", 40, 100, 0,
     ImGui.WindowFlags_HorizontalScrollbar | ImGui.WindowFlags_AlwaysHorizontalScrollbar
-    | ImGui.WindowFlags_NoScrollWithMouse)
+    | ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_NoInputs)
   if ok then
     -- AlwaysHorizontalScrollbar means this child's own scrollbar is
     -- already showing on this first read, not "as of whatever it

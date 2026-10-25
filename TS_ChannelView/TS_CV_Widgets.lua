@@ -3436,6 +3436,23 @@ local function icon_speaker(dl, x, y, sz, col)
   ImGui.DrawList_PathArcTo(dl, x + sz * 0.58, cy, sz * 0.26, -0.95, 0.95, 8)
   ImGui.DrawList_PathStroke(dl, col, 0, 1.2)
 end
+-- A bin: a lid with a handle, and a can narrowing to its foot.
+local function icon_bin(dl, x, y, sz, col)
+  local w = math.max(1.2, sz * 0.08)
+  local l, r = x + sz * 0.22, x + sz * 0.78
+  ImGui.DrawList_AddLine(dl, x + sz * 0.16, y + sz * 0.26, x + sz * 0.84, y + sz * 0.26, col, w)
+  ImGui.DrawList_AddRect(dl, x + sz * 0.40, y + sz * 0.14, x + sz * 0.60, y + sz * 0.26, col, 1.0, 0, w)
+  ImGui.DrawList_PathClear(dl)
+  ImGui.DrawList_PathLineTo(dl, l + sz * 0.04, y + sz * 0.32)
+  ImGui.DrawList_PathLineTo(dl, l + sz * 0.08, y + sz * 0.86)
+  ImGui.DrawList_PathLineTo(dl, r - sz * 0.08, y + sz * 0.86)
+  ImGui.DrawList_PathLineTo(dl, r - sz * 0.04, y + sz * 0.32)
+  ImGui.DrawList_PathStroke(dl, col, 0, w)
+  for _, f in ipairs({ 0.40, 0.50, 0.60 }) do
+    ImGui.DrawList_AddLine(dl, x + sz * f, y + sz * 0.40, x + sz * f, y + sz * 0.76, col, w * 0.8)
+  end
+end
+
 -- Headphones: a band over the top, a cup at each end. Listening to
 -- something other than the output (a detector's filters, say).
 local function icon_headphones(dl, x, y, sz, col)
@@ -3520,6 +3537,7 @@ W.ICONS = {
   stereo   = icon_stereo,
   speaker  = icon_speaker,
   headphones = icon_headphones,
+  bin      = icon_bin,
   tablet   = icon_tablet,
   tablet_on = icon_tablet_on,
   midi     = icon_midi,

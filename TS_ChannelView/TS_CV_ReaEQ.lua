@@ -156,6 +156,15 @@ end
 --
 -- Returns bands (array) and master (a { val, pidx } table, or nil if this
 -- FX doesn't publish one).
+-- ReaEQ's own on/off for the band at `pos` (0-based), or nil when this
+-- REAPER doesn't answer it.
+local function band_flag(track, addr, pos)
+  if not reaper.TrackFX_GetNamedConfigParm then return nil end
+  local ok, v = reaper.TrackFX_GetNamedConfigParm(track, addr, "BANDENABLED" .. pos)
+  if not ok or v == nil or v == "" then return nil end
+  return tonumber(v) ~= 0
+end
+
 function RQ.read(track, addr)
   local by_key, order, master = {}, {}, nil
 
@@ -203,10 +212,17 @@ function RQ.read(track, addr)
     i = i + 1
   end
 
+  -- On or off: ReaEQ's own BANDENABLED<n> (n its place in the plugin's
+  -- band list, which is the parameters' order). GetEQBandEnabled finds a
+  -- band by its type, and the "alt" band types (Band (alt), Band (alt 2))
+  -- read as plain bands there, so it can't find them and says off.
   local bands = {}
-  for _, bkey in ipairs(order) do
+  for pos, bkey in ipairs(order) do
     local b = by_key[bkey]
-    b.enabled = reaper.TrackFX_GetEQBandEnabled(track, addr, b.bandtype, b.bandidx)
+    b.pos = pos - 1
+    local on = band_flag(track, addr, b.pos)
+    if on == nil then on = reaper.TrackFX_GetEQBandEnabled(track, addr, b.bandtype, b.bandidx) end
+    b.enabled = on
     bands[#bands + 1] = b
   end
   return bands, master
@@ -336,7 +352,11 @@ function RQ.set_q(track, addr, band, q, state)
 end
 
 function RQ.set_enabled(track, addr, band, on)
-  reaper.TrackFX_SetEQBandEnabled(track, addr, band.bandtype, band.bandidx, on)
+  -- by its place, when ReaEQ answers that (see RQ.read), else by its type
+  if not (band.pos and band_flag(track, addr, band.pos) ~= nil
+          and reaper.TrackFX_SetNamedConfigParm(track, addr, "BANDENABLED" .. band.pos, on and "1" or "0")) then
+    reaper.TrackFX_SetEQBandEnabled(track, addr, band.bandtype, band.bandidx, on)
+  end
   band.enabled = on
 end
 

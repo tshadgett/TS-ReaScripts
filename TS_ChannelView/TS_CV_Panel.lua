@@ -55,6 +55,9 @@ local function own_eq(key) return EQP ~= nil and RQ.is_eq(key) end
 local function own_rc(key) return CP ~= nil and RC.is_comp(key) end
 local function own_trim(key) return TR ~= nil and TR.is(key) end
 P.own_eq, P.own_rc, P.own_trim = own_eq, own_rc, own_trim
+-- the layout each own panel (ReaEQ, ReaComp, the Trimmer) was last drawn
+-- with, for its size (P.own_w, P.width)
+local own_layout = {}
 -- a layout's canvas, when there's Pro to draw it
 local function canvas_of(layout) return MP ~= nil and layout and layout.canvas or nil end
 P.canvas_of = canvas_of
@@ -1185,23 +1188,27 @@ end
 function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
   if collapsed then return C.COLLAPSED_W end
   -- the TS_CV Trimmer: its own panel, as wide as the strip's height needs
-  if key and own_trim(key) then return TRP.width(avail_h) end
+  if key and own_trim(key) then
+    local l = own_layout[key] or M.get(key)
+    return (l and l.own_w) or TRP.width(avail_h)
+  end
   -- an EQ or compressor canvas (any plugin): the canvas, and its layout's
   -- controls in columns beside it
   if canvas and MP then
     local side = 0
     local n = type(n_or_controls) == "table" and #n_or_controls or (n_or_controls or 0)
-    if n > 0 then
+    -- folded away, its controls pop out from the edge instead (fold_pop)
+    if n > 0 and not canvas.fold then
       side = P.width(n_or_controls, avail_h, false, false, nil, false, false, lock) - C.PANEL_PAD
     end
     -- with input/output meters: on the panel's two outside edges
     return MP.width(canvas.kind, canvas) + side + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
   if key and own_eq(key) then
-    return C.EQ_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
+    return P.own_w(key) + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
   end
   -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
-  if key and own_rc(key) then return C.RC_PANEL_W + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0) end
+  if key and own_rc(key) then return P.own_w(key) + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0) end
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -1770,8 +1777,11 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   ImGui.InvisibleButton(ctx, "hdr##" .. fx.guid, name_w, h,
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hdr_hovered = ImGui.IsItemHovered(ctx)
+  -- Alt+click: out of the chain (asked first), as in REAPER's FX chain
+  local alt = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Alt) ~= 0
+  if alt and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then req.remove = true end
 
-  if ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+  if not alt and ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     -- x and y are output slots in the Lua API and must be passed as
     -- nil; the button is the FOURTH argument, not the second.
     local dx = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
@@ -3403,7 +3413,8 @@ local function rc_body(ctx, dl, x, y, ww, bh, track, fx, req, io, enabled, plate
     CP.draw, ctx, dl, ex, y + C.HEADER_H, ew, bh, track, fx, req)
 end
 
-local draw_panel
+local draw_panel, size_grip, fold_tab, fold_pop
+local fold_req = false   -- the panel being drawn has its controls folded away
 
 -- The Rack view (TS_ChannelView_Rack.lua) draws panels down a column:
 -- P.FILL_W, when set, is the column's width -- a panel's plate, header and
@@ -3457,6 +3468,14 @@ function P.rack_from_rows(vis, shared)
   return n
 end
 -- (a canvas layout's own: its `h`)
+-- ReaEQ's and ReaComp's own canvases: the width set by dragging the
+-- panel's edge (the layout drawn last for that key, else the library's),
+-- or the usual.
+function P.own_w(key)
+  local l = own_layout[key] or M.get(key)
+  return (l and l.own_w) or (own_eq(key) and C.EQ_PANEL_W or C.RC_PANEL_W)
+end
+
 function P.rack_canvas_h(w, cv)
   if cv and cv.h then return cv.h end
   return math.floor(math.max(240, math.min(384, w * 0.5)))
@@ -3515,15 +3534,18 @@ end
 function P.rack_height(track, fx, layout, key, w, shared)
   if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
   local base = C.HEADER_H + P.footer_h()
-  if own_trim(key) then return base + TRP.rack_body_h(w) end
+  if own_trim(key) then return base + (layout.own_h or TRP.rack_body_h(w)) end
   local io = P.has_io(track, fx, layout)
-  if own_eq(key) or own_rc(key) then return base + P.rack_canvas_h(w - io_w(io)) end
+  if own_eq(key) or own_rc(key) then
+    return base + P.rack_canvas_h(w - io_w(io), layout.own_h and { h = layout.own_h } or nil)
+  end
   local vis = P.visible(layout.controls or {}, track, fx)
   local lock = M.locked(layout)
   local canvas = canvas_of(layout)
   if canvas then
     local ew = w - io_w(io)
     local h = base + P.rack_canvas_h(ew, canvas)
+    if canvas.fold_rack then return h end
     if #vis > 0 and P.is_grid(vis) then
       -- the controls under it, a grid: as tall as it is across the width
       h = h + C.GRID_TOP_PAD + C.PANEL_PAD + (rack_grid_tall(vis, ew - C.PANEL_PAD * 2, lock))
@@ -3560,6 +3582,195 @@ function P.rack_height(track, fx, layout, key, w, shared)
   return (rack_grid_h(vis, w, false, key, io, false, lock, from)) + P.gr_strip_h()
 end
 
+-- A canvas panel's size, by dragging its edge: the right edge in
+-- ChannelView sets the canvas's width, the bottom edge in the rack its
+-- height -- what the grid editor's Canvas width / height set, kept with
+-- the layout (ReaEQ's and ReaComp's own canvases: own_w / own_h).
+-- Double-click the edge: the usual size again.
+local size_drag = nil   -- { guid, v0 }
+-- A canvas layout with controls beside the canvas (under it in the rack)
+-- folds them away when its edge is dragged in past the point where the
+-- canvas, at its least, and the controls fit; dragged back out, they
+-- come back. Folded, they pop out from the edge (fold_pop).
+local CANVAS_MIN = { w = 200, h = 120 }
+-- how far above that the controls fold, so the canvas never gets squeezed
+-- right down to its least before they go
+local FOLD_SLACK = { w = 60, h = 40 }
+local function ctl_room(track, fx, layout, key, ww, wh, canvas, io)
+  local vis = P.visible(layout.controls or {}, track, fx)
+  if #vis == 0 then return 0 end
+  if P.RACK then
+    local was = canvas.fold_rack
+    canvas.fold_rack = nil
+    local full = P.rack_height(track, fx, layout, key, ww, nil)
+    canvas.fold_rack = was
+    return math.max(0, full - C.HEADER_H - P.footer_h() - P.rack_canvas_h(ww - io_w(io), canvas))
+  end
+  return math.max(0, P.width(vis, wh, false, false, nil, false, false, M.locked(layout)) - C.PANEL_PAD)
+end
+
+size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track)
+  local rack = P.RACK
+  local gx, gy, gw, gh
+  if rack then gx, gy, gw, gh = x + 10, y + wh - 5, ww - 20, 5
+  else gx, gy, gw, gh = x + ww - 5, y + C.HEADER_H, 5, wh - C.HEADER_H end
+  if gw < 4 or gh < 4 then return end
+  ImGui.SetCursorScreenPos(ctx, gx, gy)
+  W.allow_overlap(ctx)
+  ImGui.InvisibleButton(ctx, "szgrip##" .. fx.guid, gw, gh)
+  local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+  local function get()
+    if canvas then
+      if rack then return P.rack_canvas_h(ww - io_w(io), canvas) end
+      return MP.width(canvas.kind, canvas)
+    end
+    -- the Trimmer: its body's height in the rack, its width here
+    if is_trim then return rack and (layout.own_h or (wh - C.HEADER_H - P.footer_h())) or (layout.own_w or ww) end
+    if rack then return P.rack_canvas_h(ww - io_w(io), layout.own_h and { h = layout.own_h } or nil) end
+    return layout.own_w or (is_eq and C.EQ_PANEL_W or C.RC_PANEL_W)
+  end
+  local function put(v)
+    if canvas then
+      if rack then canvas.h = v else canvas.w = v end
+    elseif rack then layout.own_h = v
+    else layout.own_w = v end
+  end
+  local function keep()
+    M.set(key, layout)
+    M.save()
+  end
+  if hov or act then
+    ImGui.SetMouseCursor(ctx, rack and ImGui.MouseCursor_ResizeNS or ImGui.MouseCursor_ResizeEW)
+    if rack then
+      local mx = gx + gw * 0.5
+      ImGui.DrawList_AddLine(dl, mx - 16, gy + 2.5, mx + 16, gy + 2.5, act and C.COL.accent or C.COL.knob_ring, 2.0)
+    else
+      local my = gy + gh * 0.5
+      ImGui.DrawList_AddLine(dl, gx + 2.5, my - 16, gx + 2.5, my + 16, act and C.COL.accent or C.COL.knob_ring, 2.0)
+    end
+    local fold_tip = (canvas and #(layout.controls or {}) > 0)
+      and ("\nIn past the canvas: its controls fold away, and come out from the edge") or ""
+    W.tip(ctx, "szgrip##" .. fx.guid, (rack and ("Drag: the " .. (is_trim and "panel's" or "canvas's") .. " height in the rack")
+                                        or ("Drag: the " .. (is_trim and "panel's" or "canvas's") .. " width"))
+      .. ("  (%d px)"):format(math.floor(get())) .. fold_tip .. "\nDouble-click: the usual size", hov, act)
+  end
+  if hov and ImGui.IsMouseDoubleClicked(ctx, 0) then
+    put(nil)
+    if canvas then if rack then canvas.fold_rack = nil else canvas.fold = nil end end
+    keep()
+    size_drag = nil
+    return
+  end
+  if act and ImGui.IsMouseDown(ctx, 0) then
+    if not size_drag or size_drag.guid ~= fx.guid then
+      size_drag = { guid = fx.guid, v0 = get() }
+      -- the controls' room, and whether they're folded now
+      if canvas then
+        size_drag.room = ctl_room(track, fx, layout, key, ww, wh, canvas, io)
+        size_drag.fold0 = rack and canvas.fold_rack or (not rack and canvas.fold)
+      end
+    end
+    local dx, dy = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left, 0)
+    local d = rack and dy or dx
+    if canvas and (size_drag.room or 0) > 0 then
+      -- the edge: canvas plus controls (canvas alone while folded)
+      local least = rack and CANVAS_MIN.h or CANVAS_MIN.w
+      local slack = rack and FOLD_SLACK.h or FOLD_SLACK.w
+      local edge = size_drag.v0 + (size_drag.fold0 and 0 or size_drag.room) + d
+      local fold = edge < least + slack + size_drag.room
+      local v = fold and math.max(least, edge) or (edge - size_drag.room)
+      v = math.min(rack and 900 or 1200, v)
+      if rack then canvas.fold_rack = fold or nil else canvas.fold = fold or nil end
+      put(math.floor(v + 0.5))
+      return
+    end
+    local v = size_drag.v0 + d
+    if rack then v = math.max(120, math.min(900, v)) else v = math.max(is_trim and 160 or 200, math.min(1200, v)) end
+    put(math.floor(v + 0.5))
+  elseif size_drag and size_drag.guid == fx.guid then
+    size_drag = nil
+    keep()
+  end
+end
+
+-- Folded controls: a tab on the canvas's edge (the right, the bottom in
+-- the rack, above the footer); with the pointer on it they pop out beside the panel (under it
+-- in the rack) in a window of their own, over whatever is there, and stay
+-- while the pointer is on them or in a menu they opened.
+local fold_out = {}   -- guid -> when the pointer was last on the tab or the controls
+local FOLD_LINGER = 0.35
+local function fold_tab_rect(x, y, ww, wh)
+  if P.RACK then return x + (ww - 44) * 0.5, y + wh - P.footer_h() - 4 - 12, 44, 12 end
+  return x + ww - 5 - 12, y + (wh - 44) * 0.5, 12, 44
+end
+fold_tab = function(ctx, dl, fx, x, y, ww, wh)
+  local tx, ty, tw, th = fold_tab_rect(x, y, ww, wh)
+  ImGui.SetCursorScreenPos(ctx, tx, ty)
+  W.allow_overlap(ctx)
+  ImGui.InvisibleButton(ctx, "foldtab##" .. fx.guid, tw, th)
+  local hov = ImGui.IsItemHovered(ctx)
+  if hov then fold_out[fx.guid] = reaper.time_precise() end
+  local lit = hov or fold_out[fx.guid] ~= nil
+  ImGui.DrawList_AddRectFilled(dl, tx, ty, tx + tw, ty + th,
+    lit and C.COL.accent or U.with_alpha(C.COL.header_bg, 0xe0), 3.0)
+  local ink = lit and C.COL.icon_on or C.COL.icon
+  local cx, cy = tx + tw * 0.5, ty + th * 0.5
+  if P.RACK then
+    ImGui.DrawList_AddLine(dl, cx - 5, cy - 2, cx, cy + 2, ink, 1.6)
+    ImGui.DrawList_AddLine(dl, cx, cy + 2, cx + 5, cy - 2, ink, 1.6)
+  else
+    ImGui.DrawList_AddLine(dl, cx - 2, cy - 5, cx + 2, cy, ink, 1.6)
+    ImGui.DrawList_AddLine(dl, cx + 2, cy, cx - 2, cy + 5, ink, 1.6)
+  end
+end
+
+fold_pop = function(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate)
+  local t = fold_out[fx.guid]
+  if not t then return end
+  local now = reaper.time_precise()
+  local canvas = canvas_of(layout)
+  local room = canvas and ctl_room(track, fx, layout, key, ww, wh, canvas, io) or 0
+  if room <= 0 then fold_out[fx.guid] = nil return end
+  local px, py, pw, ph
+  if P.RACK then px, py, pw, ph = x, y + wh - 1, ww, C.HEADER_H + P.footer_h() + room
+  else px, py, pw, ph = x + ww - 1, y, room + C.PANEL_PAD, wh end
+  ImGui.SetNextWindowPos(ctx, px, py)
+  ImGui.SetNextWindowSize(ctx, pw, ph)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, 0, 0)
+  local flags = ImGui.WindowFlags_NoDecoration | ImGui.WindowFlags_NoSavedSettings | ImGui.WindowFlags_NoFocusOnAppearing
+    | ImGui.WindowFlags_NoDocking | ImGui.WindowFlags_NoNav | ImGui.WindowFlags_NoScrollWithMouse
+  local visible = ImGui.Begin(ctx, "##cvfold" .. fx.guid, nil, flags)
+  local on_it = false
+  if visible then
+    local pdl = ImGui.GetWindowDrawList(ctx)
+    local wx, wy = ImGui.GetWindowPos(ctx)
+    local saved = plate and push_plate(plate)
+    if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, M.finish(layout, plate), M.metal(layout, plate))
+    else ImGui.DrawList_AddRectFilled(pdl, wx, wy, wx + pw, wy + ph, C.COL.panel_bg, 3.0) end
+    ImGui.DrawList_AddRect(pdl, wx, wy, wx + pw, wy + ph, C.COL.accent, 3.0, 0, 1.0)
+    if P.RACK then
+      draw_controls(ctx, pdl, wx, wy, pw, ph, track, fx, layout, key, req, nil, nil)
+    else
+      -- the plugin's name where its header would be
+      local name = U.fx_label(fx)
+      local _, th = ImGui.CalcTextSize(ctx, name)
+      ImGui.DrawList_PushClipRect(pdl, wx, wy, wx + pw, wy + C.HEADER_H, true)
+      ImGui.DrawList_AddText(pdl, wx + 8, wy + (C.HEADER_H - th) * 0.5, C.COL.header_dim, name)
+      ImGui.DrawList_PopClipRect(pdl)
+      draw_controls(ctx, pdl, wx, wy + C.HEADER_H, pw, ph, track, fx, layout, key, req, nil, nil)
+    end
+    if saved then pop_plate(saved) end
+    on_it = ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows | ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+      or ImGui.IsAnyItemActive(ctx)
+    -- ReaImGui: End only when Begin returned true
+    ImGui.End(ctx)
+  end
+  ImGui.PopStyleVar(ctx)
+  local menu = ImGui.IsPopupOpen(ctx, "", ImGui.PopupFlags_AnyPopupId | ImGui.PopupFlags_AnyPopupLevel)
+  if on_it or menu then fold_out[fx.guid] = now
+  elseif now - t > FOLD_LINGER then fold_out[fx.guid] = nil end
+end
+
 -- Draws one panel at the current cursor position and advances past it.
 -- Returns a `req` table of things the caller should act on this frame:
 --   toggle_bypass, toggle_float, open_menu, open_editor, ctx_control
@@ -3577,6 +3788,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   local is_eq = own_eq(key)
   -- ReaComp's panel is its own canvas, with its own meters beside it
   local is_rc = own_rc(key)
+  if is_eq or is_rc or is_trim then own_layout[key] = layout end
   -- the TS_CV Trimmer: meters, trims and filters of its own
   local is_trim = own_trim(key)
   -- ReaEQ has nothing to meter -- T.reports_gr would already say no for
@@ -3597,6 +3809,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   if P.RACK and P.FILL_W then w, nat_w, off = P.FILL_W, P.FILL_W, 0 end
 
   local pn_x, pn_y = ImGui.GetCursorPos(ctx)
+  fold_req = false
   local ok = ImGui.BeginChild(ctx, "pnl##" .. fx.guid, w, avail_h, 0,
     ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
   if ok then
@@ -3679,9 +3892,10 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         -- the rack: the canvas across the whole width, the controls under it
         local stacked = P.RACK and P.FILL_W and true or false
         local full_bh = bh
+        local folded = (stacked and canvas.fold_rack) or (not stacked and canvas.fold)
         if stacked then
           cw = ew
-          if #(layout.controls or {}) > 0 then bh = math.min(bh, P.rack_canvas_h(ew, canvas)) end
+          if #(layout.controls or {}) > 0 and not folded then bh = math.min(bh, P.rack_canvas_h(ew, canvas)) end
         end
         -- (a light faceplate gives the canvas a dark screen: on_screen)
         local todo = M.canvas_todo(canvas) or (canvas.kind ~= "eq" and not next(canvas.roles or {}))
@@ -3700,7 +3914,9 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         else
           screen(MP.draw_eq, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, layout, req)
         end
-        if #(layout.controls or {}) > 0 then
+        if #(layout.controls or {}) > 0 and folded then
+          fold_req = true
+        elseif #(layout.controls or {}) > 0 then
           if stacked then
             -- a grid of its own under the canvas: its panel height is what
             -- the canvas leaves, with a header and foot's worth added back
@@ -3731,8 +3947,14 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + ww - 0.5, y + wh - 0.5, C.COL.accent, 3.0, 0, 1.6)
     end
     if saved then pop_plate(saved) end
+    if not collapsed and (canvas or is_eq or is_rc or is_trim) then
+      size_grip(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track)
+    end
+    local folded_here = fold_req
+    if folded_here then fold_tab(ctx, dl, fx, x, y, ww, wh) end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)
+    if folded_here then fold_pop(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate) end
   else
     -- Culled: still occupy the space, or the parent's bounds
     -- never grow past it. See W.child_skipped.

@@ -8064,6 +8064,19 @@ do
   reaper = real
 end
 
+-- a canvas layout's controls folded away (they pop out from the edge):
+-- kept with the canvas, apart for ChannelView and the rack
+do
+  local M_ = require("TS_CV_Mappings")
+  local cv = M_.canvas_of({ Canvas = "comp", CanvasW = "320", CanvasFold = "1" })
+  check("canvas fold: read", tostring(cv.fold) .. " " .. tostring(cv.fold_rack) .. " " .. tostring(cv.w), "true nil 320")
+  cv.fold_rack = true
+  local out = {}
+  M_.canvas_lines(cv, out)
+  check("canvas fold: written", tostring(out.CanvasFold) .. " " .. tostring(out.CanvasFoldRack), "1 1")
+  check("canvas fold: copied", tostring(M_.copy_canvas(cv).fold_rack), "true")
+end
+
 -- ChannelView and Pro at different versions: which one to update, said
 -- once for each pair; Pro's own scripts (the Rack, the web bridge) won't start
 do

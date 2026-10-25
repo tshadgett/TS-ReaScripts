@@ -669,6 +669,75 @@ function CH.geometry(y, h, master)
   return { top = top, fh = fh, btm = btm, bh = bh, bgap = bgap, rows = rows }
 end
 
+-- A fader shorter than this is too short to use: the volume is a knob
+-- instead, its level meter a ring round it.
+CH.FADER_MIN = 90
+
+-- The volume as a knob between `top` and `bottom`, centred across x..x+w,
+-- with each channel's level (and its peak hold) on a ring round the dial:
+-- the fader panel when it's too short for a fader.
+local function volume_knob(ctx, dl, x, w, top, bottom, track, idp, vol, now)
+  local small = (bottom - top) < C.CELL_H
+  local sz = C.SIZES[small and "small" or "medium"]
+  local cw = C.CELL_W * sz.w / 2
+  local ch = C.CELL_H * sz.h / 2
+  ImGui.SetCursorScreenPos(ctx, x + (w - cw) * 0.5, top + math.max(0, (bottom - top - ch) * 0.5))
+  local vt = U.db_text(vol)
+  -- its name drawn here, over the ring (the knob's own would sit under it)
+  local kch, knv, kact = W.knob(ctx, idp .. "volk", "", U.vol_to_fader(vol), vt,
+    { size = small and "small" or nil, tooltip = "Volume   " .. vt .. " dB" })
+  if kact and kact.right_click then ImGui.OpenPopup(ctx, idp .. "fmenu") end
+  fader_menu(ctx, track, idp .. "fmenu")
+  local dbl = kact and kact.double_click
+  if dbl then knv, kch = U.UNITY_POS, true end
+  if kch then
+    local nv = U.fader_to_vol(knv)
+    if dbl then set(track, "D_VOL", nv) else G.vol(track, nv) end
+  end
+  local k = W.last_knob
+  if not k then return end
+  -- the ring: one arc a channel (left inside, right outside), over the
+  -- knob's own sweep, lit to the level, a tick at the peak hold
+  local nch = math.min(2, W.meter_channels(track))
+  local a0, a1 = math.pi * 0.75, math.pi * 2.25
+  local tip = {}
+  for i = 1, nch do
+    local key = idp .. "c" .. i
+    local lv = U.val2db(reaper.Track_GetPeakInfo(track, i - 1))
+    local hold = W.level_peak(key, lv, now)
+    local rms = W.level_rms(key, lv, now)
+    local rh = W.level_peak(key .. "#r", rms, now)
+    local r = k.r + 3 + (i - 1) * 3.5
+    ImGui.DrawList_PathClear(dl)
+    ImGui.DrawList_PathArcTo(dl, k.cx, k.cy, r, a0, a1, 32)
+    ImGui.DrawList_PathStroke(dl, C.COL.knob_track, 0, 2.5)
+    local f = W.level_frac(lv)
+    if f > 0 then
+      ImGui.DrawList_PathClear(dl)
+      ImGui.DrawList_PathArcTo(dl, k.cx, k.cy, r, a0, a0 + (a1 - a0) * f, math.max(4, math.floor(32 * f)))
+      ImGui.DrawList_PathStroke(dl, W.level_bar_colour(lv), 0, 2.5)
+    end
+    local hf = W.level_frac(hold)
+    if hf > 0 then
+      local a = a0 + (a1 - a0) * hf
+      ImGui.DrawList_AddLine(dl, k.cx + math.cos(a) * (r - 1.5), k.cy + math.sin(a) * (r - 1.5),
+        k.cx + math.cos(a) * (r + 1.5), k.cy + math.sin(a) * (r + 1.5), W.level_colour(hold, C.COL.header_text), 1.5)
+    end
+    tip[i] = ("%speak %s   RMS %s   now %s"):format((nch > 1) and ((i == 1) and "L  " or "R  ") or "",
+      U.db_str(hold), U.db_str(rh), U.db_str(lv))
+  end
+  local reach = k.r + 3 + (nch - 1) * 3.5 + 2
+  local lab = "Volume"
+  if small then W.push_small(ctx) end
+  local lw, lh = ImGui.CalcTextSize(ctx, lab)
+  ImGui.DrawList_AddText(dl, k.cx - lw * 0.5, math.max(top, k.cy - reach - lh - 1), C.COL.label, lab)
+  if small then W.pop_small(ctx) end
+  local over = ImGui.IsWindowHovered(ctx)
+    and ImGui.IsMouseHoveringRect(ctx, k.cx - reach, k.cy - reach, k.cx + reach, k.cy + reach)
+    and not ImGui.IsMouseHoveringRect(ctx, k.cx - k.r, k.cy - k.r, k.cx + k.r, k.cy + k.r)
+  W.tip(ctx, idp .. "ringtip", table.concat(tip, "\n"), over, false)
+end
+
 function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   idp = idp or "ch"
   local pad = 5
@@ -790,7 +859,10 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   local top   = geo.top
   local fh    = geo.fh
 
-  if fh > 40 then
+  if fh < CH.FADER_MIN then
+    -- too short for a fader to be any use: a knob, the meter round it
+    volume_knob(ctx, dl, x + pad, inner, top, btm - 4, track, idp, vol, now)
+  else
     local fx = x + pad + (half - fw) * 0.5
     local fch, fnv, fact = W.fader(ctx, idp .. "fader", fx, top, fw, fh,
       U.vol_to_fader(vol), "Volume   " .. U.db_text(vol) .. " dB",
