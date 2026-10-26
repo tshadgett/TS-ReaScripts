@@ -2,10 +2,10 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.5.2
+-- @version 2.5.3
 -- @changelog
---  Settings > PANELS > Auto-hide the header: the panels take its room, and
---  it slides out over them from the window's top edge, as ChannelView's.
+--  Auto-hide the header: Track Analyser no longer stops with an error
+--  (EndChild) when the header slides out.
 -- @about
 --  # Track Analyser
 --
@@ -3343,7 +3343,18 @@ local function frame()
     local hdrHidden = S.hideHeader and not openSettings
     local hdrX, hdrY = ImGui.GetCursorScreenPos(ctx)
     local hdrW = ImGui.GetContentRegionAvail(ctx)
-    if not hdrHidden then drawHeader() end
+    -- the top of the window's inside, above its padding
+    local hdrTop = hdrY - 8
+    if ImGui.GetStyleVar and ImGui.StyleVar_WindowPadding then
+      local okp, _, py = pcall(ImGui.GetStyleVar, ctx, ImGui.StyleVar_WindowPadding())
+      if okp and type(py) == "number" then hdrTop = hdrY - py end
+    end
+    if not hdrHidden then drawHeader()
+    else
+      -- hidden: the track's colour rule at the window's top, the panels
+      -- straight under it (as ChannelView's)
+      ImGui.SetCursorScreenPos(ctx, hdrX, hdrTop + 3)
+    end
 
     -- Set below when settings is open and the pointer is inside it.
     local settingsHovered = false
@@ -3951,15 +3962,17 @@ local function frame()
       local EDGE, LINGER, PADY = 6, 0.35, 4
       local mx, my = ImGui.GetMousePos(ctx)
       local now = r.time_precise()
-      local hh = ImGui.GetFrameHeight(ctx) + PADY * 2
+      -- from the window's top, the row where it sits when shown
+      local top = hdrY - hdrTop
+      local hh = top + ImGui.GetFrameHeight(ctx) + PADY
       local inside = mx >= hdrX and mx <= hdrX + hdrW
       local hf = 0
       if ImGui.HoveredFlags_ChildWindows then hf = hf | ImGui.HoveredFlags_ChildWindows() end
       if ImGui.HoveredFlags_AllowWhenBlockedByActiveItem then
         hf = hf | ImGui.HoveredFlags_AllowWhenBlockedByActiveItem()
       end
-      local atEdge = inside and my >= hdrY - 8 and my <= hdrY + EDGE and ImGui.IsWindowHovered(ctx, hf)
-      local onIt = hdrOut and inside and my >= hdrY - 8 and my <= hdrY + hh
+      local atEdge = inside and my >= hdrTop and my <= hdrTop + EDGE and ImGui.IsWindowHovered(ctx, hf)
+      local onIt = hdrOut and inside and my >= hdrTop and my <= hdrTop + hh
       local menu = false
       if hdrOut and ImGui.IsPopupOpen and ImGui.PopupFlags_AnyPopupId then
         local pf = ImGui.PopupFlags_AnyPopupId()
@@ -3971,19 +3984,22 @@ local function frame()
       if not hdrOut then
         -- the edge it comes out from, marked so it can be found
         local cxm = hdrX + hdrW * 0.5
-        ImGui.DrawList_AddLine(dl, cxm - 20, hdrY - 3, cxm + 20, hdrY - 3, COL.textDim, 2)
+        ImGui.DrawList_AddLine(dl, cxm - 20, hdrTop + 1.5, cxm + 20, hdrTop + 1.5, COL.textDim, 2)
       else
-        ImGui.SetCursorScreenPos(ctx, hdrX, hdrY)
+        ImGui.SetCursorScreenPos(ctx, hdrX, hdrTop)
         local nc, nv = 0, 0
         if ImGui.Col_ChildBg and ImGui.GetStyleColor then
           ImGui.PushStyleColor(ctx, ImGui.Col_ChildBg(), ImGui.GetStyleColor(ctx, ImGui.Col_WindowBg())) ; nc = 1
         end
         if ImGui.StyleVar_WindowPadding then
-          ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding(), 0, PADY) ; nv = 1
+          ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding(), 0, top) ; nv = 1
         end
         local wf = ImGui.WindowFlags_NoScrollbar() | ImGui.WindowFlags_NoScrollWithMouse()
         if ImGui.BeginChild(ctx, '##tahdr', hdrW, hh, 0, wf) then
           drawHeader()
+          -- the header puts the cursor back where its row left it; an item
+          -- there, or ImGui takes that for growing the child past its edge
+          ImGui.Dummy(ctx, 0, 0)
           local cdl = ImGui.GetWindowDrawList(ctx)
           local cx0, cy0 = ImGui.GetWindowPos(ctx)
           ImGui.DrawList_AddLine(cdl, cx0, cy0 + hh - 1, cx0 + hdrW, cy0 + hh - 1, COL.grid, 1)

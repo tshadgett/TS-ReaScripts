@@ -1,5 +1,10 @@
 # Track Analyser — changelog
 
+## 2.5.3
+
+- **Auto-hide the header no longer stops Track Analyser** with an error
+  (EndChild) when the header slides out.
+
 ## 2.5.2 — auto-hide header
 
 - **Auto-hide the header** (Settings ▸ PANELS): the panels take its room,
