@@ -87,6 +87,7 @@ local st = {
 
 -- Opens the window, on a drawer (and an item in it) when given.
 function AE.open(d, item)
+  if st.open then W.reopen(st) end
   st.open = true
   st.focus = true
   if d then st.bar_id = d.id end
@@ -1097,6 +1098,7 @@ end
 
 function AE.draw(ctx)
   if not st.open then return end
+  if W.held(st) then return end
   ImGui.SetNextWindowSize(ctx, 920, 500, ImGui.Cond_FirstUseEver)
   if st.focus then ImGui.SetNextWindowFocus(ctx); st.focus = false end
   local vis, open = ImGui.Begin(ctx, "Organise actions##cvae", true, ImGui.WindowFlags_NoCollapse)

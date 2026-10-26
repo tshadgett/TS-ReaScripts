@@ -499,13 +499,14 @@ W.mark_reach = function(r) return r + math.max(2.5, r * 0.26) end
 -- A knob's value arc, in place of its scale's ticks or dots (Style >
 -- Value arc): the track round the travel, lit from the start ("pos"), from
 -- the end back ("neg") or out from the middle ("mid", with a mark there)
--- to the value, in the theme's fill (its centred fill for "mid").
-local function value_arc(dl, cx, cy, r, v, mode, dim)
+-- to the value, in the theme's fill (its centred fill for "mid"), or
+-- `own`, a colour of the knob's (Style > Value arc > its colour).
+local function value_arc(dl, cx, cy, r, v, mode, dim, own)
   local r0, r1 = r + 1.5, r + math.max(2.5, r * 0.26)
   local rr, w = (r0 + r1) * 0.5, math.max(2.0, (r1 - r0) * 0.8)
   local a = A_MIN + A_SPAN * v
   arc(dl, cx, cy, rr, A_MIN, A_MAX, C.COL.knob_track, w)
-  local col = (mode == "mid") and C.COL.knob_fill_bi or C.COL.knob_fill
+  local col = own or ((mode == "mid") and C.COL.knob_fill_bi or C.COL.knob_fill)
   if dim then col = U.with_alpha(col, 0x66) end
   if mode == "neg" then arc(dl, cx, cy, rr, a, A_MAX, col, w)
   elseif mode == "mid" then
@@ -813,7 +814,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
   local def = own and { parts = own, cap = "black" } or C.KNOB_STYLE[style]
   if def.parts then
     -- built from parts (TS_CV_KnobParts), with the scale round it
-    if o.arc then value_arc(dl, cx, cy, r, v, o.arc, o.dim)
+    if o.arc then value_arc(dl, cx, cy, r, v, o.arc, o.dim, o.arc_col)
     elseif o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring)
     elseif def.parts.scale == "dots" then
       -- a ring of printed dots, as on a console's EQ
@@ -857,7 +858,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
     end
   end
 
-  if o.arc then value_arc(dl, cx, cy, r, v, o.arc, o.dim)
+  if o.arc then value_arc(dl, cx, cy, r, v, o.arc, o.dim, o.arc_col)
   elseif o.marks then mark_ticks(dl, cx, cy, r, o.marks, tick) end
 
   if style == "led" then
@@ -967,7 +968,7 @@ function W.knob_face(dl, cx, cy, r, value, o)
     ImGui.DrawList_AddCircleFilled(dl, cx + 0.8 * k, cy + 1.6 * k, R + 0.6 * k, fade(0x00000040), 36)
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, fade(0x000000ff), 36)
     ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, fade(U.with_alpha(base, 0xb0)), 36)
-    ImGui.DrawList_AddCircleFilled(dl, cx - 1.6 * k, cy - 2.2 * k, R * 0.92, fade(base), 36)
+    ImGui.DrawList_AddCircleFilled(dl, cx - 0.8 * k, cy - 1.1 * k, R * 0.95, fade(base), 36)
     -- the bar: a flat top, and either side of it a slope running down to
     -- the dome -- in shadow on the side away from the light, catching it on
     -- the other, with a soft fall-off beyond the shadowed one. Each band
@@ -985,18 +986,19 @@ function W.knob_face(dl, cx, cy, r, value, o)
     end
     local lit = ((vx * -0.6 + vy * -0.8) > 0) and 1 or -1   -- +v or -v: the side facing the light
     local s1, s2 = BAR_SLOPE * k, BAR_FALL * k
-    band(-lit * (h + s1), -lit * (h + s1 + s2), fade(0x00000030))
-    band(-lit * h, -lit * (h + s1), fade(0x00000070))
-    band(lit * h, lit * (h + s1), fade(0xffffff50))
-    band(-h, h, fade(U.lighten(base, 0.45)))
+    -- (gently: the bar is the knob's own colour, a shade up, not a sheen)
+    band(-lit * (h + s1), -lit * (h + s1 + s2), fade(0x00000020))
+    band(-lit * h, -lit * (h + s1), fade(0x00000048))
+    band(lit * h, lit * (h + s1), fade(0xffffff1c))
+    band(-h, h, fade(U.lighten(base, 0.12)))
     -- the crests, where the top turns down into the slopes
     local L, lw = len(h), math.max(1.0, 1.2 * k)
     local function crest(w, col)
       ImGui.DrawList_AddLine(dl, cx + ux * L + vx * w, cy + uy * L + vy * w,
         cx - ux * L + vx * w, cy - uy * L + vy * w, col, lw)
     end
-    crest(lit * h, fade(0xffffffa0))
-    crest(-lit * h, fade(0x00000066))
+    crest(lit * h, fade(0xffffff48))
+    crest(-lit * h, fade(0x00000050))
     -- the pointer: a short dark line in the bar's far end
     local px1, py1 = at(BAR_R * 0.48); local px2, py2 = at(BAR_R - 3.5)
     ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, fade(cap_ink(base)), math.max(1.5, 3 * k))
@@ -1241,7 +1243,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   end
 
   W.knob_face(dl, cx, cy, dial_r, value, {
-    style = opts.style, cap = opts.cap, bipolar = opts.bipolar, arc = opts.arc, ctx = ctx, look = opts.look,
+    style = opts.style, cap = opts.cap, bipolar = opts.bipolar, arc = opts.arc, arc_col = opts.arc_col, ctx = ctx, look = opts.look,
     dim = opts.dim, hot = hovered or active, marks = sc and sc.marks })
   if opts.mod then
     W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap, opts.look))
@@ -2810,6 +2812,22 @@ end
 -- itself and the corner never responds. W.allow_overlap() is called by
 -- every widget that fills a cell, just before its button.
 W.BADGE = 12
+
+-- A window of our own (Edit layout, Organise actions, ...) asked for again
+-- while it's open. On macOS one closed with its own title bar's close
+-- button can be left hidden while ImGui still has it open, so it would go
+-- on being drawn where nobody sees it. Left out for a few frames, ImGui
+-- lets that window go, and the next Begin makes a new one.
+-- W.reopen(t) where it's asked for; `if W.held(t) then return end` before
+-- its Begin.
+function W.reopen(t) if t then t.reopen = 3 end end
+function W.held(t)
+  if t and t.reopen and t.reopen > 0 then
+    t.reopen = t.reopen - 1
+    return true
+  end
+  return false
+end
 
 function W.allow_overlap(ctx)
   if ImGui.SetNextItemAllowOverlap then ImGui.SetNextItemAllowOverlap(ctx) end

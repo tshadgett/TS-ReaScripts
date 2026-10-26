@@ -418,6 +418,13 @@ local function scale_of(v)
   local k = U.trim(v or ""):match("^(%a+)")
   return (k == "values" or k == "ten" or k == "none") and k or nil
 end
+-- ArcCol<n>: a value arc's colour, a cap colour's name or #rrggbb
+function M.arc_col_of(v)
+  v = U.trim(v or "")
+  if v == "" then return nil end
+  if C.CAP[v] or (C.custom_rgb and C.custom_rgb(v)) then return v end
+  return nil
+end
 local function scale_ink_of(v)
   local k = scale_of(v)
   return (k and k ~= "none" and U.trim(v or ""):match("|%s*cap%s*$")) and "cap" or nil
@@ -1465,6 +1472,8 @@ local function parse_section(sect)
         metal   = (U.trim(sect["Metal" .. i] or "") == "1") or nil,
         scale   = scale_of(sect["Scale" .. i]),
         scale_ink = scale_ink_of(sect["Scale" .. i]),
+        -- a value arc's own colour (a cap colour's name, or #rrggbb)
+        arcc    = (t == "knob" or t == "stepped") and M.arc_col_of(sect["ArcCol" .. i]) or nil,
         show    = (t ~= "page" and t ~= "section") and M.show_of(sect["Show" .. i]) or nil,
         at      = at_of(sect["At" .. i], t == "divider"),
         -- a section's outline or a line's colour: a faceplate's or your own
@@ -1628,6 +1637,7 @@ local function serialize(layout)
     if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
+    if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
     if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
     if (c.type == "section" or c.type == "divider") and C.plate_key(c.edge) then out["Edge" .. (i - 1)] = C.plate_key(c.edge) end
@@ -2096,7 +2106,8 @@ function M.get_or_default(key, track, addr, cache_id)
   local id = cache_id or (tostring(addr) .. ":" .. key)
   local d = def_cache[id]
   if not d then
-    local kind = RB.kind(key)
+    -- (another layout of theirs, never saved: a normal default)
+    local kind = (not select(2, M.split_variant(key))) and RB.kind(key) or nil
     if kind == "readelay" then d = { controls = {}, aliases = {} }
     elseif kind == "reaverbate" then
       d = { controls = { { param = 1, type = "knob", label = "" }, { param = 4, type = "knob", label = "", bipolar = true } }, aliases = {} }
@@ -2113,7 +2124,7 @@ end
 -- layouts, new layouts and controls added in the editor. Kept in ExtState,
 -- a key per field: knob = style, look, cap, ink, arc; button = style, cap.
 local DEF_FIELDS = {
-  knob   = { "style", "look", "cap", "scale_ink", "arc" },
+  knob   = { "style", "look", "cap", "scale_ink", "arc", "arcc" },
   toggle = { "style", "cap" },
 }
 local function def_key(fam, f) return "default_" .. fam .. "_" .. f end
@@ -2156,7 +2167,7 @@ function M.apply_default_look(c)
   if not d then return c end
   c.style, c.cap = d.style, d.cap
   if fam == "knob" then
-    c.look, c.scale_ink = KP.copy(d.look), d.scale_ink
+    c.look, c.scale_ink, c.arcc = KP.copy(d.look), d.scale_ink, d.arcc
     if d.arc then
       c.arc = c.bipolar and "mid" or ((d.arc == "mid") and "pos" or d.arc)
     end
@@ -2553,7 +2564,7 @@ end
 
 function M.look_of(c)
   return { fam = M.look_family(c), type = c.type, style = c.style, cap = c.cap, size = c.size,
-           scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, back = c.back, brush = c.brush, metal = c.metal,
+           scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc, back = c.back, brush = c.brush, metal = c.metal,
            finish = c.finish, corners = c.corners, look = KP.copy(c.look),
            style2 = c.style2, look2 = KP.copy(c.look2),
            dir = c.dir, len = c.len, thin = c.thin }
@@ -2599,7 +2610,7 @@ function M.paste_look(o, s)
     if fam == s.fam then o.style = s.style end
     o.cap = cap_for(fam, s)
     if fam == "knob" and s.fam == "knob" then
-      o.scale, o.scale_ink, o.arc = s.scale, s.scale_ink, s.arc
+      o.scale, o.scale_ink, o.arc, o.arcc = s.scale, s.scale_ink, s.arc, s.arcc
       -- a value arc says whether the knob is centred
       if s.arc then o.bipolar = (s.arc == "mid") or nil end
       -- its own look, built from parts (on a concentric knob, the outer's),
@@ -2641,7 +2652,7 @@ function M.copy(layout)
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         metal = c.metal, finish = c.finish, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),
-                        scale = c.scale, scale_ink = c.scale_ink, arc = c.arc,
+                        scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
                         invert2 = c.invert2, edge = c.edge,
                         at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,

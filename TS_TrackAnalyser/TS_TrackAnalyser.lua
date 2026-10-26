@@ -2,10 +2,10 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.5.1
+-- @version 2.5.2
 -- @changelog
---  Insert probes leaves a new probe's tap inputs unplugged, so the pin
---  connector no longer shows it on 3/4 and up.
+--  Settings > PANELS > Auto-hide the header: the panels take its room, and
+--  it slides out over them from the window's top edge, as ChannelView's.
 -- @about
 --  # Track Analyser
 --
@@ -350,6 +350,7 @@ local S = {
   baseHue   = 219,
   tint      = 1.0,
   trackRule = true,   -- the track's colour as a hairline, top and bottom
+  hideHeader = false, -- the title row slides out from the top edge (as ChannelView's)
   autoScale   = true,
   -- Off until you ask for it. The curve is the most demanding thing here:
   -- it needs BOTH probes publishing and enough signal through them to
@@ -828,6 +829,9 @@ local function palFollow(now)
   buildPalette()
 end
 local settingsDirty, settingsAt = false, 0
+-- Auto-hide header: when the pointer was last at the top edge, on the
+-- header or in one of its menus (nil: tucked away)
+local hdrOut = nil
 local function touchSettings() settingsDirty = true end
 
 local function saveSettings()
@@ -3000,334 +3004,346 @@ local function frame()
     end
 
     ---------------------------------------------------- header
-    local name = "no track"
-    if rigTrack then
-      local _, n = r.GetSetMediaTrackInfo_String(rigTrack, "P_NAME", "", false)
-      name = (n ~= "" and n) or "(unnamed track)"
-    end
-    -- The header row's origin AND the width actually available to it.
-    -- GetWindowSize is the whole window including its padding and border;
-    -- drawing is clipped to the CONTENT region, which is narrower. Using
-    -- the former as the right-hand limit would clip the chip's last few
-    -- pixels no matter how short the label was.
-    local headX, headY = ImGui.GetCursorScreenPos(ctx)
-    local headAvail = ImGui.GetContentRegionAvail(ctx)
-    ImGui.Text(ctx, name)
-    ImGui.SameLine(ctx)
-    if ImGui.SmallButton(ctx, 'Settings') then
-      openSettings = not openSettings
-      -- The startup file may have been edited outside this panel since
-      -- the last look, so the state is re-read rather than remembered.
-      if openSettings then startup.checked = false end
-    end
-    -- The window mode is the one thing you change while listening, so it
-    -- lives on the title row rather than three clicks away.
-    ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, 104)
-    local modeNames = { "Free", "ms", "Beats" }
-    if ImGui.BeginCombo(ctx, '##mode', modeNames[S.timeMode]) then
-      for i, m in ipairs({ "Free (wheel)", "Milliseconds", "Beats" }) do
-        if ImGui.Selectable(ctx, m, i == S.timeMode) then
-          S.timeMode = i ; lock = {} ; touchSettings()
-        end
+    -- The title row: the track, Settings, the window and the collisions
+    -- chip. A function, so that with Auto-hide the header it can be drawn
+    -- over the panels instead (at the end of the window).
+    local function drawHeader()
+      local name = "no track"
+      if rigTrack then
+        local _, n = r.GetSetMediaTrackInfo_String(rigTrack, "P_NAME", "", false)
+        name = (n ~= "" and n) or "(unnamed track)"
       end
-      ImGui.EndCombo(ctx)
-    end
-    ImGui.SameLine(ctx)
-    local rvh
-    local function markh(c) if c then touchSettings() end end
-    if S.timeMode == 2 then
-      ImGui.SetNextItemWidth(ctx, 96)
-      rvh, S.windowMs = ImGui.DragDouble(ctx, '##len', S.windowMs, 5, 20, 8000, "%.0f ms") ; markh(rvh)
+      -- The header row's origin AND the width actually available to it.
+      -- GetWindowSize is the whole window including its padding and border;
+      -- drawing is clipped to the CONTENT region, which is narrower. Using
+      -- the former as the right-hand limit would clip the chip's last few
+      -- pixels no matter how short the label was.
+      local headX, headY = ImGui.GetCursorScreenPos(ctx)
+      local headAvail = ImGui.GetContentRegionAvail(ctx)
+      ImGui.Text(ctx, name)
       ImGui.SameLine(ctx)
-      rvh, S.beatLock = ImGui.Checkbox(ctx, 'Hold', S.beatLock) ; markh(rvh)
-    elseif S.timeMode == 3 then
-      ImGui.SetNextItemWidth(ctx, 76)
-      rvh, S.windowBeats = ImGui.DragInt(ctx, '##beats', S.windowBeats, 0.2, 1, 32, "%d beats") ; markh(rvh)
+      if ImGui.SmallButton(ctx, 'Settings') then
+        openSettings = not openSettings
+        -- The startup file may have been edited outside this panel since
+        -- the last look, so the state is re-read rather than remembered.
+        if openSettings then startup.checked = false end
+      end
+      -- The window mode is the one thing you change while listening, so it
+      -- lives on the title row rather than three clicks away.
       ImGui.SameLine(ctx)
-      rvh, S.beatLock = ImGui.Checkbox(ctx, 'Lock', S.beatLock) ; markh(rvh)
-    else
-      ImGui.SetNextItemWidth(ctx, 96)
-      rvh, S.histSec = ImGui.DragDouble(ctx, '##hist', S.histSec, 0.02, 0.05, 8, "%.2f s") ; markh(rvh)
-    end
-
-    if rigNote then
-      ImGui.SameLine(ctx)
-      if rigNeedsProbes then
-        -- Drawn as a button rather than a line of text: the thing to do
-        -- about "no probes" is to add them, and the offer belongs where the
-        -- problem is stated, not three menus away. Transparent background,
-        -- so it still reads as a note until you put the pointer on it.
-        local pushed = 0
-        local function pc(which, col)
-          if which then ImGui.PushStyleColor(ctx, which(), col) ; pushed = pushed + 1 end
+      ImGui.SetNextItemWidth(ctx, 104)
+      local modeNames = { "Free", "ms", "Beats" }
+      if ImGui.BeginCombo(ctx, '##mode', modeNames[S.timeMode]) then
+        for i, m in ipairs({ "Free (wheel)", "Milliseconds", "Beats" }) do
+          if ImGui.Selectable(ctx, m, i == S.timeMode) then
+            S.timeMode = i ; lock = {} ; touchSettings()
+          end
         end
-        pc(ImGui.Col_Button,        0x00000000)
-        pc(ImGui.Col_ButtonHovered, 0xFFFFFF1A)
-        pc(ImGui.Col_ButtonActive,  0xFFFFFF33)
-        pc(ImGui.Col_Text,          COL.warn)
-        local hit = ImGui.SmallButton(ctx, rigNote .. " -- Install?")
-        if pushed > 0 then ImGui.PopStyleColor(ctx, pushed) end
-        if ImGui.IsItemHovered(ctx) and ImGui.SetTooltip then
-          ImGui.SetTooltip(ctx,
-            "Add a probe at each end of the FX chain.")
-        end
-        if hit then confirmInsertProbes() end
+        ImGui.EndCombo(ctx)
+      end
+      ImGui.SameLine(ctx)
+      local rvh
+      local function markh(c) if c then touchSettings() end end
+      if S.timeMode == 2 then
+        ImGui.SetNextItemWidth(ctx, 96)
+        rvh, S.windowMs = ImGui.DragDouble(ctx, '##len', S.windowMs, 5, 20, 8000, "%.0f ms") ; markh(rvh)
+        ImGui.SameLine(ctx)
+        rvh, S.beatLock = ImGui.Checkbox(ctx, 'Hold', S.beatLock) ; markh(rvh)
+      elseif S.timeMode == 3 then
+        ImGui.SetNextItemWidth(ctx, 76)
+        rvh, S.windowBeats = ImGui.DragInt(ctx, '##beats', S.windowBeats, 0.2, 1, 32, "%d beats") ; markh(rvh)
+        ImGui.SameLine(ctx)
+        rvh, S.beatLock = ImGui.Checkbox(ctx, 'Lock', S.beatLock) ; markh(rvh)
       else
-        ImGui.TextColored(ctx, COL.warn, rigNote)
+        ImGui.SetNextItemWidth(ctx, 96)
+        rvh, S.histSec = ImGui.DragDouble(ctx, '##hist', S.histSec, 0.02, 0.05, 8, "%.2f s") ; markh(rvh)
       end
-    end
 
-    ----------------------------------------------------------
-    -- the collisions chip
-    --
-    -- A checkbox and a combo would have done the job and looked like a
-    -- settings dialog that escaped onto the title bar. This is drawn
-    -- instead: a lamp, a rule, and a name, sitting at the right-hand end
-    -- where nothing else competes for the space.
-    --
-    -- The lamp IS the switch, and it carries the state rather than
-    -- reporting it. Unlit when off. Lit in the mask colour when on and
-    -- clear. Ringed when something is actually being masked, with the
-    -- ring's opacity following the deepest collision -- so the one glance
-    -- you give the title row already tells you whether to look down at
-    -- the spectrum.
-    --
-    -- Everything is an InvisibleButton over a drawn shape, so it inherits
-    -- ImGui's hit testing and hover semantics without any of its chrome.
-    ----------------------------------------------------------
-    do
-      local wx     = ImGui.GetWindowPos(ctx)
-      local hdl    = ImGui.GetWindowDrawList(ctx)
-      -- Where drawing actually stops being visible.
-      local contentRight = headX + headAvail
-      -- Where the header's own controls finished, so the chip can be told
-      -- how much room is left rather than guessing at a fixed 260.
-      local lastRight = wx + 260
-      if ImGui.GetItemRectMax then
-        local ok, ix = pcall(ImGui.GetItemRectMax, ctx)
-        if ok and ix then lastRight = ix end
-      end
-      -- Where the header row actually is, captured before the row was
-      -- built. Reading the cursor here gives the position AFTER the row
-      -- wrapped, which would put the chip on a line of its own.
-      local cy = headY
-      local savedX, savedY = ImGui.GetCursorScreenPos(ctx)
-
-      -- Sized to its content, then pushed against the right edge. A fixed
-      -- width would either clip long track names or leave a hole after
-      -- short ones.
-      -- "track missing" is only true when the panel WENT LOOKING and did
-      -- not find it. With collisions off nothing looks, so saying it
-      -- would report a fault that has not occurred: the partner is simply
-      -- released, and the honest word for that is none.
-      local full = cmpTrack and cmpName
-                 or (S.showMask and cmpGuid and cmpGuid ~= "" and "track missing")
-                 or "no track"
-
-      local vsW = ImGui.CalcTextSize(ctx, "vs")
-      local LAMP, GAP2, PAD = 9, 7, 4
-      local chipH = 18
-      local fixedW = LAMP + GAP2 + vsW + GAP2 + PAD * 2
-
-      -- TRUNCATED BY MEASURED WIDTH, NOT BY BYTE COUNT.
-      --   A fixed 22-character cut says nothing about how wide those
-      --   characters are, and nothing at all about how much room is left.
-      --   This asks the font, and asks it about the space that actually
-      --   exists on this row at this window size.
-      --
-      --   Binary search rather than shrinking a character at a time: six
-      --   measurements instead of forty, and each one is a marshalled
-      --   call. Cached on the name and the width, because neither moves
-      --   between most frames.
-      local maxText = (contentRight - 2) - (lastRight + 14) - fixedW
-      local label, tw = chipFit(ctx, full, maxText)
-
-      -- No room for a name is not a reason to lose the lamp: the lamp is
-      -- the state and the switch, and it is 9 pixels wide.
-      local lampOnly = (label == nil)
-      if lampOnly then label, tw = "", 0 end
-
-      local chipW = lampOnly and (LAMP + PAD * 2)
-                              or (fixedW + tw)
-      local cx = (contentRight - 2) - chipW
-      local top = cy - 1
-
-      if cx > lastRight + 6 then
-        local on   = S.showMask
-        local hot  = MC.active and MC.nBands > 0
-        local depth = hot and math.min(1, MC.peak / math.max(1, S.maskDepth)) or 0
-
-        -- lamp ---------------------------------------------------------
-        ImGui.SetCursorScreenPos(ctx, cx, top)
-        ImGui.InvisibleButton(ctx, "##maskLamp", LAMP + PAD * 2, chipH)
-        local lampHover = ImGui.IsItemHovered(ctx)
-        if lampOnly and ImGui.IsItemClicked(ctx, 1) then
-          ImGui.OpenPopup(ctx, "##maskMenu")
-        elseif ImGui.IsItemClicked(ctx) then
-          S.showMask = not S.showMask
-          touchSettings()
-          if S.showMask then
-            -- compareFollowTrack, not refreshCompare: switching it back
-            -- on should reconsider which partner belongs to the track
-            -- you are on NOW, not re-arm whichever one was current when
-            -- it was switched off. Clearing the gate's memory makes the
-            -- frame loop agree.
-            cmpLastTrack, cmpLastChange = nil, -1
-            compareFollowTrack()
-          else
-            releaseCompare()
+      if rigNote then
+        ImGui.SameLine(ctx)
+        if rigNeedsProbes then
+          -- Drawn as a button rather than a line of text: the thing to do
+          -- about "no probes" is to add them, and the offer belongs where the
+          -- problem is stated, not three menus away. Transparent background,
+          -- so it still reads as a note until you put the pointer on it.
+          local pushed = 0
+          local function pc(which, col)
+            if which then ImGui.PushStyleColor(ctx, which(), col) ; pushed = pushed + 1 end
           end
-        end
-        local lx, ly = cx + PAD + LAMP * 0.5, top + chipH * 0.5
-        local rad = LAMP * 0.5
-        if on then
-          ImGui.DrawList_AddCircleFilled(hdl, lx, ly, rad - 2,
-            alpha(S.cMask, hot and 1.0 or 0.55), 16)
-          if hot then
-            -- The ring is the alarm. It only appears when there is
-            -- something to be alarmed about, and it grows with the
-            -- deepest collision rather than blinking on at a threshold.
-            ImGui.DrawList_AddCircle(hdl, lx, ly, rad + 1.5,
-              alpha(S.cMask, 0.25 + 0.6 * depth), 18, 1.4)
+          pc(ImGui.Col_Button,        0x00000000)
+          pc(ImGui.Col_ButtonHovered, 0xFFFFFF1A)
+          pc(ImGui.Col_ButtonActive,  0xFFFFFF33)
+          pc(ImGui.Col_Text,          COL.warn)
+          local hit = ImGui.SmallButton(ctx, rigNote .. " -- Install?")
+          if pushed > 0 then ImGui.PopStyleColor(ctx, pushed) end
+          if ImGui.IsItemHovered(ctx) and ImGui.SetTooltip then
+            ImGui.SetTooltip(ctx,
+              "Add a probe at each end of the FX chain.")
           end
+          if hit then confirmInsertProbes() end
         else
-          ImGui.DrawList_AddCircle(hdl, lx, ly, rad - 2,
-            lampHover and COL.text or COL.textDim, 16, 1.2)
+          ImGui.TextColored(ctx, COL.warn, rigNote)
         end
+      end
 
-        -- the name, and the menu behind it ------------------------------
-        local pickHover = false
-        if not lampOnly then
-        local nx = cx + PAD + LAMP + GAP2
-        ImGui.SetCursorScreenPos(ctx, nx, top)
-        ImGui.InvisibleButton(ctx, "##maskPick", vsW + GAP2 + tw + PAD, chipH)
-        pickHover = ImGui.IsItemHovered(ctx)
-        if ImGui.IsItemClicked(ctx) then ImGui.OpenPopup(ctx, "##maskMenu") end
-
-        -- A hairline under the name, not a box around it. It says
-        -- "this is clickable" at the weight of a text field rather than
-        -- a button, and it brightens instead of filling on hover.
-        ImGui.DrawList_AddLine(hdl, nx, top + chipH - 2, nx + vsW + GAP2 + tw, top + chipH - 2,
-          pickHover and alpha(S.cMask, 0.8) or COL.grid, 1)
-        ImGui.DrawList_AddText(hdl, nx, top + 2, COL.textDim, "vs")
-        ImGui.DrawList_AddText(hdl, nx + vsW + GAP2, top + 2,
-          (cmpTrack and (pickHover and COL.text or COL.textDim))
-            or alpha(COL.warn, 0.9), label)
+      ----------------------------------------------------------
+      -- the collisions chip
+      --
+      -- A checkbox and a combo would have done the job and looked like a
+      -- settings dialog that escaped onto the title bar. This is drawn
+      -- instead: a lamp, a rule, and a name, sitting at the right-hand end
+      -- where nothing else competes for the space.
+      --
+      -- The lamp IS the switch, and it carries the state rather than
+      -- reporting it. Unlit when off. Lit in the mask colour when on and
+      -- clear. Ringed when something is actually being masked, with the
+      -- ring's opacity following the deepest collision -- so the one glance
+      -- you give the title row already tells you whether to look down at
+      -- the spectrum.
+      --
+      -- Everything is an InvisibleButton over a drawn shape, so it inherits
+      -- ImGui's hit testing and hover semantics without any of its chrome.
+      ----------------------------------------------------------
+      do
+        local wx     = ImGui.GetWindowPos(ctx)
+        local hdl    = ImGui.GetWindowDrawList(ctx)
+        -- Where drawing actually stops being visible.
+        local contentRight = headX + headAvail
+        -- Where the header's own controls finished, so the chip can be told
+        -- how much room is left rather than guessing at a fixed 260.
+        local lastRight = wx + 260
+        if ImGui.GetItemRectMax then
+          local ok, ix = pcall(ImGui.GetItemRectMax, ctx)
+          if ok and ix then lastRight = ix end
         end
+        -- Where the header row actually is, captured before the row was
+        -- built. Reading the cursor here gives the position AFTER the row
+        -- wrapped, which would put the chip on a line of its own.
+        local cy = headY
+        local savedX, savedY = ImGui.GetCursorScreenPos(ctx)
 
-        -- The popup is ImGui's, but it does not have to look like it.
-        local pushedC, pushedV = 0, 0
-        local function pc(which, col)
-          if which then ImGui.PushStyleColor(ctx, which(), col) ; pushedC = pushedC + 1 end
-        end
-        pc(ImGui.Col_PopupBg,       0x14171Aff)
-        pc(ImGui.Col_Border,        0x333A42ff)
-        pc(ImGui.Col_Text,          0x8A939Cff)
-        pc(ImGui.Col_HeaderHovered, alpha(S.cMask, 0.30))
-        pc(ImGui.Col_HeaderActive,  alpha(S.cMask, 0.45))
-        pc(ImGui.Col_Header,        alpha(S.cMask, 0.22))
-        if ImGui.StyleVar_WindowPadding then
-          ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding(), 10, 8) ; pushedV = pushedV + 1
-        end
-        if ImGui.StyleVar_ItemSpacing then
-          ImGui.PushStyleVar(ctx, ImGui.StyleVar_ItemSpacing(), 6, 4) ; pushedV = pushedV + 1
-        end
-        if ImGui.StyleVar_FrameRounding then
-          ImGui.PushStyleVar(ctx, ImGui.StyleVar_FrameRounding(), 3) ; pushedV = pushedV + 1
-        end
+        -- Sized to its content, then pushed against the right edge. A fixed
+        -- width would either clip long track names or leave a hole after
+        -- short ones.
+        -- "track missing" is only true when the panel WENT LOOKING and did
+        -- not find it. With collisions off nothing looks, so saying it
+        -- would report a fault that has not occurred: the partner is simply
+        -- released, and the honest word for that is none.
+        local full = cmpTrack and cmpName
+                   or (S.showMask and cmpGuid and cmpGuid ~= "" and "track missing")
+                   or "no track"
 
-        if ImGui.BeginPopup and ImGui.BeginPopup(ctx, "##maskMenu") then
-          local dl2 = ImGui.GetWindowDrawList(ctx)
-          local selDim = (ImGui.SelectableFlags_Disabled
-                          and ImGui.SelectableFlags_Disabled()) or 0
+        local vsW = ImGui.CalcTextSize(ctx, "vs")
+        local LAMP, GAP2, PAD = 9, 7, 4
+        local chipH = 18
+        local fixedW = LAMP + GAP2 + vsW + GAP2 + PAD * 2
 
-          -- THE COLOUR SWATCH, drawn INTO the row after it is laid out.
-          -- Same device as ChannelView's send menu: three leading spaces
-          -- reserve the column, and the colour goes down in absolute
-          -- coordinates over the item's own rectangle. Two lists that
-          -- name the project's tracks should read as the same list.
-          local function swatch(tr2, dim)
-            local ix, iy  = ImGui.GetItemRectMin(ctx)
-            local _,  iy2 = ImGui.GetItemRectMax(ctx)
-            local sw = trackColour(tr2) or COL.grid
-            if dim then sw = alpha(sw, 0.38) end
-            ImGui.DrawList_AddRectFilled(dl2, ix + 2, iy + 2, ix + 9, iy2 - 2, sw, 1.5)
-          end
+        -- TRUNCATED BY MEASURED WIDTH, NOT BY BYTE COUNT.
+        --   A fixed 22-character cut says nothing about how wide those
+        --   characters are, and nothing at all about how much room is left.
+        --   This asks the font, and asks it about the space that actually
+        --   exists on this row at this window size.
+        --
+        --   Binary search rather than shrinking a character at a time: six
+        --   measurements instead of forty, and each one is a marshalled
+        --   call. Cached on the name and the width, because neither moves
+        --   between most frames.
+        local maxText = (contentRight - 2) - (lastRight + 14) - fixedW
+        local label, tw = chipFit(ctx, full, maxText)
 
-          ImGui.TextColored(ctx, COL.textDim, "COMPARE AGAINST")
-          ImGui.Separator(ctx)
-          if ImGui.Selectable(ctx, "   none##tanone", cmpGuid == nil) then
-            setCompare(nil) ; cmpName = ""
-          end
+        -- No room for a name is not a reason to lose the lamp: the lamp is
+        -- the state and the switch, and it is 9 pixels wide.
+        local lampOnly = (label == nil)
+        if lampOnly then label, tw = "", 0 end
 
-          -- A track named with nothing but punctuation is a template
-          -- spacer, and REAPER's own I_SPACER puts a gap above a track.
-          -- Both are grouping you set up in the project; flattening them
-          -- out would make this list harder to read than the track panel
-          -- it is describing. Never a rule before the first entry -- that
-          -- reads as something missing above it.
-          local pendingGap, first = false, true
-          for i = 0, r.CountTracks(0) - 1 do
-            local tr2 = r.GetTrack(0, i)
-            local _, nm = r.GetSetMediaTrackInfo_String(tr2, "P_NAME", "", false)
-            local _, gu = r.GetSetMediaTrackInfo_String(tr2, "GUID", "", false)
-            local trimmed = (nm or ""):match("^%s*(.-)%s*$")
-            if trimmed ~= "" and trimmed:match("^[%-%_%=%~%.%*%s]+$") then
-              pendingGap = true
+        local chipW = lampOnly and (LAMP + PAD * 2)
+                                or (fixedW + tw)
+        local cx = (contentRight - 2) - chipW
+        local top = cy - 1
+
+        if cx > lastRight + 6 then
+          local on   = S.showMask
+          local hot  = MC.active and MC.nBands > 0
+          local depth = hot and math.min(1, MC.peak / math.max(1, S.maskDepth)) or 0
+
+          -- lamp ---------------------------------------------------------
+          ImGui.SetCursorScreenPos(ctx, cx, top)
+          ImGui.InvisibleButton(ctx, "##maskLamp", LAMP + PAD * 2, chipH)
+          local lampHover = ImGui.IsItemHovered(ctx)
+          if lampOnly and ImGui.IsItemClicked(ctx, 1) then
+            ImGui.OpenPopup(ctx, "##maskMenu")
+          elseif ImGui.IsItemClicked(ctx) then
+            S.showMask = not S.showMask
+            touchSettings()
+            if S.showMask then
+              -- compareFollowTrack, not refreshCompare: switching it back
+              -- on should reconsider which partner belongs to the track
+              -- you are on NOW, not re-arm whichever one was current when
+              -- it was switched off. Clearing the gate's memory makes the
+              -- frame loop agree.
+              cmpLastTrack, cmpLastChange = nil, -1
+              compareFollowTrack()
             else
-              local space = (r.GetMediaTrackInfo_Value(tr2, "I_SPACER") or 0) > 0.5
-              if (pendingGap or space) and not first then ImGui.Separator(ctx) end
-              pendingGap, first = false, false
+              releaseCompare()
+            end
+          end
+          local lx, ly = cx + PAD + LAMP * 0.5, top + chipH * 0.5
+          local rad = LAMP * 0.5
+          if on then
+            ImGui.DrawList_AddCircleFilled(hdl, lx, ly, rad - 2,
+              alpha(S.cMask, hot and 1.0 or 0.55), 16)
+            if hot then
+              -- The ring is the alarm. It only appears when there is
+              -- something to be alarmed about, and it grows with the
+              -- deepest collision rather than blinking on at a threshold.
+              ImGui.DrawList_AddCircle(hdl, lx, ly, rad + 1.5,
+                alpha(S.cMask, 0.25 + 0.6 * depth), 18, 1.4)
+            end
+          else
+            ImGui.DrawList_AddCircle(hdl, lx, ly, rad - 2,
+              lampHover and COL.text or COL.textDim, 16, 1.2)
+          end
 
-              local shown = (trimmed ~= "") and trimmed or ("Track %d"):format(i + 1)
-              -- The id suffix, not the text, is what tells two rows apart:
-              -- two tracks can carry the same name, and ImGui would treat
-              -- them as one item.
-              local label = ("   %d  %s##ta%d"):format(i + 1, shown, i + 1)
+          -- the name, and the menu behind it ------------------------------
+          local pickHover = false
+          if not lampOnly then
+          local nx = cx + PAD + LAMP + GAP2
+          ImGui.SetCursorScreenPos(ctx, nx, top)
+          ImGui.InvisibleButton(ctx, "##maskPick", vsW + GAP2 + tw + PAD, chipH)
+          pickHover = ImGui.IsItemHovered(ctx)
+          if ImGui.IsItemClicked(ctx) then ImGui.OpenPopup(ctx, "##maskMenu") end
 
-              if tr2 == rigTrack then
-                -- Listed, disabled, swatch dimmed. Seeing your own track
-                -- there and unavailable answers "why is mine not in the
-                -- list" before it gets asked; a number missing from the
-                -- middle reads as a fault in the list itself.
-                ImGui.Selectable(ctx, label, false, selDim)
-                swatch(tr2, true)
+          -- A hairline under the name, not a box around it. It says
+          -- "this is clickable" at the weight of a text field rather than
+          -- a button, and it brightens instead of filling on hover.
+          ImGui.DrawList_AddLine(hdl, nx, top + chipH - 2, nx + vsW + GAP2 + tw, top + chipH - 2,
+            pickHover and alpha(S.cMask, 0.8) or COL.grid, 1)
+          ImGui.DrawList_AddText(hdl, nx, top + 2, COL.textDim, "vs")
+          ImGui.DrawList_AddText(hdl, nx + vsW + GAP2, top + 2,
+            (cmpTrack and (pickHover and COL.text or COL.textDim))
+              or alpha(COL.warn, 0.9), label)
+          end
+
+          -- The popup is ImGui's, but it does not have to look like it.
+          local pushedC, pushedV = 0, 0
+          local function pc(which, col)
+            if which then ImGui.PushStyleColor(ctx, which(), col) ; pushedC = pushedC + 1 end
+          end
+          pc(ImGui.Col_PopupBg,       0x14171Aff)
+          pc(ImGui.Col_Border,        0x333A42ff)
+          pc(ImGui.Col_Text,          0x8A939Cff)
+          pc(ImGui.Col_HeaderHovered, alpha(S.cMask, 0.30))
+          pc(ImGui.Col_HeaderActive,  alpha(S.cMask, 0.45))
+          pc(ImGui.Col_Header,        alpha(S.cMask, 0.22))
+          if ImGui.StyleVar_WindowPadding then
+            ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding(), 10, 8) ; pushedV = pushedV + 1
+          end
+          if ImGui.StyleVar_ItemSpacing then
+            ImGui.PushStyleVar(ctx, ImGui.StyleVar_ItemSpacing(), 6, 4) ; pushedV = pushedV + 1
+          end
+          if ImGui.StyleVar_FrameRounding then
+            ImGui.PushStyleVar(ctx, ImGui.StyleVar_FrameRounding(), 3) ; pushedV = pushedV + 1
+          end
+
+          if ImGui.BeginPopup and ImGui.BeginPopup(ctx, "##maskMenu") then
+            local dl2 = ImGui.GetWindowDrawList(ctx)
+            local selDim = (ImGui.SelectableFlags_Disabled
+                            and ImGui.SelectableFlags_Disabled()) or 0
+
+            -- THE COLOUR SWATCH, drawn INTO the row after it is laid out.
+            -- Same device as ChannelView's send menu: three leading spaces
+            -- reserve the column, and the colour goes down in absolute
+            -- coordinates over the item's own rectangle. Two lists that
+            -- name the project's tracks should read as the same list.
+            local function swatch(tr2, dim)
+              local ix, iy  = ImGui.GetItemRectMin(ctx)
+              local _,  iy2 = ImGui.GetItemRectMax(ctx)
+              local sw = trackColour(tr2) or COL.grid
+              if dim then sw = alpha(sw, 0.38) end
+              ImGui.DrawList_AddRectFilled(dl2, ix + 2, iy + 2, ix + 9, iy2 - 2, sw, 1.5)
+            end
+
+            ImGui.TextColored(ctx, COL.textDim, "COMPARE AGAINST")
+            ImGui.Separator(ctx)
+            if ImGui.Selectable(ctx, "   none##tanone", cmpGuid == nil) then
+              setCompare(nil) ; cmpName = ""
+            end
+
+            -- A track named with nothing but punctuation is a template
+            -- spacer, and REAPER's own I_SPACER puts a gap above a track.
+            -- Both are grouping you set up in the project; flattening them
+            -- out would make this list harder to read than the track panel
+            -- it is describing. Never a rule before the first entry -- that
+            -- reads as something missing above it.
+            local pendingGap, first = false, true
+            for i = 0, r.CountTracks(0) - 1 do
+              local tr2 = r.GetTrack(0, i)
+              local _, nm = r.GetSetMediaTrackInfo_String(tr2, "P_NAME", "", false)
+              local _, gu = r.GetSetMediaTrackInfo_String(tr2, "GUID", "", false)
+              local trimmed = (nm or ""):match("^%s*(.-)%s*$")
+              if trimmed ~= "" and trimmed:match("^[%-%_%=%~%.%*%s]+$") then
+                pendingGap = true
               else
-                local hit = ImGui.Selectable(ctx, label, gu == cmpGuid)
-                swatch(tr2, false)
-                if hit then
-                  setCompare(gu)
-                  -- Choosing a track to compare against, while collisions
-                  -- are off, otherwise does nothing visible at all. The lamp
-                  -- lighting is the feedback that the choice landed.
-                  if not S.showMask then S.showMask = true ; touchSettings() end
+                local space = (r.GetMediaTrackInfo_Value(tr2, "I_SPACER") or 0) > 0.5
+                if (pendingGap or space) and not first then ImGui.Separator(ctx) end
+                pendingGap, first = false, false
+
+                local shown = (trimmed ~= "") and trimmed or ("Track %d"):format(i + 1)
+                -- The id suffix, not the text, is what tells two rows apart:
+                -- two tracks can carry the same name, and ImGui would treat
+                -- them as one item.
+                local label = ("   %d  %s##ta%d"):format(i + 1, shown, i + 1)
+
+                if tr2 == rigTrack then
+                  -- Listed, disabled, swatch dimmed. Seeing your own track
+                  -- there and unavailable answers "why is mine not in the
+                  -- list" before it gets asked; a number missing from the
+                  -- middle reads as a fault in the list itself.
+                  ImGui.Selectable(ctx, label, false, selDim)
+                  swatch(tr2, true)
+                else
+                  local hit = ImGui.Selectable(ctx, label, gu == cmpGuid)
+                  swatch(tr2, false)
+                  if hit then
+                    setCompare(gu)
+                    -- Choosing a track to compare against, while collisions
+                    -- are off, otherwise does nothing visible at all. The lamp
+                    -- lighting is the feedback that the choice landed.
+                    if not S.showMask then S.showMask = true ; touchSettings() end
+                  end
                 end
               end
             end
+            ImGui.EndPopup(ctx)
           end
-          ImGui.EndPopup(ctx)
-        end
-        if pushedV > 0 then ImGui.PopStyleVar(ctx, pushedV) end
-        if pushedC > 0 then ImGui.PopStyleColor(ctx, pushedC) end
+          if pushedV > 0 then ImGui.PopStyleVar(ctx, pushedV) end
+          if pushedC > 0 then ImGui.PopStyleColor(ctx, pushedC) end
 
-        if (lampHover or pickHover) and ImGui.SetTooltip then
-          if MC.why then
-            ImGui.SetTooltip(ctx, "collisions -- " .. MC.why)
-          elseif hot then
-            ImGui.SetTooltip(ctx, ("%d bands masked\ndeepest %.1f dB at %.0f Hz")
-              :format(MC.nBands, MC.peak, MC.peakHz))
-          else
-            ImGui.SetTooltip(ctx, on and "collisions on" or "collisions off")
+          if (lampHover or pickHover) and ImGui.SetTooltip then
+            if MC.why then
+              ImGui.SetTooltip(ctx, "collisions -- " .. MC.why)
+            elseif hot then
+              ImGui.SetTooltip(ctx, ("%d bands masked\ndeepest %.1f dB at %.0f Hz")
+                :format(MC.nBands, MC.peak, MC.peakHz))
+            else
+              ImGui.SetTooltip(ctx, on and "collisions on" or "collisions off")
+            end
           end
-        end
 
-        -- Put the cursor back exactly where the header left it. The chip
-        -- is drawn and hit-tested in absolute coordinates, so it owes the
-        -- layout nothing.
-        ImGui.SetCursorScreenPos(ctx, savedX, savedY)
+          -- Put the cursor back exactly where the header left it. The chip
+          -- is drawn and hit-tested in absolute coordinates, so it owes the
+          -- layout nothing.
+          ImGui.SetCursorScreenPos(ctx, savedX, savedY)
+        end
       end
     end
+    -- Auto-hide header: the panels take its room, and it comes out over
+    -- them from the window's top edge. Never while Settings is open: its
+    -- button is the way to close it.
+    local hdrHidden = S.hideHeader and not openSettings
+    local hdrX, hdrY = ImGui.GetCursorScreenPos(ctx)
+    local hdrW = ImGui.GetContentRegionAvail(ctx)
+    if not hdrHidden then drawHeader() end
 
     -- Set below when settings is open and the pointer is inside it.
     local settingsHovered = false
@@ -3466,6 +3482,15 @@ local function frame()
       ImGui.SameLine(ctx)
       rv, S.showScope = ImGui.Checkbox(ctx, 'Scope', S.showScope)
       if rv then keepOne("scope") ; touchSettings() end
+      ImGui.SameLine(ctx)
+      rv, S.hideHeader = ImGui.Checkbox(ctx, 'Auto-hide the header', S.hideHeader)
+      if rv then touchSettings() end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx,
+          "The panels take its room. It slides out over them while the\n" ..
+          "pointer is at the window's top edge, or on it, or in its menus.\n" ..
+          "(Shown while Settings is open.)")
+      end
 
       ImGui.Separator(ctx)
 
@@ -3918,6 +3943,55 @@ local function frame()
         else
           S.windowBeats = math.max(1, math.min(32, S.windowBeats + (wheel > 0 and -1 or 1)))
         end
+      end
+    end
+
+    -- Auto-hide header: drawn last, so it lies over the panels.
+    if hdrHidden then
+      local EDGE, LINGER, PADY = 6, 0.35, 4
+      local mx, my = ImGui.GetMousePos(ctx)
+      local now = r.time_precise()
+      local hh = ImGui.GetFrameHeight(ctx) + PADY * 2
+      local inside = mx >= hdrX and mx <= hdrX + hdrW
+      local hf = 0
+      if ImGui.HoveredFlags_ChildWindows then hf = hf | ImGui.HoveredFlags_ChildWindows() end
+      if ImGui.HoveredFlags_AllowWhenBlockedByActiveItem then
+        hf = hf | ImGui.HoveredFlags_AllowWhenBlockedByActiveItem()
+      end
+      local atEdge = inside and my >= hdrY - 8 and my <= hdrY + EDGE and ImGui.IsWindowHovered(ctx, hf)
+      local onIt = hdrOut and inside and my >= hdrY - 8 and my <= hdrY + hh
+      local menu = false
+      if hdrOut and ImGui.IsPopupOpen and ImGui.PopupFlags_AnyPopupId then
+        local pf = ImGui.PopupFlags_AnyPopupId()
+        if ImGui.PopupFlags_AnyPopupLevel then pf = pf | ImGui.PopupFlags_AnyPopupLevel() end
+        menu = ImGui.IsPopupOpen(ctx, '', pf)
+      end
+      if atEdge or onIt or menu then hdrOut = now end
+      if hdrOut and now - hdrOut > LINGER then hdrOut = nil end
+      if not hdrOut then
+        -- the edge it comes out from, marked so it can be found
+        local cxm = hdrX + hdrW * 0.5
+        ImGui.DrawList_AddLine(dl, cxm - 20, hdrY - 3, cxm + 20, hdrY - 3, COL.textDim, 2)
+      else
+        ImGui.SetCursorScreenPos(ctx, hdrX, hdrY)
+        local nc, nv = 0, 0
+        if ImGui.Col_ChildBg and ImGui.GetStyleColor then
+          ImGui.PushStyleColor(ctx, ImGui.Col_ChildBg(), ImGui.GetStyleColor(ctx, ImGui.Col_WindowBg())) ; nc = 1
+        end
+        if ImGui.StyleVar_WindowPadding then
+          ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding(), 0, PADY) ; nv = 1
+        end
+        local wf = ImGui.WindowFlags_NoScrollbar() | ImGui.WindowFlags_NoScrollWithMouse()
+        if ImGui.BeginChild(ctx, '##tahdr', hdrW, hh, 0, wf) then
+          drawHeader()
+          local cdl = ImGui.GetWindowDrawList(ctx)
+          local cx0, cy0 = ImGui.GetWindowPos(ctx)
+          ImGui.DrawList_AddLine(cdl, cx0, cy0 + hh - 1, cx0 + hdrW, cy0 + hh - 1, COL.grid, 1)
+          -- ReaImGui: EndChild only when BeginChild returned true.
+          ImGui.EndChild(ctx)
+        end
+        if nv > 0 then ImGui.PopStyleVar(ctx, nv) end
+        if nc > 0 then ImGui.PopStyleColor(ctx, nc) end
       end
     end
 

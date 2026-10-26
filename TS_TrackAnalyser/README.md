@@ -74,6 +74,11 @@ Measured with Pro-C 3 and InfiniStrip, the named route answered on **all
 `20*log10(v)`, which can read "−0.44 dB" while the compressor is pulling
 26 — so the value is read and the law applied, never the text.
 
+**Auto-hide the header** (Settings ▸ PANELS) gives the header's room to the
+panels, as ChannelView's does. It slides out over them while the pointer is
+at the window's top edge, on it, or in one of its menus, and stays put
+while Settings is open.
+
 ## Collisions
 
 A toggle and a track picker. Pick a comparison track and Panel 1 overlays

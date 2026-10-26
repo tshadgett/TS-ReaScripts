@@ -1,5 +1,12 @@
 # Track Analyser — changelog
 
+## 2.5.2 — auto-hide header
+
+- **Auto-hide the header** (Settings ▸ PANELS): the panels take its room,
+  and it slides out over them while the pointer is at the window's top
+  edge, on it, or in one of its menus, as ChannelView's does. It stays put
+  while Settings is open.
+
 ## 2.5.1 — probe pins
 
 - **Insert probes leaves a new probe's tap inputs unplugged.** REAPER

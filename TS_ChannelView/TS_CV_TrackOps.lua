@@ -949,6 +949,9 @@ function TO.duplicate_tracks(tracks)
     end
   end
   if #list == 0 then return false end
+  -- each plugin's own settings go with the copies (TS_CV_Carry)
+  local CR = require("TS_CV_Carry")
+  for _, tr in ipairs(list) do CR.write(tr, nil) end
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
   reaper.Main_OnCommand(40297, 0)          -- Track: Unselect all tracks
@@ -959,6 +962,57 @@ function TO.duplicate_tracks(tracks)
                                   or "ChannelView: duplicate tracks", -1)
   reaper.TrackList_AdjustWindows(false)
   return ok
+end
+
+-- Saves `tracks` as a track template with REAPER's own dialog (its
+-- options and folder), each plugin's own settings written on the track
+-- (TS_CV_Carry). With measurement taps laid, it asks whether to keep
+-- them (and the channels for them); left out, they go back after. The
+-- selection is put back after.
+function TO.save_template(tracks)
+  local list = {}
+  for _, tr in ipairs(tracks) do
+    if tr and not TO.is_master(tr) and reaper.ValidatePtr2(0, tr, "MediaTrack*") then
+      list[#list + 1] = tr
+    end
+  end
+  if #list == 0 then return false end
+  local TP = require("TS_CV_Taps")
+  local CR = require("TS_CV_Carry")
+  local lift = false
+  for _, tr in ipairs(list) do
+    if TP.has_taps(tr) then
+      local a = reaper.MB("Keep ChannelView's measurement taps in the template?\n\n"
+        .. "Yes: as the track is, taps and channels included.\n"
+        .. "No: without them (ChannelView lays them again).", "Save as track template", 3)
+      if a == 2 then return false end
+      lift = (a == 7)
+      break
+    end
+  end
+  local sel = {}
+  for i = 0, reaper.CountSelectedTracks(0) - 1 do sel[#sel + 1] = reaper.GetSelectedTrack(0, i) end
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  reaper.Main_OnCommand(40297, 0)          -- Track: Unselect all tracks
+  for _, tr in ipairs(list) do
+    reaper.SetTrackSelected(tr, true)
+    CR.write(tr, nil)
+    if lift then TP.for_template(tr) end
+  end
+  reaper.PreventUIRefresh(-1)
+  -- Track: Save tracks as track template... (its dialog waits for you)
+  reaper.Main_OnCommand(40392, 0)
+  reaper.PreventUIRefresh(1)
+  if lift then for _, tr in ipairs(list) do TP.sync(tr) end end
+  reaper.Main_OnCommand(40297, 0)
+  for _, tr in ipairs(sel) do
+    if reaper.ValidatePtr2(0, tr, "MediaTrack*") then reaper.SetTrackSelected(tr, true) end
+  end
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock("ChannelView: save as track template", -1)
+  reaper.TrackList_AdjustWindows(false)
+  return true
 end
 
 function TO.insert_new(after)

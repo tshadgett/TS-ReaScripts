@@ -619,6 +619,101 @@ do
   GE.close()
   M.remove(key); M.save()
 end
+-- copy from one plugin's layout, paste into another's: each control to
+-- the parameter of the same name there (or your alias); Paste look
+do
+  local GE = require("TS_CV_GridEditor")
+  local T = GE._t
+  local NAMES = { [0] = { "Gain", "Ratio", "Attack", "Drive" }, [1] = { "Attack", "Mix", "gain", "Ratio" } }
+  local gn, gp = reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName
+  reaper.TrackFX_GetNumParams = function(_, a) return #(NAMES[a] or {}) end
+  reaper.TrackFX_GetParamName = function(_, a, p) local t = NAMES[a] or {}; return true, t[p + 1] or "" end
+  M.set("CrossA", { grid = { cols = 24, rows = 8 }, aliases = { [1] = "Squash" }, controls = {
+    { param = 0, type = "knob", label = "", style = "chicken", at = { c = 0, r = 0, w = 4, h = 4 } },
+    { param = 1, type = "knob", label = "", at = { c = 4, r = 0, w = 4, h = 4 } },
+    { param = 3, type = "knob", label = "", at = { c = 8, r = 0, w = 4, h = 4 } },
+    { param = 2, type = "toggle", label = "", at = { c = 12, r = 0, w = 4, h = 2 } } } })
+  M.set("CrossB", { grid = { cols = 24, rows = 8 }, controls = {
+    { param = 1, type = "knob", label = "", at = { c = 0, r = 4, w = 4, h = 4 } } } })
+  M.save()
+  GE.open({}, { addr = 0, guid = "gx1", name = "VST: CrossA" }, "CrossA", M.get("CrossA"), nil, { rows = 2 })
+  T.select(1); T.pick(2); T.pick(3); T.pick(4)
+  T.copy()
+  GE.open({}, { addr = 1, guid = "gx2", name = "VST: CrossB" }, "CrossB", M.get("CrossB"), nil, { rows = 2 })
+  T.paste()
+  local got = {}
+  for _, c in ipairs(T.cur().controls) do got[#got + 1] = tostring(c.param) end
+  check("cross paste: by name, case aside", table.concat(got, " "), "1 2 3 0")
+  check("cross paste: the alias comes too", T.cur().aliases[3], "Squash")
+  check("cross paste: the look kept", T.cur().controls[2].style, "chicken")
+  check("cross paste: what isn't here, said", (T.warn() or ""):find("Drive", 1, true) ~= nil, true)
+  -- several picked: the panel's menu can paste a style on them all
+  T.select(1); T.pick(2)
+  check("picked for the menu", table.concat(GE.picked_for("gx2", "CrossB") or {}, ","), "1,2")
+  check("picked: not another instance's", tostring(GE.picked_for("other", "CrossB")), "nil")
+  GE.close()
+  reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = gn, gp
+  M.remove("CrossA"); M.remove("CrossB"); M.save()
+end
+-- pages in the grid editor: added, controls moved onto one, reordered,
+-- taken out again (what was on it put where it fits)
+do
+  local GE = require("TS_CV_GridEditor")
+  local T = GE._t
+  local St_ = require("TS_CV_State")
+  local proj = {}
+  local gp, sp = reaper.GetProjExtState, reaper.SetProjExtState
+  reaper.GetProjExtState = function(_, _, k) return 1, proj[k] or "" end
+  reaper.SetProjExtState = function(_, _, k, v) proj[k] = v end
+  St_.clear_cache()
+  M.set("PagePlug", { grid = { cols = 16, rows = 4 }, controls = {
+    { param = 0, type = "knob", label = "", at = { c = 0, r = 0, w = 4, h = 4 } },
+    { param = 1, type = "knob", label = "", at = { c = 4, r = 0, w = 4, h = 4 } },
+    { param = 2, type = "knob", label = "", at = { c = 8, r = 0, w = 4, h = 4 } } } })
+  M.save()
+  GE.open({}, { addr = 0, guid = "gpg", name = "VST: PagePlug" }, "PagePlug", M.get("PagePlug"), nil, { rows = 2 })
+  local function shape()
+    local t = {}
+    for _, c in ipairs(T.cur().controls) do
+      t[#t + 1] = (c.type == "page") and ("|" .. (c.label or "")) or (tostring(c.param) .. "@" .. c.at.c .. "," .. c.at.r)
+    end
+    return table.concat(t, " ")
+  end
+  T.add_page()
+  check("pages: a second, empty", shape(), "0@0,0 1@4,0 2@8,0 |")
+  check("pages: and shown", St_.page("gpg"), 2)
+  T.move_to_page({ 2 }, 2)
+  check("pages: a control moved to it, where it fits", shape(), "0@0,0 2@8,0 | 1@0,0")
+  T.cur().controls[3].label = "Two"
+  T.move_page(2, 1)
+  check("pages: reordered", shape(), "|Two 1@0,0 | 0@0,0 2@8,0")
+  T.remove_page(1)
+  check("pages: one taken out, its controls on the next where they fit, no tabs left", shape(), "1@4,0 0@0,0 2@8,0")
+  check("pages: saved", #M.get("PagePlug").controls, 3)
+  T.add_page()
+  check("pages: the new page's break selected (the sheet's)", T.cur().controls[T.sel()].type, "page")
+  T.remove()
+  check("pages: Delete on a break takes its page out", shape(), "1@4,0 0@0,0 2@8,0")
+  GE.close()
+  reaper.GetProjExtState, reaper.SetProjExtState = gp, sp
+  St_.clear_cache()
+  M.remove("PagePlug"); M.save()
+end
+-- a value arc's own colour: kept, read back, copied
+do
+  M.set("ArcColPlug", { controls = {
+    { param = 0, type = "knob", label = "", arc = "pos", arcc = "red" },
+    { param = 1, type = "knob", label = "", arc = "mid", arcc = "#12ab34" },
+    { param = 2, type = "toggle", label = "", arcc = "red" } } })
+  M.save(); M.reload()
+  local l = M.get("ArcColPlug")
+  check("arc colour: read back", tostring(l.controls[1].arcc) .. " " .. tostring(l.controls[2].arcc), "red #12ab34")
+  check("arc colour: knobs only", tostring(l.controls[3].arcc), "nil")
+  check("arc colour: copied", M.copy(l).controls[1].arcc, "red")
+  check("arc colour: in a copied style", M.look_of(l.controls[2]).arcc, "#12ab34")
+  check("arc colour: junk ignored", tostring(M.arc_col_of("nonsense")), "nil")
+  M.remove("ArcColPlug"); M.save()
+end
 check("rows at h=120", P.rows_for(120), 1)
 check("cols for 8 @1 row", cols_for(8, 120), 8)
 
@@ -7449,6 +7544,38 @@ do
   reaper.new_array = had
 end
 
+-- a value arc in a colour of its own: drawn in it, through W.knob
+do
+  local strokes = {}
+  local fake = setmetatable({
+    GetMouseDelta = function() return 0, 0 end, GetMouseWheel = function() return 0 end,
+    GetMousePos = function() return 0, 0 end, GetCursorScreenPos = function() return 0, 0 end,
+    GetWindowDrawList = function() return "dl" end, InvisibleButton = function() return false end,
+    IsItemActive = function() return false end, IsItemHovered = function() return false end,
+    IsItemClicked = function() return false end, IsMouseDown = function() return false end,
+    IsMouseDoubleClicked = function() return false end, IsItemActivated = function() return false end,
+    GetKeyMods = function() return 0 end, CalcTextSize = function() return 6, 10 end,
+    DrawList_PathStroke = function(_, col) strokes[#strokes + 1] = col end,
+  }, { __index = function(_, key)
+    if key:find("Flags_") or key:find("MouseButton_") or key:find("MouseCursor_") or key:find("^Mod_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake)
+  local had = reaper.new_array
+  reaper.new_array = function() return {} end
+  local ok, err = pcall(function()
+    for _, style in ipairs({ "skirted", "bar", "hifi" }) do
+      strokes = {}
+      W.knob("ctx", "##arcc", "Gain", 0.6, "", { arc = "pos", arc_col = 0x12345678, style = style })
+      local seen = false
+      for _, c in ipairs(strokes) do if c == 0x12345678 then seen = true end end
+      check("arc colour: drawn on a " .. style .. " knob", seen, true)
+    end
+  end)
+  check("arc colour: draw ran", ok and true or err, true)
+  reaper.new_array = had
+end
+
 -- The TS_CV Trimmer: the trim rule, Auto trim over items, where it goes,
 -- the filters' curve, and the panel's shape.
 do
@@ -8077,6 +8204,18 @@ do
   check("canvas fold: copied", tostring(M_.copy_canvas(cv).fold_rack), "true")
 end
 
+-- REAPER's plugins with a panel of ChannelView's: that's their Standard
+-- layout; another of theirs (Copy to new layout, ...) is a normal one
+do
+  local RB = require("TS_CV_ReaFX")
+  check("own panel: the Standard layout", tostring(RB.own_eq("ReaEQ")) .. " " .. tostring(RB.own_comp("ReaComp")), "true true")
+  check("own panel: not another layout of theirs", tostring(RB.own_eq("ReaEQ :: Knobs")) .. " " .. tostring(RB.own_comp("ReaComp :: Mine")), "false false")
+  check("own panel: the six", tostring(RB.has_panel("ReaDelay :: x")) .. " " .. tostring(RB.has_panel("Pro-C 3")), "true false")
+  local l = { controls = {} }
+  RB.ensure(nil, 0, "d", "ReaDelay :: Knobs", l)
+  check("own panel: no delay canvas on another layout", tostring(l.canvas), "nil")
+end
+
 -- ChannelView and Pro at different versions: which one to update, said
 -- once for each pair; Pro's own scripts (the Rack, the web bridge) won't start
 do
@@ -8113,6 +8252,69 @@ do
   check("pro check: reads ChannelView's @version", PRO.standard_release(), ED.RELEASE)
   check("pro check: ChannelView's folder holds its layouts", (PRO.standard_dir() or ""):gsub("\\", "/"):match("/$") ~= nil, true)
   ED.mismatch, reaper = was, real
+end
+
+-- Carried settings (TS_CV_Carry): a copy of a track (duplicated, pasted,
+-- from a template) takes up its plugins' own settings by their places.
+do
+  local CR = require("TS_CV_Carry")
+  local was = {}
+  for _, k in ipairs({ "EnumProjExtState", "GetProjExtState", "SetProjExtState", "GetSetMediaTrackInfo_String" }) do
+    was[k] = reaper[k]
+  end
+  local PROJ, keys = {}, {}
+  local function setp(_, _, k, v)
+    if PROJ[k] == nil then keys[#keys + 1] = k end
+    PROJ[k] = v
+  end
+  reaper.SetProjExtState = setp
+  reaper.GetProjExtState = function(_, _, k) return 1, PROJ[k] or "" end
+  reaper.EnumProjExtState = function(_, _, i)
+    local k = keys[i + 1]
+    if not k then return false end
+    return true, k, PROJ[k]
+  end
+  local EXT = {}
+  reaper.GetSetMediaTrackInfo_String = function(tr, k, v, set)
+    EXT[tr] = EXT[tr] or {}
+    if set then EXT[tr][k] = v end
+    return true, EXT[tr][k] or ""
+  end
+  local function tree(g1, g2, g3)
+    return { tree = {
+      { path = { 0 }, name = "VST3: Pro-C 3", guid = g1 },
+      { path = { 1 }, name = "Container", guid = g2,
+        children = { { path = { 1, 0 }, name = "JS: Saturator", guid = g3 } } },
+    } }
+  end
+  local A, B, Cc, D = {}, {}, {}, {}
+  setp(0, 0, "variant:{A1}", "Pro-C 3 :: Vocal")
+  setp(0, 0, "virt:{A3}:Drive", "0.4")
+  setp(0, 0, "collapsed:{A2}", "1")
+  setp(0, 0, "rack_lock", "{A1}")
+  check("carry: written", CR.write(A, tree("{A1}", "{A2}", "{A3}")), true)
+  check("carry: not again when unchanged", CR.write(A, tree("{A1}", "{A2}", "{A3}")), false)
+  check("carry: a line a setting", select(2, EXT[A][CR.KEY]:gsub("\n", "")) + 1, 3)
+  check("carry: the original takes nothing", CR.adopt(A, tree("{A1}", "{A2}", "{A3}")), false)
+  EXT[B] = { [CR.KEY] = EXT[A][CR.KEY] }
+  check("carry: a copy takes them up", CR.adopt(B, tree("{B1}", "{B2}", "{B3}")), true)
+  check("carry: the layout variant", PROJ["variant:{B1}"], "Pro-C 3 :: Vocal")
+  check("carry: a virtual control, in a container", PROJ["virt:{B3}:Drive"], "0.4")
+  check("carry: the folded container", PROJ["collapsed:{B2}"], "1")
+  check("carry: the copy's own record", EXT[B][CR.KEY]:find("{B1}", 1, true) ~= nil
+        and EXT[B][CR.KEY]:find("{A1}", 1, true) == nil, true)
+  check("carry: only once", CR.adopt(B, tree("{B1}", "{B2}", "{B3}")), false)
+  EXT[Cc] = { [CR.KEY] = EXT[A][CR.KEY] }
+  local t = tree("{C1}", "{C2}", "{C3}")
+  t.tree[1].name = "VST3: Pro-Q 4"
+  CR.adopt(Cc, t)
+  check("carry: another plugin in that place takes nothing", PROJ["variant:{C1}"], nil)
+  check("carry: the others still do", PROJ["virt:{C3}:Drive"], "0.4")
+  EXT[D] = { [CR.KEY] = EXT[A][CR.KEY] }
+  setp(0, 0, "variant:{D1}", "Pro-C 3 :: Drums")
+  CR.adopt(D, tree("{D1}", "{D2}", "{D3}"))
+  check("carry: a plugin's own settings kept", PROJ["variant:{D1}"], "Pro-C 3 :: Drums")
+  for k, f in pairs(was) do reaper[k] = f end
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

@@ -110,6 +110,37 @@ local function lit_disc(dl, cx, cy, R, col, fd, lift)
   end
 end
 
+-- How many bands a gradient from `a` to `b` across a face of radius R
+-- needs to read as smooth: a step of more than a level or so of any
+-- channel shows as a stripe, on a dark knob most of all. `lo`, `hi`: the
+-- fewest and the most.
+local function steps(a, b, R, lo, hi)
+  local d = 0
+  for sh = 8, 24, 8 do d = math.max(d, math.abs(((a >> sh) & 0xff) - ((b >> sh) & 0xff))) end
+  local n = math.ceil(d / 1.2)
+  if R < 10 then hi = math.min(hi, 6) elseif R < 20 then hi = math.min(hi, 16) end
+  return math.max(lo, math.min(hi, n))
+end
+
+-- The part of a disc of radius R on the light's side of a line across
+-- it at right angles to the light, `s` from its centre toward the light
+-- (-R: the whole disc, R: nothing); `back` the other way, the part away
+-- from the light past -s. A gradient is these drawn one over another,
+-- each smaller than the last: no band's edge meets another's, so no
+-- seams show between them (bands laid side by side leave a faint line
+-- at each join, which read as stripes).
+local function segment(dl, cx, cy, R, s, col, back)
+  local half = math.acos(math.max(-1, math.min(1, s / R)))
+  if half <= 0.001 then return end
+  local mid = back and (LIGHT_A + math.pi) or LIGHT_A
+  if half >= math.pi - 0.001 then
+    ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, col, 0)
+    return
+  end
+  ImGui.DrawList_PathArcTo(dl, cx, cy, R, mid - half, mid + half, math.max(4, math.floor(28 * half / math.pi)))
+  ImGui.DrawList_PathFillConvex(dl, col)
+end
+
 -- A flat face, flush with the top of the knob: an even, gentle fall of
 -- light across it (bands at right angles to the light, not discs stacked
 -- toward it, which read as a dome), its edge catching the light on the
@@ -119,15 +150,9 @@ local function flat_face(dl, cx, cy, R, col, fd, lift)
   local up = math.max(0, L - 1)
   local dark = mix(col, BLACK, math.min(0.70, 0.14 * math.min(1, L) + 0.18 * up))
   local light = mix(col, WHITE, math.min(0.70, (0.05 + 0.10 * (lift or 0)) * math.min(1, L) + 0.12 * up))
-  ImGui.DrawList_AddCircleFilled(dl, cx, cy, R, fd(mix(dark, light, 0.5)), 0)
-  local n = (R < 10) and 3 or ((KP.LIGHT > 1 and R >= 20) and 12 or 6)
+  local n = steps(dark, light, R, 3, 40)
   for i = 0, n - 1 do
-    local s0, s1 = -R + 2 * R * i / n, -R + 2 * R * (i + 1) / n
-    local f0 = math.acos(math.max(-1, math.min(1, s0 / R)))
-    local f1 = math.acos(math.max(-1, math.min(1, s1 / R)))
-    ImGui.DrawList_PathArcTo(dl, cx, cy, R, LIGHT_A + f1, LIGHT_A + f0, 10)
-    ImGui.DrawList_PathArcTo(dl, cx, cy, R, LIGHT_A - f0, LIGHT_A - f1, 10)
-    ImGui.DrawList_PathFillConvex(dl, fd(mix(dark, light, (i + 0.5) / n)))
+    segment(dl, cx, cy, R, -R + 2 * R * i / n, fd(mix(dark, light, (i + 0.5) / n)))
   end
   local w = math.max(1.0, R * 0.05)
   ImGui.DrawList_PathArcTo(dl, cx, cy, R - w * 0.5, LIGHT_A - 1.2, LIGHT_A + 1.2, 16)
@@ -144,19 +169,15 @@ local function light_wash(dl, cx, cy, R, fd)
   local up = KP.LIGHT - 1
   if up <= 0 or R < 4 then return end
   local wa, ba = math.min(0x80, 0x48 * up), math.min(0x80, 0x40 * up)
-  local n = (R < 12) and 4 or ((R < 20) and 8 or 14)
-  for i = 0, n - 1 do
-    local s0, s1 = -R + 2 * R * i / n, -R + 2 * R * (i + 1) / n
-    local f0 = math.acos(math.max(-1, math.min(1, s0 / R)))
-    local f1 = math.acos(math.max(-1, math.min(1, s1 / R)))
-    -- i = 0 is the band nearest the light
-    local t = (i + 0.5) / n
-    local col = (t < 0.5) and alpha(WHITE, math.floor(wa * (0.5 - t) * 2))
-                           or alpha(BLACK, math.floor(ba * (t - 0.5) * 2))
-    if (col & 0xff) > 0 then
-      ImGui.DrawList_PathArcTo(dl, cx, cy, R, LIGHT_A + f1, LIGHT_A + f0, 10)
-      ImGui.DrawList_PathArcTo(dl, cx, cy, R, LIGHT_A - f0, LIGHT_A - f1, 10)
-      ImGui.DrawList_PathFillConvex(dl, fd(col))
+  -- light from the centre out to the lit edge, shade from the centre to
+  -- the far one: each a stack of thin layers, smaller and smaller toward
+  -- its edge, which add up to the strength there
+  for _, side in ipairs({ { a = wa, col = WHITE, back = false }, { a = ba, col = BLACK, back = true } }) do
+    local n = math.max(2, math.min((R < 12) and 4 or ((R < 20) and 8 or 16), math.ceil(side.a / 2)))
+    local each = 1 - (1 - side.a / 255) ^ (1 / n)
+    local a8 = math.max(1, math.floor(each * 255 + 0.5))
+    for k = 0, n - 1 do
+      segment(dl, cx, cy, R, R * k / n, fd(alpha(side.col, a8)), side.back)
     end
   end
 end

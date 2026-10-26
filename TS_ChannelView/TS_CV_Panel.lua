@@ -51,8 +51,9 @@ function P.attach(imgui)
 end
 -- Whether `key` is a plugin with a panel of its own (Pro): ReaEQ, ReaComp,
 -- the Trimmer. Without Pro, each is an ordinary plugin's panel.
-local function own_eq(key) return EQP ~= nil and RQ.is_eq(key) end
-local function own_rc(key) return CP ~= nil and RC.is_comp(key) end
+-- (their Standard layout; another of theirs is a normal one: TS_CV_ReaFX)
+local function own_eq(key) return EQP ~= nil and require("TS_CV_ReaFX").own_eq(key) end
+local function own_rc(key) return CP ~= nil and require("TS_CV_ReaFX").own_comp(key) end
 local function own_trim(key) return TR ~= nil and TR.is(key) end
 P.own_eq, P.own_rc, P.own_trim = own_eq, own_rc, own_trim
 -- the layout each own panel (ReaEQ, ReaComp, the Trimmer) was last drawn
@@ -2410,9 +2411,21 @@ end
 -- was given one), the open one lifted into the body. Click a tab, or
 -- wheel over the strip, to change page; right-click a tab for its colour.
 local tab_menu = nil   -- { guid, page, orig } while a tab's colour popup is open
+-- where each panel's tabs were drawn last (guid -> { {x1, y1, x2, y2}, ... }),
+-- and its colour popup asked for from elsewhere: for Edit layout, whose
+-- own window lies over the panel it shows
+P.tab_rects = {}
+function P.open_tab_menu(guid, page) tab_menu = { guid = guid, page = page, open = true } end
 local function draw_tab_strip(ctx, dl, x, y, w, fx, pages, cur, req)
   local guid = fx.guid
   local h = C.TAB_STRIP_H
+  local rects = {}
+  P.tab_rects[guid] = rects
+  if tab_menu and tab_menu.guid == guid and tab_menu.open then
+    tab_menu.open = nil
+    tab_menu.orig = pages[tab_menu.page] and pages[tab_menu.page].cap
+    ImGui.OpenPopup(ctx, "tabcol##" .. guid)
+  end
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.header_bg)
   ImGui.DrawList_AddLine(dl, x, y + h - 0.5, x + w, y + h - 0.5, C.COL.panel_border, 1.0)
   ImGui.SetCursorScreenPos(ctx, x, y)
@@ -2442,6 +2455,7 @@ local function draw_tab_strip(ctx, dl, x, y, w, fx, pages, cur, req)
     local bw = tw + TAB_PAD_X * 2
     local on = (i == cur)
     local x1, y1, x2, y2 = tx, y + (on and 2 or 4), tx + bw, y + h
+    rects[i] = { x1, y1, x2, y2 }
     ImGui.SetCursorScreenPos(ctx, x1, y1)
     W.allow_overlap(ctx)
     ImGui.InvisibleButton(ctx, "tab" .. i .. "##" .. guid, bw, y2 - y1,
@@ -2982,14 +2996,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           for i = 1, #list do snaps[i] = rev and (1 - list[i].norm) or list[i].norm end
         end
         changed, nv, act = W.knob(ctx, id, label, value, shown,
-          { bipolar = ctl.bipolar, arc = ctl.arc, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
+          { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = st, snaps = snaps, mod = modded, ring = ring,
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
-          { bipolar = ctl.bipolar, arc = ctl.arc, tooltip = tip, dim = not T.get_enabled(track, fx.addr),
+          { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
@@ -3663,7 +3677,7 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
       ImGui.DrawList_AddLine(dl, gx + 2.5, my - 16, gx + 2.5, my + 16, act and C.COL.accent or C.COL.knob_ring, 2.0)
     end
     local fold_tip = (canvas and #(layout.controls or {}) > 0)
-      and ("\nIn past the canvas: its controls fold away, and come out from the edge") or ""
+      and ("\nPast the canvas: folds the controls away") or ""
     W.tip(ctx, "szgrip##" .. fx.guid, (rack and ("Drag: the " .. (is_trim and "panel's" or "canvas's") .. " height in the rack")
                                         or ("Drag: the " .. (is_trim and "panel's" or "canvas's") .. " width"))
       .. ("  (%d px)"):format(math.floor(get())) .. fold_tip .. "\nDouble-click: the usual size", hov, act)

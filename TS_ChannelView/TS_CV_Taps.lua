@@ -1570,6 +1570,24 @@ function TP.remove_probes(tr)
   TP.invalidate()
 end
 
+-- Before the track is saved as a template: the taps lifted and the
+-- plugins held for them let go, so the template is the track as it was
+-- before ChannelView laid them. TP.sync lays them again afterwards. The
+-- probes themselves stay (Track Analyser's too).
+-- Whether ChannelView has laid taps on the track, or holds plugins at a
+-- channel count for them.
+function TP.has_taps(tr)
+  if not tr then return false end
+  local r = read_record(tr)
+  return (r ~= nil and #(r.taps or {}) > 0) or next(read_holds(tr)) ~= nil
+end
+
+function TP.for_template(tr)
+  if not tr then return end
+  lift(tr, read_record(tr))
+  release_holds(tr)
+end
+
 -- The pre or post probe's address, for opening its window.
 function TP.probe_addr(tr, which)
   local lv = tr and find_level(tr, nil)

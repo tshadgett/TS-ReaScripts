@@ -713,7 +713,18 @@ function E.cancel_vpick()
   vpick = nil
 end
 
+local draw_entry_body
+-- The selected control's fields, keyed by the control: ImGui writes a
+-- text field's last edit back on the frame it's let go, and that frame
+-- can already be showing the next control -- whose alias would then be
+-- the one you were typing (the Enter never pressed). By its place in the
+-- list, which holds while it's being edited (the control's table may not).
 local function draw_entry_editor(ctx)
+  ImGui.PushID(ctx, "sel" .. tostring(st.sel_asg or 0))
+  draw_entry_body(ctx)
+  ImGui.PopID(ctx)
+end
+draw_entry_body = function(ctx)
   local c = st.scratch.controls[st.sel_asg]
   if not st.grid then
     ImGui.SeparatorText(ctx, "Selected control")
@@ -834,6 +845,10 @@ local function draw_entry_editor(ctx)
   local types = st.grid and (virt and {} or GRID_TYPES) or TYPES
   local vkinds = ((st.multi or not ED.PRO) and not virt) and {} or VIRT_KINDS
   local show_type = not ((st.multi or not ED.PRO) and virt)
+  -- on a grid a page break (or a line, a gap, a section) is only that:
+  -- nothing to turn it into
+  local structural = { page = true, divider = true, blank = true, half_gap = true, section = true }
+  if st.grid and structural[c.type] then show_type = false end
   if show_type then row_name("Type") end
   local cur = 0
   for i, t in ipairs(types) do if t == c.type then cur = i - 1 break end end
@@ -1350,7 +1365,8 @@ end
 -- Copy to new and New empty make a variant from what's in the editor
 -- (unsaved edits go to the new one, the old one is left as it was).
 local function draw_layout_row(ctx, track)
-  if RQ.is_eq(st.key) or RC.is_comp(st.key) or not ED.PRO then return end
+  local RB = require("TS_CV_ReaFX")
+  if RB.own_eq(st.key) or RB.own_comp(st.key) or not ED.PRO then return end
   local base, cur = M.split_variant(st.key)
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, "Layout")
@@ -1427,7 +1443,8 @@ end
 -- layout is being edited -- so it's saved as it's changed, apart from
 -- the layout's own Save.
 local function draw_switch_rules(ctx, track)
-  if RQ.is_eq(st.key) or RC.is_comp(st.key) or not (track and st.fx) or not ED.PRO then return end
+  local RB = require("TS_CV_ReaFX")
+  if RB.own_eq(st.key) or RB.own_comp(st.key) or not (track and st.fx) or not ED.PRO then return end
   local base = M.split_variant(st.key)
   local rules = M.copy_rules(M.switch_rules(base)) or {}
   -- (in the grid editor, a window of their own: always open)

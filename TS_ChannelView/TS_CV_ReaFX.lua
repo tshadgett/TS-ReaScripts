@@ -28,6 +28,17 @@ local M = require("TS_CV_Mappings")
 
 local RB = {}
 
+-- REAPER's plugins that ChannelView gives a panel of its own: ReaEQ's and
+-- ReaComp's (TS_CV_EQPanel, TS_CV_CompPanel), and the canvases here. That
+-- is their Standard layout; any other layout of theirs (Layout > Copy to
+-- new layout, New empty layout, New canvas layout) is a normal one.
+RB.PANELS = { ReaEQ = true, ReaComp = true, ReaGate = true, ReaLimit = true, ReaDelay = true, ReaVerbate = true }
+local function base_of(key) return (M.split_variant and select(1, M.split_variant(key or ""))) or key end
+function RB.has_panel(key) return RB.PANELS[base_of(key) or ""] == true end
+-- ReaEQ's / ReaComp's own panel is shown: their Standard layout
+function RB.own_eq(key) return key == "ReaEQ" end
+function RB.own_comp(key) return key == "ReaComp" end
+
 function RB.kind(key)
   local base = M.split_variant and select(1, M.split_variant(key or "")) or key
   if base == "ReaDelay" then return "readelay" end
@@ -138,8 +149,11 @@ function RB.tap_base(k) return 2 + (k - 1) * 10 end
 
 -- The layout with its canvas (in memory): ReaDelay's or ReaVerbate's.
 function RB.ensure(track, addr, guid, key, layout)
+  if not layout then return layout end
+  -- (another layout of theirs is the user's own: left as it is)
+  if M.split_variant and select(2, M.split_variant(key or "")) then return layout end
   local kind = RB.kind(key)
-  if not kind or not layout then return layout end
+  if not kind then return layout end
   if RB.DEFAULT_CANVAS[kind] then return layout end     -- (theirs: RB.default_canvas)
   local want = (kind == "readelay") and "delay" or "reverb"
   local cv = layout.canvas

@@ -857,7 +857,11 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   style, background), made on all of them. **Copy** and **Paste** make
   copies where they first fit, here or in another of the plugin's
   layouts: a virtual control gets a name of its own, and a parameter
-  already on the panel isn't pasted.
+  already on the panel isn't pasted. Into another plugin's layout, each
+  goes to the parameter of the same name there (or your alias for it),
+  keeping its look and place; any that plugin hasn't got are left out and
+  named. With several selected, a control's right-click has **Paste
+  style to the selected** (after *Copy style* on any control).
 - Every change is saved as you make it. **Undo** and **Redo** step back
   and forward through what you've done since the window opened.
 
@@ -933,7 +937,14 @@ default), shared with the TCP window and the web page.
   one). Click a tab, or roll the wheel over the strip, to change page;
   right-click a tab for its colour. Dividers inside a page split its
   columns as usual. The panel is as wide as its widest page, and keeps
-  the page it's on with the project.
+  the page it's on with the project. In **Edit layout** (Pro) the panel's
+  tabs work too: click one for its page, with its break's tab name and
+  colour in the sheet (as Edit parameters has them), *Move* and *Remove
+  this page* (what was on it goes on the page before, where it fits);
+  right-click a tab for any colour; drag a tab along to reorder; drop
+  controls on a tab to move them to its page. **Page** in the list's
+  *Add* puts in a new page after the one shown (the first splits the
+  panel in two).
 - **(Pro) Show when.** A control can be shown only while another parameter of
   the plugin — on the panel or not — reads a given way: *is*, *is not*,
   *is above*, *is below* or *is between*. Set it in the editor's *Show
@@ -1002,7 +1013,7 @@ Right-click a control for the quick things. The menu is in four parts:
 **Control** — what it does: *Show as*, *Name*, *Values*, *Centred fill* (a
 fader's; a knob's is *Style ▸ Value arc ▸ Centred*),
 *Reverse*, *Show when* (Pro); **Look** (Pro) — *Style*, *Background*,
-*Section* and *Copy / paste style*; **Automate** — macros and modulators, its
+*Section*, *Copy style* and *Paste style*; **Automate** — macros and modulators, its
 automation lane and REAPER's parameter modulation; **Arrange** — *Insert
 before* a gap, half-gap or divider, and *Remove from panel*. *Plugin ▸*
 at the foot collapses, moves or opens the whole plugin. Everything under
@@ -1079,7 +1090,12 @@ listens to); ReaLimit's with its *True peak*, *Constant gain* and *Low
 latency* options as buttons above its release (they're kept in ReaLimit's
 own settings, not as parameters, so they can't be automated). A gate's line for where it
 closes is dragged by its grip, in the middle, so the threshold's line can
-always be taken anywhere else. Any other plugin of the right
+always be taken anywhere else. Rather have knobs? These six (ReaEQ,
+ReaComp, ReaGate, ReaLimit, ReaDelay, ReaVerbate) have the *Layout* menu
+every plugin has: their panel is the *Standard* layout, and **Copy to new
+layout** makes a normal layout of their controls (or *New empty layout*,
+or *New canvas layout*), edited like any plugin's; *Make … the default*
+for every instance. Any other plugin of the right
 kind can have one too, as a layout: panel menu **=** ▸ *Layout* ▸ **New
 canvas layout** ▸ *EQ*, *Compressor*, *Multiband*, *Gate*, *Limiter*,
 *De-esser*, *Saturation*, *Delay*, *Reverb*, *Modulation* or *Envelope*.
@@ -1231,8 +1247,9 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
 - **Value arc.** Style ▸ *Value arc* puts a lit arc round any knob in place
   of its ticks or dots: *Positive* (from the start of its travel up to the
   value), *Negative* (from the end back to it) or *Centred* (out from the
-  middle), in the theme's fill colour; on an Arc knob it sets which way
-  its arc fills. *Centred* also makes the knob centred: an Arc or LED ring
+  middle), in the theme's fill colour or one you pick under *Arc colour*;
+  on an Arc knob it sets which way its arc fills (its colour is the
+  knob's). *Centred* also makes the knob centred: an Arc or LED ring
   face fills from the middle, and a modulator swings it both ways round
   its setting. *The same for its section* and *For the whole panel* pass
   it on. The web page shows it too.
@@ -1251,9 +1268,10 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   Silver, Stone, Black, White, Brown and Gold. *Apply to every knob on this panel* copies one
   control's look to the rest. **Copy style** (right-click any control)
   takes its style, colour, size (a fader's shape), scale, background and
-  finish; **Paste style** puts it on another control, on any panel, and
-  *Paste to every knob (fader, button) in this section / on this panel*
-  does the lot. A pasted look takes only what fits: a knob's style stays
+  finish; **Paste style** puts it on another control, on any panel,
+  *Paste style to every knob (fader, button) ▸ In this section / On this
+  panel* does the lot, and in Edit layout, with several selected, *Paste
+  style to the selected* does those. A pasted look takes only what fits: a knob's style stays
   with knobs, but its colour goes onto a fader or a button. A toggle's Style is the colour it lights
   when on (Amber, Green, Red, Blue, Yellow, White or the theme's), and so
   is a button row's, along with its face: *Flat*, *Lit lens* (dark tinted
@@ -1428,6 +1446,21 @@ icon comes too, found in `Data/toolbar_icons` and the current theme's
 folder as REAPER's toolbars find them (a toggle with an `_off` icon shows
 its `_on` partner while it's on).
 
+## Track templates
+
+Right-click a track ▸ *Save as track template…* (with several selected, it
+saves those). It opens REAPER's own dialog, with its usual options and
+folder. With measurement taps on the track, ChannelView asks first whether
+to keep them: *Yes* saves the track as it is, taps and channels included;
+*No* leaves them out (and any plugin held at a channel count for them),
+and they go back once it's saved. The probes stay either way. *Add track
+▸ New track from template* brings one in.
+
+Each plugin's own ChannelView settings (the layout it shows, a folded
+panel, a virtual control's setting, its page) go with the track: into a
+template, a duplicated track, or a track copied and pasted. The copy takes
+them up the first time ChannelView shows it.
+
 ## Files
 
 | | |
@@ -1495,6 +1528,7 @@ its `_on` partner while it's on).
 | `TS_ChannelView_OrganiseActions.lua` | the *Organise actions* action |
 | `TS_CV_Startup.lua` | the Run-when-REAPER-starts option, and the `__startup.lua` surgery |
 | `TS_CV_State.lua` | per-instance view state (collapsed), saved in the project |
+| `TS_CV_Carry.lua` | those per-instance settings carried on the track, for copies and templates |
 | `TS_CV_Steps.lua` | cached choices for stepped parameters (derived, deletable) |
 | `TS_ChannelView_Web.lua` | the web companion's bridge — see *On a tablet* (Pro) |
 | `TS_ChannelView.html` | the web companion's page. Goes in `reaper_www_root/` (Pro) |

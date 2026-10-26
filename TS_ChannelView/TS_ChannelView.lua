@@ -1,9 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.2.1
+-- @version 3.3.0
 -- @changelog
---  Organise actions: Alt+click a row to remove it (a menu with things in
---  it asks first). See the CHANGELOG.
+--  Save as track template (asks whether to keep the measurement taps), and
+--  plugins keep their ChannelView settings on copied tracks. With Pro:
+--  pages in Edit layout, paste into another plugin's layout by name, Copy
+--  and Paste style in the right-click, layouts for REAPER's own plugins, a
+--  value arc's colour, smoother knob shading. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -55,6 +58,7 @@
 --  [nomain] TS_CV_Share.lua
 --  [nomain] TS_CV_Startup.lua
 --  [nomain] TS_CV_State.lua
+--  [nomain] TS_CV_Carry.lua
 --  [nomain] TS_CV_Steps.lua
 --  [nomain] TS_CV_Taps.lua
 --  [nomain] TS_CV_Trace.lua
@@ -454,6 +458,14 @@ local function rescan(force)
         full = T.collect(app.track)
         app.full_hash = T.hash(full)
       end
+      -- a duplicated or pasted track, or one from a template: its plugins
+      -- take up the settings it carries (TS_CV_Carry)
+      if require("TS_CV_Carry").adopt(app.track, full) then St.clear_cache() end
+    end
+    -- and what it carries kept up to date, every couple of seconds
+    if now - (app.carry_at or 0) > 2 then
+      app.carry_at = now
+      require("TS_CV_Carry").write(app.track, full)
     end
     list = MD.strip(app.track, full)
     if not TP.probes_shown() then list = TP.strip_probes(app.track, list) end
@@ -1877,7 +1889,7 @@ local function style_menu(fx, key, idx, c)
       local l, pk = materialise(fx)
       local ctl = l.controls
       local function put(o)
-        if o and (o.type == "knob" or o.type == "stepped") then o.arc, o.bipolar = c.arc, c.bipolar end
+        if o and (o.type == "knob" or o.type == "stepped") then o.arc, o.bipolar, o.arcc = c.arc, c.bipolar, c.arcc end
       end
       if scope == "section" then
         local function edge(o) return o.type == "divider" or o.type == "page" end
@@ -1889,6 +1901,35 @@ local function style_menu(fx, key, idx, c)
         for _, o in ipairs(ctl) do put(o) end
       end
       M.set(pk, l); M.save()
+    end
+    -- its colour: the theme's fill unless one is picked (an Arc or LED
+    -- ring knob's own arc is its Colour, above)
+    if arc_now and not own_face then
+      ImGui.Spacing(ctx)
+      ImGui.TextDisabled(ctx, "Arc colour")
+      local arc_cur = c.arcc or "accent"
+      for i, cp in ipairs(C.CAPS) do
+        if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+        local col = cp.col or ((arc_now == "mid") and C.COL.knob_fill_bi or C.COL.knob_fill)
+        if ImGui.ColorButton(ctx, cp.label .. "##arcc_" .. cp.key, col, ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+          set({ arcc = (cp.key ~= "accent") and cp.key or false })
+        end
+        if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, (cp.key == "accent") and "Theme" or cp.label) end
+        if cp.key == arc_cur then
+          local x0, y0 = ImGui.GetItemRectMin(ctx)
+          local x1, y1 = ImGui.GetItemRectMax(ctx)
+          ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+        end
+      end
+      local function choose_arc(k, save)
+        local l, pk = materialise(fx)
+        local lc = l.controls[idx]
+        if lc then lc.arcc = k end
+        M.set(pk, l)
+        if save then M.save() end
+      end
+      local now_ac = W.cap_col(c.arcc) or C.COL.knob_fill
+      swatch_extras("arcc", c.arcc, now_ac >> 8, "Arc colour", choose_arc, fx)
     end
     if ImGui.Selectable(ctx, "The same for its section##varc_sec", false, KEEP_OPEN, 160, 0) then arc_to("section") end
     ImGui.SameLine(ctx, 0, 4)
@@ -1917,7 +1958,7 @@ local function style_menu(fx, key, idx, c)
       for _, o in ipairs(l.controls) do
         if style_family(o.type) == fam then
           o.style, o.cap = src.style, src.cap
-          if fam == "knob" then o.scale_ink, o.arc, o.bipolar = src.scale_ink, src.arc, src.bipolar end
+          if fam == "knob" then o.scale_ink, o.arc, o.bipolar, o.arcc = src.scale_ink, src.arc, src.bipolar, src.arcc end
           if fam == "fader" then o.dir, o.len, o.thin = src.dir, src.len, src.thin end
         end
       end
@@ -2160,8 +2201,10 @@ local function panel_menu()
   ImGui.SeparatorText(ctx, "Layout")
   -- Layout variants: another layout for the same plugin, picked per
   -- instance (TS_CV_Mappings "<plugin> :: <name>", St.variant). Not for
-  -- ReaEQ or ReaComp, whose panels are their own.
-  if not RQ.is_eq(key) and not RC.is_comp(key) then
+  -- REAPER's plugins with a panel of ChannelView's (ReaEQ, ReaComp,
+  -- ReaGate, ReaLimit, ReaDelay, ReaVerbate): that's their Standard, and
+  -- other layouts of theirs are normal ones, with or without a canvas.
+  do
     local base, shown = M.split_variant(key)
     local dflt = M.default_variant(base)
     local function mark(nm) return (nm == dflt) and "  (default)" or "" end
@@ -2223,7 +2266,11 @@ local function panel_menu()
       app.var_name = txt
       local ok = M.clean_variant(txt) ~= nil and not M.has(M.variant_key(base, M.clean_variant(txt) or ""))
       local function make(empty)
-        local _, nm = M.new_variant(base, txt, layout, empty)
+        -- copied from a panel of ChannelView's (TS_CV_ReaFX): the plugin's
+        -- controls, as a normal layout
+        local from = layout
+        if not shown and require("TS_CV_ReaFX").has_panel(key) then from = M.build_default(app.track, fx.addr) end
+        local _, nm = M.new_variant(base, txt, from, empty)
         if nm then St.set_variant(fx.guid, nm); app.var_name = nil; ImGui.CloseCurrentPopup(ctx) end
       end
       if ch and ok then make(false) end
@@ -2550,6 +2597,8 @@ local function section_range(controls, idx)
 end
 
 local function look_items(fx, key, layout, idx, c, locked)
+  -- (Standard: copy and paste are Pro's)
+  if not ED.PRO and not locked then ED.menu(ImGui, ctx, "Copy / paste style") return end
   if ImGui.MenuItem(ctx, "Copy style") then
     app.style_clip = { look = M.look_of(c) }
   end
@@ -2577,13 +2626,26 @@ local function look_items(fx, key, layout, idx, c, locked)
   end
   if ImGui.MenuItem(ctx, "Paste style", nil, false, have) then paste(idx, idx) end
   tip()
-  local noun = have and (s.fam and LOOK_NOUN[s.fam] or "control") or "control"
-  if ImGui.MenuItem(ctx, "Paste to every " .. noun .. " in this section", nil, false, have) then
-    paste(section_range(layout.controls, idx))
+  -- several picked in Edit layout (this plugin, this layout): on all of them
+  local picked = require("TS_CV_GridEditor").picked_for(fx.guid, key)
+  if picked and #picked > 1 then
+    if ImGui.MenuItem(ctx, ("Paste style to the %d selected"):format(#picked), nil, false, have) then
+      local l = materialise(fx)
+      local n = 0
+      for _, k in ipairs(picked) do
+        local o = l.controls[k]
+        local fits = o and o.type ~= "divider" and (s.fam == nil or M.look_family(o) == s.fam)
+        if fits and M.paste_look(o, s) then n = n + 1 end
+      end
+      if n > 0 then M.set(key, l); M.save() end
+    end
+    tip()
   end
-  tip()
-  if ImGui.MenuItem(ctx, "Paste to every " .. noun .. " on this panel", nil, false, have) then
-    paste(1, #layout.controls)
+  local noun = have and (s.fam and LOOK_NOUN[s.fam] or "control") or "control"
+  if ImGui.BeginMenu(ctx, "Paste style to every " .. noun, have) then
+    if ImGui.MenuItem(ctx, "In this section") then paste(section_range(layout.controls, idx)) end
+    if ImGui.MenuItem(ctx, "On this panel") then paste(1, #layout.controls) end
+    ImGui.EndMenu(ctx)
   end
   tip()
 end
@@ -3315,10 +3377,7 @@ local function control_menu()
   if ED.PRO and not div_idx and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
     ImGui.SetTooltip(ctx, layout.grid and "Not on a section." or "Needs a divider first:\nArrange > Insert before > Divider.")
   end
-  if ED.menu(ImGui, ctx, "Copy / paste style") then
-    look_items(fx, key, layout, idx, c, false)
-    ImGui.EndMenu(ctx)
-  end
+  look_items(fx, key, layout, idx, c, false)
 
   ------------------------------------------------------------ AUTOMATE
   automate_items(fx, c)
@@ -4715,7 +4774,7 @@ local function panel_row(row_h, row_w)
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   P.has_io(app.track, fx, lay),
                                   St.is_gr_open(fx.guid), M.locked(lay),
-                                  (not RQ.is_eq(k) and not RC.is_comp(k)) and lay.canvas or nil)
+                                  (not P.own_eq(k) and not P.own_rc(k)) and lay.canvas or nil)
           if i > 1 then total = total + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)

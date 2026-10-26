@@ -49,6 +49,7 @@ local st = {
   ren_req    = false, ren_track = nil, ren_buf = "", ren_focus = false,
   col_req    = false, col_tracks = nil, col_rgb = 0x808080, col = nil,
   ins_req    = false, ins_anchor = nil, ins_tree = nil,
+  tpl_req    = nil,
 }
 
 -- ---------------------------------------------------------------------
@@ -232,6 +233,11 @@ local function context_menu(ctx)
     TO.duplicate_tracks(tg)
     changed = true
   end
+  if ImGui.MenuItem(ctx, many and ("Save %d tracks as track template\u{2026}"):format(#tg)
+                               or "Save as track template\u{2026}", nil, false, not master) then
+    st.tpl_req = tg          -- next frame, once the menu has closed
+  end
+  tip_if_hovered(ctx, "With each plugin's ChannelView settings")
   if ImGui.MenuItem(ctx, many and ("Remove %d tracks"):format(#tg) or "Remove track",
       nil, false, not master) then
     TO.remove_tracks(tg)
@@ -622,6 +628,13 @@ end
 -- window, outside any child. Returns true on a frame something changed.
 function TM.draw(ctx)
   local changed = false
+  -- Save as track template, asked for last frame: REAPER's dialog waits
+  -- for you, so it's opened with the menu already gone
+  if st.tpl_req then
+    local tg = st.tpl_req
+    st.tpl_req = nil
+    if TO.save_template(tg) then changed = true end
+  end
   if context_menu(ctx)  then changed = true end
   if rename_popup(ctx)  then changed = true end
   if colour_dialog(ctx) then changed = true end

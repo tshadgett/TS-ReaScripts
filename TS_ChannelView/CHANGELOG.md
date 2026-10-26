@@ -1,5 +1,45 @@
 # ChannelView — changelog
 
+## 3.3.0 — track templates, pages in Edit layout
+
+### ChannelView
+
+- **Save as track template** (a track's right-click; several selected:
+  those). REAPER's own dialog. With measurement taps on the track it asks
+  first whether to keep them: *Yes* saves the track as it is, *No* leaves
+  them out (and the channel counts held for them).
+- **Plugins keep their ChannelView settings on copied tracks.** The layout
+  each shows, folded panels, virtual controls and the page go with a
+  track into a template, a duplicate or a pasted copy.
+- **An alias typed without pressing Enter** stays on its control: it went
+  onto the next control selected too.
+- **Organise actions on a Mac** opens again after its window was closed
+  with the red button.
+
+### ChannelView Pro
+
+- **Pages in Edit layout.** The panel's tabs work in the editor: click one
+  for its page and its tab's name and colour, right-click for any colour,
+  drag a tab along to reorder, drop controls on a tab to move them there.
+  *Page* in the list's *Add* puts in a new one; *Remove this page* (or
+  Delete) keeps what was on it.
+- **Copy and paste into another plugin's layout:** each control goes to the
+  parameter of the same name (or your alias) there; any the plugin hasn't
+  got are named.
+- **Copy style and Paste style** are in a control's right-click, not a
+  submenu, with *Paste style to the selected* when several are selected in
+  Edit layout.
+- **REAPER's plugins with knobs:** ReaEQ, ReaComp, ReaGate, ReaLimit,
+  ReaDelay and ReaVerbate have the *Layout* menu every plugin has. Their
+  panel is the *Standard* layout; *Copy to new layout* makes a normal one
+  of their controls.
+- **A value arc's colour:** Style ▸ Value arc ▸ *Arc colour*, on the web
+  page too.
+- **Smoother knobs:** no stripes across flat knob faces or the light over
+  them, and a Bar knob's bar is the knob's own colour.
+- **Edit layout and Knob look on a Mac** open again after their window was
+  closed with the red button.
+
 ## 3.2.1
 
 - **Organise actions: Alt+click a row to remove it.** While Alt is held,
