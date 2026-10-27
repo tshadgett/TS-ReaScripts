@@ -99,6 +99,7 @@ end
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local CH = require("TS_CV_Channel")
 local G  = require("TS_CV_Gang")
 local TM = require("TS_CV_TrackMenu")
@@ -819,6 +820,135 @@ local function track_area(x, top, w, h, now)
 end
 
 -- ---------------------------------------------------------------------
+-- the patch bay (Pro): a column left of the rows
+-- ---------------------------------------------------------------------
+-- It opens as ChannelView's mixer bay does (½ s on a row's colour strip,
+-- or pinned) and, docked, the docker widens by its width so the rows keep
+-- theirs: the arrange view moves over. A script has no way to set a
+-- docker's width, but REAPER takes a drag of the docker's own edge
+-- (mouse messages to the docker, the pointer moved along with them and
+-- put back after). Floating, the window just grows. Closing gives the
+-- width back.
+local BAY = { mod = nil, w = 0, widened = 0 }
+function BAY.pb()
+  if BAY.mod == nil then
+    BAY.mod = require("TS_CV_Edition").module("TS_CV_PatchBay") or false
+    if BAY.mod then BAY.mod.attach(ImGui) end
+  end
+  return BAY.mod or nil
+end
+
+-- The docker's edge that faces the arrange view, dragged by `delta` px
+-- (wider when positive). False when not docked beside the arrange view.
+function BAY.dock_drag(delta)
+  if not (reaper.JS_Window_Find and reaper.JS_WindowMessage_Send and reaper.JS_Mouse_SetPosition) then return false end
+  local h = reaper.JS_Window_Find(C.TCP_WIN_TITLE, true)
+  local dock = h and reaper.JS_Window_GetParent(h)
+  if not dock or reaper.JS_Window_GetTitle(dock) ~= "REAPER_dock" then return false end
+  local ok, l, t, r, b = reaper.JS_Window_GetRect(dock)
+  local arr = reaper.JS_Window_FindChildByID(reaper.GetMainHwnd(), 1000)
+  local ok2, al, _, ar = reaper.JS_Window_GetRect(arr)
+  if not (ok and ok2) then return false end
+  local sx, d
+  if al >= r - 4 then sx, d = r - 2, delta          -- left of the arrange view: its right edge
+  elseif ar <= l + 4 then sx, d = l + 1, -delta     -- right of it: its left edge
+  else return false end
+  local sy = math.floor((t + b) / 2)
+  local cx, cy = reaper.JS_Window_ScreenToClient(dock, sx, sy)
+  local px, py = reaper.GetMousePosition()
+  local function msg(m, x)
+    reaper.JS_Mouse_SetPosition(sx + (x - cx), sy)
+    reaper.JS_WindowMessage_Send(dock, m, (m == "WM_LBUTTONUP") and 0 or 1, 0, x, cy)
+  end
+  msg("WM_MOUSEMOVE", cx)
+  msg("WM_LBUTTONDOWN", cx)
+  for i = 1, 10 do msg("WM_MOUSEMOVE", cx + math.floor(d * i / 10)) end
+  msg("WM_LBUTTONUP", cx + d)
+  reaper.JS_Mouse_SetPosition(px, py)
+  return true
+end
+
+-- Wider by `delta` (narrower when negative): the docker, or a floating
+-- window itself (next frame, before its Begin).
+function BAY.resize(delta)
+  if BAY.dock_drag(delta) then return true end
+  if dock_id == 0 and app.win then app.grow = (app.grow or 0) + delta return true end
+  return false
+end
+
+-- Open or closed this frame: widen or give the width back. Not while the
+-- button is down (a click outside is closing it, or a cable is in hand).
+function BAY.follow(bay)
+  if ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then return end
+  local open = bay.is_open()
+  if open and BAY.widened == 0 then
+    local list = {}
+    for _, e in ipairs(app.rows) do list[#list + 1] = { track = e.track, num = e.num } end
+    BAY.w = bay.tcp_width(list)
+    -- -1: couldn't widen; the rows give up the room instead
+    BAY.widened = BAY.resize(BAY.w) and BAY.w or -1
+  elseif not open and BAY.widened ~= 0 then
+    if BAY.widened > 0 then BAY.resize(-BAY.widened) end
+    BAY.widened = 0
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- REAPER's own track panel, kept shut
+-- ---------------------------------------------------------------------
+-- This window stands in for REAPER's TCP, which is squeezed to nothing
+-- beside the arrange view -- but REAPER sometimes opens it again at
+-- startup. For the first while after this starts, it's closed again if it
+-- has any width: its divider dragged shut the way a mouse would (messages
+-- to REAPER's window, the pointer moved along and put back, as for the
+-- patch bay's docker).
+local NATIVE = { until_t = nil, next_t = 0, WATCH = 20, EVERY = 2 }
+function NATIVE.width()
+  if not (reaper.JS_Window_ListAllChild and reaper.JS_Window_HandleFromAddress) then return nil end
+  local main = reaper.GetMainHwnd()
+  local _, list = reaper.JS_Window_ListAllChild(main)
+  for addr in (list or ""):gmatch("[^,]+") do
+    local c = reaper.JS_Window_HandleFromAddress(addr)
+    if c and reaper.JS_Window_GetParent(c) == main and reaper.JS_Window_GetClassName(c) == "REAPERTCPDisplay" then
+      local ok, l, t, r, b = reaper.JS_Window_GetRect(c)
+      if ok then return r - l, l, r end
+    end
+  end
+  return nil
+end
+function NATIVE.close()
+  local w, l, r = NATIVE.width()
+  if not w or w <= 4 then return false end
+  local main = reaper.GetMainHwnd()
+  local ok, al, at, _, ab = reaper.JS_Window_GetRect(reaper.JS_Window_FindChildByID(main, 1000))
+  if not ok or al < r then return false end
+  local sx, sy = math.floor((r + al) / 2), math.floor((at + ab) / 2)
+  local cx, cy = reaper.JS_Window_ScreenToClient(main, sx, sy)
+  local px, py = reaper.GetMousePosition()
+  local d = -(w + 2)
+  local function msg(m, x)
+    reaper.JS_Mouse_SetPosition(sx + (x - cx), sy)
+    reaper.JS_WindowMessage_Send(main, m, (m == "WM_LBUTTONUP") and 0 or 1, 0, x, cy)
+  end
+  msg("WM_MOUSEMOVE", cx)
+  msg("WM_LBUTTONDOWN", cx)
+  for i = 1, 10 do msg("WM_MOUSEMOVE", cx + math.floor(d * i / 10)) end
+  msg("WM_LBUTTONUP", cx + d)
+  reaper.JS_Mouse_SetPosition(px, py)
+  return true
+end
+-- once a frame: every couple of seconds for the first twenty, while no
+-- button is held
+function NATIVE.tick(now)
+  NATIVE.until_t = NATIVE.until_t or (now + NATIVE.WATCH)
+  if now > NATIVE.until_t or now < NATIVE.next_t then return end
+  NATIVE.next_t = now + NATIVE.EVERY
+  if not (reaper.JS_WindowMessage_Send and reaper.JS_Mouse_SetPosition) then return end
+  if reaper.JS_Mouse_GetState and reaper.JS_Mouse_GetState(1 | 2) ~= 0 then return end
+  NATIVE.close()
+end
+
+-- ---------------------------------------------------------------------
 -- the channel flyout
 -- ---------------------------------------------------------------------
 
@@ -870,7 +1000,10 @@ local function draw_flyout()
     local base = col or C.COL.header_bg
     local ink  = U.contrast_text(base)
     local fly_bg = C.COL.panel_bg
-    local tint = (TCP_TINT and tr ~= reaper.GetMasterTrack(0)) and TO.track_tint(tr) or 0
+    -- ChannelView's own rule for the track (its group's or its own
+    -- strength), as the mixer and the Channel panel draw it: not the
+    -- TCP's row option, which is about the rows
+    local tint = (tr ~= reaper.GetMasterTrack(0)) and TO.track_tint(tr) or 0
     if tint > 0 and col then fly_bg = U.tint_readable(fly_bg, col, tint) end
     ImGui.DrawList_AddRectFilled(dl, wx, wy, wx + CW, wy + H, fly_bg, 3.0)
     local fly_ink = (tint > 0 and col) and W.push_tinted(fly_bg, col) or nil
@@ -885,9 +1018,10 @@ local function draw_flyout()
     ImGui.DrawList_AddRect(dl, wx + 0.5, wy + 0.5, wx + CW - 0.5, wy + H - 0.5,
       C.COL.panel_border, 3.0, 0, 1.0)
 
-    -- The cap: ChannelView's own Channel header, in the track's colour,
-    -- with the track's name and a close button -- the same function, so
-    -- input FX, automation mode and whatever else it grows appear here too.
+    -- The cap: ChannelView's own Channel header, in the track's colour
+    -- (as the Channel panel's is), with the track's name and a close
+    -- button -- the same function, so input FX, automation mode and
+    -- whatever else it grows appear here too.
     local label
     if tr == reaper.GetMasterTrack(0) then label = "MASTER"
     else
@@ -1023,7 +1157,7 @@ local function settings_menu()
     ImGui.SetTooltip(ctx, "Samples and ms, on tracks with latency\n(tall rows only)")
   end
   ImGui.SetNextItemWidth(ctx, 150)
-  local pch, pv = ImGui.SliderInt(ctx, "Channel panel height", math.floor(C.TCP_PANEL_H), 180, 700)
+  local pch, pv = ST.slider_int(ctx, "Channel panel height", math.floor(C.TCP_PANEL_H), 180, 700)
   if pch then C.TCP_PANEL_H = pv; ext_set("panel_h", pv) end
 
   do
@@ -1057,12 +1191,12 @@ local function settings_menu()
     -- ChannelView's own two settings, written back to ChannelView's own
     -- keys: the palette is one choice, and both windows follow it.
     ImGui.SetNextItemWidth(ctx, 190)
-    local hch, hv = ImGui.SliderInt(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
+    local hch, hv = ST.slider_int(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
     if hch then
       C.BASE_HUE = hv; C.build_palette(); cv_set("base_hue", hv)
     end
     ImGui.SetNextItemWidth(ctx, 190)
-    local tch, tv = ImGui.SliderDouble(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
+    local tch, tv = ST.slider_double(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
     if tch then
       C.TINT = tv; C.build_palette(); cv_set("tint", string.format("%.3f", tv))
     end
@@ -1077,11 +1211,9 @@ local function settings_menu()
 
   if ImGui.BeginMenu(ctx, "Dock") then
     for _, d in ipairs(DOCKS) do
-      if ImGui.MenuItem(ctx, d[1], nil, dock_id == d[2]) then
-        dock_id = d[2]
-        ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_Always)
-        ext_set("dock", dock_id)
-      end
+      -- asked for here, done before the window opens next frame: a
+      -- SetNextWindowDockID inside the menu would dock the menu
+      if ImGui.MenuItem(ctx, d[1], nil, dock_id == d[2]) then app.dock_req = d[2] end
     end
     ImGui.EndMenu(ctx)
   end
@@ -1106,6 +1238,7 @@ local function frame()
   -- muted track hides its M), leaving no button to notice the release.
   if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then W.end_paint() end
   poll_shared(now)
+  NATIVE.tick(now)
   follow_selection()
   -- A double-click whose second release landed somewhere else never
   -- consumed its suppression; drop it once the mouse is plainly up.
@@ -1128,8 +1261,21 @@ local function frame()
   draw_flyout()
 
   ImGui.SetNextWindowSize(ctx, 240, 600, ImGui.Cond_FirstUseEver)
-  if dock_id ~= 0 then ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_FirstUseEver) end
+  if app.dock_req then
+    -- the Dock menu's pick (0: floating)
+    ImGui.SetNextWindowDockID(ctx, app.dock_req, ImGui.Cond_Always)
+    dock_id = app.dock_req
+    ext_set("dock", dock_id)
+    app.dock_req = nil
+  elseif dock_id ~= 0 then
+    ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_FirstUseEver)
+  end
+  if app.grow and app.win then
+    ImGui.SetNextWindowSize(ctx, math.max(120, app.win.w + app.grow), app.win.h, ImGui.Cond_Always)
+    app.grow = nil
+  end
   ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.win_bg)
+  ST.push(ctx)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, 0, 0)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_ItemSpacing, 4, 4)
   local visible, open = ImGui.Begin(ctx, C.TCP_WIN_TITLE, true,
@@ -1172,9 +1318,57 @@ local function frame()
 
       local area_top = tb_bottom
       local area_bot = math.min(g.bottom, bottom)
+      -- the patch bay, left of the rows while it's open
+      local bay = BAY.pb()
+      local bw = 0
+      if bay then
+        -- the real pointer: over the arrange view, ReaImGui still reports
+        -- the last place it saw in this window
+        local ptr
+        if reaper.GetMousePosition and ImGui.PointConvertNative then
+          local nx, ny = reaper.GetMousePosition()
+          ptr = { ImGui.PointConvertNative(ctx, nx, ny) }
+        end
+        bay.reveal(ctx, app.drag ~= nil, ptr)
+        BAY.follow(bay)
+        if bay.is_open() and BAY.widened ~= 0 then bw = math.min(BAY.w, math.max(0, ww - 60)) end
+      end
       if area_bot - area_top > 4 then
-        ImGui.SetCursorScreenPos(ctx, wx, area_top)
-        track_area(wx, area_top, ww, area_bot - area_top, now)
+        ImGui.SetCursorScreenPos(ctx, wx + bw, area_top)
+        track_area(wx + bw, area_top, ww - bw, area_bot - area_top, now)
+        if bay then
+          -- the rows' colour strips open it; the whole area keeps it
+          local zones = {}
+          for _, e in ipairs(app.rows) do
+            if e.visible and e.h > 0 then
+              local ix = wx + bw + (C.TCP_INDENT_FOLDERS and e.depth * C.TCP_INDENT or 0)
+              zones[#zones + 1] = { ix, e.y, ix + C.TCP_STRIP_W, e.y + e.h }
+            end
+          end
+          local area = { wx, area_top, wx + ww, area_bot }
+          bay.remember(zones, area)
+          if bw > 0 then
+            local list = {}
+            for _, e in ipairs(app.rows) do list[#list + 1] = { track = e.track, num = e.num } end
+            bay.draw_tcp(ctx, { x = wx, y = area_top, w = bw, h = area_bot - area_top, rows = app.rows,
+              list = list, sel = G.is_selected, bay_rect = area })
+            -- the wheel over the bay scrolls (or with Ctrl, zooms) the
+            -- arrange view, as over the rows -- unless a cable took it
+            local mx, my = ImGui.GetMousePos(ctx)
+            if mx >= wx and mx < wx + bw and my >= area_top and my < area_bot
+               and ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows) and not W.wheel_taken() then
+              local wheel = ImGui.GetMouseWheel(ctx)
+              if wheel ~= 0 then
+                local mods = ImGui.GetKeyMods(ctx)
+                if (mods & ImGui.Mod_Ctrl) ~= 0 or (mods & ImGui.Mod_Super) ~= 0 then
+                  reaper.Main_OnCommand(wheel > 0 and 40111 or 40112, 0)  -- View: Zoom in/out vertical
+                else
+                  AR.scroll(-wheel * C.TCP_WHEEL_PX)
+                end
+              end
+            end
+          end
+        end
       end
 
       -- The bottom toolbar: whatever is left below the arrange view --
@@ -1209,6 +1403,7 @@ local function frame()
     app.win = nil
   end
   ImGui.PopStyleVar(ctx, 2)
+  ST.pop(ctx)
   ImGui.PopStyleColor(ctx)
 
   if open then
@@ -1230,5 +1425,9 @@ function safe_frame()
     "\n-------------------------------------------------------------\n")
 end
 
-reaper.atexit(function() TB.cancel_pick(); TB2.cancel_pick() end)
+reaper.atexit(function()
+  TB.cancel_pick(); TB2.cancel_pick()
+  -- the patch bay's width, given back
+  if BAY.widened > 0 then BAY.resize(-BAY.widened); BAY.widened = 0 end
+end)
 reaper.defer(safe_frame)

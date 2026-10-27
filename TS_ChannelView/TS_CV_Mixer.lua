@@ -51,6 +51,34 @@ local ImGui
 
 function MX.attach(imgui) ImGui = imgui end
 
+-- The patch bay (TS_CV_PatchBay, Pro): nil without Pro.
+local PB
+local function pb()
+  if PB == nil then
+    PB = require("TS_CV_Edition").module("TS_CV_PatchBay") or false
+    if PB then PB.attach(ImGui) end
+  end
+  return PB or nil
+end
+MX.patch_bay = pb
+
+-- The patch bay opened or closed (once a frame, off last frame's pointer)
+-- and the height it takes: from the strips in mixer view, from the panels
+-- above the name row in channel view (the caller gives the row that much
+-- more). 0 while it's closed, or without Pro.
+local bay_frame, bay_h = -1, 0
+function MX.bay_lift(ctx)
+  local bay = pb()
+  if not bay then return 0 end
+  local f = ImGui.GetFrameCount(ctx)
+  if bay_frame ~= f then
+    bay.reveal(ctx, MX.drag ~= nil)
+    bay_frame = f
+    bay_h = bay.is_open() and bay.lift(MX.tracks()) or 0
+  end
+  return bay_h
+end
+
 -- Set by TS_CV_TrackStrip.request_scroll() when the selection changed
 -- from outside this window (the arrange view, the track manager). Read
 -- and cleared here, in channel view only -- the mixer doesn't chase a
@@ -475,7 +503,7 @@ end
 -- Returns the track to open in channel view (the strip's own body was
 -- double-clicked), and the track a name-button double-click wants opened
 -- -- which may be the same track, or nil, independently.
-local function column(ctx, t, avail_h, cur_track)
+local function column(ctx, t, avail_h, cur_track, lift)
   local collapsed = t.folded or St.is_collapsed("mx:" .. t.guid)
   local w = MX.col_width(t.guid, t.folded)
   -- Selected as REAPER sees it, so a multi-selection lights every strip
@@ -490,7 +518,10 @@ local function column(ctx, t, avail_h, cur_track)
   -- jammed against the strip.
   local name_h    = C.STRIP_H
   local name_gap  = 4
-  local strip_h   = math.max(0, avail_h - name_h)
+  -- lifted for the patch bay (TS_CV_PatchBay), which opens under the
+  -- name buttons: they ride up with the strip
+  lift = lift or 0
+  local strip_h   = math.max(0, avail_h - name_h - lift)
 
   local col_x, col_y = ImGui.GetCursorPos(ctx)
   local ok = ImGui.BeginChild(ctx, "mx##" .. t.guid, w, avail_h, 0,
@@ -652,10 +683,16 @@ function MX.row_pad_y(ctx, pad_x)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, pad_x, C.TRACKROW_PAD_Y)
   -- NoInputs: it's a real window, 40 by 100 at the top left of the row,
   -- and would otherwise take the pointer from whatever is drawn there
-  -- (a left-hand action bar's top button)
+  -- (a left-hand action bar's top button). And unseen: its scrollbar
+  -- would otherwise show past a narrow left-hand bar, as a stray dot.
+  for _, c in ipairs({ ImGui.Col_ScrollbarBg, ImGui.Col_ScrollbarGrab,
+                       ImGui.Col_ScrollbarGrabHovered, ImGui.Col_ScrollbarGrabActive }) do
+    ImGui.PushStyleColor(ctx, c, 0)
+  end
   local ok = ImGui.BeginChild(ctx, "mxpadprobe", 40, 100, 0,
     ImGui.WindowFlags_HorizontalScrollbar | ImGui.WindowFlags_AlwaysHorizontalScrollbar
-    | ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_NoInputs)
+    | ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_NoInputs
+    | ImGui.WindowFlags_NoBackground)
   if ok then
     -- AlwaysHorizontalScrollbar means this child's own scrollbar is
     -- already showing on this first read, not "as of whatever it
@@ -664,6 +701,7 @@ function MX.row_pad_y(ctx, pad_x)
     pad_y = 100 - h
     ImGui.EndChild(ctx)
   end
+  ImGui.PopStyleColor(ctx, 4)
   ImGui.PopStyleVar(ctx)
   ImGui.SetCursorPos(ctx, probe_x, probe_y)
 
@@ -730,6 +768,10 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
     -- that question.
     local inner_h = total_h - pad_y
     local list = MX.tracks()
+    -- the patch bay: opened or closed off last frame's pointer, and what
+    -- the strips give up for it
+    local bay = pb()
+    local lift = bay and MX.bay_lift(ctx) or 0
 
     if strips and #list == 0 then
       ImGui.TextDisabled(ctx, "No tracks are shown in the mixer.")
@@ -753,6 +795,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
     local row_y = select(2, ImGui.GetCursorPos(ctx))
     local x_off = 0
     local rects = {}      -- each column's screen x and width, for dropping
+    ImGui.SetCursorPos(ctx, 0, row_y)
+    local org_x, org_y = ImGui.GetCursorScreenPos(ctx)   -- the row's content origin, on screen
 
     for i, t in ipairs(list) do
       local gap = 0
@@ -780,7 +824,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
                            track = t.track, name = track_label(t) }
 
       if strips then
-        local want, dbl = column(ctx, t, inner_h, cur_track)
+        local want, dbl = column(ctx, t, inner_h, cur_track, lift)
         if want then open_it = want end
         if dbl  then dbl_track = dbl end
       else
@@ -817,13 +861,37 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
     do
       if #list > 0 then x_off = x_off + C.MIX_GAP end
       ImGui.SetCursorPos(ctx, x_off, row_y)
-      local th = strips and math.max(C.STRIP_H - 8, inner_h - C.STRIP_H)
+      local th = strips and math.max(C.STRIP_H - 8, inner_h - C.STRIP_H - lift)
                          or (C.STRIP_H - 8)
       if W.dashed_plus(ctx, "mxadd", C.ADD_TILE_W, th,
           "Insert a track\u{2026}") then
         TM.open_insert(cur_track)
       end
       x_off = x_off + C.ADD_TILE_W
+    end
+
+    -- The patch bay, over the strips and under them, the outputs' box
+    -- after the insert tile. Last frame's geometry is kept for opening
+    -- and closing it: the name buttons' colour stripe, and the row.
+    if bay then
+      local wx, wy = ImGui.GetWindowPos(ctx)
+      local ww, wh = ImGui.GetWindowSize(ctx)
+      -- the name buttons: under the strips in mixer view, the row's top in
+      -- channel view; the bay (when open) is under them, at the row's foot
+      local nb_top = strips and (org_y + inner_h - C.STRIP_H - lift + 4) or org_y
+      local nb_bot = nb_top + C.STRIP_H - 8
+      bay.remember({ wx, nb_bot - C.COLOUR_STRIPE - 3, wx + ww, nb_bot + 3 }, { wx, wy, wx + ww, wy + wh })
+      if lift > 0 then
+        local hw_x = org_x + x_off + 12
+        x_off = x_off + 12 + bay.hw_width()
+        bay.draw(ctx, {
+          list = list, rects = rects, row_x = org_x, row_y = org_y,
+          strips_h = strips and math.max(0, inner_h - C.STRIP_H - lift) or 0, bay_h = lift,
+          bay_y = org_y + inner_h - lift, bay_cy = row_y + inner_h - lift,
+          width = x_off, hw_x = hw_x, cx = 0, cy = row_y,
+          sel = function(tr) return tr ~= nil and (MX.selected(tr) or tr == cur_track) end,
+        })
+      end
     end
 
     -- A drag in progress. Over the outer quarters of a strip it's a move

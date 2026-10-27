@@ -18,6 +18,7 @@
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local PR = require("TS_CV_Presets")
 
 local ImGui
@@ -178,6 +179,7 @@ function PU.draw(ctx)
   if d.mode == "default" then
     ImGui.TextWrapped(ctx, "Saved as a preset, and loaded whenever this plugin is added.")
   end
+  ST.caption(ctx, "Name")
   if d.focus then ImGui.SetKeyboardFocusHere(ctx); d.focus = false end
   ImGui.SetNextItemWidth(ctx, 320)
   local ch, v = ImGui.InputTextWithHint(ctx, "##pname", "preset name", d.name)
@@ -189,14 +191,14 @@ function PU.draw(ctx)
   if addr and d.mode ~= "rename" then
     local info = PR.list(d.track, addr)
     if #info.user > 0 then
-      ImGui.TextDisabled(ctx, "or replace one of yours:")
+      ST.caption(ctx, "Or replace one of yours")
       preset_list(ctx, "##pdlist", info.user, d.name, info.default, function(n) d.name = n end, 320)
     end
   end
 
   local function close() dlg = nil; ImGui.CloseCurrentPopup(ctx) end
   local label = (d.mode == "rename") and "Rename" or "Save"
-  if ImGui.Button(ctx, label, 90) or enter then
+  if ST.button(ctx, label, "main", 90) or enter then
     local name = U.trim(d.name)
     if not addr then
       err("The plugin isn't there any more."); close()

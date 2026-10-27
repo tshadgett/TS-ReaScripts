@@ -15,6 +15,7 @@ local C   = require("TS_CV_Config")
 local ED  = require("TS_CV_Edition")
 local U   = require("TS_CV_Util")
 local W   = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local T   = require("TS_CV_FXTree")
 local M   = require("TS_CV_Mappings")
 local TL  = ED.module("TS_CV_Tiles")
@@ -1875,7 +1876,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     if ImGui.BeginPopup(ctx, "wetpop##" .. fx.guid) then
       ImGui.TextDisabled(ctx, "Wet")
       ImGui.SetNextItemWidth(ctx, 160)
-      local ch, nv = ImGui.SliderDouble(ctx, "##wet", wet_v * 100, 0, 100, "%.0f%%")
+      local ch, nv = ST.slider_double(ctx, "##wet", wet_v * 100, 0, 100, "%.0f%%")
       if ch then reaper.TrackFX_SetParam(track, fx.addr, wet_p, nv / 100) end
       ImGui.EndPopup(ctx)
     end
@@ -3818,9 +3819,9 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   local is_eq = own_eq(key)
   -- ReaComp's panel is its own canvas, with its own meters beside it
   local is_rc = own_rc(key)
-  if is_eq or is_rc or is_trim then own_layout[key] = layout end
   -- the TS_CV Trimmer: meters, trims and filters of its own
   local is_trim = own_trim(key)
+  if is_eq or is_rc or is_trim then own_layout[key] = layout end
   -- ReaEQ has nothing to meter -- T.reports_gr would already say no for
   -- it, but skipping the check entirely is one fewer FX-parameter scan
   -- for the one plugin type that's never going to answer yes.

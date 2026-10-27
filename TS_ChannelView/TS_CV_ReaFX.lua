@@ -32,7 +32,8 @@ local RB = {}
 -- ReaComp's (TS_CV_EQPanel, TS_CV_CompPanel), and the canvases here. That
 -- is their Standard layout; any other layout of theirs (Layout > Copy to
 -- new layout, New empty layout, New canvas layout) is a normal one.
-RB.PANELS = { ReaEQ = true, ReaComp = true, ReaGate = true, ReaLimit = true, ReaDelay = true, ReaVerbate = true }
+RB.PANELS = { ReaEQ = true, ReaComp = true, ReaGate = true, ReaLimit = true, ReaDelay = true, ReaVerbate = true,
+              ReaXcomp = true, ReaSynth = true }
 local function base_of(key) return (M.split_variant and select(1, M.split_variant(key or ""))) or key end
 function RB.has_panel(key) return RB.PANELS[base_of(key) or ""] == true end
 -- ReaEQ's / ReaComp's own panel is shown: their Standard layout
@@ -45,6 +46,8 @@ function RB.kind(key)
   if base == "ReaVerbate" then return "reaverbate" end
   if base == "ReaGate" then return "reagate" end
   if base == "ReaLimit" then return "realimit" end
+  if base == "ReaXcomp" then return "reaxcomp" end
+  if base == "ReaSynth" then return "reasynth" end
   return nil
 end
 
@@ -59,7 +62,46 @@ RB.DEFAULT_CANVAS = {
                side = {} },
   realimit = { kind = "limit", roles = { Threshold = "threshold", Ceiling = "ceiling", Release = "release" },
                anywhere = { Ceiling = true } },
+  -- ReaXcomp: its bands' controls are "<k>-Threshold" and so on, as many
+  -- bands as it has (RB.banded_roles); its band's top frequency is the
+  -- crossover above it; Active, turned round, its bypass
+  reaxcomp = { kind = "multi", banded = true, need = "B1Threshold", side = {} },
+  -- ReaSynth: its ADSR on the envelope canvas, the oscillator beside it
+  reasynth = { kind = "env", roles = { Attack = "attack", Decay = "decay", Sustain = "sustain", Release = "release",
+                                       Square = "square mix", Saw = "saw mix", Triangle = "triangle mix",
+                                       Sine2 = "extra sine mix", Sine2Tune = "extra sine tuning", PulseWidth = "pulse width",
+                                       Detune = "global detune", Portamento = "portamento", Volume = "volume" },
+               need = "Attack" },
 }
+
+-- ReaXcomp's roles from its names: band k's "<k>-<name>". Returns the
+-- roles, the turned-round ones, and how many bands.
+RB.XCOMP = { ["threshold"] = "Threshold", ["ratio"] = "Ratio", ["knee"] = "Knee", ["attack"] = "Attack",
+             ["release"] = "Release", ["gain"] = "Gain", ["rms"] = "RMS", ["make up gain"] = "AutoMakeup",
+             ["auto release"] = "AutoRelease", ["feedback detector"] = "Feedback", ["active"] = "Bypass" }
+function RB.banded_roles(names)
+  local roles, rev, nb, tops = {}, {}, 0, {}
+  for p = 0, #names do
+    local k, rest = (names[p] or ""):match("^(%d+)%-(.+)$")
+    k = tonumber(k)
+    if k and k >= 1 then
+      rest = rest:lower()
+      if rest == "band top frequency" then tops[k] = p
+      else
+        local r = RB.XCOMP[rest]
+        if r and k <= M.MB_MAX then
+          roles["B" .. k .. r] = p
+          if r == "Bypass" then rev["B" .. k .. r] = true end
+        end
+      end
+      if k > nb then nb = k end
+    end
+  end
+  nb = math.min(nb, M.MB_MAX)
+  -- the crossovers: each band's top but the last's
+  for k = 1, nb - 1 do roles["Crossover" .. k] = tops[k] end
+  return roles, rev, nb
+end
 
 -- Role -> parameter for `kind` from the plugin's parameter names
 -- (`names[p]`, 0-based).
@@ -91,6 +133,19 @@ local function param_names(track, addr, guid)
   return names
 end
 
+-- ReaXcomp's bands as it has them now: a preset (or its own Add band /
+-- Remove band) changes how many, and its parameters with them
+function RB.follow_bands(track, addr, guid, layout)
+  local cv = layout.canvas
+  if not (cv and cv.kind == "multi") then return layout end
+  local np = reaper.TrackFX_GetNumParams(track, addr) or 0
+  if cv.seen_np == np and cv.seen_guid == guid then return layout end
+  local roles, rev, nb = RB.banded_roles(param_names(track, addr, guid))
+  if roles.B1Threshold then cv.roles, cv.rev, cv.nb = roles, rev, nb end
+  cv.seen_np, cv.seen_guid = np, guid
+  return layout
+end
+
 -- A default layout (never a saved one) for ReaGate or ReaLimit, given its
 -- canvas: the roles found, and beside the canvas only the controls it
 -- doesn't already show.
@@ -99,9 +154,11 @@ function RB.default_canvas(track, addr, guid, kind, layout)
   if not (d and layout) or layout.canvas then return layout end
   -- canvases are Pro: without it the default keeps every control
   if not require("TS_CV_Edition").PRO then return layout end
-  local roles = RB.roles_by_name(kind, param_names(track, addr, guid))
-  if not roles.Threshold then return layout end
-  layout.canvas = { kind = d.kind, roles = roles, rev = {} }
+  local roles, rev, nb
+  if d.banded then roles, rev, nb = RB.banded_roles(param_names(track, addr, guid))
+  else roles, rev = RB.roles_by_name(kind, param_names(track, addr, guid)), {} end
+  if not roles[d.need or "Threshold"] then return layout end
+  layout.canvas = { kind = d.kind, roles = roles, rev = rev, nb = nb }
   if d.side then
     -- beside it, the controls named (the rest stay in the plugin's window)
     local names, keep = param_names(track, addr, guid), {}
@@ -154,6 +211,7 @@ function RB.ensure(track, addr, guid, key, layout)
   if M.split_variant and select(2, M.split_variant(key or "")) then return layout end
   local kind = RB.kind(key)
   if not kind then return layout end
+  if kind == "reaxcomp" then return RB.follow_bands(track, addr, guid, layout) end
   if RB.DEFAULT_CANVAS[kind] then return layout end     -- (theirs: RB.default_canvas)
   local want = (kind == "readelay") and "delay" or "reverb"
   local cv = layout.canvas
@@ -323,6 +381,95 @@ function RB.remove_tap(track, addr, k)
     table.remove(taps, k)
     return taps
   end)
+end
+
+-- ---------------------------------------------------------------------
+-- ReaXcomp's bands, added and taken away
+-- ---------------------------------------------------------------------
+-- Its state: a band's size and how many bands (little-endian ints), each
+-- band's record (its top frequency the first double, Hz; the last band's
+-- the top of the range), then a few settings of its own. Its own Add band
+-- puts a copy of a band below it, topped between the two; Remove band
+-- takes the record out, the band above taking its range.
+function RB.xcomp_split(raw)
+  if #raw < 8 then return nil end
+  local bsz, nb = string.unpack("<i4<i4", raw)
+  if bsz < 16 or bsz > 512 or nb < 1 or nb > 64 or #raw < 8 + nb * bsz then return nil end
+  local bands = {}
+  for k = 1, nb do bands[k] = raw:sub(9 + (k - 1) * bsz, 8 + k * bsz) end
+  return bands, bsz, raw:sub(9 + nb * bsz)
+end
+function RB.xcomp_join(bands, bsz, tail)
+  return string.pack("<i4<i4", bsz, #bands) .. table.concat(bands) .. tail
+end
+local function top_of(b) return (string.unpack("<d", b)) end
+local function with_top(b, f) return string.pack("<d", f) .. b:sub(9) end
+
+-- band k in two: a copy below it, topped halfway (on a log scale) from
+-- the band below's top (20 Hz for the first)
+function RB.xcomp_split_band(bands, k)
+  local b = bands[k]
+  if not b then return nil end
+  local lo = (k > 1) and top_of(bands[k - 1]) or 20
+  local hi = top_of(b)
+  if hi <= lo * 1.05 then return nil end
+  table.insert(bands, k, with_top(b, math.sqrt(math.max(1, lo) * hi)))
+  return bands
+end
+-- band k out: the band above takes its range; the last one's top passes
+-- to the band below
+function RB.xcomp_remove_band(bands, k)
+  if #bands <= 1 or not bands[k] then return nil end
+  if k == #bands then bands[k - 1] = with_top(bands[k - 1], top_of(bands[k])) end
+  table.remove(bands, k)
+  return bands
+end
+
+-- Whether band k's controls and every one after them can move: adding or
+-- taking away a band shifts them, so none may have automation, a link or
+-- a modulator. Returns ok, why not.
+function RB.xcomp_can_change(track, addr, guid, k)
+  local names = param_names(track, addr, guid)
+  local first
+  for p = 0, #names do
+    local b = tonumber((names[p] or ""):match("^(%d+)%-"))
+    if b and b >= k then first = p break end
+  end
+  if not first then return false, "No such band" end
+  for p = first, #names do
+    if reaper.GetFXEnvelope and reaper.GetFXEnvelope(track, addr, p, false) then
+      return false, "Automation on this band or a later one: it would land on the wrong controls"
+    end
+    for _, key in ipairs({ "plink.active", "mod.active" }) do
+      local ok, v = reaper.TrackFX_GetNamedConfigParm(track, addr, ("param.%d.%s"):format(p, key))
+      if ok and v == "1" then
+        return false, "A link or modulator on this band or a later one: it would land on the wrong control"
+      end
+    end
+  end
+  return true
+end
+
+local function xcomp_rewrite(track, addr, label, fn)
+  local ok, c = reaper.TrackFX_GetNamedConfigParm(track, addr, "vst_chunk")
+  if not ok then return false end
+  local bands, bsz, tail = RB.xcomp_split(RB.b64dec(c))
+  if not bands then return false end
+  bands = fn(bands)
+  if not bands then return false end
+  reaper.Undo_BeginBlock()
+  local done = reaper.TrackFX_SetNamedConfigParm(track, addr, "vst_chunk", RB.b64enc(RB.xcomp_join(bands, bsz, tail)))
+  reaper.Undo_EndBlock(label, -1)
+  return done
+end
+function RB.xcomp_split_at(track, addr, k)
+  return xcomp_rewrite(track, addr, "ReaXcomp: split band " .. k, function(b)
+    if #b >= M.MB_MAX then return nil end
+    return RB.xcomp_split_band(b, k)
+  end)
+end
+function RB.xcomp_remove_at(track, addr, k)
+  return xcomp_rewrite(track, addr, "ReaXcomp: remove band " .. k, function(b) return RB.xcomp_remove_band(b, k) end)
 end
 
 return RB

@@ -573,17 +573,23 @@ M.ROLES = {
             "Offset", "Ratio", "FeedbackR", "Cross", "Width", "Link", "LowCut", "HighCut", "Mix", "Dry" },
   reverb = { "Predelay", "Decay", "Size", "Balance", "Early", "Diffusion", "LowFreq", "Bass", "HighFreq", "Damping",
              "Tone", "LowEQ", "HighEQ", "LowCutOn", "HighCutOn", "LowCut", "HighCut", "Style", "Freeze", "Mix" },
-  env = { "Delay", "Attack", "Hold", "Decay", "Sustain", "Release", "AttackCurve", "DecayCurve", "ReleaseCurve" },
+  -- (a synth's oscillator too: its waves' mix, the extra sine and its
+  -- tuning, pulse width, detune, portamento, volume -- drawn over it)
+  env = { "Delay", "Attack", "Hold", "Decay", "Sustain", "Release", "AttackCurve", "DecayCurve", "ReleaseCurve",
+          "Square", "Saw", "Triangle", "Sine2", "Sine2Tune", "PulseWidth", "Detune", "Portamento", "Volume" },
   mod = { "Rate", "Depth", "Shape", "Phase", "Delay", "Feedback", "Mix", "Voices" },
   sat = { "Drive", "Style", "Tone", "Tone2", "Output", "Mix" },
 }
 -- A multiband compressor: up to M.MB_MAX bands, each with the compressor's
 -- roles (named B<k><role>), the crossovers between them, and its output.
-M.MB_MAX = 4
+M.MB_MAX = 8
 -- Low / High: the band's own edges, for a plugin whose bands each have
 -- theirs (FabFilter Pro-MB) rather than crossovers between them; Used:
 -- whether the band is in use (a plugin with more band slots than bands)
-M.MB_BAND_ROLES = { "Low", "High", "Threshold", "Ratio", "Knee", "Attack", "Release", "Gain", "Solo", "Bypass", "Used" }
+-- AutoMakeup / AutoRelease / Feedback: a band's own switches (ReaXcomp's),
+-- RMS its detector's averaging, a small slider in its strip
+M.MB_BAND_ROLES = { "Low", "High", "Threshold", "Ratio", "Knee", "Attack", "Release", "Gain", "Solo", "Bypass", "Used",
+                    "RMS", "AutoMakeup", "AutoRelease", "Feedback" }
 do
   local r = {}
   for k = 1, M.MB_MAX - 1 do r[#r + 1] = "Crossover" .. k end
@@ -2112,7 +2118,7 @@ function M.get_or_default(key, track, addr, cache_id)
     elseif kind == "reaverbate" then
       d = { controls = { { param = 1, type = "knob", label = "" }, { param = 4, type = "knob", label = "", bipolar = true } }, aliases = {} }
     else d = M.build_default(track, addr) end
-    -- ReaGate's and ReaLimit's start with a canvas
+    -- ReaGate's, ReaLimit's, ReaXcomp's and ReaSynth's start with a canvas
     if RB.DEFAULT_CANVAS[kind or ""] then d = RB.default_canvas(track, addr, cache_id, kind, d) end
     def_cache[id] = d
   end

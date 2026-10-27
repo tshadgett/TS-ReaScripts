@@ -54,8 +54,8 @@ PL.F = {
   vis_pre  = { off = 5, leg = 4 },        -- Visualizer slot + 1 (old: slot, -1 none)
   vis_post = { off = 6, leg = 4 },
   tap_n    = { off = 8,  leg = 5 },
-  lag      = { off = 9,  leg = 6,  n = 4 },
-  rst      = { off = 13, leg = 10, n = 4 },
+  lag      = { off = 9,  leg = 6,  n = 4, off2 = 50 },   -- off2: taps 5..8 (a probe that takes eight)
+  rst      = { off = 13, leg = 10, n = 4, off2 = 54 },
   gen      = { off = 17, leg = 22 },
   arm      = { off = 18, leg = 23 },
   nogr     = { off = 19, leg = 24 },
@@ -64,15 +64,20 @@ PL.F = {
   fine     = { off = 24, leg = 49 },
   ack_pre  = { off = 32 },
   ack_post = { off = 33 },
-  gr       = { off = 64, leg = 14, n = 4 },
-  cal      = { off = 68, leg = 18, n = 4 },
-  inpk     = { off = 72, leg = 25, n = 4 },
-  outpk    = { off = 76, leg = 29, n = 4 },
-  inrms    = { off = 80, leg = 33, n = 4 },
-  outrms   = { off = 84, leg = 37, n = 4 },
+  gr       = { off = 64, leg = 14, n = 4, off2 = 97 },
+  cal      = { off = 68, leg = 18, n = 4, off2 = 101 },
+  inpk     = { off = 72, leg = 25, n = 4, off2 = 105 },
+  outpk    = { off = 76, leg = 29, n = 4, off2 = 109 },
+  inrms    = { off = 80, leg = 33, n = 4, off2 = 113 },
+  outrms   = { off = 84, leg = 37, n = 4, off2 = 117 },
   mbgr     = { off = 88, leg = 45, n = 4 },
   mbl      = { off = 92, leg = 50, n = 4 },
 }
+-- A field's place in the block: the i-th (0-based) of it, taps 5..8 apart
+local function at(f, i)
+  if f.off2 and i >= f.n then return f.off2 + i - f.n end
+  return f.off + i
+end
 PL.LEG_ROLE, PL.LEG_REL, PL.LEG_VIS = 0, 2, 3
 
 local attached = false
@@ -128,7 +133,7 @@ function PL.get(tr, fx, field, i)
   end
   local b = PL.block(tr)
   if not b then return 0 end
-  return rd(b + f.off + i)
+  return rd(b + at(f, i))
 end
 
 -- Only when it changes: on an old probe a write is a parameter change,
@@ -144,7 +149,7 @@ function PL.set(tr, fx, field, i, v)
     return
   end
   local b = PL.block(tr)
-  if b then wr(b + f.off + i, v) end
+  if b then wr(b + at(f, i), v) end
 end
 
 -- The old probe's role slider (0 pre, 1 post, 2 comparison); nil for a
@@ -221,6 +226,7 @@ function PL.tick()
       local b = PL.BASE + (m.from + 1) * PL.STRIDE
       write_names(b, 0, 0)
       for k = PL.F.pub_pre.off, PL.F.fine.off do wr(b + k, 0) end
+      for k = PL.F.lag.off2, PL.F.rst.off2 + 3 do wr(b + k, 0) end
     end
   end
   for _, e in pairs(named) do

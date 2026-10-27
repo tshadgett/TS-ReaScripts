@@ -42,6 +42,13 @@ local TP = require("TS_CV_Taps")
 local Tr = {}
 
 local TW_BASE, TW_HDR, TW_COLS = 0x54000, 0x5C000, 2048
+local TW_BASE2 = 0x208000      -- taps 5..8 (a probe that takes eight)
+local TAPS = 8
+-- tap t's (1-based) column c
+local function tw_at(t, c)
+  if t <= 4 then return TW_BASE + ((t - 1) * TW_COLS + c) * 4 end
+  return TW_BASE2 + ((t - 5) * TW_COLS + c) * 4
+end
 Tr.COLS = TW_COLS
 
 local frame_no = 0
@@ -52,7 +59,7 @@ function Tr.begin_frame() frame_no = frame_no + 1 end
 -- frame are read, so an open trace costs a handful of reads a frame, not
 -- the 8000 a full window would.
 local tw = { n = -1, cur = 0, writer = -1, moved = -10, live = false, frame = -1 }
-for t = 1, 4 do tw[t] = { mn = {}, mx = {}, ip = {}, gr = {} } end
+for t = 1, TAPS do tw[t] = { mn = {}, mx = {}, ip = {}, gr = {} } end
 
 local function tw_sync()
   if tw.frame == frame_no then return tw.live end
@@ -69,13 +76,16 @@ local function tw_sync()
   local stopped = (reaper.GetPlayState() & 1) == 0
   tw.live = tw.slice > 0 and tw.sr > 0
             and ((now - tw.moved) < 0.5 or (stopped and n > 0))
+  -- the taps the writer has (an older probe doesn't say: four)
+  local taps = math.floor(rd(TW_HDR + 6) or 0)
+  taps = (taps >= 1 and taps <= TAPS) and taps or 4
   if n ~= tw.n or writer ~= tw.writer then
     local todo = n - tw.n
     if tw.n < 0 or writer ~= tw.writer or todo < 0 or todo >= TW_COLS then todo = TW_COLS end
     for k = todo - 1, 0, -1 do
       local c = (cur - k) % TW_COLS
-      for t = 1, 4 do
-        local b, d = TW_BASE + ((t - 1) * TW_COLS + c) * 4, tw[t]
+      for t = 1, taps do
+        local b, d = tw_at(t, c), tw[t]
         d.mn[c], d.mx[c], d.ip[c], d.gr[c] = rd(b), rd(b + 1), rd(b + 2), rd(b + 3)
       end
     end

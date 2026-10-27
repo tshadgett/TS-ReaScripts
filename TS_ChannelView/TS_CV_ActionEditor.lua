@@ -25,6 +25,7 @@
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local TB = require("TS_CV_Toolbar")
 local DR = require("TS_CV_Drawers")
 local FB = require("TS_CV_FXButtons")
@@ -385,22 +386,16 @@ local function bar_settings(ctx, bar)
   flow_begin()
   if st.name_for ~= d then st.name_for, st.name_buf = d, d.name or "" end
   flow(ctx, "name")
-  ImGui.BeginGroup(ctx)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, "Name")
-  ImGui.SameLine(ctx)
-  ImGui.SetNextItemWidth(ctx, 150)
+  ST.cap(ctx, "Name")
+  ImGui.SetNextItemWidth(ctx, 170)
   local changed, v = ImGui.InputText(ctx, "##aedrname", st.name_buf)
   if changed then st.name_buf = v end
   if ImGui.IsItemDeactivatedAfterEdit(ctx) then d.name = TB.clean(st.name_buf); DR.save() end
-  ImGui.EndGroup(ctx)
+  ST.done(ctx)
   measure(ctx, "name")
 
   flow(ctx, "place", 14)
-  ImGui.BeginGroup(ctx)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, "Place")
-  ImGui.SameLine(ctx)
+  ST.cap(ctx, "Place")
   ImGui.SetNextItemWidth(ctx, 190)
   if ImGui.BeginCombo(ctx, "##aeplace", DR.SIDE_NAME[d.side]) then
     for _, p in ipairs(DR.PLACES) do
@@ -411,13 +406,15 @@ local function bar_settings(ctx, bar)
     end
     ImGui.EndCombo(ctx)
   end
-  ImGui.EndGroup(ctx)
+  ST.done(ctx)
   measure(ctx, "place")
 
   local shown = DR.DRAWER[d.side] or d.side == "window"
   if shown then
     flow(ctx, "open", 14)
-    local c1, open = ImGui.Checkbox(ctx, "Open##aedropen", d.open)
+    ST.cap(ctx)
+    local c1, open = ST.checkbox(ctx, "Open##aedropen", d.open)
+    ST.done(ctx)
     measure(ctx, "open")
     if c1 then
       d.open = open; DR.save()
@@ -426,21 +423,15 @@ local function bar_settings(ctx, bar)
   end
   if d.side ~= "web" then
     flow(ctx, "style", 14)
-    ImGui.BeginGroup(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, "Buttons")
-    ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Icons and labels##aest", d.style == "both") then d.style = "both"; DR.save() end
-    ImGui.SameLine(ctx, 0, 6)
-    if ImGui.RadioButton(ctx, "Icons##aest", d.style == "icons") then d.style = "icons"; DR.save() end
-    ImGui.EndGroup(ctx)
+    ST.cap(ctx, "Buttons")
+    local pick = ST.seg(ctx, "##aest", { { "Icons and labels", "both" }, { "Icons", "icons" } },
+      d.style == "icons" and "icons" or "both")
+    ST.done(ctx)
+    if pick then d.style = pick; DR.save() end
     measure(ctx, "style")
 
     flow(ctx, "size", 14)
-    ImGui.BeginGroup(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, "Size")
-    ImGui.SameLine(ctx)
+    ST.cap(ctx, "Size")
     ImGui.SetNextItemWidth(ctx, 110)
     local cur = d.size or DR.SIZE_DEF
     local cur_name = cur .. " px"
@@ -451,54 +442,36 @@ local function bar_settings(ctx, bar)
       end
       ImGui.EndCombo(ctx)
     end
-    ImGui.EndGroup(ctx)
+    ST.done(ctx)
     measure(ctx, "size")
   end
   local across, updown = DR.aligns(d)
-  if across or updown then
-    flow(ctx, "align", 14)
-    ImGui.BeginGroup(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, "Align")
-    local function combo(id, list, cur, usual, set)
-      ImGui.SameLine(ctx)
-      ImGui.SetNextItemWidth(ctx, 84)
-      local name = usual
-      for _, a in ipairs(list) do if a[2] == cur then name = a[1] end end
-      if ImGui.BeginCombo(ctx, id, name) then
-        for _, a in ipairs(list) do
-          if ImGui.Selectable(ctx, a[1] .. id .. a[2], cur == a[2]) then set(a[2]); DR.save() end
-        end
-        ImGui.EndCombo(ctx)
-      end
-    end
-    if across then combo("##aeha", DR.HALIGN, d.halign or "-", "Left", function(v) d.halign = v end) end
-    if updown then
-      local column = d.side == "left" or d.side == "right"
-      combo("##aeva", DR.VALIGN, d.valign or "-", column and "Top" or "Centre", function(v) d.valign = v end)
-    end
-    ImGui.EndGroup(ctx)
-    measure(ctx, "align")
+  if across then
+    flow(ctx, "across", 14)
+    ST.cap(ctx, "Across")
+    local pick = ST.seg(ctx, "##aeha", DR.HALIGN, d.halign or "l")
+    ST.done(ctx)
+    if pick then d.halign = pick; DR.save() end
+    measure(ctx, "across")
+  end
+  if updown then
+    local column = d.side == "left" or d.side == "right"
+    flow(ctx, "updown", 14)
+    ST.cap(ctx, "Up and down")
+    local pick = ST.seg(ctx, "##aeva", DR.VALIGN, d.valign or (column and "t" or "c"))
+    ST.done(ctx)
+    if pick then d.valign = pick; DR.save() end
+    measure(ctx, "updown")
   end
   flow(ctx, "cstyle", 14)
-  ImGui.BeginGroup(ctx)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, "Colours")
-  ImGui.SameLine(ctx)
-  ImGui.SetNextItemWidth(ctx, 120)
-  if ImGui.BeginCombo(ctx, "##aecs", d.cstyle == "i" and "Coloured icons" or "Underlines") then
-    if ImGui.Selectable(ctx, "Underlines##aecsu", d.cstyle ~= "i") then d.cstyle = "u"; DR.save() end
-    if ImGui.Selectable(ctx, "Coloured icons##aecsi", d.cstyle == "i") then d.cstyle = "i"; DR.save() end
-    ImGui.EndCombo(ctx)
-  end
-  ImGui.EndGroup(ctx)
+  ST.cap(ctx, "Colours")
+  local cpick = ST.seg(ctx, "##aecs", { { "Underlines", "u" }, { "Coloured icons", "i" } }, d.cstyle == "i" and "i" or "u")
+  ST.done(ctx)
+  if cpick then d.cstyle = cpick; DR.save() end
   measure(ctx, "cstyle")
   if d.side == "window" then
     flow(ctx, "dock", 14)
-    ImGui.BeginGroup(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, "Dock")
-    ImGui.SameLine(ctx)
+    ST.cap(ctx, "Dock")
     ImGui.SetNextItemWidth(ctx, 110)
     local cur_name = "Floating"
     for _, k in ipairs(DR.DOCKS) do if k[2] == (d.dock or 0) then cur_name = k[1] end end
@@ -508,20 +481,19 @@ local function bar_settings(ctx, bar)
       end
       ImGui.EndCombo(ctx)
     end
-    ImGui.EndGroup(ctx)
+    ST.done(ctx)
     measure(ctx, "dock")
     -- on a line of its own: its swatches wrap to the panel's width
-    ImGui.BeginGroup(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, "Background")
-    ImGui.SameLine(ctx)
+    ST.cap(ctx, "Background")
     DR.bg_items(ctx, d, true)
-    ImGui.EndGroup(ctx)
+    ST.done(ctx)
     measure(ctx, "bg")
   end
   if not DR.SINGLE[d.side] then
     flow(ctx, "remove", 14)
-    local rm = ImGui.SmallButton(ctx, "Remove the bar\u{2026}")
+    ST.cap(ctx)
+    local rm = ST.button(ctx, "Remove the bar\u{2026}", "remove")
+    ST.done(ctx)
     measure(ctx, "remove")
     if rm then
       if reaper.MB(("Remove \"%s\" and its buttons?"):format(d.name or ""), "ChannelView", 4) == 6 then
@@ -553,7 +525,7 @@ local function item_props(ctx, tb, web)
       ImGui.Text(ctx, "Menu")
       ImGui.TextDisabled(ctx, ("%d inside. Clicking it opens it."):format(#it.items))
       if not web then
-        local chg, v = ImGui.Checkbox(ctx, "Large submenus##aelarge", it.large == true)
+        local chg, v = ST.checkbox(ctx, "Large submenus##aelarge", it.large == true)
         if chg then it.large = v or nil; tb.save() end
         if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its submenus shown as buttons, like the bar's.") end
       end
@@ -625,7 +597,7 @@ local function item_props(ctx, tb, web)
     end
     ImGui.Spacing(ctx)
     if st.label_for ~= it then st.label_for, st.label_buf = it, it.label or "" end
-    ImGui.Text(ctx, "Label")
+    ST.caption(ctx, "Label")
     ImGui.SetNextItemWidth(ctx, -1)
     local hint = it.menu and "Menu" or ((TB.switch_of(it) or FB.kind(it)) and tb.text_of({ cmd = it.cmd, label = "" }))
                  or (TB.action_name(TB.resolve(it.cmd)) or "")
@@ -634,24 +606,24 @@ local function item_props(ctx, tb, web)
     if ImGui.IsItemDeactivatedAfterEdit(ctx) then it.label = TB.clean(st.label_buf); tb.save() end
     ImGui.Spacing(ctx)
     do
-      ImGui.Text(ctx, "Colour")
+      ST.caption(ctx, "Colour")
       tb.colour_row(ctx, it, "aecap", true)
       ImGui.Spacing(ctx)
     end
     -- a plugin's own look, over its vendor's (TS_CV_Vendors)
     if FB.kind(it) == "fx" then
-      ImGui.Text(ctx, "Vendor look")
+      ST.caption(ctx, "Vendor look")
       tb.vendor_look(ctx, it, "aevo")
       ImGui.Spacing(ctx)
     end
     -- an FX chain: added, in place of the plugins, or asked each time
     if FB.kind(it) == "chain" then
-      ImGui.Text(ctx, "When clicked")
+      ST.caption(ctx, "When clicked")
       tb.chain_mode(ctx, it, "aecm")
       ImGui.Spacing(ctx)
     end
     do
-      ImGui.Text(ctx, web and "Icon (the web shows ChannelView's own)" or "Icon")
+      ST.caption(ctx, web and "Icon (the web shows ChannelView's own)" or "Icon")
       local dl = ImGui.GetWindowDrawList(ctx)
       local x, y = ImGui.GetCursorScreenPos(ctx)
       ImGui.Dummy(ctx, 28, 24)
@@ -663,9 +635,7 @@ local function item_props(ctx, tb, web)
       ImGui.SameLine(ctx)
       if ImGui.Button(ctx, "Choose\u{2026}##aeicon") then tb.open_icons(it, "ae") end
       ImGui.SameLine(ctx)
-      ImGui.BeginDisabled(ctx, it.icon == "")
-      if ImGui.Button(ctx, "None##aeicon") then it.icon = ""; tb.save() end
-      ImGui.EndDisabled(ctx)
+      if ST.button(ctx, "None##aeicon", nil, nil, nil, { dim = it.icon == "" }) then it.icon = ""; tb.save() end
     end
   end
   ImGui.Spacing(ctx); ImGui.Separator(ctx); ImGui.Spacing(ctx)
@@ -684,7 +654,7 @@ local function item_props(ctx, tb, web)
     ImGui.EndPopup(ctx)
   end
   ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Remove##aerm") then remove_item(tb, it) end
+  if ST.button(ctx, "Remove##aerm", "remove") then remove_item(tb, it) end
   W.tip(ctx, "aerm", "Or Alt+click its row", ImGui.IsItemHovered(ctx), false)
 end
 
@@ -831,7 +801,7 @@ local function vendor_colour(ctx)
   if c then keep(c) end
   if not done and #CPk.recent > 0 then
     ImGui.Spacing(ctx)
-    ImGui.TextDisabled(ctx, "Recent")
+    ST.caption(ctx, "Recent")
     local r = CPk.recent_row(ctx, "aevp")
     if r then keep(r) end
   end
@@ -842,7 +812,7 @@ local function vendor_colour(ctx)
     CPk.any_colour(ctx, p.s, "aevp")
     ImGui.EndGroup(ctx)
     ImGui.Spacing(ctx)
-    if ImGui.Button(ctx, "Apply##aevp") then keep(p.s.rgb) end
+    if ST.button(ctx, "Apply##aevp", "main") then keep(p.s.rgb) end
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel##aevp") then done = true end
   end
@@ -1020,10 +990,10 @@ draw_share = function(ctx)
   local function close() share = nil; ImGui.CloseCurrentPopup(ctx) end
   if d.mode == "import" then
     ImGui.TextDisabled(ctx, U.truncate(d.file:match("[^\\/]+$") or d.file, 60))
-    ImGui.TextWrapped(ctx, "Tick the bars to bring in. One with the name of one of yours replaces its buttons; " ..
+    ImGui.TextWrapped(ctx, "Pick the bars to bring in. One with the name of one of yours replaces its buttons; " ..
       "the others come in as new bars, where they were.")
   else
-    ImGui.TextWrapped(ctx, "Tick the bars to export: their buttons, menus and where they sit.")
+    ImGui.TextWrapped(ctx, "Pick the bars to export: their buttons, menus and where they sit.")
   end
   ImGui.Spacing(ctx)
   local function can(e) return not (d.mode == "import" and e.status == "same") end
@@ -1034,10 +1004,8 @@ draw_share = function(ctx)
   if ImGui.BeginChild(ctx, "##aesharelist", 400, math.min(#d.list, 12) * (line_h + 8) + 8, ImGui.ChildFlags_Borders) then
     for i, e in ipairs(d.list) do
       local name = d.mode == "export" and ((e.d.name ~= "" and e.d.name) or ("Bar " .. e.d.id)) or (e.name ~= "" and e.name or "Bar")
-      ImGui.BeginDisabled(ctx, not can(e))
-      local ch, v = ImGui.Checkbox(ctx, name .. "##aesh" .. i, e.pick)
+      local ch, v = ST.checkbox(ctx, name .. "##aesh" .. i, e.pick, { dim = not can(e) })
       if ch then e.pick = v end
-      ImGui.EndDisabled(ctx)
       ImGui.SameLine(ctx)
       local place = d.mode == "export" and e.d.side or e.place
       local items = d.mode == "export" and e.d.tb.items or e.items
@@ -1054,15 +1022,14 @@ draw_share = function(ctx)
     ImGui.EndChild(ctx)
   end
   if d.mode == "import" then
-    local ch, v = ImGui.Checkbox(ctx, "Use their places (the TCP's and web bars swap in)##aeshpl", d.use_places)
+    local ch, v = ST.checkbox(ctx, "Use their places (the TCP's and web bars swap in)##aeshpl", d.use_places)
     if ch then d.use_places = v end
   end
   local picked = {}
   for _, e in ipairs(d.list) do if e.pick and can(e) then picked[#picked + 1] = e end end
   ImGui.Spacing(ctx)
-  ImGui.BeginDisabled(ctx, #picked == 0)
   local label = (d.mode == "import") and ("Import %d###aeshgo") or ("Export %d\u{2026}###aeshgo")
-  if ImGui.Button(ctx, label:format(#picked), 120) then
+  if ST.button(ctx, label:format(#picked), "main", 120, nil, { dim = #picked == 0 }) then
     if d.mode == "export" then
       local bars = {}
       for _, e in ipairs(picked) do bars[#bars + 1] = e.d end
@@ -1090,7 +1057,6 @@ draw_share = function(ctx)
       end
     end
   end
-  ImGui.EndDisabled(ctx)
   ImGui.SameLine(ctx)
   if share and ImGui.Button(ctx, "Cancel##aeshcancel", 90) then close() end
   ImGui.EndPopup(ctx)

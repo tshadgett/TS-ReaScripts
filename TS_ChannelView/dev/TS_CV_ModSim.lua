@@ -380,7 +380,7 @@ local l2 = MD.link_of(TR, comp.guid, 5)
 check("scan resolves nested", l2 and l2.mod.guid, "m1")
 check("macro link", l2.macro, true)
 local a, b = MD.range(l2)
-check("whole range", a .. " " .. b, "0 1")
+check("whole range", ("%g %g"):format(a, b), "0 1")
 MD.set_range(TR, l2, 0.25, 0.8)
 l2 = MD.link_of(TR, comp.guid, 5)
 a, b = MD.range(l2)
@@ -480,6 +480,18 @@ do
   check("automation left alone", ours.envs[0].v0, 0.1)
   ours.envs[0] = keep
   reaper.SetEnvelopePoint = sp
+end
+
+-- REAPER keeps the baseline in the parameter's own units (ReaComp's
+-- threshold 0..2, measured): read and written as 0..1 here
+do
+  local gpe = reaper.TrackFX_GetParamEx
+  reaper.TrackFX_GetParamEx = function() return 0, 0, 2, 1 end
+  check("baseline: REAPER's 0.3617 on 0..2 is 0.18", ("%.4f"):format(MD.base_norm(TR, 0, 0, 0.3617)), "0.1809")
+  check("baseline: 0.4 written as 0.8", ("%.2f"):format(MD.base_raw(TR, 0, 0, 0.4)), "0.80")
+  reaper.TrackFX_GetParamEx = function() return 0, 0, 0, 0 end
+  check("baseline: no range, as it is", ("%.2f"):format(MD.base_raw(TR, 0, 0, 0.4)), "0.40")
+  reaper.TrackFX_GetParamEx = gpe
 end
 
 -- sidechain

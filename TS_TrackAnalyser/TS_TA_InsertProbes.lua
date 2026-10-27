@@ -71,13 +71,13 @@ NAMES[#NAMES + 1] = PROBE
 local resolved = nil
 
 -- THE TAP PINS COME UNPLUGGED. Beyond its left and right, the probe has
--- sixteen inputs for ChannelView's taps (pins 2..17), and REAPER connects
+-- thirty-two inputs for ChannelView's taps (pins 2..33), and REAPER connects
 -- a new plugin's inputs to the channels of the same number. In the pin
 -- connector that reads as the probe using 3/4 and up -- a sidechain's
 -- usual pair -- though it only reads them, and only once ChannelView lays
 -- a tap (which points them where it needs). So a new probe starts with
 -- them unplugged. A probe already on a track is left as it is.
-local TAP_PINS = 16
+local TAP_PINS = 32
 
 local function unplugTaps(tr, idx)
   for pin = 2, 1 + TAP_PINS do r.TrackFX_SetPinMappings(tr, idx, 0, pin, 0, 0) end

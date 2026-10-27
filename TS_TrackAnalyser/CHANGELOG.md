@@ -1,5 +1,21 @@
 # Track Analyser — changelog
 
+## 2.6.0 — new look, TS_TrackProbe 2.3.0
+
+- **Settings in ChannelView's look:** every setting has its name above it,
+  switches are chips with a light, choices of a few are joined chips, and
+  sliders show their value at the right (double-click or Ctrl-click to
+  type one). The controls use ChannelView's accent; the response curve
+  keeps its gold.
+- **TS_TrackProbe 2.3.0:**
+  - Up to eight plugins per track measured by probe taps (four before),
+    each with its own reduction trace.
+  - The ten bands are measured by FFT, at about a quarter of the CPU.
+  - With ChannelView 3.5 running, only the tracks on screen there, or the
+    one Track Analyser shows, are measured; the rest cost nothing. Their
+    zero is still measured at every stop.
+  - Reopen the project after updating, so the new probe runs.
+
 ## 2.5.3
 
 - **Auto-hide the header no longer stops Track Analyser** with an error

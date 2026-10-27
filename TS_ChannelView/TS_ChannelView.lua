@@ -1,12 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.3.0
+-- @version 3.5.0
 -- @changelog
---  Save as track template (asks whether to keep the measurement taps), and
---  plugins keep their ChannelView settings on copied tracks. With Pro:
---  pages in Edit layout, paste into another plugin's layout by name, Copy
---  and Paste style in the right-click, layouts for REAPER's own plugins, a
---  value arc's colour, smoother knob shading. See the CHANGELOG.
+--  A new look for options and dialogs, up to eight plugins per track
+--  measured (only the tracks on screen), links shown where REAPER has them,
+--  the Channel panel's header in the track's colour, the Dock menu fixed.
+--  With Pro: the patch bay, macros and modulators on canvas handles,
+--  ReaXcomp and ReaSynth canvases. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -25,6 +25,7 @@
 --  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_MidiLearn.lua
 --  [nomain] TS_CV_Drawers.lua
+--  [nomain] TS_CV_Style.lua
 --  [nomain] TS_CV_ActionEditor.lua
 --  [nomain] TS_CV_ActionIcons.lua
 --  [main]   TS_ChannelView_Toolbars.lua
@@ -157,6 +158,7 @@ local U = require("TS_CV_Util")
 local T = require("TS_CV_FXTree")
 local M = require("TS_CV_Mappings")
 local W = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 -- Standard, or with Pro (TS_CV_Edition): Pro's modules are there only with
 -- it; without, those called from many places are stand-ins doing nothing
 local ED = require("TS_CV_Edition")
@@ -1291,8 +1293,9 @@ end
 local function brush_tick(fx, key, idx, c, kind, pl, id)
   local fin = M.part_finish(kind, pl, c.finish, c.brush) or "plain"
   local f_now = C.FINISH[fin] or C.FINISH.plain
+  ST.caption(ctx, "Finish")
   ImGui.SetNextItemWidth(ctx, 120)
-  if ImGui.BeginCombo(ctx, "Finish##" .. id, f_now.label) then
+  if ImGui.BeginCombo(ctx, "##Finish" .. id, f_now.label) then
     local dflt = M.part_brushed(kind, pl, nil) and "brushed" or "plain"
     for _, f in ipairs(C.FINISHES) do
       if ImGui.Selectable(ctx, f.label .. "##" .. id .. "_" .. f.key, fin == f.key) and kind then
@@ -1312,7 +1315,7 @@ local function brush_tick(fx, key, idx, c, kind, pl, id)
   end
   -- and/or a metallic flake (Metal<n>)
   local mt = M.part_metal(kind, c.metal)
-  local mch, mv = ImGui.Checkbox(ctx, "Metallic flake##" .. id .. "_m", mt)
+  local mch, mv = ST.checkbox(ctx, "Metallic flake##" .. id .. "_m", mt)
   if mch and kind then
     local l = materialise(fx)
     local lc = l.controls[idx]
@@ -1332,8 +1335,9 @@ local function corners_combo(fx, key, idx, c, kind, id)
   local now = M.corners_of(c.corners)
   local label = "Square"
   for _, o in ipairs(CORNER_CHOICES) do if o[1] == now then label = o[2] end end
+  ST.caption(ctx, "Corners")
   ImGui.SetNextItemWidth(ctx, 120)
-  if ImGui.BeginCombo(ctx, "Corners##" .. id, label) then
+  if ImGui.BeginCombo(ctx, "##Corners" .. id, label) then
     for _, o in ipairs(CORNER_CHOICES) do
       if ImGui.Selectable(ctx, o[2] .. "##" .. id .. "_" .. (o[1] or "square"), now == o[1]) and kind then
         local l = materialise(fx)
@@ -1939,11 +1943,9 @@ local function style_menu(fx, key, idx, c)
     -- is a look, so it's here
     ImGui.Spacing(ctx)
     local sc_now = M.scale_kind(c) or "none"
-    ImGui.BeginDisabled(ctx, sc_now == "none")
-    local rv, on = ImGui.Checkbox(ctx, "Numbers in cap colour##scale_ink", c.scale_ink == "cap")
+    local rv, on = ST.checkbox(ctx, "Numbers in cap colour##scale_ink", c.scale_ink == "cap", { dim = sc_now == "none" })
     if rv then set({ scale_ink = on and "cap" or false }) end
-    ImGui.EndDisabled(ctx)
-    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "Dial numbers in the knob's colour, not the faceplate's.")
     end
   end
@@ -2062,7 +2064,7 @@ box_menu_items = function(node)
   if wet and wet >= 0 then
     local wv = reaper.TrackFX_GetParam(tr, node.addr, wet) or 1
     ImGui.SetNextItemWidth(ctx, 150)
-    local ch, nv = ImGui.SliderDouble(ctx, "Wet##boxwet", wv * 100, 0, 100, "%.0f%%")
+    local ch, nv = ST.slider_double(ctx, "Wet##boxwet", wv * 100, 0, 100, "%.0f%%")
     if ch then reaper.TrackFX_SetParam(tr, node.addr, wet, nv / 100) end
   end
   parallel_menu(node.addr, node.parallel, node.index, "container")
@@ -2181,7 +2183,7 @@ local function panel_menu()
     if wet and wet >= 0 then
       local wv = reaper.TrackFX_GetParam(app.track, fx.addr, wet) or 1
       ImGui.SetNextItemWidth(ctx, 150)
-      local ch, nv = ImGui.SliderDouble(ctx, "Wet##fxwet", wv * 100, 0, 100, "%.0f%%")
+      local ch, nv = ST.slider_double(ctx, "Wet##fxwet", wv * 100, 0, 100, "%.0f%%")
       if ch then reaper.TrackFX_SetParam(app.track, fx.addr, wet, nv / 100) end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Wet/dry mix.\nCtrl+click: type a value.")
@@ -2754,11 +2756,11 @@ local function link_items(fx, c, param, axis)
     if l.macro then
       local a, b = MD.range(l)
       ImGui.SetNextItemWidth(ctx, 170)
-      local ca, na = ImGui.SliderDouble(ctx, "At 0%##modfrom" .. tag, a * 100, 0, 100, "%.0f%%")
+      local ca, na = ST.slider_double(ctx, "At 0%##modfrom" .. tag, a * 100, 0, 100, "%.0f%%")
       if ca then MD.set_range(app.track, l, na / 100, b) end
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Control position at macro 0%.\nCtrl+click: type a value.") end
       ImGui.SetNextItemWidth(ctx, 170)
-      local cb, nb = ImGui.SliderDouble(ctx, "At 100%##modto" .. tag, b * 100, 0, 100, "%.0f%%")
+      local cb, nb = ST.slider_double(ctx, "At 100%##modto" .. tag, b * 100, 0, 100, "%.0f%%")
       if cb then MD.set_range(app.track, l, a, nb / 100) end
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Control position at macro 100%.\nCtrl+click: type a value.") end
       if ImGui.MenuItem(ctx, "Swap the ends" .. tag) then MD.set_range(app.track, l, b, a) end
@@ -2767,15 +2769,15 @@ local function link_items(fx, c, param, axis)
     else
       ImGui.SetNextItemWidth(ctx, 170)
       local depth = math.abs(l.scale) * 100
-      local ch, nv = ImGui.SliderDouble(ctx, "Depth##moddepth" .. tag, depth, 0, 100, "%.0f%%")
+      local ch, nv = ST.slider_double(ctx, "Depth##moddepth" .. tag, depth, 0, 100, "%.0f%%")
       if ch then MD.set_depth(app.track, l, (l.scale < 0 and -1 or 1) * nv / 100) end
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Modulation amount.\nCtrl+click: type a value.") end
       local inv = l.scale < 0
-      local ich = ImGui.Checkbox(ctx, "Invert##modinv" .. tag, inv)
+      local ich = ST.checkbox(ctx, "Invert##modinv" .. tag, inv)
       if ich then MD.invert(app.track, l) end
       ImGui.SameLine(ctx, 0, 14)
       local bi = MD.is_bipolar(l)
-      local bch = ImGui.Checkbox(ctx, "Bipolar##modbi" .. tag, bi)
+      local bch = ST.checkbox(ctx, "Bipolar##modbi" .. tag, bi)
       if bch then MD.set_bipolar(app.track, l, not bi) end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Swing both ways around the set position.")
@@ -3007,40 +3009,42 @@ local function values_menu(fx, key, layout, idx, c)
     ImGui.SetTooltip(ctx, "Your own range (below), for plugins that don't report values.")
   end
   ImGui.Separator(ctx)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, "From")
-  ImGui.SameLine(ctx, 46)
-  ImGui.SetNextItemWidth(ctx, 62)
+  ST.cap(ctx, "From")
+  ImGui.SetNextItemWidth(ctx, 74)
   local _, lo = ImGui.InputText(ctx, "##rmlo", b.lo)
   local e1 = enter_pressed()
   b.lo = lo
-  ImGui.SameLine(ctx, 0, 6); ImGui.Text(ctx, "to"); ImGui.SameLine(ctx, 0, 6)
-  ImGui.SetNextItemWidth(ctx, 62)
+  ST.done(ctx)
+  ImGui.SameLine(ctx, 0, 8)
+  ST.cap(ctx, "To")
+  ImGui.SetNextItemWidth(ctx, 74)
   local _, hi = ImGui.InputText(ctx, "##rmhi", b.hi)
   local e2 = enter_pressed()
   b.hi = hi
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, "Unit")
-  ImGui.SameLine(ctx, 46)
+  ST.done(ctx)
   local un = {}
   for i, u in ipairs(U.RANGE_UNITS) do un[i] = (u == "") and "none" or u end
-  ImGui.SetNextItemWidth(ctx, 62)
+  ST.cap(ctx, "Unit")
+  ImGui.SetNextItemWidth(ctx, 74)
   local uch, ui = ImGui.Combo(ctx, "##rmunit", b.unit - 1, table.concat(un, "\0") .. "\0")
   if uch then b.unit = ui + 1 end
-  ImGui.SameLine(ctx, 0, 6); ImGui.Text(ctx, "curve"); ImGui.SameLine(ctx, 0, 6)
+  ST.done(ctx)
+  ImGui.SameLine(ctx, 0, 8)
+  ST.cap(ctx, "Curve")
   ImGui.SetNextItemWidth(ctx, 74)
   local cch, ci = ImGui.Combo(ctx, "##rmcurve", b.curve - 1, "Linear\0Log\0Squared\0")
   if cch then b.curve = ci + 1 end
+  ST.done(ctx)
   want = typed()
   local now = reaper.TrackFX_GetParamNormalized(app.track, fx.addr, p) or 0
   ImGui.TextDisabled(ctx, want and ("now reads " .. U.range_text(want, now)) or "type two different ends")
-  if not want then ImGui.BeginDisabled(ctx, true) end
-  if ImGui.Button(ctx, "Set##rmset") or ((e1 or e2) and want) then store(want); ImGui.CloseCurrentPopup(ctx) end
-  if not want then ImGui.EndDisabled(ctx) end
+  if ST.button(ctx, "Set##rmset", "main", nil, nil, { dim = not want }) or ((e1 or e2) and want) then
+    store(want); ImGui.CloseCurrentPopup(ctx)
+  end
   ImGui.SameLine(ctx)
-  if not rg then ImGui.BeginDisabled(ctx, true) end
-  if ImGui.Button(ctx, "Clear##rmclr") then store(nil); app.rng_for = nil; ImGui.CloseCurrentPopup(ctx) end
-  if not rg then ImGui.EndDisabled(ctx) end
+  if ST.button(ctx, "Clear##rmclr", "remove", nil, nil, { dim = not rg }) then
+    store(nil); app.rng_for = nil; ImGui.CloseCurrentPopup(ctx)
+  end
 end
 
 -- Show when: Always, or one click on a button, dropdown, stepped knob or
@@ -3850,7 +3854,7 @@ local function menu_bar()
       -- the width of a control's column, for every panel
       if ImGui.BeginMenu(ctx, "Control spacing") then
         ImGui.SetNextItemWidth(ctx, 140)
-        local cwch, cwv = ImGui.SliderInt(ctx, "##cell_w", C.CELL_W, C.CELL_W_MIN, C.CELL_W_MAX, "%d px")
+        local cwch, cwv = ST.slider_int(ctx, "##cell_w", C.CELL_W, C.CELL_W_MIN, C.CELL_W_MAX, "%d px")
         if cwch then
           C.set_cell_w(cwv)
           ext_set("cell_w", tostring(C.CELL_W))
@@ -3869,7 +3873,7 @@ local function menu_bar()
       -- mixer strip and the track name buttons (collapsed ones keep theirs)
       if ImGui.BeginMenu(ctx, "Strip width") then
         ImGui.SetNextItemWidth(ctx, 140)
-        local swch, swv = ImGui.SliderInt(ctx, "##channel_w", C.CHANNEL_W, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX, "%d px")
+        local swch, swv = ST.slider_int(ctx, "##channel_w", C.CHANNEL_W, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX, "%d px")
         if swch then
           C.set_channel_w(swv)
           ext_set("channel_w", tostring(C.CHANNEL_W))
@@ -3904,7 +3908,7 @@ local function menu_bar()
       -- how strongly the light models the plates and knobs
       if ED.menu(ImGui, ctx, "Lighting", C.EFFECT_3D) then
         ImGui.SetNextItemWidth(ctx, 140)
-        local lch, lv = ImGui.SliderInt(ctx, "##light", C.LIGHT, 0, C.LIGHT_MAX, "%d%%")
+        local lch, lv = ST.slider_int(ctx, "##light", C.LIGHT, 0, C.LIGHT_MAX, "%d%%")
         if lch then
           C.LIGHT = lv
           require("TS_CV_KnobParts").LIGHT = C.LIGHT / 100
@@ -3925,7 +3929,7 @@ local function menu_bar()
       -- buttons, fader caps; and the web page's)
       if ED.menu(ImGui, ctx, "Shadows", C.EFFECT_3D) then
         ImGui.SetNextItemWidth(ctx, 140)
-        local shch, shv = ImGui.SliderInt(ctx, "##shadow", C.SHADOW, 0, C.SHADOW_MAX, "%d%%")
+        local shch, shv = ST.slider_int(ctx, "##shadow", C.SHADOW, 0, C.SHADOW_MAX, "%d%%")
         if shch then
           C.SHADOW = shv
           ED.light().STRENGTH = C.SHADOW / 100
@@ -3983,7 +3987,7 @@ local function menu_bar()
         -- line with a REAPER theme without picking thirty colours. Bypass
         -- and warnings deliberately don't follow it -- see TS_CV_Config.
         ImGui.SetNextItemWidth(ctx, 190)
-        local hch, hv = ImGui.SliderInt(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
+        local hch, hv = ST.slider_int(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
         if hch then
           C.BASE_HUE = hv
           C.build_palette()
@@ -3991,7 +3995,7 @@ local function menu_bar()
         end
 
         ImGui.SetNextItemWidth(ctx, 190)
-        local tch, tv = ImGui.SliderDouble(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
+        local tch, tv = ST.slider_double(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
         if tch then
           C.TINT = tv
           C.build_palette()
@@ -4069,11 +4073,9 @@ local function menu_bar()
     ImGui.Separator(ctx)
     if ImGui.BeginMenu(ctx, "Dock") then
       for _, d in ipairs(DOCKS) do
-        if ImGui.MenuItem(ctx, d[1], nil, dock_id == d[2]) then
-          dock_id = d[2]
-          ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_Always)
-          ext_set(DOCK_KEY, dock_id)
-        end
+        -- asked for here, done before the window opens next frame: a
+        -- SetNextWindowDockID inside the menu would dock the menu
+        if ImGui.MenuItem(ctx, d[1], nil, dock_id == d[2]) then app.dock_req = d[2] end
       end
       ImGui.EndMenu(ctx)
     end
@@ -4688,7 +4690,7 @@ local function panel_requests(i, fx, layout, key, req)
       local c = layout.controls and layout.controls[req.ctx_control]
       local pn = ""
       if c and c.param then
-        _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, c.param, "")
+        pn = select(2, reaper.TrackFX_GetParamName(app.track, fx.addr, c.param, ""))
       end
       -- starts as the name the control shows now
       app.rename_buf = c and c.param
@@ -5311,11 +5313,19 @@ local function frame()
   DR.sync()
 
   ImGui.SetNextWindowSize(ctx, 1100, 300, ImGui.Cond_FirstUseEver)
-  if dock_id ~= 0 then
+  if app.dock_req then
+    -- the Dock menu's pick (0: floating)
+    ImGui.SetNextWindowDockID(ctx, app.dock_req, ImGui.Cond_Always)
+    dock_id = app.dock_req
+    ext_set(DOCK_KEY, dock_id)
+    app.dock_req = nil
+  elseif dock_id ~= 0 then
     ImGui.SetNextWindowDockID(ctx, dock_id, ImGui.Cond_FirstUseEver)
   end
 
   ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.win_bg)
+  -- the look of every panel, dialogue and menu drawn this frame
+  ST.push(ctx)
   -- Read BEFORE our own ItemSpacing goes on the stack: what the header
   -- arithmetic wants is the spacing Track Analyser gets, which is the
   -- default. There is no GetStyleVar in this build, but the difference
@@ -5533,8 +5543,11 @@ local function frame()
     -- two of them are both spent -- so row_h + spacing_y + strip_h
     -- lands on avail_h exactly, the same total mixer view gets, split
     -- differently rather than shrunk.
+    -- the patch bay (Pro), open in channel view: between the panels and
+    -- the name row, the panels giving up its height
+    local cv_bay = (not RACK and not C.MIXER_VIEW) and MX.bay_lift(ctx) or 0
     local row_h = math.max(C.CELL_H + C.HEADER_H + C.PANEL_PAD * 2,
-                           avail_h - spacing_y - strip_h - bot_take)
+                           avail_h - spacing_y - strip_h - bot_take - cv_bay)
     -- Channel pinned left, Sends and Receives pinned right, the plugin
     -- row scrolling between them. The pinned panels are measured first so
     -- the row in the middle knows what is left for it.
@@ -5657,7 +5670,7 @@ local function frame()
       -- double-click: back to mixer, same as double-clicking the
       -- Channel panel or the empty plugin row does.
       local _, want_mixer, dbl_track =
-        MX.draw_row(ctx, strip_h, app.track, false, child_pad_y, win_pad_x)
+        MX.draw_row(ctx, strip_h + cv_bay, app.track, false, child_pad_y, win_pad_x)
       if want_mixer then
         set_view(true)
       elseif dbl_track then
@@ -5736,6 +5749,7 @@ local function frame()
 
   -- The style pushes happened before Begin, so they unwind either way.
   ImGui.PopStyleVar(ctx, 1)
+  ST.pop(ctx)
   ImGui.PopStyleColor(ctx)
 
   if open and not app.want_quit then

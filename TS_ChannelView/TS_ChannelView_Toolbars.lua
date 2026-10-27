@@ -49,6 +49,7 @@ end
 
 local C  = require("TS_CV_Config")
 local W  = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local TB = require("TS_CV_Toolbar")
 local DR = require("TS_CV_Drawers")
 local AE = require("TS_CV_ActionEditor")
@@ -149,6 +150,7 @@ local function frame()
     reaper.DeleteExtState(C.EXT_SECT, DR.HOST_ORGANISE, false)
     AE.open()
   end
+  ST.push(ctx)
   for _, d in ipairs(DR.list) do
     if d.side == "window" and d.open then bar_window(d)
     elseif d.tb then d.tb.poll() end
@@ -165,6 +167,7 @@ local function frame()
       ImGui.End(ctx)
     end
   end
+  ST.pop(ctx)
   reaper.SetExtState(C.EXT_SECT, DR.HOST_ALIVE, tostring(reaper.time_precise()), false)
   if reaper.GetExtState(C.EXT_SECT, DR.HOST_QUIT) == "1" then
     reaper.DeleteExtState(C.EXT_SECT, DR.HOST_QUIT, false)

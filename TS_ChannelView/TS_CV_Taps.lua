@@ -6,9 +6,9 @@
   Some compressors never answer REAPER's GainReduction_dB query, so there
   is nothing to meter. Their reduction can still be MEASURED, from the
   audio going in and coming out, and TS_TrackProbe does the measuring:
-  its post probe has tap inputs for up to four plugins (see the notes at
-  the top of TS_TrackProbe.jsfx for how the estimate works and where it
-  can be wrong).
+  its post probe has tap inputs for up to eight plugins (four on an older
+  probe; see the notes at the top of TS_TrackProbe.jsfx for how the
+  estimate works and where it can be wrong).
 
   This module does the plumbing. For every plugin type ticked "Measure
   gain reduction" or "Input/output meters" in Setup Edit Parameters, on
@@ -73,7 +73,7 @@ local PL = require("TS_CV_ProbeLink")
 local TP = {}
 
 TP.PROBE_NAME = "TS_TrackProbe"
-TP.MAX_TAPS   = 4
+TP.MAX_TAPS   = 8    -- a probe that takes eight; older ones four
 TP.EXT_KEY    = "P_EXT:TS_CV_TAPS"
 
 -- A tapped plugin's delay from input to output, samples, as the trace
@@ -86,6 +86,9 @@ end
 TP.GMEM_NS    = "TS_TA_Mem"
 TP.HB_SLOT    = 73
 TP.WAVE_SLOT  = 74   -- which track's post probe writes the per-tap waveforms
+TP.GATE_SLOT  = 76   -- moving: only the tracks named in their blocks measure
+TP.WATCH_OFF  = 7    -- a track's block: moving while something shows it
+TP.WATCH_FOR  = 0.5  -- seconds a track stays named after its last reading
 
 -- TS_TrackProbe slider indices, 0-based as TrackFX_GetParam sees them.
 TP.P_ROLE  = 0
@@ -618,20 +621,32 @@ local function candidates(tr, lv)
   return out
 end
 
--- What SHOULD be tapped on a track right now: the level, and up to four
+-- How many plugins a probe can measure: one for every four input pins
+-- past its own two (34 pins: eight; an older probe's 18: four). Read off
+-- the running instance, so a project still running an older probe gets
+-- four until it's reopened.
+function TP.capacity(tr, probe)
+  if not (tr and probe and reaper.TrackFX_GetIOSize) then return 4 end
+  local _, ins = reaper.TrackFX_GetIOSize(tr, probe)
+  local n = math.floor(((ins or 0) - 2) / 4)
+  return math.max(1, math.min(TP.MAX_TAPS, n >= 1 and n or 4))
+end
+
+-- What SHOULD be tapped on a track right now: the level, and up to eight
 -- plugins between its probes that want measuring -- their gain
 -- reduction, their levels, or both. nil when nothing does (or there are
 -- no probes).
 function TP.desired(tr)
   local lv = find_level(tr, nil)
   if not lv then return nil, nil end
+  local cap = TP.capacity(tr, lv.items[lv.post])
   local r = {
     level = lv.caddr and fx_guid(tr, lv.caddr) or "TOP",
     probe = fx_guid(tr, lv.items[lv.post]),
     taps = {},
   }
   for _, c in ipairs(candidates(tr, lv)) do
-    if #r.taps >= TP.MAX_TAPS then break end
+    if #r.taps >= cap then break end
     local a = c.addr
     local gr = not c.parallel and (wants_measure(tr, a) or wants_mb(tr, a))
     local lvl = not c.parallel
@@ -1602,11 +1617,16 @@ end
 -- Per track: { [target guid] = { probe guid, index } } from the record,
 -- and the probe's last known address.
 local readers = {}
+-- The tracks something read this moment (on screen): only theirs are
+-- measured (TS_TrackProbe's ONLY THE TRACKS ON SCREEN). { [key] = { tr, t } }
+local watched = {}
 
 local function reader_for(tr)
   local key = tostring(tr)
   local rd = readers[key]
   local now = reaper.time_precise()
+  local w = watched[key]
+  if w then w.t = now else watched[key] = { tr = tr, t = now } end
   if rd and now - rd.t < 0.5 then return rd end
   local rec = read_record(tr)
   rd = { t = now, map = {}, what = {}, probe = nil }
@@ -1850,7 +1870,9 @@ function TP.mb_plan(tr, addr, cv)
       local st = TP.mb_state(tr, addr, R["B" .. k .. "Used"])
       plan[k] = { lo = (k == 1) and TP.MB_LO or plan.xs[k - 1], hi = (k == nb) and TP.MB_HI or plan.xs[k],
                   used = st ~= "off", byp = st == "byp" }
-      plan.at[k] = k
+      -- the probe splits in four: past four bands, the first three are
+      -- measured and the rest (one split together) aren't
+      plan.at[k] = (nb <= 4 or k <= 3) and k or nil
     end
     return plan
   end
@@ -2091,6 +2113,15 @@ function TP.update(now)
   if not attached then reaper.gmem_attach(TP.GMEM_NS); attached = true end
   hb = (hb + 1) % 1000000
   reaper.gmem_write(TP.HB_SLOT, hb)
+  -- only the tracks on screen: each one read lately named in its block
+  reaper.gmem_write(TP.GATE_SLOT, hb)
+  for key, w in pairs(watched) do
+    if now - w.t > TP.WATCH_FOR or not reaper.ValidatePtr(w.tr, "MediaTrack*") then watched[key] = nil
+    else
+      local b = PL.block(w.tr)
+      if b then reaper.gmem_write(b + TP.WATCH_OFF, hb) end
+    end
+  end
   do
     local want = 0
     if wave_tr and now - wave_at < 0.5 and reaper.ValidatePtr(wave_tr, "MediaTrack*") then

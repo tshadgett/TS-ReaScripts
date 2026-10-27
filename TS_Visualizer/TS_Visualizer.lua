@@ -2,13 +2,15 @@
 -- @title TS_Visualizer
 -- @description TS_Visualizer
 -- @author Tim Shadgett (with Claude) -- fork of JKK_Visualizer by Junki Kim
--- @version 2.2.1
+-- @version 2.3.0
 -- @changelog
---  Tidier code comments and README. Nothing changes in use.
+--  The Editor in ChannelView's look: names above settings, chips for
+--  switches and choices, sliders with their value at the right.
 -- @license MIT
 -- @provides
 --     [main] TS_Visualizer_Editor.lua
 --     [nomain] TS_Theme.lua
+--     [nomain] TS_VZ_Style.lua
 --     [effect] TS_Visualizer.jsfx
 --========================================================
 options = reaper.gmem_attach('TS_Visualizer_Mem') 

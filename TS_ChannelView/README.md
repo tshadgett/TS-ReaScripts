@@ -28,7 +28,8 @@ and ReaEQ's and ReaComp's), knob and button styles and colours, faceplates,
 finishes, sections and backgrounds, the 3D effect's lighting and shadows,
 the plugin's own colours, vendor looks, more than one layout per plugin and
 switching between them, Show when rules and virtual controls, the TS_CV
-Trimmer and the gain-reduction trace.
+Trimmer, the gain-reduction trace and the patch bay (in the mixer and the
+TCP window).
 
 Without Pro, everything else works as described, and a layout made with Pro
 still works: its grid, Show rules and virtual controls are drawn as they
@@ -111,6 +112,48 @@ selection).
   the other follows.
 - **☰ ▸ Run when REAPER starts** starts the rack with REAPER, on its own:
   ChannelView's option and the rack's are separate.
+
+## The patch bay (Pro)
+
+Rest the pointer on a name button's colour stripe for half a second and a
+patch bay opens under the name buttons: every send as a cable. In mixer
+view the strips and names lift to show it; in channel view the panels do.
+
+- Each track has an **IN** jack and an **OUT** jack (the master IN only);
+  the audio device's outputs sit at the right end.
+- A cable runs from the sending track's OUT to the receiving track's IN,
+  in the sending track's colour, as thick as the send is loud: solid
+  post-fader, dashed pre-fader, dotted pre-FX, faded when muted, amber
+  when it lands on 3/4 (a sidechain). The selected tracks' cables are
+  bright, the rest dimmed.
+- Above the jacks, **rails**: each track's send to its parent, the master
+  or its folder, one tier for each folder depth, ending in an arrow into
+  the parent's IN. Drag a track's drop off the rail, or Alt-click it, to
+  switch that send off (it shows hollow); click it, or drag it back onto
+  the rail, to switch it on.
+- **Drag** from a jack to another track's (OUT to IN, or IN to OUT: the
+  jacks say which way the audio goes), or from an OUT to an output, and
+  let go: choose the channels, the mode and the level, then **Connect**,
+  or **Sidechain → 3/4**.
+- Over a cable: what it is; the wheel sets its level (Shift: finer),
+  Alt-click removes it. Grab a cable near one end (just off its jack) and
+  drop that end on another jack to move the send there, its settings
+  with it; drop it in empty space to remove it.
+- A collapsed folder stands for the tracks folded inside it: their cables
+  come from and go to its jacks, fainter.
+- In mixer view the strips are dimmed and hold still while it's open. A
+  click anywhere outside the bay closes it, and so does Escape; the pin
+  keeps it open.
+
+**In the TCP window** the bay opens to the left of the track rows: rest the
+pointer on a row's colour strip, or use the pin at the bay's top left. The
+jacks sit level with their tracks (IN above OUT), the rails run up beside
+the rows, and the outputs' box is under the last track. The docker widens
+to make room and REAPER's arrange view moves over; closing the bay gives
+the width back. (The docker is widened by dragging its edge for you, so the
+pointer jumps there and back.) The rows stay live: select a track to
+brighten its cables. Moving the pointer out to the arrange view closes it,
+and the wheel over the bay scrolls the rows.
 
 ## Freeze
 
@@ -373,8 +416,8 @@ outline would have nothing to stand against.
   tick for pre-comp (ReaComp's lookahead, which adds that much latency);
   **A** is auto release. Wet, dry and auto make-up sit beside it, the
   reduction and output meters run down the right, and the **detector** —
-  main input or sidechain, RMS, its low- and high-pass and preview — is in
-  a drawer underneath. The level history and the dot come from the track's
+  main input or sidechain, RMS, its low- and high-pass, and headphones to
+  hear what it hears — is in a drawer underneath. The level history and the dot come from the track's
   TS_TrackProbe pair, connected while the panel is open. ReaComp's *Limit
   output* switch isn't one of its parameters, so the panel can't offer it.
 * **Duplicate** a plugin or a container from its menu: a copy, settings and
@@ -469,7 +512,7 @@ outline would have nothing to stand against.
   whatever follows one always starts a new column — however the previous
   section ended, part-filled, padded with gaps, or exactly full. The rule
   itself is a narrow gutter rather than a cell, and is vertical in either
-  flow. Its "Line" checkbox in the editor turns the rule off while
+  flow. Its "Line" switch in the editor turns the rule off while
   keeping the column break, for spacing two groups apart without a
   visible line between them.
 * **Half-gap** — a control type that staggers whatever comes after it
@@ -594,6 +637,53 @@ Turn the control itself and the whole range moves with it.
   and at full. A control that sits in the middle of its range (a gain in
   ±dB, a pan) swings both ways round where it's set; others swing one way.
   The control's menu has *Depth*, *Invert* and *Bipolar*.
+
+**EQ nodes (Pro).** A node on an EQ canvas takes links too: drag a ◯ to
+either side of a node for its frequency, above or below it for its gain,
+or onto it for its Q. A linked node shows a faint ghost where it's set
+and moves with its source; a line from the ghost ends in a dot at the
+reach. Drag the ghost to move the setting, the dot to change the reach;
+Alt-click the dot to remove the link. Dragging the node itself moves the
+setting too. A linked Q shows as an arc round it, like a knob's reach: drag
+its tick (the setting) or its dot (the reach) round.
+
+**Dynamics handles (Pro).** A compressor's, gate's or limiter's handles
+take links the same way: the envelope nodes (pre-open, attack, hold,
+release), the ratio, the knee and a gate's range (drop a ◯ on it), and
+the level lines (threshold, a gate's open and close, a limiter's ceiling:
+drop it anywhere along the line). A linked line shows its setting as a
+faint dashed line and its reach as a line in the source's colour, the span
+between them lit. The ghost, the reach dot and Alt-click to unlink work as
+on an EQ node.
+
+**Every canvas (Pro).** The other canvases' handles take links the same
+way:
+- **Delay:** the echo time, the right side's time, the feedback, each
+  tap's time (either side of its dot) and level (above or below), and the
+  cuts under it (the gate's detector filters as well).
+- **De-esser:** its frequency, its band's edges and its threshold (drop
+  along the line).
+- **Saturation:** the drive, its setting and reach along the diagonal.
+- **Reverb:** the pre-delay, the decay, the early level (or early / late
+  balance); in the strip under it, each side's crossover and decay, the
+  tone, the shelves and the cuts.
+- **Envelope:** each time, the sustain and each curve.
+- **Modulation:** the depth, the rate, the phases and the voices' pans.
+- **Multiband:** the crossovers (drop anywhere down one), each band's
+  threshold and its small sliders.
+
+The buttons, rows of settings and lists on a canvas take links as a panel's
+do: drop a ◯ on one; a linked one shows a corner in the source's colour,
+hovering it shows the line back to its source, and Alt-click unlinks it.
+
+A handle's ghost and reach are placed with the other modulated controls at
+their settings, and a canvas's scales are framed for every modulated
+control's whole swing, so they hold still while the music moves.
+
+The small knobs on a canvas (wet, dry, make-up, mix, the detector's RMS and
+filters, a delay's or reverb's) take links as a panel's knobs do: an arc
+round the knob shows the reach, with a tick at the setting and a dot at the
+reach to drag round.
 
 Right-click a lane button (on a macro, or on a modulator setting) to show
 or hide its lane, or to remove it, automation and all after asking. A
@@ -795,7 +885,7 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
 - **On the left**, the plugin's parameters (find one by name) and what
   else a layout can hold: a line, a section, a virtual knob, button or
   selector. Drag any of them onto the grid, or double-click a parameter to
-  put it where it first fits. With **Learn** ticked, touching a control in
+  put it where it first fits. With **Learn** on, touching a control in
   the plugin's own window puts it on the panel. A parameter already on the
   panel is greyed: click it to select it there, drag it to move it.
 - **In the middle**, the panel as it is, with the grid over it in quarter
@@ -1090,8 +1180,16 @@ listens to); ReaLimit's with its *True peak*, *Constant gain* and *Low
 latency* options as buttons above its release (they're kept in ReaLimit's
 own settings, not as parameters, so they can't be automated). A gate's line for where it
 closes is dragged by its grip, in the middle, so the threshold's line can
-always be taken anywhere else. Rather have knobs? These six (ReaEQ,
-ReaComp, ReaGate, ReaLimit, ReaDelay, ReaVerbate) have the *Layout* menu
+always be taken anywhere else. ReaXcomp starts with the multiband canvas
+(every band it has, up to eight, with its own switches; **+** in a band's
+strip splits it in two, **×** takes it away, and a preset with more or
+fewer bands is followed), and ReaSynth with
+its oscillator over its envelope: one cycle of the wave (drag its pulse
+width on the square's edge, its volume up or down), drawbars for the
+square, saw, triangle and extra sine, a pitch ruler for the detune and the
+extra sine's tuning, and a glide ramp as long as the portamento.
+Rather have knobs? These eight (ReaEQ, ReaComp, ReaGate, ReaLimit,
+ReaDelay, ReaVerbate, ReaXcomp, ReaSynth) have the *Layout* menu
 every plugin has: their panel is the *Standard* layout, and **Copy to new
 layout** makes a normal layout of their controls (or *New empty layout*,
 or *New canvas layout*), edited like any plugin's; *Make … the default*
@@ -1146,7 +1244,7 @@ many times longer, and the canvas draws the one the plugin is on. Layouts
 learned with an earlier ChannelView keep drawing as they did; learn again
 (*Set up this layout…* ▸ *Learn*) to have the measured shapes.
 
-An EQ layout can be a **dynamic EQ**: tick *Dynamics* in its setup and map
+An EQ layout can be a **dynamic EQ**: turn on *Dynamics* in its setup and map
 each band's threshold, range, ratio, attack, release and dynamics switch.
 Learning holds the dynamics off; the canvas draws each dynamic band's
 reach, with its range node to drag, and the picked band's level going in
@@ -1161,7 +1259,7 @@ range instead. A compressor's dB isn't always dBFS (an SSL bus compressor's
 through a hidden copy at rising levels and finds where it starts to
 compress; the canvas then draws and drags the threshold in true dBFS. A
 knee reading 0–1 is drawn as a share, and ratios under 1:1 (expansion)
-are drawn as such. Tick **Reversed** for a *Compression* or
+are drawn as such. Turn on **Reversed** for a *Compression* or
 *Peak reduction* control (more of it is a lower threshold), or an attack,
 hold or release that's fastest at the top. A compressor with no threshold
 maps its **Input**: its threshold is drawn fixed (measured, or a guessed
@@ -1176,13 +1274,16 @@ and dashed), the range floor and the ratio, with a lamp that lights while
 it's open; a limiter its level history with the threshold (or input gain)
 and the ceiling.
 
-**Multiband.** Up to four bands, split by shared crossovers or by each
+**Multiband.** Up to eight bands, split by shared crossovers or by each
 band's own edges (as Pro-MB does). *All bands* shows the bands over the
 spectrum with a strip each — a small transfer curve with its threshold,
 a dot riding it at the band's level going in, and sliders for ratio,
-attack, release and gain — plus solo, bypass and the band's in-use
-setting; + BAND takes an unused band into use. Click a band for the full
-compressor canvas. One reduction meter for the whole plugin.
+attack, release, RMS and gain — plus solo, bypass, a band's own
+automatic make-up, automatic release and feedback-detector switches
+where it has them, and its in-use setting; + BAND takes an unused band
+into use. Click a band for the full compressor canvas. One reduction
+meter for the whole plugin. The bands' levels and reductions are measured
+for up to four bands (past four, the first three).
 
 **De-esser.** Its band (split-band above the frequency, or around it) over
 the spectrum, filled from the top as it reduces, and the waveform with the
@@ -1358,9 +1459,12 @@ Channel panel a share of the track's colour. Each group in *Group looks*
 has a **Background** strength (folder parents at 60% and everything else at
 15%, say), and a track can have its own in the fader menu's **Background**
 slider; *As group* goes back to its group's. Off by default. A light
-colour is held back so the readouts on it stay readable. The TCP window
-follows, unless its View menu ▸ *Background tint* is off. The web page has
-it too.
+colour is held back so the readouts on it stay readable. The TCP window's
+rows follow, unless its View menu ▸ *Background tint* is off; the fader
+panel it opens always does. The web page has it too.
+
+The Channel panel's header, like the fader panel the TCP window opens, is
+in the track's colour.
 
 ## Controls
 
@@ -1374,6 +1478,11 @@ it too.
 | hover | the current value, in a tooltip that stays put |
 | right-click | control menu |
 | click a stepped value | its list of choices |
+
+In ChannelView's option sheets and dialogs every setting has its name in
+small letters above it. A switch is a chip with a light: click it on or
+off. A choice of a few is a row of joined chips. A slider shows its value
+at the right; double-click or Ctrl-click it to type one.
 
 ## Presets
 
@@ -1423,6 +1532,9 @@ of anything on screen, in REAPER or out of it: switch it on, point, and
 click — or press Enter, so the click doesn't land on another program —
 and Esc puts it away. It needs the js_ReaScriptAPI extension (from
 ReaPack). Every colour picker in ChannelView and the TCP window has it.
+
+For its first 20 seconds the TCP window keeps REAPER's own track panel
+shut: REAPER sometimes opens it again at startup.
 
 In the TCP window, the settings menu's **Plugin delay (PDC) under
 meters** shows each track's plugin delay compensation under its meter,
@@ -1474,9 +1586,11 @@ them up the first time ChannelView shows it.
 | `TS_CV_Pro.lua` | ChannelView Pro's package; Standard looks for it (Pro) |
 | `TS_CV_GridEditor.lua` | the grid editor (*Edit layout*) (Pro) |
 | `TS_CV_Widgets.lua` | knob / button / stepped-value drawing |
+| `TS_CV_Style.lua` | the look of option sheets and dialogs: captions, chips, switches, sliders |
 | `TS_CV_Panel.lua` | one plugin's panel |
 | `TS_CV_Editor.lua` | the Setup Edit Parameters dialog |
 | `TS_CV_Mixer.lua` | mixer view, and the shared track row (`MX.draw_row`) both views draw into |
+| `TS_CV_PatchBay.lua` | the patch bay, under the name buttons and in the TCP window (Pro) |
 | `TS_CV_TrackStrip.lua` | asks the track row to scroll to the selection |
 | `TS_CV_Browser.lua` | the add-a-plugin picker |
 | `TS_CV_Search.lua` | the forgiving, ranked plugin search (picker, [+] menu and web page) |
@@ -1490,6 +1604,7 @@ them up the first time ChannelView shows it.
 | `TS_CV_ModRack.lua` | the Macros and Modulators panels |
 | `TS_CV_Modulators.jsfx` | the ChannelView Modulators plugin. Goes in `Effects/` |
 | `TS_CV_CanvasSetup.lua` | setting up a canvas layout for any plugin (Pro) |
+| `TS_CV_CanvasMod.lua` | macros and modulators on a canvas's handles (Pro) |
 | `TS_CV_RolePanel.lua` | the canvases for gates, limiters, multiband, de-essers, saturation, delays, reverbs, modulation and envelopes (Pro) |
 | `TS_CV_Delay.lua` | the delay canvas's model: every delay as echo lines or taps (Pro) |
 | `TS_CV_ReaFX.lua` | ReaDelay's and ReaVerbate's canvases, and adding and removing ReaDelay taps |
@@ -1547,11 +1662,11 @@ generation of backup as `TS_ChannelView_Mappings.bak.ini`.
 ### Sharing layouts
 
 *Layouts ▸ Export layouts to file…* lists your saved layouts — the ones for
-the selected track's plugins already ticked — and writes the ones you tick
+the selected track's plugins already picked — and writes the ones you pick
 to a file you name. Send it to someone, and they use *Layouts ▸ Import
 layouts from file…*: it lists what's in the file, marked *new*, *replaces
-yours* or *same as yours*, and brings in the ones they tick. New ones start
-ticked; ones that would replace a layout you already have start unticked,
+yours* or *same as yours*, and brings in the ones they pick. New ones start
+picked; ones that would replace a layout you already have don't,
 and importing them asks first. A layout you've locked here isn't replaced
 (it shows as *yours is locked*) until you unlock it. The library as it was
 is kept as the `.bak`. The file is an ordinary layout library, so a whole
@@ -1959,7 +2074,12 @@ Nothing is inserted next to the plugin. ChannelView routes a copy of what
 goes in and what comes out on spare channels, from 5/6 up, skipping any
 pair a plugin, send or receive already uses; one routed onto theirs later
 moves them to free channels. The post probe compares the
-two in ten bands. Up to four plugins per track. What was changed is written
+two in ten bands. Up to eight plugins per track (four with a probe older
+than TS_TrackProbe 2.3.0, until the project is reopened). Only the tracks
+on screen are measured: the one in channel view, the mixer strips in view,
+and the web companion's. The rest cost nothing until you look at them,
+and their zero is still measured at every stop, so they read right as
+soon as they appear. What was changed is written
 on the track (`P_EXT:TS_CV_TAPS`) and taken out exactly when you untick it.
 
 When the copies need more channels than the track has, ChannelView raises
@@ -1991,7 +2111,7 @@ on its panel: what goes into the plugin and what comes out, from the same
 probe copies. Under them is the change in level, output RMS minus input RMS.
 It works for any plugin between the probes, including ones that report their
 own reduction; those are tapped for their levels alone. Gain reduction and
-levels together share the limit of four plugins per track. On a canvas the
+levels together share the limit of eight plugins per track. On a canvas the
 two meters run down the panel's left and right edges.
 
 ### The gain-reduction trace (Pro)

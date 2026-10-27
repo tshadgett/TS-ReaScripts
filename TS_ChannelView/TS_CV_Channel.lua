@@ -16,6 +16,7 @@
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local St = require("TS_CV_State")
 local G  = require("TS_CV_Gang")
 local TM = require("TS_CV_TrackMenu")
@@ -69,7 +70,7 @@ end
 -- the colour the picker starts on.
 local function look_choices(ctx, id, now, none, none_tip, choose_part, undo_pick, from, title)
   now = now or {}
-  ImGui.TextDisabled(ctx, "Style")
+  ST.caption(ctx, "Style")
   if ImGui.Selectable(ctx, none .. "##" .. id .. "_sn", now.style == nil, CP.KEEP_OPEN, 160, 0) then
     choose_part("style", nil, true)
   end
@@ -80,7 +81,7 @@ local function look_choices(ctx, id, now, none, none_tip, choose_part, undo_pick
     end
   end
   ImGui.Spacing(ctx)
-  ImGui.TextDisabled(ctx, "Colour")
+  ST.caption(ctx, "Colour")
   if ImGui.Selectable(ctx, none .. "##" .. id .. "_cn", now.cap == nil, CP.KEEP_OPEN, 160, 0) then
     choose_part("cap", nil, true)
   end
@@ -139,12 +140,12 @@ local function fader_menu(ctx, track, pid)
     local mine = TO.own_tint(track, now)
     local grp = TO.track_tint(track)
     ImGui.Spacing(ctx)
-    ImGui.TextDisabled(ctx, "Background")
-    ImGui.SetNextItemWidth(ctx, 160)
+    ST.caption(ctx, "Background")
+    ImGui.SetNextItemWidth(ctx, 250)
     local shown = mine or math.floor(grp * 100 + 0.5)
     local fmt = mine and (mine > 0 and "%d%% track colour" or "Off")
                 or (shown > 0 and ("%d%%  (" .. (cat_label and cat_label:lower() or "default") .. ")") or "As group: off")
-    local bch, bv = ImGui.SliderInt(ctx, "##bgown", shown, 0, 100, fmt)
+    local bch, bv = ST.slider_int(ctx, "##bgown", shown, 0, 100, fmt)
     if bch then TO.set_own_tint(tg, bv) end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "Strip, name and Channel panel tinted in the track colour\n" ..
@@ -184,10 +185,10 @@ local function fader_menu(ctx, track, pid)
           grevert, dc and (dc >> 8), c.label .. " fader colour")
         -- the strip's background in the track's colour, at a strength
         ImGui.Spacing(ctx)
-        ImGui.TextDisabled(ctx, "Background")
-        ImGui.SetNextItemWidth(ctx, 160)
+        ST.caption(ctx, "Background")
+        ImGui.SetNextItemWidth(ctx, 240)
         local pct = TO.bg_tint(c.key)
-        local tch, tv = ImGui.SliderInt(ctx, "##bgt" .. c.key, pct, 0, 100,
+        local tch, tv = ST.slider_int(ctx, "##bgt" .. c.key, pct, 0, 100,
           pct > 0 and "%d%% track colour" or "Off")
         if tch then TO.set_bg_tint(c.key, tv, true) end
         if ImGui.IsItemHovered(ctx) then
@@ -408,7 +409,7 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
         "Close", nil, opts.ink) then
       opts.on_close()
     end
-  elseif W.icon_button(ctx, idp .. "col", "collapse", btn, false, "Collapse channel strip") then
+  elseif W.icon_button(ctx, idp .. "col", "collapse", btn, false, "Collapse channel strip", nil, opts.ink) then
     St.toggle_collapsed(KEY)
   end
 
@@ -1071,7 +1072,12 @@ function CH.draw(ctx, track, avail_h)
           "CH", C.COL.header_dim, wh - btn - 16)
       end
     else
-      CH.draw_header(ctx, dl, x, y, ww, track)
+      -- the cap in the track's colour, as the TCP's flyout has it (the
+      -- master, with none of its own, a cool grey)
+      local cap = track and U.track_colour(track, 0xff)
+      if track and not cap and track == reaper.GetMasterTrack(0) then cap = 0x8a90a0ff end
+      CH.draw_header(ctx, dl, x, y, ww, track,
+        cap and { base = cap, ink = U.contrast_text(cap) } or nil)
       if track then
         CH.draw_body(ctx, dl, x, y + C.HEADER_H, ww, wh - C.HEADER_H, track)
       end

@@ -242,9 +242,9 @@ do
   M.remove(hkey); M.save(); M.reload()
 end
 
--- Bit 0 still means what it always meant, so every layout written
--- before reverse existed reads back unchanged. This is the old shape,
--- hand-written into the library the way an existing file has it.
+-- Bit 0 keeps its meaning, so a layout written without reverse reads
+-- back unchanged. This is that shape, hand-written into the library the
+-- way an existing file has it.
 do
   local old_key = "OldFormat"
   M.set(old_key, { controls = { { param = 1, type = "knob", label = "x" } } })
@@ -1883,7 +1883,7 @@ end
 local H = 4 * C.CELL_H + C.HEADER_H + C.PANEL_PAD * 2
 check("rows at that height", P.rows_for(H), 4)
 
--- no dividers: the old behaviour must be untouched
+-- no dividers: the plain fill, untouched
 local l = P.layout(ctrls("kkkkkkkk"), H)
 check("8 knobs place 8 items",  #l.items, 8)
 check("8 knobs, 2 columns wide", l.width, 2 * C.CELL_W)
@@ -2378,9 +2378,9 @@ do
   check("the two reds differ",        C.COL.level_over ~= C.COL.level_clip, true)
 
   -- The bar is green, then red, then a harder red. Three colours, and
-  -- the old amber step at -6 is gone: -6 dBFS is not a warning about
-  -- anything, so a colour change there meant nothing and did it thirty
-  -- times a second on every strip at once.
+  -- no step at -6: -6 dBFS is not a warning about anything, so a colour
+  -- change there would mean nothing and happen thirty times a second on
+  -- every strip at once.
   check("a quiet bar is green",    W.level_bar_colour(-40), C.COL.level_lo)
   check("and -6 is still green",   W.level_bar_colour(-6),  C.COL.level_lo)
   check("no step at -6",
@@ -4469,7 +4469,7 @@ do
       end
       return ctl
     end
-    -- the baseline was recorded at the original 58 px column
+    -- the baseline is for a 58 px column
     local rows_for, cw0 = P.rows_for, C.CELL_W
     P.rows_for = function(r) return r end
     C.set_cell_w(58)
@@ -4715,8 +4715,8 @@ do
   check("brush: not without a section", brc[5].brush, nil)
   check("brush: copied", MP.copy(MP.get("BrushPlug")).controls[1].brush, true)
   MP.remove("BrushPlug"); MP.save(); MP.reload()
-  -- surface finishes (Finish<n>, Finish): one per surface, Brush<n> the old
-  -- way of saying brushed
+  -- surface finishes (Finish<n>, Finish): one per surface, Brush<n> the
+  -- older way of saying brushed, still read
   check("finish: every one has a label", (function()
     for _, f in ipairs(C.FINISHES) do if not (f.key and f.label) then return false end end
     return #C.FINISHES end)(), 12)
@@ -4980,7 +4980,7 @@ do
   MP.save(); MP.reload()
 end
 
--- Faceplates no longer in the list leave a layout on the theme's; a
+-- A faceplate not in the list leaves a layout on the theme's; a
 -- colour of your own (#rrggbb) works anywhere a faceplate does
 do
   local MP = require("TS_CV_Mappings")
@@ -5299,7 +5299,7 @@ do
     end
     return table.concat(out, " ")
   end
-  -- the mockup's compressor: knobs over a horizontal fader, side by side
+  -- a compressor: knobs over a horizontal fader, side by side
   local lay = P.layout({ K"Thr", K"Rat", F("Mk", nil, 2), K"Att", K"Knee", F("Mix", "h", 2), F("Wid", "h", 2),
                          K"Rel", K"Look", F("Out") }, nil, 4)
   check("faders: placed like the mockup", at(lay),
@@ -6667,7 +6667,7 @@ do
     { "Time", "TimeR", "Sync", "Feedback", "FeedbackR", "Cross", "Width", "Mode", "Link", "Mix" }), "2 3 1 4 5 6 7 8 9 10")
   check("guess delay: right words", roles_of(CS.guess({ "Left Delay", "Right Delay", "Offset", "Ratio" }, "delay"),
     { "Time", "TimeR", "Offset", "Ratio" }), "0 1 2 3")
-  -- the five delays Tim tried, by their own parameter names
+  -- five real delays, by their own parameter names
   do
     local function g_of(names)
       local g = CS.guess(names, "delay")
@@ -6861,7 +6861,7 @@ do
     { "Decay", "Bass", "LowFreq", "HighFreq", "Damping", "Predelay", "Size", "Diffusion", "Mix" }), "5 6 7 8 9 10 11 12 2")
   check("guess reverb: cuts are cuts", roles_of(CS.guess({ "Decay", "Low Cut", "High Cut", "HF Damp" }, "reverb"),
     { "LowCut", "HighCut", "Damping" }), "1 2 3")
-  -- the reverbs Tim tried, by their own names
+  -- real reverbs, by their own names
   do
     local function g(names, list) return roles_of(CS.guess(names, "reverb"), list) end
     check("guess reverb: words apart", CS._rv_words("RTHighMultiply") .. "|" .. CS._rv_words("earlyLateMix") .. "|" .. CS._rv_words("HiCut"),
@@ -6910,7 +6910,7 @@ do
     { "Attack", "AttackCurve", "Decay", "Sustain", "Release", "ReleaseCurve" }), "1 0 2 3 4 5")
   check("guess modulation", roles_of(CS.guess({ "Rate", "Depth", "Waveform", "Stereo Phase", "Mix" }, "mod"),
     { "Rate", "Depth", "Shape", "Phase", "Mix" }), "0 1 2 3 4")
-  -- the choruses Tim tried, by their own names: voices of their own
+  -- real choruses, by their own names: voices of their own
   -- (Triad Chorus), a depth per side (TriceraChorus), a count (Thorus)
   do
     local triad = { "In", "Out", "Feedback", "Stereo", "Voice 1 Amount", "Voice 2 Amount", "Voice 3 Amount",
@@ -7318,7 +7318,7 @@ end
 os.remove("./TS_ChannelView_Mappings.ini")
 os.remove("./TS_ChannelView_Mappings.bak.ini")
 -- An EQ band learned on one side only (cuts, say) asked for its Q on the
--- other: the other side's shape, not a crash (user report, 2.1.0).
+-- other: the other side's shape, not a crash.
 do
   local ME = require("TS_CV_MapEQ")
   local Q = { { -12, 0.9 }, { -6, 0.8 }, { -3, 0.7 } }
@@ -7438,7 +7438,7 @@ do
     if p == 1 then return true, ("%.0f Hz"):format(100 * 100 ^ n) end
     return true, (n >= 0.5) and "Wide" or "Narrow"
   end
-  -- cuts only learned, as Tim's Slick EQ mid band
+  -- cuts only learned, as Slick EQ's mid band
   local L = { Z = 0.5, shapes = { { type = "bell", F = { { 0, 100 }, { 1, 10000 } },
     G = { { 0, -15.6 }, { 0.25, -7.6 }, { 0.5, 0 } }, Q = { { -15.6, 0.94 }, { -7.6, 0.86 } }, R = {} } } }
   local b = { name = "Mid", freq = 1, gain = 0, q = 2, learn = ME.encode(L) }
@@ -7482,9 +7482,8 @@ end
 
 -- A stepped knob follows a slow drag. The plugin reports its value back
 -- each frame already on a step; a drag that started again from there every
--- frame lost every move under half a step and never got anywhere (the
--- forum's "stepped knob behaves very strangely"). The drag's own running
--- position is kept until the button lets go.
+-- frame would lose every move under half a step and never get anywhere.
+-- The drag's own running position is kept until the button lets go.
 do
   local CC = require("TS_CV_Config")
   local down, dy, wheel = true, -3, 0
@@ -7574,6 +7573,217 @@ do
   end)
   check("arc colour: draw ran", ok and true or err, true)
   reaper.new_array = had
+end
+
+-- a modulator's ◯ dropped on an EQ node: which parameter by where it's let
+-- go (either side: frequency, above or below: gain, on it: Q); a linked
+-- way dragged moves the link's setting
+do
+  local CM = require("TS_CV_CanvasMod")
+  local MR_ = require("TS_CV_ModRack")
+  local MD_ = require("TS_CV_Mod")
+  local mouse, released = { 0, 0 }, true
+  local fake = setmetatable({
+    GetMousePos = function() return mouse[1], mouse[2] end,
+    IsMouseReleased = function() return released end,
+    CalcTextSize = function() return 30, 10 end,
+  }, { __index = function(_, key)
+    if key:find("Flags_") or key:find("MouseButton_") or key:find("MouseCursor_") or key:find("^Mod_") then return 1 end
+    return function() end
+  end })
+  CM.attach(fake)
+  local lo = MD_.link_of
+  MD_.link_of = function() return nil end
+  local src = { guid = "{M}", col = 0xff0000ff, name = "LFO 1" }
+  MR_.drag = { mod = src, k = 1, x = 0, y = 0 }
+  local axes = { { key = "freq", param = 4, label = "Frequency" }, { key = "gain", param = 5, label = "Gain" },
+                 { key = "q", param = 6, label = "Q" } }
+  local node = { x = 100, y = 100, r = 5 }
+  local function drop_at(x, y)
+    mouse = { x, y }
+    local req = {}
+    CM.over("ctx", "dl", {}, { guid = "{E}", path_t = { 0 } }, node, axes, req)
+    return req.mod_drop and req.mod_drop.param
+  end
+  check("node drop: left of it, frequency", drop_at(85, 100), 4)
+  check("node drop: right of it, frequency", drop_at(115, 101), 4)
+  check("node drop: above it, gain", drop_at(100, 85), 5)
+  check("node drop: below it, gain", drop_at(99, 116), 5)
+  check("node drop: on it, Q", drop_at(101, 101), 6)
+  check("node drop: off it, nothing", tostring(drop_at(160, 160)), "nil")
+  mouse = { 100, 85 }
+  local req = {}
+  CM.over("ctx", "dl", {}, { guid = "{E}", path_t = { 0 } }, node, axes, req)
+  check("node drop: a gain link swings both ways", req.mod_drop and req.mod_drop.centre, true)
+  -- a level line takes it anywhere along it, not off it
+  local lnode = { x = 280, y = 100, r = 5, line = { 0, 300 } }
+  local laxes = { { key = "thr", dir = "y", param = 9, label = "Threshold" } }
+  local function line_drop(x, y)
+    mouse = { x, y }
+    local rq = {}
+    CM.over("ctx", "dl", {}, { guid = "{E}", path_t = { 0 } }, lnode, laxes, rq)
+    return rq.mod_drop and rq.mod_drop.param
+  end
+  check("line drop: far along it", line_drop(40, 103), 9)
+  check("line drop: off it", tostring(line_drop(40, 120)), "nil")
+  -- a button or a list on a canvas: a ◯ let go over it links it
+  do
+    local W3 = require("TS_CV_Widgets")
+    local mc = W3.mod_corner_col
+    local corner
+    W3.mod_corner_col = function() corner = true end
+    local lo3 = MD_.link_of
+    MD_.link_of = function() return nil end
+    MR_.drag = { mod = src, k = 1 }
+    mouse = { 20, 15 }
+    local rq = {}
+    CM.rect("ctx", "dl", {}, { guid = "{E}", path_t = { 0 } }, rq, { 10, 10, 50, 26 }, 12, "Sync")
+    check("button drop: over it, linked", rq.mod_drop and rq.mod_drop.param, 12)
+    mouse = { 80, 15 }
+    rq = {}
+    CM.rect("ctx", "dl", {}, { guid = "{E}", path_t = { 0 } }, rq, { 10, 10, 50, 26 }, 12, "Sync")
+    check("button drop: off it, nothing", tostring(rq.mod_drop), "nil")
+    MR_.drag = nil
+    local nt3 = MR_.note_target
+    MR_.note_target = function() end
+    MD_.link_of = function() return { macro = true, mod = src } end
+    CM.rect("ctx", "dl", {}, { guid = "{E}", path_t = { 0 } }, {}, { 10, 10, 50, 26 }, 12, "Sync")
+    check("button linked: its corner in the source's colour", corner, true)
+    -- Alt-click on a linked one: unlinked, its own click left out
+    local unl
+    local ul3 = MD_.unlink
+    MD_.unlink = function() unl = true end
+    local km, mc3 = fake.GetKeyMods, fake.IsMouseClicked
+    fake.GetKeyMods = function() return 1 end
+    fake.IsMouseClicked = function() return true end
+    mouse = { 20, 15 }
+    local took = CM.rect("ctx", "dl", {}, { guid = "{E}", path_t = { 0 } }, {}, { 10, 10, 50, 26 }, 12, "Sync")
+    check("button Alt-click: unlinked, its click left out", tostring(unl) .. " " .. tostring(took), "true true")
+    fake.GetKeyMods, fake.IsMouseClicked, MD_.unlink = km, mc3, ul3
+    MD_.link_of, W3.mod_corner_col, MR_.note_target = lo3, mc, nt3
+  end
+  -- a line or slot handle: its ghost and reach dots after it, so they win
+  do
+    local order = {}
+    local lo4, rg4 = MD_.link_of, MD_.range
+    MD_.link_of = function() return { macro = true, mod = src } end
+    MD_.range = function() return 0.2, 0.8 end
+    local W4 = require("TS_CV_Widgets")
+    local t4, a4 = W4.tip, W4.allow_overlap
+    W4.tip, W4.allow_overlap = function() end, function() end
+    local nt4, nh4 = MR_.note_target, MR_.note_ctl_hover
+    MR_.note_target, MR_.note_ctl_hover = function() end, function() end
+    local ib, km4 = fake.InvisibleButton, fake.GetKeyMods
+    fake.GetKeyMods = function() return 0 end
+    fake.InvisibleButton = function(_, id) order[#order + 1] = id:match("^cm") and "dot" or "handle" end
+    local ax4 = { key = "Release", dir = "x", param = 3, pos = function(v) return 10 + v * 100 end }
+    CM.wrap("ctx", "dl", {}, { guid = "{E}" }, {}, "rel", { x = 40, y = 50, r = 5, late = true }, { ax4 },
+      function() fake.InvisibleButton("ctx", "rel", 1, 1); return false, false, false end)
+    check("slot handle: its dots submitted after it", order[1], "handle")
+    fake.InvisibleButton, fake.GetKeyMods = ib, km4
+    MD_.link_of, MD_.range, W4.tip, W4.allow_overlap, MR_.note_target, MR_.note_ctl_hover = lo4, rg4, t4, a4, nt4, nh4
+  end
+  -- a threshold's corner runs up the diagonal but drags up and down
+  local diag = { key = "thr", dir = "path", along = "y", param = 9, pos = function(v) return 100 + v * 100, 200 - v * 100 end }
+  -- a handle of two ways, one linked: its own drag still runs, the
+  -- linked way named so it's left alone
+  do
+    local lo2, sl2, lv2 = MD_.link_of, MD_.shift_link, MD_.live
+    local rg2 = MD_.range
+    MD_.link_of = function(_, _, p) return (p == 4) and { macro = true, mod = src } or nil end
+    MD_.shift_link, MD_.live = function() end, function() return 0.5 end
+    local W2 = require("TS_CV_Widgets")
+    local t2, a2 = W2.tip, W2.allow_overlap
+    W2.tip, W2.allow_overlap = function() end, function() end
+    local nt2, nh2 = MR_.note_target, MR_.note_ctl_hover
+    MR_.note_target, MR_.note_ctl_hover = function() end, function() end
+    fake.GetKeyMods = function() return 0 end
+    fake.GetMouseDelta = function() return 0, 0 end
+    local two = { { key = "t", dir = "x", param = 4, pos = function(v) return 100 + v * 100 end },
+                  { key = "lv", dir = "y", param = 5, pos = function(v) return 200 - v * 100 end } }
+    MD_.range = function() return 0.2, 0.8 end
+    local _, _, dg, lk = CM.wrap("ctx", "dl", {}, { guid = "{E}" }, {}, "w2", { x = 150, y = 150, r = 5 }, two,
+      function() return true, true, true end)
+    check("two ways, one linked: its own drag runs", tostring(dg) .. " " .. tostring(lk.x) .. " " .. tostring(lk.y), "true true nil")
+    MD_.link_of = function() return { macro = true, mod = src } end
+    local _, _, dg2 = CM.wrap("ctx", "dl", {}, { guid = "{E}" }, {}, "w2", { x = 150, y = 150, r = 5 }, two,
+      function() return true, true, true end)
+    check("two ways, both linked: its own drag left out", dg2, false)
+    MD_.link_of, MD_.shift_link, MD_.live, MD_.range = lo2, sl2, lv2, rg2
+    W2.tip, W2.allow_overlap, MR_.note_target, MR_.note_ctl_hover = t2, a2, nt2, nh2
+  end
+  check("line drag: by its height only", math.floor(CM.v_at(diag, 0, 150, nil, 0) * 1000 + 0.5) / 1000, 0.5)
+  MR_.drag = nil
+  -- dragging a linked way: the link's setting moves, by the pixels' worth
+  local moved
+  local sl, lv = MD_.shift_link, MD_.live
+  MD_.link_of = function(_, _, p) return (p == 4) and { mod = src } or nil end
+  MD_.live = function() return 0.5 end
+  MD_.shift_link = function(_, _, d) moved = d end
+  local ax = { key = "freq", param = 4, pos = function(v) return 100 + v * 200 end }
+  check("node drag: a linked way taken care of", CM.shift({}, { guid = "{E}" }, ax, 20), true)
+  check("node drag: by its own scale", math.floor(moved * 1000 + 0.5) / 1000, 0.1)
+  check("node drag: an unlinked way left to the canvas", CM.shift({}, { guid = "{E}" }, { key = "gain", param = 5, pos = function() return 0 end }, 0, 20), false)
+  -- the ghost and the reach stay put while the source moves the node
+  local W_ = require("TS_CV_Widgets")
+  local tip, ao, nt, nh, rg = W_.tip, W_.allow_overlap, MR_.note_target, MR_.note_ctl_hover, MD_.range
+  W_.tip, W_.allow_overlap = function() end, function() end
+  MR_.note_target, MR_.note_ctl_hover = function() end, function() end
+  MD_.range = function() return 0.2, 0.8 end
+  MD_.link_of = function(_, _, p) return (p == 4) and { macro = true, mod = src } or nil end
+  local drawn
+  fake.GetKeyMods = function() return 0 end
+  fake.IsItemHovered = function() return false end
+  fake.IsItemActive = function() return false end
+  mouse = { 0, 0 }
+  fake.DrawList_AddCircle = function(_, x, y) drawn[#drawn + 1] = math.floor(x + 0.5) .. "," .. math.floor(y + 0.5) end
+  fake.DrawList_AddLine = function(_, x1, y1, x2, y2) drawn[#drawn + 1] = math.floor(x2 + 0.5) .. "," .. math.floor(y2 + 0.5) end
+  local function handles(nx)
+    drawn = {}
+    MD_.live = function() return 0.25 end   -- read a moment apart from the node
+    CM.under("ctx", "dl", {}, { guid = "{E}" }, "n", { x = nx, y = 100, r = 5 }, { ax })
+    return table.concat(drawn, " ")
+  end
+  local h1 = handles(150)
+  check("node mod: ghost at its setting, line to the reach", h1:match("^140,100 260,100") ~= nil, true)
+  check("node mod: handles stay put as the node moves", handles(230), h1)
+  -- a reach past the canvas's edge is kept inside it, so it can be grabbed
+  MD_.range = function() return 0.2, 1.4 end
+  drawn = {}
+  CM.under("ctx", "dl", {}, { guid = "{E}" }, "n", { x = 150, y = 100, r = 5, box = { 100, 50, 300, 150 } }, { ax })
+  check("node mod: a reach past the edge kept inside", drawn[2], "293,100")
+  -- a linked Q: an arc round it, its ends dragged round
+  local function q(x, y) return math.floor(CM.q_at(0, 0, x, y) * 100 + 0.5) / 100 end
+  check("node Q: straight up is half way", q(0, -10), 0.5)
+  check("node Q: bottom left is the start", q(-10, 10), 0)
+  check("node Q: bottom right is the end", q(10, 10), 1)
+  check("node Q: in the gap, the nearer end", q(1, 10) .. " " .. q(-1, 10), "1.0 0.0")
+  local set
+  MD_.range = function() return 0.25, 0.75 end
+  local sr = MD_.set_range
+  MD_.set_range = function(_, _, a, b) set = { a, b } end
+  MD_.link_of = function(_, _, p) return (p == 6) and { macro = true, mod = src } or nil end
+  fake.IsItemActive = function() return true end
+  fake.IsMouseDown = function() return true end
+  mouse = { 100, 80 }   -- straight above the node: half way
+  local okq, eq = pcall(CM.under, "ctx", "dl", {}, { guid = "{E}" }, "n", { x = 100, y = 100, r = 5, box = { 0, 0, 300, 300 } },
+    { { key = "q", param = 6, label = "Q" } })
+  check("node Q: drawn", okq or eq, true)
+  check("node Q: dragged round sets its end", set and (set[1] .. " " .. set[2]), "0.25 0.5")
+  -- a reach the canvas pins to its edge (a gain past its range) still moves
+  local pinned = { key = "freq", param = 4, pos = function(v) return math.max(50, math.min(150, 100 + (v - 0.5) * 400)) end }
+  local function r3(v) return v and math.floor(v * 1000 + 0.5) / 1000 end
+  check("node mod: dragged to a place, the value there", r3(CM.v_at(pinned, 140, nil, 1)), 0.6)
+  check("node mod: past the edge, it stays where it is", r3(CM.v_at(pinned, 170, nil, 1)), 1)
+  MD_.range = function() return 0.5, 1.0 end
+  MD_.link_of = function(_, _, p) return (p == 4) and { macro = true, mod = src } or nil end
+  set = nil
+  mouse = { 130, 100 }
+  CM.under("ctx", "dl", {}, { guid = "{E}" }, "n", { x = 100, y = 100, r = 5, box = { 0, 0, 300, 300 } }, { pinned })
+  check("node mod: a reach pinned at the edge drags in", set and r3(set[2]), 0.575)
+  fake.IsItemActive, fake.IsMouseDown, MD_.set_range = function() return false end, nil, sr
+  W_.tip, W_.allow_overlap, MR_.note_target, MR_.note_ctl_hover, MD_.range = tip, ao, nt, nh, rg
+  MD_.link_of, MD_.shift_link, MD_.live = lo, sl, lv
 end
 
 -- The TS_CV Trimmer: the trim rule, Auto trim over items, where it goes,
@@ -8089,13 +8299,225 @@ do
     answers.DrawList_AddRect = nil
     local cv = { kind = "gate", rev = {}, roles = { Threshold = 0, Attack = 1, Release = 2, Preopen = 3, Hold = 4,
                  Lowpass = 5, Hipass = 6, Hysteresis = 12, Preview = 13, RMS = 14 } }
-    local okd, errd = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "rg-draw", name = "VST: ReaGate (Cockos)" }, {}, cv)
+    -- its attack and release driven by a macro: drawn with their reach
+    local MDg = require("TS_CV_Mod")
+    local lo_, li_ = MDg.link_of, MDg.live
+    local src_ = { guid = "{M}", col = 0xff00ffff, name = "Macro 1" }
+    MDg.link_of = function(_, _, p)
+      if p == 1 or p == 2 then return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
+    end
+    MDg.live = function() return 0.3 end
+    local okd, errd = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "rg-draw", name = "VST: ReaGate (Cockos)", path_t = { 0 } }, {}, cv)
     check("reagate: its canvas draws", okd and "ok" or tostring(errd), "ok")
+    MDg.link_of = function() return nil end
+    local okd2, errd2 = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "rg-draw", name = "VST: ReaGate (Cockos)", path_t = { 0 } }, {}, cv)
+    check("reagate: its canvas draws, nothing linked", okd2 and "ok" or tostring(errd2), "ok")
+    -- a compressor's: its ratio and attack driven
+    reads[7] = "4.0:1"
+    MDg.link_of = function(_, _, p)
+      if p == 1 or p == 7 then return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
+    end
+    local ccv = { kind = "comp", rev = {}, roles = { Threshold = 0, Attack = 1, Release = 2, Ratio = 7 } }
+    local okc, errc = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "cc-draw", name = "VST: SomeComp", path_t = { 0 } }, {}, ccv)
+    check("comp: its canvas draws, ratio and attack driven", okc and "ok" or tostring(errc), "ok")
+    -- an expander's ratio on a gate
+    local gcv = { kind = "gate", rev = {}, roles = { Threshold = 0, Attack = 1, Release = 2, Ratio = 7, Range = 9 } }
+    local okg, errg = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "ge-draw", name = "VST: SomeGate", path_t = { 0 } }, {}, gcv)
+    check("gate: an expander's ratio driven", okg and "ok" or tostring(errg), "ok")
+    -- every handle driven: thresholds, knee, hysteresis, range, ceiling
+    MDg.link_of = function() return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
+    ccv.roles.Knee = 8
+    local oka, erra = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "cc-draw", name = "VST: SomeComp", path_t = { 0 } }, {}, ccv)
+    check("comp: every handle driven", oka and "ok" or tostring(erra), "ok")
+    local okb, errb = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "ge-draw", name = "VST: SomeGate", path_t = { 0 } }, {}, gcv)
+    check("gate: every handle driven", okb and "ok" or tostring(errb), "ok")
+    local okr, errr = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "rg-draw", name = "VST: ReaGate (Cockos)", path_t = { 0 } }, {}, cv)
+    check("reagate: every handle driven", okr and "ok" or tostring(errr), "ok")
+    local lcv_ = { kind = "limit", rev = {}, roles = { Threshold = 0, Ceiling = 9, Release = 2 } }
+    local okl_, errl_ = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 260, {}, { addr = 0, guid = "rl2-draw", name = "VST: SomeLimit", path_t = { 0 } }, {}, lcv_)
+    check("limiter: every handle driven", okl_ and "ok" or tostring(errl_), "ok")
+    MDg.link_of = function() return nil end
+    reads[7] = "0"
     -- the same filter panel under a delay's echoes
     local dcv = { kind = "delay", rev = {}, roles = { Time = 1, Feedback = 2, LowCut = 6, HighCut = 5 } }
     local okdl, errdl = pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 600, 400, {},
       { addr = 0, guid = "dl-draw", name = "VST: SomeDelay" }, {}, dcv)
     check("delay: its canvas draws, with its filters", okdl and "ok" or tostring(errdl), "ok")
+    -- every handle and cut driven
+    MDg.link_of = function() return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
+    local CMt = require("TS_CV_CanvasMod")
+    local cu, seen = CMt.under, {}
+    CMt.under = function(c_, d_, t_, f_, id_, n_, axes_)
+      for _, a_ in ipairs(axes_) do
+        local x1, y1 = a_.pos(0.1)
+        local x2, y2 = a_.pos(0.9)
+        local moved = (x1 and x2 and math.abs(x1 - x2) > 0.5) or (y1 and y2 and math.abs(y1 - y2) > 0.5)
+        seen[#seen + 1] = a_.key .. (moved and "+" or "=")
+      end
+      return cu(c_, d_, t_, f_, id_, n_, axes_)
+    end
+    local fpn = reaper.TrackFX_FormatParamValueNormalized
+    reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+      if p == 1 then return true, ("%.0f ms"):format(10 + n * 990) end
+      if p == 2 then return true, ("%.0f %%"):format(n * 100) end
+      if p == 5 or p == 6 then return true, ("%.0f Hz"):format(20 * 1000 ^ n) end
+      return true, "0"
+    end
+    local okdm, errdm = pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 600, 400, {},
+      { addr = 0, guid = "dl-draw", name = "VST: SomeDelay", path_t = { 0 } }, {}, dcv)
+    reaper.TrackFX_FormatParamValueNormalized = fpn
+    CMt.under = cu
+    check("delay: every handle driven", okdm and "ok" or tostring(errdm), "ok")
+    table.sort(seen)
+    check("delay: its handles and cuts move with their control", table.concat(seen, " "), "Feedback+ Time+ hc+ lc+")
+    -- a modulated time doesn't swing the feedback's ghost: the others at
+    -- their settings
+    do
+      local msrc = { guid = "{L}", col = 0xff00ffff, name = "LFO 1", slot = 0, j = 1 }
+      MDg.link_of = function() return { mod = msrc, baseline = 0.5, scale = 0.2, offset = 0, slot = 0, param = 1 } end
+      local gp, gpn = reaper.TrackFX_GetParam, reaper.TrackFX_GetParamNormalized
+      reaper.TrackFX_GetParam = function() return 1, 0, 1 end
+      reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+        if p == 1 then return true, ("%.0f ms"):format(10 + n * 990) end
+        if p == 2 then return true, ("%.0f %%"):format(n * 100) end
+        return true, "0"
+      end
+      local got = {}
+      CMt.under = function(c_, d_, t_, f_, id_, n_, axes_)
+        for _, a_ in ipairs(axes_) do
+          if a_.key == "Feedback" then local x_, y_ = a_.pos(0.5); got[#got + 1] = ("%.1f,%.1f"):format(x_ or -1, y_ or -1) end
+        end
+      end
+      for _, live in ipairs({ 0.3, 0.7 }) do
+        reaper.TrackFX_GetParamNormalized = function() return live end
+        pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 600, 400, {},
+          { addr = 0, guid = "dl-draw", name = "VST: SomeDelay", path_t = { 0 } }, {}, dcv)
+      end
+      CMt.under = cu
+      reaper.TrackFX_GetParam, reaper.TrackFX_GetParamNormalized, reaper.TrackFX_FormatParamValueNormalized = gp, gpn, fpn
+      check("delay: a modulated time leaves the feedback's handles put", #got == 2 and got[1] == got[2], true)
+      MDg.link_of = function() return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
+    end
+    -- every other role canvas: drawn with nothing linked, with macros,
+    -- with modulators; each linked handle moves with its control, and
+    -- stays put while the others swing (TS_CV_CanvasMod)
+    do
+      local RPm = require("TS_CV_RolePanel")
+      local CMc = require("TS_CV_CanvasMod")
+      local cu2 = CMc.under
+      local gp2, gpn2, fpn2 = reaper.TrackFX_GetParam, reaper.TrackFX_GetParamNormalized, reaper.TrackFX_FormatParamValueNormalized
+      local msrc = { guid = "{L}", col = 0xff00ffff, name = "LFO 1", slot = 0, j = 1 }
+      local CANV = {
+        { "deess",  { Threshold = 0, Frequency = 1, Width = 2, Range = 9 }, nil, "Frequency Range Threshold" },
+        { "deess",  { Threshold = 0, Low = 5, High = 6 }, nil, "High Low Threshold" },
+        { "sat",    { Drive = 1, Mix = 2 }, nil, "Drive Mix" },
+        { "reverb", { Predelay = 1, Decay = 2, Early = 3, Size = 4, Diffusion = 5, Mix = 6, LowFreq = 7, HighFreq = 8,
+                      Bass = 9, Damping = 10, Tone = 11, LowCut = 12, HighCut = 13, LowEQ = 14, HighEQ = 15 }, nil,
+          "Bass Damping Decay Diffusion Early HighCut HighEQ HighFreq LowCut LowEQ LowFreq Mix Predelay Size Tone" },
+        { "reverb", { Predelay = 1, Decay = 2, Balance = 3 }, nil, "Balance Decay Predelay" },
+        { "env",    { Delay = 1, Attack = 2, Hold = 3, Decay = 4, Sustain = 5, Release = 6,
+                      AttackCurve = 7, DecayCurve = 8, ReleaseCurve = 9 }, nil,
+          "Attack AttackCurve Decay DecayCurve Delay Hold Release ReleaseCurve Sustain" },
+        -- a synth's: its oscillator over the envelope (ReaSynth's)
+        { "env",    { Attack = 1, Decay = 2, Sustain = 3, Release = 4, Square = 5, Saw = 6, Triangle = 7, Sine2 = 8,
+                      Sine2Tune = 9, PulseWidth = 10, Detune = 11, Portamento = 12, Volume = 13 }, nil,
+          "Attack Decay Detune Portamento PulseWidth Release Saw Sine Sine2Tune Sq Sustain Tri Volume" },
+        { "mod",    { Rate = 1, Depth = 2, Phase = 3, Mix = 5 }, nil, "Depth Mix Phase Rate" },
+        { "mod",    { V1Rate = 1, V1Depth = 2, V1Phase = 3, V1Pan = 4, V2Rate = 5, V2Depth = 6, V2Pan = 7 }, nil, "Pan V1Depth V1Pan V1Phase V1Rate V2Pan" },
+        { "multi",  { Crossover1 = 1, Crossover2 = 2, B1Threshold = 3, B2Threshold = 4, B3Threshold = 5,
+                      B1Ratio = 6, B1Gain = 7, B1Attack = 8 }, 3,
+          "Atk B1Threshold B2Threshold B3Threshold Crossover1 Crossover2 Gain Ratio" },
+        -- the dynamics canvases (CompPanel's)
+        { "limit",  { Threshold = 1, Ceiling = 2, Release = 3 }, nil, "Ceiling Release Threshold", true },
+        { "gate",   { Threshold = 1, Attack = 2, Hold = 3, Release = 4, Range = 5, Hysteresis = 6, Ratio = 7 }, nil,
+          "Closes Opens atk hold range ratio rel", true, { [7] = function(n) return ("%.1f:1"):format(1 + n * 19) end } },
+        { "comp",   { Threshold = 1, Ratio = 2, Attack = 3, Release = 4, Knee = 5, Makeup = 6, Mix = 7 }, nil,
+          "Make-up Mix atk knee ratio rel thr", true, { [2] = function(n) return ("%.1f:1"):format(1 + n * 19) end } },
+      }
+      -- ReaXcomp's eight bands, every band control and switch mapped
+      do
+        local r8, keys, rv8 = {}, {}, {}
+        local p = 1
+        for k = 1, 8 do
+          if k < 8 then r8["Crossover" .. k] = p; p = p + 1; keys[#keys + 1] = "Crossover" .. k end
+          for _, rl in ipairs({ "Threshold", "Ratio", "Knee", "Attack", "Release", "Gain", "RMS", "AutoMakeup", "AutoRelease", "Feedback", "Bypass" }) do
+            r8["B" .. k .. rl] = p; p = p + 1
+          end
+          rv8["B" .. k .. "Bypass"] = true
+          keys[#keys + 1] = "B" .. k .. "Threshold"
+        end
+        for _, kk in ipairs({ "Atk", "Gain", "RMS", "Ratio", "Rel" }) do keys[#keys + 1] = kk end
+        table.sort(keys)
+        CANV[#CANV + 1] = { "multi", r8, 8, table.concat(keys, " "), nil, nil, rv8, "VST: ReaXcomp (Cockos)" }
+      end
+      reaper.TrackFX_GetParam = function() return 1, 0, 1 end
+      for i, c in ipairs(CANV) do
+        reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+          if c[6] and c[6][p] then return true, c[6][p](n) end
+          return true, ("%.3f"):format(n)
+        end
+        local cv_ = { kind = c[1], rev = c[7] or {}, roles = c[2], nb = c[3] }
+        local fx_ = { addr = 0, guid = "rc" .. i, name = c[8] or ("VST: Some " .. c[1]), path_t = { 0 } }
+        local function draw(link, live)
+          MDg.link_of = link
+          reaper.TrackFX_GetParamNormalized = function() return live or 0.3 end
+          if c[5] then return pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 700, 420, {}, fx_, {}, cv_) end
+          return pcall(RPm.draw, "ctx", "dl", 0, 0, 700, 420, {}, fx_, {}, cv_)
+        end
+        local ok1, e1 = draw(function() return nil end)
+        -- macros: each axis moves with its control
+        local seen, keys = {}, {}
+        CMc.under = function(c_, d_, t_, f_, id_, n_, axes_)
+          for _, a_ in ipairs(axes_) do
+            keys[a_.key] = true
+            if a_.pos then
+              local x1, y1 = a_.pos(0.1)
+              local x2, y2 = a_.pos(0.9)
+              local moved = (x1 and x2 and math.abs(x1 - x2) > 0.5) or (y1 and y2 and math.abs(y1 - y2) > 0.5)
+              if not moved then seen[#seen + 1] = a_.key end
+            end
+          end
+          return cu2(c_, d_, t_, f_, id_, n_, axes_)
+        end
+        local ok2, e2 = draw(function() return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end)
+        CMc.under = cu2
+        -- modulators: placed the same however the others are swinging
+        local at = {}
+        CMc.under = function(c_, d_, t_, f_, id_, n_, axes_)
+          for _, a_ in ipairs(axes_) do
+            if a_.pos then
+              local x_, y_ = a_.pos(0.5)
+              local key = id_ .. ":" .. a_.key
+              local v_ = ("%.1f,%.1f"):format(x_ or -1, y_ or -1)
+              if at[key] == nil then at[key] = v_ elseif at[key] ~= v_ then at[key] = false end
+            end
+          end
+        end
+        local mlink = function() return { mod = msrc, baseline = 0.5, scale = 0.2, offset = 0, slot = 0, param = 1 } end
+        local ok3, e3 = draw(mlink, 0.3)
+        local ok4, e4 = draw(mlink, 0.7)
+        CMc.under = cu2
+        local swung = {}
+        for k_, v_ in pairs(at) do if v_ == false then swung[#swung + 1] = k_ end end
+        table.sort(swung)
+        local tag = c[1] .. " " .. i .. ": "
+        check(tag .. "draws, nothing linked", ok1 or e1, true)
+        check(tag .. "draws, macros on every handle", ok2 or e2, true)
+        check(tag .. "draws, modulators on every handle", (ok3 and ok4) or e3 or e4, true)
+        local kl = {}
+        for k_ in pairs(keys) do kl[#kl + 1] = k_ end
+        table.sort(kl)
+        check(tag .. "its handles", table.concat(kl, " "), c[4])
+        check(tag .. "every handle moves with its control", table.concat(seen, " "), "")
+        check(tag .. "every handle stays put while the others swing", table.concat(swung, " "), "")
+      end
+      CMc.under = cu2
+      reaper.TrackFX_GetParam, reaper.TrackFX_GetParamNormalized, reaper.TrackFX_FormatParamValueNormalized = gp2, gpn2, fpn2
+      MDg.link_of = function() return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
+    end
+    local okgf, errgf = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 320, {}, { addr = 0, guid = "rg-draw", name = "VST: ReaGate (Cockos)", path_t = { 0 } }, {}, cv)
+    check("reagate: its detector filters driven", okgf and "ok" or tostring(errgf), "ok")
+    MDg.link_of = function() return nil end
     -- ReaLimit's, with its options
     local RBm = require("TS_CV_ReaFX")
     reaper.TrackFX_GetNamedConfigParm = function(_, _, k)
@@ -8105,6 +8527,32 @@ do
     local lcv = { kind = "limit", rev = {}, roles = { Threshold = 0, Ceiling = 1, Release = 2 } }
     local okl, errl = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 260, {}, { addr = 0, guid = "rl-draw", name = "VST: ReaLimit (Cockos)" }, {}, lcv)
     check("realimit: its canvas draws, with its options", okl and "ok" or tostring(errl), "ok")
+    -- ReaComp's own panel, every handle driven and not
+    do
+      local names = { [0] = "Thresh", "Ratio", "Attack", "Release", "Pre-comp", "Knee", "Auto Release", "Wet" }
+      local rc_reads = { [0] = "-20.0", "4.0", "3.0", "100", "0.0", "6.0", "0", "0.0" }
+      local units = { [0] = " dB", ":1", " ms", " ms", " ms", " dB", "", " dB" }
+      local had = {}
+      for _, k in ipairs({ "TrackFX_GetNumParams", "TrackFX_GetParamName", "TrackFX_GetFormattedParamValue",
+                           "TrackFX_FormatParamValueNormalized" }) do had[k] = reaper[k] end
+      reaper.TrackFX_GetNumParams = function() return 8 end
+      reaper.TrackFX_GetParamName = function(_, _, p) return true, names[p] or "" end
+      reaper.TrackFX_GetFormattedParamValue = function(_, _, p) return true, rc_reads[p] or "0" end
+      reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+        local base = tonumber(rc_reads[p]) or 0
+        return true, ("%.1f%s"):format(base + n * 10, units[p] or "")
+      end
+      require("TS_CV_ReaComp").forget_maps()
+      MDg.link_of = function() return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
+      local ok1, e1 = pcall(CPm.draw, "ctx", "dl", 0, 0, 640, 320, {}, { addr = 0, guid = "rc-draw", name = "VST: ReaComp (Cockos)", path_t = { 0 } }, {})
+      check("reacomp: every handle driven", ok1 and "ok" or tostring(e1), "ok")
+      MDg.link_of = function() return nil end
+      local ok2, e2 = pcall(CPm.draw, "ctx", "dl", 0, 0, 640, 320, {}, { addr = 0, guid = "rc-draw", name = "VST: ReaComp (Cockos)", path_t = { 0 } }, {})
+      check("reacomp: its panel draws", ok2 and "ok" or tostring(e2), "ok")
+      for k, v in pairs(had) do reaper[k] = v end
+      require("TS_CV_ReaComp").forget_maps()
+    end
+    MDg.link_of, MDg.live = lo_, li_
     reaper = real2
   end
   -- a bar's menu with Large items: its submenu rows drawn as the bar's
@@ -8184,11 +8632,119 @@ do
   state = string.pack("<i4<i4", 4, 0) .. ("\0"):rep(40)
   check("realimit: a state it doesn't know left alone", tostring(RB.set_limit_flag({}, 0, nil, "truepeak", true)) ..
         " " .. tostring(RB.limit_flags({}, 0, nil)), "false nil")
+  -- ReaXcomp (its real names, REAPER 7.83): the multiband canvas, a band
+  -- per "<k>-" group, each band's top frequency the crossover above it,
+  -- Active turned round as its bypass; nothing beside
+  local xnames = {}
+  local per = { "Band top frequency", "Gain", "Threshold", "Ratio", "Knee", "Attack", "Release", "RMS", "Make Up Gain",
+                "Auto Release", "FeedBack Detector", "Active" }
+  local function xcomp(nb_)
+    xnames = {}
+    for k = 1, nb_ do for j, nm in ipairs(per) do xnames[(k - 1) * 12 + j - 1] = k .. "-" .. nm end end
+    xnames[nb_ * 12], xnames[nb_ * 12 + 1], xnames[nb_ * 12 + 2] = "Bypass", "Wet", "Delta"
+  end
+  xcomp(4)
+  reaper.TrackFX_GetNumParams = function() return #xnames + 1 end
+  reaper.TrackFX_GetParamName = function(_, _, p) return true, xnames[p] end
+  ED.PRO = { RELEASE = ED.RELEASE }
+  local xd = RB.default_canvas({}, 0, "rx-test", "reaxcomp", dflt())
+  local xr = xd.canvas and xd.canvas.roles or {}
+  check("reaxcomp: a multiband canvas of its four bands", (xd.canvas and xd.canvas.kind or "-") .. " " .. tostring(xd.canvas and xd.canvas.nb), "multi 4")
+  check("reaxcomp: crossovers are the bands' tops", ("%s %s %s %s"):format(xr.Crossover1, xr.Crossover2, xr.Crossover3, tostring(xr.Crossover4)), "0 12 24 nil")
+  check("reaxcomp: band 2's controls", ("%s %s %s %s %s %s"):format(xr.B2Threshold, xr.B2Ratio, xr.B2Knee, xr.B2Gain, xr.B2RMS, xr.B2Release), "14 15 16 13 19 18")
+  check("reaxcomp: its switches", ("%s %s %s %s"):format(xr.B3AutoMakeup, xr.B3AutoRelease, xr.B3Feedback, xr.B3Bypass), "32 33 34 35")
+  check("reaxcomp: Active turned round as bypass", xd.canvas.rev.B1Bypass, true)
+  check("reaxcomp: nothing beside it", #xd.controls, 0)
+  xcomp(8)
+  local x8 = RB.default_canvas({}, 0, "rx8-test", "reaxcomp", dflt())
+  check("reaxcomp: eight bands", tostring(x8.canvas and x8.canvas.nb) .. " " .. tostring(x8.canvas.roles.Crossover7), "8 72")
+  -- a preset with more or fewer bands: the canvas follows
+  xcomp(3)
+  local xf = RB.default_canvas({}, 0, "rxf-test", "reaxcomp", dflt())
+  RB.ensure({}, 0, "rxf-test", "ReaXcomp", xf)
+  local nb0 = xf.canvas.nb
+  xcomp(6)
+  RB.ensure({}, 0, "rxf-test", "ReaXcomp", xf)
+  local nb1, c5 = xf.canvas.nb, xf.canvas.roles.Crossover5
+  xcomp(2)
+  RB.ensure({}, 0, "rxf-test", "ReaXcomp", xf)
+  check("reaxcomp: follows a preset's bands", ("%s %s %s %s %s"):format(nb0, nb1, tostring(c5), xf.canvas.nb, tostring(xf.canvas.roles.B3Threshold)), "3 6 48 2 nil")
+  -- ReaXcomp's stored bands (its real state, four bands): split one, take one away
+  do
+    local hx = "3800000004000000be644f7c82aa5540000000000000f03f96683bd536a2bc3faaf8bf232ab40f404c37894160e5004014000000c10000001400000007000000ece61f993d419240000000000000f03f19008b93759dc13f1a5cedd4e590f43f00000000000000000f0000006a00000013000000060000006219c3903ea5bf40000000000000f03f34e4bac334f2c03f0d83c8bb2bf8f63f00000000000000000c000000450000001100000006000000000000000070d740000000000000f03f2066b20cac52c03f0000000000000040fa7e6abc7493c83f0c0000001c0000000200000006000000010000000100000020793c074ddbf53f0000000000000000000000000100000002000000"
+    local raw4 = hx:gsub("%x%x", function(c) return string.char(tonumber(c, 16)) end)
+    local bands, bsz, tail = RB.xcomp_split(raw4)
+    check("reaxcomp state: its bands", ("%d %d %d"):format(#bands, bsz, #tail), "4 56 36")
+    check("reaxcomp state: back as it was", RB.xcomp_join(bands, bsz, tail) == raw4, true)
+    local tops = function(b) local o = {} for i, r in ipairs(b) do o[i] = ("%.0f"):format((string.unpack("<d", r))) end return table.concat(o, " ") end
+    check("reaxcomp state: band tops", tops(bands), "87 1168 8101 24000")
+    local b5 = RB.xcomp_split_band(bands, 2)
+    check("reaxcomp: a band split in two", tops(b5), "87 318 1168 8101 24000")
+    check("reaxcomp: the new band its settings", b5[2]:sub(9) == b5[3]:sub(9), true)
+    local b4 = RB.xcomp_remove_band(b5, 2)
+    check("reaxcomp: taken away again, as it was", RB.xcomp_join(b4, bsz, tail) == raw4, true)
+    local b3 = RB.xcomp_remove_band(RB.xcomp_split(raw4), 4)
+    check("reaxcomp: the last band away, the one below tops the range", tops(b3), "87 1168 24000")
+    check("reaxcomp: one band stays", RB.xcomp_remove_band({ bands[1] }, 1), nil)
+    check("reaxcomp: not a state it knows", RB.xcomp_split("abc"), nil)
+    -- not while a band at or after it has automation or a link
+    xcomp(4)
+    local ge, gn = reaper.GetFXEnvelope, reaper.TrackFX_GetNamedConfigParm
+    reaper.GetFXEnvelope = function(_, _, p) return p == 30 and "env" or nil end
+    reaper.TrackFX_GetNamedConfigParm = function(_, _, k) return k == "param.40.plink.active", "1" end
+    local c2, why2 = RB.xcomp_can_change({}, 0, "rxc-test", 2)
+    local c4, why4 = RB.xcomp_can_change({}, 0, "rxc-test", 4)
+    reaper.GetFXEnvelope = function() return nil end
+    local c1 = RB.xcomp_can_change({}, 0, "rxc-test", 4)
+    reaper.TrackFX_GetNamedConfigParm = function() return false, "" end
+    local c0 = RB.xcomp_can_change({}, 0, "rxc-test", 1)
+    reaper.GetFXEnvelope, reaper.TrackFX_GetNamedConfigParm = ge, gn
+    check("reaxcomp: automation on a later band stops it", ("%s %s %s %s"):format(tostring(c2), tostring(c4), tostring(c1), tostring(c0)), "false false false true")
+    check("reaxcomp: says why", (why2 or ""):find("Automation") ~= nil and (why4 or ""):find("link") ~= nil, true)
+  end
+  -- ReaSynth (its real names): envelope and oscillator on the canvas, the two odd switches beside
+  local snames = { [0] = "Attack", "Release", "Square mix", "Saw mix", "Triangle mix", "Volume", "Decay", "Extra sine mix",
+                   "Extra sine tuning", "Sustain", "Pulse Width", "Global detune", "Legacy oscillator mode", "Portamento",
+                   "Broken portamento (legacy)" }
+  reaper.TrackFX_GetNumParams = function() return 15 end
+  reaper.TrackFX_GetParamName = function(_, _, p) return true, snames[p] end
+  local sctl = {}
+  for p = 0, 14 do sctl[#sctl + 1] = { param = p, type = "knob", label = "" } end
+  local sd = RB.default_canvas({}, 0, "rs-test", "reasynth", { controls = sctl, aliases = {} })
+  local sr = sd.canvas and sd.canvas.roles or {}
+  check("reasynth: an envelope canvas", (sd.canvas and sd.canvas.kind or "-") .. " " .. ("%s %s %s %s"):format(sr.Attack, sr.Decay, sr.Sustain, sr.Release), "env 0 6 9 1")
+  local sp = {}
+  for _, c in ipairs(sd.controls) do sp[#sp + 1] = c.param end
+  check("reasynth: only the odd switches beside it", table.concat(sp, ","), "12,14")
+  check("reasynth: the oscillator on the canvas", ("%s %s %s %s %s %s %s %s %s"):format(sr.Square, sr.Saw, sr.Triangle, sr.Sine2,
+    sr.Sine2Tune, sr.PulseWidth, sr.Detune, sr.Portamento, sr.Volume), "2 3 4 7 8 10 11 13 5")
+  -- its wave, as drawn: a sine alone; the square at its pulse width, the sine gone under it
+  local RPw = require("TS_CV_RolePanel")
+  check("reasynth: a sine alone", ("%.2f %.2f"):format(RPw.osc_wave(0.25, {}), RPw.osc_wave(0.75, {})), "1.00 -1.00")
+  local sqo = { sq = 1, pw = 0.25 }
+  check("reasynth: the square at its pulse width", ("%.0f %.0f %.0f"):format(RPw.osc_wave(0.1, sqo), RPw.osc_wave(0.3, sqo), RPw.osc_wave(0.9, sqo)), "1 -1 -1")
+  check("reasynth: the extra sine an octave up", ("%.2f"):format(RPw.osc_wave(0.125, { s2 = 1, tune = 1200 }) - RPw.osc_wave(0.125, {})), "1.00")
   ED.PRO = nil
   local s2 = RB.default_canvas({}, 0, "rg-test", "reagate", dflt())
   check("reagate: without Pro, every control and no canvas", #s2.controls .. " " .. tostring(s2.canvas), "8 nil")
   ED.PRO = was
   reaper = real
+end
+
+-- a multiband of more than four bands: the probe splits in four, so the
+-- first three are measured and the rest aren't
+do
+  local TPm = require("TS_CV_Taps")
+  local gpn, gfp, fpn = reaper.TrackFX_GetParamNormalized, reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_FormatParamValueNormalized
+  reaper.TrackFX_GetParamNormalized = function(_, _, p) return 0.1 + p * 0.1 end
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n) return true, ("%.0f Hz"):format(20 * 1000 ^ n) end
+  local cv8 = { nb = 8, roles = { Crossover1 = 0, Crossover2 = 1, Crossover3 = 2, Crossover4 = 3, Crossover5 = 4, Crossover6 = 5, Crossover7 = 6 }, rev = {} }
+  local plan = TPm.mb_plan({}, 0, cv8)
+  local at = {}
+  for k = 1, 8 do at[#at + 1] = tostring(plan.at[k]) end
+  check("multiband 8: the first three measured", table.concat(at, " "), "1 2 3 nil nil nil nil nil")
+  check("multiband 8: its bands", ("%d %.0f"):format(#plan.xs, plan[8].hi), "7 20000")
+  reaper.TrackFX_GetParamNormalized, reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_FormatParamValueNormalized = gpn, gfp, fpn
 end
 
 -- a canvas layout's controls folded away (they pop out from the edge):
@@ -8315,6 +8871,190 @@ do
   CR.adopt(D, tree("{D1}", "{D2}", "{D3}"))
   check("carry: a plugin's own settings kept", PROJ["variant:{D1}"], "Pro-C 3 :: Drums")
   for k, f in pairs(was) do reaper[k] = f end
+end
+
+-- ---------------------------------------------------------------------
+-- the patch bay (TS_CV_PatchBay)
+-- ---------------------------------------------------------------------
+do
+  local PBt = require("TS_CV_PatchBay")
+  check("bay: taller for every rail tier", PBt.height(3) - PBt.height(1), 2 * PBt.RAIL_GAP)
+  check("bay: room for the deepest sag", PBt.height(1) >= PBt.jack_y(0, 1) + PBt.JACK_R + PBt.SAG_MAX, true)
+  local xs, ys = PBt.curve(10, 100, 210, 100, 50)
+  check("bay: a cable starts and ends on its jacks", ("%d,%d %d,%d"):format(xs[1], ys[1], xs[#xs], ys[#ys]), "10,100 210,100")
+  check("bay: and sags between", math.floor(ys[math.floor(#ys / 2) + 1] + 0.5), 138)
+  check("bay: near a cable", PBt.dist(xs, ys, 110, 137) < 3, true)
+  check("bay: a collapsed strip's jacks side by side", PBt.jack_r(30) <= 5 and PBt.jack_x(0, 30, "out") - PBt.jack_x(0, 30, "in") >= 2 * PBt.jack_r(30) + 2, true)
+  check("bay: a full strip's jacks full size", PBt.jack_r(96), PBt.JACK_R)
+  check("bay: louder, thicker", PBt.width_of(1) > PBt.width_of(0.25), true)
+  check("bay: the modes' dashes", tostring(PBt.dash_of(0)) .. " " .. PBt.dash_of(3)[1] .. " " .. PBt.dash_of(1)[1], "nil 9 2")
+  -- drawn, open, with a folder (one hidden), a send, a sidechain, a hardware output
+  local real = reaper
+  local M_, F_, K_, H_, V_ = { n = "M" }, { n = "F" }, { n = "K" }, { n = "H" }, { n = "V" }
+  local parent = { [K_] = F_, [H_] = F_ }
+  local sends = { [K_] = { { V_, 0, 1, 0 } }, [H_] = { { V_, 0, 0.5, 2 } } }
+  local hwo = { [V_] = { 2 } }
+  local order = { F_, K_, H_, V_ }
+  local made = {}
+  reaper = setmetatable({
+    GetMasterTrack = function() return M_ end,
+    GetParentTrack = function(t) return parent[t] end,
+    CountTracks = function() return #order end,
+    GetTrack = function(_, i) return order[i + 1] end,
+    GetTrackNumSends = function(t, cat) return cat == 0 and #(sends[t] or {}) or (cat == 1 and #(hwo[t] or {}) or 0) end,
+    GetTrackSendInfo_Value = function(t, cat, i, k)
+      if cat == 1 then return (k == "I_DSTCHAN") and hwo[t][i + 1] or ((k == "D_VOL") and 1 or 0) end
+      local e = sends[t][i + 1]
+      if k == "P_DESTTRACK" then return e[1] end
+      if k == "I_SENDMODE" then return e[2] end
+      if k == "D_VOL" then return e[3] end
+      if k == "I_DSTCHAN" then return e[4] end
+      return 0
+    end,
+    GetMediaTrackInfo_Value = function(t, k)
+      if k == "B_MAINSEND" then return (t == H_) and 0 or 1 end
+      if k == "IP_TRACKNUMBER" then for i, o in ipairs(order) do if o == t then return i end end return -1 end
+      if k == "I_NCHAN" then return 2 end
+      return 0
+    end,
+    GetSetMediaTrackInfo_String = function(t) return true, t.n end,
+    GetNumAudioOutputs = function() return 4 end,
+    GetTrackColor = function() return 0 end,
+    time_precise = function() return 100 end,
+    ValidatePtr2 = function() return true end,
+    CreateTrackSend = function(a, b) made[#made + 1] = { a, b }; return 0 end,
+    SetTrackSendInfo_Value = function() end, SetMediaTrackInfo_Value = function() end,
+    Undo_BeginBlock = function() end, Undo_EndBlock = function() end,
+  }, { __index = real })
+  local lines = 0
+  local fake = setmetatable({
+    BeginChild = function() return true end, GetMousePos = function() return -100, -100 end,
+    IsWindowHovered = function() return false end, GetKeyMods = function() return 0 end,
+    CalcTextSize = function(_, t) return #(t or "") * 6, 12 end, GetMouseWheel = function() return 0 end,
+    IsMouseDown = function() return false end, IsMouseClicked = function() return false end,
+    IsKeyPressed = function() return false end, InvisibleButton = function() return false end,
+    IsItemHovered = function() return false end, BeginPopup = function() return false end,
+    DrawList_AddLine = function() lines = lines + 1 end,
+    MouseButton_Left = 0, Mod_Alt = 4, Mod_Shift = 2, Key_Escape = 1,
+  }, { __index = function(_, k)
+    if k:match("^WindowFlags_") or k:match("^MouseCursor_") then return 0 end
+    return function() return nil end
+  end })
+  local Wt = require("TS_CV_Widgets")
+  local wa = { Wt.push_small, Wt.pop_small, Wt.tip }
+  Wt.push_small, Wt.pop_small, Wt.tip = function() end, function() end, function() end
+  PBt.attach(fake)
+  PBt._st.open = true
+  local list = { { track = M_, num = 0 }, { track = F_, num = 1 }, { track = V_, num = 4 } }   -- K and H hidden in F
+  local rects = { { x = 0, w = 96, track = M_ }, { x = 102, w = 30, track = F_ }, { x = 138, w = 96, track = V_ } }
+  local ok_, err_ = pcall(PBt.draw, "ctx", { list = list, rects = rects, row_x = 0, row_y = 0, strips_h = 200, bay_y = 200, bay_cy = 200,
+    bay_h = PBt.height(PBt.tiers(list)), width = 400, hw_x = 260, cx = 0, cy = 0, sel = function() return false end })
+  check("bay: draws, a collapsed folder standing for its tracks", ok_ or err_, true)
+  check("bay: its cables and rails drawn", lines > 40, true)
+  check("bay: a send made from a drop", PBt.connect(K_, V_, nil, 0, 2, 0, -6) and made[1][1] == K_ and made[1][2] == V_, true)
+  -- re-routed: made again at the new end with its settings, the old one gone
+  local sets, gone = {}, {}
+  reaper.SetTrackSendInfo_Value = function(t, cat, i, k, v) sets[#sets + 1] = ("%s%d:%s=%s"):format(t.n, cat, k, tostring(v)) end
+  reaper.RemoveTrackSend = function(t, cat, i) gone[#gone + 1] = ("%s%d#%d"):format(t.n, cat, i) end
+  reaper.GetTrackSendInfo_Value = function(_, _, _, k) return ({ D_VOL = 0.5, I_SENDMODE = 3, I_SRCCHAN = 0 })[k] or 0 end
+  made = {}
+  local cK = { src = K_, dst = V_, cat = 0, idx = 0, dstch = 2 }
+  local okr = PBt.reroute(cK, "dst", F_)
+  local has = function(x) for _, v in ipairs(sets) do if v == x then return true end end return false end
+  check("bay: re-routed to another track", okr and made[1][1] == K_ and made[1][2] == F_ and gone[1] == "K0#0", true)
+  check("bay: its level, mode and channels kept", has("K0:D_VOL=0.5") and has("K0:I_SENDMODE=3") and has("K0:I_DSTCHAN=2"), true)
+  made, gone, sets = {}, {}, {}
+  check("bay: moved from the same track, nothing", PBt.reroute(cK, "src", K_), false)
+  check("bay: onto its own track, nothing", PBt.reroute(cK, "dst", K_), false)
+  check("bay: nothing made or taken", #made + #gone, 0)
+  local okh = PBt.reroute(cK, "dst", nil, 2)
+  check("bay: re-routed to an output", okh and made[1][2] == nil and has("K1:I_DSTCHAN=2") and gone[1] == "K0#0", true)
+  made, gone, sets = {}, {}, {}
+  local okm = PBt.reroute({ src = H_, hw = 0, cat = 1, idx = 0, dstch = 0 }, "src", V_)
+  check("bay: an output's send moved to another track", okm and made[1][1] == V_ and has("V1:I_DSTCHAN=0") and gone[1] == "H1#0", true)
+  -- a rail drop dragged off its rail switches that send off; a click on
+  -- a hollow one switches it on
+  do
+    local mains = {}
+    reaper.SetMediaTrackInfo_Value = function(t, k, v) if k == "B_MAINSEND" then mains[#mains + 1] = t.n .. "=" .. v end end
+    reaper.GetTrackSendInfo_Value = function() return 0 end
+    sends, hwo = {}, {}
+    local list2 = { { track = M_, num = 0 }, { track = F_, num = 1 }, { track = K_, num = 2 }, { track = H_, num = 3 } }
+    local rects2 = { { x = 0, w = 96, track = M_ }, { x = 102, w = 96, track = F_ }, { x = 204, w = 96, track = K_ }, { x = 306, w = 96, track = H_ } }
+    local g2 = { list = list2, rects = rects2, row_x = 0, row_y = 0, strips_h = 200, bay_y = 200, bay_cy = 200, bay_h = PBt.height(PBt.tiers(list2)),
+                 width = 500, hw_x = 420, cx = 0, cy = 0, sel = function() return false end }
+    local ry = PBt.rail_y(200, 1)
+    local kx, hx = PBt.jack_x(204, 96, "out"), PBt.jack_x(306, 96, "out")
+    local mpx, mpy, down, clicked = 0, 0, false, false
+    fake.GetMousePos = function() return mpx, mpy end
+    fake.IsWindowHovered = function() return true end
+    fake.IsMouseDown = function() return down end
+    fake.IsMouseClicked = function() return clicked end
+    local function frame(x, y, d, c) mpx, mpy, down, clicked = x, y, d, c; PBt.draw("ctx", g2) end
+    frame(kx, ry + 8, true, true)            -- press on Kick's drop (on)
+    frame(kx + 40, ry + 60, true, false)     -- pull it away
+    frame(kx + 40, ry + 60, false, false)    -- let go
+    frame(hx, ry + 8, true, true)            -- a click on H's (off, see B_MAINSEND above)
+    frame(hx, ry + 8, false, false)
+    check("bay: a drop pulled off its rail, then a hollow one clicked", table.concat(mains, " "), "K=0 H=1")
+    -- a cable's far end pulled from H's IN onto F's IN: re-routed there
+    sends = { [K_] = { { H_, 0, 1, 0 } } }
+    reaper.GetTrackSendInfo_Value = function(t, cat, i, k)
+      local e = sends[t] and sends[t][i + 1]
+      if not e then return 0 end
+      if k == "P_DESTTRACK" then return e[1] end
+      if k == "D_VOL" then return e[3] end
+      return 0
+    end
+    made, gone = {}, {}
+    local jy = PBt.jack_y(200, PBt.tiers(list2))
+    local hin, fin = PBt.jack_x(306, 96, "in"), PBt.jack_x(102, 96, "in")
+    local cxs, cys = PBt.curve(kx, jy, hin, jy, PBt.sag(kx, hin))
+    local gi = math.floor(#cxs * 0.8)
+    frame(cxs[gi], cys[gi], true, true)       -- grab it near its far end
+    frame(fin, jy, true, false)               -- over F's IN
+    frame(fin, jy, false, false)              -- let go
+    check("bay: a cable's end moved to another jack", #made == 1 and made[1][1] == K_ and made[1][2] == F_ and gone[1] == "K0#0", true)
+    fake.IsWindowHovered = function() return false end
+    fake.IsMouseDown = function() return false end
+    fake.IsMouseClicked = function() return false end
+    fake.GetMousePos = function() return -100, -100 end
+  end
+  -- the sheet up, hanging over the name row: a click on its buttons there
+  -- doesn't close the bay; without it, a click outside the bay does
+  do
+    PBt._st.open, PBt._st.pinned = true, false
+    PBt.remember({ 0, 500, 800, 510 }, { 0, 0, 800, 520 })
+    PBt._st.last.bay = { 0, 200, 800, 450 }
+    fake.GetMousePos = function() return 300, 505 end
+    fake.IsMouseClicked = function() return true end
+    fake.IsMousePosValid = function() return true end
+    PBt._st.sheet = { src = K_, dst = V_ }
+    PBt.reveal("ctx", false)
+    local kept = PBt._st.open
+    PBt._st.sheet = nil
+    fake.GetMousePos = function() return 300, 100 end
+    PBt.reveal("ctx", false)
+    check("bay: a click under the sheet keeps it, one outside the bay closes it", tostring(kept) .. " " .. tostring(PBt._st.open), "true false")
+    fake.IsMouseClicked = function() return false end
+    fake.GetMousePos = function() return -100, -100 end
+  end
+  -- the TCP's bay: a column left of the rows, the same cables turned on
+  -- their side
+  do
+    PBt._st.open, PBt._st.drag, PBt._st.move, PBt._st.rdrag = true, nil, nil, nil
+    fake.GetMousePos = function() return -100, -100 end
+    local l0 = lines
+    local rows = { { track = M_, y = 100, h = 40 }, { track = F_, y = 142, h = 30 }, { track = V_, y = 174, h = 40 } }
+    local okt, errt = pcall(PBt.draw_tcp, "ctx", { x = 0, y = 90, w = PBt.tcp_width(list), h = 400, rows = rows,
+      list = list, sel = function() return true end, bay_rect = { 0, 90, 500, 490 } })
+    check("bay (TCP): draws, rows for columns", okt or errt, true)
+    check("bay (TCP): its rails drawn (a rail, the arrow in, two drops)", lines - l0 >= 4, true)
+    check("bay (TCP): wide enough for the sag and the outputs", PBt.tcp_width(list) >= 230, true)
+  end
+  PBt._st.open = false
+  Wt.push_small, Wt.pop_small, Wt.tip = wa[1], wa[2], wa[3]
+  reaper = real
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

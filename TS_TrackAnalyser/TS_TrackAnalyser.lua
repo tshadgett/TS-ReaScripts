@@ -2,10 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.5.3
+-- @version 2.6.0
 -- @changelog
---  Auto-hide the header: Track Analyser no longer stops with an error
---  (EndChild) when the header slides out.
+--  Settings in ChannelView's new look. TS_TrackProbe 2.3.0: up to eight
+--  measured plugins per track, ten bands by FFT at a quarter of the CPU,
+--  and only the tracks being looked at are measured.
 -- @about
 --  # Track Analyser
 --
@@ -34,6 +35,7 @@
 --   [nomain] TS_TA_Strip.lua
 --   [nomain] TS_TA_Mask.lua
 --   [nomain] TS_TA_GR.lua
+--   [nomain] TS_TA_Style.lua
 --   [effect] TS_TrackProbe.jsfx
 --========================================================
 --
@@ -305,9 +307,17 @@ local Mask = need("TS_TA_Mask", true, {
 -- testable on synthetic band levels with a known answer, and this file is
 -- not. See its header for why the measured trace is not a broadband ratio.
 local GR = need("TS_TA_GR", true, { "shape" })
+-- The settings' look: the same kit as ChannelView's, so the TS_ tools'
+-- options read alike (captions above, chips, the accent for what's on).
+local Kit = need("TS_TA_Style", true, {
+  "attach", "palette", "push", "pop", "cap", "done", "caption", "checkbox", "seg",
+  "button", "slider_double", "slider_int",
+})
 if not Strip then return end
 if not Mask then return end
 if not GR then return end
+if not Kit then return end
+Kit.attach(ImGui)
 
 -- The measured models are not part of drawing. They are for the
 -- measurement tools and are not loaded here at all -- the panel must not
@@ -405,8 +415,8 @@ local S = {
   cGR       = 0xF0A860ff,
   cGRMeas   = 0xD2609Bff,     -- reduction MEASURED by a probe tap: ChannelView's pink
 
-  -- Each data colour follows the base hue until you take it off auto by
-  -- unticking the box beside it. See DERIVED.
+  -- Each data colour follows the base hue until you switch off the Auto
+  -- chip beside it. See DERIVED.
   autoSpecPre  = true,
   autoSpecPost = true,
   autoWavePre  = true,
@@ -557,6 +567,8 @@ local function buildPalette()
     else h, sa = base + dh, sat end
     COL[name] = hsl(h, sa, lum, 0xff)
   end
+  -- and the settings' greys and accent, from the same two knobs
+  if Kit then Kit.palette(base, tint) end
 
   -- The data colours follow the same two knobs, except where you have
   -- said otherwise. Alpha is carried through untouched: on the spectrum
@@ -670,7 +682,7 @@ local function edgeOf(col)  return alpha(col, math.min(1, alphaOf(col) + 0.35)) 
 -- gold as the one accent, used only where a control is actually engaged.
 -- Nothing here changes behaviour; it stops the furniture shouting.
 --
--- Pushed after Begin and popped before End, every frame, because ImGui is
+-- Pushed before Begin and popped after End, every frame, because ImGui is
 -- immediate mode and there is nowhere else to keep it.
 ----------------------------------------------------------
 
@@ -953,6 +965,7 @@ local G = TA.gmem
 -- that keeps them running, and where the post probe writes each tap's
 -- reduction per scope column while this panel has the track armed.
 local TAP_HB, TAP_TRACE, TAP_COLS = 73, 0x50000, 4096
+local TAP_TRACE2 = 0x200000   -- taps 5..8
 local tapBeat = 0
 TA.attach()
 
@@ -1805,7 +1818,8 @@ local function pumpGR()
   if grLastCol and span > 0 and span <= MAX_BRIDGE then
     for j, src in ipairs(rigSources) do
       if src.est and src.route and src.route.index then
-        local tb = TAP_TRACE + (src.route.index - 1) * TAP_COLS
+        local ix = src.route.index
+        local tb = ix <= 4 and (TAP_TRACE + (ix - 1) * TAP_COLS) or (TAP_TRACE2 + (ix - 5) * TAP_COLS)
         local i, k = grLastCol, 0
         while k <= span do
           local row = grHist[i] or {}
@@ -1890,7 +1904,7 @@ local function drawPanel1(dl, x0, y0, w, h)
 
   SP.n = 0
   if rig then
-    -- GATED ON THE PROBE EXISTING, not just on the checkbox.
+    -- GATED ON THE PROBE EXISTING, not just on the setting.
     --
     --   A track with only ONE probe is a legitimate setup -- it gives the
     --   output spectrum, the output waveform and everything the collision
@@ -2989,6 +3003,7 @@ local function frame()
   --   side benefit that the window's own chrome -- background, border,
   --   title -- is styled as well as the widgets in it.
   local styleC, styleV = pushStyle(ctx)
+  Kit.push(ctx)
 
   local visible, open = ImGui.Begin(ctx, 'Track Analyser', true,
     ImGui.WindowFlags_NoScrollWithMouse())
@@ -3048,12 +3063,12 @@ local function frame()
         ImGui.SetNextItemWidth(ctx, 96)
         rvh, S.windowMs = ImGui.DragDouble(ctx, '##len', S.windowMs, 5, 20, 8000, "%.0f ms") ; markh(rvh)
         ImGui.SameLine(ctx)
-        rvh, S.beatLock = ImGui.Checkbox(ctx, 'Hold', S.beatLock) ; markh(rvh)
+        rvh, S.beatLock = Kit.checkbox(ctx, 'Hold', S.beatLock) ; markh(rvh)
       elseif S.timeMode == 3 then
         ImGui.SetNextItemWidth(ctx, 76)
         rvh, S.windowBeats = ImGui.DragInt(ctx, '##beats', S.windowBeats, 0.2, 1, 32, "%d beats") ; markh(rvh)
         ImGui.SameLine(ctx)
-        rvh, S.beatLock = ImGui.Checkbox(ctx, 'Lock', S.beatLock) ; markh(rvh)
+        rvh, S.beatLock = Kit.checkbox(ctx, 'Lock', S.beatLock) ; markh(rvh)
       else
         ImGui.SetNextItemWidth(ctx, 96)
         rvh, S.histSec = ImGui.DragDouble(ctx, '##hist', S.histSec, 0.02, 0.05, 8, "%.2f s") ; markh(rvh)
@@ -3397,6 +3412,12 @@ local function frame()
       end
       -- Anything that changed is worth writing down, once things settle.
       local function mark(changed) if changed then touchSettings() end end
+      -- the next captioned control beside the last, or on a new line when
+      -- the panel is too narrow for it
+      local function beside(w)
+        ImGui.SameLine(ctx, 0, 14)
+        if (ImGui.GetContentRegionAvail(ctx)) < w then ImGui.NewLine(ctx) end
+      end
 
       local cflags = ImGui.ColorEditFlags_NoInputs()
       if ImGui.ColorEditFlags_AlphaBar then
@@ -3406,26 +3427,30 @@ local function frame()
         cflags = cflags | ImGui.ColorEditFlags_AlphaPreviewHalf()
       end
 
-      -- A data colour and its auto box. Auto GREYS the picker rather than
+      -- A data colour and its Auto switch. Auto GREYS the picker rather than
       -- hiding it: the point of following the hue is to see what the hue
       -- produced, and a control that vanishes when it is doing its job
-      -- leaves you wondering where the colour came from. Untick to take
-      -- that one colour off the hue; the others carry on following.
+      -- leaves you wondering where the colour came from. Switch Auto off to
+      -- take that one colour off the hue; the others carry on following.
       local canDis = (ImGui.BeginDisabled and ImGui.EndDisabled) and true or false
-      local function colAuto(key, label)
+      -- caption: shown above the pair (Kit), or none when the pair sits
+      -- beside the switch it belongs to
+      local function colAuto(key, caption)
         local flag = DERIVED_AUTO[key]
         local on   = S[flag] ~= false
+        if caption then Kit.cap(ctx, caption) end
         if canDis and on then ImGui.BeginDisabled(ctx) end
-        local ch, v = ImGui.ColorEdit4(ctx, label, S[key], cflags)
+        local ch, v = ImGui.ColorEdit4(ctx, '##' .. key, S[key], cflags)
         if ch then S[key] = v ; touchSettings() end
         if canDis and on then ImGui.EndDisabled(ctx) end
         ImGui.SameLine(ctx, 0, 3)
-        local ch2, v2 = ImGui.Checkbox(ctx, '##' .. key .. 'auto', on)
+        local ch2, v2 = Kit.checkbox(ctx, 'Auto##' .. key .. 'auto', on)
         if ch2 then S[flag] = v2 ; buildPalette() ; touchSettings() end
         if ImGui.IsItemHovered(ctx) then
           ImGui.SetTooltip(ctx,
-            "Follow the hue. Untick to pick it.")
+            "Follow the hue. Off: pick it.")
         end
+        if caption then Kit.done(ctx) end
       end
 
       ---------------------------------------------- appearance
@@ -3434,14 +3459,14 @@ local function frame()
       -- maths, so the pair can be brought into line with a REAPER theme
       -- together. 219 and 1.00 are the hand-picked colours exactly.
       ImGui.SetNextItemWidth(ctx, 190)
-      local hch, hv = ImGui.SliderInt(ctx, 'Hue', math.floor(S.baseHue), 0, 359)
+      local hch, hv = Kit.slider_int(ctx, 'Hue', math.floor(S.baseHue), 0, 359)
       if hch then
         S.baseHue = hv ; buildPalette() ; touchSettings()
         palSet(hv, S.tint)
       end
-      ImGui.SameLine(ctx)
+      beside(200)
       ImGui.SetNextItemWidth(ctx, 150)
-      local tch, tv = ImGui.SliderDouble(ctx, 'Tint', S.tint, 0.0, 2.0, "%.2f")
+      local tch, tv = Kit.slider_double(ctx, 'Tint', S.tint, 0.0, 2.0, "%.2f")
       if tch then
         S.tint = tv ; buildPalette() ; touchSettings()
         palSet(S.baseHue, tv)
@@ -3451,6 +3476,8 @@ local function frame()
           "How far the greys lean toward the hue.\n0 grey, 1 default.")
       end
 
+      beside(200)
+      Kit.cap(ctx, "Palette")
       do  -- a live swatch, so the sliders are not guesswork
         local sdl = ImGui.GetWindowDrawList(ctx)
         local cx, cy = ImGui.GetCursorScreenPos(ctx)
@@ -3459,14 +3486,16 @@ local function frame()
                        "zeroLine", "textDim", "text", "accent", "warn" }
         for i, k in ipairs(keys) do
           local x0 = cx + (i - 1) * (sw / #keys)
-          ImGui.DrawList_AddRectFilled(sdl, x0, cy, x0 + sw / #keys, cy + sh, COL[k] or 0, 0)
+          ImGui.DrawList_AddRectFilled(sdl, x0, cy + 5, x0 + sw / #keys, cy + 5 + sh, COL[k] or 0, 0)
         end
-        ImGui.Dummy(ctx, sw, sh + 2)
+        ImGui.Dummy(ctx, sw, ImGui.GetFrameHeight(ctx))
       end
+      Kit.done(ctx)
+      beside(200)
+      Kit.cap(ctx)
+      rv, S.trackRule = Kit.checkbox(ctx, 'Track colour rule', S.trackRule) ; mark(rv)
       ImGui.SameLine(ctx)
-      rv, S.trackRule = ImGui.Checkbox(ctx, 'Track colour rule', S.trackRule) ; mark(rv)
-      ImGui.SameLine(ctx)
-      if ImGui.SmallButton(ctx, 'Reset') then
+      if ImGui.Button(ctx, 'Reset') then
         S.baseHue, S.tint = 219, 1.0
         -- Reset means reset: any colour taken off the hue by hand comes
         -- back onto it, which is the only way back to the stock scheme
@@ -3475,6 +3504,7 @@ local function frame()
         buildPalette() ; touchSettings()
         palSet(219, 1.0)
       end
+      Kit.done(ctx)
 
       ImGui.Separator(ctx)
 
@@ -3488,13 +3518,13 @@ local function frame()
           if which == "spectrum" then S.showScope = true else S.showSpectrum = true end
         end
       end
-      rv, S.showSpectrum = ImGui.Checkbox(ctx, 'Spectrum', S.showSpectrum)
+      rv, S.showSpectrum = Kit.checkbox(ctx, 'Spectrum', S.showSpectrum)
       if rv then keepOne("spectrum") ; touchSettings() end
       ImGui.SameLine(ctx)
-      rv, S.showScope = ImGui.Checkbox(ctx, 'Scope', S.showScope)
+      rv, S.showScope = Kit.checkbox(ctx, 'Scope', S.showScope)
       if rv then keepOne("scope") ; touchSettings() end
       ImGui.SameLine(ctx)
-      rv, S.hideHeader = ImGui.Checkbox(ctx, 'Auto-hide the header', S.hideHeader)
+      rv, S.hideHeader = Kit.checkbox(ctx, 'Auto-hide the header', S.hideHeader)
       if rv then touchSettings() end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx,
@@ -3533,27 +3563,29 @@ local function frame()
       local function dimOn()  if canDim and not havePre then ImGui.BeginDisabled(ctx) end end
       local function dimOff() if canDim and not havePre then ImGui.EndDisabled(ctx) end end
       dimOn()
-      rv, S.showPre   = ImGui.Checkbox(ctx, 'Pre spectrum',  S.showPre)   ; mark(rv) ; ImGui.SameLine(ctx)
-      colAuto('cSpecPre', '##cspre')
+      rv, S.showPre   = Kit.checkbox(ctx, 'Pre spectrum',  S.showPre, { dim = not havePre }) ; mark(rv) ; ImGui.SameLine(ctx, 0, 4)
+      colAuto('cSpecPre')
       dimOff()
-      ImGui.SameLine(ctx)
-      rv, S.showPost  = ImGui.Checkbox(ctx, 'Post spectrum', S.showPost)  ; mark(rv) ; ImGui.SameLine(ctx)
-      colAuto('cSpecPost', '##cspost')
+      beside(200)
+      rv, S.showPost  = Kit.checkbox(ctx, 'Post spectrum', S.showPost)  ; mark(rv) ; ImGui.SameLine(ctx, 0, 4)
+      colAuto('cSpecPost')
+      beside(200)
+      rv, S.showCurve = Kit.checkbox(ctx, 'Response curve', S.showCurve) ; mark(rv) ; ImGui.SameLine(ctx, 0, 4)
+      colAuto('cCurve')
 
-      rv, S.showCurve = ImGui.Checkbox(ctx, 'Response curve', S.showCurve) ; mark(rv) ; ImGui.SameLine(ctx)
-      colAuto('cCurve', '##ccurve') ; ImGui.SameLine(ctx)
-      rv, S.curveFill = ImGui.Checkbox(ctx, 'Curve fill',     S.curveFill) ; mark(rv) ; ImGui.SameLine(ctx)
-      rv, S.autoScale = ImGui.Checkbox(ctx, 'Auto expand',    S.autoScale) ; mark(rv)
+      rv, S.curveFill = Kit.checkbox(ctx, 'Curve fill',     S.curveFill) ; mark(rv) ; ImGui.SameLine(ctx)
+      rv, S.autoScale = Kit.checkbox(ctx, 'Auto expand',    S.autoScale) ; mark(rv)
 
       -- Short follows a knob move and shows the noise with it; long is
       -- smooth and lags. 1.5 s is about the point where a filter sweep still
       -- reads as a sweep.
-      ImGui.SetNextItemWidth(ctx, 150)
-      rv, S.curveTau  = ImGui.SliderDouble(ctx, 'Curve averaging (s)', S.curveTau, 0.05, 5) ; mark(rv)
-      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, 170)
+      rv, S.curveTau  = Kit.slider_double(ctx, 'Curve averaging', S.curveTau, 0.05, 5, "%.2f s") ; mark(rv)
+      beside(200)
+      Kit.cap(ctx, 'Curve smoothing')
       ImGui.SetNextItemWidth(ctx, 130)
       local sm = SMOOTH[S.smoothIdx] or SMOOTH[1]
-      if ImGui.BeginCombo(ctx, 'Curve smoothing', sm.name) then
+      if ImGui.BeginCombo(ctx, '##smooth', sm.name) then
         for i, e in ipairs(SMOOTH) do
           if ImGui.Selectable(ctx, e.name, i == S.smoothIdx) then
             S.smoothIdx = i ; touchSettings()
@@ -3561,51 +3593,58 @@ local function frame()
         end
         ImGui.EndCombo(ctx)
       end
+      Kit.done(ctx)
 
       -- How far below the loudest bin the excitation may fall before the
       -- curve breaks rather than divides by nothing.
-      ImGui.SetNextItemWidth(ctx, 150)
-      rv, S.excRange  = ImGui.SliderDouble(ctx, 'Excitation range (dB)', S.excRange, 20, 96) ; mark(rv)
-      ImGui.SameLine(ctx)
-      ImGui.SetNextItemWidth(ctx, 150)
-      rv, S.specBot   = ImGui.SliderDouble(ctx, 'Spectrum floor', S.specBot, -120, -40, "%.0f dB") ; mark(rv)
+      ImGui.SetNextItemWidth(ctx, 170)
+      rv, S.excRange  = Kit.slider_double(ctx, 'Excitation range', S.excRange, 20, 96, "%.0f dB") ; mark(rv)
+      beside(200)
+      ImGui.SetNextItemWidth(ctx, 170)
+      rv, S.specBot   = Kit.slider_double(ctx, 'Spectrum floor', S.specBot, -120, -40, "%.0f dB") ; mark(rv)
       -- How fast a peak falls back. The probe has no parameters, so every
       -- probe takes it from here.
-      ImGui.SetNextItemWidth(ctx, 150)
-      rv, S.specRel   = ImGui.SliderDouble(ctx, 'Spectrum release', S.specRel, 50, 2000, "%.0f ms") ; mark(rv)
+      beside(200)
+      ImGui.SetNextItemWidth(ctx, 170)
+      rv, S.specRel   = Kit.slider_double(ctx, 'Spectrum release', S.specRel, 50, 2000, "%.0f ms") ; mark(rv)
 
       ImGui.Separator(ctx)
 
       ---------------------------------------------- collisions
       heading("COLLISIONS")
-      ImGui.TextColored(ctx, COL.textDim,
-        "the lamp on the title row switches this on and picks the track")
-      ImGui.SameLine(ctx)
+      Kit.cap(ctx, "Colour")
       local rvm
       rvm, S.cMask = ImGui.ColorEdit4(ctx, '##cmask', S.cMask, cflags) ; mark(rvm)
+      Kit.done(ctx)
+      ImGui.SameLine(ctx, 0, 10)
+      Kit.cap(ctx)
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.TextColored(ctx, COL.textDim,
+        "the lamp on the title row switches this on and picks the track")
+      Kit.done(ctx)
 
       if S.showMask then
-        ImGui.SetNextItemWidth(ctx, 150)
+        ImGui.SetNextItemWidth(ctx, 170)
         -- 0 is same-critical-band only, which is roughly what Pro-Q and
         -- Claro describe themselves as doing. 1 is Schroeder as
         -- published. Having both on one control is what makes them
         -- comparable on the same material.
-        rv, S.maskSpread = ImGui.SliderDouble(ctx, 'Spread', S.maskSpread, 0, 2,
+        rv, S.maskSpread = Kit.slider_double(ctx, 'Spread', S.maskSpread, 0, 2,
           S.maskSpread < 0.05 and "same band only" or "%.2f") ; mark(rv)
-        ImGui.SameLine(ctx)
-        ImGui.SetNextItemWidth(ctx, 150)
-        rv, S.maskOffset = ImGui.SliderDouble(ctx, 'Masking index', S.maskOffset, 0, 24, "%.0f dB") ; mark(rv)
-
-        ImGui.SetNextItemWidth(ctx, 150)
-        rv, S.maskFloor = ImGui.SliderDouble(ctx, 'Audibility gate', S.maskFloor, -100, -20, "%.0f dB") ; mark(rv)
-        ImGui.SameLine(ctx)
-        ImGui.SetNextItemWidth(ctx, 150)
-        rv, S.maskDepth = ImGui.SliderDouble(ctx, 'Full red at', S.maskDepth, 3, 30, "%.0f dB") ; mark(rv)
+        beside(200)
+        ImGui.SetNextItemWidth(ctx, 170)
+        rv, S.maskOffset = Kit.slider_double(ctx, 'Masking index', S.maskOffset, 0, 24, "%.0f dB") ; mark(rv)
+        beside(200)
+        ImGui.SetNextItemWidth(ctx, 170)
+        rv, S.maskFloor = Kit.slider_double(ctx, 'Audibility gate', S.maskFloor, -100, -20, "%.0f dB") ; mark(rv)
+        beside(200)
+        ImGui.SetNextItemWidth(ctx, 170)
+        rv, S.maskDepth = Kit.slider_double(ctx, 'Full red at', S.maskDepth, 3, 30, "%.0f dB") ; mark(rv)
 
         -- The contour is the line along the top of the post spectrum. It
         -- reads more precisely than the fill does, and some material is
         -- easier to judge with it off and only the wash showing.
-        rv, S.maskEdge = ImGui.Checkbox(ctx, 'Colour the contour too', S.maskEdge) ; mark(rv)
+        rv, S.maskEdge = Kit.checkbox(ctx, 'Colour the contour too', S.maskEdge) ; mark(rv)
 
         if MC.why then
           ImGui.TextColored(ctx, COL.textDim, "collisions: " .. MC.why)
@@ -3620,30 +3659,31 @@ local function frame()
 
       ---------------------------------------------- panel 2
       heading("WAVEFORM AND GAIN REDUCTION")
-      ImGui.SetNextItemWidth(ctx, 130)
-      local modes = { "Free (wheel)", "Milliseconds", "Beats" }
-      if ImGui.BeginCombo(ctx, 'Window', modes[S.timeMode]) then
-        for i, m in ipairs(modes) do
-          if ImGui.Selectable(ctx, m, i == S.timeMode) then
-            S.timeMode = i ; lock = {} ; touchSettings()
-          end
-        end
-        ImGui.EndCombo(ctx)
+      do
+        local modes = { { "Free (wheel)", 1 }, { "Milliseconds", 2 }, { "Beats", 3 } }
+        Kit.cap(ctx, "Window")
+        local pick = Kit.seg(ctx, "##tmode", modes, S.timeMode)
+        Kit.done(ctx)
+        if pick and pick ~= S.timeMode then S.timeMode = pick ; lock = {} ; touchSettings() end
       end
-      ImGui.SameLine(ctx)
+      beside(200)
       if S.timeMode == 2 then
-        ImGui.SetNextItemWidth(ctx, 150)
-        rv, S.windowMs = ImGui.SliderDouble(ctx, 'Length', S.windowMs, 20, 8000, "%.0f ms")
-        ImGui.SameLine(ctx)
-        rv, S.beatLock = ImGui.Checkbox(ctx, 'Hold window', S.beatLock)
+        ImGui.SetNextItemWidth(ctx, 170)
+        rv, S.windowMs = Kit.slider_double(ctx, 'Length', S.windowMs, 20, 8000, "%.0f ms")
+        beside(200)
+        Kit.cap(ctx)
+        rv, S.beatLock = Kit.checkbox(ctx, 'Hold window', S.beatLock)
+        Kit.done(ctx)
       elseif S.timeMode == 3 then
-        ImGui.SetNextItemWidth(ctx, 120)
-        rv, S.windowBeats = ImGui.SliderInt(ctx, 'Beats', S.windowBeats, 1, 32)
-        ImGui.SameLine(ctx)
-        rv, S.beatLock = ImGui.Checkbox(ctx, 'Lock to beat', S.beatLock)
+        ImGui.SetNextItemWidth(ctx, 140)
+        rv, S.windowBeats = Kit.slider_int(ctx, 'Beats', S.windowBeats, 1, 32)
+        beside(200)
+        Kit.cap(ctx)
+        rv, S.beatLock = Kit.checkbox(ctx, 'Lock to beat', S.beatLock)
+        Kit.done(ctx)
       else
-        ImGui.SetNextItemWidth(ctx, 150)
-        rv, S.histSec = ImGui.SliderDouble(ctx, 'History', S.histSec, 0.05, 8, "%.2f s")
+        ImGui.SetNextItemWidth(ctx, 170)
+        rv, S.histSec = Kit.slider_double(ctx, 'History', S.histSec, 0.05, 8, "%.2f s")
       end
 
       -- How often each plugin actually produces a new reduction number.
@@ -3710,23 +3750,19 @@ local function frame()
         end
       end
 
-      rv, S.showGR = ImGui.Checkbox(ctx, 'GR meter', S.showGR) ; mark(rv)
+      Kit.cap(ctx)
+      rv, S.showGR = Kit.checkbox(ctx, 'GR meter', S.showGR) ; mark(rv)
       ImGui.SameLine(ctx)
-      rv, S.showGRTrace = ImGui.Checkbox(ctx, 'GR trace', S.showGRTrace) ; mark(rv)
+      rv, S.showGRTrace = Kit.checkbox(ctx, 'GR trace', S.showGRTrace) ; mark(rv)
+      Kit.done(ctx)
       if S.showGRTrace then
-        ImGui.SameLine(ctx)
-        ImGui.SetNextItemWidth(ctx, 210)
-        local srcs = { "reported by the plugin  (~18/s)",
-                       "measured by the probes  (500/s)" }
-        local cur = srcs[S.grTraceSrc] or srcs[1]
-        if ImGui.BeginCombo(ctx, '##grsrc', cur) then
-          for i, nm in ipairs(srcs) do
-            if ImGui.Selectable(ctx, nm, i == S.grTraceSrc) then
-              S.grTraceSrc = i ; touchSettings()
-            end
-          end
-          ImGui.EndCombo(ctx)
-        end
+        beside(200)
+        local srcs = { { "Reported by the plugin (~18/s)", 1 },
+                       { "Measured by the probes (500/s)", 2 } }
+        Kit.cap(ctx, "The trace")
+        local pick = Kit.seg(ctx, "##grsrc", srcs, S.grTraceSrc == 2 and 2 or 1)
+        Kit.done(ctx)
+        if pick and pick ~= S.grTraceSrc then S.grTraceSrc = pick ; touchSettings() end
         if S.grTraceSrc == 2 then
           local haveSrc = false
           for _, src in ipairs(rigSources) do
@@ -3758,19 +3794,19 @@ local function frame()
         end
       end
 
-      ImGui.SetNextItemWidth(ctx, 150)
-      rv, S.grRange = ImGui.SliderDouble(ctx, 'Reduction scale', S.grRange, 6, 36, "%.0f dB") ; mark(rv)
-      ImGui.SameLine(ctx)
-      dimOn()
-      rv, S.showPreWave = ImGui.Checkbox(ctx, 'Unprocessed behind', S.showPreWave) ; mark(rv)
-      dimOff()
+      ImGui.SetNextItemWidth(ctx, 170)
+      rv, S.grRange = Kit.slider_double(ctx, 'Reduction scale', S.grRange, 6, 36, "%.0f dB") ; mark(rv)
+      beside(200)
+      Kit.cap(ctx)
+      rv, S.showPreWave = Kit.checkbox(ctx, 'Unprocessed behind', S.showPreWave, { dim = not havePre }) ; mark(rv)
+      Kit.done(ctx)
 
       colAuto('cWavePre', 'Unprocessed')
-      ImGui.SameLine(ctx)
+      beside(200)
       colAuto('cWavePost', 'Processed')
-      ImGui.SameLine(ctx)
+      beside(200)
       colAuto('cGR', 'Reduction')
-      ImGui.SameLine(ctx)
+      beside(200)
       colAuto('cGRMeas', 'Measured')
 
       ImGui.Separator(ctx)
@@ -3783,7 +3819,7 @@ local function frame()
       if not startup.checked then startupScan() end
       do
         local on = (startup.state == "ours" or startup.state == "manual")
-        local rvS, want = ImGui.Checkbox(ctx, 'Run when REAPER starts', on)
+        local rvS, want = Kit.checkbox(ctx, 'Run when REAPER starts', on)
         if rvS then
           local ok, why
           if want then ok, why = startupAdd() else ok, why = startupRemove() end
@@ -3793,7 +3829,8 @@ local function frame()
               "Track Analyser", 0)
           end
         end
-        ImGui.SameLine(ctx)
+        ImGui.SameLine(ctx, 0, 10)
+        ImGui.AlignTextToFramePadding(ctx)
         if startup.note then
           ImGui.TextColored(ctx, COL.warn, startup.note)
         elseif startup.state == "ours" then
@@ -3809,7 +3846,7 @@ local function frame()
 
       ---------------------------------------------- what it is reading
       local rvs
-      rvs, S.showSources = ImGui.Checkbox(ctx, 'Show sources', S.showSources) ; mark(rvs)
+      rvs, S.showSources = Kit.checkbox(ctx, 'Show sources', S.showSources) ; mark(rvs)
       if S.showSources then
       heading("SOURCES")
       if #rigSources == 0 then
@@ -4014,6 +4051,7 @@ local function frame()
     ImGui.End(ctx)
   end
   -- Balanced against the push above, outside the Begin/End pair.
+  Kit.pop(ctx)
   popStyle(ctx, styleC, styleV)
 
   -- Written at most once a second, and only after something changed, so a

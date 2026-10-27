@@ -21,6 +21,7 @@
 --]]
 
 local C  = require("TS_CV_Config")
+local ST = require("TS_CV_Style")
 local TO = require("TS_CV_TrackOps")
 
 local CN = {}
@@ -372,14 +373,16 @@ local function draw_save(ctx)
   end
   ImGui.TextDisabled(ctx, sv.path and ("Save the container " .. (sv.label or "") .. " as an FX chain")
                                    or ("Save the FX chain on " .. track_label(sv.track)))
+  ST.caption(ctx, "Name")
   ImGui.SetNextItemWidth(ctx, 240)
   if sv.focus == nil then ImGui.SetKeyboardFocusHere(ctx); sv.focus = true end
-  local _, nm = ImGui.InputTextWithHint(ctx, "Name##cnname", "chain name", sv.name)
+  local _, nm = ImGui.InputTextWithHint(ctx, "##cnname", "chain name", sv.name)
   local enter = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
                 or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
   sv.name = nm
+  ST.caption(ctx, "Folder")
   ImGui.SetNextItemWidth(ctx, 240)
-  if ImGui.BeginCombo(ctx, "Folder##cnfolder", sv.folder == "" and "FXChains" or sv.folder) then
+  if ImGui.BeginCombo(ctx, "##cnfolder", sv.folder == "" and "FXChains" or sv.folder) then
     for _, f in ipairs(sv.folders or { "" }) do
       if ImGui.Selectable(ctx, (f == "" and "FXChains" or f) .. "##cnf" .. f, f == sv.folder) then sv.folder = f end
     end
@@ -387,7 +390,7 @@ local function draw_save(ctx)
   end
   ImGui.TextDisabled(ctx, "A new folder: type it before the name, as Folder/Name.")
   ImGui.Separator(ctx)
-  local go = ImGui.Button(ctx, "Save##cnsave") or enter
+  local go = ST.button(ctx, "Save##cnsave", "main") or enter
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Cancel##cncancel") then
     ImGui.CloseCurrentPopup(ctx); ImGui.EndPopup(ctx); st.save = nil
@@ -483,7 +486,7 @@ function CN.draw(ctx)
 
   ImGui.TextDisabled(ctx, "Load an FX chain onto " .. track_label(tr))
   local rep = CN.replace_on()
-  local chg, v = ImGui.Checkbox(ctx, "Replace the existing FX", rep)
+  local chg, v = ST.checkbox(ctx, "Replace the existing FX", rep)
   if chg then set_replace(v) end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx, "The chain takes the plugins' place.\nThe probes, Trimmer and ChannelView Modulators stay.")

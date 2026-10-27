@@ -22,6 +22,7 @@
 --]]
 
 local C = require("TS_CV_Config")
+local ST = require("TS_CV_Style")
 local U = require("TS_CV_Util")
 local M = require("TS_CV_Mappings")
 local CP = require("TS_CV_ColourPick")
@@ -219,9 +220,7 @@ local function move_control(from, to)
 end
 
 local function draw_assigned(ctx, track, list_w, list_h)
-  ImGui.Text(ctx, "Panel")
-  ImGui.SameLine(ctx)
-  ImGui.TextDisabled(ctx, "\u{2014}  drag a row to reorder")
+  ST.caption(ctx, "Panel  \u{2014}  drag a row to reorder")
 
   local _, mouse_y = ImGui.GetMousePos(ctx)
   local drop_at, first_top, last_bottom = nil, nil, nil
@@ -294,7 +293,7 @@ local function draw_assigned(ctx, track, list_w, list_h)
   local n = #st.scratch.controls
   local sel = st.sel_asg
 
-  if ImGui.Button(ctx, "Remove >>", 90) then
+  if ST.button(ctx, "Remove >>", "remove", 90) then
     if st.scratch.controls[sel] then
       table.remove(st.scratch.controls, sel)
       st.sel_asg = math.min(sel, #st.scratch.controls)
@@ -371,7 +370,7 @@ local function draw_assigned(ctx, track, list_w, list_h)
 end
 
 local function draw_available(ctx, track, list_w, list_h)
-  ImGui.Text(ctx, "Plugin parameters")
+  ST.caption(ctx, "Plugin parameters")
   ImGui.SetNextItemWidth(ctx, list_w)
   -- Enter adds the selected parameter if the filter still shows it, else
   -- the first one it shows, and leaves the box ready for the next
@@ -418,7 +417,7 @@ local function draw_available(ctx, track, list_w, list_h)
     add_param(track, st.sel_avail)
   end
   ImGui.SameLine(ctx)
-  local lch, lv = ImGui.Checkbox(ctx, "Learn", st.learn)
+  local lch, lv = ST.checkbox(ctx, "Learn", st.learn)
   if lch then st.learn = lv end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
@@ -605,7 +604,7 @@ local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row)
       if ok then txt = U.trim(sv or "") end
     end
     if txt == "" then txt = ("%.0f%%"):format((norm or 0) * 100) end
-    local ch, v = ImGui.SliderDouble(ctx, fid, norm or 0, 0, 1, (txt:gsub("%%", "%%%%")))
+    local ch, v = ST.slider_double(ctx, fid, norm or 0, 0, 1, (txt:gsub("%%", "%%%%")))
     if ch then return v end
     return nil
   end
@@ -642,10 +641,9 @@ local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row)
 end
 
 -- The selected control's settings, as a column: each on a row of its own,
--- its name on the left, and only the rows that apply to its type.
+-- its name captioned above it, and only the rows that apply to its type.
 local COL_W   = 330          -- the column's width
-local KEY_W   = 86           -- the names' width
-local FIELD_W = COL_W - KEY_W - 8
+local FIELD_W = 236          -- a field's width
 
 -- A number as typed; "20k" is 20000.
 function E.parse_num(t)
@@ -736,14 +734,10 @@ draw_entry_body = function(ctx)
     return
   end
 
-  -- a row: its name right-aligned in the names' column, the field after
+  -- a row: its name captioned above it (TS_CV_Style); "" just starts
+  -- the next line
   local function row_name(text)
-    local tw = ImGui.CalcTextSize(ctx, text)
-    local x0 = ImGui.GetCursorPosX(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.SetCursorPosX(ctx, x0 + KEY_W - tw)
-    ImGui.Text(ctx, text)
-    ImGui.SameLine(ctx, 0, 8)
+    if text ~= "" then ST.caption(ctx, text) end
   end
   local function tip(text)
     if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then ImGui.SetTooltip(ctx, text) end
@@ -792,7 +786,7 @@ draw_entry_body = function(ctx)
     ImGui.TextDisabled(ctx, "now " .. U.range_text(rg, (st.track and st.fx)
       and reaper.TrackFX_GetParamNormalized(st.track, st.fx.addr, p) or 0))
     ImGui.SameLine(ctx, 0, 8)
-    if ImGui.Button(ctx, "Clear##rgclr") then st.scratch.ranges[p] = nil end
+    if ST.button(ctx, "Clear##rgclr", "remove") then st.scratch.ranges[p] = nil end
     tip("Back to the plugin's own values.")
   end
   -- a control without a scale of numbers: the plugin's own values, or yours
@@ -976,7 +970,7 @@ draw_entry_body = function(ctx)
       local sch, si = ImGui.Combo(ctx, "##vstart", M.vindex(c, c.virtual.start) - 1, table.concat(opts, "\0") .. "\0")
       if sch then c.virtual.start = M.vnorm(c, si + 1) end
     else
-      local sch, sv = ImGui.SliderDouble(ctx, "##vstart", c.virtual.start or 0, 0, 1,
+      local sch, sv = ST.slider_double(ctx, "##vstart", c.virtual.start or 0, 0, 1,
         ("%d %%%%"):format(math.floor((c.virtual.start or 0) * 100 + 0.5)))
       if sch then c.virtual.start = sv end
     end
@@ -1011,7 +1005,7 @@ draw_entry_body = function(ctx)
         tip(cmd and (text .. "\nClick: change it") or "Click: pick an action")
         if cmd then
           ImGui.SameLine(ctx, 0, 4)
-          if ImGui.Button(ctx, "\u{00D7}##vactx" .. i, 22, 0) then
+          if ST.button(ctx, "\u{00D7}##vactx" .. i, "remove", 22, 0) then
             c.virtual.actions[i] = nil
             if next(c.virtual.actions) == nil then c.virtual.actions = nil end
           end
@@ -1175,7 +1169,7 @@ draw_entry_body = function(ctx)
   -- a divider: its line, and the section after it
   if c.type == "divider" then
     row_name("Line")
-    local lch, lv = ImGui.Checkbox(ctx, "Draw the rule", not c.no_rule)
+    local lch, lv = ST.checkbox(ctx, "Draw the rule", not c.no_rule)
     if lch then c.no_rule = (not lv) or nil end
     tip("A line between the groups. Off: the same gap, no line.")
     local names, keys = { "None", "Inset" }, { "", "inset" }
@@ -1254,7 +1248,7 @@ draw_entry_body = function(ctx)
     local function gap() if any then ImGui.SameLine(ctx, 0, 12) end any = true end
     if not two then
       gap()
-      local bch, bv = ImGui.Checkbox(ctx, "Centred", c.bipolar and true or false)
+      local bch, bv = ST.checkbox(ctx, "Centred", c.bipolar and true or false)
       if bch then c.bipolar = bv end
       tip("Fill from 12 o'clock instead of the minimum.")
     end
@@ -1265,17 +1259,17 @@ draw_entry_body = function(ctx)
       "For parameters wired backwards."
     if c.type == "knob" or c.type == "toggle" or c.type == "stepped" then
       gap()
-      local rch, rv = ImGui.Checkbox(ctx, "Reverse", c.invert and true or false)
+      local rch, rv = ST.checkbox(ctx, "Reverse", c.invert and true or false)
       if rch then c.invert = rv or nil end
       tip(rev_tip)
     elseif two then
       local a, b = (c.type == "xy") and "X" or "ring", (c.type == "xy") and "Y" or "inner"
       gap()
-      local rch, rv = ImGui.Checkbox(ctx, "Reverse " .. a, c.invert and true or false)
+      local rch, rv = ST.checkbox(ctx, "Reverse " .. a, c.invert and true or false)
       if rch then c.invert = rv or nil end
       tip(rev_tip)
       gap()
-      local r2, v2 = ImGui.Checkbox(ctx, "Reverse " .. b, c.invert2 and true or false)
+      local r2, v2 = ST.checkbox(ctx, "Reverse " .. b, c.invert2 and true or false)
       if r2 then c.invert2 = v2 or nil end
       tip(rev_tip)
     end
@@ -1283,7 +1277,7 @@ draw_entry_body = function(ctx)
     if two then row_name(""); any = false end
     gap()
     if st.scratch.live then ImGui.BeginDisabled(ctx, true) end
-    local vch, vv = ImGui.Checkbox(ctx, "Live name", live)
+    local vch, vv = ST.checkbox(ctx, "Live name", live, { dim = st.scratch.live and true or nil })
     if vch then c.live = vv or nil end
     if st.scratch.live then ImGui.EndDisabled(ctx) end
     tip(st.scratch.live and
@@ -1368,9 +1362,7 @@ local function draw_layout_row(ctx, track)
   local RB = require("TS_CV_ReaFX")
   if RB.own_eq(st.key) or RB.own_comp(st.key) or not ED.PRO then return end
   local base, cur = M.split_variant(st.key)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, "Layout")
-  ImGui.SameLine(ctx)
+  ST.cap(ctx, "Layout")
   ImGui.SetNextItemWidth(ctx, 180)
   local dflt = M.default_variant(base)
   if ImGui.BeginCombo(ctx, "##edlayout", cur or "Standard") then
@@ -1397,9 +1389,11 @@ local function draw_layout_row(ctx, track)
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx, "The layout this instance shows (and you're editing).\n" ..
-      "Set the default from a panel's menu: Layout \u{25B8} Make \"...\" the default.")
+      "Set the default from a panel's menu: Layout \u{25B8} Make \"\u{2026}\" the default.")
   end
+  ST.done(ctx)
   ImGui.SameLine(ctx, 0, 16)
+  ST.cap(ctx, "New layout")
   ImGui.SetNextItemWidth(ctx, 170)
   -- (not EnterReturnsTrue: with it ImGui only hands the text back on
   -- Enter, so the buttons would always see an empty name)
@@ -1407,6 +1401,7 @@ local function draw_layout_row(ctx, track)
   local ch = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
              or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
   st.var_name = txt
+  ST.done(ctx)
   local nm = M.clean_variant(txt)
   local ok = nm ~= nil and not M.has(M.variant_key(base, nm))
   local function make(empty)
@@ -1420,6 +1415,7 @@ local function draw_layout_row(ctx, track)
   end
   if ch and ok then make(false) end
   ImGui.SameLine(ctx)
+  ST.cap(ctx)
   if not ok then ImGui.BeginDisabled(ctx, true) end
   if ImGui.Button(ctx, "Copy to new layout") then make(false) end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
@@ -1435,6 +1431,7 @@ local function draw_layout_row(ctx, track)
       or "Type a name first.")
   end
   if not ok then ImGui.EndDisabled(ctx) end
+  ST.done(ctx)
 end
 
 -- The plugin's layout switching (TS_CV_Mappings Switch<n>): an ordered
@@ -1491,7 +1488,7 @@ local function draw_switch_rules(ctx, track)
     if rule_value_ui(ctx, "##rv", track, addr, r, st.scratch.controls, 84, 110,
         function(t) ImGui.SameLine(ctx); ImGui.Text(ctx, t); ImGui.SameLine(ctx) end) then changed = true end
     ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "\u{2715}") then drop = i end
+    if ST.button(ctx, "\u{2715}", "remove") then drop = i end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Remove this rule") end
     ImGui.PopID(ctx)
   end
@@ -1522,7 +1519,7 @@ local function draw_meters(ctx)
   if st.reports_gr then
     next_tick()
     meter_on = (st.scratch.meter ~= nil) and st.scratch.meter.on or false
-    local mch, mv = ImGui.Checkbox(ctx, "Gain reduction meter", meter_on)
+    local mch, mv = ST.checkbox(ctx, "Gain reduction meter", meter_on)
     if mch then
       st.scratch.meter = st.scratch.meter or { range = C.MAX_GR_DB }
       st.scratch.meter.on = mv
@@ -1534,7 +1531,7 @@ local function draw_meters(ctx)
     -- Not offered for ReaEQ: an EQ has no reduction to measure.
     next_tick()
     measure_on = st.scratch.measure == true
-    local mch, mv = ImGui.Checkbox(ctx, "Measure gain reduction (estimated)", measure_on)
+    local mch, mv = ST.checkbox(ctx, "Measure gain reduction (estimated)", measure_on)
     if mch then
       st.scratch.measure = mv or nil
       st.scratch.meter = st.scratch.meter or { range = C.MAX_GR_DB }
@@ -1549,7 +1546,7 @@ local function draw_meters(ctx)
   -- Input and output meters: any plugin, reporting or not, measured by
   -- the track's probes from the same copies the reduction is.
   next_tick()
-  local lch, lv = ImGui.Checkbox(ctx, "Input/output meters", st.scratch.levels == true)
+  local lch, lv = ST.checkbox(ctx, "Input/output meters", st.scratch.levels == true)
   if lch then st.scratch.levels = lv or nil end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
@@ -1558,7 +1555,7 @@ local function draw_meters(ctx)
   end
   -- For plugins that rename their own parameters.
   next_tick()
-  local lvch, lvv = ImGui.Checkbox(ctx, "Live parameter names", st.scratch.live and true or false)
+  local lvch, lvv = ST.checkbox(ctx, "Live parameter names", st.scratch.live and true or false)
   if lvch then st.scratch.live = lvv or nil end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
@@ -1569,7 +1566,7 @@ local function draw_meters(ctx)
   -- what goes with them
   if (meter_on or measure_on) and st.scratch.meter then
     ImGui.SetNextItemWidth(ctx, 120)
-    local rch, rv = ImGui.SliderDouble(ctx, "full scale",
+    local rch, rv = ST.slider_double(ctx, "Full scale##grrange",
       st.scratch.meter.range or C.MAX_GR_DB, 3, 40, "%.0f dB")
     if rch then st.scratch.meter.range = rv end
     if ImGui.IsItemHovered(ctx) then
@@ -1594,7 +1591,7 @@ local function draw_meters(ctx)
       ImGui.TextDisabled(ctx, "Not measured while it runs in parallel.")
     end
     -- The zero: global, since it's how the probes behave on every track.
-    local zch, zv = ImGui.Checkbox(ctx, "Measure the zero while stopped (all tracks)", TP.zero_on())
+    local zch, zv = ST.checkbox(ctx, "Measure the zero while stopped (all tracks)", TP.zero_on())
     if zch then TP.set_zero_on(zv) end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx,
@@ -1721,6 +1718,7 @@ function E.draw(ctx, _selected)
       ImGui.SameLine(ctx, 0, 16)
       local kind = st.scratch.canvas.kind == "eq" and "EQ"
                    or ((M.CANVAS_NAMES[st.scratch.canvas.kind] or "compressor"):lower())
+      ST.cap(ctx)
       if ImGui.Button(ctx, "Set up the " .. kind .. " canvas\u{2026}") then
         local go = true
         if edited() then
@@ -1745,6 +1743,7 @@ function E.draw(ctx, _selected)
         ImGui.SetTooltip(ctx, "Choose the controls the canvas uses" ..
           (kind == "EQ" and ", and learn its bands." or "."))
       end
+      ST.done(ctx)
     end
     draw_switch_rules(ctx, track)
 
@@ -1773,7 +1772,7 @@ function E.draw(ctx, _selected)
     ImGui.EndGroup(ctx)
 
     ImGui.Separator(ctx)
-    if ImGui.Button(ctx, "Save", 90) then
+    if ST.button(ctx, "Save", "main", 90) then
       M.set(st.key, st.scratch)
       TP.invalidate()
       M.save()
@@ -1818,7 +1817,7 @@ function E.draw(ctx, _selected)
         :format(C.AUTO_DEFAULT_N))
     end
     ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Clear all", 90) then
+    if ST.button(ctx, "Clear all", "remove", 90) then
       st.scratch = { controls = {}, aliases = st.scratch.aliases,
                      meter = st.scratch.meter, live = st.scratch.live }
       st.sel_asg = 0

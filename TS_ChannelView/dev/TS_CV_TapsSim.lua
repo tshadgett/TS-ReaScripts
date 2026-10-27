@@ -223,6 +223,7 @@ reaper = {
   TrackFX_Delete = function(tr, a) index(); table.remove(tr.fx, a + 1); return true end,
   PreventUIRefresh = function() end,
   ValidatePtr = function() return true end,
+  TrackFX_GetIOSize = function(_, a) index(); local f = amap[a]; return 0, f and f.nin or 0, f and f.nout or 0 end,
   gmem_attach = function() end, gmem_write = function(i, v) gmem[i] = v end,
   gmem_read = function(i) return gmem[i] or 0 end,
   GetLastTouchedFX = function() return false end,
@@ -465,6 +466,24 @@ check("no reading for a levels tap",   TP.reading(track, "{C3}"), nil)
 F(5).params[TP.P_INPK + 1] = -12.5; F(5).params[TP.P_OUTRMS + 1] = -9
 local lv = TP.levels(track, "{C3}")
 check("levels read back",              lv and (lv.in_pk .. "/" .. lv.out_rms), "-12.5/-9")
+-- only the tracks on screen measure: a track read is named in its block
+-- (TS_TrackProbe's ONLY THE TRACKS ON SCREEN), and the gate keeps moving
+do
+  local blk = 0x100000 + 3 * 128 + TP.WATCH_OFF      -- track 3: index 2
+  gmem[TP.GATE_SLOT], gmem[blk] = nil, nil
+  TP.update()
+  local g1, w1 = gmem[TP.GATE_SLOT], gmem[blk]
+  TP.update()
+  check("on screen: the gate moves",       g1 ~= nil and gmem[TP.GATE_SLOT] ~= g1, true)
+  check("on screen: named when read",      w1 ~= nil and gmem[blk] ~= w1, true)
+  now_t = now_t + 1                                  -- nothing has read it for a second
+  local w2 = gmem[blk]
+  TP.update()
+  check("on screen: not named once unread", gmem[blk], w2)
+  TP.levels(track, "{C3}")
+  TP.update()
+  check("on screen: named again when read", gmem[blk] ~= w2, true)
+end
 -- a multiband: the probe splits the tap's audio at the crossovers asked for
 check("multiband: asked",              TP.set_mb(track, "{C1}", { 200, 2000 }), true)
 check("multiband: tap and crossovers", ("%d %d %d %d"):format(F(5).params[TP.P_MB], F(5).params[TP.P_MBX],
@@ -931,6 +950,35 @@ do
   check("kept: channels stay for the receive", track.nch, grown)
   check("kept: still held",                    tostring(pc.held), "4")
 end
+
+-- ---------------------------------------------------------------- eight
+-- A probe that takes eight (34 input pins) measures past four; an older
+-- one (18) stops at four.
+reset()
+measure = { ["LA-2A"] = true, ["1176"] = true, ["Pro-C 2"] = true, ["Comp A"] = true, ["Comp B"] = true, ["Comp C"] = true, ["Comp D"] = true }
+package.loaded["TS_CV_Mappings"].get = function(key) return { measure = measure[key] or nil } end
+-- (Pro-C 2 reports its own: not measured; six that don't)
+for k, nm in ipairs({ "Comp A", "Comp B", "Comp C", "Comp D" }) do
+  table.insert(track.fx, #track.fx, fx("VST3: " .. nm .. " (Test)", "{X" .. k .. "}", 2, 2, { pdc = 10 * k }))
+end
+TP.invalidate()
+TP.sync(track)
+check("eight: an older probe measures four", #TP.parse_record(track.ext[TP.EXT_KEY]).taps, 4)
+local post = track.fx[#track.fx]
+post.nin = 34
+for p = 18, 33 do post.pin_in[p] = { 0, 0 } end
+TP.invalidate()
+TP.sync(track)
+local rec8 = TP.parse_record(track.ext[TP.EXT_KEY])
+check("eight: one that takes eight measures all six", #rec8.taps, 6)
+local t6 = rec8.taps[6]
+check("eight: tap 6's pins on its copies", ("%d %d"):format(post.pin_in[22][1], post.pin_in[24][1]), ("%d %d"):format(TP.bit(t6.pre), TP.bit(t6.post)))
+check("eight: tap 7's pins unplugged", post.pin_in[26][1] .. " " .. post.pin_in[29][1], "0 0")
+if NEW then
+  check("eight: tap 6's latency apart from 1..4's", gmem[0x100000 + 3 * 128 + 50 + 1], 40)
+  check("eight: taps in use", gmem[0x100000 + 3 * 128 + 8], 6)
+end
+check("eight: settles", TP.sync(track), false)
 
 -- ---------------------------------------------------------------- records
 check("v2 round trip", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")),

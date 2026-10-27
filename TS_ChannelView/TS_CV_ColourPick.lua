@@ -42,6 +42,7 @@
 local C  = require("TS_CV_Config")
 local TO = require("TS_CV_TrackOps")
 local W  = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 
 local CP = {}
 local ImGui
@@ -509,7 +510,7 @@ function CP.draw(ctx, nested)
 
   ImGui.Spacing(ctx)
   if not done then
-    if ImGui.Button(ctx, "Apply") then keep(s.rgb) end
+    if ST.button(ctx, "Apply", "main") then keep(s.rgb) end
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel")
        or (not CP.dropping() and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape)) then

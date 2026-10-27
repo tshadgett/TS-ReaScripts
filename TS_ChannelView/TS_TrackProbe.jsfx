@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.0.0
+version: 2.3.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -49,6 +49,8 @@ author: Tim Shadgett
 //   0x60000    measuring the taps' zero, + track index * 8 (THE ZERO POINT)
 //   0x70000    third-octave reduction, + track index * 128
 //   0x100000   THE PROBE BLOCK, + (track index + 1) * 128 (the master is 0)
+//   0x200000   tap traces for taps 5..8
+//   0x208000   per-tap waveforms for taps 5..8
 //   73         tap heartbeat, bumped by any reader
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
@@ -60,9 +62,11 @@ author: Tim Shadgett
 //     2  publish, pre probe        3  publish, post probe
 //     4  1: the post probe is the comparison (Track Analyser's masking)
 //     5  Visualizer slot + 1, pre  6  Visualizer slot + 1, post (0 none)
+//     7  moving while the track is on screen (ONLY THE TRACKS ON SCREEN)
 //     8  tap_n         9..12  tap_lag1..4     13..16  tap_rst1..4
 //    17  tap_gen      18  cal_arm (pre)      19  tap_nogr
 //    20  tap_mb       21..23  tap_mbx1..3    24  tap_fine
+//    50..53  tap_lag5..8   54..57  tap_rst5..8
 //   The probes write:
 //    32  the pre probe's block count     33  the post probe's (a probe
 //        that has recognised itself; a script sees a pair come alive)
@@ -73,7 +77,13 @@ author: Tim Shadgett
 //    80..83  tap_inrms1..4   84..87  tap_outrms1..4
 //    88..91  tap_mbgr1..4    92..95  tap_mbl1..4
 //    96  counts the post probe's writes of the above
-//   The names are those of the variables that hold them.
+//    97..100  tap_gr5..8     101..104  tap_cal5..8
+//    105..108  tap_inpk5..8  109..112  tap_outpk5..8
+//    113..116  tap_inrms5..8 117..120  tap_outrms5..8
+//    121  how many plugins this probe can measure (8; nothing from older ones: 4)
+//   Taps 5..8 sit apart from 1..4 so that a script or probe that knows
+//   only four finds 1..4 where it expects them. The names are those of
+//   the readings; the probe keeps them in TV_* (one per tap).
 //
 // INPUT AND OUTPUT LEVELS, PER TAP
 //   The same two copies a tap measures gain reduction from are also the
@@ -103,7 +113,9 @@ author: Tim Shadgett
 //     0x5C000  [0] newest column  [1] columns  [2] samples per column
 //              [3] sample rate    [4] writer (track index + 1)
 //              [5] columns written, ever (a reader spots a stalled writer)
-//     0x54000 + (tap * 2048 + column) * 4:
+//              [6] taps in use (older probes leave it 0: read four)
+//     0x54000 + (tap * 2048 + column) * 4 for taps 1..4, and
+//     0x208000 + ((tap - 4) * 2048 + column) * 4 for taps 5..8 (0-based tap):
 //              [0] output min  [1] output max  [2] input peak  [3] GR dB
 
 // Control block (the panel writes these; 0 means "use my default"):
@@ -200,7 +212,8 @@ author: Tim Shadgett
 //   own plugin only:
 //     * the "before" signal is delayed by that plugin's reported latency
 //       (tap_lagN, written by ChannelView), so both sides line up
-//     * both go through the ten-band filterbank, a column every 2 ms
+//     * both are split into ten bands, a column every 2 ms (THE TEN
+//       BANDS, BY FFT below)
 //     * per band, the ratio after/before, smoothed. A static EQ inside the
 //       plugin is a constant per band; make-up gain is a constant in every
 //       band; compression moves every band together
@@ -214,6 +227,18 @@ author: Tim Shadgett
 //   has shown, and a compressor that never lets go reads low -- by how
 //   much it never releases. So the baseline is only the fallback. The
 //   real zero is MEASURED, while playback is stopped:
+//
+// THE TEN BANDS, BY FFT
+//   Each tap keeps its last ~85 ms of both copies, "before" and "after"
+//   packed as one complex signal, and splits them with REAPER's own FFT
+//   at three sizes, each band taken from the smallest that gives it at
+//   least three bins: 256 points every column for the top bands, 1024
+//   every second column for the middle, 4096 every eighth for the lowest
+//   (all doubled at 88.2/96 kHz, and again at 176.4/192). One complex FFT
+//   gives both copies' spectra; a band's power is its bins' power, as a
+//   mean square. Between its FFTs a band holds its last value. Much
+//   cheaper than ten bandpass filters a sample on each copy, and the
+//   lows answer a little slower (their window is longer).
 //
 // A MULTIBAND COMPRESSOR, BAND BY BAND
 //   A multiband plugin reports one reduction to REAPER, if any. Its tap
@@ -294,6 +319,15 @@ author: Tim Shadgett
 //   changing gmem[73] (ChannelView and Track Analyser both do). With
 //   neither open they cost nothing.
 //
+//   ONLY THE TRACKS ON SCREEN. A reader that says which tracks it shows
+//   keeps gmem[76] moving, and bumps PB_WATCH (7) in each of those
+//   tracks' blocks. While it does, a post probe measures only if its own
+//   track's PB_WATCH moved in the last second (or Track Analyser is
+//   publishing it); otherwise it skips the filterbank and the levels and
+//   reads 0. The zero is still measured at every stop, on every track,
+//   so a track comes on screen already zeroed. With no such reader
+//   (gmem[76] still for three seconds) every track measures.
+//
 //   The tap pins are INPUTS ONLY. The copies carry on along their spare
 //   channels after this probe; ChannelView picks channels that nothing
 //   after the probe uses and that a parent track has too few channels to
@@ -325,6 +359,22 @@ in_pin:tap 4 before L
 in_pin:tap 4 before R
 in_pin:tap 4 after L
 in_pin:tap 4 after R
+in_pin:tap 5 before L
+in_pin:tap 5 before R
+in_pin:tap 5 after L
+in_pin:tap 5 after R
+in_pin:tap 6 before L
+in_pin:tap 6 before R
+in_pin:tap 6 after L
+in_pin:tap 6 after R
+in_pin:tap 7 before L
+in_pin:tap 7 before R
+in_pin:tap 7 after L
+in_pin:tap 7 after R
+in_pin:tap 8 before L
+in_pin:tap 8 before R
+in_pin:tap 8 after L
+in_pin:tap 8 after R
 out_pin:left
 out_pin:right
 
@@ -338,25 +388,34 @@ out_pin:right
   // THE PROBE BLOCK (see above)
   PB_BASE = 0x100000; PB_STRIDE = 128; PB_TRACKS = 8192;
   PB_PRE = 0; PB_POST = 1; PB_PUBPRE = 2; PB_PUBPOST = 3; PB_CMP = 4;
-  PB_VISPRE = 5; PB_VISPOST = 6;
+  PB_VISPRE = 5; PB_VISPOST = 6; PB_WATCH = 7;
   PB_TAPN = 8; PB_LAG = 9; PB_RST = 13; PB_GEN = 17; PB_ARM = 18;
   PB_NOGR = 19; PB_MB = 20; PB_MBX = 21; PB_FINE = 24;
   PB_ACKPRE = 32; PB_ACKPOST = 33; PB_SEEN = 34; PB_SEENN = 42;
   PB_GR = 64; PB_CAL = 68; PB_INPK = 72; PB_OUTPK = 76; PB_INRMS = 80;
   PB_OUTRMS = 84; PB_MBGR = 88; PB_MBL = 92; PB_RSEQ = 96;
+  // taps 5..8, apart (THE PROBE BLOCK)
+  PB_LAG2 = 50; PB_RST2 = 54; PB_GR2 = 97; PB_CAL2 = 101; PB_INPK2 = 105;
+  PB_OUTPK2 = 109; PB_INRMS2 = 113; PB_OUTRMS2 = 117; PB_CAP = 121;
+  // a tap's field in the block: taps 1..4 at `lo`, 5..8 at `hi`
+  function pbAt(lo, hi, t) ( t < 4 ? lo + t : hi + t - 4; );
   CTRL_REL = 75;
+  CTRL_GATE = 76;   // moving: a reader names the tracks it shows (PB_WATCH)
+  !gate_init ? ( gate_init = 1; gate_age = watch_age = 1000000000; gate_last = watch_last = 0; );
 
   // the settings and readings, at their defaults
   role = -1; publish = 0; rel_ms = 400; vis_include = 0; vis_slot = -1;
-  tap_n = 0; tap_lag1 = tap_lag2 = tap_lag3 = tap_lag4 = 0;
-  tap_rst1 = tap_rst2 = tap_rst3 = tap_rst4 = 0;
-  tap_gr1 = tap_gr2 = tap_gr3 = tap_gr4 = 0;
-  tap_cal1 = tap_cal2 = tap_cal3 = tap_cal4 = 0;
-  tap_gen = 0; cal_arm = 0; tap_nogr = 0;
-  tap_inpk1 = tap_inpk2 = tap_inpk3 = tap_inpk4 = -150;
-  tap_outpk1 = tap_outpk2 = tap_outpk3 = tap_outpk4 = -150;
-  tap_inrms1 = tap_inrms2 = tap_inrms3 = tap_inrms4 = -150;
-  tap_outrms1 = tap_outrms2 = tap_outrms3 = tap_outrms4 = -150;
+  tap_n = 0; tap_gen = 0; cal_arm = 0; tap_nogr = 0;
+  // per tap (TAP_MAX of each): its latency and relearn count (in), its
+  // reduction, its zero's state and its levels (out)
+  TV_LAG = 400100; TV_RST = 400110; TV_GR = 400120; TV_CAL = 400130;
+  TV_INPK = 400140; TV_OUTPK = 400150; TV_INRMS = 400160; TV_OUTRMS = 400170;
+  t = 0;
+  loop(8,
+    TV_LAG[t] = TV_RST[t] = TV_GR[t] = TV_CAL[t] = 0;
+    TV_INPK[t] = TV_OUTPK[t] = TV_INRMS[t] = TV_OUTRMS[t] = -150;
+    t += 1;
+  );
   tap_mb = 0; tap_mbx1 = tap_mbx2 = tap_mbx3 = 0;
   tap_mbgr1 = tap_mbgr2 = tap_mbgr3 = tap_mbgr4 = 0;
   tap_fine = 0;
@@ -610,14 +669,15 @@ out_pin:right
 
   //-- the taps ----------------------------------------------------------
   CTRL_TAPHB  = 73;               // bumped by any reader; taps idle when it stops
-  TAPTR_HDR   = 0x4F000;          // [0] taps in use, [1..4] each tap's reading
-  TAPTR_BASE  = 0x50000;          // tap t's column t*SCOPE_COLS + cur
-  TAP_MAX     = 4;
-  TAP_BASE    = 131072;           // clear of everything above
+  TAPTR_HDR   = 0x4F000;          // [0] taps in use, [1..8] each tap's reading
+  TAPTR_BASE  = 0x50000;          // tap t's column t*SCOPE_COLS + cur (taps 1..4)
+  TAPTR_BASE2 = 0x200000;         // ... taps 5..8, (t-4)*SCOPE_COLS + cur
+  TAP_MAX     = 8;
+  TAP_BASE    = 1048576;          // clear of everything above (and the FFT rings)
   TAP_STRIDE  = 66560;            // a delay line, then the state below
   TAP_S       = 65544;            // state, relative to the tap's base
   TS_PRE = 0; TS_POST = 40;       // filter state, 10 bands x 4
-  TS_PA = 80; TS_PB = 90;         // column power accumulators
+  TS_PA = 80; TS_PB = 90;         // each band's power, before and after (mean square)
   TS_SM = 100; TS_BS = 110;       // smoothed ratio, baseline (dB)
   TS_PK = 120; TS_HB = 130;       // band peak (power), has-baseline flag
   TS_SORT = 140;                  // median scratch
@@ -636,6 +696,7 @@ out_pin:right
   TS_HOLD = 290;                  // samples until a latency change has flushed through
   TS_MBP = 300;                   // a multiband tap: each filterbank band's input power this column
   TS_MBL = 320;                   // ... and each of the plugin's bands' input level (dBFS)
+  TS_RPOS = 340;                  // where the next sample goes in its ring (THE TEN BANDS, BY FFT)
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -646,16 +707,28 @@ out_pin:right
   TAP_REL    = 150;               // dB/s the reading falls: a short hold, so a
                                   // frame-rate reader catches a 2 ms peak, and
                                   // no slower -- the reader adds its own hold
-  TAP_C      = 43008;             // GRB_N*4 coefficients of the taps' own filterbank
+  // THE TEN BANDS, BY FFT
+  TF_WS   = 524288;               // FFT workspace, up to 16384 complex: on a 65536 boundary
+  TF_W2   = 557056;               // the windows, complex (w, 0): the largest size ...
+  TF_W1   = 589824;               // ... the middle ...
+  TF_W0   = 598016;               // ... and the smallest
+  TF_BR   = 600100;               // per band: which size (0 small, 1 middle, 2 large)
+  TF_BK0  = 600120;               // ... its first bin
+  TF_BK1  = 600140;               // ... its last bin
+  TF_RING = 655360;               // per tap, its ring: before and after, packed
+  TF_RSTR = 32768;                // a ring's room: 16384 complex
+  tap_col = 0;
   tap_sr = 0; tap_sacc = 0; tap_on = 0; tap_live = 0;
   hb_last = -1; hb_age = 1000000000;
 
   // per-plugin waveforms (PER-PLUGIN WAVEFORMS)
   CTRL_TWTRK = 74;
-  TW_BASE = 0x54000;
+  TW_BASE = 0x54000;              // taps 1..4
+  TW_BASE2 = 0x208000;            // taps 5..8
+  function twAt(t, c) ( t < 4 ? TW_BASE + (t * TW_COLS + c) * 4 : TW_BASE2 + ((t - 4) * TW_COLS + c) * 4; );
   TW_HDR  = 0x5C000;
   TW_COLS = 2048;
-  TW_ACC  = 400000;               // per tap: min, max, input peak, GR -- clear of the taps
+  TW_ACC  = 400000;               // per tap: min, max, input peak, GR (8 x 4)
   tw_on = 0; tw_cur = 0; tw_sacc = 0; tw_n = 0; tw_slice = 192;
   t = 0; loop(TAP_MAX, TW_ACC[t * 4] = 1; TW_ACC[t * 4 + 1] = -1;
                        TW_ACC[t * 4 + 2] = 0; TW_ACC[t * 4 + 3] = 0; t += 1; );
@@ -842,21 +915,31 @@ out_pin:right
     fn_cnt >= FN_HOP ? ( fn_cnt = 0; fineFrame(); );
   );
 
-  function tapBands() local(i, ratio, lo, hi, f0, q, w0, al, a0, hiC) (
+  // a Hann window of n points, as complex pairs (w, 0), at `w`
+  function tfWindow(w, n) local(i) (
+    i = 0;
+    loop(n, w[i * 2] = 0.5 - 0.5 * cos(2 * $pi * i / n); w[i * 2 + 1] = 0; i += 1; );
+  );
+
+  function tapBands() local(i, ratio, lo, hi, hiC, k, r, n, b0, b1) (
     hiC = min(GRB_HI, srate * 0.45);
     ratio = log(hiC / GRB_LO);
+    // the three sizes, scaled with the rate (THE TEN BANDS, BY FFT)
+    k = srate > 132000 ? 4 : (srate > 66000 ? 2 : 1);
+    tf_n0 = 256 * k; tf_n1 = 1024 * k; tf_n2 = 4096 * k;
+    tf_rn = tf_n2;
+    tfWindow(TF_W0, tf_n0); tfWindow(TF_W1, tf_n1); tfWindow(TF_W2, tf_n2);
     i = 0;
     loop(GRB_N,
       lo = GRB_LO * exp(ratio * i / GRB_N);
       hi = GRB_LO * exp(ratio * (i + 1) / GRB_N);
-      f0 = sqrt(lo * hi);
-      q  = f0 / max(hi - lo, 1);
-      w0 = 2 * $pi * f0 / srate;
-      al = sin(w0) / (2 * q);
-      a0 = 1 + al;
-      TAP_C[i * 4 + 0] = al / a0;
-      TAP_C[i * 4 + 1] = (-2 * cos(w0)) / a0;
-      TAP_C[i * 4 + 2] = (1 - al) / a0;
+      // the smallest size giving it three bins or more
+      r = 0;
+      while (r < 2 && (hi - lo) * (r == 0 ? tf_n0 : tf_n1) / srate < 3) ( r += 1; );
+      n = r == 0 ? tf_n0 : (r == 1 ? tf_n1 : tf_n2);
+      b0 = max(1, ceil(lo * n / srate));
+      b1 = min(n / 2 - 1, max(b0, ceil(hi * n / srate) - 1));
+      TF_BR[i] = r; TF_BK0[i] = b0; TF_BK1[i] = b1;
       i += 1;
     );
     tap_slice = max(8, floor(srate * 0.002));
@@ -897,7 +980,7 @@ out_pin:right
       // until the cleared line has refilled, "before" is part silence: a
       // ratio taken then jumps, and the baseline climbs to it and sinks
       // back at 0.1 dB/s -- minutes of reduction that isn't there
-      s[TS_HOLD] = n + 2 * max(1, tap_slice);
+      s[TS_HOLD] = n + 2 * max(1, tap_slice) + tf_rn;   // (and the FFTs' longest window)
       i = 0; loop(GRB_N, s[TS_HB + i] = 0; i += 1; );
       // the third-octaves' zero, learnt across the jump, would be wrong
       t == tap_fine - 1 ? ( fineForget(); fn_hold = FN_N + n; );
@@ -905,8 +988,8 @@ out_pin:right
   );
 
   // One sample of one tap: `a` is the mono sum before the plugin, `b`
-  // after it. Delay a, filter both, accumulate each band's power.
-  function tapSample(t, a, b) local(tb, s, n, dp, bi, c, fs, y, z) (
+  // after it. Delay a, and keep both for the FFTs.
+  function tapSample(t, a, b) local(tb, s, n, dp, rg) (
     tb = TAP_BASE + t * TAP_STRIDE;
     s = tb + TAP_S;
     n = s[TS_LAGN];
@@ -918,28 +1001,49 @@ out_pin:right
       a = tb[dp];
       s[TS_DPOS] = dp;
     );
+    // into its ring, before and after packed as one complex sample
+    rg = TF_RING + t * TF_RSTR;
+    dp = s[TS_RPOS];
+    rg[dp * 2] = a; rg[dp * 2 + 1] = b;
+    dp += 1; dp >= tf_rn ? dp = 0;
+    s[TS_RPOS] = dp;
+    t == tap_fine - 1 ? (fineIn(a, b));
+  );
+
+  // The bands taken at size r (0 small, 1 middle, 2 large) from tap t's
+  // ring: its last n samples, windowed, one complex FFT; each band's power
+  // before and after, as mean squares, into TS_PA / TS_PB.
+  function tapFFT(t, r) local(s, n, w, rg, st, n1, sc, bi, k, kk, zr, zi, yr, yi, sa, sb, u, v) (
+    s = TAP_BASE + t * TAP_STRIDE + TAP_S;
+    n = r == 0 ? tf_n0 : (r == 1 ? tf_n1 : tf_n2);
+    w = r == 0 ? TF_W0 : (r == 1 ? TF_W1 : TF_W2);
+    rg = TF_RING + t * TF_RSTR;
+    st = s[TS_RPOS] - n; st < 0 ? st += tf_rn;
+    n1 = min(n, tf_rn - st);
+    memcpy(TF_WS, rg + st * 2, n1 * 2);
+    n1 < n ? memcpy(TF_WS + n1 * 2, rg, (n - n1) * 2);
+    convolve_c(TF_WS, w, n);
+    fft(TF_WS, n); fft_permute(TF_WS, n);
+    // Hann: a mean square is 2 x the bins' power / (0.375 n^2); the two
+    // spectra out of the one: A = (Z[k] + conj Z[n-k]) / 2, B = (Z[k] - conj Z[n-k]) / 2i
+    sc = 0.5 / (0.375 * n * n);
     bi = 0;
     loop(GRB_N,
-      c = TAP_C + bi * 4;
-      fs = s + TS_PRE + bi * 4;
-      y = c[0] * a + fs[0];
-      fs[0] = fs[1] - c[1] * y;
-      fs[1] = -c[0] * a - c[2] * y;
-      z = c[0] * y + fs[2];
-      fs[2] = fs[3] - c[1] * z;
-      fs[3] = -c[0] * y - c[2] * z;
-      s[TS_PA + bi] += z * z;
-      fs = s + TS_POST + bi * 4;
-      y = c[0] * b + fs[0];
-      fs[0] = fs[1] - c[1] * y;
-      fs[1] = -c[0] * b - c[2] * y;
-      z = c[0] * y + fs[2];
-      fs[2] = fs[3] - c[1] * z;
-      fs[3] = -c[0] * y - c[2] * z;
-      s[TS_PB + bi] += z * z;
+      TF_BR[bi] == r ? (
+        sa = 0; sb = 0;
+        k = TF_BK0[bi];
+        loop(TF_BK1[bi] - k + 1,
+          zr = TF_WS[k * 2]; zi = TF_WS[k * 2 + 1];
+          kk = (n - k) * 2; yr = TF_WS[kk]; yi = TF_WS[kk + 1];
+          u = zr + yr; v = zi - yi; sa += u * u + v * v;
+          u = zi + yi; v = zr - yr; sb += u * u + v * v;
+          k += 1;
+        );
+        s[TS_PA + bi] = sa * sc;
+        s[TS_PB + bi] = sb * sc;
+      );
       bi += 1;
     );
-    t == tap_fine - 1 ? (fineIn(a, b));
   );
 
   // A multiband tap's bands: the median reduction of the filterbank bands
@@ -1004,6 +1108,10 @@ out_pin:right
   function tapColumn(t) local(s, bi, pa, pb, pk, gate, r, d, n, j, g, zo) (
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
     n = 0;
+    // the bands due this column (THE TEN BANDS, BY FFT), staggered
+    tapFFT(t, 0);
+    (tap_col & 1) == 1 ? tapFFT(t, 1);
+    (tap_col & 7) == 2 ? tapFFT(t, 2);
     // While the zero is being measured: sum each band's power for this
     // test level, and nothing else -- no baseline, no peak, no reading.
     cal_mute ? (
@@ -1011,17 +1119,16 @@ out_pin:right
         bi = 0;
         loop(GRB_N,
           cal_ph == 1 ? (
-            s[TS_AA + bi] += s[TS_PA + bi] / tap_slice;
-            s[TS_AB + bi] += s[TS_PB + bi] / tap_slice;
+            s[TS_AA + bi] += s[TS_PA + bi];
+            s[TS_AB + bi] += s[TS_PB + bi];
           ) : (
-            s[TS_BA + bi] += s[TS_PA + bi] / tap_slice;
-            s[TS_BB + bi] += s[TS_PB + bi] / tap_slice;
+            s[TS_BA + bi] += s[TS_PA + bi];
+            s[TS_BB + bi] += s[TS_PB + bi];
           );
           bi += 1;
         );
         cal_ph == 1 ? (s[TS_NA] += 1) : (s[TS_NB] += 1);
       );
-      bi = 0; loop(GRB_N, s[TS_PA + bi] = 0; s[TS_PB + bi] = 0; bi += 1; );
       s[TS_LAST] = 0;
       s[TS_DISP] = max(0, s[TS_DISP] - tap_rel);
       bi = 0; loop(4, s[TS_MBG + bi] = max(0, s[TS_MBG + bi] - tap_rel); bi += 1; );
@@ -1029,9 +1136,8 @@ out_pin:right
     zo = s[TS_HASCAL] > 0.5;
     bi = 0;
     loop(GRB_N,
-      pa = s[TS_PA + bi] / tap_slice;
-      pb = s[TS_PB + bi] / tap_slice;
-      s[TS_PA + bi] = 0; s[TS_PB + bi] = 0;
+      pa = s[TS_PA + bi];
+      pb = s[TS_PB + bi];
       s[TS_MBP + bi] = pa;
       pk = max(pa, s[TS_PK + bi] * tap_pkdec);
       s[TS_PK + bi] = pk;
@@ -1188,17 +1294,20 @@ out_pin:right
     // the taps' settings: the post probe's
     role == 1 ? (
       tap_n = gmem[pb + PB_TAPN];
-      tap_lag1 = gmem[pb + PB_LAG];     tap_lag2 = gmem[pb + PB_LAG + 1];
-      tap_lag3 = gmem[pb + PB_LAG + 2]; tap_lag4 = gmem[pb + PB_LAG + 3];
-      tap_rst1 = gmem[pb + PB_RST];     tap_rst2 = gmem[pb + PB_RST + 1];
-      tap_rst3 = gmem[pb + PB_RST + 2]; tap_rst4 = gmem[pb + PB_RST + 3];
+      k = 0;
+      loop(TAP_MAX,
+        TV_LAG[k] = gmem[pb + pbAt(PB_LAG, PB_LAG2, k)];
+        TV_RST[k] = gmem[pb + pbAt(PB_RST, PB_RST2, k)];
+        k += 1;
+      );
       tap_gen = gmem[pb + PB_GEN];
       tap_nogr = gmem[pb + PB_NOGR];
       tap_mb = gmem[pb + PB_MB];
       tap_mbx1 = gmem[pb + PB_MBX]; tap_mbx2 = gmem[pb + PB_MBX + 1]; tap_mbx3 = gmem[pb + PB_MBX + 2];
       tap_fine = gmem[pb + PB_FINE];
+      tap_watch = gmem[pb + PB_WATCH];
     ) : (
-      tap_n = 0; tap_mb = 0; tap_fine = 0;
+      tap_n = 0; tap_mb = 0; tap_fine = 0; tap_watch = 0;
     );
     // Track Analyser's spectrum release
     v = gmem[CTRL_REL];
@@ -1207,20 +1316,19 @@ out_pin:right
   );
 
   // What the post probe has to say, into its block.
-  function writeReadings() (
+  function writeReadings() local(k) (
     (role == 1 && pb >= 0) ? (
-      gmem[pb + PB_GR] = tap_gr1; gmem[pb + PB_GR + 1] = tap_gr2;
-      gmem[pb + PB_GR + 2] = tap_gr3; gmem[pb + PB_GR + 3] = tap_gr4;
-      gmem[pb + PB_CAL] = tap_cal1; gmem[pb + PB_CAL + 1] = tap_cal2;
-      gmem[pb + PB_CAL + 2] = tap_cal3; gmem[pb + PB_CAL + 3] = tap_cal4;
-      gmem[pb + PB_INPK] = tap_inpk1; gmem[pb + PB_INPK + 1] = tap_inpk2;
-      gmem[pb + PB_INPK + 2] = tap_inpk3; gmem[pb + PB_INPK + 3] = tap_inpk4;
-      gmem[pb + PB_OUTPK] = tap_outpk1; gmem[pb + PB_OUTPK + 1] = tap_outpk2;
-      gmem[pb + PB_OUTPK + 2] = tap_outpk3; gmem[pb + PB_OUTPK + 3] = tap_outpk4;
-      gmem[pb + PB_INRMS] = tap_inrms1; gmem[pb + PB_INRMS + 1] = tap_inrms2;
-      gmem[pb + PB_INRMS + 2] = tap_inrms3; gmem[pb + PB_INRMS + 3] = tap_inrms4;
-      gmem[pb + PB_OUTRMS] = tap_outrms1; gmem[pb + PB_OUTRMS + 1] = tap_outrms2;
-      gmem[pb + PB_OUTRMS + 2] = tap_outrms3; gmem[pb + PB_OUTRMS + 3] = tap_outrms4;
+      k = 0;
+      loop(TAP_MAX,
+        gmem[pb + pbAt(PB_GR, PB_GR2, k)] = TV_GR[k];
+        gmem[pb + pbAt(PB_CAL, PB_CAL2, k)] = TV_CAL[k];
+        gmem[pb + pbAt(PB_INPK, PB_INPK2, k)] = TV_INPK[k];
+        gmem[pb + pbAt(PB_OUTPK, PB_OUTPK2, k)] = TV_OUTPK[k];
+        gmem[pb + pbAt(PB_INRMS, PB_INRMS2, k)] = TV_INRMS[k];
+        gmem[pb + pbAt(PB_OUTRMS, PB_OUTRMS2, k)] = TV_OUTRMS[k];
+        k += 1;
+      );
+      gmem[pb + PB_CAP] = TAP_MAX;
       gmem[pb + PB_MBGR] = tap_mbgr1; gmem[pb + PB_MBGR + 1] = tap_mbgr2;
       gmem[pb + PB_MBGR + 2] = tap_mbgr3; gmem[pb + PB_MBGR + 3] = tap_mbgr4;
       gmem[pb + PB_MBL] = tap_mbl1; gmem[pb + PB_MBL + 1] = tap_mbl2;
@@ -1334,34 +1442,32 @@ out_pin:right
   hb != hb_last ? ( hb_last = hb; hb_age = 0; ) : hb_age += samplesblock;
   tap_cfg  = (role >= 0.5 && role < 1.5) ? max(0, min(TAP_MAX, floor(tap_n))) : 0;
   tap_live = tap_cfg > 0 && hb_age < srate * 3;
+  // on screen (ONLY THE TRACKS ON SCREEN), or measuring the zero
+  tap_watch != watch_last ? ( watch_last = tap_watch; watch_age = 0; ) : watch_age += samplesblock;
+  gate_v = gmem[CTRL_GATE];
+  gate_v != gate_last ? ( gate_last = gate_v; gate_age = 0; ) : gate_age += samplesblock;
+  tap_seen = gate_age >= srate * 3 || watch_age < srate || publish >= 0.5;
+  tap_run = tap_live && (tap_seen || cal_ph > 0);
   // the third-octave tap: set up afresh when it's another tap, or a new rate
   (tap_fine != fn_tap || fn_sr != srate) ? ( fn_tap = tap_fine; fineSetup(); );
   tap_live ? (
     tap_sr != srate ? ( tapBands(); t = 0; loop(TAP_MAX, tapReset(t); t += 1; ); );
-    setTapLag(0, tap_lag1); setTapLag(1, tap_lag2);
-    setTapLag(2, tap_lag3); setTapLag(3, tap_lag4);
     // A bumped relearn counter drops what that tap has learnt: ChannelView
     // bumps it when the plugin is touched, so a new make-up gain is found
     // again rather than read as reduction.
-    (TAP_BASE + TAP_S)[TS_RST] != tap_rst1 ? ( tapReset(0); (TAP_BASE + TAP_S)[TS_RST] = tap_rst1;
-      (TAP_BASE + TAP_S)[TS_HASCAL] > 0.5 ? (TAP_BASE + TAP_S)[TS_STALE] = 1; );
-    (TAP_BASE + TAP_STRIDE + TAP_S)[TS_RST] != tap_rst2 ? ( tapReset(1); (TAP_BASE + TAP_STRIDE + TAP_S)[TS_RST] = tap_rst2;
-      (TAP_BASE + TAP_STRIDE + TAP_S)[TS_HASCAL] > 0.5 ? (TAP_BASE + TAP_STRIDE + TAP_S)[TS_STALE] = 1; );
-    (TAP_BASE + 2 * TAP_STRIDE + TAP_S)[TS_RST] != tap_rst3 ? ( tapReset(2); (TAP_BASE + 2 * TAP_STRIDE + TAP_S)[TS_RST] = tap_rst3;
-      (TAP_BASE + 2 * TAP_STRIDE + TAP_S)[TS_HASCAL] > 0.5 ? (TAP_BASE + 2 * TAP_STRIDE + TAP_S)[TS_STALE] = 1; );
-    (TAP_BASE + 3 * TAP_STRIDE + TAP_S)[TS_RST] != tap_rst4 ? ( tapReset(3); (TAP_BASE + 3 * TAP_STRIDE + TAP_S)[TS_RST] = tap_rst4;
-      (TAP_BASE + 3 * TAP_STRIDE + TAP_S)[TS_HASCAL] > 0.5 ? (TAP_BASE + 3 * TAP_STRIDE + TAP_S)[TS_STALE] = 1; );
+    t = 0;
+    loop(TAP_MAX,
+      setTapLag(t, TV_LAG[t]);
+      ts = TAP_BASE + t * TAP_STRIDE + TAP_S;
+      ts[TS_RST] != TV_RST[t] ? ( tapReset(t); ts[TS_RST] = TV_RST[t];
+        ts[TS_HASCAL] > 0.5 ? ts[TS_STALE] = 1; );
+      t += 1;
+    );
   );
   // The readings, every block: a tap not in use, or not running, reads 0.
-  g1 = (tap_live && tapIsGR(0)) ? tapReading(0) : 0;
-  g2 = (tap_live && tapIsGR(1)) ? tapReading(1) : 0;
-  g3 = (tap_live && tapIsGR(2)) ? tapReading(2) : 0;
-  g4 = (tap_live && tapIsGR(3)) ? tapReading(3) : 0;
-  (g1 != tap_gr1 || g2 != tap_gr2 || g3 != tap_gr3 || g4 != tap_gr4) ? (
-    tap_gr1 = g1; tap_gr2 = g2; tap_gr3 = g3; tap_gr4 = g4;
-  );
+  t = 0; loop(TAP_MAX, TV_GR[t] = (tap_run && tapIsGR(t)) ? tapReading(t) : 0; t += 1; );
   // a multiband tap's bands, the same way
-  mbs = (tap_mb >= 1 && tap_mb <= 4 && tap_live && tapIsGR(tap_mb - 1)) ? TAP_BASE + (tap_mb - 1) * TAP_STRIDE + TAP_S : 0;
+  mbs = (tap_mb >= 1 && tap_mb <= TAP_MAX && tap_run && tapIsGR(tap_mb - 1)) ? TAP_BASE + (tap_mb - 1) * TAP_STRIDE + TAP_S : 0;
   m1 = mbs ? mbs[TS_MBG] : 0;     m2 = mbs ? mbs[TS_MBG + 1] : 0;
   m3 = mbs ? mbs[TS_MBG + 2] : 0; m4 = mbs ? mbs[TS_MBG + 3] : 0;
   (m1 != tap_mbgr1 || m2 != tap_mbgr2 || m3 != tap_mbgr3 || m4 != tap_mbgr4) ? (
@@ -1376,29 +1482,24 @@ out_pin:right
   (!mbs || tap_lvc == 0) && (m1 != tap_mbl1 || m2 != tap_mbl2 || m3 != tap_mbl3 || m4 != tap_mbl4) ? (
     tap_mbl1 = m1; tap_mbl2 = m2; tap_mbl3 = m3; tap_mbl4 = m4;
   );
-  // The levels, about thirty times a second while a reader is alive;
-  // silence once, when it goes away.
-  tap_live ? (
+  // The levels, about thirty times a second while a reader is alive and
+  // the track on screen; silence once, when either goes away.
+  tap_run ? (
     tap_lvdead = 0;
     tap_lvc += samplesblock;
     tap_lvc >= tap_lvn ? (
       tap_lvc = 0;
-      tap_inpk1 = lvAmp(lvGet(0, TS_LIP)); tap_inpk2 = lvAmp(lvGet(1, TS_LIP));
-      tap_inpk3 = lvAmp(lvGet(2, TS_LIP)); tap_inpk4 = lvAmp(lvGet(3, TS_LIP));
-      tap_outpk1 = lvAmp(lvGet(0, TS_LOP)); tap_outpk2 = lvAmp(lvGet(1, TS_LOP));
-      tap_outpk3 = lvAmp(lvGet(2, TS_LOP)); tap_outpk4 = lvAmp(lvGet(3, TS_LOP));
-      tap_inrms1 = lvMS(lvGet(0, TS_LIR)); tap_inrms2 = lvMS(lvGet(1, TS_LIR));
-      tap_inrms3 = lvMS(lvGet(2, TS_LIR)); tap_inrms4 = lvMS(lvGet(3, TS_LIR));
-      tap_outrms1 = lvMS(lvGet(0, TS_LOR)); tap_outrms2 = lvMS(lvGet(1, TS_LOR));
-      tap_outrms3 = lvMS(lvGet(2, TS_LOR)); tap_outrms4 = lvMS(lvGet(3, TS_LOR));
+      t = 0;
+      loop(TAP_MAX,
+        TV_INPK[t] = lvAmp(lvGet(t, TS_LIP)); TV_OUTPK[t] = lvAmp(lvGet(t, TS_LOP));
+        TV_INRMS[t] = lvMS(lvGet(t, TS_LIR)); TV_OUTRMS[t] = lvMS(lvGet(t, TS_LOR));
+        t += 1;
+      );
       lvChanged = 1;
     );
   ) : (tap_lvdead == 0 ? (
     tap_lvdead = 1;
-    tap_inpk1 = tap_inpk2 = tap_inpk3 = tap_inpk4 = -150;
-    tap_outpk1 = tap_outpk2 = tap_outpk3 = tap_outpk4 = -150;
-    tap_inrms1 = tap_inrms2 = tap_inrms3 = tap_inrms4 = -150;
-    tap_outrms1 = tap_outrms2 = tap_outrms3 = tap_outrms4 = -150;
+    t = 0; loop(TAP_MAX, TV_INPK[t] = TV_OUTPK[t] = TV_INRMS[t] = TV_OUTRMS[t] = -150; t += 1; );
     lvChanged = 1;
   ));
   lvChanged ? (
@@ -1406,9 +1507,8 @@ out_pin:right
   );
 
   (active && tap_cfg > 0) ? (
-    gmem[TAPTR_HDR] = tap_live ? tap_cfg : 0;
-    gmem[TAPTR_HDR + 1] = g1; gmem[TAPTR_HDR + 2] = g2;
-    gmem[TAPTR_HDR + 3] = g3; gmem[TAPTR_HDR + 4] = g4;
+    gmem[TAPTR_HDR] = tap_run ? tap_cfg : 0;
+    t = 0; loop(TAP_MAX, gmem[TAPTR_HDR + 1 + t] = TV_GR[t]; t += 1; );
   );
 
   //-- measuring the zero (THE ZERO POINT) ----------------------------------
@@ -1420,7 +1520,7 @@ out_pin:right
 
   // The per-tap waveforms: this track's post probe, while asked for.
   tw_was = tw_on;
-  tw_on = tap_live && cal_pl >= 0 && gmem[CTRL_TWTRK] == cal_pl + 1;
+  tw_on = tap_run && cal_pl >= 0 && gmem[CTRL_TWTRK] == cal_pl + 1;
   // Columns only advance while the transport runs, so stopping leaves the
   // last pass on screen to look at rather than scrolling it into silence.
   tw_run = tw_on && (play_state & 1);
@@ -1435,6 +1535,7 @@ out_pin:right
     gmem[TW_HDR + 2] = tw_slice;
     gmem[TW_HDR + 3] = srate;
     gmem[TW_HDR + 4] = cal_pl + 1;
+    gmem[TW_HDR + 6] = tap_cfg;
   );
   cal_play = (play_state & 1) == 1;
 
@@ -1532,13 +1633,7 @@ out_pin:right
 
   // Where each tap's zero stands, for ChannelView and Track Analyser.
   (role >= 0.5 && role < 1.5) ? (
-    c1 = tapIsGR(0) ? calState(0) : 0;
-    c2 = tapIsGR(1) ? calState(1) : 0;
-    c3 = tapIsGR(2) ? calState(2) : 0;
-    c4 = tapIsGR(3) ? calState(3) : 0;
-    (c1 != tap_cal1 || c2 != tap_cal2 || c3 != tap_cal3 || c4 != tap_cal4) ? (
-      tap_cal1 = c1; tap_cal2 = c2; tap_cal3 = c3; tap_cal4 = c4;
-    );
+    t = 0; loop(TAP_MAX, TV_CAL[t] = tapIsGR(t) ? calState(t) : 0; t += 1; );
   );
 
   writeReadings();
@@ -1607,10 +1702,10 @@ out_pin:right
         grb += 1;
       );
       // Each tap's latest column, on the panel's own clock, for its traces.
-      (tap_live && role >= 0.5 && role < 1.5) ? (
+      (tap_run && role >= 0.5 && role < 1.5) ? (
         t = 0;
         loop(tap_cfg,
-          gmem[TAPTR_BASE + t * SCOPE_COLS + cur] =
+          gmem[(t < 4 ? TAPTR_BASE + t * SCOPE_COLS : TAPTR_BASE2 + (t - 4) * SCOPE_COLS) + cur] =
             (TAP_BASE + t * TAP_STRIDE + TAP_S)[TS_LAST];
           t += 1;
         );
@@ -1808,25 +1903,25 @@ out_pin:right
   );
 
   //-- the taps -----------------------------------------------------------
-  tap_live ? (
+  tap_run ? (
     // Levels, every tap -- falling away while the zero is measured, so
     // the test noise never shows on a meter.
     cal_mute ? (
       t = 0; loop(tap_cfg, tapLevels(t, 0, 0, 0, 0); t += 1; );
     ) : (
-      tapLevels(0, spl2, spl3, spl4, spl5);
-      tap_cfg >= 2 ? tapLevels(1, spl6, spl7, spl8, spl9);
-      tap_cfg >= 3 ? tapLevels(2, spl10, spl11, spl12, spl13);
-      tap_cfg >= 4 ? tapLevels(3, spl14, spl15, spl16, spl17);
+      t = 0;
+      loop(tap_cfg, tapLevels(t, spl(2 + t * 4), spl(3 + t * 4), spl(4 + t * 4), spl(5 + t * 4)); t += 1; );
     );
     // Gain reduction, only for the taps measuring it.
-    tapIsGR(0) ? tapSample(0, (spl2 + spl3) * 0.5, (spl4 + spl5) * 0.5);
-    tapIsGR(1) ? tapSample(1, (spl6 + spl7) * 0.5, (spl8 + spl9) * 0.5);
-    tapIsGR(2) ? tapSample(2, (spl10 + spl11) * 0.5, (spl12 + spl13) * 0.5);
-    tapIsGR(3) ? tapSample(3, (spl14 + spl15) * 0.5, (spl16 + spl17) * 0.5);
+    t = 0;
+    loop(tap_cfg,
+      tapIsGR(t) ? tapSample(t, (spl(2 + t * 4) + spl(3 + t * 4)) * 0.5, (spl(4 + t * 4) + spl(5 + t * 4)) * 0.5);
+      t += 1;
+    );
     tap_sacc += 1;
     tap_sacc >= tap_slice ? (
       tap_sacc = 0;
+      tap_col += 1;
       t = 0; loop(tap_cfg, tapIsGR(t) ? tapColumn(t); t += 1; );
     );
 
@@ -1855,7 +1950,7 @@ out_pin:right
         tw_t = 0;
         loop(TAP_MAX,
           tw_a = TW_ACC + tw_t * 4;
-          tw_b = TW_BASE + (tw_t * TW_COLS + tw_cur) * 4;
+          tw_b = twAt(tw_t, tw_cur);
           tw_t < tap_cfg ? (
             gmem[tw_b] = (tw_a[0] <= tw_a[1] ? tw_a[0] : 0);
             gmem[tw_b + 1] = (tw_a[0] <= tw_a[1] ? tw_a[1] : 0);
@@ -1912,7 +2007,8 @@ out_pin:right
   #gfx_s = "";
   active && publish >= 0.5 ? strcat(#gfx_s, "Publishing to Track Analyser   ");
   vis_active ? ( sprintf(#gfx_t, "Visualizer slot %d   ", vis_slot + 1); strcat(#gfx_s, #gfx_t); );
-  tap_live ? ( sprintf(#gfx_t, "Measuring %d plugin%s", tap_cfg, tap_cfg == 1 ? "" : "s"); strcat(#gfx_s, #gfx_t); );
+  tap_run ? ( sprintf(#gfx_t, "Measuring %d plugin%s", tap_cfg, tap_cfg == 1 ? "" : "s"); strcat(#gfx_s, #gfx_t); )
+  : tap_live ? ( sprintf(#gfx_t, "%d plugin%s, measured while shown", tap_cfg, tap_cfg == 1 ? "" : "s"); strcat(#gfx_s, #gfx_t); );
   cal_pre && cal_phase > 0 ? strcat(#gfx_s, "Measuring the zero");
   gfx_r = 0.36; gfx_g = 0.64; gfx_b = 0.88;
   gfx_drawstr(#gfx_s);

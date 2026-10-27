@@ -17,6 +17,7 @@ local ED = require("TS_CV_Edition")
 local SW = ED.switches()
 local KP = require("TS_CV_KnobParts")
 local LT = ED.light()
+local ST = require("TS_CV_Style")
 
 local W   = {}
 
@@ -54,7 +55,7 @@ local A_MAX      = math.pi * 2.25    -- sweep end:   lower-right
 local A_SPAN     = A_MAX - A_MIN
 local ARC_SEGS   = 32
 
-function W.attach(imgui) ImGui = imgui; SW.attach(imgui); KP.attach(imgui); LT.attach(imgui) end
+function W.attach(imgui) ImGui = imgui; SW.attach(imgui); KP.attach(imgui); LT.attach(imgui); ST.attach(imgui, W) end
 
 -- ---------------------------------------------------------------------
 -- The 3D effect (View > 3D effect). While a panel is drawn with it, W.hw

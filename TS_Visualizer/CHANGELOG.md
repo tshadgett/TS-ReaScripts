@@ -1,5 +1,14 @@
 # TS_Visualizer — changelog
 
+## 2.3.0 — the Editor's new look
+
+- **The Editor in ChannelView's look:** every setting has its name above
+  it, switches are chips with a light (Follow, beside each colour), a
+  choice of a few is a row of joined chips (the slope guide, the spectrum
+  tilt), and sliders show their value at the right (double-click or
+  Ctrl-click to type one). Two gains or speeds to a row.
+- *Reset to defaults* is spelled right.
+
 ## 2.2.1 — tidier code
 
 - Code comments and the README tidied: what the code does and why, without

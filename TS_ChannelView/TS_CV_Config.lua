@@ -609,6 +609,15 @@ C.PALETTE = {
   knob_pointer  = { "tint",   -2.1, 0.394, 0.935 },
   knob_ring     = { "tint",    1.0, 0.147, 0.280 },
   toggle_off    = { "tint",    2.2, 0.160, 0.196 },
+  -- Options panels and dialogues (TS_CV_Style): fields, chips, their
+  -- edges, the bright edge of a picked chip, and a remove button's fill.
+  ui_field      = { "tint",    3.0, 0.120, 0.150 },
+  ui_chip       = { "tint",    3.0, 0.100, 0.180 },
+  ui_chip_hov   = { "tint",    3.0, 0.100, 0.215 },
+  ui_chip_on    = { "tint",    3.0, 0.100, 0.250 },
+  ui_edge       = { "tint",    3.0, 0.080, 0.320 },
+  ui_hi         = { "tint",    0.0, 0.080, 0.830 },
+  ui_remove_bg  = { "alert",   0.0, 0.450, 0.150 },
   toggle_on     = { "solid",  -14.0, 0.661, 0.573 },
   toggle_text   = { "tint",    3.9, 0.206, 0.867 },
   accent        = { "solid",  -14.0, 0.661, 0.573 },

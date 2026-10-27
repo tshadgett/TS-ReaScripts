@@ -21,6 +21,7 @@
 local C  = require("TS_CV_Config")
 local U  = require("TS_CV_Util")
 local W  = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local M  = require("TS_CV_Mappings")
 local EN = require("TS_CV_Envelopes")
 
@@ -385,7 +386,7 @@ function ML.draw(ctx, w)
   local mw = ImGui.CalcTextSize(ctx, "More\u{2026}") + 16
   local right_w = 22 + 8 + mw + 12
   local tail_w = show_bind and 0
-                 or (220 + ImGui.CalcTextSize(ctx, "Only when its track is selected") + fh + 8)
+                 or (220 + ImGui.CalcTextSize(ctx, "Only when its track is selected") + 37 + 8)
   local pair_w = lw + 8 + cw + 8 + lr * 2 + 8 + cw2   -- the lane's +, then the cards
   local function centred(gw, room)
     local sx = x0 + (w - gw) * 0.5
@@ -522,12 +523,16 @@ function ML.draw(ctx, w)
       end
     end
     x = x + 220
-    -- the options
-    ImGui.SetCursorScreenPos(ctx, x, ry)
-    local c1, v1 = ImGui.Checkbox(ctx, "Only when its track is selected##mlsel", st.sel_only)
+    -- the options: two on / off chips, stacked in the card's height (so
+    -- squeezed a little: frame padding of 1)
+    ImGui.PushStyleVar(ctx, ImGui.StyleVar_FramePadding, 6, 1)
+    local sh = ImGui.GetFrameHeight(ctx) or fh
+    ImGui.SetCursorScreenPos(ctx, x, cy + (ch - sh * 2 - 2) * 0.5 + (ry - cy))
+    local c1, v1 = ST.checkbox(ctx, "Only when its track is selected##mlsel", st.sel_only)
     if c1 then st.sel_only = v1; ext_set(ML.EXT .. "_sel", v1 and "1" or "0") end
-    ImGui.SetCursorScreenPos(ctx, x, ry + fh - 2)
-    local c2, v2 = ImGui.Checkbox(ctx, "Soft takeover##mlsoft", st.soft)
+    ImGui.SetCursorScreenPos(ctx, x, cy + (ch - sh * 2 - 2) * 0.5 + (ry - cy) + sh + 2)
+    local c2, v2 = ST.checkbox(ctx, "Soft takeover##mlsoft", st.soft)
+    ImGui.PopStyleVar(ctx)
     if c2 then st.soft = v2; ext_set(ML.EXT .. "_soft", v2 and "1" or "0") end
     W.tip(ctx, "mlsoft", "Parameter waits for the control to reach it\n(absolute controls only)",
       ImGui.IsItemHovered(ctx), false)

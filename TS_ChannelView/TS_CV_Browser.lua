@@ -27,6 +27,7 @@
 --]]
 
 local C  = require("TS_CV_Config")
+local ST = require("TS_CV_Style")
 local U  = require("TS_CV_Util")
 local SR = require("TS_CV_Search")
 local IX = require("TS_CV_FXIndex")
@@ -440,11 +441,11 @@ local function draw_smart(ctx)
   local visible, open = ImGui.Begin(ctx, (e.id and "Smart folder" or "New smart folder") .. "###tscv_smartfold",
     true, ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoDocking)
   if visible then
-    ImGui.Text(ctx, "Name")
+    ST.caption(ctx, "Name")
     ImGui.SetNextItemWidth(ctx, 340)
     local _, nm = ImGui.InputText(ctx, "##sfname", e.name)
     e.name = nm
-    ImGui.Text(ctx, "Search")
+    ST.caption(ctx, "Search")
     if e.focus then ImGui.SetKeyboardFocusHere(ctx); e.focus = false end
     ImGui.SetNextItemWidth(ctx, 340)
     local _, q = ImGui.InputText(ctx, "##sfq", e.q)
@@ -464,8 +465,7 @@ local function draw_smart(ctx)
     if #hits > SMART_SHOWN then ImGui.TextDisabled(ctx, ("  \u{2026}and %d more"):format(#hits - SMART_SHOWN)) end
     ImGui.Separator(ctx)
     local ok = U.trim(e.name) ~= "" and U.trim(e.q) ~= ""
-    if not ok then ImGui.BeginDisabled(ctx) end
-    if ImGui.Button(ctx, "Save", 90) then
+    if ST.button(ctx, "Save", "main", 90, nil, { dim = not ok }) then
       edit_folders(function(mm)
         local id = e.id
         if id and not mm.folders[id] then return false end
@@ -474,7 +474,6 @@ local function draw_smart(ctx)
       end)
       smart_ed = nil
     end
-    if not ok then ImGui.EndDisabled(ctx) end
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel", 90) then smart_ed = nil end
     ImGui.End(ctx)
@@ -1078,7 +1077,7 @@ function B._draw(ctx, track)
     end
 
     local nch = st.pick and #(st.chosen or {}) or 0
-    if ImGui.Button(ctx, (nch > 1) and ("Add %d###addbtn"):format(nch) or "Add###addbtn", 90) then
+    if ST.button(ctx, (nch > 1) and ("Add %d###addbtn"):format(nch) or "Add###addbtn", "main", 90) then
       if st.pick then inserted = pick_chosen(st.results[st.sel])
       else inserted = insert(st.track or track, st.results[st.sel], st.insert_at, st.input) end
       if inserted then ImGui.CloseCurrentPopup(ctx); st.open = false end

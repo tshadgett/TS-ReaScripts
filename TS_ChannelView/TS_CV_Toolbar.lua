@@ -49,6 +49,7 @@
 local C = require("TS_CV_Config")
 local U = require("TS_CV_Util")
 local W = require("TS_CV_Widgets")
+local ST = require("TS_CV_Style")
 local AI = require("TS_CV_ActionIcons")
 local FB = require("TS_CV_FXButtons")
 -- (vendor looks: Pro)
@@ -1487,13 +1488,13 @@ TB.new_menu = new_menu
 
 -- The label box, in a right-click menu.
 local function label_box(ctx, it, hint)
-  ImGui.TextDisabled(ctx, hint)
+  ST.caption(ctx, hint)
   ImGui.SetNextItemWidth(ctx, 150)
   local _, v = ImGui.InputText(ctx, "##" .. ID .. "label", st.label_buf)
   local enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
   st.label_buf = v
   ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Set") or enter then
+  if ST.button(ctx, "Set", "main") or enter then
     it.label = clean(st.label_buf); TB.save()
     ImGui.CloseCurrentPopup(ctx)
   end
@@ -1555,9 +1556,9 @@ function TB.colour_row(ctx, it, id, nested)
   -- how this button shows it: as the bar does, unless ticked otherwise
   if colour_of(it.color) then
     local u, i = TB.cstyle_of(it)
-    local cu, nu = ImGui.Checkbox(ctx, "Underline##" .. id .. "csu", u)
+    local cu, nu = ST.checkbox(ctx, "Underline##" .. id .. "csu", u)
     ImGui.SameLine(ctx, 0, 12)
-    local ci, ni = ImGui.Checkbox(ctx, "Colour the icon##" .. id .. "csi", i)
+    local ci, ni = ST.checkbox(ctx, "Colour the icon##" .. id .. "csi", i)
     if cu or ci then
       local v = (nu and "u" or "") .. (ni and "i" or "")
       -- the same as the bar: it follows the bar again
@@ -1565,6 +1566,7 @@ function TB.colour_row(ctx, it, id, nested)
       TB.save()
     end
     ImGui.SameLine(ctx, 0, 12)
+    ImGui.AlignTextToFramePadding(ctx)
     ImGui.TextDisabled(ctx, it.cs and "this button's own" or "as the bar")
   end
   if nested then TB.draw_colour(ctx) end

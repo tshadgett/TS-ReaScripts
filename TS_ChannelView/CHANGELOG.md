@@ -1,5 +1,68 @@
 # ChannelView — changelog
 
+## 3.5.0 — patch bay, a new look, eight plugins per track
+
+### ChannelView
+
+- **A new look for options and dialogs.** Every setting has its name
+  above it. A switch is a chip with a light, a choice of a few is a row of
+  joined chips, and a slider shows its value at the right (double-click or
+  Ctrl-click it to type one). Everyday buttons are grey, the main one in
+  the accent colour, and a remove button has an orange outline. The rest
+  of the windows follow the palette instead of ImGui's own blue.
+- **Up to eight plugins per track are measured** (TS_TrackProbe 2.3.0):
+  their meters, measured reduction and traces. With more than four, some
+  went without. Reopen the project after updating, so the new probe runs.
+- **Only the tracks on screen are measured:** the one in channel view, the
+  mixer strips in view and the web companion's. The rest cost nothing,
+  and their zero is still measured at every stop, so they read right as
+  soon as they show.
+- **The probe's ten bands are measured by FFT,** at about a quarter of
+  the CPU per measured plugin.
+- **Macro and modulator links sit where REAPER has them** on parameters
+  whose range isn't 0 to 1 (a JSFX's rate in Hz, ReaComp's threshold) and
+  on ReaEQ's gains: the knob rings, and a modulator's setting.
+- **The Channel panel's header is in the track's colour.** The fader panel
+  the TCP window opens has the same header and follows the mixer's
+  *Background tint*.
+- **The TCP window keeps REAPER's own track panel shut** when REAPER opens
+  it again at startup.
+- **The Dock menu** in ChannelView and the TCP window docks the window: it
+  did nothing.
+- **No stray dot** at the edge of a left-hand action bar in mixer view.
+
+### ChannelView Pro
+
+- **The patch bay.** Rest the pointer on a name button's colour stripe in
+  the mixer or channel view, or on a row's colour strip in the TCP window:
+  every send as a cable from OUT to IN, in the sending track's colour, as
+  thick as it is loud, its line showing the mode. Rails show each track's
+  send to the master or its folder. Drag from jack to jack to connect
+  (channels, mode, level, or *Sidechain → 3/4*); the wheel over a cable
+  sets its level, dragging one end moves the send, Alt-click removes it.
+  In the TCP window the docker widens to make room and gives the width
+  back when it closes.
+- **Macros and modulators on a canvas's handles.** Drop a ◯ on an EQ node
+  (beside it for the frequency, above or below for the gain, on it for
+  the Q), a compressor's, gate's or limiter's nodes and level lines, and
+  the handles of every other canvas: delay, de-esser, saturation, reverb,
+  envelope, modulation and multiband. A linked handle shows a ghost at its
+  setting and a dot at its reach; drag either, Alt-click the dot to
+  unlink. Handles hold still while the music moves. A canvas's small
+  knobs, buttons, rows and lists take links as a panel's do.
+- **ReaXcomp** starts with the multiband canvas: every band it has, up to
+  eight, with its own switches; **+** in a band's strip splits it, **×**
+  takes it away. Multiband canvases now go up to eight bands.
+- **ReaSynth** starts with its oscillator over its envelope: one cycle of
+  the wave (drag the pulse width and the volume), drawbars for each wave,
+  a pitch ruler for the detune and the extra sine's tuning, and a glide
+  ramp.
+- **ReaLimit:** the ceiling's grip sits in the middle of its line, so it
+  can be grabbed where it meets the threshold, and the captions no longer
+  overlap.
+- **ReaComp's preview filter** is a headphones button, as on the gate.
+- The editors (Edit layout, Set up layout, Knob look) have the new look.
+
 ## 3.3.0 — track templates, pages in Edit layout
 
 ### ChannelView

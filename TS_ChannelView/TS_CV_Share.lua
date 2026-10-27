@@ -15,6 +15,7 @@
 --]]
 
 local U = require("TS_CV_Util")
+local ST = require("TS_CV_Style")
 local M = require("TS_CV_Mappings")
 
 local ImGui
@@ -131,10 +132,10 @@ function LS.draw(ctx, busy)
 
   if d.mode == "import" then
     ImGui.TextDisabled(ctx, U.truncate(d.file:match("[^\\/]+$") or d.file, 56))
-    ImGui.TextWrapped(ctx, "Tick the layouts to bring in. One you already have is replaced \u{2014} " ..
+    ImGui.TextWrapped(ctx, "Pick the layouts to bring in. One you already have is replaced \u{2014} " ..
       "your library as it was is kept as TS_ChannelView_Mappings.bak.ini.")
   else
-    ImGui.TextWrapped(ctx, "Tick the layouts to export. This track's plugins are ticked to start with.")
+    ImGui.TextWrapped(ctx, "Pick the layouts to export. This track's plugins are picked to start with.")
   end
   ImGui.Spacing(ctx)
 
@@ -157,11 +158,9 @@ function LS.draw(ctx, busy)
       ImGui.ChildFlags_Borders or 1) then
     for i, e in ipairs(d.list) do
       if matches(e, d.filter) then
-        ImGui.BeginDisabled(ctx, not can(e))
-        local ch, v = ImGui.Checkbox(ctx, e.key .. "##sh" .. i, e.pick)
+        local ch, v = ST.checkbox(ctx, e.key .. "##sh" .. i, e.pick, { dim = not can(e) })
         if ch then e.pick = v end
-        ImGui.EndDisabled(ctx)
-        if e.status == "locked" and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+        if e.status == "locked" and ImGui.IsItemHovered(ctx) then
           ImGui.SetTooltip(ctx, "Your layout is locked\n" ..
             "Unlock it (padlock, panel foot) to import over it")
         end
@@ -177,9 +176,8 @@ function LS.draw(ctx, busy)
   local picked = {}
   for _, e in ipairs(d.list) do if e.pick and can(e) then picked[#picked + 1] = e end end
   ImGui.Spacing(ctx)
-  ImGui.BeginDisabled(ctx, #picked == 0)
   local label = (d.mode == "import") and ("Import %d###shgo") or ("Export %d\u{2026}###shgo")
-  if ImGui.Button(ctx, label:format(#picked), 120) then
+  if ST.button(ctx, label:format(#picked), "main", 120, nil, { dim = #picked == 0 }) then
     if d.mode == "export" then
       local keys = {}
       for _, e in ipairs(picked) do keys[#keys + 1] = e.key end
@@ -213,7 +211,6 @@ function LS.draw(ctx, busy)
       end
     end
   end
-  ImGui.EndDisabled(ctx)
   ImGui.SameLine(ctx)
   if dlg and ImGui.Button(ctx, "Cancel", 90) then close() end
   ImGui.EndPopup(ctx)

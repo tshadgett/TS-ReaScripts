@@ -22,6 +22,7 @@
 --]]
 
 local C  = require("TS_CV_Config")
+local ST = require("TS_CV_Style")
 local TO = require("TS_CV_TrackOps")
 local CN = require("TS_CV_Chains")
 local IC = require("TS_CV_Icons")
@@ -268,7 +269,7 @@ local function rename_popup(ctx)
     return false
   end
 
-  ImGui.TextDisabled(ctx, "Rename " .. label_of(tr))
+  ST.caption(ctx, "Rename " .. label_of(tr))
   if st.ren_focus then
     ImGui.SetKeyboardFocusHere(ctx)
     st.ren_focus = false
@@ -278,7 +279,7 @@ local function rename_popup(ctx)
   local enter = (ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)))
   st.ren_buf = buf
   ImGui.SameLine(ctx)
-  local ok = ImGui.Button(ctx, "OK")
+  local ok = ST.button(ctx, "OK", "main")
   if enter or ok then
     TO.rename(tr, st.ren_buf)
     changed = true
@@ -362,12 +363,12 @@ local function colour_dialog(ctx)
 
   ImGui.Spacing(ctx)
   if not close then
-    if ImGui.Button(ctx, "Apply") then
+    if ST.button(ctx, "Apply", "main") then
       TO.set_colour(tracks, s.rgb)
       changed, close = true, true
     end
     ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Remove colour") then
+    if ST.button(ctx, "Remove colour", "remove") then
       TO.set_colour(tracks, nil)
       changed, close = true, true
     end

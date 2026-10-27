@@ -22,6 +22,19 @@ local theme_path = here .. "TS_Theme.lua"
 local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyTheme) 
                    or function(ctx) return 0, 0 end
 
+-- The controls' look: the same kit as ChannelView's and Track Analyser's
+-- (captions above, chips, the accent for what's on), over the flat
+-- reaper.ImGui_* names this script uses. The Editor won't start without it.
+if not reaper.file_exists(here .. "TS_VZ_Style.lua") then
+    reaper.ShowMessageBox("TS_VZ_Style.lua must sit beside this script.\n\nReinstall TS_Visualizer from ReaPack.",
+        "TS_Visualizer Editor", 0)
+    return
+end
+local Kit = dofile(here .. "TS_VZ_Style.lua")
+Kit.attach(setmetatable({}, { __index = function(_, k) return reaper["ImGui_" .. k] end }))
+Kit.set_small(function(c) reaper.ImGui_PushFont(c, font_11, 11) end,
+              function(c) reaper.ImGui_PopFont(c) end)
+
 -- Memory Address 
     options = reaper.gmem_attach('TS_Visualizer_Mem')
     local MEM_GAIN_GONIO    = 2
@@ -64,19 +77,19 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
         ["ATTACK"]  = { "Response Speed (Attack)", "How fast it reacts." },
         ["RELEASE"] = { "Decay Speed (Release)", "How fast it fades." },
         ["ORDER"]   = { "Module Order",     "Drag to reorder the modules." },
-        ["BG"]      = { "Background",       "Follows Hue/Tint. Untick \"Follow\" to pick it." },
-        ["LINE"]    = { "Grid & Lines",     "Follows Hue/Tint. Untick \"Follow\" to pick it." },
-        ["TEXT"]    = { "Text & Labels",    "Follows Hue/Tint. Untick \"Follow\" to pick it." },
-        ["ZERO"]    = { "Weak Signal",      "Follows Hue/Tint. Untick \"Follow\" to pick it." },
-        ["MID"]     = { "Normal Signal",    "Follows Hue/Tint. Untick \"Follow\" to pick it." },
-        ["PEAK"]    = { "Strong Signal",    "Follows Hue/Tint. Untick \"Follow\" to pick it." },
-        ["FREZ"]    = { "Peak Line",        "Follows Hue/Tint. Untick \"Follow\" to pick it." },
+        ["BG"]      = { "Background",       "Follows Hue/Tint. Turn \"Follow\" off to pick it." },
+        ["LINE"]    = { "Grid & Lines",     "Follows Hue/Tint. Turn \"Follow\" off to pick it." },
+        ["TEXT"]    = { "Text & Labels",    "Follows Hue/Tint. Turn \"Follow\" off to pick it." },
+        ["ZERO"]    = { "Weak Signal",      "Follows Hue/Tint. Turn \"Follow\" off to pick it." },
+        ["MID"]     = { "Normal Signal",    "Follows Hue/Tint. Turn \"Follow\" off to pick it." },
+        ["PEAK"]    = { "Strong Signal",    "Follows Hue/Tint. Turn \"Follow\" off to pick it." },
+        ["FREZ"]    = { "Peak Line",        "Follows Hue/Tint. Turn \"Follow\" off to pick it." },
         ["RESET"]   = { "Reset",            "Colours back to default." },
         ["BASE_HUE"] = { "Hue", "Base hue for the palette, shared with ChannelView and Track Analyser. Default 219\xc2\xb0." },
         ["TINT"]     = { "Tint", "How far the greys lean toward the hue. 0 is grey, 1 the default." },
         ["HUE_SAT_RESET"] = { "Reset Hue/Tint", "Hue 219\xc2\xb0, Tint 1.0." },
         ["SYNC_CV"] = { "Sync Colour with ChannelView", "Hue and Tint follow the shared TS palette." },
-        ["FOLLOW"]  = { "Follow Hue/Tint", "This swatch follows the palette. Untick to pick it by hand." },
+        ["FOLLOW"]  = { "Follow Hue/Tint", "This swatch follows the palette. Turn it off to pick it by hand." },
         ["SLOPE"]   = { "Spectrum Slope Guide", "A dB/octave reference line through the cursor, while hovering." },
         ["TILT"]    = { "Spectrum Tilt", "Tilts the spectrum by dB/octave (about 1 kHz)." },
         ["ORIENTATION"] = { "Layout Orientation", "Side by side or stacked. Drag the dividers to resize." },
@@ -375,25 +388,17 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
 -- Color Editor
 --
 -- Every swatch here follows the Hue/Tint palette below by default (see
--- the "Follow" checkbox each one draws) - the actual colour is computed
+-- the "Follow" chip each one draws) - the actual colour is computed
 -- by TS_Visualizer.lua's own build_palette(), the same live colour engine
 -- ChannelView and TrackAnalyser use, and just read back here for display.
--- Unticking "Follow" hands that one swatch back to a plain colour picker,
+-- Turning "Follow" off hands that one swatch back to a plain colour picker,
 -- same as TrackAnalyser's per-colour auto-follow toggles.
 ----------------------------------------------------------
+    -- caption above, the swatch, then its Follow chip (Kit), as one group
     function ColorEdit(ctx, label, mem_idx, desc_id, follow_idx)
-        if follow_idx then
-            local fval = reaper.gmem_read(FOLLOW_HUE_BASE + follow_idx)
-            local fchanged, fnew = reaper.ImGui_Checkbox(ctx, "##follow_"..follow_idx, fval ~= 0)
-            if fchanged then
-                reaper.gmem_write(FOLLOW_HUE_BASE + follow_idx, fnew and 1 or 0)
-                SaveAllSettings()
-                fval = fnew and 1 or 0
-            end
-            if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "FOLLOW" end
-            reaper.ImGui_SameLine(ctx)
-            if fval ~= 0 then reaper.ImGui_BeginDisabled(ctx) end
-        end
+        Kit.cap(ctx, label)
+        local fval = follow_idx and reaper.gmem_read(FOLLOW_HUE_BASE + follow_idx) or 0
+        if fval ~= 0 then reaper.ImGui_BeginDisabled(ctx) end
 
         local r = reaper.gmem_read(mem_idx)
         local g = reaper.gmem_read(mem_idx + 1)
@@ -409,7 +414,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
         reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 6, 6)
         reaper.ImGui_SetNextItemWidth(ctx, 30)
 
-        local retval, new_packed_col = reaper.ImGui_ColorEdit4(ctx, label, packed_col, flags)
+        local retval, new_packed_col = reaper.ImGui_ColorEdit4(ctx, "##" .. label, packed_col, flags)
         reaper.ImGui_PopStyleVar(ctx)
 
         -- gmem is written every frame the picker reports a change, so the
@@ -434,9 +439,23 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
             shared_info.hovered_id = desc_id
         end
 
-        if follow_idx and reaper.gmem_read(FOLLOW_HUE_BASE + follow_idx) ~= 0 then
-            reaper.ImGui_EndDisabled(ctx)
+        if fval ~= 0 then reaper.ImGui_EndDisabled(ctx) end
+        if follow_idx then
+            reaper.ImGui_SameLine(ctx, 0, 4)
+            local fchanged, fnew = Kit.checkbox(ctx, "Follow##follow_" .. follow_idx, fval ~= 0)
+            if fchanged then
+                reaper.gmem_write(FOLLOW_HUE_BASE + follow_idx, fnew and 1 or 0)
+                SaveAllSettings()
+            end
+            if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "FOLLOW" end
         end
+        Kit.done(ctx)
+    end
+
+    -- the next group beside the last, or on a new line when there's no room
+    local function beside(ctx, w)
+        reaper.ImGui_SameLine(ctx, 0, 14)
+        if (reaper.ImGui_GetContentRegionAvail(ctx)) < w then reaper.ImGui_NewLine(ctx) end
     end
 
 ----------------------------------------------------------
@@ -479,6 +498,14 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
         local textcol_title = 0xE3DB8EFF
         local textcol_gray = 0x808080FF
         local pushed_vars, pushed_cols = ApplyTheme(ctx)
+        -- the shared palette's greys and accent over the theme's widgets
+        do
+            local h, t = reaper.gmem_read(MEM_BASE_HUE), reaper.gmem_read(MEM_TINT)
+            if h == 0 and t == 0 then h, t = 219, 1.0 end   -- nothing written yet
+            Kit.palette(h, t)
+        end
+        Kit.push(ctx)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), Kit.COL.win_bg)
         reaper.ImGui_PushFont(ctx, font_12, 12)
         reaper.ImGui_SetNextWindowSize(ctx, 530, 640, reaper.ImGui_Cond_Once())
 
@@ -514,30 +541,36 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 -- anything. The same pattern is used throughout this file.
                 -- 1. Gonio Gain
                 local g_gain = reaper.gmem_read(MEM_GAIN_GONIO)
-                local g_changed, g_new = reaper.ImGui_SliderDouble(ctx, "Gonio Gain", g_gain, 0.0, 1.0, "%.3f")
+                reaper.ImGui_SetNextItemWidth(ctx, 220)
+                local g_changed, g_new, g_changed_done = Kit.slider_double(ctx, "Gonio gain", g_gain, 0.0, 1.0, "%.3f")
                 if g_changed then reaper.gmem_write(MEM_GAIN_GONIO, g_new) end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then SaveAllSettings() end
+                if g_changed_done then SaveAllSettings() end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "GAIN_GONIO" end
+                beside(ctx, 220)
 
                 -- 2. Symbiote Gain
                 local sym_gain = reaper.gmem_read(MEM_GAIN_SYMBIOTE)
-                local s_changed, s_new = reaper.ImGui_SliderDouble(ctx, "Symbiote Gain", sym_gain, 0.0, 1.0, "%.3f")
+                reaper.ImGui_SetNextItemWidth(ctx, 220)
+                local s_changed, s_new, s_changed_done = Kit.slider_double(ctx, "Symbiote gain", sym_gain, 0.0, 1.0, "%.3f")
                 if s_changed then reaper.gmem_write(MEM_GAIN_SYMBIOTE, s_new) end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then SaveAllSettings() end
+                if s_changed_done then SaveAllSettings() end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "GAIN_SYMBIOTE" end
 
                 -- 3. Scope Gain
                 local scp_gain = reaper.gmem_read(MEM_GAIN_SCOPE)
-                local scp_changed, scp_new = reaper.ImGui_SliderDouble(ctx, "Scope Gain", scp_gain, 0.0, 1.0, "%.3f")
+                reaper.ImGui_SetNextItemWidth(ctx, 220)
+                local scp_changed, scp_new, scp_changed_done = Kit.slider_double(ctx, "Scope gain", scp_gain, 0.0, 1.0, "%.3f")
                 if scp_changed then reaper.gmem_write(MEM_GAIN_SCOPE, scp_new) end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then SaveAllSettings() end
+                if scp_changed_done then SaveAllSettings() end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "GAIN_SCOPE" end
+                beside(ctx, 220)
 
                 -- 4. Spectrum Gain
                 local spec_gain = reaper.gmem_read(MEM_GAIN_SPECTRUM)
-                local sp_changed, sp_new = reaper.ImGui_SliderDouble(ctx, "Spectrum Gain", spec_gain, 0.0, 1.0, "%.3f")
+                reaper.ImGui_SetNextItemWidth(ctx, 220)
+                local sp_changed, sp_new, sp_changed_done = Kit.slider_double(ctx, "Spectrum gain", spec_gain, 0.0, 1.0, "%.3f")
                 if sp_changed then reaper.gmem_write(MEM_GAIN_SPECTRUM, sp_new) end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then SaveAllSettings() end
+                if sp_changed_done then SaveAllSettings() end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "GAIN_SPECTRUM" end
 
                 -- Spectrum Slope Guide
@@ -549,12 +582,15 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 for i = 1, 4 do
                     if slope_val == SLOPE_VALUES[i] then slope_idx = i end
                 end
-                local slope_changed, new_idx = reaper.ImGui_SliderInt(ctx, "Slope Guide", slope_idx, 1, 4, SLOPE_LABELS[slope_idx])
-                if slope_changed then
+                Kit.cap(ctx, "Slope guide")
+                local new_idx = Kit.seg(ctx, "##slope", { { "Off", 1 }, { "3", 2 }, { "4.5", 3 }, { "6 dB/oct", 4 } }, slope_idx)
+                Kit.done(ctx)
+                if new_idx and new_idx ~= slope_idx then
                     reaper.gmem_write(MEM_SPECTRUM_SLOPE, SLOPE_VALUES[new_idx])
+                    SaveAllSettings()
                 end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then SaveAllSettings() end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "SLOPE" end
+                beside(ctx, 220)
 
                 -- Spectrum Tilt (shifts the displayed curve itself, rather
                 -- than just overlaying a reference line)
@@ -565,11 +601,13 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 for i = 1, 4 do
                     if tilt_val == TILT_VALUES[i] then tilt_idx = i end
                 end
-                local tilt_changed, tilt_new_idx = reaper.ImGui_SliderInt(ctx, "Spectrum Tilt", tilt_idx, 1, 4, TILT_LABELS[tilt_idx])
-                if tilt_changed then
+                Kit.cap(ctx, "Spectrum tilt")
+                local tilt_new_idx = Kit.seg(ctx, "##tilt", { { "Off", 1 }, { "3", 2 }, { "4.5", 3 }, { "6 dB/oct", 4 } }, tilt_idx)
+                Kit.done(ctx)
+                if tilt_new_idx and tilt_new_idx ~= tilt_idx then
                     reaper.gmem_write(MEM_SPECTRUM_TILT, TILT_VALUES[tilt_new_idx])
+                    SaveAllSettings()
                 end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then SaveAllSettings() end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "TILT" end
 
                 reaper.ImGui_Spacing(ctx)
@@ -582,22 +620,24 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 reaper.ImGui_Spacing(ctx)
                 local font_scale = reaper.gmem_read(1300)
                     if font_scale <= 0 then font_scale = 1.0 end
-                    local changed, new_scale = reaper.ImGui_SliderDouble(ctx, "Font Scale", font_scale, 0.5, 2.0, "%.2fx")
+                    reaper.ImGui_SetNextItemWidth(ctx, 220)
+                    local changed, new_scale, fs_done = Kit.slider_double(ctx, "Font scale", font_scale, 0.5, 2.0, "%.2fx")
                     if changed then
                         reaper.gmem_write(1300, new_scale)
                     end
-                    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then SaveAllSettings() end
+                    if fs_done then SaveAllSettings() end
                     if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "FONT" end
                     reaper.ImGui_Spacing(ctx)
             -- Signal Speed
                 -- Attack Slider
                     local current_att = reaper.gmem_read(4)
                     if current_att <= 0 then current_att = 1.0 end
-                    local changed_att, new_att = reaper.ImGui_SliderDouble(ctx, "Response Speed", current_att, 0.1, 1.0, "%.2fx")
+                    reaper.ImGui_SetNextItemWidth(ctx, 220)
+                    local changed_att, new_att, att_done = Kit.slider_double(ctx, "Response speed", current_att, 0.1, 1.0, "%.2fx")
                     -- Right-click reset is its own single event, not part of
                     -- a drag, so it saves immediately rather than
-                    -- waiting on IsItemDeactivatedAfterEdit (which a
-                    -- right-click doesn't reliably trigger).
+                    -- waiting on the slider's release (which a
+                    -- right-click doesn't trigger).
                     local reset_att = reaper.ImGui_IsItemClicked(ctx, 1)
                     if reset_att then
                         new_att = 1.0
@@ -606,15 +646,17 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                     if changed_att then
                         reaper.gmem_write(4, new_att)
                     end
-                    if reset_att or reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+                    if reset_att or att_done then
                         SaveAllSettings()
                     end
                     if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "ATTACK" end
+                    beside(ctx, 220)
 
                 -- Release Slider
                     local current_rel = reaper.gmem_read(5)
                     if current_rel <= 0 then current_rel = 1.0 end
-                    local changed_rel, new_rel = reaper.ImGui_SliderDouble(ctx, "Decay Speed", current_rel, 0.1, 1.0, "%.2fx")
+                    reaper.ImGui_SetNextItemWidth(ctx, 220)
+                    local changed_rel, new_rel, rel_done = Kit.slider_double(ctx, "Decay speed", current_rel, 0.1, 1.0, "%.2fx")
                     local reset_rel = reaper.ImGui_IsItemClicked(ctx, 1)
                     if reset_rel then
                         new_rel = 1.0
@@ -623,7 +665,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                     if changed_rel then
                         reaper.gmem_write(5, new_rel)
                     end
-                    if reset_rel or reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+                    if reset_rel or rel_done then
                         SaveAllSettings()
                     end
                     if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "RELEASE" end
@@ -632,14 +674,14 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 -- Layout Orientation
                 local orient_val = reaper.gmem_read(MEM_ORIENTATION)
                 local is_vert = (orient_val == 1)
-                local orient_changed, orient_new = reaper.ImGui_Checkbox(ctx, "Vertical Layout", is_vert)
+                local orient_changed, orient_new = Kit.checkbox(ctx, "Vertical layout", is_vert)
                 if orient_changed then
                     reaper.gmem_write(MEM_ORIENTATION, orient_new and 1 or 0)
                     SaveAllSettings()
                 end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "ORIENTATION" end
                 reaper.ImGui_SameLine(ctx)
-                if reaper.ImGui_Button(ctx, "Reset Panel Sizes") then
+                if reaper.ImGui_Button(ctx, "Reset panel sizes") then
                     for i = 1, 7 do
                         reaper.gmem_write(MEM_MOD_SIZE + i, 0)
                         reaper.DeleteExtState(SECTION, "ModSize_"..i, true)
@@ -649,7 +691,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "RESET_SIZES" end
 
                 local pair_val = reaper.gmem_read(MEM_PAIR_GONIO_SYMBIOTE)
-                local pair_changed, pair_new = reaper.ImGui_Checkbox(ctx, "Pair Gonio + Symbiote (Vertical layout)", pair_val == 1)
+                local pair_changed, pair_new = Kit.checkbox(ctx, "Pair Gonio + Symbiote (vertical layout)", pair_val == 1)
                 if pair_changed then
                     reaper.gmem_write(MEM_PAIR_GONIO_SYMBIOTE, pair_new and 1 or 0)
                     SaveAllSettings()
@@ -674,7 +716,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 end
 
                 local pair_ld_val = reaper.gmem_read(MEM_PAIR_LUFS_DYN)
-                local pair_ld_changed, pair_ld_new = reaper.ImGui_Checkbox(ctx, "Pair LUFS + Dynamics (Vertical layout)", pair_ld_val == 1)
+                local pair_ld_changed, pair_ld_new = Kit.checkbox(ctx, "Pair LUFS + Dynamics (vertical layout)", pair_ld_val == 1)
                 if pair_ld_changed then
                     reaper.gmem_write(MEM_PAIR_LUFS_DYN, pair_ld_new and 1 or 0)
                     SaveAllSettings()
@@ -706,7 +748,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 if not startup.checked then startupScan() end
                 do
                     local on = (startup.state == "ours" or startup.state == "manual")
-                    local run_changed, run_new = reaper.ImGui_Checkbox(ctx, "Run at REAPER Startup", on)
+                    local run_changed, run_new = Kit.checkbox(ctx, "Run when REAPER starts", on)
                     if run_changed then
                         local ok, why
                         if run_new then ok, why = startupAdd() else ok, why = startupRemove() end
@@ -715,7 +757,8 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                         end
                     end
                     if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "RUN_STARTUP" end
-                    reaper.ImGui_SameLine(ctx)
+                    reaper.ImGui_SameLine(ctx, 0, 10)
+                    reaper.ImGui_AlignTextToFramePadding(ctx)
                     if startup.note then
                         reaper.ImGui_TextColored(ctx, 0xE8C25AFF, startup.note)
                     elseif startup.state == "ours" then
@@ -737,12 +780,14 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 local loud_val = reaper.gmem_read(MEM_LOUDNESS_TARGET)
                 local loud_idx = math.floor(loud_val + 0.5)
                 if loud_idx < 0 or loud_idx > 19 then loud_idx = 0 end
-                local loud_changed, loud_new = reaper.ImGui_SliderInt(ctx, "Loudness Target", loud_idx, 0, 19, LOUD_LABELS[loud_idx + 1])
+                reaper.ImGui_SetNextItemWidth(ctx, 240)
+                local loud_changed, loud_new = Kit.slider_int(ctx, "Loudness target", loud_idx, 0, 19, LOUD_LABELS[loud_idx + 1])
                 if loud_changed then
                     reaper.gmem_write(MEM_LOUDNESS_TARGET, loud_new)
                     SaveTargetToProject("LoudnessTarget", loud_new)
                 end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "LOUD_TARGET" end
+                beside(ctx, 240)
 
                 local GENRE_LABELS = {
                     "Off", "Universal", "Acoustic", "Classical", "Country", "EDM", "Funk",
@@ -751,7 +796,8 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 local genre_val = reaper.gmem_read(MEM_GENRE_TARGET)
                 local genre_idx = math.floor(genre_val + 0.5)
                 if genre_idx < 0 or genre_idx > 13 then genre_idx = 0 end
-                local genre_changed, genre_new = reaper.ImGui_SliderInt(ctx, "Genre/Dynamics Target", genre_idx, 0, 13, GENRE_LABELS[genre_idx + 1])
+                reaper.ImGui_SetNextItemWidth(ctx, 240)
+                local genre_changed, genre_new = Kit.slider_int(ctx, "Genre / dynamics target", genre_idx, 0, 13, GENRE_LABELS[genre_idx + 1])
                 if genre_changed then
                     reaper.gmem_write(MEM_GENRE_TARGET, genre_new)
                     SaveTargetToProject("GenreTarget", genre_new)
@@ -769,7 +815,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
 
                 for i, module_id in ipairs(ui_order) do
                     local is_active = ui_active[module_id]
-                    local rv, new_val = reaper.ImGui_Checkbox(ctx, "##act_"..i, is_active)
+                    local rv, new_val = Kit.checkbox(ctx, "##act_"..i, is_active)
                     if rv then
                         ui_active[module_id] = new_val
                         reaper.gmem_write(1150 + module_id, new_val and 1 or 0)
@@ -808,19 +854,24 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 --
                 -- Same colour engine as ChannelView and TrackAnalyser: one
                 -- Hue + one Tint generate every swatch below by default.
-                -- Untick a swatch's "Follow" box to hand-pick that one
+                -- Turn a swatch's "Follow" off to hand-pick that one
                 -- colour instead; the rest keep following the palette.
                 reaper.ImGui_SeparatorText(ctx, 'Global Theme')
                 ColorEdit(ctx, "Background", MEM_BG, "BG", 1)
-                ColorEdit(ctx, "Grid & Lines", MEM_LINE, "LINE", 2)
-                ColorEdit(ctx, "Text & Labels", MEM_TEXT, "TEXT", 3)
+                beside(ctx, 110)
+                ColorEdit(ctx, "Grid & lines", MEM_LINE, "LINE", 2)
+                beside(ctx, 110)
+                ColorEdit(ctx, "Text & labels", MEM_TEXT, "TEXT", 3)
 
                 reaper.ImGui_Spacing(ctx)
                 reaper.ImGui_SeparatorText(ctx, 'Signal Colors')
-                ColorEdit(ctx, "Weak (Zero)", MEM_ZERO, "ZERO", 4)
-                ColorEdit(ctx, "Normal (Mid)", MEM_MID, "MID", 5)
-                ColorEdit(ctx, "Strong (Peak)", MEM_PEAK, "PEAK", 6)
-                ColorEdit(ctx, "Spec Frez Line", MEM_FREZ, "FREZ", 7)
+                ColorEdit(ctx, "Weak (zero)", MEM_ZERO, "ZERO", 4)
+                beside(ctx, 110)
+                ColorEdit(ctx, "Normal (mid)", MEM_MID, "MID", 5)
+                beside(ctx, 110)
+                ColorEdit(ctx, "Strong (peak)", MEM_PEAK, "PEAK", 6)
+                beside(ctx, 110)
+                ColorEdit(ctx, "Peak line", MEM_FREZ, "FREZ", 7)
 
                 reaper.ImGui_Spacing(ctx)
                 reaper.ImGui_SeparatorText(ctx, 'Hue / Tint')
@@ -831,10 +882,10 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 -- fallback to ChannelView's own section for an install
                 -- that hasn't moved yet, so this stays correct even if
                 -- the Editor isn't open) rather than from the sliders.
-                -- Disable the sliders while synced so it's clear they
+                -- Dim the sliders while synced so it's clear they
                 -- aren't the live source.
                 local sync_val = reaper.gmem_read(MEM_SYNC_CV)
-                local sync_changed, sync_new = reaper.ImGui_Checkbox(ctx, "Sync Colour with ChannelView", sync_val ~= 0)
+                local sync_changed, sync_new = Kit.checkbox(ctx, "Sync colour with ChannelView", sync_val ~= 0)
                 if sync_changed then
                     reaper.gmem_write(MEM_SYNC_CV, sync_new and 1 or 0)
                     SaveAllSettings()
@@ -843,55 +894,57 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
 
                 local cv_synced = sync_val ~= 0
                 if cv_synced then
-                    -- The shared TS_Palette section, with the old
-                    -- ChannelView location read as a fallback so an
-                    -- existing setting still shows as followed.
+                    -- The shared TS_Palette section, with ChannelView's
+                    -- own section read as a fallback so a setting kept
+                    -- only there still shows as followed.
                     if reaper.HasExtState("TS_Palette", "base_hue")
                        or reaper.HasExtState("TS_ChannelView", "base_hue") then
-                        reaper.ImGui_TextColored(ctx, 0x9AAAB8FF, "Following the shared TS Hue/Tint live. Untick to set these manually.")
+                        reaper.ImGui_TextColored(ctx, 0x9AAAB8FF, "Following the shared TS Hue/Tint live. Turn this off to set these by hand.")
                     else
                         reaper.ImGui_TextColored(ctx, 0xE8C25AFF, "No shared colour has been set yet, so this is using the sliders below for now.")
                     end
                 end
 
-                if cv_synced then reaper.ImGui_BeginDisabled(ctx) end
                 -- The same Hue/Tint knobs ChannelView and TrackAnalyser
                 -- use: Hue is an absolute 0-359 base colour, Tint scales
                 -- how far the furniture swatches (bg/grid/text/zero/frez)
                 -- lean toward it. The two accent colours (Normal/Strong
                 -- Signal) follow Hue but ignore Tint, staying fully
                 -- saturated - same as those tools' "solid" role. Only
-                -- swatches with "Follow" ticked above actually move.
+                -- swatches with "Follow" on above actually move.
                 -- As with the colour pickers above: gmem is written
                 -- every frame so the drag tracks live, but SaveAllSettings()
                 -- (150+ ExtState keys) only fires once, on release - not on
                 -- every one of the dozens of frames a drag touches.
                 local hue_val = reaper.gmem_read(MEM_BASE_HUE)
-                local hue_changed, hue_new = reaper.ImGui_SliderInt(ctx, "Hue", math.floor(hue_val), 0, 359, "%d\xc2\xb0")
+                reaper.ImGui_SetNextItemWidth(ctx, 220)
+                local hue_changed, hue_new, hue_done = Kit.slider_int(ctx, "Hue", math.floor(hue_val), 0, 359, "%d\xc2\xb0",
+                    { dim = cv_synced })
                 if hue_changed then
                     reaper.gmem_write(MEM_BASE_HUE, hue_new)
                 end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+                if hue_done then
                     SaveAllSettings()
                 end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "BASE_HUE" end
+                beside(ctx, 220)
 
                 local tint_val = reaper.gmem_read(MEM_TINT)
-                local tint_changed, tint_new = reaper.ImGui_SliderDouble(ctx, "Tint", tint_val, 0.0, 2.0, "%.2f")
+                reaper.ImGui_SetNextItemWidth(ctx, 220)
+                local tint_changed, tint_new, tint_done = Kit.slider_double(ctx, "Tint", tint_val, 0.0, 2.0, "%.2f",
+                    { dim = cv_synced })
                 if tint_changed then
                     reaper.gmem_write(MEM_TINT, tint_new)
                 end
-                if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+                if tint_done then
                     SaveAllSettings()
                 end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "TINT" end
-                if cv_synced then reaper.ImGui_EndDisabled(ctx) end
 
                 -- Resets only the manual Hue/Tint values (and puts every
                 -- swatch back to following), independent of the sync
-                -- toggle above - it stays usable (not wrapped in
-                -- BeginDisabled) so it's ready the moment sync is turned
-                -- back off.
+                -- toggle above - it stays usable (not dimmed) so it's
+                -- ready the moment sync is turned back off.
                 if reaper.ImGui_Button(ctx, "Reset Hue/Tint", -1, 24) then
                     ApplyDefaults()
                 end
@@ -900,7 +953,7 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
                 reaper.ImGui_Spacing(ctx)
                 reaper.ImGui_Spacing(ctx)
             -- Reset
-                if reaper.ImGui_Button(ctx, "Reset to Defualts", -1, 27) then
+                if reaper.ImGui_Button(ctx, "Reset to defaults", -1, 27) then
                     ApplyDefaults()
                 end
                 if reaper.ImGui_IsItemHovered(ctx) then shared_info.hovered_id = "RESET" end
@@ -955,6 +1008,8 @@ local ApplyTheme = (reaper.file_exists(theme_path) and dofile(theme_path).ApplyT
         end
         reaper.ImGui_PopFont(ctx)
 
+        reaper.ImGui_PopStyleColor(ctx, 1)
+        Kit.pop(ctx)
         if pushed_vars > 0 then reaper.ImGui_PopStyleVar(ctx, pushed_vars) end
         if pushed_cols > 0 then reaper.ImGui_PopStyleColor(ctx, pushed_cols) end
 

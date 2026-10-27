@@ -19,8 +19,10 @@
   LINKS (REAPER's own parameter modulation)
     A control is driven by giving its parameter a link from one of ours:
     mod.active 1, plink.active 1, plink.effect = our plugin's slot,
-    plink.param = the macro or the modulator's output. Its value is then
+    plink.param = the macro or the modulator's output. Its value (0..1) is
         baseline + scale * (source + offset)
+    the baseline as REAPER keeps it being in the parameter's own units
+    (MD.base_norm / base_raw turn it to and from 0..1)
       * from a macro: baseline is where the control sits with the macro
         at 0%, baseline + scale where it sits at 100% (the two ends of
         its range; scale < 0 runs it backwards), offset 0
@@ -189,6 +191,78 @@ function MD.ensure(track, ara_first)
   return nil
 end
 
+-- REAPER keeps a modulation's baseline in the parameter's own units (its
+-- TrackFX_GetParamEx range: ReaComp's threshold runs 0..2), while the
+-- scale and offset are shares of that range (REAPER 7.83). So a link's
+-- value, as a 0..1 position, is
+--     (baseline - min) / (max - min) + scale * (source + offset)
+-- Everything here works in 0..1; these two turn it to and from REAPER's.
+local function raw_range(track, s, p)
+  if not reaper.TrackFX_GetParamEx then return 0, 1 end
+  local _, mn, mx = reaper.TrackFX_GetParamEx(track, s, p)
+  if not (mn and mx) or mx <= mn then return 0, 1 end
+  return mn, mx
+end
+-- ...except where a plugin keeps a parameter's raw value on a curve of its
+-- own. ReaEQ's band gains: raw is the amplitude over 4 (0..+12 dB is
+-- 0..1), while the 0..1 position runs along a dB scale (0.5 is 0 dB),
+-- and the link is linear in the position, from the baseline turned along
+-- that curve. Built once per parameter from what the plugin says each
+-- position reads, in dB.
+local curves = {}
+local function curve_of(track, s, p)
+  local key = (reaper.TrackFX_GetFXGUID(track, s) or tostring(s)) .. ":" .. p
+  local c = curves[key]
+  if c ~= nil then return c or nil end
+  c = false
+  local fxn, pn = "", ""
+  if reaper.TrackFX_GetFXName then fxn = select(2, reaper.TrackFX_GetFXName(track, s, "")) or "" end
+  if fxn:find("ReaEQ", 1, true) and reaper.TrackFX_GetParamName then
+    pn = select(2, reaper.TrackFX_GetParamName(track, s, p, "")) or ""
+  end
+  if fxn:find("ReaEQ", 1, true) and pn:match("^Gain") and reaper.TrackFX_FormatParamValueNormalized then
+    local ns, rs, last = {}, {}, -1
+    for i = 0, 256 do
+      local n = i / 256
+      local ok, said = reaper.TrackFX_FormatParamValueNormalized(track, s, p, n, "")
+      local shown = ok and said or ""
+      local db = shown:lower():find("inf", 1, true) and -math.huge or tonumber(shown:match("[-+]?%d+%.?%d*"))
+      if db then
+        local r = (db == -math.huge) and 0 or (10 ^ (db / 20) / 4)
+        if r > last then ns[#ns + 1], rs[#rs + 1], last = n, r, r end
+      end
+    end
+    if #ns > 16 then c = { n = ns, r = rs } end
+  end
+  curves[key] = c
+  return c or nil
+end
+-- y at x along the points (xs rising), held at the ends
+local function along(xs, ys, x)
+  if x <= xs[1] then return ys[1] end
+  if x >= xs[#xs] then return ys[#ys] end
+  local lo, hi = 1, #xs
+  while hi - lo > 1 do
+    local mid = (lo + hi) // 2
+    if xs[mid] <= x then lo = mid else hi = mid end
+  end
+  local t = (x - xs[lo]) / (xs[hi] - xs[lo])
+  return ys[lo] + (ys[hi] - ys[lo]) * t
+end
+local function base_norm(track, s, p, raw)
+  local c = curve_of(track, s, p)
+  if c then return along(c.r, c.n, raw) end
+  local mn, mx = raw_range(track, s, p)
+  return (raw - mn) / (mx - mn)
+end
+local function base_raw(track, s, p, norm)
+  local c = curve_of(track, s, p)
+  if c then return along(c.n, c.r, norm) end
+  local mn, mx = raw_range(track, s, p)
+  return mn + norm * (mx - mn)
+end
+MD.base_norm, MD.base_raw = base_norm, base_raw
+
 -- One of our own parameters with REAPER's parameter modulation switched on
 -- (by hand in the plugin window, or a stray link) holds at its modulation
 -- baseline whatever is written to it -- a macro would snap back the moment
@@ -201,7 +275,7 @@ local function hold_baseline(track, slot, p, norm)
     if not (on("plink.active") or on("lfo.active") or on("acs.active")) then
       set(track, slot, ("param.%d.mod.active"):format(p), 0)
     else
-      set(track, slot, ("param.%d.mod.baseline"):format(p), math.max(0, math.min(1, norm)))
+      set(track, slot, ("param.%d.mod.baseline"):format(p), base_raw(track, slot, p, math.max(0, math.min(1, norm))))
     end
   end
 end
@@ -450,7 +524,7 @@ local function do_scan(track)
               macro = hit.src.src == "macro", bipolar = hit.bipolar or false,
               scale = getn(track, s, ("param.%d.plink.scale"):format(p)) or 1,
               offset = getn(track, s, ("param.%d.plink.offset"):format(p)) or 0,
-              baseline = getn(track, s, ("param.%d.mod.baseline"):format(p)) or 0,
+              baseline = base_norm(track, s, p, getn(track, s, ("param.%d.mod.baseline"):format(p)) or 0),
             }
             res.links[tguid .. ":" .. tp] = l
             local t = res.by_mod[hit.src.guid]
@@ -542,7 +616,7 @@ local function write_link(track, s, p, base, scale, offset, slot, sp)
   set(track, s, ("param.%d.lfo.active"):format(p), 0)
   set(track, s, ("param.%d.acs.active"):format(p), 0)
   set(track, s, ("param.%d.mod.active"):format(p), 1)
-  set(track, s, ("param.%d.mod.baseline"):format(p), base)
+  set(track, s, ("param.%d.mod.baseline"):format(p), base_raw(track, s, p, base))
   set(track, s, ("param.%d.plink.active"):format(p), 1)
   set(track, s, ("param.%d.plink.offset"):format(p), offset)
   set(track, s, ("param.%d.plink.scale"):format(p), scale)
@@ -696,7 +770,7 @@ function MD.is_bipolar(l) return l.bipolar == true end
 -- A modulated control's own value (where the knob sits) is its baseline.
 function MD.set_baseline(track, l, v)
   v = math.max(0, math.min(1, v))
-  set(track, l.slot, ("param.%d.mod.baseline"):format(l.param), v)
+  set(track, l.slot, ("param.%d.mod.baseline"):format(l.param), base_raw(track, l.slot, l.param, v))
   l.baseline = v
 end
 
@@ -704,7 +778,7 @@ end
 function MD.set_range(track, l, from, to)
   from = math.max(0, math.min(1, from))
   to = math.max(0, math.min(1, to))
-  set(track, l.slot, ("param.%d.mod.baseline"):format(l.param), from)
+  set(track, l.slot, ("param.%d.mod.baseline"):format(l.param), base_raw(track, l.slot, l.param, from))
   set(track, l.slot, ("param.%d.plink.scale"):format(l.param), to - from)
   l.baseline, l.scale = from, to - from
 end
