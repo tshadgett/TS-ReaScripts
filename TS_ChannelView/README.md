@@ -844,7 +844,11 @@ put them. Every bar is global, not per project.
   want first. On Windows it needs js_ReaScriptAPI; on macOS REAPER needs
   Screen Recording permission; elsewhere, set them from files. They're
   kept in `Data/TS_ChannelView_Thumbs`, one per plugin (its VST2, VST3
-  and CLAP share it).
+  and CLAP share it). Many at once: a bar's right-click ▸ *Take plugin button pictures*
+  (every bar's plugin buttons without one), or *Take their pictures* at
+  the top of a developer's list in the add-a-plugin menu. They're taken
+  one after another, never while REAPER plays; a line at the foot of
+  REAPER's window says how far it's got, and the same menu stops it.
 - **Toolbar switches.** A button that puts another bar in this bar's place
   — its spot, width, docker or window position — and puts this one away;
   lit while its bar is the one showing, so a row of them copied onto each

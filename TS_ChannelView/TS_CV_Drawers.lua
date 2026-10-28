@@ -1058,6 +1058,7 @@ function DR.drawer_menu(ctx, d, where)
     end
     ImGui.EndMenu(ctx)
   end
+  DR.picture_items(ctx)
   if d.side == "window" and DR.host_extra then DR.host_extra(ctx) end
   if (DR.DRAWER[d.side] or d.side == "window") and ImGui.MenuItem(ctx, "Close##dr" .. d.id) then
     d.open = false; DR.save()
@@ -1066,6 +1067,44 @@ function DR.drawer_menu(ctx, d, where)
     if reaper.MB(("Remove \"%s\" and its buttons?"):format(d.name or ""), "ChannelView", 4) == 6 then
       DR.remove(d)
     end
+  end
+end
+
+-- Every plugin button on every bar, menus included: { { ident }, ... }.
+function DR.plugin_buttons()
+  local FB = require("TS_CV_FXButtons")
+  local out, seen = {}, {}
+  local function walk(items)
+    for _, it in ipairs(items or {}) do
+      if it.menu then walk(it.items) end
+      local k, what = FB.kind(it)
+      if k == "fx" and what and not seen[what] then seen[what] = true; out[#out + 1] = { ident = what } end
+    end
+  end
+  for _, d in ipairs(DR.list) do if d.tb then walk(d.tb.items) end end
+  return out
+end
+
+-- The pictures of every plugin button (TS_CV_Thumbs, Pro), for a bar's
+-- right-click: taken one after another, or stopped.
+local missing = { n = 0, at = -1 }
+function DR.picture_items(ctx)
+  local th = W.thumbs()
+  if not (th and th.can_capture()) then return end
+  local done, total = th.progress()
+  if done then
+    if ImGui.MenuItem(ctx, ("Stop taking plugin pictures (%d of %d)##drpic"):format(done, total)) then th.stop() end
+    return
+  end
+  local now = reaper.time_precise()
+  if now - missing.at > 1 then missing.n, missing.at = th.missing(DR.plugin_buttons()), now end
+  if ImGui.MenuItem(ctx, ("Take plugin button pictures (%d)##drpic"):format(missing.n), nil, false, missing.n > 0) then
+    th.want_many(DR.plugin_buttons())
+    missing.at = -1
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, missing.n > 0 and "Every bar's plugin buttons without a picture,\none after another (not while REAPER plays)."
+      or "Every plugin button has a picture.")
   end
 end
 

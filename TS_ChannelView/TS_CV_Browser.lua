@@ -570,9 +570,35 @@ end
 
 -- A submenu whose body is only built when it opens, which is what keeps a
 -- menu over a large collection cheap.
-local function group_menu(ctx, track, label, list)
+-- A developer's plugins' pictures (TS_CV_Thumbs, Pro): all of them taken
+-- one after another, at the top of its list.
+local pic_count = {}       -- label -> { n, at }
+local function group_pictures(ctx, label, list)
+  local th = require("TS_CV_Widgets").thumbs()
+  if not (th and th.can_capture()) then return end
+  local done, total = th.progress()
+  if done then
+    if ImGui.MenuItem(ctx, ("Stop taking pictures (%d of %d)##grpic"):format(done, total)) then th.stop() end
+  else
+    local now = reaper.time_precise()
+    local c = pic_count[label]
+    if not c or now - c.at > 1 then c = { n = th.missing(list), at = now }; pic_count[label] = c end
+    if ImGui.MenuItem(ctx, ("Take their pictures (%d)##grpic"):format(c.n), nil, false, c.n > 0) then
+      th.want_many(list)
+      pic_count[label] = nil
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, c.n > 0 and "Those without a picture, one after another\n(not while REAPER plays)."
+        or "They all have a picture.")
+    end
+  end
+  ImGui.Separator(ctx)
+end
+
+local function group_menu(ctx, track, label, list, pictures)
   if not list or #list == 0 then return end
   if ImGui.BeginMenu(ctx, ("%s  (%d)"):format(label, #list)) then
+    if pictures then group_pictures(ctx, label, list) end
     plugin_items(ctx, track, list)
     ImGui.EndMenu(ctx)
   end
@@ -683,7 +709,7 @@ local function items(ctx, track)
 
   if #(devs or {}) > 0 and ImGui.BeginMenu(ctx, "Developers") then
     for _, d in ipairs(devs) do
-      group_menu(ctx, track, d.name, by_dev[d.name])
+      group_menu(ctx, track, d.name, by_dev[d.name], true)
     end
     ImGui.EndMenu(ctx)
   end

@@ -1,9 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.6.0
+-- @version 3.6.1
 -- @changelog
---  Moves with ChannelView Pro 3.6.0 (popped-out panels, plugin pictures).
---  See the CHANGELOG.
+--  Moves with ChannelView Pro 3.6.1: plugin pictures taken many at once
+--  (every plugin button, or a developer's plugins). See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

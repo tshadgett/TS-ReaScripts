@@ -9443,6 +9443,60 @@ do
 end
 
 -- ---------------------------------------------------------------------
+-- plugin pictures, many at once: those without one, one after another,
+-- waiting while REAPER plays, stopped on request
+-- ---------------------------------------------------------------------
+do
+  local real = reaper
+  local tmp = os.tmpname(); os.remove(tmp)
+  local root = tmp .. "_res3"
+  os.execute('mkdir -p "' .. root .. '/Data/TS_ChannelView_Thumbs"')
+  local f = io.open(root .. "/Data/TS_ChannelView_Thumbs/Have.png", "wb"); f:write("png"); f:close()
+  local now, play, added, tracks = 100, 0, {}, {}
+  reaper = setmetatable({
+    GetOS = function() return "Win64" end,
+    GetResourcePath = function() return root end,
+    time_precise = function() return now end,
+    JS_Window_GetRect = function() return true end, JS_GDI_GetScreenDC = function() return 1 end,
+    JS_LICE_CreateBitmap = function() return {} end, JS_LICE_WritePNG = function() return true end,
+    GetPlayState = function() return play end,
+    CountTracks = function() return #tracks end,
+    InsertTrackAtIndex = function() tracks[#tracks + 1] = {} end,
+    GetTrack = function(_, i) return tracks[i + 1] end,
+    GetSetMediaTrackInfo_String = function() return true, "" end,
+    SetMediaTrackInfo_Value = function() end,
+    PreventUIRefresh = function() end,
+    TrackFX_AddByName = function(_, ident) added[#added + 1] = ident; return 0 end,
+    TrackFX_Show = function() end,
+    TrackFX_GetFloatingWindow = function() return nil end,
+    ValidatePtr = function(t) return t ~= nil and not t.gone end,
+    DeleteTrack = function(t) t.gone = true end,
+    TrackList_AdjustWindows = function() end,
+    TrackCtl_SetToolTip = function() end,
+    GetMainHwnd = function() return "MAIN" end,
+  }, { __index = real })
+  package.loaded["TS_CV_Thumbs"] = nil
+  local THb = require("TS_CV_Thumbs")
+  local list = { { ident = "a", name = "VST3: Have (X)" }, { ident = "b", name = "VST3: One (X)" },
+                 { ident = "c", name = "VST3: Two (X)" }, { ident = "d", name = "VST: One (X)" } }
+  check("bulk: how many need one", THb.missing(list), 2)
+  check("bulk: those asked for", THb.want_many(list), 2)
+  check("bulk: progress", table.concat({ THb.progress() }, "/"), "0/2")
+  play = 1
+  THb.tick()
+  check("bulk: waits while REAPER plays", #added, 0)
+  play = 0
+  THb.tick()
+  check("bulk: then starts", added[1], "b")
+  THb.stop()
+  THb.tick()
+  check("bulk: stopped", tostring(THb.progress()) .. " " .. #added .. " " .. tostring(tracks[1].gone), "nil 1 true")
+  os.execute('rm -rf "' .. root .. '"')
+  package.loaded["TS_CV_Thumbs"] = nil
+  reaper = real
+end
+
+-- ---------------------------------------------------------------------
 -- popped-out panels (TS_CV_PopOut): windows of pinned panels, saved with
 -- the project, found again by GUID
 -- ---------------------------------------------------------------------

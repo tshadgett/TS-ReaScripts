@@ -1,5 +1,21 @@
 # ChannelView — changelog
 
+## 3.6.1 — plugin pictures, many at once
+
+### ChannelView
+
+- Nothing new without Pro: this version moves with ChannelView Pro.
+
+### ChannelView Pro
+
+- **Plugin pictures, many at once.** A bar's right-click ▸ *Take plugin
+  button pictures* takes the picture of every plugin button on every bar
+  (menus included) that hasn't one yet; *Take their pictures* at the top
+  of a developer's list in the add-a-plugin menu does the same for that
+  developer's plugins. They're taken one after another, never while
+  REAPER plays or records. A line at the foot of REAPER's window says how
+  far it's got, and the same menu item stops it.
+
 ## 3.6.0 — popped-out panels, plugin pictures
 
 ### ChannelView
