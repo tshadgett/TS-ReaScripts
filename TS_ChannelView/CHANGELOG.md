@@ -1,5 +1,33 @@
 # ChannelView — changelog
 
+## 3.6.0 — popped-out panels, plugin pictures
+
+### ChannelView
+
+- Nothing new without Pro: this version moves with ChannelView Pro.
+
+### ChannelView Pro
+
+- **Popped-out panels.** A panel's right-click ▸ *Pop out*, or drag it by
+  its header out of ChannelView: a copy of the panel in a window of its
+  own, floating or in any docker, while ChannelView keeps showing it. It
+  stays on that plugin whatever you select. A window holds as many panels
+  as you like, from any tracks, each with its track's name over it: side
+  by side, or stacked down like the Rack view when the window is taller
+  than it's wide (or as you set it). A popped-out panel can show a layout
+  of its own, different from ChannelView's and the rack's. The windows
+  are saved with the project.
+- **Plugin pictures.** Rest the pointer on a plugin button or a plugin in
+  the add-a-plugin list to see a picture of its window. It's taken when
+  you make the button, and the first time the plugin's window is open
+  with nothing over it, once the window has settled (plugins that open
+  blurred are taken once they're sharp). *Picture* in a panel's, a
+  button's or the list's right-click takes it again, sets it from a file
+  or removes it. Windows (js_ReaScriptAPI) and macOS (Screen Recording
+  permission); elsewhere from files.
+- **Containers on the web companion:** a container's own panel and its
+  corners, and its sheet folds and unfolds it.
+
 ## 3.5.5 — knobs on a container, a quieter patch bay
 
 ### ChannelView

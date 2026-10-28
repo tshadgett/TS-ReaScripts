@@ -199,7 +199,26 @@ end
 -- they've taken it, so the row can tell the difference instead of doing
 -- both. Reset once per frame.
 local wheel_used = false
-function W.begin_frame()   wheel_used = false end
+-- Run at the start of every frame by each window (TS_CV_Thumbs' captures).
+W.frame_hooks = {}
+function W.begin_frame()
+  wheel_used = false
+  for _, f in pairs(W.frame_hooks) do f() end
+end
+
+-- Plugin pictures (TS_CV_Thumbs, Pro): the module, attached to this
+-- window and ticking with it, or nil without Pro.
+local thumbs
+function W.thumbs()
+  if thumbs == nil then
+    thumbs = require("TS_CV_Edition").module("TS_CV_Thumbs") or false
+    if thumbs then
+      thumbs.attach(ImGui)
+      W.frame_hooks.thumbs = thumbs.tick
+    end
+  end
+  return thumbs or nil
+end
 -- The wheel as a control should see it: nothing while View > Use mouse
 -- wheel on controls is off, so it goes on to scroll whatever's behind.
 function W.control_wheel(ctx)

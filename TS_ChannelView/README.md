@@ -113,6 +113,39 @@ selection).
 - **☰ ▸ Run when REAPER starts** starts the rack with REAPER, on its own:
   ChannelView's option and the rack's are separate.
 
+## Popped-out panels (Pro)
+
+A copy of a plugin's panel in a window of its own, floating or in any
+docker, while ChannelView keeps showing it too: the bus compressor beside
+the arrange, the kick's and the bass's EQs side by side, an instrument
+next to the MIDI editor.
+
+- **Pop out**: a panel's right-click ▸ *Pop out* ▸ *In a window of its
+  own*, or *Into* a window you already have. Or drag the panel by its
+  header out of ChannelView: dropped over a popped-out window it goes
+  into it, anywhere else into a window of its own.
+- A popped-out panel is **pinned**: that plugin on that track, whatever
+  you select. Its track's name is over it.
+- A window holds as many panels as you like, from any tracks: side by
+  side, or stacked down when the window is taller than it's wide, each
+  panel then laid out as the Rack view lays it out (as wide as the
+  window, as tall as it needs). The window's menu (right-click the space
+  round the panels, or a panel's ≡ ▸ *Window*): *Add from* the selected
+  track, *Rename*, *Panels* (by the window's shape, side by side or
+  stacked down), *Dock* and *Close* (the plugins stay where they are).
+- A popped-out panel's right-click has *Move left* / *Move right*, *Move
+  to* another window, and *Take it out of this window*, with the rest of
+  the panel's usual menu.
+- **A layout of its own.** Pick another from a popped-out panel's
+  *Layout* menu and it shows there only: ChannelView, the rack and the
+  popped-out panel can each show a different one. Until you pick one, it
+  shows ChannelView's (side by side) or the rack's (stacked down).
+  Folding is the window's own too. Meters work as they do in ChannelView.
+- The windows are saved with the project and come back with it. A panel
+  whose plugin has gone says so, with a button to take it out.
+- They're ChannelView's own windows, so they show while ChannelView runs
+  (not from the rack).
+
 ## The patch bay (Pro)
 
 Rest the pointer on the track row's bottom edge, under its scrollbar, for
@@ -386,7 +419,10 @@ outline would have nothing to stand against.
   the ones a macro or modulator link passes through stay off unless you
   put them on. The container's menu ▸ **Fold to its panel** leaves just
   that panel in the row, standing for everything inside (its bracket says
-  how many); *Unfold* brings them back.
+  how many); *Unfold* brings them back. The web companion (Pro) shows a
+  container's panel and its corners too, and its container sheet folds
+  and unfolds it; putting a control on a container is done here, on the
+  desktop.
 * **Oversampling.** REAPER's own, set from ChannelView: **OS** in a panel's
   foot oversamples that plugin, a container's menu ▸ *Oversample everything
   in it* does a container, and **OS** in the header bar does the whole
@@ -794,6 +830,21 @@ put them. Every bar is global, not per project.
   Organise actions) is *Add it*, *Replace the plugins* (the chain takes
   their place; the probes, Trimmer and ChannelView Modulators stay) or
   *Ask each time* (a click asks which, on the web page too).
+- **Plugin pictures (Pro).** Rest the pointer on a plugin button, or on a
+  plugin in the add-a-plugin list, and a picture of the plugin's window
+  shows beside it, so you can tell one instrument from another. The
+  picture is taken when you make the button (the plugin opens on a
+  hidden, temporary track, then goes), and the first time a plugin's own
+  window is open with nothing over it. It waits until the window holds
+  still, so a plugin that opens blurred or fades in is taken once it's
+  sharp (at most ten seconds). *Picture* in a plugin panel's
+  right-click, a plugin button's right-click or the list's takes it
+  again, sets it from an image file or removes it. From the panel it's
+  taken from the plugin's window as you have it, so set the view you
+  want first. On Windows it needs js_ReaScriptAPI; on macOS REAPER needs
+  Screen Recording permission; elsewhere, set them from files. They're
+  kept in `Data/TS_ChannelView_Thumbs`, one per plugin (its VST2, VST3
+  and CLAP share it).
 - **Toolbar switches.** A button that puts another bar in this bar's place
   — its spot, width, docker or window position — and puts this one away;
   lit while its bar is the one showing, so a row of them copied onto each
@@ -1652,6 +1703,8 @@ them up the first time ChannelView shows it.
 | `TS_ChannelView_PatchBay.lua`, `TS_ChannelView_TCP_PatchBay.lua` | open or close the patch bay, in ChannelView or its TCP window (Pro) |
 | `TS_ChannelView_BypassModulation.lua` | the *Bypass modulation* action: every modulator on the selected tracks held still, or moving again |
 | `TS_CV_Toolbar.lua` | an action bar: its buttons, menus, switches, icon picker |
+| `TS_CV_Thumbs.lua` | pictures of plugins for the plugin buttons and the plugin list (Pro) |
+| `TS_CV_PopOut.lua` | popped-out panels: their windows, saved with the project (Pro) |
 | `TS_CV_FXButtons.lua` | buttons that add a plugin or an FX chain |
 | `TS_CV_Vendors.lua` | a colour, initials and a look per plugin vendor (Pro) |
 | `TS_CV_Finish.lua`, `textures/` | faceplate, section and background finishes, and their texture tiles (copied to `reaper_www_root/` for the web page) (Pro) |

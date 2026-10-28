@@ -1,12 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.5.5
+-- @version 3.6.0
 -- @changelog
---  Knobs on a container: put a plugin's control on its container's own
---  panel, macros and all, and fold the container to that panel.
---  ChannelView shows when REAPER starts into a shared docker. With Pro:
---  the patch bay opens from a chip on the edge, not by itself. See the
---  CHANGELOG.
+--  Moves with ChannelView Pro 3.6.0 (popped-out panels, plugin pictures).
+--  See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -212,6 +209,10 @@ local RCP = ED.module("TS_CV_Recipes", ED.stub({ list = function() return {} end
 -- the web companion -- is shared; the library merges both windows' saves
 -- (TS_CV_Mappings M.sync).
 local RACK = rawget(_G, "TS_CV_RACK") == true
+-- popped-out panels (Pro): windows of ChannelView's own, not the rack's
+-- (POP.PO the module; the rest of POP further down)
+local POP = {}
+POP.PO = (not RACK) and ED.module("TS_CV_PopOut") or nil
 if RACK then C.WIN_TITLE = "ChannelView Rack" end
 
 -- ChannelView Pro at another version: said once for each pair of
@@ -436,6 +437,9 @@ local function track_valid(tr)
 end
 
 local function rescan(force)
+  -- asked from a popped-out panel's menu (app.track is its track for the
+  -- moment): done for ChannelView's own track once that's back
+  if app.popout then app.popout_dirty = true return end
   local now = reaper.time_precise()
   if not force and (now - app.last_scan) < C.RESCAN_INTERVAL then return end
   app.last_scan = now
@@ -2176,6 +2180,64 @@ local function box_menu()
   ImGui.EndPopup(ctx)
 end
 
+-- popped-out panels: see POP.window
+POP.views, POP.rects, POP.place, POP.LABEL_H, POP.PAD = {}, {}, nil, 16, 3
+POP.SCOPED = { "track", "chain", "menu_fx", "open_panel_menu", "ctl_menu", "open_ctl_menu",
+                 "remove_ask", "drag", "fxren_for", "fxren_buf", "rename_buf", "label_buf",
+                 "rng_for", "rng", "state_buf", "popout" }
+
+function POP.scope(view, track, fn)
+  local saved = {}
+  for _, k in ipairs(POP.SCOPED) do saved[k] = app[k]; app[k] = view[k] end
+  app.track, app.popout = track, view
+  -- folded on its own, apart from ChannelView's
+  local was_c, was_f, was_v, was_a = St.COLLAPSED, St.FOLD, St.VARIANT, St.VARIANT_ALSO
+  St.COLLAPSED, St.FOLD = "pcollapsed:", "pfold:"
+  -- its own layout picked, else the one of the view it's laid out like:
+  -- ChannelView's side by side, the rack's stacked down (then ChannelView's)
+  St.VARIANT = "pvariant:"
+  St.VARIANT_ALSO = view.down and { "rvariant:" } or { "variant:" }
+  if view.down then POP.rack_mode(true) end
+  local ok, err = xpcall(fn, debug.traceback)
+  if view.down then POP.rack_mode(false) end
+  St.COLLAPSED, St.FOLD, St.VARIANT, St.VARIANT_ALSO = was_c, was_f, was_v, was_a
+  for _, k in ipairs(POP.SCOPED) do view[k] = app[k]; app[k] = saved[k] end
+  view.popout, view.track = nil, nil
+  if not ok then error(err, 0) end
+end
+
+-- A window of panels stacked down draws them as the Rack view does: each
+-- as wide as the window, as tall as it needs, the rack's defaults.
+function POP.rack_mode(on)
+  if on then
+    POP.was = { P.RACK, M.VIEW_DEFAULTS, W.CHEVRONS_UPDOWN }
+    P.RACK, M.VIEW_DEFAULTS, W.CHEVRONS_UPDOWN = true, M.RACK_DEFAULTS_SECT, true
+  elseif POP.was then
+    P.RACK, M.VIEW_DEFAULTS, W.CHEVRONS_UPDOWN = table.unpack(POP.was, 1, 3)
+    POP.was = nil
+  end
+end
+
+-- Pops the plugin `fx` on `track` out: into window `into`, or a window of
+-- its own (named after it) at `at` = { x, y } when given.
+function POP.pop_out(track, fx, into, at)
+  if not POP.PO or not track or not fx or fx.guid == "" then return end
+  local w = into and POP.PO.window(into)
+  if not w then
+    w = POP.PO.new_window(U.fx_label(fx))
+    if at then POP.place = { id = w.id, x = at[1], y = at[2] } end
+  end
+  POP.PO.add(w.id, reaper.GetTrackGUID(track), fx.guid)
+end
+
+-- The window a screen point is over, or nil.
+function POP.at(x, y)
+  for id, r in pairs(POP.rects) do
+    if x >= r[1] and x < r[1] + r[3] and y >= r[2] and y < r[2] + r[4] then return id end
+  end
+  return nil
+end
+
 local function panel_menu()
   if not ImGui.BeginPopup(ctx, "panelmenu") then return end
   local fx = app.chain[app.menu_fx or -1]
@@ -2276,11 +2338,11 @@ local function panel_menu()
       -- which one new instances (and any not set to another) use
       if cur ~= dflt then
         if ImGui.MenuItem(ctx, "Make \"" .. U.truncate(cur or "Standard", 20) .. "\" the "
-            .. (RACK and "rack's default" or "default")) then
+            .. (P.RACK and "rack's default" or "default")) then
           M.set_default_variant(base, cur); M.save()
         end
         if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, RACK
+          ImGui.SetTooltip(ctx, P.RACK
             and "Used in the Rack view by new instances and any not set to another layout there."
             or "Used by new instances and any not set to another layout.")
         end
@@ -2371,7 +2433,7 @@ local function panel_menu()
   if not own_panel then
     if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
       require("TS_CV_GridEditor").open(app.track, fx, key, layout, nil,
-        { rows = M.locked(layout) or (RACK and P.RACK_ROWS) or app.cv_rows or 2, index = app.menu_fx, cv_h = app.cv_h,
+        { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = app.menu_fx, cv_h = app.cv_h,
           rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
     end
     if ED.PRO and ImGui.IsItemHovered(ctx) then
@@ -2487,6 +2549,39 @@ local function panel_menu()
     reaper.TrackFX_Show(app.track, fx.addr, 1)
   end
   do
+    -- its picture, for the hover previews (TS_CV_Thumbs, Pro)
+    local th = not (fx.container_panel or fx.is_container) and W.thumbs()
+    if th and ImGui.BeginMenu(ctx, "Picture") then
+      local key = th.key_of_fx(app.track, fx.addr)
+      local has = key and th.has(key)
+      if th.can_capture() and ImGui.MenuItem(ctx, has and "Take it again" or "Take it now") then
+        th.retake(app.track, fx.addr)
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "From its window, once it's open\nwith nothing over it.")
+      end
+      if ImGui.MenuItem(ctx, "From a file\u{2026}", nil, false, key ~= nil) then th.from_file(key) end
+      if ImGui.MenuItem(ctx, "Remove", nil, false, has) then th.remove(key) end
+      ImGui.EndMenu(ctx)
+    end
+  end
+  -- a copy of the panel in a window of its own (TS_CV_PopOut, Pro)
+  if POP.PO and not app.popout and not (fx.container_panel or fx.is_container) and ImGui.BeginMenu(ctx, "Pop out") then
+    if ImGui.MenuItem(ctx, "In a window of its own") then POP.pop_out(app.track, fx) end
+    local inside = POP.PO.windows_with(fx.guid)
+    local ws = POP.PO.windows()
+    if #ws > 0 then ImGui.Separator(ctx) end
+    for _, w in ipairs(ws) do
+      if ImGui.MenuItem(ctx, "Into \u{201C}" .. U.truncate(w.name, 24) .. "\u{201D}##po" .. w.id, nil, inside[w.id], not inside[w.id]) then
+        POP.pop_out(app.track, fx, w.id)
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  if POP.PO and not app.popout and ImGui.IsItemHovered(ctx) and not (fx.container_panel or fx.is_container) then
+    ImGui.SetTooltip(ctx, "A copy of this panel, floating or docked.\nOr drag its header out of ChannelView.")
+  end
+  do
     local st = T.os_state(app.track, fx)
     if ImGui.BeginMenu(ctx, "Oversampling" .. (st.lit and ("  (" .. st.lit .. "x)") or "")) then
       P.os_choices(ctx, app.track, fx.addr, st, "plugin")
@@ -2516,6 +2611,29 @@ local function panel_menu()
     end
   end
   -------------------------------------------------------------- CHAIN
+  if app.popout then
+    -- a popped-out panel: its place in its window
+    local id, k = app.popout.win, app.menu_fx
+    local w = POP.PO.window(id)
+    ImGui.SeparatorText(ctx, "Popped out")
+    if ImGui.MenuItem(ctx, "Move left", nil, false, k > 1) then POP.PO.nudge(id, k, -1) end
+    if ImGui.MenuItem(ctx, "Move right", nil, false, w and k < #w.panels) then POP.PO.nudge(id, k, 1) end
+    if ImGui.BeginMenu(ctx, "Move to") then
+      if ImGui.MenuItem(ctx, "A window of its own") then POP.PO.move(id, k, nil, U.fx_label(fx)) end
+      for _, o in ipairs(POP.PO.windows()) do
+        if o.id ~= id and ImGui.MenuItem(ctx, "\u{201C}" .. U.truncate(o.name, 24) .. "\u{201D}##pomv" .. o.id) then
+          POP.PO.move(id, k, o.id)
+        end
+      end
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.MenuItem(ctx, "Take it out of this window") then POP.PO.take_out(id, k) end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "The plugin stays on its track.") end
+    if w and ImGui.BeginMenu(ctx, "Window: " .. U.truncate(w.name, 20)) then
+      POP.menu(w)
+      ImGui.EndMenu(ctx)
+    end
+  else
   ImGui.SeparatorText(ctx, "Chain")
   if ImGui.MenuItem(ctx, "Move left", nil, false, fx.index > 0) then
     nudge(fx.path_t, -1)
@@ -2562,6 +2680,7 @@ local function panel_menu()
       box_menu_items(box)
       ImGui.EndMenu(ctx)
     end
+  end
   end
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, fx.container_panel and "Remove container and everything in it"
@@ -3313,7 +3432,7 @@ local function control_menu()
       if not ED.PRO and ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then E.open(app.track, fx, key, layout, idx) end
       if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
         require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
-          { rows = M.locked(layout) or (RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
+          { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
           rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
       end
     end
@@ -3519,7 +3638,7 @@ local function control_menu()
   end
   if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
     require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
-      { rows = M.locked(layout) or (RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
+      { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
           rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
   end
   plugin_sub(fx)
@@ -4831,6 +4950,235 @@ end
 -- ChannelView shows too keeps the rows it fills there, P.rack_from_rows):
 -- ChannelView publishes them as its window changes height, kept for when
 -- it isn't running; the rack reads them twice a second.
+-- ---------------------------------------------------------------------
+-- popped-out panels (TS_CV_PopOut, Pro): windows of this window's, each
+-- panel drawn as the row draws its own, with app's track, chain and menu
+-- state swapped for the window's while it is
+-- ---------------------------------------------------------------------
+-- A popped-out window's menu (a panel's ≡ ▸ Window, or a right-click
+-- round its panels).
+function POP.menu(w)
+  -- ChannelView's own track (from a panel's menu, app.track is the panel's)
+  local tr, chain = POP.cv_track, POP.cv_chain or {}
+  if ImGui.BeginMenu(ctx, "Add from " .. U.truncate(tr and POP.PO.track_name(tr) or "the track", 20)) then
+    if not tr or #chain == 0 then ImGui.TextDisabled(ctx, "(no plugins)") end
+    local has = {}
+    for _, p in ipairs(w.panels) do has[p.f] = true end
+    for i, fx in ipairs(chain) do
+      if not fx.container_panel and not fx.is_container and fx.guid ~= "" then
+        if ImGui.MenuItem(ctx, U.fx_label(fx) .. "##poadd" .. i, nil, has[fx.guid], not has[fx.guid]) then
+          POP.PO.add(w.id, reaper.GetTrackGUID(tr), fx.guid)
+        end
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  if ImGui.BeginMenu(ctx, "Rename") then
+    if POP.ren_for ~= w.id then POP.ren_for, POP.ren_buf = w.id, w.name end
+    ImGui.SetNextItemWidth(ctx, 160)
+    local _, v = ImGui.InputText(ctx, "##poren", POP.ren_buf)
+    POP.ren_buf = v
+    local enter = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "OK##poren") or enter then
+      POP.PO.rename(w.id, U.trim(POP.ren_buf)); POP.ren_for = nil
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    ImGui.EndMenu(ctx)
+  end
+  if ImGui.BeginMenu(ctx, "Panels") then
+    local dir = w.dir or "auto"
+    if ImGui.MenuItem(ctx, "By the window's shape", nil, dir == "auto") then POP.PO.set_dir(w.id, "auto") end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Side by side, or stacked down\nwhen it's taller than it's wide.") end
+    if ImGui.MenuItem(ctx, "Side by side", nil, dir == "across") then POP.PO.set_dir(w.id, "across") end
+    if ImGui.MenuItem(ctx, "Stacked down", nil, dir == "down") then POP.PO.set_dir(w.id, "down") end
+    ImGui.EndMenu(ctx)
+  end
+  if ImGui.BeginMenu(ctx, "Dock") then
+    for _, d in ipairs(DOCKS) do
+      -- done before the window opens next frame (here it would dock the menu)
+      if ImGui.MenuItem(ctx, d[1], nil, (w.dock or 0) == d[2]) then POP.dock_req = { w.id, d[2] } end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  ImGui.Separator(ctx)
+  if ImGui.MenuItem(ctx, "Close") then POP.close = w.id end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "The plugins stay where they are.") end
+end
+
+-- One popped-out window: its panels side by side or stacked down, each
+-- with its track's name over it.
+function POP.window(w, now)
+  local view = POP.views[w.id] or {}
+  POP.views[w.id] = view
+  view.win = w.id
+  -- what it shows, found again (a panel's index is its place in the window)
+  local items, chain = {}, {}
+  for k, p in ipairs(w.panels) do
+    local tr, fx = POP.PO.resolve(p.t, p.f, now)
+    items[k] = { tr = tr, fx = fx }
+    chain[k] = fx or { guid = "", gone = true }
+  end
+  view.chain = chain
+
+  if POP.dock_req and POP.dock_req[1] == w.id then
+    ImGui.SetNextWindowDockID(ctx, POP.dock_req[2], ImGui.Cond_Always)
+    POP.PO.set_dock(w.id, POP.dock_req[2])
+    POP.dock_req = nil
+  elseif not POP.applied[w.id] then
+    ImGui.SetNextWindowDockID(ctx, w.dock or 0, ImGui.Cond_FirstUseEver)
+  end
+  POP.applied[w.id] = true
+  if POP.place and POP.place.id == w.id then
+    ImGui.SetNextWindowPos(ctx, POP.place.x, POP.place.y, ImGui.Cond_Always)
+    POP.place = nil
+  end
+  local row_h = (app.cv_h or 240)
+  ImGui.SetNextWindowSize(ctx, 420, row_h + POP.LABEL_H + 48, ImGui.Cond_FirstUseEver)
+  ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.win_bg)
+  -- a narrow margin: the panels are what the window is for
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, POP.PAD, POP.PAD)
+  local vis, open = ImGui.Begin(ctx, w.name .. "###cvpop" .. w.id, true,
+    ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_NoCollapse)
+  ImGui.PopStyleVar(ctx)
+  ImGui.PopStyleColor(ctx)
+  if not open then POP.close = w.id end
+  if vis then
+    local d = ImGui.GetWindowDockID(ctx)
+    if d ~= (w.dock or 0) then POP.PO.set_dock(w.id, d) end
+    do
+      local x, y = ImGui.GetWindowPos(ctx)
+      local ww, wh = ImGui.GetWindowSize(ctx)
+      POP.rects[w.id] = { x, y, ww, wh }
+    end
+
+    -- the panels (the window's own menu: a panel's ≡ ▸ Window, or a
+    -- right-click on the space round them)
+    local avail_w, avail_h = ImGui.GetContentRegionAvail(ctx)
+    -- side by side, or stacked down (by its shape, unless it's set)
+    local down = (w.dir == "down") or (w.dir ~= "across" and avail_h > avail_w)
+    view.down = down
+    local cflags = ImGui.WindowFlags_NoScrollWithMouse | (down and 0 or ImGui.WindowFlags_HorizontalScrollbar)
+    local menu_here = false
+    if ImGui.BeginChild(ctx, "porow", avail_w, avail_h, 0, cflags) then
+      local inner_w, inner_h = ImGui.GetContentRegionAvail(ctx)
+      local ph = math.max(60, inner_h - POP.LABEL_H)
+      local dl = ImGui.GetWindowDrawList(ctx)
+      local function track_line(x, y, wd, tr)
+        local name = tr and POP.PO.track_name(tr) or "(track gone)"
+        local col = tr and U.track_colour(tr, 0xff) or C.COL.label
+        ImGui.DrawList_AddRectFilled(dl, x, y + 5, x + 10, y + 9, col, 2)
+        ImGui.DrawList_PushClipRect(dl, x, y, x + wd, y + POP.LABEL_H, true)
+        ImGui.DrawList_AddText(dl, x + 14, y, C.COL.label, name)
+        ImGui.DrawList_PopClipRect(dl)
+      end
+      -- one panel at x, y (its track's line first); returns its width, height
+      local function one(k, it, x, y)
+        if not it.fx then
+          track_line(x, y, 160, it.tr)
+          ImGui.SetCursorScreenPos(ctx, x, y + POP.LABEL_H + 4)
+          ImGui.TextDisabled(ctx, "Its plugin isn't there.")
+          ImGui.SetCursorScreenPos(ctx, x, y + POP.LABEL_H + 26)
+          if ImGui.SmallButton(ctx, "Take it out##pogone" .. k) then POP.take_out = { w.id, k } end
+          return 160, POP.LABEL_H + 48
+        end
+        ImGui.SetCursorScreenPos(ctx, x, y + POP.LABEL_H)
+        local wd, ht
+        POP.scope(view, it.tr, function()
+          local layout, key = layout_for(it.fx)
+          local h = ph
+          if down then
+            -- (the space left of a scrollbar, when there is one)
+            P.FILL_W = math.max(80, inner_w)
+            h = POP.rack_height(it.fx, layout, key, P.FILL_W)
+          end
+          local pw, req = P.draw(ctx, it.tr, it.fx, layout, key, h, k, false)
+          P.FILL_W = nil
+          wd, ht = pw, h
+          -- not here: dragging (it moves plugins in ChannelView's row),
+          -- Alt+click remove (asked before the frame), and modulator drops
+          -- (a modulator is ChannelView's track's)
+          req.begin_drag, req.remove, req.mod_drop = nil, nil, nil
+          panel_requests(k, it.fx, layout, key, req)
+          if req.open_menu or req.ctx_control then view.menu_track = it.tr end
+        end)
+        track_line(x, y, wd or 120, it.tr)
+        return wd or 120, POP.LABEL_H + (ht or ph)
+      end
+      local x, y = ImGui.GetCursorScreenPos(ctx)
+      local gap = C.PANEL_GAP + 4
+      for k, it in ipairs(items) do
+        local pw, h = one(k, it, x, y)
+        -- every panel's line at the row's top, or each under the last
+        if down then y = y + h + gap else x = x + pw + gap end
+      end
+      if #items > 0 then
+        -- room made for what was drawn (no gap after the last), so the
+        -- child scrolls to it and no further
+        if down then y = y - gap else x = x - gap end
+        ImGui.SetCursorScreenPos(ctx, x, y)
+        ImGui.Dummy(ctx, 0, 0)
+      else
+        ImGui.TextDisabled(ctx, "No panels: right-click \u{25B8} Add from.")
+      end
+      if ImGui.IsWindowHovered(ctx) and not ImGui.IsAnyItemHovered(ctx)
+         and ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Right) then
+        menu_here = true
+      end
+      if ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows) then
+        local wy, wx = ImGui.GetMouseWheel(ctx)
+        if down then
+          if wy ~= 0 and not W.wheel_taken() then
+            ImGui.SetScrollY(ctx, ImGui.GetScrollY(ctx) - wy * C.WHEEL_SCROLL_PX)
+          end
+        else
+          local dx = (wx ~= 0) and wx or ((wy ~= 0 and not W.wheel_taken()) and wy or 0)
+          if dx ~= 0 then ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - dx * C.WHEEL_SCROLL_PX) end
+        end
+      end
+      ImGui.EndChild(ctx)
+    end
+
+    -- the panels' menus, for the panel they were opened on
+    POP.scope(view, view.menu_track, function()
+      if app.open_panel_menu then ImGui.OpenPopup(ctx, "panelmenu"); app.open_panel_menu = false end
+      if app.open_ctl_menu   then ImGui.OpenPopup(ctx, "ctlmenu");   app.open_ctl_menu   = false end
+      if app.track then
+        panel_menu()
+        control_menu()
+      end
+    end)
+    if menu_here then ImGui.OpenPopup(ctx, "pomenu") end
+    if ImGui.BeginPopup(ctx, "pomenu") then
+      ImGui.TextDisabled(ctx, w.name)
+      ImGui.Separator(ctx)
+      POP.menu(w)
+      ImGui.EndPopup(ctx)
+    end
+    W.draw_tip(ctx)
+    ImGui.End(ctx)
+  end
+end
+
+-- Every popped-out window, after ChannelView's own.
+function POP.windows()
+  if not POP.PO then return end
+  POP.applied = POP.applied or {}
+  POP.rects = {}
+  POP.cv_track, POP.cv_chain = app.track, app.chain
+  local now = reaper.time_precise()
+  for _, w in ipairs(POP.PO.windows()) do POP.window(w, now) end
+  if POP.close then POP.PO.close(POP.close); POP.views[POP.close] = nil; POP.close = nil end
+  if POP.take_out then POP.PO.take_out(POP.take_out[1], POP.take_out[2]); POP.take_out = nil end
+  -- something changed from a popped-out panel's menu: ChannelView's own
+  -- chain read again too (it may be the same track)
+  if app.popout_dirty then
+    app.popout_dirty = false
+    POP.PO.forget()
+    rescan(true)
+  end
+end
+
 local ROWS = { key = "panel_rows", said = nil, read_at = -1 }
 function ROWS.publish(inner_h)
   local n = P.rows_for(inner_h)
@@ -4972,8 +5320,19 @@ local function panel_row(row_h, row_w)
     -- The marker takes the container's colour when the drop goes into
     -- one, and says which.
     if app.drag then
-      local mx = ImGui.GetMousePos(ctx)
+      local mx, my = ImGui.GetMousePos(ctx)
       local drop = app.track and drop_under(mx) or nil
+      -- dragged out of the window: a popped-out copy (Pro), into the
+      -- popped-out window it's over or one of its own
+      local r = app.win_rect
+      local out = POP.PO and r and app.drag.what == "plugin"
+                  and not (mx >= r[1] and mx < r[1] + r[3] and my >= r[2] and my < r[2] + r[4])
+      local into = out and POP.at(mx, my)
+      if out then
+        drop = nil
+        local w = into and POP.PO.window(into)
+        ImGui.SetTooltip(ctx, w and ("Pop out into \u{201C}" .. w.name .. "\u{201D}") or "Pop out")
+      end
       app.drop_gap = drop
       if drop then
         local dl = ImGui.GetWindowDrawList(ctx)
@@ -4987,6 +5346,11 @@ local function panel_row(row_h, row_w)
       end
       if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
         if drop then move_to(app.drag.path, drop.parent, drop.gap, app.drag.what) end
+        if out then
+          for _, f in ipairs(app.chain) do
+            if f.guid == app.drag.guid then POP.pop_out(app.track, f, into, { mx - 20, my - 10 }) break end
+          end
+        end
         app.drag, app.drop_gap = nil, nil
       end
     end
@@ -5050,15 +5414,16 @@ local function rack_height(fx, layout, key, rack_w)
   -- up in both, otherwise ChannelView's own pick
   local shared = St.switch_rule(fx.guid) ~= nil
   if not shared then
-    local was = St.VARIANT
-    St.VARIANT = "variant:"
+    local was, was_a = St.VARIANT, St.VARIANT_ALSO
+    St.VARIANT, St.VARIANT_ALSO = "variant:", nil
     shared = St.chosen_key(fx.name, fx.guid) == key
-    St.VARIANT = was
+    St.VARIANT, St.VARIANT_ALSO = was, was_a
   end
   local h = P.rack_height(app.track, fx, layout, key, rack_w, shared)
   rack_fit[fx.guid] = { sig = sig, h = h }
   return h
 end
+POP.rack_height = rack_height
 
 -- where a dragged panel would land: above or below the panel under the
 -- pointer (the column's take on drop_under)
@@ -5085,7 +5450,7 @@ end
 -- in to the panels it spans. A container also gets a strip across the
 -- column over its first panel -- its on/off square, its name, its
 -- oversampling -- which opens its menu; a parallel run is marked "=".
-local RACK_BRK_W = 9
+C.RACK_BRK_W = 9
 -- Each panel moves in by the brackets round it only: depth n (the
 -- deepest bracket row covering it, plus one) indents it n rows' worth;
 -- a panel in no bracket keeps the column's full width.
@@ -5096,7 +5461,7 @@ local function rack_indents()
   end
   return function(i)
     local d = depth[i] or 0
-    return d > 0 and (d * RACK_BRK_W + 4) or 0
+    return d > 0 and (d * C.RACK_BRK_W + 4) or 0
   end
 end
 
@@ -5104,7 +5469,7 @@ local function rack_brk_strip(b, colx, colw)
   local dl = ImGui.GetWindowDrawList(ctx)
   local x0, y0 = ImGui.GetCursorScreenPos(ctx)
   local h = C.BRK_ROW_H + 4
-  local lx = colx + 3 + (b.row + 0.5) * RACK_BRK_W
+  local lx = colx + 3 + (b.row + 0.5) * C.RACK_BRK_W
   local col = C.COL.brk_container
   local off = not T.get_enabled(app.track, b.node.addr)
   if off then col = U.with_alpha(col, 0x80) end
@@ -5153,7 +5518,7 @@ local function rack_brk_lines(colx, strip_y)
       local box = b.kind == "container"
       local col = box and C.COL.brk_container or C.COL.brk_parallel
       if box and not T.get_enabled(app.track, b.node.addr) then col = U.with_alpha(col, 0x80) end
-      local lx = math.floor(colx + 3 + (b.row + 0.5) * RACK_BRK_W) + 0.5
+      local lx = math.floor(colx + 3 + (b.row + 0.5) * C.RACK_BRK_W) + 0.5
       local top = (box and strip_y[b]) or (math.floor(ra.y + 4) + 0.5)
       local bot = math.floor(rb.y + rb.h - 4) + 0.5
       ImGui.DrawList_AddLine(dl, lx, top, lx, bot, col, 1.5)
@@ -5299,7 +5664,7 @@ end
 -- sits in the window's own margin at the right edge (as thin as that
 -- margin), so the column keeps the same margins either side whether it's
 -- showing or not; with a drawer on the right, an 8 px one is kept room for.
-local RACK_SB = 8
+C.RACK_SB = 8
 local function rack_column(col_w, col_h)
   local x0, y0 = ImGui.GetCursorScreenPos(ctx)
   local wx = ImGui.GetWindowPos(ctx)
@@ -5307,7 +5672,7 @@ local function rack_column(col_w, col_h)
   local edge = wx + ww - (ImGui.GetStyleVar(ctx, ImGui.StyleVar_WindowBorderSize) or 0)
   local room = math.floor(edge - (x0 + col_w))
   local margin = room >= 5 and room <= 16
-  local sb_w = margin and room or RACK_SB
+  local sb_w = margin and room or C.RACK_SB
   local reach = margin and room or 0
   local rack_w = math.max(120, col_w + reach - sb_w)
   local top_h, foot = 0, {}
@@ -5382,6 +5747,13 @@ local colour_poll = 0
 
 local function frame()
   W.begin_frame()
+  -- plugin pictures (Pro): ChannelView's own window watches for plugin
+  -- windows opening, to take their picture the first time
+  if not app.thumbs_on then
+    app.thumbs_on = true
+    local th = not RACK and W.thumbs()
+    if th then th.watch = true end
+  end
   P.begin_frame()
   P.begin_rects()
   MR.begin_frame()
@@ -5478,6 +5850,11 @@ local function frame()
   if visible then
     local d = ImGui.GetWindowDockID(ctx)
     if d ~= dock_id then dock_id = d; ext_set(DOCK_KEY, d) end
+    do  -- for a panel dragged out of it (a popped-out copy)
+      local wx, wy = ImGui.GetWindowPos(ctx)
+      local ww, wh = ImGui.GetWindowSize(ctx)
+      app.win_rect = { wx, wy, ww, wh }
+    end
     if not app.header_hide then menu_bar() end
     app.shown_once = true
   elseif not app.shown_once and not RACK and dock_id ~= 0 then
@@ -5863,6 +6240,8 @@ local function frame()
     W.draw_tip(ctx)
     ImGui.End(ctx)
   end
+  -- popped-out panels (Pro), each a window of its own
+  POP.windows()
   -- the Organise actions window, its own window beside this one
   AE.draw(ctx)
   -- the knob look editor (Style > Customise...), its own window too

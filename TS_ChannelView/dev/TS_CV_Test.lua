@@ -3830,6 +3830,7 @@ do
       end
       for alias in src:gmatch("local%s+([%w_]+)%s*=%s*[^\n]-%.switches%s*%(") do bind[alias] = "TS_CV_Switches" end
       for alias in src:gmatch("local%s+([%w_]+)%s*=%s*[^\n]-%.light%s*%(") do bind[alias] = "TS_CV_Light" end
+      for alias in src:gmatch("local%s+([%w_]+)%s*=%s*[^\n]-%.thumbs%s*%(") do bind[alias] = "TS_CV_Thumbs" end
 
       for alias, fn in src:gmatch("([%w_]+)%.([%w_]+)%s*%(") do
         local mod = bind[alias]
@@ -6101,7 +6102,27 @@ do
     St.VARIANT, M.VIEW_DEFAULTS = "variant:", M.DEFAULTS_SECT
     check("channelview: unchanged by the rack", St.layout_key(name, "{R}"), "Kontakt 7 :: Across")
     St.set_variant("{R}", nil)
-    M.remove("Kontakt 7 :: Across"); M.remove("Kontakt 7 :: Down")
+    -- a popped-out panel picks apart too: its own, else the pick of the
+    -- view it's laid out like (the rack's when stacked), else defaults
+    M.set("Kontakt 7 :: Pop", { controls = {} })
+    St.set_variant("{R}", "Across")
+    St.VARIANT, St.VARIANT_ALSO = "rvariant:", nil
+    St.set_variant("{R}", "Down")
+    St.VARIANT, St.VARIANT_ALSO = "pvariant:", { "variant:" }
+    check("popout across: ChannelView's pick", St.layout_key(name, "{R}"), "Kontakt 7 :: Across")
+    St.VARIANT_ALSO = { "rvariant:" }
+    M.VIEW_DEFAULTS = M.RACK_DEFAULTS_SECT
+    check("popout down: the rack's pick", St.layout_key(name, "{R}"), "Kontakt 7 :: Down")
+    St.set_variant("{R}", "Pop")
+    check("popout: its own pick", St.layout_key(name, "{R}"), "Kontakt 7 :: Pop")
+    check("popout: kept apart", PROJ["TS_ChannelViewpvariant:{R}"], "Pop")
+    St.VARIANT, St.VARIANT_ALSO, M.VIEW_DEFAULTS = "variant:", nil, M.DEFAULTS_SECT
+    check("channelview: unchanged by a pop-out", St.layout_key(name, "{R}"), "Kontakt 7 :: Across")
+    for _, pf in ipairs({ "variant:", "rvariant:", "pvariant:" }) do
+      St.VARIANT = pf; St.set_variant("{R}", nil)
+    end
+    St.VARIANT = "variant:"
+    M.remove("Kontakt 7 :: Across"); M.remove("Kontakt 7 :: Down"); M.remove("Kontakt 7 :: Pop")
   end
   -- making variants: a copy, or empty with the names kept
   local src = { controls = { { type = "knob", param = 5 } }, aliases = { [5] = "Verb" }, lock = 3 }
@@ -9256,6 +9277,272 @@ do
   check("container panel: folded is kept in the project", CT.folded("{C}") and proj["cfold:{C}"] == "1", true)
   T2.addr_of = addr_of
   reaper = real
+end
+
+-- ---------------------------------------------------------------------
+-- plugin pictures (TS_CV_Thumbs): keys, the queue, taking one on a
+-- temporary track
+-- ---------------------------------------------------------------------
+do
+  local real = reaper
+  local tmp = os.tmpname(); os.remove(tmp)
+  local root = tmp .. "_res"
+  os.execute('mkdir -p "' .. root .. '/Data"')
+  local tracks, shown, deleted, captured, now = {}, {}, 0, 0, 100
+  local blur = 0           -- what the window shows changes while it's above 0
+  local ext = {}
+  reaper = setmetatable({
+    GetOS = function() return "Win64" end,
+    GetResourcePath = function() return root end,
+    RecursiveCreateDirectory = function(p) os.execute('mkdir -p "' .. p .. '"') return 1 end,
+    time_precise = function() return now end,
+    JS_Window_GetRect = function() return true end, JS_GDI_GetScreenDC = function() return 1 end,
+    JS_LICE_CreateBitmap = function() return {} end, JS_LICE_WritePNG = function(p)
+      captured = captured + 1; local f = io.open(p, "wb"); f:write("png"); f:close(); return true end,
+    JS_Window_GetClientRect = function() return true, 0, 0, 300, 200 end,
+    JS_GDI_Blit = function() end, JS_LICE_GetDC = function() return 1 end, JS_GDI_ReleaseDC = function() end,
+    JS_LICE_DestroyBitmap = function() end,
+    JS_LICE_GetPixel = function(_, x, y) return (x * 7 + y + blur) & 0xffffff end,   -- not blank
+    CountTracks = function() return #tracks end,
+    InsertTrackAtIndex = function(i) tracks[#tracks + 1] = { n = i } end,
+    GetTrack = function(_, i) return tracks[i + 1] end,
+    GetSetMediaTrackInfo_String = function() return true, "" end,
+    SetMediaTrackInfo_Value = function() end,
+    PreventUIRefresh = function() end,
+    TrackFX_AddByName = function(_, ident) return ident == "bad" and -1 or 0 end,
+    TrackFX_Show = function(_, _, how) shown[#shown + 1] = how end,
+    TrackFX_GetFloatingWindow = function() return "HWND" end,
+    ValidatePtr = function(t) return t ~= nil and not t.gone end,
+    DeleteTrack = function(t) t.gone = true; deleted = deleted + 1 end,
+    TrackList_AdjustWindows = function() end,
+    SetExtState = function(_, k, v) ext[k] = v end,
+    GetExtState = function(_, k) return ext[k] or "" end,
+  }, { __index = real })
+  package.loaded["TS_CV_Thumbs"] = nil
+  local THt = require("TS_CV_Thumbs")
+  check("thumbs: a plugin's key leaves out its format and developer", THt.key("VST3: Pro-Q 4 (FabFilter)"), "Pro-Q 4")
+  check("thumbs: VST2 and VST3 share one", THt.key("VST: Pro-Q 4 (FabFilter) (2 out)") == THt.key("VST3: Pro-Q 4 (FabFilter)"), true)
+  check("thumbs: a JSFX by its file", THt.key("JS: utility/volume.jsfx"), "volume")
+  check("thumbs: none yet", THt.has("Pro-Q 4"), false)
+  THt.want("C:\\x\\Pro-Q 4.vst3", "VST3: Pro-Q 4 (FabFilter)")
+  THt.want("C:\\x\\Pro-Q 4.vst3", "VST3: Pro-Q 4 (FabFilter)")
+  local q = THt._q()
+  check("thumbs: asked for once", #q, 1)
+  THt.tick()                                   -- the temporary track, the plugin, its window
+  check("thumbs: a temporary track, the plugin floated", #tracks .. " " .. tostring(shown[1]), "1 3")
+  THt.tick()                                   -- the window found
+  now = now + 0.5; THt.tick()
+  check("thumbs: not before it has drawn itself", captured, 0)
+  -- it opens blurred: what it shows keeps changing for a while
+  blur = 0x404040
+  now = now + 1.0; THt.tick()
+  blur = 0x202020
+  now = now + 0.5; THt.tick()
+  blur = 0x101010
+  now = now + 0.5; THt.tick()
+  check("thumbs: not while it's still coming into focus", captured, 0)
+  blur = 0
+  now = now + 0.5; THt.tick()
+  check("thumbs: still settling (one look sharp)", captured, 0)
+  now = now + 0.5; THt.tick()
+  check("thumbs: taken once it has held still, and the track gone", captured .. " " .. deleted .. " " .. tostring(THt.has("Pro-Q 4")), "1 1 true")
+  THt.want("x", "VST3: Pro-Q 4 (FabFilter)")
+  check("thumbs: not again once there", #THt._q(), 0)
+  THt.want("bad", "VST: Nope (X)")
+  THt.tick()
+  check("thumbs: a plugin that won't load leaves no track behind", deleted, 2)
+  THt.remove("Pro-Q 4")
+  check("thumbs: removed", THt.has("Pro-Q 4"), false)
+  -- each window has its own images: one that looked before the picture
+  -- was taken in another finds it once it's there
+  local fake = { ValidatePtr = function(i) return i ~= nil end, CreateImage = function(p) return { p = p } end }
+  THt.attach(fake)
+  package.loaded["TS_CV_Thumbs"] = nil
+  local other = require("TS_CV_Thumbs")
+  other.attach(fake)
+  check("thumbs: no picture yet in the other window", other._image("Pro-Q 4"), nil)
+  THt.capture("HWND", "Pro-Q 4")
+  now = now + 0.6
+  check("thumbs: the other window sees the new picture", other._image("Pro-Q 4") ~= nil, true)
+  check("thumbs: a missing one isn't looked for every frame", other._image("Fresh"), nil)
+  local f = io.open(other.dir() .. "Fresh.png", "wb"); f:write("png"); f:close()
+  now = now + 0.1
+  check("thumbs: not straight away", other._image("Fresh"), nil)
+  now = now + other.RECHECK
+  check("thumbs: ...but is again after a moment (a file put there by hand)", other._image("Fresh") ~= nil, true)
+  os.execute('rm -rf "' .. root .. '"')
+  package.loaded["TS_CV_Thumbs"] = nil
+  reaper = real
+end
+
+-- ---------------------------------------------------------------------
+-- plugin pictures: a plugin's window open in REAPER, taken once it has
+-- settled with nothing over it; taken again when asked
+-- ---------------------------------------------------------------------
+do
+  local real = reaper
+  local tmp = os.tmpname(); os.remove(tmp)
+  local root = tmp .. "_res2"
+  os.execute('mkdir -p "' .. root .. '/Data"')
+  local now, captured, covered, open = 100, 0, false, true
+  local track = { name = "T1" }
+  local shown = 0
+  reaper = setmetatable({
+    GetOS = function() return "Win64" end,
+    GetResourcePath = function() return root end,
+    RecursiveCreateDirectory = function(p) os.execute('mkdir -p "' .. p .. '"') return 1 end,
+    time_precise = function() return now end,
+    JS_Window_GetRect = function() return true end, JS_GDI_GetScreenDC = function() return 1 end,
+    JS_LICE_CreateBitmap = function() return {} end, JS_LICE_WritePNG = function(p)
+      captured = captured + 1; local f = io.open(p, "wb"); f:write("png"); f:close(); return true end,
+    JS_Window_GetClientRect = function() return true, 0, 0, 300, 200 end,
+    JS_GDI_Blit = function() end, JS_LICE_GetDC = function() return 1 end, JS_GDI_ReleaseDC = function() end,
+    JS_LICE_DestroyBitmap = function() end,
+    JS_LICE_GetPixel = function(_, x, y) return (x * 7 + y) & 0xffffff end,
+    JS_Window_FromPoint = function() return covered and "OTHER" or "PLUG" end,
+    JS_Window_IsChild = function() return false end,
+    JS_Window_IsWindow = function() return open end,
+    CountTracks = function() return 1 end,
+    GetTrack = function() return track end,
+    GetMasterTrack = function() return { name = "M" } end,
+    TrackFX_GetCount = function(t) return t == track and 1 or 0 end,
+    TrackFX_GetFloatingWindow = function(t) return (t == track and open) and "PLUG" or nil end,
+    TrackFX_GetNamedConfigParm = function(_, _, k)
+      if k == "fx_name" then return true, "VST3: Dimension (Acme)" end
+      return false, ""
+    end,
+    TrackFX_Show = function() shown = shown + 1; open = true end,
+    GetTouchedOrFocusedFX = function() return false end,
+    ValidatePtr = function() return true end,
+    SetExtState = function() end, GetExtState = function() return "" end,
+  }, { __index = real })
+  package.loaded["TS_CV_Thumbs"] = nil
+  local THw = require("TS_CV_Thumbs")
+  THw.watch = true
+  covered = true
+  for _ = 1, 20 do now = now + 0.25; THw.tick() end
+  check("thumbs watch: not while something's over the window", captured, 0)
+  covered = false
+  for _ = 1, 3 do now = now + 0.25; THw.tick() end
+  check("thumbs watch: not straight after it comes clear", captured, 0)
+  for _ = 1, 12 do now = now + 0.25; THw.tick() end
+  check("thumbs watch: taken once clear and settled", captured, 1)
+  for _ = 1, 20 do now = now + 0.25; THw.tick() end
+  check("thumbs watch: once", captured, 1)
+  -- taken again when asked, with the watch off and the window closed
+  THw.watch, open = false, false
+  THw.retake(track, 0)
+  check("thumbs retake: the window opened", shown, 1)
+  for _ = 1, 20 do now = now + 0.25; THw.tick() end
+  check("thumbs retake: taken again", captured, 2)
+  for _ = 1, 20 do now = now + 0.25; THw.tick() end
+  check("thumbs retake: once", captured, 2)
+  os.execute('rm -rf "' .. root .. '"')
+  package.loaded["TS_CV_Thumbs"] = nil
+  reaper = real
+end
+
+-- ---------------------------------------------------------------------
+-- popped-out panels (TS_CV_PopOut): windows of pinned panels, saved with
+-- the project, found again by GUID
+-- ---------------------------------------------------------------------
+do
+  local real = reaper
+  local ext = {}
+  local proj = "P1"
+  local trA, trB, master = { g = "{A}" }, { g = "{B}" }, { g = "{M}" }
+  local fxs = { [trA] = { "{f1}", "{f2}" }, [trB] = { "{f3}" }, [master] = {} }
+  reaper = setmetatable({
+    EnumProjects = function() return proj end,
+    GetProjExtState = function(_, _, k) return 1, ext[proj .. k] or "" end,
+    SetProjExtState = function(_, _, k, v) ext[proj .. k] = v end,
+    ValidatePtr2 = function() return true end,
+    GetTrackGUID = function(t) return t.g end,
+    GetMasterTrack = function() return master end,
+    CountTracks = function() return 2 end,
+    GetTrack = function(_, i) return ({ trA, trB })[i + 1] end,
+    TrackFX_GetFXGUID = function(t, i) return fxs[t][i + 1] end,
+    time_precise = function() return 10 end,
+  }, { __index = real })
+  package.loaded["TS_CV_PopOut"] = nil
+  local Tm = require("TS_CV_FXTree")
+  local real_collect, real_guid_at = Tm.collect, Tm.guid_at
+  Tm.collect = function(t)
+    local out = {}
+    for i, g in ipairs(fxs[t]) do out[#out + 1] = { guid = g, addr = i - 1, name = "VST: X" .. i } end
+    return out
+  end
+  Tm.guid_at = function(t, addr) return fxs[t][addr + 1] end
+  local POm = require("TS_CV_PopOut")
+  local w = POm.new_window("Mix watch")
+  check("popout: a new window", #POm.windows() .. " " .. w.name, "1 Mix watch")
+  check("popout: a panel added", POm.add(w.id, "{A}", "{f2}"), true)
+  check("popout: not twice", POm.add(w.id, "{A}", "{f2}"), false)
+  POm.add(w.id, "{B}", "{f3}")
+  local tr, fx = POm.resolve("{A}", "{f2}")
+  check("popout: found by guid", (tr == trA) and fx and fx.addr, 1)
+  -- the chain changes under it: found where it went
+  fxs[trA] = { "{f2}", "{f1}" }
+  tr, fx = POm.resolve("{A}", "{f2}")
+  check("popout: found again after a move", fx and fx.addr, 0)
+  fxs[trA] = { "{f1}" }
+  tr, fx = POm.resolve("{A}", "{f2}")
+  check("popout: a plugin gone, its track still there", tostring(tr == trA) .. " " .. tostring(fx), "true nil")
+  check("popout: a track gone", POm.resolve("{Z}", "{f1}"), nil)
+  -- saved with the project, read again on a project switch
+  POm.rename(w.id, "Bus\tthings")
+  proj = "P2"
+  check("popout: another project has its own", #POm.windows(), 0)
+  proj = "P1"
+  local back = POm.windows()
+  check("popout: back with the project", #back .. " " .. back[1].name .. " " .. #back[1].panels, "1 Bus things 2")
+  check("popout: the panels' order kept", back[1].panels[2].f, "{f3}")
+  POm.set_dir(w.id, "down")
+  local d = POm.decode(POm.encode(POm._data()))
+  check("popout: encode/decode", d.windows[1].panels[1].t .. d.windows[1].panels[1].f .. d.next .. d.windows[1].dir, "{A}{f2}2down")
+  check("popout: an older line reads as auto", POm.decode("3\tOld\t0\t{A},{f1}").windows[1].dir .. #POm.decode("3\tOld\t0\t{A},{f1}").windows[1].panels, "auto1")
+  -- moving, nudging, taking out
+  POm.nudge(w.id, 1, 1)
+  check("popout: nudged", POm.window(w.id).panels[1].f, "{f3}")
+  local w2 = POm.move(w.id, 1, nil, "Bass")
+  check("popout: moved to a window of its own", #POm.windows() .. " " .. w2.name .. " " .. #POm.window(w.id).panels, "2 Bass 1")
+  check("popout: which windows have it", POm.windows_with("{f3}")[w2.id], true)
+  POm.take_out(w.id, 1)
+  check("popout: a window goes with its last panel", #POm.windows(), 1)
+  POm.close(w2.id)
+  check("popout: closed", #POm.windows(), 0)
+  Tm.collect, Tm.guid_at = real_collect, real_guid_at
+  package.loaded["TS_CV_PopOut"] = nil
+  reaper = real
+end
+
+-- ---------------------------------------------------------------------
+-- no module reads a global it never set (a local used above where it's
+-- declared reads as one, and fails only when that line runs)
+-- ---------------------------------------------------------------------
+do
+  local known = {}
+  for w in ([[reaper require pairs ipairs type tostring tonumber math string table os io
+    pcall xpcall select setmetatable getmetatable rawget rawset rawequal rawlen next error
+    assert print debug package utf8 _G load loadfile dofile collectgarbage gfx coroutine]]):gmatch("%S+") do
+    known[w] = true
+  end
+  local probe = io.popen("command -v luac5.4 2>/dev/null")
+  local luac = probe and probe:read("l"); if probe then probe:close() end
+  if luac and luac ~= "" then
+    local bad = {}
+    local ls = io.popen("ls *.lua 2>/dev/null")
+    for f in ls:lines() do
+      local h = io.popen(('luac5.4 -l -l -p "%s" 2>/dev/null'):format(f))
+      for line in h:lines() do
+        local g = line:match('GETTABUP.-_ENV "([%w_]+)"')
+        if g and not known[g] then bad[#bad + 1] = f .. ":" .. g end
+      end
+      h:close()
+    end
+    ls:close()
+    check("no module reads an unknown global", table.concat(bad, " "), "")
+  end
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

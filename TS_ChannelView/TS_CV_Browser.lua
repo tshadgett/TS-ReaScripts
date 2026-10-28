@@ -69,9 +69,15 @@ local by_fold, by_cat, by_dev, by_letter = nil, nil, nil, nil
 function B.attach(imgui) ImGui = imgui end
 function B.is_open() return st.open end
 
--- ---------------------------------------------------------------------
-
 local installed
+
+-- The installed plugin with this ident (EnumInstalledFX's), or nil.
+function B.entry_of(ident)
+  for _, e in ipairs(installed()) do if e.ident == ident then return e end end
+  return nil
+end
+
+-- ---------------------------------------------------------------------
 
 -- Forget the collection, so the next look reads it (and your FX Folders)
 -- afresh -- after a folder has been edited.
@@ -482,7 +488,30 @@ local function draw_smart(ctx)
 end
 
 -- A plugin's right-click menu: add it to a folder, take it out of one.
+-- The plugin's picture (TS_CV_Thumbs, Pro) beside the row under the pointer.
+local function preview(ctx, e)
+  if not ImGui.IsItemHovered(ctx) then return end
+  local th = require("TS_CV_Widgets").thumbs()
+  if th then th.preview(ctx, th.key(e.name)) end
+end
+
+-- Its picture: taken now, from a file, or gone (Pro).
+local function picture_actions(ctx, e)
+  local th = require("TS_CV_Widgets").thumbs()
+  if not th then return end
+  local key = th.key(e.name)
+  if not key then return end
+  ImGui.Separator(ctx)
+  if th.can_capture() and ImGui.MenuItem(ctx, th.has(key) and "Take its picture again" or "Take its picture") then
+    th.want(e.ident, e.name, true)
+  end
+  if ImGui.MenuItem(ctx, "Picture from a file\u{2026}") then th.from_file(key) end
+  if ImGui.MenuItem(ctx, "Remove its picture", nil, false, th.has(key)) then th.remove(key) end
+end
+
 local function folder_actions(ctx, e)
+  picture_actions(ctx, e)
+  ImGui.Separator(ctx)
   local kind = IX.kind_of(e.name)
   if not kind then
     ImGui.TextDisabled(ctx, "Folders can't hold this kind of plugin")
@@ -529,6 +558,7 @@ local function plugin_items(ctx, track, list)
     end
     if active_multi then ImGui.PopItemFlag(ctx) end
     badge(ctx, dl, e.fmt)
+    preview(ctx, e)
     if ImGui.BeginPopupContextItem(ctx, "##fxctx" .. i) then
       ImGui.TextDisabled(ctx, e.short)
       ImGui.Separator(ctx)
@@ -738,6 +768,7 @@ local function results_list(ctx, track, found)
       end
       if active_multi then ImGui.PopItemFlag(ctx) end
       badge(ctx, dl, e.fmt)
+      preview(ctx, e)
       if ImGui.BeginPopupContextItem(ctx, "##fxqctx" .. i) then
         ImGui.TextDisabled(ctx, e.short)
         ImGui.Separator(ctx)
@@ -1052,6 +1083,7 @@ function B._draw(ctx, track)
           end
         end
         badge(ctx, ImGui.GetWindowDrawList(ctx), e.fmt)
+        preview(ctx, e)
         -- right-click a result: the rest of that developer, or its folders
         if ImGui.BeginPopupContextItem(ctx, "##fxdctx" .. i) then
           ImGui.TextDisabled(ctx, e.short)

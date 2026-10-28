@@ -42,20 +42,22 @@ function S.clear_cache() cache = {}; gr_open = {}; pages = {}; variants = {}; gr
 -- default is written to the project.
 -- The project key a collapsed state is kept under, and the one for how a
 -- plugin was last left (S.last_fold): the Rack view keeps its own
--- ("rcollapsed:", "rfold:"), so folding a panel there leaves ChannelView's
--- alone.
+-- ("rcollapsed:", "rfold:"), and so do popped-out panels ("pcollapsed:",
+-- for as long as one is drawn), so folding a panel there leaves
+-- ChannelView's alone.
 S.COLLAPSED, S.FOLD = "collapsed:", "fold:"
 
 function S.is_collapsed(guid, default)
   default = default or false
   if guid == nil or guid == "" then return false end
-  local v = cache[guid]
+  local ck = S.COLLAPSED .. guid
+  local v = cache[ck]
   if v ~= nil then return v end
   local _, str = reaper.GetProjExtState(0, NS, S.COLLAPSED .. guid)
   if str == "1" then v = true
   elseif str == "0" then v = false
   else v = default end
-  cache[guid] = v
+  cache[ck] = v
   return v
 end
 
@@ -63,7 +65,7 @@ function S.set_collapsed(guid, on, default)
   default = default or false
   if guid == nil or guid == "" then return end
   on = on and true or false
-  cache[guid] = on
+  cache[S.COLLAPSED .. guid] = on
   local val = (on == default) and "" or (on and "1" or "0")
   reaper.SetProjExtState(0, NS, S.COLLAPSED .. guid, val)
 end
@@ -141,8 +143,11 @@ end
 -- The layout variant an instance shows (TS_CV_Mappings, "<plugin> ::
 -- <name>"), per instance, saved with the project. nil for the plugin's
 -- own layout.
--- The Rack view picks its own ("rvariant:"); `pfx` reads another view's.
+-- The Rack view picks its own ("rvariant:"), and so do popped-out panels
+-- ("pvariant:", S.VARIANT_ALSO the views they fall back on); `pfx` reads
+-- another view's.
 S.VARIANT = "variant:"
+S.VARIANT_ALSO = nil
 function S.variant(guid, pfx)
   if guid == nil or guid == "" then return nil end
   local k = (pfx or S.VARIANT) .. guid
@@ -233,6 +238,15 @@ function S.layout_key(fx_name, guid, track, addr)
   end
   local v = S.variant(guid)
   if v == S.OWN then return base end
+  -- a popped-out panel, with nothing picked for it: the pick of the view
+  -- it's laid out like (S.VARIANT_ALSO), before the defaults
+  if not v then
+    for _, pfx in ipairs(S.VARIANT_ALSO or {}) do
+      local o = S.variant(guid, pfx)
+      if o == S.OWN then return base end
+      if o then v = o break end
+    end
+  end
   v = v or (M.default_variant and M.default_variant(base))
   -- the rack, with nothing picked for it: ChannelView's pick, then its default
   if not v and S.VARIANT ~= "variant:" then

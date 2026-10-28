@@ -775,7 +775,12 @@ local function press(ctx, i, it, x, y, bw, bh, dir)
   if FB.kind(it) then
     -- a plugin or an FX chain to add (TS_CV_FXButtons): lit while the
     -- plugin is on the selected track
-    W.tip(ctx, ID .. i, (it.label ~= "" and (it.label .. "\n") or "") .. FB.tip(it), hovered, false)
+    local text = (it.label ~= "" and (it.label .. "\n") or "") .. FB.tip(it)
+    -- a plugin with a picture (TS_CV_Thumbs, Pro): the picture, the text under it
+    local th = hovered and FB.kind(it) == "fx" and W.thumbs()
+    if not (th and th.preview(ctx, th.key_of_ident(select(2, FB.kind(it))), text)) then
+      W.tip(ctx, ID .. i, text, hovered, false)
+    end
     if pressed then TB.run_fx(it) end
     return hovered, held, FB.is_on(it), true
   end
@@ -1431,6 +1436,9 @@ function TB.menu_entries(ctx, items, path)
       if marks then row_icon(ctx, vi, ih, strip, iw) end
     elseif FB.kind(it) then
       if ImGui.MenuItem(ctx, pad .. text_of(vi) .. key, nil, FB.is_on(it)) then TB.run_fx(it) end
+      -- a plugin with a picture (TS_CV_Thumbs, Pro): the picture beside it
+      local th = FB.kind(it) == "fx" and ImGui.IsItemHovered(ctx) and W.thumbs()
+      if th then th.preview(ctx, th.key_of_ident(select(2, FB.kind(it)))) end
       if marks then row_icon(ctx, vi, ih, strip, iw) end
     else
       local id = TB.resolve(it.cmd)
@@ -1704,6 +1712,18 @@ local function item_menu(ctx)
     end
     if FB.kind(it) == "fx" and ImGui.BeginMenu(ctx, "Vendor look") then
       TB.vendor_look(ctx, it, ID .. "vo", true)
+      ImGui.EndMenu(ctx)
+    end
+    -- the plugin's picture, for the hover preview (TS_CV_Thumbs, Pro)
+    local th = FB.kind(it) == "fx" and W.thumbs()
+    if th and ImGui.BeginMenu(ctx, "Picture") then
+      local ident = select(2, FB.kind(it))
+      local key = th.key_of_ident(ident)
+      if th.can_capture() and ImGui.MenuItem(ctx, (key and th.has(key)) and "Take it again" or "Take it now") then
+        th.want(ident, nil, true)
+      end
+      if ImGui.MenuItem(ctx, "From a file\u{2026}", nil, false, key ~= nil) then th.from_file(key) end
+      if ImGui.MenuItem(ctx, "Remove", nil, false, key ~= nil and th.has(key)) then th.remove(key) end
       ImGui.EndMenu(ctx)
     end
     if FB.kind(it) == "chain" and ImGui.BeginMenu(ctx, "When clicked") then

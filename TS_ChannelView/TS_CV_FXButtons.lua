@@ -107,6 +107,9 @@ end
 -- A new button for a plugin picked in the browser (its entry) or a chain
 -- (an entry from TS_CV_Chains' list).
 function FB.fx_item(e)
+  -- its picture taken now, for the button's hover preview (Pro)
+  local th = require("TS_CV_Widgets").thumbs()
+  if th then th.want(e.ident, e.name) end
   return { cmd = FB.fx_cmd(e.ident), icon = FB.icon_for("fx", e.name, e.cats) or "",
            label = e.short or FB.short("fx", e.name) }
 end
