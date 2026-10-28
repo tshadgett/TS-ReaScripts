@@ -56,7 +56,10 @@ local PB
 local function pb()
   if PB == nil then
     PB = require("TS_CV_Edition").module("TS_CV_PatchBay") or false
-    if PB then PB.attach(ImGui) end
+    if PB then
+      PB.attach(ImGui)
+      PB.init({ pin = "patchbay_pinned", req = "patchbay_toggle", cmd = "patchbay_toggle_cmd" })
+    end
   end
   return PB or nil
 end
@@ -747,6 +750,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
   local open_it, want_view, dbl_track = nil, false, nil
 
   local row_x, row_y0 = ImGui.GetCursorPos(ctx)
+  -- the window's bottom, for the patch bay's edge below the row
+  local parent_bot = select(2, ImGui.GetWindowPos(ctx)) + select(2, ImGui.GetWindowSize(ctx))
   -- Popped unconditionally below (after the if/else, before return),
   -- the same as row_pad_y -- the push happens regardless of what
   -- BeginChild returns, so the pop has to as well.
@@ -872,15 +877,15 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
 
     -- The patch bay, over the strips and under them, the outputs' box
     -- after the insert tile. Last frame's geometry is kept for opening
-    -- and closing it: the name buttons' colour stripe, and the row.
+    -- and closing it: the row's bottom edge, and the row.
     if bay then
       local wx, wy = ImGui.GetWindowPos(ctx)
       local ww, wh = ImGui.GetWindowSize(ctx)
-      -- the name buttons: under the strips in mixer view, the row's top in
-      -- channel view; the bay (when open) is under them, at the row's foot
-      local nb_top = strips and (org_y + inner_h - C.STRIP_H - lift + 4) or org_y
-      local nb_bot = nb_top + C.STRIP_H - 8
-      bay.remember({ wx, nb_bot - C.COLOUR_STRIPE - 3, wx + ww, nb_bot + 3 }, { wx, wy, wx + ww, wy + wh })
+      -- a rest along the row's bottom edge (under its scrollbar, down to
+      -- the window's foot) brings up the chip, standing on that edge
+      local rb = wy + wh
+      local foot = math.max(rb + 4, math.min(parent_bot, rb + 16))
+      bay.remember({ wx, rb - 3, wx + ww, foot, side = "bottom", edge = foot }, { wx, wy, wx + ww, wy + wh })
       if lift > 0 then
         local hw_x = org_x + x_off + 12
         x_off = x_off + 12 + bay.hw_width()
@@ -892,6 +897,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
           sel = function(tr) return tr ~= nil and (MX.selected(tr) or tr == cur_track) end,
         })
       end
+      bay.chip(ctx)
     end
 
     -- A drag in progress. Over the outer quarters of a strip it's a move

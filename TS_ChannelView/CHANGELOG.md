@@ -1,5 +1,42 @@
 # ChannelView — changelog
 
+## 3.5.5 — knobs on a container, a quieter patch bay
+
+### ChannelView
+
+- **Knobs on a container.** Right-click a control on a plugin inside a
+  container ▸ *On its container* (or *On the outer container*) and it
+  shows on the container's own panel too, at the head of its bracket:
+  turning either turns both. They're REAPER's container parameters, so
+  they go with the container into an FX chain or a track template, and
+  ones mapped in REAPER's container window show there as well. A control
+  that's on its container has a corner in the container's colour. A macro
+  or modulator on it shows on both knobs, and can be dropped on or
+  adjusted from either. *Take off the container* removes it (*Hide from
+  the container* when a macro or modulator drives it).
+- **Fold a container to its panel** (its menu): only its knobs stay in
+  the row, standing for everything inside; its bracket says how many.
+- **ChannelView shows when REAPER starts** into a docker it shares with
+  other windows: it brings its own tab forward.
+- **The View menu's tooltips** for *Float plugins without controls* and
+  *Auto-hide this header* were swapped.
+
+### ChannelView Pro
+
+- **The patch bay no longer opens by itself.** Rest the pointer on the
+  track row's bottom edge (in the TCP window, the window's left edge) and
+  a small *Patch bay* chip grows out of it; click it to open the bay.
+- **View ▸ Patch bay** turns the patch bay off altogether (on by
+  default; shared with the TCP window).
+- **A pinned patch bay is open again next time.**
+- **Actions to open and close it:** *TS_ChannelView_PatchBay* and
+  *TS_ChannelView_TCP_PatchBay*, for a shortcut, a toolbar button (lit
+  while it's open) or a control surface.
+- **Edit layout's parameter list keeps up** with a plugin adding or
+  dropping parameters (a container's knobs, a JSFX, a band added), and
+  a container's arranged panel keeps its knobs on the right parameters
+  when one is taken off.
+
 ## 3.5.0 — patch bay, a new look, eight plugins per track
 
 ### ChannelView

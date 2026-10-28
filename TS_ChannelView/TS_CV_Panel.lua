@@ -16,6 +16,7 @@ local ED  = require("TS_CV_Edition")
 local U   = require("TS_CV_Util")
 local W   = require("TS_CV_Widgets")
 local ST = require("TS_CV_Style")
+local CT = require("TS_CV_Containers")
 local T   = require("TS_CV_FXTree")
 local M   = require("TS_CV_Mappings")
 local TL  = ED.module("TS_CV_Tiles")
@@ -3088,6 +3089,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             MR.note_ctl_hover(link.mod.guid, link.out, hx_, hy_)
           end
         end
+      elseif CT.on[fx.guid .. ":" .. p] then
+        -- on its container's own panel too (TS_CV_Containers)
+        W.mod_corner_col(dl, cell_x + cell_w, cell_y, 6, C.COL.brk_container)
       end
       -- a modulator's link being dragged in: this control takes it
       if MR.drag then

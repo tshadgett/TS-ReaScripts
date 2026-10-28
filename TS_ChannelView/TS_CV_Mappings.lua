@@ -2114,7 +2114,9 @@ function M.get_or_default(key, track, addr, cache_id)
   if not d then
     -- (another layout of theirs, never saved: a normal default)
     local kind = (not select(2, M.split_variant(key))) and RB.kind(key) or nil
-    if kind == "readelay" then d = { controls = {}, aliases = {} }
+    local cguid = key:match("^Container (%b{})$")
+    if cguid then d = require("TS_CV_Containers").default_layout(track, addr, cguid)
+    elseif kind == "readelay" then d = { controls = {}, aliases = {} }
     elseif kind == "reaverbate" then
       d = { controls = { { param = 1, type = "knob", label = "" }, { param = 4, type = "knob", label = "", bipolar = true } }, aliases = {} }
     else d = M.build_default(track, addr) end

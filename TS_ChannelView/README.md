@@ -115,9 +115,14 @@ selection).
 
 ## The patch bay (Pro)
 
-Rest the pointer on a name button's colour stripe for half a second and a
-patch bay opens under the name buttons: every send as a cable. In mixer
-view the strips and names lift to show it; in channel view the panels do.
+Rest the pointer on the track row's bottom edge, under its scrollbar, for
+half a second and a small **Patch bay** chip grows up out of it; click it,
+and the patch bay opens under the name buttons: every send as a cable. In
+mixer view the strips and names lift to show it; in channel view the panels
+do. *View ▸ Patch bay* turns it off altogether. The
+actions *TS_ChannelView_PatchBay* and
+*TS_ChannelView_TCP_PatchBay* open and close it from a shortcut, a toolbar
+button (lit while it's open) or a control surface.
 
 - Each track has an **IN** jack and an **OUT** jack (the master IN only);
   the audio device's outputs sit at the right end.
@@ -142,11 +147,13 @@ view the strips and names lift to show it; in channel view the panels do.
 - A collapsed folder stands for the tracks folded inside it: their cables
   come from and go to its jacks, fainter.
 - In mixer view the strips are dimmed and hold still while it's open. A
-  click anywhere outside the bay closes it, and so does Escape; the pin
-  keeps it open.
+  click anywhere outside the bay, Escape, or moving the pointer away from
+  the track row closes it. The pin at its bottom left keeps it open, and a
+  pinned bay is open again next time.
 
-**In the TCP window** the bay opens to the left of the track rows: rest the
-pointer on a row's colour strip, or use the pin at the bay's top left. The
+**In the TCP window** the bay opens to the left of the track rows, from the
+chip that grows out of the window's left edge when you rest on it;
+the pin at the bay's top left keeps it open. The
 jacks sit level with their tracks (IN above OUT), the rails run up beside
 the rows, and the outputs' box is under the last track. The docker widens
 to make room and REAPER's arrange view moves over; closing the bay gives
@@ -363,6 +370,23 @@ outline would have nothing to stand against.
   a plugin into it, unpack it (its plugins move out to where it was),
   remove it, or save it as an FX chain. *Move left / right* and *Remove*
   work anywhere in the chain.
+* **Knobs on a container.** Right-click a control on a plugin inside a
+  container ▸ *On its container* (or *On the outer container*, when it's
+  nested) and it shows on the container's own panel too, at the head of
+  its bracket: turning either turns both. These are REAPER's container
+  parameters, so they're saved with the project and go with the container
+  into an FX chain or a track template. Each control that's on a container
+  has a corner in the container's colour on its plugin's panel. A macro or
+  modulator on it shows its reach on both knobs, and can be dropped on,
+  or adjusted from, either. On the
+  container's panel, a control's right-click ▸ *Take off the container*
+  (*Hide from the container* when a macro or modulator drives it: the
+  link runs through that container parameter, so REAPER keeps it).
+  A parameter mapped in REAPER's own container window shows there as well;
+  the ones a macro or modulator link passes through stay off unless you
+  put them on. The container's menu ▸ **Fold to its panel** leaves just
+  that panel in the row, standing for everything inside (its bracket says
+  how many); *Unfold* brings them back.
 * **Oversampling.** REAPER's own, set from ChannelView: **OS** in a panel's
   foot oversamples that plugin, a container's menu ▸ *Oversample everything
   in it* does a container, and **OS** in the header bar does the whole
@@ -1581,6 +1605,7 @@ them up the first time ChannelView shows it.
 | `TS_CV_Config.lua` | sizes, colours, glyphs, behaviour. All hand-editable |
 | `TS_CV_Util.lua` | name cleaning, INI, parameter helpers |
 | `TS_CV_FXTree.lua` | container-aware FX chain walk |
+| `TS_CV_Containers.lua` | a container's own panel: the controls put on it, folding to it |
 | `TS_CV_Mappings.lua` | the layout library |
 | `TS_CV_Edition.lua` | Standard or Pro: finds Pro's files, and greys Pro's menu items without them |
 | `TS_CV_Pro.lua` | ChannelView Pro's package; Standard looks for it (Pro) |
@@ -1624,6 +1649,7 @@ them up the first time ChannelView shows it.
 | `TS_CV_Share.lua` | importing and exporting layouts (*Layouts ▸ Import / Export*) |
 | `TS_CV_ColourPick.lua` | the colour picker every colour dialog shares: palettes, eyedropper, recent colours |
 | `TS_ChannelView_ToggleMixer.lua` | the *Toggle mixer view* action, for a shortcut or toolbar |
+| `TS_ChannelView_PatchBay.lua`, `TS_ChannelView_TCP_PatchBay.lua` | open or close the patch bay, in ChannelView or its TCP window (Pro) |
 | `TS_ChannelView_BypassModulation.lua` | the *Bypass modulation* action: every modulator on the selected tracks held still, or moving again |
 | `TS_CV_Toolbar.lua` | an action bar: its buttons, menus, switches, icon picker |
 | `TS_CV_FXButtons.lua` | buttons that add a plugin or an FX chain |

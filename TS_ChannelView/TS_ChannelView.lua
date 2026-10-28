@@ -1,12 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.5.0
+-- @version 3.5.5
 -- @changelog
---  A new look for options and dialogs, up to eight plugins per track
---  measured (only the tracks on screen), links shown where REAPER has them,
---  the Channel panel's header in the track's colour, the Dock menu fixed.
---  With Pro: the patch bay, macros and modulators on canvas handles,
---  ReaXcomp and ReaSynth canvases. See the CHANGELOG.
+--  Knobs on a container: put a plugin's control on its container's own
+--  panel, macros and all, and fold the container to that panel.
+--  ChannelView shows when REAPER starts into a shared docker. With Pro:
+--  the patch bay opens from a chip on the edge, not by itself. See the
+--  CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -26,6 +26,7 @@
 --  [nomain] TS_CV_MidiLearn.lua
 --  [nomain] TS_CV_Drawers.lua
 --  [nomain] TS_CV_Style.lua
+--  [nomain] TS_CV_Containers.lua
 --  [nomain] TS_CV_ActionEditor.lua
 --  [nomain] TS_CV_ActionIcons.lua
 --  [main]   TS_ChannelView_Toolbars.lua
@@ -195,6 +196,7 @@ local RC = require("TS_CV_ReaComp")
 local BZ = require("TS_CV_Busy")
 local ML = require("TS_CV_MidiLearn")
 local MD = require("TS_CV_Mod")
+local CT = require("TS_CV_Containers")
 local MR = require("TS_CV_ModRack")
 local TB = require("TS_CV_Toolbar")
 local DR = require("TS_CV_Drawers")
@@ -471,6 +473,17 @@ local function rescan(force)
     end
     list = MD.strip(app.track, full)
     if not TP.probes_shown() then list = TP.strip_probes(app.track, list) end
+    -- a container with knobs on it gets a panel of its own, at its head;
+    -- folded to that panel, what's inside it stays out of the row
+    local tr, with_panel = app.track, {}
+    list = T.with_container_panels(list, function(n)
+      local vis = CT.visible(tr, n.addr, n.guid, n.path)
+      if #vis == 0 then return nil end
+      with_panel[n.guid] = true
+      return { visible = vis, sig = table.concat(vis, ",") }
+    end)
+    list = T.fold(list, function(g) return with_panel[g] and CT.folded(g) end)
+    CT.note(app.track, list)
   end
   local h = T.hash(list)
   -- Two different things happen here. A FORCED rescan re-reads the chain,
@@ -2085,6 +2098,20 @@ box_menu_items = function(node)
   if ImGui.MenuItem(ctx, "Expand everything in it", nil, false, #inside > 0) then
     for _, f in ipairs(inside) do set_fold(f, false) end
   end
+  -- its own panel (the controls put on it) standing for everything in it
+  do
+    local has = CT.shown[node.guid] and #CT.shown[node.guid] > 0
+    local folded = has and CT.folded(node.guid)
+    if ImGui.MenuItem(ctx, folded and "Unfold: show what's in it" or "Fold to its panel", nil, false, has and true or false) then
+      CT.set_folded(node.guid, not folded)
+      rescan(true)
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, has and (folded and "Bring its plugins back into the row." or
+        "Show only the container's own panel: the controls put on it.") or
+        "Put a control on it first (a control's right-click \u{25B8} On its container).")
+    end
+  end
   if ImGui.MenuItem(ctx, "Add plugin into it\u{2026}") then
     B.open_menu({ parent = node.path, gap = #(node.children or {}) })
   end
@@ -2524,13 +2551,21 @@ local function panel_menu()
   end
   do
     local box = fx.ancestors and fx.ancestors[#fx.ancestors]
+    -- a container's own panel: its own menu
+    if fx.container_panel then
+      box = nil
+      for _, b in ipairs(app.brackets or {}) do
+        if b.kind == "container" and b.node.guid == fx.guid then box = b.node break end
+      end
+    end
     if box and ImGui.BeginMenu(ctx, "Container: " .. U.truncate(box_label(box), 24)) then
       box_menu_items(box)
       ImGui.EndMenu(ctx)
     end
   end
   ImGui.Separator(ctx)
-  if ImGui.MenuItem(ctx, fx.is_container and "Remove container" or "Remove plugin from the chain") then
+  if ImGui.MenuItem(ctx, fx.container_panel and "Remove container and everything in it"
+                        or fx.is_container and "Remove container" or "Remove plugin from the chain") then
     remove_fx(fx)
     ImGui.EndPopup(ctx)
     return
@@ -3110,6 +3145,78 @@ local function plugin_sub(fx)
   end
 end
 
+-- A control and its container's panel (TS_CV_Containers): put it on the
+-- panel of the container it's in (or one further out), or, on a
+-- container's own panel, take it off.
+local function container_items(fx, c)
+  if not (app.track and c and c.param and c.param >= 0) then return end
+  local tr = app.track
+  if fx.container_panel then
+    ImGui.SeparatorText(ctx, "Container")
+    local slot, p = CT.source(tr, fx.addr, c.param)
+    local inner
+    if slot then
+      local path = {}
+      for d, v in ipairs(fx.path_t) do path[d] = v end
+      path[#path + 1] = slot
+      inner = T.addr_of(tr, path)
+    end
+    -- a macro's or modulator's link runs through it: off the panel, but
+    -- the parameter stays (the link needs it)
+    local busy = CT.carries(tr, fx.addr, fx.path_t, c.param)
+    if ImGui.MenuItem(ctx, busy and "Hide from the container" or "Take off the container") then
+      reaper.Undo_BeginBlock()
+      local what = CT.take_off(tr, fx.addr, fx.guid, fx.path_t, c.param)
+      if what then CT.fix_layout(fx.guid, c.param, what == "deleted") end
+      reaper.Undo_EndBlock("ChannelView: take a control off its container", -1)
+      M.clear_default_cache()
+      rescan(true)
+    end
+    if busy and ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "A macro or modulator drives it through the container, so the\n" ..
+        "container keeps the parameter (REAPER's Param menu still lists it);\nit just leaves this panel.")
+    end
+    if inner and ImGui.MenuItem(ctx, "Open " .. U.truncate(U.clean_fx_name(select(2, reaper.TrackFX_GetFXName(tr, inner, ""))), 24) .. "'s window") then
+      reaper.TrackFX_Show(tr, inner, 3)
+    end
+    return
+  end
+  local anc = fx.ancestors
+  if not anc or #anc == 0 then return end
+  ImGui.SeparatorText(ctx, "Container")
+  -- the container it's in first, then those further out
+  for up = 1, #anc do
+    local node = anc[#anc - up + 1]
+    local on = CT.is_on(tr, fx.path_t, c.param, up)
+    local label = (up == 1 and "On its container" or "On the outer container") .. ": " .. box_label(node)
+    if ImGui.MenuItem(ctx, label .. "##ct" .. up, nil, on) then
+      reaper.Undo_BeginBlock()
+      if on then
+        local p = CT.put(tr, fx.path_t, c.param, up)   -- (found, not made)
+        local what = p and CT.take_off(tr, node.addr, node.guid, node.path, p)
+        if what then CT.fix_layout(node.guid, p, what == "deleted") end
+      else
+        local p, cguid = CT.put(tr, fx.path_t, c.param, up)
+        -- a container panel with a layout of its own takes it at the end
+        local l = p and M.get("Container " .. cguid)
+        if l then
+          l = M.copy(l)
+          l.controls = l.controls or {}
+          l.controls[#l.controls + 1] = M.apply_default_look({ param = p, type = "knob", label = "" })
+          M.set("Container " .. cguid, l); M.save()
+        end
+      end
+      reaper.Undo_EndBlock("ChannelView: " .. (on and "take a control off" or "put a control on") .. " its container", -1)
+      M.clear_default_cache()
+      rescan(true)
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, on and "On that container's panel. Click: take it off."
+        or "Show this control on the container's own panel too:\nturning either turns both, and it goes with the container\ninto an FX chain or a track template.")
+    end
+  end
+end
+
 local function automate_items(fx, c)
   if not (app.track and c and c.param and c.param >= 0) then return end
   ImGui.SeparatorText(ctx, "Automate")
@@ -3230,6 +3337,7 @@ local function control_menu()
     ImGui.SeparatorText(ctx, "Look")
     look_items(fx, key, layout, idx, c, true)
     automate_items(fx, c)
+    container_items(fx, c)
     ImGui.Separator(ctx)
     plugin_sub(fx)
     ImGui.EndPopup(ctx)
@@ -3385,6 +3493,7 @@ local function control_menu()
 
   ------------------------------------------------------------ AUTOMATE
   automate_items(fx, c)
+  container_items(fx, c)
 
   ------------------------------------------------------------- ARRANGE
   ImGui.SeparatorText(ctx, "Arrange")
@@ -3824,6 +3933,11 @@ local function menu_bar()
         app.float_empty = not app.float_empty
         ext_set(FLOAT_KEY, app.float_empty and "1" or "0")
       end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "A plugin whose layout has no controls opens its own window when you\n" ..
+          "come to its track, and it closes when you move on, unless you pin it\n" ..
+          "(the pin in its panel's header).")
+      end
       if ImGui.MenuItem(ctx, "Auto-hide this header", nil, app.header_hide) then
         app.header_hide = not app.header_hide
         ext_set(app.hide_key, app.header_hide and "1" or "0")
@@ -3831,11 +3945,6 @@ local function menu_bar()
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "For a small screen: the panels take the header's room, and it slides\n"
           .. "out over them while the pointer is at the window's top edge.")
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "A plugin whose layout has no controls opens its own window when you\n" ..
-          "come to its track, and it closes when you move on, unless you pin it\n" ..
-          "(the pin in its panel's header).")
       end
       if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
         C.SHOW_VALUES = not C.SHOW_VALUES
@@ -3849,6 +3958,16 @@ local function menu_bar()
       end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Off: the wheel only scrolls.")
+      end
+      -- the patch bay (Pro) at all (shared with the TCP window)
+      do
+        local bay = MX.patch_bay()
+        if ED.item(ImGui, ctx, "Patch bay", nil, bay and bay.enabled()) and bay then
+          bay.set_enabled(not bay.enabled())
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Rest on the row's bottom edge: a chip that opens it.\nOff: no chip, and its actions do nothing.")
+        end
       end
 
       -- the width of a control's column, for every panel
@@ -4521,6 +4640,7 @@ local function bracket_tip(b)
     local inside = #(n.children or {})
     local t = ("Container: %s \u{2014} %d %s"):format(box_label(n), inside,
       inside == 1 and "slot" or "slots")
+    if CT.folded(n.guid) and CT.shown[n.guid] then t = t .. "\nFolded to its panel" end
     if not T.get_enabled(app.track, n.addr) then t = t .. "\nBypassed" end
     if n.parallel ~= 0 then t = t .. "\nIn parallel with previous" end
     local st = T.os_state(app.track, { addr = n.addr, ancestors = box_ancestors(n) })
@@ -4560,6 +4680,10 @@ local function draw_brackets()
       local ly = math.floor((app.brk_top or ra.y) + (b.row + 0.5) * C.BRK_ROW_H) + 0.5
       local sq = 7
       local label = box and box_label(b.node) or nil
+      -- folded to its panel: says so, and how much it stands for
+      if label and CT.shown[b.node.guid] and CT.folded(b.node.guid) then
+        label = label .. "  \u{25B8} " .. #(b.node.children or {})
+      end
       local tw, th = 0, 0
       if label then
         tw, th = ImGui.CalcTextSize(ctx, label)
@@ -5355,6 +5479,19 @@ local function frame()
     local d = ImGui.GetWindowDockID(ctx)
     if d ~= dock_id then dock_id = d; ext_set(DOCK_KEY, d) end
     if not app.header_hide then menu_bar() end
+    app.shown_once = true
+  elseif not app.shown_once and not RACK and dock_id ~= 0 then
+    -- Started with REAPER into a docker whose tab REAPER doesn't bring
+    -- forward (another window's tab is showing, or the tabs are hidden):
+    -- bring ours forward, once a second for the first 15 seconds.
+    local now = reaper.time_precise()
+    app.start_t = app.start_t or now
+    if now - app.start_t < 15 and (not app.activate_t or now - app.activate_t >= 1)
+       and reaper.JS_Window_Find and reaper.DockWindowActivate then
+      app.activate_t = now
+      local h = reaper.JS_Window_Find(C.WIN_TITLE, true)
+      if h then reaper.DockWindowActivate(h) end
+    end
   end
   ImGui.PopStyleVar(ctx)
 

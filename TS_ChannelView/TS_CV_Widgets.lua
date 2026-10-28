@@ -3523,6 +3523,17 @@ local function icon_pin(dl, x, y, sz, col)
   pin_seg(0.30, 0, 0.64, 0, 0.06)         -- the point
 end
 
+-- The patch bay: two jacks, a cable sagging between them.
+local function icon_patchbay(dl, x, y, sz, col)
+  local function P(u, v) return x + sz * u, y + sz * v end
+  local r = sz * 0.13
+  local ax, ay = P(0.24, 0.32); local bx, by = P(0.76, 0.32)
+  ImGui.DrawList_AddCircle(dl, ax, ay, r, col, 12, math.max(1.0, sz * 0.08))
+  ImGui.DrawList_AddCircle(dl, bx, by, r, col, 12, math.max(1.0, sz * 0.08))
+  local c1x, c1y = P(0.24, 0.92); local c2x, c2y = P(0.76, 0.92)
+  ImGui.DrawList_AddBezierCubic(dl, ax, ay + r, c1x, c1y, c2x, c2y, bx, by + r, col, math.max(1.2, sz * 0.09), 16)
+end
+
 -- An eyedropper: a squeeze bulb top right, a collar, and a glass tube
 -- running down to its tip bottom left.
 local function icon_dropper(dl, x, y, sz, col)
@@ -3571,6 +3582,7 @@ W.ICONS = {
   power    = icon_power,
   float    = icon_float,
   pin      = icon_pin,
+  patchbay = icon_patchbay,
   menu     = icon_menu,
   -- A panel folds away to the left and opens out to the right: collapse
   -- points left, expand points right.
@@ -3848,6 +3860,9 @@ local function rot_get(ctx, text, col, px, w, h)
   rot_img[key] = { img = img }
   return img
 end
+
+-- Is vertical text turned (true), or stacked letters (false)?
+function W.text_turns() return rot_usable() and true or false end
 
 -- Text running down a narrow bar -- what a console does with a collapsed
 -- strip. Returns the height used.

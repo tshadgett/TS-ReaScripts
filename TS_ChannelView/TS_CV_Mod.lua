@@ -555,9 +555,16 @@ function MD.find(track, guid)
   return nil
 end
 
--- The link driving this plugin's parameter, or nil.
+-- A container's parameter that stands for a plugin's (TS_CV_Containers):
+-- "{container guid}:param" -> "{plugin guid}:param".
+MD.aliases = {}
+
+-- The link driving this plugin's parameter, or nil. A container's own
+-- parameter shows the link of the plugin parameter it stands for.
 function MD.link_of(track, guid, param)
-  return MD.scan(track).links[(guid or "") .. ":" .. param]
+  local k = (guid or "") .. ":" .. param
+  local links = MD.scan(track).links
+  return links[k] or (MD.aliases[k] and links[MD.aliases[k]])
 end
 
 -- A source's value now, 0..1 (its output k, or a modulator's output).

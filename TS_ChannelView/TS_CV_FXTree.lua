@@ -346,7 +346,7 @@ function T.hash(list)
   local parts = {}
   for i, e in ipairs(list) do
     parts[i] = (e.guid ~= "" and e.guid or (e.path .. ":" .. e.name))
-               .. "@" .. e.path .. "/" .. (e.parallel or 0)
+               .. "@" .. e.path .. "/" .. (e.parallel or 0) .. (e.sig and ("#" .. e.sig) or "")
   end
   -- containers and their own parallel setting, which no panel carries
   local function walk(nodes)
@@ -361,19 +361,8 @@ function T.hash(list)
   return table.concat(parts, "|")
 end
 
--- T.collect's list without some top-level slots (`drop(slot)` true): the
--- plugin row leaves out what has panels of its own (ChannelView
--- Modulators) or nothing to show (the probes, when hidden). The tree's
--- first/last indexes point into the list, so they're renumbered.
-function T.without(list, drop)
-  local out = { tree = {} }
-  for k, v in pairs(list) do if type(k) ~= "number" and k ~= "tree" then out[k] = v end end
-  for _, fx in ipairs(list) do
-    if not (fx.path_t and #fx.path_t == 1 and drop(fx.path_t[1])) then out[#out + 1] = fx end
-  end
-  for _, node in ipairs(list.tree or {}) do
-    if not (node.path and #node.path == 1 and drop(node.path[1])) then out.tree[#out.tree + 1] = node end
-  end
+-- Points the tree's first/last at the list as it now is.
+local function renumber(out)
   local function renum(nodes)
     for _, node in ipairs(nodes) do
       local first, last
@@ -388,6 +377,87 @@ function T.without(list, drop)
   end
   renum(out.tree)
   return out
+end
+
+local function shell_of(list)
+  local out = { tree = list.tree or {} }
+  for k, v in pairs(list) do if type(k) ~= "number" and k ~= "tree" then out[k] = v end end
+  return out
+end
+
+-- T.collect's list without some top-level slots (`drop(slot)` true): the
+-- plugin row leaves out what has panels of its own (ChannelView
+-- Modulators) or nothing to show (the probes, when hidden). The tree's
+-- first/last indexes point into the list, so they're renumbered.
+function T.without(list, drop)
+  local out = shell_of(list)
+  out.tree = {}
+  for _, fx in ipairs(list) do
+    if not (fx.path_t and #fx.path_t == 1 and drop(fx.path_t[1])) then out[#out + 1] = fx end
+  end
+  for _, node in ipairs(list.tree or {}) do
+    if not (node.path and #node.path == 1 and drop(node.path[1])) then out.tree[#out.tree + 1] = node end
+  end
+  return renumber(out)
+end
+
+-- A container's own panel (TS_CV_Containers) at the head of what's in
+-- it: `panel(node)` gives the extra fields for one (nil: none), for each
+-- container with plugins in it. The entry is the container itself, as an
+-- empty container's is, with container_panel set.
+function T.with_container_panels(list, panel)
+  local out = shell_of(list)
+  local heads = {}
+  local function walk(nodes, ancestors)
+    for _, n in ipairs(nodes or {}) do
+      if n.kind == "container" and n.children and #n.children > 0 then
+        local extra = panel(n)
+        if extra and n.first and list[n.first] then heads[n.first] = heads[n.first] or {}; table.insert(heads[n.first], 1, { n, ancestors, extra }) end
+        local inner = {}
+        for i, a in ipairs(ancestors) do inner[i] = a end
+        inner[#inner + 1] = n
+        walk(n.children, inner)
+      end
+    end
+  end
+  walk(list.tree, {})
+  for i, fx in ipairs(list) do
+    -- outer containers' panels first: walk() put the innermost first
+    local hs = heads[i]
+    if hs then
+      for k = #hs, 1, -1 do
+        local n, anc, extra = hs[k][1], hs[k][2], hs[k][3]
+        local parent = {}
+        for d = 1, #n.path - 1 do parent[d] = n.path[d] end
+        local e = {
+          addr = n.addr, name = "Container " .. n.guid, alias = n.alias or "Container",
+          path = table.concat(n.path, "."), path_t = n.path, parent_path = parent,
+          index = n.index, siblings = n.count, depth = #n.path - 1, guid = n.guid,
+          top_index = n.path[1], is_top_level = (#n.path == 1), parallel = n.parallel,
+          is_container = true, container_panel = true, ancestors = anc,
+        }
+        for k2, v in pairs(extra) do e[k2] = v end
+        out[#out + 1] = e
+      end
+    end
+    out[#out + 1] = fx
+  end
+  return renumber(out)
+end
+
+-- Leaves out what's inside a container folded to its panel (`folded(guid)`).
+function T.fold(list, folded)
+  local out = shell_of(list)
+  local any = false
+  for _, fx in ipairs(list) do
+    local hidden = false
+    for _, a in ipairs(fx.ancestors or {}) do
+      if folded(a.guid) then hidden = true break end
+    end
+    if hidden then any = true else out[#out + 1] = fx end
+  end
+  if not any then return list end
+  return renumber(out)
 end
 
 -- ---------------------------------------------------------------------

@@ -1537,6 +1537,33 @@ do
   check("brackets: empty container", #list .. (list[2].is_container and "c" or "") ..
         "/" .. br[1].kind .. br[1].first .. br[1].last, "2c/container22")
 
+  -- a container with knobs on it: its own panel at the head of its
+  -- bracket; folded to it, what's inside drops out of the row
+  do
+    reset()
+    local lp = T.with_container_panels(T.collect(TR), function(n)
+      if n.name == "C1" or n.name == "C2" then return { visible = { 0 }, sig = "0" } end
+    end)
+    local g = {}
+    for i, e in ipairs(lp) do g[i] = (e.container_panel and "*" or "") .. e.guid:gsub("[{}]", "") end
+    check("container panels: at the head of each container", table.concat(g, ","), "A,*C1,B,*C2,D,E,F,G")
+    local brs = {}
+    for _, b in ipairs(T.groups(lp)) do if b.kind == "container" then brs[#brs + 1] = b.node.name .. b.first .. "-" .. b.last end end
+    table.sort(brs)
+    check("container panels: the brackets take them in", table.concat(brs, " "), "C12-6 C24-6")
+    check("container panels: a panel is its container", lp[2].addr == lp[3].ancestors[1].addr and lp[2].path == "1", true)
+    local f2 = T.fold(lp, function(gd) return gd == "{C2}" end)
+    g = {}
+    for i, e in ipairs(f2) do g[i] = e.guid:gsub("[{}]", "") end
+    check("container panels: folded, its plugins leave the row", table.concat(g, ","), "A,C1,B,C2,F,G")
+    local f1 = T.fold(lp, function(gd) return gd == "{C1}" end)
+    g = {}
+    for i, e in ipairs(f1) do g[i] = e.guid:gsub("[{}]", "") end
+    check("container panels: an outer one folded takes the inner one's panel too", table.concat(g, ","), "A,C1,F,G")
+    check("container panels: what's on them changes the chain's hash", T.hash(lp) ~= T.hash(T.with_container_panels(T.collect(TR), function(n)
+      if n.name == "C1" or n.name == "C2" then return { visible = { 0, 1 }, sig = "0,1" } end end)), true)
+  end
+
   -- moves
   reset()
   T.move(TR, { 1, 1, 0 }, {}, 0)                -- D out to the front
@@ -9039,6 +9066,88 @@ do
     fake.IsMouseClicked = function() return false end
     fake.GetMousePos = function() return -100, -100 end
   end
+  -- opening: the chip, the toggle action, View > Patch bay off, a pin
+  -- kept for next time, and leaving the row closes it only once entered
+  do
+    local ext, clock = {}, 100
+    local tp, ge, se, de = reaper.time_precise, reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState
+    reaper.time_precise = function() return clock end
+    reaper.GetExtState = function(sec, k) return ext[sec .. "/" .. k] or "" end
+    reaper.SetExtState = function(sec, k, v) ext[sec .. "/" .. k] = v end
+    reaper.DeleteExtState = function(sec, k) ext[sec .. "/" .. k] = nil end
+    local st_ = PBt._st
+    st_.open, st_.pinned, st_.sheet, st_.drag = false, false, nil, nil
+    PBt.init({ pin = "pb_pin_t", req = "pb_req_t" })
+    PBt.remember({ 0, 500, 800, 510 }, { 0, 0, 800, 520 })
+    fake.IsMousePosValid = function() return true end
+    fake.IsWindowHovered = function() return true end
+    fake.GetMousePos = function() return 300, 505 end           -- on the edge
+    PBt.reveal("ctx", false); clock = clock + 1; PBt.reveal("ctx", false)
+    check("bay: a rest on the edge brings up the chip, not the bay",
+      tostring(st_.open) .. " " .. tostring(st_.chip_at ~= nil), "false true")
+    -- the chip: drawn under the pointer, a click on it opens the bay
+    fake.InvisibleButton = function() return true end
+    fake.GetWindowPos = function() return 286, 493 end
+    fake.Begin = function() return true end
+    fake.InvisibleButton = function() return false end
+    local keep_at, put_x, put_y = st_.chip_at, nil, nil
+    fake.SetNextWindowPos = function(_, x, y) put_x, put_y = x, y end
+    st_.chip_at = { 3, 300, { 0, 90, 7, 490, side = "left", edge = 0 } }   -- the TCP window's left edge
+    local oku, erru = pcall(PBt.chip, "ctx")
+    check("bay: the chip draws standing up (the TCP's)", oku or erru, true)
+    check("bay: the TCP's chip grows out of the window's left edge, reaching over it", put_x, -PBt.CHIP_OVER)
+    -- ChannelView's stands on the row's bottom edge, kept inside the row
+    st_.chip_at = { 5, 505, { 0, 497, 800, 516, side = "bottom", edge = 516 } }
+    pcall(PBt.chip, "ctx")
+    check("bay: ChannelView's chip stands on the row's bottom edge, inside it", tostring(put_y + 24) .. " " .. tostring(put_x >= 0), "516 true")
+    fake.SetNextWindowPos = nil
+    st_.chip_at = keep_at
+    fake.InvisibleButton = function() return true end
+    local okc, errc = pcall(PBt.chip, "ctx")
+    check("bay: the chip draws", okc or errc, true)
+    check("bay: a click on the chip opens it (the chip gone)", tostring(st_.open) .. " " .. tostring(st_.chip_at), "true nil")
+    fake.InvisibleButton = function() return false end
+    st_.open = false
+    -- off the edge and the chip: it goes
+    PBt.reveal("ctx", false); clock = clock + 1; PBt.reveal("ctx", false)
+    local up = st_.chip_at ~= nil
+    fake.GetMousePos = function() return 300, 300 end
+    PBt.reveal("ctx", false); clock = clock + 1; PBt.reveal("ctx", false)
+    check("bay: the chip goes once the pointer is off it and the edge", tostring(up) .. " " .. tostring(st_.chip_at), "true nil")
+    st_.open = false
+    -- View > Patch bay off: no chip, the action does nothing
+    PBt.set_enabled(false)
+    fake.GetMousePos = function() return 300, 505 end
+    ext["TS_ChannelView/pb_req_t"] = "1"
+    PBt.reveal("ctx", false); clock = clock + 1; PBt.reveal("ctx", false)
+    check("bay: off, no chip and the action does nothing", tostring(st_.chip_at) .. " " .. tostring(st_.open), "nil false")
+    PBt.set_enabled(true)
+    -- the toggle action, from a shortcut with the pointer elsewhere: it
+    -- stays open until the pointer has been in the row and left it
+    fake.GetMousePos = function() return 300, 900 end
+    ext["TS_ChannelView/pb_req_t"] = "1"
+    PBt.reveal("ctx", false)
+    check("bay: the toggle action opens it (its request taken)", tostring(st_.open) .. " " .. tostring(ext["TS_ChannelView/pb_req_t"]), "true nil")
+    clock = clock + 1; PBt.reveal("ctx", false); clock = clock + 1; PBt.reveal("ctx", false)
+    local held = st_.open
+    fake.GetMousePos = function() return 300, 300 end; PBt.reveal("ctx", false)
+    fake.GetMousePos = function() return 300, 900 end
+    PBt.reveal("ctx", false); clock = clock + 1; PBt.reveal("ctx", false)
+    check("bay: opened from outside, it waits for the pointer to come and go", tostring(held) .. " " .. tostring(st_.open), "true false")
+    -- pinned: kept, and open again next time; Escape unpins
+    PBt.set_pinned(true)
+    st_.open, st_.pinned = false, false
+    PBt.init({ pin = "pb_pin_t", req = "pb_req_t" })
+    check("bay: pinned, it's open next time", tostring(st_.open) .. " " .. tostring(st_.pinned), "true true")
+    fake.IsKeyPressed = function() return true end
+    PBt.reveal("ctx", false)
+    fake.IsKeyPressed = function() return false end
+    check("bay: Escape closes and unpins it, for next time too", tostring(st_.open) .. " " .. tostring(ext["TS_ChannelView/pb_pin_t"]), "false 0")
+    st_.keys = nil
+    fake.IsWindowHovered = function() return false end
+    fake.GetMousePos = function() return -100, -100 end
+    reaper.time_precise, reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState = tp, ge, se, de
+  end
   -- the TCP's bay: a column left of the rows, the same cables turned on
   -- their side
   do
@@ -9054,6 +9163,98 @@ do
   end
   PBt._st.open = false
   Wt.push_small, Wt.pop_small, Wt.tip = wa[1], wa[2], wa[3]
+  reaper = real
+end
+
+-- ---------------------------------------------------------------------
+-- a container's own panel: which of its mapped parameters it shows
+-- ---------------------------------------------------------------------
+do
+  local CT = require("TS_CV_Containers")
+  local real = reaper
+  local cfg, proj = {}, {}
+  -- the container at top slot 0 (addr 0) inside an outer container (addr 9, path {3}):
+  -- its params 0..3 mapped from slot 1's 0, 2, 5, 7; then Bypass, Wet, Delta
+  local nparams = { [0] = 7, [9] = 4 }
+  local map = { [0] = { { 1, 0 }, { 1, 2 }, { 1, 5 }, { 1, 7 } }, [9] = { { 0, 3 } } }
+  reaper = setmetatable({
+    TrackFX_GetNumParams = function(_, a) return nparams[a] or 0 end,
+    TrackFX_GetNamedConfigParm = function(_, a, k)
+      local i, what = k:match("^param%.(%d+)%.container_map%.(%w+_?%w*)$")
+      if i then
+        local m = map[a] and map[a][tonumber(i) + 1]
+        if not m then return false, "" end
+        -- REAPER deletes a mapping when this is read
+        if what == "delete" then
+          table.remove(map[a], tonumber(i) + 1); nparams[a] = nparams[a] - 1
+          return true, ""
+        end
+        return true, tostring(what == "fx_index" and m[1] or m[2])
+      end
+      local v = cfg[a .. ":" .. k]
+      return v ~= nil, v or ""
+    end,
+    GetProjExtState = function(_, _, k) return 1, proj[k] or "" end,
+    SetProjExtState = function(_, _, k, v) proj[k] = v end,
+  }, { __index = real })
+  local T2 = require("TS_CV_FXTree")
+  local addr_of = T2.addr_of
+  T2.addr_of = function(_, path) return (#path == 1 and path[1] == 3) and 9 or nil end
+  -- param 1 carries a link; param 3 is mapped up into the outer container
+  cfg["0:param.1.plink.active"] = "1"
+  check("container panel: mapped ones shown, ones carrying a link or mapped up left off",
+    table.concat(CT.visible("tr", 0, "{C}", { 3, 0 }), ","), "0,2")
+  proj["cpanel:{C}#1:2"] = "S"   -- (slot 1's parameter 2 is container param 1)
+  proj["cpanel:{C}#1:5"] = "H"
+  check("container panel: put on shows a link's carrier; taken off hides one",
+    table.concat(CT.visible("tr", 0, "{C}", { 3, 0 }), ","), "0,1")
+  check("container panel: its mapped count", CT.mapped("tr", 0), 4)
+  -- a container's knob shows the link of the plugin parameter under it
+  do
+    local MDt = require("TS_CV_Mod")
+    T2.addr_of = function(_, path)
+      if #path == 1 and path[1] == 3 then return 9 end
+      if #path == 3 and path[3] == 1 then return 5 end
+      return nil
+    end
+    reaper.TrackFX_GetFXGUID = function(_, a) return a == 5 and "{P}" or nil end
+    proj["cpanel:{C}#1:0"] = nil
+    CT.note("tr", { { container_panel = true, visible = { 0 }, guid = "{C}", addr = 0, path_t = { 3, 0 } } })
+    check("container panel: its knob stands for the plugin's parameter", MDt.aliases["{C}:0"], "{P}:0")
+    check("container panel: shown once, it stays shown", proj["cpanel:{C}#1:0"], "S")
+    local scan = MDt.scan
+    MDt.scan = function() return { links = { ["{P}:0"] = { tag = "L" } } } end
+    check("container panel: a macro's link shows on both knobs",
+      (MDt.link_of("tr", "{C}", 0) or {}).tag .. (MDt.link_of("tr", "{P}", 0) or {}).tag, "LL")
+    MDt.scan = scan
+    reaper.TrackFX_GetFXGUID = nil
+    T2.addr_of = function(_, path) return (#path == 1 and path[1] == 3) and 9 or nil end
+    proj["cpanel:{C}#1:0"] = nil
+  end
+  -- taken off: a plain mapping is deleted; one carrying a link is only hidden
+  CT.take_off("tr", 0, "{C}", { 3, 0 }, 0)
+  check("container panel: taken off, a plain mapping is deleted", CT.mapped("tr", 0) .. " " .. nparams[0], "3 6")
+  cfg["0:param.1.plink.active"], cfg["0:param.0.plink.active"] = nil, "1"   -- its link moves down with it
+  CT.take_off("tr", 0, "{C}", { 3, 0 }, 0)   -- now slot 1's param 2, put on by hand but carrying a link
+  check("container panel: one carrying a link is hidden, not deleted",
+    CT.mapped("tr", 0) .. " " .. tostring(proj["cpanel:{C}#1:2"]), "3 H")
+  -- the container panel's own layout follows: the control gone, the ones after it renumbered
+  do
+    local Mt = require("TS_CV_Mappings")
+    local g, st_, sv = Mt.get, Mt.set, Mt.save
+    local saved
+    Mt.get = function(k) return k == "Container {C}" and { controls = { { param = 0 }, { param = 2 }, { param = 3, param2 = 4 } }, grid = { cols = 4 } } or nil end
+    Mt.set = function(_, l) saved = l end
+    Mt.save = function() end
+    CT.fix_layout("{C}", 2, true)
+    local ps = {}
+    for i, c in ipairs(saved.controls) do ps[i] = c.param .. (c.param2 and ("/" .. c.param2) or "") end
+    check("container panel: its layout follows a deleted parameter", table.concat(ps, ",") .. " " .. tostring(saved.grid ~= nil), "0,2/3 true")
+    Mt.get, Mt.set, Mt.save = g, st_, sv
+  end
+  CT.set_folded("{C}", true)
+  check("container panel: folded is kept in the project", CT.folded("{C}") and proj["cfold:{C}"] == "1", true)
+  T2.addr_of = addr_of
   reaper = real
 end
 

@@ -822,10 +822,11 @@ end
 -- ---------------------------------------------------------------------
 -- the patch bay (Pro): a column left of the rows
 -- ---------------------------------------------------------------------
--- It opens as ChannelView's mixer bay does (½ s on a row's colour strip,
--- or pinned) and, docked, the docker widens by its width so the rows keep
--- theirs: the arrange view moves over. A script has no way to set a
--- docker's width, but REAPER takes a drag of the docker's own edge
+-- It opens from the chip a ½ s rest on the window's left edge brings up,
+-- as ChannelView's mixer bay does, or from its toggle action; pinned, it
+-- opens again next time. Docked, the docker widens by its width so the
+-- rows keep theirs: the arrange view moves over. A script has no way to
+-- set a docker's width, but REAPER takes a drag of the docker's own edge
 -- (mouse messages to the docker, the pointer moved along with them and
 -- put back after). Floating, the window just grows. Closing gives the
 -- width back.
@@ -833,7 +834,10 @@ local BAY = { mod = nil, w = 0, widened = 0 }
 function BAY.pb()
   if BAY.mod == nil then
     BAY.mod = require("TS_CV_Edition").module("TS_CV_PatchBay") or false
-    if BAY.mod then BAY.mod.attach(ImGui) end
+    if BAY.mod then
+      BAY.mod.attach(ImGui)
+      BAY.mod.init({ pin = "patchbay_pinned_tcp", req = "patchbay_toggle_tcp", cmd = "patchbay_toggle_tcp_cmd" })
+    end
   end
   return BAY.mod or nil
 end
@@ -1122,6 +1126,15 @@ local function settings_menu()
     ImGui.SetTooltip(ctx, "Rows tinted in the track's colour\n" ..
       "Strength: set in ChannelView (fader right-click)")
   end
+  do
+    local bay = BAY.pb()
+    if require("TS_CV_Edition").item(ImGui, ctx, "Patch bay", nil, bay and bay.enabled()) and bay then
+      bay.set_enabled(not bay.enabled())
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Rest on the window's left edge: a chip that opens it.\nOff: no chip, and its actions do nothing.\nShared with ChannelView")
+    end
+  end
   if ImGui.MenuItem(ctx, "Indent folders", nil, C.TCP_INDENT_FOLDERS) then
     C.TCP_INDENT_FOLDERS = not C.TCP_INDENT_FOLDERS
     ext_set("indent", C.TCP_INDENT_FOLDERS and "1" or "0")
@@ -1239,6 +1252,11 @@ local function frame()
   if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then W.end_paint() end
   poll_shared(now)
   NATIVE.tick(now)
+  -- a heartbeat, so the patch bay's toggle action knows this window is open
+  if not app.alive_t or now - app.alive_t > 0.5 then
+    app.alive_t = now
+    reaper.SetExtState(C.EXT_SECT, "tcp_alive", tostring(now), false)
+  end
   follow_selection()
   -- A double-click whose second release landed somewhere else never
   -- consumed its suppression; drop it once the mouse is plainly up.
@@ -1337,16 +1355,11 @@ local function frame()
         ImGui.SetCursorScreenPos(ctx, wx + bw, area_top)
         track_area(wx + bw, area_top, ww - bw, area_bot - area_top, now)
         if bay then
-          -- the rows' colour strips open it; the whole area keeps it
-          local zones = {}
-          for _, e in ipairs(app.rows) do
-            if e.visible and e.h > 0 then
-              local ix = wx + bw + (C.TCP_INDENT_FOLDERS and e.depth * C.TCP_INDENT or 0)
-              zones[#zones + 1] = { ix, e.y, ix + C.TCP_STRIP_W, e.y + e.h }
-            end
-          end
+          -- a rest along the window's left edge brings up the chip, growing
+          -- out of that edge; the whole area keeps the bay open
           local area = { wx, area_top, wx + ww, area_bot }
-          bay.remember(zones, area)
+          bay.remember({ wx, area_top, wx + C.TCP_STRIP_W, area_bot, side = "left", edge = wx }, area)
+          bay.chip(ctx)
           if bw > 0 then
             local list = {}
             for _, e in ipairs(app.rows) do list[#list + 1] = { track = e.track, num = e.num } end
