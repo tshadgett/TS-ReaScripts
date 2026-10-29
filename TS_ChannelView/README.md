@@ -422,7 +422,10 @@ outline would have nothing to stand against.
   how many); *Unfold* brings them back. The web companion (Pro) shows a
   container's panel and its corners too, and its container sheet folds
   and unfolds it; putting a control on a container is done here, on the
-  desktop.
+  desktop. A container panel's layout and looks are shared by every
+  container with the same name and the same knobs on it, so one inserted
+  again from an FX chain or a track template, or on a copied track, looks
+  the same. Rename it in ChannelView and its layout goes with the name.
 * **Oversampling.** REAPER's own, set from ChannelView: **OS** in a panel's
   foot oversamples that plugin, a container's menu ▸ *Oversample everything
   in it* does a container, and **OS** in the header bar does the whole

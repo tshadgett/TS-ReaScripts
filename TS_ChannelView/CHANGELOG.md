@@ -1,5 +1,23 @@
 # ChannelView — changelog
 
+## 3.6.2 — container fixes
+
+### ChannelView
+
+- **Knobs on a container inside a container.** Putting a control on the
+  outer container no longer stops ChannelView with an error.
+- **Container panel looks travel with the container.** A container's
+  panel layout and its control styles are now shared by every container
+  with the same name and the same knobs on it. A container inserted again
+  from a saved FX chain or a track template, or on a copied track, looks
+  the same instead of starting plain. Renaming a container in ChannelView
+  takes its layout with it.
+
+### ChannelView Pro
+
+- **Web companion:** an EQ band's slope can now be changed from the
+  tablet.
+
 ## 3.6.1 — plugin pictures, many at once
 
 ### ChannelView

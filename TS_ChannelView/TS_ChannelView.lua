@@ -1,9 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.6.1
+-- @version 3.6.2
 -- @changelog
---  Moves with ChannelView Pro 3.6.1: plugin pictures taken many at once
---  (every plugin button, or a developer's plugins). See the CHANGELOG.
+--  Container fixes: a knob on an outer container no longer stops
+--  ChannelView, and a container's panel looks travel with it into saved
+--  FX chains, track templates and copied tracks. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -484,7 +485,7 @@ local function rescan(force)
       local vis = CT.visible(tr, n.addr, n.guid, n.path)
       if #vis == 0 then return nil end
       with_panel[n.guid] = true
-      return { visible = vis, sig = table.concat(vis, ",") }
+      return { visible = vis, sig = table.concat(vis, ","), name = CT.key(tr, n.addr, n.guid, n.path) }
     end)
     list = T.fold(list, function(g) return with_panel[g] and CT.folded(g) end)
     CT.note(app.track, list)
@@ -2063,7 +2064,10 @@ box_menu_items = function(node)
   app.boxren_buf = v
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Rename##boxren") or enter then
+    -- (its panel's layout goes with the name)
+    local was = CT.key(tr, node.addr, node.guid, node.path)
     T.rename(tr, node.addr, node.guid, U.trim(app.boxren_buf))
+    CT.carry(was, CT.key(tr, node.addr, nil, node.path))
     app.boxren_for = nil
     rescan(true)
     ImGui.CloseCurrentPopup(ctx)
@@ -2261,6 +2265,8 @@ local function panel_menu()
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Rename##fxren") or ren_enter then
     T.rename(app.track, fx.addr, fx.guid, U.trim(app.fxren_buf))
+    -- (a container's panel layout goes with the name)
+    if fx.container_panel then CT.carry(fx.name, CT.key(app.track, fx.addr, nil, fx.path_t)) end
     app.fxren_for = nil
     rescan(true)
     ImGui.CloseCurrentPopup(ctx)
@@ -3286,7 +3292,7 @@ local function container_items(fx, c)
     if ImGui.MenuItem(ctx, busy and "Hide from the container" or "Take off the container") then
       reaper.Undo_BeginBlock()
       local what = CT.take_off(tr, fx.addr, fx.guid, fx.path_t, c.param)
-      if what then CT.fix_layout(fx.guid, c.param, what == "deleted") end
+      if what then CT.fix_layout(fx.name, CT.key(tr, fx.addr, nil, fx.path_t), c.param, what == "deleted") end
       reaper.Undo_EndBlock("ChannelView: take a control off its container", -1)
       M.clear_default_cache()
       rescan(true)
@@ -3310,19 +3316,20 @@ local function container_items(fx, c)
     local label = (up == 1 and "On its container" or "On the outer container") .. ": " .. box_label(node)
     if ImGui.MenuItem(ctx, label .. "##ct" .. up, nil, on) then
       reaper.Undo_BeginBlock()
+      local was = CT.key(tr, node.addr, node.guid, node.path)
       if on then
         local p = CT.put(tr, fx.path_t, c.param, up)   -- (found, not made)
         local what = p and CT.take_off(tr, node.addr, node.guid, node.path, p)
-        if what then CT.fix_layout(node.guid, p, what == "deleted") end
+        if what then CT.fix_layout(was, CT.key(tr, node.addr, nil, node.path), p, what == "deleted") end
       else
-        local p, cguid = CT.put(tr, fx.path_t, c.param, up)
+        local p = CT.put(tr, fx.path_t, c.param, up)
         -- a container panel with a layout of its own takes it at the end
-        local l = p and M.get("Container " .. cguid)
-        if l then
-          l = M.copy(l)
-          l.controls = l.controls or {}
-          l.controls[#l.controls + 1] = M.apply_default_look({ param = p, type = "knob", label = "" })
-          M.set("Container " .. cguid, l); M.save()
+        if p then
+          CT.carry(was, CT.key(tr, node.addr, nil, node.path), function(l, own)
+            if not own then return end
+            l.controls = l.controls or {}
+            l.controls[#l.controls + 1] = M.apply_default_look({ param = p, type = "knob", label = "" })
+          end)
         end
       end
       reaper.Undo_EndBlock("ChannelView: " .. (on and "take a control off" or "put a control on") .. " its container", -1)

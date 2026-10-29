@@ -2114,7 +2114,8 @@ function M.get_or_default(key, track, addr, cache_id)
   if not d then
     -- (another layout of theirs, never saved: a normal default)
     local kind = (not select(2, M.split_variant(key))) and RB.kind(key) or nil
-    local cguid = key:match("^Container (%b{})$")
+    local CT = require("TS_CV_Containers")
+    local cguid = CT.is_key(key) and (key:match("^Container (%b{})$") or reaper.TrackFX_GetFXGUID(track, addr))
     if cguid then d = require("TS_CV_Containers").default_layout(track, addr, cguid)
     elseif kind == "readelay" then d = { controls = {}, aliases = {} }
     elseif kind == "reaverbate" then

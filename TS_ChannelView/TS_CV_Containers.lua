@@ -20,6 +20,10 @@
 
   A container can also be folded to its panel (cfold:{guid}): the plugins
   inside drop out of the row and the panel stands for them.
+
+  The panel's layout is shared by every container of the same name with
+  the same plugin parameters on it (CT.key), so one inserted again from an
+  FX chain or a track template, or on a copied track, looks the same.
 --]]
 
 local CT = {}
@@ -43,6 +47,7 @@ end
 
 -- Container parameter `i`'s source: the slot inside and its parameter.
 function CT.source(track, caddr, i)
+  if not (track and caddr and i) then return nil end
   local slot = getn(track, caddr, ("param.%d.container_map.fx_index"):format(i))
   local p = getn(track, caddr, ("param.%d.container_map.fx_parm"):format(i))
   if slot and p then return slot, p end
@@ -103,7 +108,7 @@ end
 CT.shown = {}
 
 -- The panel's layout when none was saved: a knob (or switch) per shown
--- parameter. (Its key is "Container {guid}".)
+-- parameter.
 function CT.default_layout(track, caddr, cguid)
   local M = require("TS_CV_Mappings")
   local U = require("TS_CV_Util")
@@ -189,24 +194,110 @@ end
 
 -- A container panel's saved layout after its parameter `i` went: the
 -- controls on it gone, the ones after it one down when it was deleted
--- (REAPER renumbers the container's parameters).
-function CT.fix_layout(cguid, i, deleted)
-  local M = require("TS_CV_Mappings")
-  local key = "Container " .. cguid
-  local l = M.get(key)
-  if not l then return end
-  l = M.copy(l)
-  local keep = {}
-  for _, c in ipairs(l.controls or {}) do
-    if c.param ~= i then
-      if deleted and c.param and c.param > i then c.param = c.param - 1 end
-      if deleted and c.param2 and c.param2 > i then c.param2 = c.param2 - 1 end
-      keep[#keep + 1] = c
+-- (REAPER renumbers the container's parameters). `old` is the layout's key
+-- before, `new` after (they differ when the mapping went).
+function CT.fix_layout(old, new, i, deleted)
+  local function fix(l)
+    local keep = {}
+    for _, c in ipairs(l.controls or {}) do
+      if c.param ~= i then
+        if deleted and c.param and c.param > i then c.param = c.param - 1 end
+        if deleted and c.param2 and c.param2 > i then c.param2 = c.param2 - 1 end
+        keep[#keep + 1] = c
+      end
+    end
+    for k, v in pairs(l.controls or {}) do if type(k) ~= "number" then keep[k] = v end end
+    l.controls = keep
+  end
+  CT.carry(old, new, fix)
+end
+
+-- ---------------------------------------------------------------------
+-- the panel's layout key
+-- ---------------------------------------------------------------------
+
+local function hash8(str)
+  local h = 2166136261
+  for i = 1, #str do h = ((h ~ str:byte(i)) * 16777619) & 0xffffffff end
+  return ("%08x"):format(h)
+end
+
+-- What's mapped onto the container: each parameter's plugin and its
+-- parameter there, in order.
+function CT.shape(track, caddr, cpath)
+  local T = require("TS_CV_FXTree")
+  local U = require("TS_CV_Util")
+  local parts, names = {}, {}
+  local n = reaper.TrackFX_GetNumParams(track, caddr) or 0
+  for i = 0, n - 1 do
+    local slot, p = CT.source(track, caddr, i)
+    if slot then
+      local nm = names[slot]
+      if not nm then
+        local path = {}
+        for d, v in ipairs(cpath or {}) do path[d] = v end
+        path[#path + 1] = slot
+        local a = T.addr_of(track, path)
+        nm = a and (get(track, a, "fx_name") or select(2, reaper.TrackFX_GetFXName(track, a, ""))) or "?"
+        nm = U.clean_fx_name(nm)
+        names[slot] = nm
+      end
+      parts[#parts + 1] = nm .. ":" .. p
     end
   end
-  for k, v in pairs(l.controls or {}) do if type(k) ~= "number" then keep[k] = v end end
-  l.controls = keep
-  M.set(key, l); M.save()
+  return table.concat(parts, "|")
+end
+
+-- The key of a container panel's layout: "Container <its name> #<hash of
+-- what's mapped>" ("Container #..." when it hasn't been renamed). A layout
+-- saved under the container's guid ("Container {guid}") moves to it.
+function CT.key(track, caddr, cguid, cpath)
+  local U = require("TS_CV_Util")
+  local name = U.trim(((get(track, caddr, "renamed_name") or ""):gsub("[%[%]\r\n#]", " "):gsub("%s+", " ")))
+  local key = U.plugin_key(("Container%s #%s"):format(name ~= "" and (" " .. name) or "",
+    hash8(CT.shape(track, caddr, cpath))))
+  if cguid then
+    local M = require("TS_CV_Mappings")
+    local old = "Container " .. cguid
+    if not M.has(key) and M.has(old) then CT.carry(old, key) end
+  end
+  return key
+end
+
+-- Is `key` a container panel's layout key (either way)?
+function CT.is_key(key)
+  key = key or ""
+  return key:match("^Container (%b{})$") ~= nil or key:match("^Container.* #%x%x%x%x%x%x%x%x$") ~= nil
+end
+
+-- A container panel's layouts (its own and its variants, and which is
+-- the default) copied from key `old` to `new`, `fn(layout, own)` changing
+-- each copy on the way. Leaves `old`'s alone: another container may still
+-- be shaped that way.
+function CT.carry(old, new, fn)
+  local M = require("TS_CV_Mappings")
+  if not old or not new or (old == new and not fn) then return end
+  local pairs_ = { { old, new, true } }
+  for _, v in ipairs(M.variants(old) or {}) do
+    pairs_[#pairs_ + 1] = { M.variant_key(old, v), M.variant_key(new, v), false }
+  end
+  local any = false
+  for _, kk in ipairs(pairs_) do
+    local l = M.get(kk[1])
+    if l then
+      l = M.copy(l)
+      if fn then fn(l, kk[3]) end
+      M.set(kk[2], l)
+      any = true
+    end
+  end
+  if old ~= new then
+    for _, sect in ipairs({ M.DEFAULTS_SECT, M.RACK_DEFAULTS_SECT }) do
+      local d = M.default_variant(old, sect)
+      if d and not M.default_variant(new, sect) then M.set_default_variant(new, d, sect); any = true end
+    end
+  end
+  if any then M.save() end
 end
 
 -- Folded to its panel?
@@ -242,7 +333,8 @@ function CT.note(track, list)
           path[#path + 1] = slot
           local a = T.addr_of(track, path)
           for _ = 1, 8 do
-            local s2, p2 = a and CT.source(track, a, p)
+            if not a then break end
+            local s2, p2 = CT.source(track, a, p)
             if not s2 then break end
             path[#path + 1] = s2
             a, p = T.addr_of(track, path), p2

@@ -9243,6 +9243,23 @@ do
     CT.note("tr", { { container_panel = true, visible = { 0 }, guid = "{C}", addr = 0, path_t = { 3, 0 } } })
     check("container panel: its knob stands for the plugin's parameter", MDt.aliases["{C}:0"], "{P}:0")
     check("container panel: shown once, it stays shown", proj["cpanel:{C}#1:0"], "S")
+    -- the outer container's knob: down through the inner container to the plugin
+    T2.addr_of = function(_, path)
+      if #path == 1 and path[1] == 3 then return 9 end
+      if #path == 2 and path[2] == 0 then return 0 end
+      if #path == 3 and path[3] == 1 then return 5 end
+      return nil
+    end
+    local okn = pcall(CT.note, "tr", { { container_panel = true, visible = { 0 }, guid = "{O}", addr = 9, path_t = { 3 } } })
+    check("container panel: an outer container's knob reaches the plugin inside the inner one",
+      tostring(okn) .. " " .. tostring(MDt.aliases["{O}:0"]), "true {P}:7")
+    proj["cpanel:{O}#0:3"] = nil
+    T2.addr_of = function(_, path)
+      if #path == 1 and path[1] == 3 then return 9 end
+      if #path == 3 and path[3] == 1 then return 5 end
+      return nil
+    end
+    CT.note("tr", { { container_panel = true, visible = { 0 }, guid = "{C}", addr = 0, path_t = { 3, 0 } } })
     local scan = MDt.scan
     MDt.scan = function() return { links = { ["{P}:0"] = { tag = "L" } } } end
     check("container panel: a macro's link shows on both knobs",
@@ -9267,11 +9284,47 @@ do
     Mt.get = function(k) return k == "Container {C}" and { controls = { { param = 0 }, { param = 2 }, { param = 3, param2 = 4 } }, grid = { cols = 4 } } or nil end
     Mt.set = function(_, l) saved = l end
     Mt.save = function() end
-    CT.fix_layout("{C}", 2, true)
+    CT.fix_layout("Container {C}", "Container #00000000", 2, true)
     local ps = {}
     for i, c in ipairs(saved.controls) do ps[i] = c.param .. (c.param2 and ("/" .. c.param2) or "") end
     check("container panel: its layout follows a deleted parameter", table.concat(ps, ",") .. " " .. tostring(saved.grid ~= nil), "0,2/3 true")
     Mt.get, Mt.set, Mt.save = g, st_, sv
+  end
+  -- the panel's layout is shared by name and what's mapped, so a copy of
+  -- the container (a new guid) finds it
+  do
+    local Mt = require("TS_CV_Mappings")
+    local g, st_, sv, hs = Mt.get, Mt.set, Mt.save, Mt.has
+    local lib = { ["Container {A}"] = { controls = { { param = 0, style = "hifi" } } } }
+    Mt.get = function(k) return lib[k] end
+    Mt.set = function(k, l) lib[k] = l end
+    Mt.has = function(k) return lib[k] ~= nil end
+    Mt.save = function() end
+    nparams[20], map[20] = 5, { { 1, 4 }, { 2, 6 } }
+    cfg["21:fx_name"], cfg["22:fx_name"] = "VST3: Pro-Q 3 (FabFilter)", "JS: Comp"
+    T2.addr_of = function(_, path)
+      if #path == 1 and path[1] == 7 then return 20 end
+      if #path == 2 and path[1] == 7 then return 20 + path[2] end
+      return nil
+    end
+    local k1 = CT.key("tr", 20, "{A}", { 7 })
+    check("container key: by what's mapped", k1:match("^Container #%x+$") ~= nil and CT.is_key(k1) and CT.is_key("Container {A}"), true)
+    check("container key: a layout kept by guid moves to it", lib[k1] and lib[k1].controls[1].style, "hifi")
+    check("container key: a copy (another guid) shares it", CT.key("tr", 20, "{B}", { 7 }), k1)
+    cfg["20:renamed_name"] = "Vox [bus]"
+    local k2 = CT.key("tr", 20, nil, { 7 })
+    check("container key: its name in it", k2, "Container Vox bus #" .. k1:match("#(%x+)$"))
+    map[20][2] = { 2, 7 }
+    check("container key: other parameters, another key", CT.key("tr", 20, nil, { 7 }) ~= k2, true)
+    -- put on: the layout goes to the new key with the control at the end
+    CT.carry(k1, "Container #11111111", function(l, own) if own then l.controls[#l.controls + 1] = { param = 1 } end end)
+    check("container key: carried, the old one left for the others",
+      #lib["Container #11111111"].controls .. " " .. #lib[k1].controls, "2 1")
+    check("container key: not a plugin's", CT.is_key("Containerizer") or CT.is_key("Container Pro (X)"), false)
+    cfg["20:renamed_name"], cfg["21:fx_name"], cfg["22:fx_name"] = nil, nil, nil
+    nparams[20], map[20] = nil, nil
+    T2.addr_of = function(_, path) return (#path == 1 and path[1] == 3) and 9 or nil end
+    Mt.get, Mt.set, Mt.save, Mt.has = g, st_, sv, hs
   end
   CT.set_folded("{C}", true)
   check("container panel: folded is kept in the project", CT.folded("{C}") and proj["cfold:{C}"] == "1", true)
