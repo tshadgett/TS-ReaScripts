@@ -440,7 +440,8 @@ local function param_choices(tr, addr, p, controls, key)
   local list = P.button_choices(tr, addr, p, key or st.key, nil)
   if #list >= 2 and #list <= 64 then
     local step = list[2].norm - list[1].norm
-    return list, math.max(0.0005, step * 0.5 - 0.0005)
+    -- (by your names for them, when you've given some)
+    return M.choice_list(key or st.key, p, list), math.max(0.0005, step * 0.5 - 0.0005)
   end
   -- a two-state switch: the plugin reports a step as big as the whole
   -- range (or says it's a toggle), which reads as "no steps" above;
@@ -1312,6 +1313,36 @@ draw_entry_body = function(ctx)
     end
     tip("Off, then on, for this plugin everywhere.\n" ..
       "Leave empty for the plugin's own text.")
+  end
+
+  -- a dropdown's (or stepped knob's) own words for its choices, for this
+  -- plugin everywhere (Choices<p>), as the right-click's Name > Choice names
+  if is_param and not virt and (c.type == "combo" or c.type == "stepped") and not st.multi
+     and st.track and st.fx then
+    local P = require("TS_CV_Panel")
+    local list = P.button_choices(st.track, st.fx.addr, c.param, st.key, c.nbtn)
+    row_name("Choice names")
+    if type(list) ~= "table" or #list < 2 then
+      ImGui.TextDisabled(ctx, "open the dropdown once to read them")
+    else
+      st.scratch.choice_names = st.scratch.choice_names or {}
+      local map = st.scratch.choice_names[c.param] or {}
+      local fh = ImGui.GetFrameHeightWithSpacing(ctx)
+      if ImGui.BeginChild(ctx, "##edchn", FIELD_W, math.min(#list, 8) * fh + 4, 0) then
+        for i, e in ipairs(list) do
+          local t = e.text or tostring(i)
+          ImGui.SetNextItemWidth(ctx, FIELD_W - 16)
+          local ch, nv = ImGui.InputTextWithHint(ctx, "##edchn" .. i, t, map[t] or "")
+          if ch then
+            -- (kept untrimmed while typing; trimmed when saved)
+            map[t] = (U.trim(nv) ~= "") and nv or nil
+            st.scratch.choice_names[c.param] = next(map) and map or nil
+          end
+          tip("For \"" .. t .. "\". Empty: the plugin's own.")
+        end
+        ImGui.EndChild(ctx)
+      end
+    end
   end
 end
 

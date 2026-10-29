@@ -742,6 +742,32 @@ do
   check("state names: cleared",     M.get_states(key, 5), nil)
   check("state names: none set",    M.state_text(key, 9, 1, "1.0"), "1.0")
 end
+do
+  -- a dropdown's choice names, keyed by the plugin's text
+  M.set_choice_names(key, 3, { Opto = "Warm", ["Vocal Mode"] = "Vox", Clean = "", Punch = "Punch" })
+  check("choice names: renamed",              M.choice_text(key, 3, "Opto"), "Warm")
+  check("choice names: by its text, trimmed", M.choice_text(key, 3, " Vocal Mode "), "Vox")
+  check("choice names: empty keeps the plugin's", M.choice_text(key, 3, "Clean"), "Clean")
+  check("choice names: same as the plugin's isn't kept", M.get_choice_names(key, 3).Punch, nil)
+  check("choice names: another parameter untouched", M.choice_text(key, 4, "Opto"), "Opto")
+  local list = { { norm = 0, text = "Clean" }, { norm = 0.5, text = "Opto" }, { norm = 1, text = "Vocal Mode" } }
+  local named = M.choice_list(key, 3, list)
+  check("choice names: the list renamed",     named[1].text .. "/" .. named[2].text .. "/" .. named[3].text, "Clean/Warm/Vox")
+  check("choice names: positions kept",       named[2].norm, 0.5)
+  check("choice names: the plugin's list untouched", list[2].text, "Opto")
+  check("choice names: the renamed list kept", M.choice_list(key, 3, list) == named, true)
+  check("choice names: no names, the same list", M.choice_list(key, 4, list) == list, true)
+  M.save(); M.reload()
+  check("choice names: survive reload",       M.choice_text(key, 3, "Vocal Mode"), "Vox")
+  check("choice names: copied",               M.copy(M.get(key)).choice_names[3].Opto, "Warm")
+  check("choice names: line",                 M.choices_line({ ["A|B"] = "x=y", Q = "R" }), "A B=x y|Q=R")
+  check("choice names: line read back, = in the plugin's text",
+        M.choices_of_line("Q=1=Narrow|Q=2=Wide")["Q=2"], "Wide")
+  check("choice names: an empty line, none", M.choices_of_line(""), nil)
+  M.set_choice_names(key, 3, {})
+  check("choice names: cleared",              M.get_choice_names(key, 3), nil)
+  M.save(); M.reload()
+end
 check("display: ... trimmed",     M.display_name(key, 2, " Release ", "Release"), "Recovery")
 M.set_alias(key, 2, "")
 M.save(); M.reload()
@@ -9620,6 +9646,453 @@ do
   check("popout: closed", #POm.windows(), 0)
   Tm.collect, Tm.guid_at = real_collect, real_guid_at
   package.loaded["TS_CV_PopOut"] = nil
+  reaper = real
+end
+
+-- ---------------------------------------------------------------------
+-- a compressor's attack and release, timed (TS_CV_Learn LN.time_fit) and
+-- kept with its canvas (AtkCal / RelCal)
+-- ---------------------------------------------------------------------
+do
+  local LNt = require("TS_CV_Learn")
+  local Mt = require("TS_CV_Mappings")
+  -- a modelled compressor: its reduction a one-pole in dB, 5 ms in, 100 ms out
+  local g, L = {}, {}
+  local gr, dt = 0, LNt.TIME_DT / 1000
+  for i = 1, 7000 do
+    local t = i * dt
+    local lv = (t > 0.2 and t < 1.4) and -10 or -50
+    local want = math.max(0, lv + 30) * 0.9
+    local tau = (want > gr) and 0.005 or 0.1
+    gr = want + (gr - want) * math.exp(-dt / tau)
+    g[i], L[i] = -gr, lv
+  end
+  local atk, rel, depth = LNt.time_fit(g, L)
+  check("timing: attack and release read off the step (within half a millisecond, 2 ms)",
+    math.abs((atk or 0) - 5) < 0.5 and math.abs((rel or 0) - 100) < 2 and math.abs((depth or 0) - 18) < 0.1, true)
+  local none = {}
+  for i = 1, 7000 do none[i] = 0 end
+  local a2, why = LNt.time_fit(none, L)
+  check("timing: no reduction, said", tostring(a2) .. " " .. tostring(why), "nil it reduced only 0.0 dB")
+  check("timing: it moves", tostring(LNt.time_moves({ { 0, 1 }, { 1, 1.05 } })) .. tostring(LNt.time_moves({ { 0, 1 }, { 1, 30 } })), "falsetrue")
+  -- kept in the library and read back
+  local cv = Mt.canvas_of({ Canvas = "comp", RoleAttack = "3", RoleRelease = "4",
+    AtkCal = "3|0:1 0.5:10 1:100", RelCal = "4|0:50 1:2000" })
+  check("timing: read back", cv.atk_cal and (#cv.atk_cal.pts .. " " .. cv.rel_cal.p), "3 4")
+  check("timing: in ms between the points (log)", ("%.2f %.1f %.0f"):format(Mt.time_ms(cv, "Attack", 0.25), Mt.time_ms(cv, "Attack", 0.5), Mt.time_ms(cv, "Release", 1)), "3.16 10.0 2000")
+  local out = {}
+  Mt.canvas_lines(cv, out)
+  check("timing: written", out.AtkCal .. " / " .. out.RelCal, "3|0:1 0.5:10 1:100 / 4|0:50 1:2000")
+  check("timing: copied with the canvas", Mt.copy_canvas(cv).rel_cal.pts[2][2], 2000)
+  cv.roles.Attack = 5
+  check("timing: not for another control", tostring(Mt.time_cal(cv, "Attack")), "nil")
+  check("timing: short", Mt.ms_text(0.3) .. ", " .. Mt.ms_text(12.4) .. ", " .. Mt.ms_text(1200), "0.3 ms, 12 ms, 1.2 s")
+  -- copied by its real time: A measured (a 0..10 scale) onto B's measured switch
+  do
+    local CMPt = require("TS_CV_Compare")
+    local real = reaper
+    local norm = { [1] = { [3] = 0.5 }, [2] = { [7] = 0 } }
+    reaper = setmetatable({
+      TrackFX_GetParamNormalized = function(_, a, p) return norm[a][p] or 0 end,
+      TrackFX_SetParamNormalized = function(_, a, p, v) norm[a][p] = v end,
+      TrackFX_FormatParamValueNormalized = function(_, a, p, n)
+        if a == 2 then return true, ({ "Fast", "Medium", "Slow", "Slower" })[math.min(4, math.floor(n * 4) + 1)] end
+        return true, ("%.1f"):format(n * 10)
+      end,
+      TrackFX_GetFormattedParamValue = function(_, a, p) return true, ("%.1f"):format((norm[a][p] or 0) * 10) end,
+      TrackFX_GetFXGUID = function(_, a) return "{tm" .. a .. "}" end,
+    }, { __index = real })
+    local acv = { roles = { Attack = 3 }, atk_cal = { p = 3, pts = { { 0, 1 }, { 0.5, 10 }, { 1, 100 } } } }
+    local bcv = { roles = { Attack = 7 }, atk_cal = { p = 7, pts = { { 0.125, 0.3 }, { 0.375, 3 }, { 0.625, 9 }, { 0.875, 30 } } } }
+    local what, txt = CMPt.copy_time("tr", 1, 3, acv, 2, 7, bcv, "Attack")
+    check("timing: copied by time onto the nearest setting (Slow)",
+      tostring(what) .. " " .. tostring(txt):gsub("^[%d%.]+ ms", "x ms") .. " " .. tostring(norm[2][7] > 0.5 and norm[2][7] < 0.75),
+      "near x ms for 10 ms true")
+    check("timing: neither measured, left to the plain copy", tostring(CMPt.copy_time("tr", 1, 3, nil, 2, 7, nil, "Attack")), "nil")
+    reaper = real
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- the EQ canvas setup: bands moved by dragging, and sorted
+-- ---------------------------------------------------------------------
+do
+  local CSt = require("TS_CV_CanvasSetup")
+  local function names(bs) local t = {} for i, b in ipairs(bs) do t[i] = b.name end return table.concat(t, ",") end
+  local function bands() return { { name = "1", freq = 0 }, { name = "2", freq = 4 }, { name = "4", freq = 12 }, { name = "3", freq = 8 } } end
+  local b = bands()
+  check("eq bands: dragged up", tostring(CSt.move_band(b, 3, 5)) .. " " .. names(b), "4 1,2,3,4")
+  b = bands()
+  check("eq bands: dragged to the top", tostring(CSt.move_band(b, 4, 1)) .. " " .. names(b), "1 3,1,2,4")
+  b = bands()
+  check("eq bands: dropped where it was", tostring(CSt.move_band(b, 2, 3)) .. tostring(CSt.move_band(b, 2, 2)) .. " " .. names(b), "nilnil 1,2,4,3")
+  check("eq bands: plugin order", names(CSt.plugin_order(bands())), "1,2,3,4")
+  check("eq bands: plugin order, by any of a band's parameters, unmapped last",
+    names(CSt.plugin_order({ { name = "x" }, { name = "b", gain = 9, q = 10 }, { name = "a", q = 2 } })), "a,b,x")
+end
+
+-- ---------------------------------------------------------------------
+-- comparing two plugins (TS_CV_Compare)
+-- ---------------------------------------------------------------------
+do
+  local CMP = require("TS_CV_Compare")
+  local real = reaper
+  -- the record
+  local st = CMP.decode(CMP.encode({ c = "{C}", a = "{A}", b = "{B}", s = "{S}", blind = 1, order = "BA", gr = 0, ap = "1:0,2:0" }))
+  check("compare: record round trip", st and (st.c .. st.a .. st.b .. st.s .. tostring(st.blind) .. st.order .. tostring(st.gr) .. st.ap),
+    "{C}{A}{B}{S}trueBAfalse1:0,2:0")
+  check("compare: a record missing a part is none", CMP.decode("c={C};a={A}"), nil)
+  -- values in units
+  local function v(t, u) local x = CMP.value(t, u); return x and (math.floor(x * 1000 + 0.5) / 1000) end
+  check("compare: ratio", v("4.0:1", "ratio"), 4)
+  check("compare: ratio, a plain number", v("4.0", "ratio"), 4)
+  check("compare: ratio, infinite capped", v("\u{221E}:1", "ratio"), 1000)
+  check("compare: ms", v("10.0 ms", "ms"), 10)
+  check("compare: seconds as ms", v("0.3 s", "ms"), 300)
+  check("compare: kHz", v("1.2 kHz", "hz"), 1200)
+  check("compare: a plain frequency", v("1000.0", "hz"), 1000)
+  check("compare: a plain number too low for a frequency", v("2.0", "hz"), nil)
+  check("compare: octaves as Q", v("2.00 oct", "q"), 0.667)
+  check("compare: Q", v("0.71", "q"), 0.71)
+  check("compare: dB", v("-3.5 dB", "db"), -3.5)
+  check("compare: a word isn't a time", v("Auto", "ms"), nil)
+  check("compare: ms isn't dB", v("10 ms", "db"), nil)
+  check("compare: shapes", table.concat({ CMP.canon("Low Shelf"), CMP.canon("HP"), CMP.canon("Bell"),
+    CMP.canon("Peak"), CMP.canon("High Cut"), CMP.canon("Low Pass"), CMP.canon("Off") }, ","),
+    "lowshelf,lowcut,bell,bell,highcut,highcut,off")
+  check("compare: near", tostring(CMP.near(120, 121, "ms")) .. tostring(CMP.near(120, 100, "ms"))
+    .. tostring(CMP.near(-3, -3.1, "db")) .. tostring(CMP.near(-3, -3.5, "db")), "truefalsetruefalse")
+  -- copying by role: A's ratio, attack and release onto a B with stepped
+  -- ratios and releases; threshold left for Match GR; knee B hasn't got
+  do
+    local norm = { [1] = { [0] = 3 / 19, [1] = math.log(100) / math.log(300), [2] = 110 / 990, [3] = 0.5, [4] = 0.3 },
+                   [2] = { [0] = 0, [1] = 0, [2] = 0.9, [3] = 0.5 } }
+    local function text(addr, p, n)
+      if addr == 1 then
+        if p == 0 then return ("%.1f:1"):format(1 + n * 19) end
+        if p == 1 then return ("%.1f ms"):format(0.1 * 300 ^ n) end
+        if p == 2 then return ("%.0f ms"):format(10 + n * 990) end
+        if p == 3 then return ("%.1f dB"):format(-60 + n * 60) end
+        if p == 4 then return ("%.1f dB"):format(n * 20) end
+      else
+        local function step(list) return list[math.min(#list, math.floor(n * #list) + 1)] end
+        if p == 0 then return step({ "1.5:1", "2:1", "4:1", "10:1" }) end
+        if p == 1 then return ("%.2f ms"):format(0.05 * 1000 ^ n) end
+        if p == 2 then return step({ "0.1 s", "0.3 s", "0.6 s", "1.2 s" }) end
+        if p == 3 then return ("%.1f dB"):format(-40 + n * 40) end
+      end
+    end
+    reaper = setmetatable({
+      TrackFX_FormatParamValueNormalized = function(_, a, p, n) return true, text(a, p, n) end,
+      TrackFX_GetFormattedParamValue = function(_, a, p) return true, text(a, p, norm[a][p]) end,
+      TrackFX_GetParamNormalized = function(_, a, p) return norm[a][p] end,
+      TrackFX_SetParamNormalized = function(_, a, p, n) norm[a][p] = n end,
+      TrackFX_GetFXGUID = function(_, a) return "{cmpfx" .. a .. "}" end,
+      TrackFX_GetNumParams = function() return 8 end,
+    }, { __index = real })
+    local roles = CMP.roles_of
+    CMP.roles_of = function(_, addr)
+      if addr == 1 then return { kind = "comp", roles = { Ratio = 0, Attack = 1, Release = 2, Threshold = 3, Knee = 4 } } end
+      return { kind = "comp", roles = { Ratio = 0, Attack = 1, Release = 2, Threshold = 3 } }
+    end
+    local res = CMP.copy("tr", { addr = 1, guid = "{a}", name = "VST3: Comp A (X)" }, { addr = 2, guid = "{b}", name = "VST3: Comp B (Y)" })
+    check("compare: copied by role", res and (res.done .. "|" .. table.concat(res.near, ",") .. "|" .. table.concat(res.missed, ",")),
+      "2|Release (0.1 s)|Knee")
+    check("compare: B's ratio and attack", text(2, 0, norm[2][0]) .. " " .. text(2, 1, norm[2][1]), "4:1 10.00 ms")
+    check("compare: B's threshold left alone", norm[2][3], 0.5)
+    -- two of the same plugin: control for control
+    local res2 = CMP.copy("tr", { addr = 1, guid = "{a}", name = "VST3: Comp A (X)" }, { addr = 2, guid = "{b}", name = "VST3: Comp A (X)" })
+    check("compare: the same plugin, control for control", res2.done .. " " .. tostring(norm[2][4] == norm[1][4]), "5 true")
+    -- different kinds
+    CMP.roles_of = function(_, addr) return { kind = addr == 1 and "comp" or "eq", roles = {}, bands = {} } end
+    local r3, why = CMP.copy("tr", { addr = 1, name = "A" }, { addr = 2, name = "B" })
+    check("compare: different kinds aren't copied", tostring(r3) .. " " .. tostring(why), "nil they're different kinds of plugin")
+    CMP.roles_of = roles
+    reaper = real
+  end
+  -- the row leaves the switch out, and the container's bracket ends at B
+  do
+    local proj = { ["compare:{T}"] = "c={C};a={A};b={B};s={S}" }
+    reaper = setmetatable({
+      GetTrackGUID = function() return "{T}" end,
+      GetProjExtState = function(_, _, k) return 1, proj[k] or "" end,
+      SetProjExtState = function(_, _, k, val) proj[k] = val end,
+      time_precise = function() return 100 end,
+    }, { __index = real })
+    local node = { path = { 2 }, kind = "container", children = {} }
+    local list = { { guid = "{A}", path_t = { 2, 0 } }, { guid = "{B}", path_t = { 2, 1 } }, { guid = "{S}", path_t = { 2, 2 } },
+                   tree = { node } }
+    local out = CMP.strip("tr", list)
+    check("compare: the switch has no panel", #out .. " " .. out[2].guid .. " " .. node.first .. "-" .. node.last, "2 {B} 1-2")
+    local Tt = require("TS_CV_FXTree")
+    local collect, guid_at = Tt.collect, Tt.guid_at
+    local present = { "{C}", "{A}", "{B}", "{S}" }
+    Tt.collect = function()
+      local kids = {}
+      for k = 2, #present do kids[#kids + 1] = { guid = present[k], addr = 10 + k, path = { 2, k - 2 } } end
+      return { tree = { { guid = present[1], addr = 10, path = { 2 }, kind = "container", children = kids } } }
+    end
+    Tt.guid_at = function() return nil end
+    check("compare: sides", tostring(CMP.side_of("tr", "{A}")) .. tostring(CMP.side_of("tr", "{B}")) .. tostring(CMP.side_of("tr", "{S}")), "ABnil")
+    check("compare: its container", CMP.is_container("tr", "{C}") and not CMP.is_container("tr", "{X}"), true)
+    present = { "{C}", "{A}", "{S}" }
+    check("compare: B gone, no sides (the bar offers to finish)", tostring(CMP.side_of("tr", "{A}")) .. " " .. tostring(CMP.load("tr") ~= nil), "nil true")
+    present = { "{X}" }
+    check("compare: its container gone (undone), forgotten", tostring(CMP.parts("tr", true)) .. " " .. tostring(proj["compare:{T}"]), "nil ")
+    proj["compare:{T}"] = "c={C};a={A};b={B};s={S}"
+    CMP.clear("tr")
+    check("compare: cleared", tostring(CMP.load("tr")), "nil")
+    Tt.collect, Tt.guid_at = collect, guid_at
+    reaper = real
+  end
+  check("compare: an octave's Q", math.floor(CMP.oct_to_q(1) * 1000 + 0.5) / 1000, 1.414)
+  -- ready to copy into: a canvas of the kind, learned for an EQ, in the
+  -- plugin's own layout or another of its layouts
+  do
+    local Mt = require("TS_CV_Mappings")
+    local g, dv, vs, todo = Mt.get, Mt.default_variant, Mt.variants, Mt.canvas_todo
+    local lib = {
+      ["EQ-PB :: EQ"] = { canvas = { kind = "eq", bands = { { freq = 1 } } } },
+      ["Comp X"] = { canvas = { kind = "comp", roles = { Ratio = 2 } } },
+      ["EQ-Half"] = { canvas = { kind = "eq", bands = { { freq = 1 } }, half = true } },
+      ["Plain"] = { controls = {} },
+    }
+    Mt.get = function(k) return lib[k] end
+    Mt.default_variant = function(b) return b == "EQ-PB" and "EQ" or nil end
+    Mt.variants = function(b) return b == "EQ-PB" and { "EQ" } or {} end
+    Mt.canvas_todo = function(cv) return cv.half and { learned = 0 } or nil end
+    local function r(b, k) local ok, v = CMP.ready_layout(b, k); return tostring(ok) .. (v and (":" .. v) or "") end
+    check("compare: ready in another layout of its own", r("EQ-PB", "eq"), "true:EQ")
+    check("compare: a compressor's roles", r("Comp X", "comp") .. " " .. r("Comp X", "eq"), "true false")
+    check("compare: an EQ not learned isn't ready", r("EQ-Half", "eq"), "false")
+    check("compare: no canvas, not ready; ReaComp is", r("Plain", "eq") .. " " .. r("ReaComp", "comp"), "false true")
+    -- a plugin showing a layout without its canvas: the canvas is still found
+    local Stt = require("TS_CV_State")
+    local lk, god = Stt.layout_key, Mt.get_or_default
+    Stt.layout_key = function(name) return name == "VST3: EQ-PB (IK)" and "EQ-PB" or "Plain" end
+    Mt.get_or_default = function(k) return lib[k] or { controls = {} } end
+    lib["EQ-PB"] = { controls = {} }
+    local cv = CMP.canvas_of("tr", 1, "{g}", "VST3: EQ-PB (IK)")
+    check("compare: its canvas, whichever layout it shows", cv and cv.kind, "eq")
+    check("compare: none of that kind", tostring(CMP.canvas_of("tr", 1, "{g}", "VST3: EQ-PB (IK)", "comp")), "nil")
+    Stt.layout_key, Mt.get_or_default = lk, god
+    lib["EQ-PB"] = nil
+    Mt.get, Mt.default_variant, Mt.variants, Mt.canvas_todo = g, dv, vs, todo
+  end
+  -- an EQ's curve matched by another built differently: A a bell at
+  -- 200 Hz +4 dB and a high shelf at 8 kHz +3 dB; B two sweepable bells
+  -- and a shelf with stepped frequencies (a console against a Pultec)
+  do
+    local MEt = require("TS_CV_MapEQ")
+    local norm = {}
+    local function fhz(n) return 20 * 1000 ^ n end
+    local function gdb(n) return -15 + 30 * n end
+    local SHELF = { 3000, 5000, 8000, 10000, 12000 }
+    local function shelf_f(n) return SHELF[math.min(#SHELF, math.floor(n * #SHELF) + 1)] end
+    reaper = setmetatable({
+      TrackFX_GetParamNormalized = function(_, _, p) return norm[p] or 0.5 end,
+      TrackFX_SetParamNormalized = function(_, _, p, v) norm[p] = v end,
+      TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+        if p == 4 then return true, ("%d Hz"):format(shelf_f(n)) end
+        return true, ("%.4f"):format(n)
+      end,
+      TrackFX_GetFXGUID = function() return "{eqb}" end,
+      time_precise = os.clock,
+    }, { __index = real })
+    local read = MEt.read_band
+    local bcv = { kind = "eq", bands = { { freq = 0, gain = 1 }, { freq = 2, gain = 3 }, { freq = 4, gain = 5 } } }
+    MEt.read_band = function(_, _, b)
+      if b.freq == 4 then return { type = "hs", f = shelf_f(norm[4] or 0.5), g = gdb(norm[5] or 0.5), q = 0.7071, on = true } end
+      return { type = "bell", f = fhz(norm[b.freq] or 0.5), g = gdb(norm[b.gain] or 0.5), q = 1, on = true }
+    end
+    local target = {}
+    for i, f in ipairs(CMP.GRID) do
+      target[i] = MEt.band_db({ type = "bell", f = 200, g = 4, q = 1 }, f) + MEt.band_db({ type = "hs", f = 8000, g = 3, q = 0.7071 }, f)
+    end
+    norm = { [1] = 0.5, [3] = 0.5, [5] = 0.5 }      -- every gain at 0 dB
+    local m = CMP.match_eq("tr", 1, bcv, target)
+    check("compare: an EQ's curve matched, not band for band",
+      m and (m.curve < 0.25 and m.from > 1.5 and m.set >= 3), true)
+    check("compare: each part of the curve to the band that suits it",
+      ("%.0f Hz %+.0f, shelf %s %+.0f, spare %+.0f"):format(fhz(norm[0]), gdb(norm[1]),
+        (shelf_f(norm[4]) >= 8000) and "8k+" or "low", gdb(norm[5]), gdb(norm[3])),
+      "201 Hz +4, shelf 8k+ +4, spare +0")
+    MEt.read_band = read
+    reaper = real
+  end
+  -- the bar, the panels' letters and blind boxes draw (a stand-in ImGui)
+  do
+    local proj = { ["compare:{T}"] = "c={C};a={A};b={B};s={S};gr=1" }
+    local params = { [0] = 1, [1] = -1.4, [2] = 1, [3] = -14, [4] = -12.6, [5] = 1 }
+    reaper = setmetatable({
+      GetTrackGUID = function() return "{T}" end,
+      GetProjExtState = function(_, _, k) return 1, proj[k] or "" end,
+      SetProjExtState = function(_, _, k, val) proj[k] = val end,
+      time_precise = function() return 200 end,
+      TrackFX_GetParam = function(_, _, p) return params[p] or 0 end,
+      TrackFX_SetParam = function(_, _, p, val) params[p] = val end,
+      GetPlayState = function() return 0 end,
+      EnumInstalledFX = function() return false end,
+    }, { __index = real })
+    local Tt = require("TS_CV_FXTree")
+    local saved = { Tt.collect, Tt.guid_at, Tt.gain_reduction, Tt.reports_gr, CMP.roles_of }
+    Tt.collect = function()
+      return { tree = { { guid = "{C}", addr = 10, path = { 2 }, kind = "container", children = {
+        { guid = "{A}", addr = 11, path = { 2, 0 }, name = "VST3: Comp A (X)" },
+        { guid = "{B}", addr = 12, path = { 2, 1 }, name = "VST3: Comp B (Y)" },
+        { guid = "{S}", addr = 13, path = { 2, 2 }, name = "JS: TS_CV Compare" } } } } }
+    end
+    Tt.guid_at = function() return nil end
+    Tt.gain_reduction = function(_, a) return a == 11 and 4.1 or 3.9 end
+    Tt.reports_gr = function() return true end
+    CMP.roles_of = function() return { kind = "comp", roles = { Threshold = 3, Makeup = 4 } } end
+    local calls = {}
+    local function rec(name) return function() calls[name] = (calls[name] or 0) + 1 end end
+    local fake = setmetatable({
+      GetWindowDrawList = function() return "dl" end,
+      CalcTextSize = function(_, t) return #t * 7, 13 end,
+      GetStyleVar = function() return 4, 3 end,
+      GetFrameHeight = function() return 18 end,
+      GetCursorScreenPos = function() return 0, 0 end,
+      GetItemRectMax = function() return 300, 20 end,
+      SmallButton = function() return false end,
+      BeginPopup = function() return false end,
+      IsItemHovered = function() return false end,
+      IsItemClicked = function() return false end,
+      InvisibleButton = function() return false end,
+      BeginMenu = function() return false end,
+      MenuItem = function() return false end,
+    }, { __index = function(_, key)
+      if key:find("Flags_") or key:find("^Col_") or key:find("StyleVar_") then return 1 end
+      return rec(key)
+    end })
+    CMP.attach(fake)
+    local ok, err = pcall(function()
+      CMP.draw_bar("ctx", "tr", 0, 600, 0)
+      CMP.draw_bar("ctx", "tr", 0, 180, 0)     -- (too narrow: short labels)
+      CMP.menu_items("ctx", "tr", { guid = "{Z}", addr = 3, name = "VST3: Comp A (X)", path_t = { 3 } })
+      local saved_roles = CMP.roles_of
+      CMP.roles_of = function() return nil end
+      local Brw = require("TS_CV_Browser")
+      local saved_mi = Brw.menu_items
+      Brw.menu_items = function(_, _, o) calls.plugin_list = o and o.pick and o.single and 1 or 0 end
+      CMP.menu_items("ctx", "tr", { guid = "{Y}", addr = 3, name = "VST3: Plain (X)", path_t = { 3 } })
+      Brw.menu_items = saved_mi
+      CMP.roles_of = saved_roles
+      CMP.overlay("ctx", "dl", "tr", { guid = "{A}" }, 0, 30, 280, 300)
+      CMP.overlay("ctx", "dl", "tr", { guid = "{B}" }, 290, 30, 280, 300)
+      proj["compare:{T}"] = "c={C};a={A};b={B};s={S};blind=1;order=BA"
+      CMP.save("tr", CMP.decode(proj["compare:{T}"]))
+      CMP.draw_bar("ctx", "tr", 0, 600, 0)
+      return CMP.blind_panel("ctx", "tr", { guid = "{A}" }, 300)
+    end)
+    check("compare: bar, letters and blind boxes draw", tostring(ok) .. " " .. tostring(err), "true " .. CMP.BLIND_W)
+    check("compare: no canvas, the whole plugin list to pick from", calls.plugin_list, 1)
+    check("compare: the blind boxes' ear icon is in the library", require("TS_CV_ActionIcons").get("cv:ear") ~= nil, true)
+    -- Copy and Match GR by kind: a compressor has both, an EQ Copy only,
+    -- anything else neither
+    do
+      local saved_st = proj["compare:{T}"]
+      proj["compare:{T}"] = "c={C};a={A};b={B};s={S};blind=0;order=AB"
+      local function chips(kind)
+        CMP.roles_of = function() return kind and { kind = kind, roles = { Threshold = 3 } } or nil end
+        params.kind_probe = (params.kind_probe or 0) + 1
+        local seen = {}
+        local sb = fake.SmallButton
+        rawset(fake, "SmallButton", function(_, label) seen[#seen + 1] = label:match("^[^#]*") return false end)
+        local tp = reaper.time_precise
+        reaper.time_precise = function() return 200 + params.kind_probe * 10 end   -- (past the kind cache)
+        CMP.draw_bar("ctx", "tr", 0, 900, 0)
+        reaper.time_precise = tp
+        rawset(fake, "SmallButton", sb)
+        local s2 = table.concat(seen, ",")
+        return (s2:find("Match GR", 1, true) and "GR" or "-") .. " " .. (s2:find("Copy", 1, true) and "Copy" or "-")
+      end
+      check("compare: compressor bar", chips("comp"), "GR Copy")
+      check("compare: limiter bar", chips("limit"), "GR Copy")
+      check("compare: EQ bar", chips("eq"), "- Copy")
+      check("compare: gate bar (by ear)", chips("gate"), "- -")
+      check("compare: no canvas bar (by ear)", chips(nil), "- -")
+      local both = CMP.roles_of
+      CMP.roles_of = function(_, addr) return addr == 11 and { kind = "comp", roles = { Threshold = 3 } } or nil end
+      params.kind_probe = params.kind_probe + 1
+      local tp = reaper.time_precise
+      reaper.time_precise = function() return 200 + params.kind_probe * 10 end
+      check("compare: a compressor against one with no canvas is by ear", CMP.kind("tr"), nil)
+      CMP.roles_of = function(_, addr) return { kind = addr == 11 and "comp" or "limit", roles = {} } end
+      reaper.time_precise = function() return 300 + params.kind_probe * 10 end
+      check("compare: a compressor against a limiter is by ear", CMP.kind("tr"), nil)
+      reaper.time_precise = tp
+      CMP.roles_of = both
+      proj["compare:{T}"] = saved_st
+      CMP.save("tr", CMP.decode(saved_st))
+    end
+    check("compare: heard is B", CMP.heard("tr"), "B")
+    CMP.switch("tr")
+    check("compare: switched to A", CMP.heard("tr") .. " " .. params[0], "A 0")
+    check("compare: B's GR readings smoothed", CMP.tick("tr") ~= nil, true)
+    Tt.collect, Tt.guid_at, Tt.gain_reduction, Tt.reports_gr, CMP.roles_of = table.unpack(saved)
+    reaper = real
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- the plugin list in a menu with its own search box (a compare's list):
+-- typing searches there, Enter picks, and no "Search..." to open a dialog
+-- ---------------------------------------------------------------------
+do
+  local real = reaper
+  local fxl = { { "VST3: Bus Comp (Acme)", "Bus Comp.vst3" }, { "VST3: Gate One (Acme)", "Gate One.vst3" } }
+  reaper = setmetatable({
+    EnumInstalledFX = function(i) local e = fxl[i + 1]; if e then return true, e[1], e[2] end return false end,
+  }, { __index = real })
+  local saved_b = package.loaded["TS_CV_Browser"]
+  package.loaded["TS_CV_Browser"] = nil
+  local okb, Bf = pcall(require, "TS_CV_Browser")
+  if not okb then
+    check("browser: loads fresh", Bf, true)
+  else
+    local typed, enter, items_seen = "gate", false, {}
+    local fake = setmetatable({
+      IsWindowAppearing = function() return true end,
+      InputTextWithHint = function(_, _, _, q) if q ~= typed then return true, typed end return false, q end,
+      IsKeyPressed = function() return enter end,
+      MenuItem = function(_, label) items_seen[#items_seen + 1] = label return false end,
+      BeginMenu = function() return false end,
+      BeginChild = function() return true end,
+      Selectable = function() return false end,
+      BeginPopupContextItem = function() return false end,
+      IsItemHovered = function() return false end,
+      CalcTextSize = function(_, t) return #t * 7, 13 end,
+      GetTextLineHeightWithSpacing = function() return 17 end,
+      GetWindowDrawList = function() return "dl" end,
+      GetCursorScreenPos = function() return 0, 0 end,
+      GetItemRectMin = function() return 0, 0 end,
+      GetItemRectMax = function() return 10, 10 end,
+      GetFontSize = function() return 13 end,
+    }, { __index = function(_, k)
+      if k:find("Flags_") or k:find("^Col_") or k:find("^Key_") or k:find("StyleVar_") then return 1 end
+      return function() end
+    end })
+    Bf.attach(fake)
+    local got
+    local ok1, e1 = pcall(Bf.menu_items, "ctx", nil, { pick = function(e) got = e.ident end, single = true, search = true })
+    check("browser: search box in the list draws", tostring(ok1) .. " " .. tostring(e1), "true false")
+    enter = true
+    local ok2, e2 = pcall(Bf.menu_items, "ctx", nil, { pick = function(e) got = e.ident end, single = true, search = true })
+    check("browser: Enter picks the match", tostring(ok2) .. " " .. tostring(e2) .. " " .. tostring(got), "true true Gate One.vst3")
+    typed, enter, items_seen = "", false, {}
+    Bf.menu_items("ctx", nil, { pick = function() end, single = true, search = true })
+    local has_search = false
+    for _, l in ipairs(items_seen) do if l:find("^Search") then has_search = true end end
+    check("browser: no Search... item with its own box", has_search, false)
+    items_seen = {}
+    Bf.menu_items("ctx", nil, { pick = function() end, single = true })
+    has_search = false
+    for _, l in ipairs(items_seen) do if l:find("^Search") then has_search = true end end
+    check("browser: Search... item without one", has_search, true)
+  end
+  package.loaded["TS_CV_Browser"] = saved_b
   reaper = real
 end
 

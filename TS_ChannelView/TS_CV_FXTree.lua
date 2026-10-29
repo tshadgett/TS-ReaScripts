@@ -401,6 +401,17 @@ function T.without(list, drop)
   return renumber(out)
 end
 
+-- T.collect's list without some plugins, wherever they sit (`drop` a set
+-- of fx guids): ChannelView's own helpers inside a container (the Compare
+-- switch, TS_CV_Compare).
+function T.without_fx(list, drop)
+  local out = shell_of(list)
+  for _, fx in ipairs(list) do
+    if not drop[fx.guid] then out[#out + 1] = fx end
+  end
+  return renumber(out)
+end
+
 -- A container's own panel (TS_CV_Containers) at the head of what's in
 -- it: `panel(node)` gives the extra fields for one (nil: none), for each
 -- container with plugins in it. The entry is the container itself, as an

@@ -18,6 +18,7 @@
 
       Ctl<n>   = <param index>|<type>|<bipolar>|<label>
       Alias<p> = <your name for parameter p>
+      Choices<p> = <plugin's text>=<your name>|<plugin's text>=<your name>...
       Meter    = <1|0>|<full-scale dB>[|<trace window: 4b, 2s ...>]
       Live     = 1
       Style<n> = <style>|<cap colour>
@@ -208,6 +209,10 @@
       ThrCal=<param>|<d or n>|<x>:<dBFS> ...   where a compressor's threshold
           really is (measured, TS_CV_Learn LN.start_thr): its reading in
           dB (d) or its position (n) against dBFS, two or more points
+      AtkCal=<param>|<x>:<ms> ...   RelCal=<param>|<x>:<ms> ...   a
+          compressor's attack and release measured (TS_CV_Learn
+          LN.start_time): the control's position against the time its
+          reduction takes to come in (or go) by 63%, two or more points
       Ref0=<dBFS>   a compressor or limiter with no threshold, only an input
           gain: the level its gain's 0 dB stands for (-18 when absent)
       SatCal=<drive>|<style>|<tone>|<drive norms>|<style norms>|<tone norms>|<levels>|<entries>
@@ -279,6 +284,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. ";   type: knob | toggle | combo | stepped | fader | xy | dual | blank | divider | half_gap | page | section\n"
                 .. ";   label overrides the alias for that one slot only\n"
                 .. "; Alias<param>=<your name for that parameter, used everywhere>\n"
+                .. "; Choices<param>=<plugin's text>=<your name>|...: a dropdown's choices renamed\n"
                 .. "; Meter=<1 on, 0 off>|<full-scale dB for the gain-reduction strip>\n"
                 .. "; Live=1: every control shows the plugin's current name for its\n"
                 .. ";   parameter (flags bit 8 does the same for one slot)\n"
@@ -772,6 +778,22 @@ function M.canvas_of(sect)
         cv.thr_cal = { p = tonumber(p), n = (how == "n"), pts = pts }
       end
     end
+    -- attack and release measured: position against ms
+    for _, w in ipairs({ { "AtkCal", "atk_cal" }, { "RelCal", "rel_cal" } }) do
+      local line = sect[w[1]] and U.trim(sect[w[1]])
+      if line and line ~= "" then
+        local p, rest = line:match("^(%d+)%s*|%s*(.*)$")
+        local pts = {}
+        for x, t in (rest or ""):gmatch("([-%d%.e]+):([-%d%.e]+)") do
+          local a, b = tonumber(x), tonumber(t)
+          if a and b and b > 0 then pts[#pts + 1] = { a, b } end
+        end
+        if p and #pts >= 2 then
+          table.sort(pts, function(a, b) return a[1] < b[1] end)
+          cv[w[2]] = { p = tonumber(p), pts = pts }
+        end
+      end
+    end
     -- a compressor or limiter driven by its input: the level (dBFS) its
     -- input gain's 0 dB stands for
     local r0 = tonumber(sect.Ref0 and U.trim(sect.Ref0) or "")
@@ -857,6 +879,14 @@ function M.canvas_lines(cv, out)
       for i, q in ipairs(tc.pts) do t[i] = ("%.6g:%.4g"):format(q[1], q[2]) end
       out.ThrCal = ("%d|%s|%s"):format(tc.p, tc.n and "n" or "d", table.concat(t, " "))
     end
+    for _, w in ipairs({ { "AtkCal", "atk_cal" }, { "RelCal", "rel_cal" } }) do
+      local c = cv[w[2]]
+      if c and c.p and c.pts and #c.pts >= 2 then
+        local t = {}
+        for i, q in ipairs(c.pts) do t[i] = ("%.6g:%.4g"):format(q[1], q[2]) end
+        out[w[1]] = ("%d|%s"):format(c.p, table.concat(t, " "))
+      end
+    end
     for _, r in ipairs(M.ROLES[cv.kind]) do
       local p = cv.roles and cv.roles[r]
       if p then out["Role" .. r] = tostring(p) .. ((cv.rev and cv.rev[r]) and "|rev" or "") end
@@ -901,6 +931,13 @@ function M.copy_canvas(cv)
     local pts = {}
     for i, q in ipairs(cv.thr_cal.pts or {}) do pts[i] = { q[1], q[2] } end
     out.thr_cal = { p = cv.thr_cal.p, n = cv.thr_cal.n, pts = pts }
+  end
+  for _, k in ipairs({ "atk_cal", "rel_cal" }) do
+    if cv[k] then
+      local pts = {}
+      for i, q in ipairs(cv[k].pts or {}) do pts[i] = { q[1], q[2] } end
+      out[k] = { p = cv[k].p, pts = pts }
+    end
   end
   return out
 end
@@ -1324,6 +1361,38 @@ function M.decay_pos(cv, ms, sn)
   return (lo + hi) * 0.5
 end
 
+-- A compressor's measured attack ("Attack") or release ("Release"), when
+-- it's for the control mapped to it now: { p, pts }, else nil.
+function M.time_cal(cv, role)
+  local c = cv and cv[(role == "Attack") and "atk_cal" or "rel_cal"]
+  if c and c.p and cv.roles and cv.roles[role] == c.p and c.pts and #c.pts >= 2 then return c end
+  return nil
+end
+
+-- Its time in ms at position n: log time between the measured points,
+-- held at the ends.
+function M.time_ms(cv, role, n)
+  local c = M.time_cal(cv, role)
+  if not c or not n then return nil end
+  local p = c.pts
+  if n <= p[1][1] then return p[1][2] end
+  if n >= p[#p][1] then return p[#p][2] end
+  local i = 1
+  while i < #p - 1 and n > p[i + 1][1] do i = i + 1 end
+  local a, b = p[i], p[i + 1]
+  if b[1] == a[1] then return a[2] end
+  local la, lb = math.log(a[2]), math.log(b[2])
+  return math.exp(la + (n - a[1]) * (lb - la) / (b[1] - a[1]))
+end
+
+-- A time, short: "0.3 ms", "12 ms", "1.2 s".
+function M.ms_text(ms)
+  if not ms then return "" end
+  if ms >= 1000 then return ("%.2g s"):format(ms / 1000) end
+  if ms >= 10 then return ("%d ms"):format(math.floor(ms + 0.5)) end
+  return ("%.2g ms"):format(ms)
+end
+
 -- The reading (or position) that puts the threshold at `db` dBFS.
 function M.thr_from_dbfs(cv, db)
   local tc = M.thr_cal(cv)
@@ -1405,6 +1474,7 @@ end
 
 local function parse_section(sect)
   local controls, aliases, states, ranges = {}, {}, {}, {}
+  local choice_names = {}
   local meter = nil
   if sect.Meter then
     local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
@@ -1423,6 +1493,11 @@ local function parse_section(sect)
     end
     local rp = k:match("^Range(%d+)$")
     if rp then ranges[tonumber(rp)] = M.range_of_line(v) end
+    local cp = k:match("^Choices(%d+)$")
+    if cp then
+      local map = M.choices_of_line(v)
+      if map then choice_names[tonumber(cp)] = map end
+    end
   end
   local i = 0
   while true do
@@ -1512,6 +1587,7 @@ local function parse_section(sect)
   local grid = grid_of(sect.Grid)
   controls.grid = grid
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
+           choice_names = next(choice_names) and choice_names or nil,
            canvas = M.canvas_of(sect), switch = M.switch_of(sect),
            -- ReaEQ's and ReaComp's own canvases: their width in ChannelView,
            -- height in the rack (a canvas layout keeps them in its canvas)
@@ -1592,6 +1668,10 @@ local function serialize(layout)
   for p, rg in pairs(layout.ranges or {}) do
     local line = M.range_line(rg)
     if line then out["Range" .. p] = line end
+  end
+  for p, map in pairs(layout.choice_names or {}) do
+    local line = M.choices_line(map)
+    if line then out["Choices" .. p] = line end
   end
   for i, c in ipairs(layout.controls or {}) do
     -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
@@ -2269,6 +2349,96 @@ function M.set_states(key, param, off, on)
   M.set(key, l)
 end
 
+-- Choice names: your own words for a dropdown's choices (or a stepped
+-- knob's, or a dropdown shown as buttons), per plugin, per parameter, like
+-- state names. Keyed by what the plugin calls the choice, so they follow
+-- it wherever it is in the list. Stored as
+-- Choices<param>=<plugin's text>=<your name>|...; "|" can't be in either,
+-- nor "=" in yours (the plugin's text is split off at the last "=").
+local function clean_choice(t) return U.trim((tostring(t or ""):gsub("[|\r\n]", " "))) end
+
+function M.choices_of_line(v)
+  local map, any = {}, false
+  for item in ((v or "") .. "|"):gmatch("([^|]*)|") do
+    local t, n = item:match("^(.*)=([^=]*)$")
+    t, n = t and U.trim(t), n and U.trim(n)
+    if t and t ~= "" and n ~= "" then map[t] = n; any = true end
+  end
+  return any and map or nil
+end
+
+function M.choices_line(map)
+  local keys = {}
+  for t, n in pairs(map or {}) do
+    if clean_choice(t) ~= "" and clean_choice(n):gsub("=", " ") ~= "" then keys[#keys + 1] = t end
+  end
+  if #keys == 0 then return nil end
+  table.sort(keys)
+  local parts = {}
+  for i, t in ipairs(keys) do
+    parts[i] = clean_choice(t) .. "=" .. U.trim((clean_choice(map[t]):gsub("=", " ")))
+  end
+  return table.concat(parts, "|")
+end
+
+M.choice_ver = 0          -- goes up with every change (renamed lists are cached by it)
+
+function M.get_choice_names(key, param)
+  local l = M.get(key)
+  local map = l and l.choice_names and l.choice_names[param]
+  if map and next(map) then return map end
+  return nil
+end
+
+-- `map`: { [plugin's text] = your name }; an empty name drops that one.
+-- Writes straight through, as aliases and state names do.
+function M.set_choice_names(key, param, map)
+  local l = M.get(key) or { controls = {}, aliases = {} }
+  local keep = {}
+  for t, n in pairs(map or {}) do
+    t, n = clean_choice(t), U.trim((clean_choice(n):gsub("=", " ")))
+    if t ~= "" and n ~= "" and n ~= t then keep[t] = n end
+  end
+  l.choice_names = l.choice_names or {}
+  l.choice_names[param] = next(keep) and keep or nil
+  if not next(l.choice_names) then l.choice_names = nil end
+  M.choice_ver = M.choice_ver + 1
+  M.set(key, l)
+end
+
+-- What a choice shows: your name for it, or the plugin's text `shown`.
+function M.choice_text(key, param, shown)
+  local map = M.get_choice_names(key, param)
+  if not map or not shown then return shown end
+  return map[U.trim(shown)] or shown
+end
+
+-- A list of choices ({ norm, text }, as TS_CV_Panel's) with your names
+-- in: the list itself when there are none, else a renamed copy (kept, so
+-- it is made once per list and change, not every frame).
+local renamed = setmetatable({}, { __mode = "k" })
+function M.choice_list(key, param, list)
+  if type(list) ~= "table" then return list end
+  local map = M.get_choice_names(key, param)
+  if not map then return list end
+  local hit = renamed[list]
+  if hit and hit.ver == M.choice_ver and hit.key == key and hit.param == param then return hit.list end
+  local out = {}
+  for i, e in ipairs(list) do
+    local n = e.text and map[U.trim(e.text)]
+    if n then
+      local ne = {}
+      for k, v in pairs(e) do ne[k] = v end
+      ne.text = n
+      out[i] = ne
+    else
+      out[i] = e
+    end
+  end
+  renamed[list] = { ver = M.choice_ver, key = key, param = param, list = out }
+  return out
+end
+
 -- Your own range for a parameter (RANGE<p>=<low>|<high>|<unit>|<curve>):
 -- what it reads as when the plugin won't say. Per plugin, per parameter,
 -- like a state's names (TS_CV_Util U.range_*).
@@ -2341,6 +2511,7 @@ end
 
 function M.set(key, layout)
   def_cache = {}
+  M.choice_ver = (M.choice_ver or 0) + 1
   -- the plugin's layout switching isn't the layout's to change: what the
   -- library has stays (M.set_switch_rules sets it), and a variant has none
   local base, var = M.split_variant(key)
@@ -2468,6 +2639,7 @@ end
 local function is_layout(t)
   for k in pairs(t) do
     if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k:match("^Range%d+$") or k == "Plate"
+       or k:match("^Choices%d+$")
        or k == "Canvas" then
       return true
     end
@@ -2677,6 +2849,13 @@ function M.copy(layout)
   out.switch = M.copy_rules(layout.switch)
   out.states = {}
   for p, st in pairs(layout.states or {}) do out.states[p] = { st[1], st[2] } end
+  if layout.choice_names then
+    out.choice_names = {}
+    for p, map in pairs(layout.choice_names) do
+      out.choice_names[p] = {}
+      for t, n in pairs(map) do out.choice_names[p][t] = n end
+    end
+  end
   if layout.ranges then
     out.ranges = {}
     for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve } end

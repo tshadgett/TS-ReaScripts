@@ -1,5 +1,32 @@
 # ChannelView — changelog
 
+## 3.7.0 — compare two plugins, choice names
+
+### ChannelView
+
+- **Choice names.** A dropdown's choices (or a stepped knob's) can have
+  your own names: right-click ▸ Name ▸ *Choice names*, or the editor's
+  *Choice names* row. They show wherever that parameter does, and follow
+  each choice by the plugin's name for it.
+
+### ChannelView Pro
+
+- **Compare two plugins.** A panel's right-click ▸ *Compare with* puts
+  the plugin and another (another copy, one with the same kind of canvas,
+  or any plugin) side by side on the same signal, one heard at a time,
+  with a bar to switch between them. *Match level* evens out their
+  loudness; *Blind* hides which is which; *Keep A* or *Keep B* leaves the
+  one chosen in place. Two EQs, compressors or limiters with the same kind
+  of canvas can also copy A's settings onto B (an EQ's curve is fitted)
+  and, for dynamics, match B's gain reduction to A's. A new action,
+  *TS_ChannelView_CompareSwitch*, switches from a shortcut.
+- **EQ canvas setup:** drag a band's swatch to move it in the list;
+  *Sort* puts the bands in the plugin's order.
+- **Compressor canvas setup:** *Measure timing* times an attack and
+  release that don't read in ms; the panel shows their real times.
+- **Learning** uses its own block of shared memory, clear of the
+  measuring probes'.
+
 ## 3.6.2 — container fixes
 
 ### ChannelView

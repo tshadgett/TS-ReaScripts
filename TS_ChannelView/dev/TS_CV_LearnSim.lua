@@ -16,7 +16,7 @@ end
 local function checkf(name, fn) check(name, fn() and true or false, true) end
 
 local ME = require("TS_CV_MapEQ")
-local BASE = 1048576
+local BASE = require("TS_CV_Learn").BASE
 
 -- ---------------------------------------------------------------------
 -- the fake REAPER
@@ -26,6 +26,7 @@ local P, NP, truth          -- the current fake plugin
 local truth_gain            -- a fake compressor's gain for a sine at a level
 local truth_rt              -- a fake reverb's decay time, ms
 local truth_sat             -- a fake saturator: y(x) for the plugin's settings
+local truth_time            -- a fake compressor's attack, release (ms) and reduction (dB)
 local old_jsfx = false      -- a REAPER still running the measuring plugin from before
 local answer = true         -- whether the analyser answers (Run FX when stopped)
 
@@ -63,6 +64,24 @@ reaper = {
   TrackFX_Show = function() end, TrackFX_SetEnabled = function() end, TrackFX_SetOffline = function() end,
   TrackFX_SetParam = function(t, fx, p, v)
     local f = t.fx[fx + 1]; f.vals[p] = v
+    if answer and f.kind == "learn" and p == 1 and f.vals[0] == 1 and (f.vals[9] or 0) >= 1.5 then
+      -- the gain every half millisecond through a stepped sine: the
+      -- reduction a one-pole in dB, in at its attack, out at its release
+      local atk, rel, depth = truth_time(t.fx[fx].vals)
+      local gr, dt, n = 0, 0.0005, math.floor((f.vals[15] or 3.6) * 2000)
+      for i = 0, n - 1 do
+        local tt = i * dt
+        local up = tt > 0.2 and tt < 1.4
+        local want = up and depth or 0
+        local tau = ((want > gr) and atk or rel) / 1000
+        gr = want + (gr - want) * math.exp(-dt / tau)
+        gmem[BASE + 2000 + i] = -gr + (math.random() - 0.5) * 0.05
+        gmem[BASE + 2000 + 9000 + i] = up and -10 or -50
+      end
+      gmem[BASE + 1] = n
+      gmem[BASE] = v
+      return
+    end
     if answer and f.kind == "learn" and p == 1 and f.vals[0] == 1 and (f.vals[9] or 0) >= 0.5 then
       -- a reverb's tail after a burst: its level every 10 ms
       local rt = truth_rt(t.fx[fx].vals)
@@ -148,7 +167,8 @@ reaper = {
     if f and f.kind == "learn" then
       return true, ({ "Role", "Measurement", "Latency", "Frames", "Settle", old_jsfx and "" or "Signal", old_jsfx and "" or "Level",
         old_jsfx and "" or "Sidechain too", old_jsfx and "" or "Burst", old_jsfx and "" or "Envelope",
-        old_jsfx and "" or "Sine frequency", old_jsfx and "" or "Curve" })[p + 1] or ""
+        old_jsfx and "" or "Sine frequency", old_jsfx and "" or "Curve", old_jsfx and "" or "Step",
+        old_jsfx and "" or "Step size", old_jsfx and "" or "Step hold", old_jsfx and "" or "Gain length" })[p + 1] or ""
     end
     return true, P[p] and P[p].name or ""
   end,
@@ -857,6 +877,45 @@ do
   check("shelf: the low band's shelf is low", L1 and L1.shapes[2] and L1.shapes[2].type, "ls")
   check("shelf: the high band's shelf is high", L2 and L2.shapes[2] and L2.shapes[2].type, "hs")
   M.remove("Shelves :: EQ")
+end
+
+-- a compressor's attack on a scale of its own (0..10) and its release in
+-- words: timed, its threshold set from its own dB and its ratio at the top
+do
+  local function knob(name, lo, hi, unit) return { name = name, lo = lo, hi = hi, unit = unit } end
+  P = {
+    [0] = knob("Threshold", -40, 0, "dB"),
+    { name = "Ratio", list = { "2:1", "4:1", "10:1" } },
+    { name = "Attack", fn = function(n) return ("%.1f"):format(n * 10) end },
+    { name = "Release", list = { "Fast", "Medium", "Slow", "Auto" } },
+    knob("Mix", 0, 100, "%"),
+  }
+  NP = 5
+  local RELS = { 50, 150, 400, 1000 }
+  truth_time = function(vals)
+    local T = -40 + 40 * vals[0]
+    local r = ({ 2, 4, 10 })[math.min(3, math.floor(vals[1] * 3) + 1)]
+    local depth = math.max(0, -10 - T) * (1 - 1 / r) * vals[4]
+    return 0.1 * 1000 ^ vals[2], RELS[math.min(4, math.floor(vals[3] * 4) + 1)], depth
+  end
+  tracks = {}
+  local user = newtrack("Drums"); tracks[1] = user
+  user.fx[1] = { kind = "eq", vals = { [0] = 0.9, 0.1, 0.3, 0.6, 0.7 } }
+  local layout = { controls = {}, aliases = {}, canvas = { kind = "comp", rev = {},
+    roles = { Threshold = 0, Ratio = 1, Attack = 2, Release = 3, Mix = 4 } } }
+  M.set("Drums :: Comp", layout)
+  local job = LN.start_time(user, 0, "Drums :: Comp", layout)
+  run(job)
+  check("timing: measured (" .. tostring(job.msg) .. ")", job.state, "done")
+  local cv = layout.canvas
+  checkf(("timing: its attack at 5.0 is 3.2 ms (%.2f)"):format(M.time_ms(cv, "Attack", 0.5) or -1),
+    function() return math.abs((M.time_ms(cv, "Attack", 0.5) or 0) / 3.162 - 1) < 0.1 end)
+  checkf(("timing: its slow release is 400 ms (%.0f)"):format(M.time_ms(cv, "Release", 0.625) or -1),
+    function() return math.abs((M.time_ms(cv, "Release", 0.625) or 0) / 400 - 1) < 0.05 end)
+  check("timing: kept in the library", M.get("Drums :: Comp").canvas.rel_cal ~= nil, true)
+  check("timing: the user's plugin untouched", ("%.1f %.1f"):format(user.fx[1].vals[2], user.fx[1].vals[3]), "0.3 0.6")
+  check("timing: the hidden track gone", #tracks, 1)
+  M.remove("Drums :: Comp")
 end
 
 os.remove(tmpdir .. "TS_ChannelView_Mappings.ini")

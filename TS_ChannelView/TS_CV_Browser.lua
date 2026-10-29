@@ -77,6 +77,55 @@ function B.entry_of(ident)
   return nil
 end
 
+-- The installed plugins whose layout key (U.plugin_key) is `key`: the
+-- same plugin in its formats. The one in `format` ("VST3", "CLAP"...)
+-- first when there is one.
+function B.by_key(key, format)
+  local out = {}
+  for _, e in ipairs(installed()) do
+    if U.plugin_key(e.name) == key then out[#out + 1] = e end
+  end
+  if format then
+    table.sort(out, function(a, b)
+      local fa, fb = U.fx_format(a.name) == format, U.fx_format(b.name) == format
+      if fa ~= fb then return fa end
+      return a.name < b.name
+    end)
+  end
+  return out
+end
+
+-- REAPER's categories for the plugin with layout key `key` (its FX
+-- browser's, from reaper-fxtags.ini), as a list.
+function B.cats_of_key(key)
+  for _, e in ipairs(installed()) do
+    if U.plugin_key(e.name) == key and e.cats then return e.cats end
+  end
+  return {}
+end
+
+-- The installed plugins in REAPER's category `cat`, one per plugin (the
+-- one in `format` first), as { key, entry }, sorted by name.
+function B.in_category(cat, format)
+  local by = {}
+  for _, e in ipairs(installed()) do
+    for _, c in ipairs(e.cats or {}) do
+      if c == cat then
+        local k = U.plugin_key(e.name)
+        local have = by[k]
+        if not have or (format and U.fx_format(e.name) == format and U.fx_format(have.name) ~= format) then
+          by[k] = e
+        end
+        break
+      end
+    end
+  end
+  local out = {}
+  for k, e in pairs(by) do out[#out + 1] = { key = k, entry = e } end
+  table.sort(out, function(a, b) return a.key:lower() < b.key:lower() end)
+  return out
+end
+
 -- ---------------------------------------------------------------------
 
 -- Forget the collection, so the next look reads it (and your FX Folders)
@@ -322,7 +371,7 @@ local menu = { request = false, insert_at = nil, query = "", focus = false, sel 
 -- Where the menu's items insert: set by B.draw_menu for the chain, or by
 -- B.menu_items when the same list is shown somewhere else (the input FX
 -- button's menu).
-local cur = { insert_at = nil, track = nil, input = false }
+local cur = { insert_at = nil, track = nil, input = false, search = false }
 
 function B.open_menu(insert_at)
   menu.request   = true
@@ -330,6 +379,9 @@ function B.open_menu(insert_at)
 end
 
 local inserted_now = false
+local search_results          -- (below, by the menu)
+-- the search box of a list drawn by B.menu_items with opts.search
+local msearch = { query = "", sel = 1, scroll = false }
 
 -- A format badge drawn over the leading space of a menu label.
 --
@@ -608,7 +660,7 @@ end
 -- chain's own add menu and anything else that adds plugins.
 local function items(ctx, track)
   installed()
-  if ImGui.MenuItem(ctx, "Search\u{2026}") then
+  if not cur.search and ImGui.MenuItem(ctx, "Search\u{2026}") then
     B.open(cur.insert_at, { track = cur.track, input = cur.input, pick = active_pick, picked = active_picked,
                             single = active_pick ~= nil and not active_multi })
   end
@@ -717,8 +769,10 @@ local function items(ctx, track)
 end
 
 -- The same list, drawn inside a menu that's already open -- a submenu of
--- the input FX button, say. `opts` as for B.open. Returns true on the
--- frame a plugin was inserted.
+-- the input FX button, say. `opts` as for B.open, and opts.search: a
+-- search box at the top (as the add menu has, typed into straight away)
+-- instead of "Search..." opening the dialog. Returns true on the frame a
+-- plugin was inserted.
 function B.menu_items(ctx, track, opts)
   inserted_now = false
   cur.insert_at = opts and opts.insert_at or nil
@@ -731,7 +785,25 @@ function B.menu_items(ctx, track, opts)
     ImGui.TextDisabled(ctx, "Click to add a button, again to take it off")
     ImGui.Separator(ctx)
   end
-  items(ctx, track)
+  cur.search = (opts and opts.search) and true or false
+  local q = ""
+  if cur.search then
+    if ImGui.IsWindowAppearing(ctx) then
+      msearch.query, msearch.sel = "", 1
+      ImGui.SetKeyboardFocusHere(ctx)
+    end
+    ImGui.SetNextItemWidth(ctx, 240)
+    local ch, nq = ImGui.InputTextWithHint(ctx, "##mfxq", "type to search\u{2026}", msearch.query)
+    if ch then msearch.query = nq; msearch.sel, msearch.scroll = 1, true end
+    q = U.trim(msearch.query)
+  end
+  if q ~= "" then
+    ImGui.Separator(ctx)
+    search_results(ctx, track, msearch, q)
+  else
+    items(ctx, track)
+  end
+  cur.search = false
   active_pick, active_picked, active_multi = nil, nil, false
   return inserted_now
 end
@@ -774,7 +846,7 @@ local function menu_anchor(ctx)
 end
 
 -- The matches in a list of their own that scrolls, as wide as the longest.
-local function results_list(ctx, track, found)
+local function results_list(ctx, track, found, m)
   local row_h = ImGui.GetTextLineHeightWithSpacing(ctx)
   local pad = badge_pad(ctx)
   local w = 240
@@ -789,7 +861,7 @@ local function results_list(ctx, track, found)
     local dl = ImGui.GetWindowDrawList(ctx)
     for i, e in ipairs(found) do
       if active_multi then ImGui.PushItemFlag(ctx, ImGui.ItemFlags_AutoClosePopups, false) end
-      if ImGui.Selectable(ctx, ("%s%s##q%d"):format(pad, e.short, i), menu.sel == i or picked(e)) then
+      if ImGui.Selectable(ctx, ("%s%s##q%d"):format(pad, e.short, i), m.sel == i or picked(e)) then
         if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
       end
       if active_multi then ImGui.PopItemFlag(ctx) end
@@ -801,9 +873,9 @@ local function results_list(ctx, track, found)
         folder_actions(ctx, e)
         ImGui.EndPopup(ctx)
       end
-      if menu.sel == i and menu.scroll then
+      if m.sel == i and m.scroll then
         ImGui.SetScrollHereY(ctx, 0.5)
-        menu.scroll = false
+        m.scroll = false
       end
     end
     ImGui.EndChild(ctx)
@@ -813,6 +885,34 @@ end
 local function quick_search(q)
   if #SR.terms(q) == 0 then return {} end
   return SR.search(installed(), q, nil, recent_bonus(), MENU_MAX)
+end
+
+-- The matches for `q` in a menu (`m`: its sel and scroll): the arrow keys
+-- pick from the list while the search box keeps focus, as in REAPER's own
+-- windows; Enter takes the one picked.
+search_results = function(ctx, track, m, q)
+  local found = quick_search(q)
+  if #found == 0 then
+    ImGui.TextDisabled(ctx, "No matches")
+    return
+  end
+  local n = #found
+  m.sel = math.max(1, math.min(n, m.sel or 1))
+  if ImGui.IsKeyPressed(ctx, ImGui.Key_DownArrow) then
+    m.sel, m.scroll = math.min(n, m.sel + 1), true
+  elseif ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow) then
+    m.sel, m.scroll = math.max(1, m.sel - 1), true
+  end
+  results_list(ctx, track, found, m)
+  -- a click inside the list's own window doesn't close the menu by
+  -- itself, as it would a row of the menu proper
+  if inserted_now then ImGui.CloseCurrentPopup(ctx) end
+  if #found >= MENU_MAX then ImGui.TextDisabled(ctx, "\u{2026}keep typing to narrow it") end
+  if not inserted_now and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+                           or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
+    if insert(cur.track or track, found[m.sel] or found[1], cur.insert_at, cur.input) then inserted_now = true end
+    ImGui.CloseCurrentPopup(ctx)
+  end
 end
 
 -- Returns true on the frame a plugin was inserted from the menu.
@@ -848,30 +948,7 @@ function B.draw_menu(ctx, track)
 
   cur.insert_at, cur.track, cur.input = menu.insert_at, nil, false
   if U.trim(menu.query) ~= "" then
-    local found = quick_search(U.trim(menu.query))
-    if #found == 0 then
-      ImGui.TextDisabled(ctx, "No matches")
-    else
-      -- the arrow keys pick from the list while the search box keeps focus,
-      -- as in REAPER's own windows; Enter adds the one picked
-      local n = #found
-      menu.sel = math.max(1, math.min(n, menu.sel or 1))
-      if ImGui.IsKeyPressed(ctx, ImGui.Key_DownArrow) then
-        menu.sel, menu.scroll = math.min(n, menu.sel + 1), true
-      elseif ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow) then
-        menu.sel, menu.scroll = math.max(1, menu.sel - 1), true
-      end
-      results_list(ctx, track, found)
-      -- a click inside the list's own window doesn't close the menu by
-      -- itself, as it would a row of the menu proper
-      if inserted_now then ImGui.CloseCurrentPopup(ctx) end
-      if #found >= MENU_MAX then ImGui.TextDisabled(ctx, "\u{2026}keep typing to narrow it") end
-      if not inserted_now and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
-                               or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
-        if insert(track, found[menu.sel] or found[1], cur.insert_at, false) then inserted_now = true end
-        ImGui.CloseCurrentPopup(ctx)
-      end
-    end
+    search_results(ctx, track, menu, U.trim(menu.query))
     if not inserted_now then
       ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, "Save as a smart folder\u{2026}") then B.edit_smart(nil, U.trim(menu.query)) end

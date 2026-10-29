@@ -676,3 +676,21 @@ package.path as it loads, and Pro's own entry scripts add Standard's.
   `tools/split.sh` copies Pro's files into it and Standard's into a
   portable REAPER, and TS-ReaScripts' `tools/sync-from-reaper.sh` leaves
   out everything in the Pro repo's `pro-files.txt`.
+
+## Compare: one container, and latency
+
+A compare is one container, [A -> B -> switch], not two parallel
+branches. A writes to a spare pair (3/4, or 5/6 when either plugin takes a
+sidechain; the container then has 4 inputs and A's sidechain pins are
+2/3), B to 1/2, and the switch reads both. Measured with a click through
+an A of 480 samples' latency and a B of none: A's click arrives 0 samples
+behind B's, because REAPER delays the channels a plugin passes through by
+that plugin's latency. Parallel containers line up too, but their sum
+peaked at 1.5 for a click of 1.0, so the single container stays.
+
+## Learning's shared memory
+
+TS_CV_Learn.jsfx and TS_CV_Learn.lua share gmem from 0x380000
+(LN.BASE): the probes use blocks from 0x100000 and the Trimmer from
+0x200000. A gain envelope (timing) is at +2000, 9000 points, with the
+input level after it.

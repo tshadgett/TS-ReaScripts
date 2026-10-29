@@ -1,10 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.6.2
+-- @version 3.7.0
 -- @changelog
---  Container fixes: a knob on an outer container no longer stops
---  ChannelView, and a container's panel looks travel with it into saved
---  FX chains, track templates and copied tracks. See the CHANGELOG.
+--  Choice names: your own names for a dropdown's choices. Pro: compare
+--  two plugins side by side. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -214,6 +213,9 @@ local RACK = rawget(_G, "TS_CV_RACK") == true
 -- (POP.PO the module; the rest of POP further down)
 local POP = {}
 POP.PO = (not RACK) and ED.module("TS_CV_PopOut") or nil
+-- comparing two plugins (Pro): the bar is the row's; the rack still
+-- leaves the switch out of its column
+POP.CMP = ED.module("TS_CV_Compare")
 if RACK then C.WIN_TITLE = "ChannelView Rack" end
 
 -- ChannelView Pro at another version: said once for each pair of
@@ -227,6 +229,7 @@ CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attac
 CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui); ML.attach(ImGui)
 TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui); KE.attach(ImGui)
 if ED.PRO then require("TS_CV_GridEditor").attach(ImGui) end
+if POP.CMP then POP.CMP.attach(ImGui); P.over_panel = POP.CMP.overlay end
 -- action drawers (global, not per project), and the window that organises
 -- every action bar
 DR.load()
@@ -478,6 +481,7 @@ local function rescan(force)
     end
     list = MD.strip(app.track, full)
     if not TP.probes_shown() then list = TP.strip_probes(app.track, list) end
+    if POP.CMP then list = POP.CMP.strip(app.track, list) end
     -- a container with knobs on it gets a panel of its own, at its head;
     -- folded to that panel, what's inside it stays out of the row
     local tr, with_panel = app.track, {}
@@ -2587,6 +2591,18 @@ local function panel_menu()
   if POP.PO and not app.popout and ImGui.IsItemHovered(ctx) and not (fx.container_panel or fx.is_container) then
     ImGui.SetTooltip(ctx, "A copy of this panel, floating or docked.\nOr drag its header out of ChannelView.")
   end
+  -- two plugins side by side, one heard at a time (TS_CV_Compare, Pro)
+  if POP.CMP and not RACK and not app.popout and not (fx.container_panel or fx.is_container) then
+    local busy = POP.CMP.parts(app.track) ~= nil
+    if ImGui.BeginMenu(ctx, "Compare with", not busy) then
+      if POP.CMP.menu_items(ctx, app.track, fx) then rescan(true) end
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, busy and "This track is comparing already:\nkeep one first."
+        or "Hear it against another plugin, one at a time,\nmatched in level, before you choose.")
+    end
+  end
   do
     local st = T.os_state(app.track, fx)
     if ImGui.BeginMenu(ctx, "Oversampling" .. (st.lit and ("  (" .. st.lit .. "x)") or "")) then
@@ -3026,8 +3042,9 @@ local function enter_pressed()
 end
 
 -- Name: everything a control is called -- the parameter's alias (this
--- plugin, everywhere), this slot's own label, its live name, and a
--- button's names for its two states.
+-- plugin, everywhere), this slot's own label, its live name, a button's
+-- names for its two states, and a dropdown's (or stepped knob's) names
+-- for its choices.
 local function name_menu(fx, key, layout, idx, c)
   local function tip(t) if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then ImGui.SetTooltip(ctx, t) end end
   -- Renaming here sets the parameter's ALIAS: the name sticks to the
@@ -3101,6 +3118,41 @@ local function name_menu(fx, key, layout, idx, c)
       ImGui.CloseCurrentPopup(ctx)
     end
     tip("Off, then on. Leave empty to keep the plugin's text.")
+  end
+
+  -- A dropdown's choices, likewise (Choices<p>): one box each, the
+  -- plugin's text as the hint. Read without moving anything.
+  if (c.type == "combo" or c.type == "stepped") and (c.param or -1) >= 0 then
+    ImGui.Separator(ctx)
+    ImGui.TextDisabled(ctx, "Choice names: this plugin, everywhere")
+    local list = P.button_choices(app.track, fx.addr, c.param, key, c.nbtn)
+    if type(list) ~= "table" or #list < 2 then
+      ImGui.TextDisabled(ctx, "Open the dropdown once to read its choices.")
+    else
+      app.choice_buf = app.choice_buf or {}
+      local rows = math.min(#list, 12)
+      local entered = false
+      local fh = ImGui.GetFrameHeightWithSpacing(ctx)
+      if ImGui.BeginChild(ctx, "##chnames", 230, rows * fh + 4, 0) then
+        for i, e in ipairs(list) do
+          local t = e.text or tostring(i)
+          ImGui.SetNextItemWidth(ctx, 210)
+          local _, nv = ImGui.InputTextWithHint(ctx, "##chn" .. i, t, app.choice_buf[t] or "")
+          if enter_pressed() then entered = true end
+          app.choice_buf[t] = nv
+        end
+        ImGui.EndChild(ctx)
+      end
+      if ImGui.Button(ctx, "Set##choices") or entered then
+        materialise(fx)
+        M.set_choice_names(key, c.param, app.choice_buf)
+        M.save()
+        ImGui.CloseCurrentPopup(ctx)
+      end
+      ImGui.SameLine(ctx)
+      if ImGui.Button(ctx, "Clear##choices") then app.choice_buf = {} end
+      tip("Empty: the plugin's own name (Set after Clear: all back).")
+    end
   end
 end
 
@@ -4794,6 +4846,12 @@ local function draw_brackets()
   for _, r in ipairs(app.panel_rects) do rect[r.chain_i] = r end
   for _, b in ipairs(app.brackets) do
     local ra, rb = rect[b.first], rect[b.last]
+    -- a compare's container: its bar instead of a bracket (TS_CV_Compare)
+    if ra and rb and POP.CMP and b.kind == "container" and POP.CMP.is_container(app.track, b.node.guid) then
+      POP.CMP.draw_bar(ctx, app.track, math.floor(ra.x), math.floor(rb.x + rb.w),
+        math.floor((app.brk_top or ra.y) + b.row * C.BRK_ROW_H))
+      ra = nil
+    end
     if ra and rb then
       local box = b.kind == "container"
       local col = box and C.COL.brk_container or C.COL.brk_parallel
@@ -4949,6 +5007,8 @@ local function panel_requests(i, fx, layout, key, req)
       app.rng_for = nil
       local st = c and c.param and M.get_states(key, c.param)
       app.state_buf = { st and st[1] or "", st and st[2] or "" }
+      app.choice_buf = {}
+      for t, nm in pairs(c and c.param and M.get_choice_names(key, c.param) or {}) do app.choice_buf[t] = nm end
       app.open_ctl_menu = true
     end
 end
@@ -5236,6 +5296,10 @@ local function panel_row(row_h, row_w)
       local drop = {}
       for _, b in ipairs(app.brackets) do
         local d = (b.row + 1) * C.BRK_ROW_H + C.BRK_PAD
+        -- (a compare's bar stands in for its bracket, and is taller)
+        if POP.CMP and b.kind == "container" and POP.CMP.is_container(app.track, b.node.guid) then
+          d = d + POP.CMP.BAR_H - C.BRK_ROW_H
+        end
         for k = b.first, b.last do drop[k] = math.max(drop[k] or 0, d) end
       end
       local function panel_h(i) return inner_h - (drop[i] or 0) end
@@ -5286,7 +5350,14 @@ local function panel_row(row_h, row_w)
         ImGui.SetCursorScreenPos(ctx, px, py)
         local layout, key = layout_for(fx)
         local is_src = app.drag ~= nil and app.drag.guid == fx.guid
-        local w, req = P.draw(ctx, app.track, fx, layout, key, panel_h(i), i, is_src)
+        local w, req
+        -- compared blind: a numbered box instead (TS_CV_Compare)
+        local cmp = POP.CMP and POP.CMP.side_of(app.track, fx.guid)
+        if cmp and POP.CMP.blind(app.track) then
+          w, req = POP.CMP.blind_panel(ctx, app.track, fx, panel_h(i)), {}
+        else
+          w, req = P.draw(ctx, app.track, fx, layout, key, panel_h(i), i, is_src)
+        end
 
         app.panel_rects[#app.panel_rects + 1] = {
           chain_i   = i,

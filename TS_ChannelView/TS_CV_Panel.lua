@@ -2840,7 +2840,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       local cell_x, cell_y = gx0 + item.x, gy0 + item.y
       local cell_w, cell_h = item.pw or hx(item.w), hy(item.h)
       W.last_knob, W.last_fader, W.last_xy = nil, nil, nil
-      local shown    = U.fmt_value(track, fx.addr, p)
+      -- (your name for the choice it's on, when you've given one)
+      local shown    = M.choice_text(key, p, U.fmt_value(track, fx.addr, p))
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, p, "")
       local label    = M.display_name(key, p, ctl.label, pname,
                                       ctl.live or layout.live)
@@ -2919,8 +2920,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             text = said or ((size == "small") and label or nil),
             on_col = lit, size = size, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" and item.kind == "buttons" then
-        -- its choices as buttons: the plugin's own names (button_choices)
-        local list = button_choices(track, fx.addr, p, key, ctl.nbtn)
+        -- its choices as buttons: the plugin's own names (button_choices),
+        -- or yours
+        local list = M.choice_list(key, p, button_choices(track, fx.addr, p, key, ctl.nbtn))
         local lit = W.lit_col(ctl.cap)
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
@@ -2929,7 +2931,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.combo(ctx, id, label, value, shown,
           step_norm(track, fx.addr, p, key),
           { tooltip     = tip,
-            steps       = combo_steps(track, fx.addr, p, key),
+            steps       = M.choice_list(key, p, combo_steps(track, fx.addr, p, key)),
             open_now    = pending_open[id],
             mod         = modded,
             style       = ctl.style })
@@ -3987,6 +3989,10 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     end
     local folded_here = fold_req
     if folded_here then fold_tab(ctx, dl, fx, x, y, ww, wh) end
+    -- anything another module draws over the panel, on its own draw list
+    -- (a compare's letter, TS_CV_Compare): drawn on the row's list it
+    -- would sit behind this child window
+    if P.over_panel then P.over_panel(ctx, dl, track, fx, x, y, ww, wh) end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)
     if folded_here then fold_pop(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate) end

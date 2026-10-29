@@ -28,8 +28,8 @@ and ReaEQ's and ReaComp's), knob and button styles and colours, faceplates,
 finishes, sections and backgrounds, the 3D effect's lighting and shadows,
 the plugin's own colours, vendor looks, more than one layout per plugin and
 switching between them, Show when rules and virtual controls, the TS_CV
-Trimmer, the gain-reduction trace and the patch bay (in the mixer and the
-TCP window).
+Trimmer, the gain-reduction trace, the patch bay (in the mixer and the
+TCP window) and comparing two plugins.
 
 Without Pro, everything else works as described, and a layout made with Pro
 still works: its grid, Show rules and virtual controls are drawn as they
@@ -145,6 +145,45 @@ next to the MIDI editor.
   whose plugin has gone says so, with a button to take it out.
 - They're ChannelView's own windows, so they show while ChannelView runs
   (not from the rack).
+
+## Comparing two plugins (Pro)
+
+Hear two plugins side by side on the same signal, one at a time, before
+choosing one. A panel's right-click ▸ **Compare with**:
+
+- **Another copy of this one**, to try other settings.
+- For an EQ, compressor or limiter with a canvas: those **ready to copy**
+  (the same kind of canvas, an EQ's learned), and **Set one up ▸**, the
+  others in its REAPER category. Picking one of those starts the compare
+  and opens its canvas setup.
+- **Any plugin ▸**: the whole plugin list, with a search box at the top
+  (start typing; arrows and Enter pick).
+
+The plugin and the one picked go into a container named *Compare*, with
+ChannelView's switch after them. Both get the same signal and keep
+running, so both meters stay live, and their latency stays lined up. In
+place of the container's bracket, a bar:
+
+- **A** / **B**: which is heard. It switches with a short crossfade. The
+  one not heard is dimmed. *TS_ChannelView_CompareSwitch* does the same
+  from a shortcut or a controller button.
+- **Match level** trims B to A's loudness (K-weighted, over a few seconds,
+  while there's sound), so neither wins for being louder.
+- **Match GR** (two compressors or limiters) sets B's threshold, or its
+  input, while playing until its gain reduction matches A's.
+- **Copy A → B** (two EQs, compressors or limiters with the same kind of
+  canvas) sets B as near A as it can go. Two EQs: B's controls are fitted
+  to A's curve. Compressors and limiters: control by role, in real units,
+  attack and release by their measured times. Threshold and makeup are
+  left to the matching. Any other pair is compared by ear.
+- **Blind** hides which is which in a shuffled order: the panels become
+  boxes 1 and 2, with an ear on the one heard (click a box to hear it).
+- **Keep A**, **Keep B** or **×** (keeps A) take the container apart and
+  leave the one kept where the plugin was. Keeping a trimmed B asks what
+  to do with the trim: fold it into B's makeup, keep it as a Volume
+  Adjustment after B, or drop it.
+
+One compare per track, saved with the project.
 
 ## The patch bay (Pro)
 
@@ -1172,6 +1211,15 @@ set them (right-click ▸ Name ▸ State names, or the editor's *State names*
 row), else the plugin's own word for the state, and ON/OFF only when the
 plugin just reports a number.
 
+A **dropdown** (or a stepped knob) can have your own **choice names**:
+right-click ▸ Name ▸ *Choice names*, or the editor's *Choice names* row,
+has a box for each of its choices with the plugin's name for it greyed in.
+Leave a box empty to keep the plugin's. They're the plugin's everywhere
+that parameter shows: the dropdown and its list, a dropdown shown as
+buttons, a stepped knob, tooltips, the Show-rule pickers and the web page.
+Each follows its choice by the plugin's name for it, so a plugin that
+reorders its list keeps them right.
+
 A **plugin instance** renamed in REAPER's FX chain shows that name on its
 panel and keeps its layout, which belongs to the plugin. The panel menu's
 name box renames it the same way (empty goes back to the plugin's name).
@@ -1290,7 +1338,8 @@ Canvases show no text readouts of what they measure: they draw it.
 
 **An EQ layout** has up to 8 bands. Name each band's controls — frequency,
 gain, Q, a shape switch, an On switch; any can be left out — or **Guess**
-them from the parameters' names. A plugin's controls don't say what shape a
+them from the parameters' names. Drag a band's colour swatch up or down to
+move it in the list; **Sort** puts the bands in the plugin's own order. A plugin's controls don't say what shape a
 band is, so ChannelView **learns** it: it puts a copy of the plugin on a
 hidden track between a pair of its own measuring plugins
 (`TS_CV_Learn.jsfx`), plays noise through it and measures what each
@@ -1339,7 +1388,12 @@ doesn't read in its role's unit (a 1176's attack of 1 to 7) runs along its
 range instead. A compressor's dB isn't always dBFS (an SSL bus compressor's
 0 dB is −22 dBFS), so **Measure threshold** in its setup plays a sine
 through a hidden copy at rising levels and finds where it starts to
-compress; the canvas then draws and drags the threshold in true dBFS. A
+compress; the canvas then draws and drags the threshold in true dBFS.
+An attack or release that doesn't read in ms (a 0–10 knob, a 1176's 1 to
+7) can be **measured**: *Measure timing* (measure the threshold first)
+steps a tone through a hidden copy at five settings of each and times the
+gain reduction. The panel then shows each one's real time beside its
+setting, and Compare's *Copy A → B* matches them by time. A
 knee reading 0–1 is drawn as a share, and ratios under 1:1 (expansion)
 are drawn as such. Turn on **Reversed** for a *Compression* or
 *Peak reduction* control (more of it is a lower threshold), or an attack,
