@@ -742,8 +742,8 @@ end
 --               was double-clicked: switch to the OTHER view (channel
 --               view on whatever track is already current, from mixer
 --               view; mixer view, from channel view).
---   dbl_track -- a NAME BUTTON was double-clicked, in either view: open
---               this track in channel view.
+--   dbl_track -- a NAME BUTTON was double-clicked, in either view:
+--               rename it (the master: open it in channel view).
 -- `row_w` (optional) is the row's width; 0 or nil fills the window (less
 -- room is left when a drawer sits beside it, TS_CV_Drawers).
 function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
@@ -808,7 +808,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
       if i > 1 then
         -- REAPER's own TCP spacer opens a gap here too, the same as it
         -- does in the send menu.
-        gap = t.space and C.STRIP_SPACER or C.MIX_GAP
+        gap = t.space and C.spacer_w() or C.MIX_GAP
       end
       x_off = x_off + gap
       ImGui.SetCursorPos(ctx, x_off, row_y)
@@ -966,6 +966,30 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
             end
           elseif before then
             TO.move_tracks(drag.track, before)
+          end
+        end
+      end
+    end
+
+    -- A plugin's panel dragged down here (ChannelView sets MX.fx_drag
+    -- { track, name }): the track under it outlined, as where it'll be
+    -- copied (moved with Alt); MX.fx_drop names it for the drop, which
+    -- ChannelView makes when the button's let go.
+    MX.fx_drop = nil
+    if MX.fx_drag then
+      local mx, my = ImGui.GetMousePos(ctx)
+      local wx, wy = ImGui.GetWindowPos(ctx)
+      local ww, wh = ImGui.GetWindowSize(ctx)
+      if mx >= wx and mx < wx + ww and my >= wy and my < wy + wh then
+        for _, r in ipairs(rects) do
+          if mx >= r.x and mx < r.x + r.w and r.track and r.track ~= MX.fx_drag.track then
+            MX.fx_drop = r.track
+            local alt = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Alt) ~= 0
+            ImGui.DrawList_AddRect(ImGui.GetWindowDrawList(ctx), r.x - 1, wy + 1, r.x + r.w + 1, wy + inner_h - 1,
+              C.COL.drop_marker, C.STRIP_ROUND, 0, 3.0)
+            ImGui.SetTooltip(ctx, (alt and "Move " or "Copy ") .. (MX.fx_drag.name or "plugin") .. " to " .. r.name
+              .. (alt and "" or "\n(Alt: move it)"))
+            break
           end
         end
       end

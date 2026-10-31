@@ -62,7 +62,13 @@ P.own_eq, P.own_rc, P.own_trim = own_eq, own_rc, own_trim
 -- with, for its size (P.own_w, P.width)
 local own_layout = {}
 -- a layout's canvas, when there's Pro to draw it
-local function canvas_of(layout) return MP ~= nil and layout and layout.canvas or nil end
+-- The canvas drawn beside a layout's controls: none when its EQ canvas is
+-- drawn in curve controls on its grid instead (M.has_curve).
+local function canvas_of(layout)
+  local cv = MP ~= nil and layout and layout.canvas or nil
+  if cv and cv.kind == "eq" and M.has_curve(layout) then return nil end
+  return cv
+end
 P.canvas_of = canvas_of
 
 -- An expanded panel's foot: the layout lock at its left, and the preset
@@ -184,6 +190,8 @@ function P.cell_size(ctl, half_rows)
   end
   local bw, bh = P.button_span(ctl)
   if bw and bh <= half_rows then return bw, bh, "buttons" end
+  -- a dropdown: one to four cells wide (Size<n>)
+  if ctl.type == "combo" then return M.combo_cells(ctl) * 2, 2 end
   if ctl.type == "half_gap" then return 2, 1 end
   local sizable = ctl.type == nil or ctl.type == "knob" or ctl.type == "stepped"
     or (ctl.type == "dual" and ctl.size ~= "small")
@@ -583,7 +591,7 @@ local function grid_room(panel_h)
 end
 
 local function new_out()
-  return { items = {}, rules = {}, segs = {}, sections = {}, gaps = {}, spacers = {} }
+  return { items = {}, rules = {}, segs = {}, sections = {}, gaps = {}, spacers = {}, texts = {}, curves = {} }
 end
 
 -- Puts control `ctl` at c, r, w by h quarter cells (dx, dy pixels on):
@@ -603,6 +611,14 @@ local function put(out, ctl, c, r, w, h, dx, dy)
     end
     return
   end
+  if t == "text" then
+    out.texts[#out.texts + 1] = { x = x, y = y, w = qx(w), h = qy(h), by = ctl }
+    return
+  end
+  if t == "curve" then
+    out.curves[#out.curves + 1] = { x = x, y = y, w = qx(w), h = qy(h), by = ctl }
+    return
+  end
   if t == "section" then
     if P.section_style(ctl) or C.edge_rgba(ctl.edge) then
       out.sections[#out.sections + 1] = { x = x, y = y, w = qx(w), h = qy(h), by = ctl }
@@ -618,6 +634,8 @@ local function put(out, ctl, c, r, w, h, dx, dy)
     it.pw = qx(w)
   elseif not STRETCH[kind] then
     if t ~= "combo" then it.x = x + half(qx(w) - hx(nw)); it.w = nw end
+    -- a dropdown in a place half a cell tall: short, its box without its name
+    if t == "combo" and h <= 2 then nh, it.short = 1, true end
     it.y = y + half(qy(h) - hy(nh))
     it.h = nh
   end
@@ -1122,7 +1140,7 @@ function P.visible(controls, track, fx)
   local shown = M.visible(controls, function(p, vname)
     if vname then return St.vvalue(fx.guid, vname, base, controls) end
     return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
-  end)
+  end, function(p, n) return require("TS_CV_Units").reads_as(track, fx.addr, fx.guid, p, n) end)
   shown.grid = controls.grid
   return shown
 end
@@ -1201,7 +1219,7 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
     local side = 0
     local n = type(n_or_controls) == "table" and #n_or_controls or (n_or_controls or 0)
     -- folded away, its controls pop out from the edge instead (fold_pop)
-    if n > 0 and not canvas.fold then
+    if n > 0 and not P.canvas_folded(canvas, key, false) then
       side = P.width(n_or_controls, avail_h, false, false, nil, false, false, lock) - C.PANEL_PAD
     end
     -- with input/output meters: on the panel's two outside edges
@@ -1341,6 +1359,9 @@ local scan_budget = 0
 -- Controls whose list was just fetched on demand and should open next
 -- frame, keyed by the control's ImGui id.
 local pending_open = {}
+-- A dropdown's list read for its opening (P.read_choices), by its ImGui id;
+-- and whether a parameter can be read that way at all (false: swept instead).
+local live_lists, readable = {}, {}
 
 -- (the gain-reduction trace reads the probe once a frame, too)
 function P.begin_frame() scan_budget = C.SCAN_BUDGET; Tr.begin_frame() end
@@ -1454,6 +1475,66 @@ local function button_choices(track, addr, param, key, n)
   return out
 end
 P.button_choices = button_choices
+
+-- A dropdown's whole list, read without moving the plugin: what it would
+-- call each setting (TrackFX_FormatParamValueNormalized) at each of its
+-- steps, or at READ_POINTS points along one that reports no steps (a
+-- program or mode list behind a plain knob). A run of one name is one
+-- choice, at the middle of its run. A plugin that can't name a setting it
+-- isn't on (every point reads the same) is moved through its range once
+-- instead; nil when that can't be done yet either. Read again whenever
+-- it's asked for, not kept: a plugin's list can follow another of its
+-- controls (Seventh Heaven's programs, its category).
+local READ_POINTS = 1024
+function P.read_choices(track, addr, param, key)
+  if not reaper.TrackFX_FormatParamValueNormalized then return nil end
+  local st = step_norm(track, addr, param, key)
+  local n = st and (math.floor(1 / st + 0.5) + 1) or nil
+  local stepped = n ~= nil and n >= 2 and n <= READ_POINTS
+  local count = stepped and n or READ_POINTS
+  local out, first, differ = {}, nil, false
+  local run_t, run_a, run_b
+  local function flush()
+    if run_t then out[#out + 1] = { norm = stepped and run_a or (run_a + run_b) * 0.5, text = run_t } end
+  end
+  for k = 0, count - 1 do
+    local v = stepped and math.min(1, k * st) or k / (count - 1)
+    local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+    t = ok and U.trim(t or "") or ""
+    if t == "" then return nil end
+    if first == nil then first = t elseif t ~= first then differ = true end
+    if t == run_t then run_b = v else flush(); run_t, run_a, run_b = t, v, v end
+  end
+  flush()
+  if not differ or #out < 2 then
+    -- a plugin that only says what it reads now (Valhalla's): read by
+    -- moving it through its range once and back (TS_CV_Units, kept for
+    -- the session; not while writing automation or playing), each setting
+    -- at the middle of its run
+    local UN = require("TS_CV_Units")
+    out = UN.choice_runs(UN.formatter(track, addr, param), 64)
+    if not out then return nil end
+  end
+  return out
+end
+
+-- The choice `step` along from the one shown now (its name, or nearest
+-- its value), round from the end when `wrap`; its norm, or nil.
+function P.step_choice(list, shown, raw, step, wrap)
+  if type(list) ~= "table" or #list == 0 then return nil end
+  local at
+  for i, e in ipairs(list) do if e.text == shown then at = i break end end
+  if not at then
+    local best = math.huge
+    for i, e in ipairs(list) do
+      local d = math.abs(e.norm - raw)
+      if d < best then at, best = i, d end
+    end
+  end
+  local to = at + step
+  if wrap then to = (to - 1) % #list + 1 else to = math.max(1, math.min(#list, to)) end
+  return list[to].norm
+end
 do
   local clear = P.clear_caches
   function P.clear_caches() clear(); fmt_cache = {} end
@@ -1781,10 +1862,14 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hdr_hovered = ImGui.IsItemHovered(ctx)
   -- Alt+click: out of the chain (asked first), as in REAPER's FX chain
-  local alt = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Alt) ~= 0
+  local mods = ImGui.GetKeyMods(ctx)
+  local alt = (mods & ImGui.Mod_Alt) ~= 0
   if alt and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then req.remove = true end
+  -- Shift+click: bypass, or back on (as REAPER's mixer FX slots)
+  local shift = not alt and (mods & ImGui.Mod_Shift) ~= 0
+  if shift and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then req.toggle_bypass = true end
 
-  if not alt and ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+  if not alt and not shift and ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     -- x and y are output slots in the Lua API and must be passed as
     -- nil; the button is the FOURTH argument, not the second.
     local dx = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
@@ -1817,7 +1902,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     W.tip(ctx, "hdr##" .. fx.guid, full, true, false)
   end
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then req.open_menu = true end
-  if hdr_hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
+  if hdr_hovered and not shift and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
     req.toggle_collapse = true
   end
 
@@ -1895,7 +1980,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
 
   at(1)
   if W.icon_button(ctx, "byp##" .. fx.guid, "power", btn, not enabled,
-      enabled and "Bypass" or "Bypassed\nClick: enable",
+      enabled and "Bypass (or Shift+click the name)" or "Bypassed\nClick: enable",
       C.COL.bypass_on) then
     req.toggle_bypass = true
   end
@@ -2729,6 +2814,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     end
   end
 
+  -- a grid's words (text controls)
+  for _, tx in ipairs(lay.texts or {}) do P.draw_text_item(ctx, dl, gx0, gy0, tx) end
+
+  -- its EQ curves (curve controls): the canvas's bands in each place
+  for n, cu in ipairs(lay.curves or {}) do
+    P.draw_curve_item(ctx, dl, gx0 + cu.x, gy0 + cu.y, cu.w, cu.h, track, fx, layout, req, n)
+  end
+
   -- a grid's lines, from end to end
   for _, sg in ipairs(lay.segs or {}) do
     -- (an upright one stops just short of its ends, whichever way it runs)
@@ -2841,7 +2934,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       local cell_w, cell_h = item.pw or hx(item.w), hy(item.h)
       W.last_knob, W.last_fader, W.last_xy = nil, nil, nil
       -- (your name for the choice it's on, when you've given one)
-      local shown    = M.choice_text(key, p, U.fmt_value(track, fx.addr, p))
+      local said_raw = U.fmt_value(track, fx.addr, p)
+      local shown    = M.choice_text(key, p, said_raw, track, fx.addr)
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, p, "")
       local label    = M.display_name(key, p, ctl.label, pname,
                                       ctl.live or layout.live)
@@ -2922,25 +3016,67 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       elseif ctl.type == "combo" and item.kind == "buttons" then
         -- its choices as buttons: the plugin's own names (button_choices),
         -- or yours
-        local list = M.choice_list(key, p, button_choices(track, fx.addr, p, key, ctl.nbtn))
+        local list = M.choice_list(key, p, button_choices(track, fx.addr, p, key, ctl.nbtn), track, fx.addr)
         local lit = W.lit_col(ctl.cap)
+        -- a colour of its own for each choice you've given one
+        local on_cols
+        if ctl.ccols then
+          on_cols = {}
+          for i, e in ipairs(list) do on_cols[i] = W.lit_col(M.choice_col(ctl, e.raw or e.text)) end
+        end
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
-            tooltip = tip, on_col = lit, style = ctl.style, mod = modded })
+            tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" then
+        -- Its list is read from the plugin when it's opened (and kept while
+        -- it's open), or when an arrow or the wheel steps it; a plugin that
+        -- can't name its settings that way is swept once (combo_steps).
+        local rk = key .. ":" .. p
+        local lv = live_lists[id]
+        local open = ImGui.IsPopupOpen(ctx, id .. "_choices")
+        if lv and not open and not pending_open[id] then live_lists[id], lv = nil, nil end
+        local by_name = readable[rk] ~= false
+        local steps
+        if lv then steps = lv
+        elseif by_name then steps = nil
+        else steps = M.choice_list(key, p, combo_steps(track, fx.addr, p, key), track, fx.addr) end
         changed, nv, act = W.combo(ctx, id, label, value, shown,
           step_norm(track, fx.addr, p, key),
-          { tooltip     = tip,
-            steps       = M.choice_list(key, p, combo_steps(track, fx.addr, p, key)),
+          { tooltip     = item.short and (label .. ": " .. (tip or "")) or tip,
+            steps       = steps,
+            current     = (lv and by_name) and shown or nil,
             open_now    = pending_open[id],
+            list_step   = by_name,
+            short       = item.short,
+            w           = (M.combo_cells(ctl) > 1 or lay.grid) and hx(item.w) or nil,
             mod         = modded,
-            style       = ctl.style })
+            style       = ctl.style,
+            -- its text in the current choice's colour, else the control's
+            ink         = W.lit_col(M.choice_col(ctl, said_raw)) or W.lit_col(ctl.cap),
+            ink_of      = ctl.ccols and function(sv) return W.lit_col(M.choice_col(ctl, sv.raw or sv.text)) end or nil })
         pending_open[id] = nil
+        local function read_now()
+          local list = P.read_choices(track, fx.addr, p, key)
+          readable[rk] = list ~= nil
+          return list and M.choice_list(key, p, list, track, fx.addr)
+        end
         if act and act.want_steps then
-          -- scan right now, and open the list on the next frame once it
-          -- has something to show
-          if combo_steps(track, fx.addr, p, key, true) then
+          -- read it now, and open it next frame
+          local list = by_name and read_now()
+          if list then
+            live_lists[id], pending_open[id] = list, true
+          elseif combo_steps(track, fx.addr, p, key, true) then
             pending_open[id] = true
+          end
+        elseif act and act.step then
+          local list = by_name and read_now()
+          local to = list and P.step_choice(list, shown, raw, act.step, act.wrap)
+          if to then nv, changed = to, true
+          elseif not list then
+            -- (can't be read by name: along its own steps instead)
+            local sn = step_norm(track, fx.addr, p, key)
+            local d = (sn or C.WHEEL_STEP) * act.step
+            nv, changed = math.max(0, math.min(1, raw + d)), true
           end
         end
       elseif ctl.type == "fader" then
@@ -3015,6 +3151,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       if act and act.double_click then
         local d = U.param_mid_norm(track, fx.addr, p)
         nv, changed = rev and (1 - d) or d, true
+      end
+      -- Ctrl+click (Cmd on a Mac) a knob or fader: a value typed in
+      if ctl.type == "knob" or ctl.type == "stepped" or ctl.type == "fader" then
+        local typed = W.type_box(ctx, id, act and act.type_in, label, shown)
+        local tn = typed and require("TS_CV_Units").typed_norm(track, fx.addr, p, typed)
+        if tn then nv, changed = rev and (1 - tn) or tn, true end
       end
       if changed then
         local pv = rev and (1 - nv) or nv
@@ -3412,6 +3554,103 @@ local function plate_light(pl)
   local r, g, b = (c >> 24) & 0xff, (c >> 16) & 0xff, (c >> 8) & 0xff
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5
 end
+-- A canvas layout's own colours (TS_CV_Mappings CanvasCol), while it
+-- draws: each stands in for the theme colours the canvases use for it, the
+-- background is filled in, and an EQ's bands take theirs.
+local CANVAS_KEYS = {
+  curve = { "accent", "eq_curve", "fader_cap" },
+  grid  = { "eq_grid", "eq_grid_0db", "header_dim", "label", "value", "knob_ring" },
+  meter = { "eq_spectrum", "icon_on" },
+  knob  = { "knob_fill" },
+}
+function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
+  local cols = cv and cv.cols
+  if not cols then return fn(...) end
+  local saved = {}
+  for el, keys in pairs(CANVAS_KEYS) do
+    if cols[el] then
+      for _, k in ipairs(keys) do saved[k] = C.COL[k]; C.COL[k] = ((cols[el] & 0xffffff) << 8) | 0xff end
+    end
+  end
+  if cols.bg then ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, ((cols.bg & 0xffffff) << 8) | 0xff, 3.0) end
+  local bands
+  for k = 1, 8 do
+    local b = cols["band" .. k]
+    if b then bands = bands or {}; bands[k] = ((b & 0xffffff) << 8) | 0xff end
+  end
+  local was = EQP and EQP.set_band_colours(bands)
+  local r = table.pack(pcall(fn, ...))
+  for k, v in pairs(saved) do C.COL[k] = v end
+  if EQP then EQP.set_band_colours(was) end
+  if not r[1] then error(r[2], 0) end
+  return table.unpack(r, 2, r.n)
+end
+
+-- An EQ curve on a grid (TS_CV_Mappings "curve"): the layout's EQ
+-- canvas (TS_CV_MapPanel) in its place, on a screen of its own, in the
+-- canvas's colours (CanvasCol). `n`: which of the layout's curves, so each
+-- has its own nodes. Pro (the canvases); a placeholder without an EQ.
+function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n)
+  local x1, y1, x2, y2 = x + 1, y + 1, x + w - 1, y + h - 1
+  ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, U.with_alpha(C.COL.panel_bg, 0xff), 3.0)
+  ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, 0x00000038, 3.0)
+  local cv = layout and layout.canvas
+  if not (MP and cv and cv.kind == "eq") then
+    W.push_small(ctx)
+    local msg = MP and "EQ curve: this layout has no EQ bands" or "EQ curve (Pro)"
+    local tw, th = ImGui.CalcTextSize(ctx, msg)
+    ImGui.DrawList_PushClipRect(dl, x1, y1, x2, y2, true)
+    ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + (h - th) * 0.5, C.COL.header_dim, msg)
+    ImGui.DrawList_PopClipRect(dl)
+    W.pop_small(ctx)
+  else
+    P.with_canvas_cols(cv, dl, x1, y1, x2 - x1, y2 - y1, MP.draw_eq, ctx, dl, x1, y1, x2 - x1, y2 - y1,
+      track, fx, layout, req, { id = ":c" .. n, small = true })
+  end
+  ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 3.0, 0, 1.0)
+end
+
+-- A text control on a grid (TS_CV_Mappings "text"): its words in its
+-- place, across, or up when the place is taller than wide; Size small or
+-- large, its colour (Edge), left / centred / right along its room.
+local TEXT_PX = { small = 11, large = 18 }
+function P.draw_text_item(ctx, dl, ox, oy, t)
+  local c = t.by
+  local txt = c.label or ""
+  if txt == "" then return end
+  local col = C.edge_rgba(c.edge) or C.COL.label
+  local x0, y0 = ox + t.x, oy + t.y
+  ImGui.DrawList_PushClipRect(dl, x0, y0, x0 + t.w, y0 + t.h, true)
+  if t.h > t.w then
+    -- up: reads from the bottom; "left" is its start (the bottom)
+    local len = ImGui.CalcTextSize(ctx, txt:upper())
+    len = math.min(len, t.h - 4)
+    local y = y0 + (t.h - len) * 0.5
+    if c.align == "left" then y = y0 + t.h - len - 2 elseif c.align == "right" then y = y0 + 2 end
+    W.vertical_text(ctx, dl, x0 + t.w * 0.5, y, txt, col, t.h - 4)
+  else
+    local base = ImGui.GetFontSize(ctx)
+    local px = TEXT_PX[c.size] or base
+    local tw, th = ImGui.CalcTextSize(ctx, txt)
+    tw, th = tw * px / base, th * px / base
+    local x = x0 + (t.w - tw) * 0.5
+    if c.align == "left" then x = x0 + 2 elseif c.align == "right" then x = x0 + t.w - tw - 2 end
+    ImGui.DrawList_AddTextEx(dl, nil, px, x, y0 + (t.h - th) * 0.5, col, txt)
+  end
+  ImGui.DrawList_PopClipRect(dl)
+end
+
+-- Whether a canvas layout's controls are folded away (in the rack:
+-- `rack`): not while Edit layout has that layout open, so what's being
+-- edited is on the panel.
+function P.canvas_folded(canvas, key, rack)
+  local f = rack and canvas.fold_rack or (not rack and canvas.fold)
+  if not f then return false end
+  local GE_ = package.loaded["TS_CV_GridEditor"]
+  if GE_ and GE_.is_open() and GE_.key() == key then return false end
+  return true
+end
+
 local function on_screen(plate, saved, dl, x, y, w, h, fn, ...)
   if not (saved and plate_light(plate)) then return fn(...) end
   pop_plate(saved)
@@ -3566,7 +3805,7 @@ function P.rack_height(track, fx, layout, key, w, shared)
   if canvas then
     local ew = w - io_w(io)
     local h = base + P.rack_canvas_h(ew, canvas)
-    if canvas.fold_rack then return h end
+    if P.canvas_folded(canvas, key, true) then return h end
     if #vis > 0 and P.is_grid(vis) then
       -- the controls under it, a grid: as tall as it is across the width
       h = h + C.GRID_TOP_PAD + C.PANEL_PAD + (rack_grid_tall(vis, ew - C.PANEL_PAD * 2, lock))
@@ -3929,7 +4168,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         -- the rack: the canvas across the whole width, the controls under it
         local stacked = P.RACK and P.FILL_W and true or false
         local full_bh = bh
-        local folded = (stacked and canvas.fold_rack) or (not stacked and canvas.fold)
+        local folded = P.canvas_folded(canvas, key, stacked)
         if stacked then
           cw = ew
           if #(layout.controls or {}) > 0 and not folded then bh = math.min(bh, P.rack_canvas_h(ew, canvas)) end
@@ -3938,7 +4177,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         local todo = M.canvas_todo(canvas) or (canvas.kind ~= "eq" and not next(canvas.roles or {}))
         local function screen(fn, ...)
           if todo then return fn(...) end
-          return on_screen(plate, saved, dl, ex + 1, y + C.HEADER_H + 1, cw - 2, bh - 2, fn, ...)
+          return on_screen(plate, saved, dl, ex + 1, y + C.HEADER_H + 1, cw - 2, bh - 2,
+            P.with_canvas_cols, canvas, dl, ex + 1, y + C.HEADER_H + 1, cw - 2, bh - 2, fn, ...)
         end
         if RP.KINDS[canvas.kind] then
           if not screen(RP.draw, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, req, canvas) then

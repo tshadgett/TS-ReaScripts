@@ -467,6 +467,7 @@ function DR.load()
   end
   for _, d in ipairs(DR.list) do d.tb = bar_for(d) end
   DR.stamp = reaper.GetExtState(C.EXT_SECT, DR.REV)
+  DR.show_group_toggles(DR.list)
 end
 
 function DR.save()
@@ -474,6 +475,7 @@ function DR.save()
   revs = revs + 1
   DR.stamp = ("%.3f.%d"):format(reaper.time_precise(), revs)
   reaper.SetExtState(C.EXT_SECT, DR.REV, DR.stamp, false)
+  DR.show_group_toggles(DR.list)
   for _, d in ipairs(DR.list) do
     if d.tb then
       d.tb.style = d.style; d.tb.btn = size_of(d.size); d.tb.bar_name = DR.name_of(d)
@@ -486,6 +488,73 @@ end
 function DR.sync()
   if reaper.GetExtState(C.EXT_SECT, DR.REV) ~= DR.stamp then DR.load(); return true end
   return false
+end
+
+-- ---------------------------------------------------------------------
+-- the Show/hide toolbars actions (TS_ChannelView_ToggleToolbars.lua,
+-- TS_ChannelView_ToggleRackToolbars.lua): a window's drawers, all at once
+-- ---------------------------------------------------------------------
+-- group "cv": ChannelView's four sides; "rack": the Rack view's. Bars in
+-- their own windows, the TCP's and the web's aren't drawers.
+DR.GROUP = {
+  cv   = { top = true, left = true, right = true, bottom = true },
+  rack = { rtop = true, rleft = true, rright = true, rbottom = true },
+}
+DR.GROUP_CMD = { cv = "bars_toggle_cmd", rack = "rbars_toggle_cmd" }
+DR.GROUP_HID = { cv = "bars_hidden", rack = "rbars_hidden" }
+
+-- Whether any of the group's drawers is open in `list`.
+function DR.group_open(list, group)
+  local g = DR.GROUP[group]
+  for _, d in ipairs(list) do if g[d.side] and d.open then return true end end
+  return false
+end
+
+-- Pure: with any of the group's drawers open, closes them all and gives
+-- back the ids it closed ("3,5"); with none, opens the ones in `hidden`
+-- that are still there (every one of the group's when none are).
+-- Returns: open now, the ids to remember.
+function DR.toggle_group(list, group, hidden)
+  local g = DR.GROUP[group]
+  if DR.group_open(list, group) then
+    local ids = {}
+    for _, d in ipairs(list) do
+      if g[d.side] and d.open then d.open = false; ids[#ids + 1] = tostring(d.id) end
+    end
+    return false, table.concat(ids, ",")
+  end
+  local want, any = {}, false
+  for id in (hidden or ""):gmatch("%d+") do want[tonumber(id)] = true end
+  for _, d in ipairs(list) do if g[d.side] and want[d.id] then any = true end end
+  local opened = false
+  for _, d in ipairs(list) do
+    if g[d.side] and (want[d.id] or not any) then d.open = true; opened = true end
+  end
+  return opened, ""
+end
+
+-- A toolbar button for either action lights while its drawers are out.
+function DR.show_group_toggles(list)
+  for group, key in pairs(DR.GROUP_CMD) do
+    local sec, cmd = reaper.GetExtState(C.EXT_SECT, key):match("^(%-?%d+):(%d+)$")
+    if sec and tonumber(cmd) > 0 and reaper.SetToggleCommandState then
+      reaper.SetToggleCommandState(tonumber(sec), tonumber(cmd), DR.group_open(list, group) and 1 or 0)
+      reaper.RefreshToolbar2(tonumber(sec), tonumber(cmd))
+    end
+  end
+end
+
+-- The action itself, run from its script: works on the stored list (the
+-- windows open follow it), ChannelView running or not.
+function DR.toggle_bars(group)
+  local line = reaper.GetExtState(C.EXT_SECT, DR.KEY)
+  if line == "" then return end      -- (no bars yet: ChannelView makes the list)
+  local list = DR.parse(line)
+  local _, ids = DR.toggle_group(list, group, reaper.GetExtState(C.EXT_SECT, DR.GROUP_HID[group]))
+  if ids ~= "" then reaper.SetExtState(C.EXT_SECT, DR.GROUP_HID[group], ids, true) end
+  reaper.SetExtState(C.EXT_SECT, DR.KEY, DR.serialize(list), true)
+  reaper.SetExtState(C.EXT_SECT, DR.REV, ("%.3f.t"):format(reaper.time_precise()), false)
+  DR.show_group_toggles(list)
 end
 
 function DR.by_id(id)

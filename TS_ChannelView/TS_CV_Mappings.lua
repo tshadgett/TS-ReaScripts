@@ -109,6 +109,7 @@
   it is the faceplate's own (on for aluminium, off for the rest). Size<n>
   makes knob n small or large (C.SIZES in TS_CV_Config.lua); with no Size
   line it is the ordinary size, and an older ChannelView ignores the line.
+  On a dropdown, Size<n>=2, 3 or 4 is how many cells wide it is.
   Buttons<n> shows dropdown n as buttons -- across or down -- and keeps
   how many choices it had, which is how much room the buttons take.
   Back<n> is control n's own background, an inset or a faceplate, drawn
@@ -138,7 +139,13 @@
   one 6 x 6), and At<n>=<column>,<row>,<width>,<height> puts control n
   on it. A divider is a line from <column>,<row> to <column + width>,
   <row + height>, any way (width and height may be below 0), and its
-  ends may be at a half. A "section" control (Ctl<n>=-1|section|0|) is a
+  ends may be at a half. A "curve" control (Ctl<n>=-1|curve|0|) is the
+  layout's EQ canvas in a place of its own (a layout with one has no
+  canvas beside its controls; several may show the same bands).
+  A "text" control (Ctl<n>=-1|text|0|<its words>)
+  is words anywhere on the grid, across or (taller than wide) up, sized
+  by Size<n> (small, large), coloured by Edge<n>, placed by Align<n>
+  (left or right; centred without). A "section" control (Ctl<n>=-1|section|0|) is a
   group, a rectangle round the controls on it, styled with the same
   lines as a divider's section (Style<n> inset or plate|<faceplate>,
   Brush, Finish, Metal, Corners) or with none, and Edge<n> for an outline
@@ -314,8 +321,9 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; At<n>=<column>,<row>,<width>,<height>: control n's place on the grid, in quarter cells\n"
                 .. ";   (a divider: a line to <column + width>,<row + height>, either way; a section: its rectangle)\n"
                 .. "; Edge<n>=<faceplate, or #rrggbb>: section n's outline, or line n's colour\n"
-                .. "; CanvasW=<px>, CanvasH=<px>: a canvas layout's canvas, its width in ChannelView, its height in the rack"
-                .. "; CanvasFold=1, CanvasFoldRack=1: its controls folded away, popping out from the panel's edge"
+                .. "; CanvasW=<px>, CanvasH=<px>: a canvas layout's canvas, its width in ChannelView, its height in the rack\n"
+                .. "; CanvasFold=1, CanvasFoldRack=1: its controls folded away, popping out from the panel's edge\n"
+                .. "; CanvasCol=<element>:#rrggbb|...: a canvas's own colours (curve, bg, grid, meter, knob, band1..band8)"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -338,7 +346,17 @@ end
 
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
-                     xy = true, dual = true, page = true, section = true }
+                     xy = true, dual = true, page = true, section = true, text = true, curve = true }
+
+-- A layout's EQ curves on its grid (Ctl<n>=-1|curve|0|): the canvas's
+-- bands, drawn and dragged in each one's place. A layout with one draws
+-- its EQ canvas there and not beside its controls.
+function M.has_curve(layout)
+  for _, c in ipairs((layout and layout.controls) or {}) do
+    if c.type == "curve" then return true end
+  end
+  return false
+end
 
 -- ---------------------------------------------------------------------
 
@@ -351,6 +369,19 @@ local function size_of(v)
   v = U.trim(v or "")
   if v ~= "medium" and C.SIZES[v] then return v end
   return nil
+end
+
+-- Size<n>=2|3|4 on a dropdown: how many cells wide; nil is one.
+local function combo_width_of(v)
+  local n = tonumber(U.trim(v or ""))
+  if n and n >= 2 and n <= 4 then return tostring(math.floor(n)) end
+  return nil
+end
+M.combo_width_of = combo_width_of
+
+-- A dropdown's width in cells (1 to 4).
+function M.combo_cells(c)
+  return tonumber(c and c.type == "combo" and combo_width_of(c.size)) or 1
 end
 
 -- Size<n>=3x2 on an XY pad: columns by rows, 2 or 3 each; nil is 2x2.
@@ -434,6 +465,40 @@ end
 local function scale_ink_of(v)
   local k = scale_of(v)
   return (k and k ~= "none" and U.trim(v or ""):match("|%s*cap%s*$")) and "cap" or nil
+end
+
+-- A dropdown's colours per choice: { [plugin's text] = lit colour's name
+-- (C.TOGGLE_COLS) or #rrggbb }, stored as <plugin's text>=<colour>|...
+-- (as its names are).
+local function lit_key(v)
+  v = U.trim(v or "")
+  if v ~= "theme" and C.TOGGLE_COL[v] then return v end
+  return C.custom_key(v)
+end
+
+function M.choice_cols_of(v)
+  local map = M.choices_of_line(v)
+  if not map then return nil end
+  local out, any = {}, false
+  for t, col in pairs(map) do
+    col = lit_key(col)
+    if col then out[t] = col; any = true end
+  end
+  return any and out or nil
+end
+
+function M.choice_cols_line(map)
+  local keep = {}
+  for t, col in pairs(map or {}) do
+    if lit_key(col) then keep[t] = lit_key(col) end
+  end
+  return M.choices_line(keep)
+end
+
+-- The colour control c gives a choice whose plugin text is `raw`, or nil.
+function M.choice_col(c, raw)
+  if not (c and c.ccols and raw) then return nil end
+  return c.ccols[U.trim(tostring(raw))]
 end
 
 -- What control c's scale is numbered with: "values" (the default), "ten",
@@ -577,7 +642,7 @@ M.ROLES = {
   deess = { "Frequency", "Low", "High", "Width", "Threshold", "Range" },
   delay = { "Time", "Note", "Rhythm", "Sync", "Multiplier", "Feedback", "Mode", "PingPong", "TimeR", "NoteR",
             "Offset", "Ratio", "FeedbackR", "Cross", "Width", "Link", "LowCut", "HighCut", "Mix", "Dry" },
-  reverb = { "Predelay", "Decay", "Size", "Balance", "Early", "Diffusion", "LowFreq", "Bass", "HighFreq", "Damping",
+  reverb = { "Predelay", "PredelayNote", "PredelaySync", "Decay", "Size", "Balance", "Early", "Diffusion", "LowFreq", "Bass", "HighFreq", "Damping",
              "Tone", "LowEQ", "HighEQ", "LowCutOn", "HighCutOn", "LowCut", "HighCut", "Style", "Freeze", "Mix" },
   -- (a synth's oscillator too: its waves' mix, the extra sine and its
   -- tuning, pulse width, detune, portamento, volume -- drawn over it)
@@ -832,7 +897,32 @@ function M.canvas_of(sect)
   -- ChannelView, in the rack
   cv.fold = (U.trim(sect.CanvasFold or "") == "1") or nil
   cv.fold_rack = (U.trim(sect.CanvasFoldRack or "") == "1") or nil
+  cv.cols = M.canvas_cols_of(sect.CanvasCol)
   return cv
+end
+
+-- A canvas's own colours (CanvasCol=curve:#rrggbb|bg:#...|...): what it
+-- draws in instead of the theme's, by element (M.CANVAS_COLS, and band1 to
+-- band8 for an EQ's bands), as 0xrrggbb. nil when there are none.
+M.CANVAS_COLS = { "curve", "bg", "grid", "meter", "knob" }
+local CANVAS_COL_OK = { curve = true, bg = true, grid = true, meter = true, knob = true }
+for k = 1, 8 do CANVAS_COL_OK["band" .. k] = true end
+function M.canvas_cols_of(v)
+  local out, any = {}, false
+  for item in ((v or "") .. "|"):gmatch("([^|]*)|") do
+    local k, hex = U.trim(item):match("^(%w+):#(%x%x%x%x%x%x)$")
+    if k and CANVAS_COL_OK[k] then out[k] = tonumber(hex, 16); any = true end
+  end
+  return any and out or nil
+end
+function M.canvas_cols_line(cols)
+  local keys = {}
+  for k in pairs(cols or {}) do if CANVAS_COL_OK[k] then keys[#keys + 1] = k end end
+  if #keys == 0 then return nil end
+  table.sort(keys)
+  local parts = {}
+  for i, k in ipairs(keys) do parts[i] = ("%s:#%06x"):format(k, cols[k] & 0xffffff) end
+  return table.concat(parts, "|")
 end
 
 function M.canvas_lines(cv, out)
@@ -896,12 +986,15 @@ function M.canvas_lines(cv, out)
   if cv.h then out.CanvasH = tostring(math.floor(cv.h)) end
   if cv.fold then out.CanvasFold = "1" end
   if cv.fold_rack then out.CanvasFoldRack = "1" end
+  local cl = M.canvas_cols_line(cv.cols)
+  if cl then out.CanvasCol = cl end
 end
 
 function M.copy_canvas(cv)
   if not cv then return nil end
   local out = { kind = cv.kind, all_on = cv.all_on, model = cv.model, no_model = cv.no_model, nb = cv.nb, nt = cv.nt, ref0 = cv.ref0, dshape = cv.dshape,
                 w = cv.w, h = cv.h, fold = cv.fold, fold_rack = cv.fold_rack,
+                cols = cv.cols and M.canvas_cols_of(M.canvas_cols_line(cv.cols)) or nil,
                  dmodes = cv.dmodes and M.dl_modes_parse(M.dl_modes_write(cv.dmodes)) or nil,
                  sat_cal = cv.sat_cal and M.sat_decode(M.sat_encode(cv.sat_cal)) or nil }
   if cv.bands then
@@ -1474,7 +1567,7 @@ end
 
 local function parse_section(sect)
   local controls, aliases, states, ranges = {}, {}, {}, {}
-  local choice_names = {}
+  local choice_names, choice_by, choice_ctx = {}, {}, {}
   local meter = nil
   if sect.Meter then
     local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
@@ -1497,6 +1590,19 @@ local function parse_section(sect)
     if cp then
       local map = M.choices_of_line(v)
       if map then choice_names[tonumber(cp)] = map end
+    end
+    -- names that follow another control: which one, and a set for each of
+    -- its settings (ChoicesBy<p>=<q>, ChoicesIn<p>.<n>=<its text>~<names>)
+    local bp = k:match("^ChoicesBy(%d+)$")
+    if bp and tonumber(U.trim(v)) then choice_by[tonumber(bp)] = math.floor(tonumber(U.trim(v))) end
+    local ip = k:match("^ChoicesIn(%d+)%.%d+$")
+    if ip then
+      local ctx_t, line = v:match("^(.-)~(.*)$")
+      local map = line and M.choices_of_line(line)
+      if ctx_t and U.trim(ctx_t) ~= "" and map then
+        choice_ctx[tonumber(ip)] = choice_ctx[tonumber(ip)] or {}
+        choice_ctx[tonumber(ip)][U.trim(ctx_t)] = map
+      end
     end
   end
   local i = 0
@@ -1558,7 +1664,11 @@ local function parse_section(sect)
         show    = (t ~= "page" and t ~= "section") and M.show_of(sect["Show" .. i]) or nil,
         at      = at_of(sect["At" .. i], t == "divider"),
         -- a section's outline or a line's colour: a faceplate's or your own
-        edge    = (t == "section" or t == "divider") and C.plate_key(U.trim(sect["Edge" .. i] or "")) or nil,
+        edge    = (t == "section" or t == "divider" or t == "text") and C.plate_key(U.trim(sect["Edge" .. i] or "")) or nil,
+        -- a text's place along its room (Align<n>=left|right; centred without)
+        align   = (t == "text") and ({ left = "left", right = "right" })[U.trim(sect["Align" .. i] or "")] or nil,
+        -- a dropdown's colour per choice (ChoiceCol<n>=<plugin's text>=<colour>|...)
+        ccols   = (t == "combo") and M.choice_cols_of(sect["ChoiceCol" .. i]) or nil,
         virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i], sect["VAct" .. i]) or nil,
       }
       -- a virtual selector shown as chips: one for each of its choices
@@ -1572,6 +1682,7 @@ local function parse_section(sect)
         local cc = controls[#controls]
         cc.dir, cc.len, cc.thin = shape_of(sect["Shape" .. i])
       end
+      if t == "combo" then controls[#controls].size = combo_width_of(sect["Size" .. i]) end
       -- a second parameter: an XY pad's Y, a concentric knob's inner one
       if t == "xy" or t == "dual" then
         local cc = controls[#controls]
@@ -1588,6 +1699,8 @@ local function parse_section(sect)
   controls.grid = grid
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
            choice_names = next(choice_names) and choice_names or nil,
+           choice_by = next(choice_by) and choice_by or nil,
+           choice_ctx = next(choice_ctx) and choice_ctx or nil,
            canvas = M.canvas_of(sect), switch = M.switch_of(sect),
            -- ReaEQ's and ReaComp's own canvases: their width in ChannelView,
            -- height in the rack (a canvas layout keeps them in its canvas)
@@ -1673,6 +1786,20 @@ local function serialize(layout)
     local line = M.choices_line(map)
     if line then out["Choices" .. p] = line end
   end
+  for p, q in pairs(layout.choice_by or {}) do out["ChoicesBy" .. p] = tostring(math.floor(q)) end
+  for p, sets in pairs(layout.choice_ctx or {}) do
+    local ctxs = {}
+    for t in pairs(sets) do ctxs[#ctxs + 1] = t end
+    table.sort(ctxs)
+    local n = 0
+    for _, t in ipairs(ctxs) do
+      local line = M.choices_line(sets[t])
+      if line then
+        n = n + 1
+        out["ChoicesIn" .. p .. "." .. n] = (t:gsub("[~|\r\n]", " ")) .. "~" .. line
+      end
+    end
+  end
   for i, c in ipairs(layout.controls or {}) do
     -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
     -- bit 3 live name, bit 4 the second parameter reversed, bits 5-6 the
@@ -1691,6 +1818,8 @@ local function serialize(layout)
     end
     if c.type == "xy" then
       if pad_size_of(c.size) then out["Size" .. (i - 1)] = pad_size_of(c.size) end
+    elseif c.type == "combo" then
+      if combo_width_of(c.size) then out["Size" .. (i - 1)] = combo_width_of(c.size) end
     elseif size_of(c.size) and not (c.type == "dual" and c.size == "small") then
       out["Size" .. (i - 1)] = c.size
     end
@@ -1726,7 +1855,12 @@ local function serialize(layout)
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
     if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
-    if (c.type == "section" or c.type == "divider") and C.plate_key(c.edge) then out["Edge" .. (i - 1)] = C.plate_key(c.edge) end
+    if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
+    if c.type == "combo" and c.ccols then
+      local line = M.choice_cols_line(c.ccols)
+      if line then out["ChoiceCol" .. (i - 1)] = line end
+    end
+    if (c.type == "section" or c.type == "divider" or c.type == "text") and C.plate_key(c.edge) then out["Edge" .. (i - 1)] = C.plate_key(c.edge) end
     if c.virtual and (c.param or -1) < 0 then
       out["Virt" .. (i - 1)] = M.virt_line(c.virtual)
       local va = M.vact_line(c.virtual.actions, #(M.vchoices(c) or {}))
@@ -1784,6 +1918,14 @@ function M.show_of(line)
               tol = math.max(0.0005, tonumber(f[3] or "") or 0.499) }
   if op == "between" then
     r.norm2 = math.max(0, math.min(1, tonumber(f[5] or "") or r.norm))
+  elseif op == "is" or op == "not" then
+    -- more than one setting: the rest in the fifth field, "a;b;c"
+    local more = {}
+    for v2 in (f[5] or ""):gmatch("[^;]+") do
+      local n = tonumber(U.trim(v2))
+      if n then more[#more + 1] = math.max(0, math.min(1, n)) end
+    end
+    if #more > 0 then r.more = more end
   end
   return r
 end
@@ -1791,17 +1933,44 @@ end
 -- A rule's op; one with no op but `inv` set is "not".
 function M.show_op(r) return r.op or (r.inv and "not") or "is" end
 
+-- The settings an "is" / "not" rule names: its first and any more.
+function M.show_values(r)
+  local out = { r.norm or 0 }
+  for _, n in ipairs(r.more or {}) do out[#out + 1] = n end
+  return out
+end
+
+-- Rule r naming the settings in `list` (in that order); false when the
+-- list is empty.
+function M.show_set_values(r, list)
+  if not list or #list == 0 then return false end
+  r.norm = list[1]
+  local more = {}
+  for i = 2, #list do more[#more + 1] = list[i] end
+  r.more = (#more > 0) and more or nil
+  return true
+end
+
 function M.show_line(r)
   local op = M.show_op(r)
   local line = ("%s|%.4f|%.4f|%d"):format(source_line(r), r.norm or 0, r.tol or 0.499, SHOW_CODE[op] or 0)
-  if op == "between" then line = line .. ("|%.4f"):format(r.norm2 or r.norm or 0) end
+  if op == "between" then line = line .. ("|%.4f"):format(r.norm2 or r.norm or 0)
+  elseif (op == "is" or op == "not") and r.more and #r.more > 0 then
+    local t = {}
+    for i, n in ipairs(r.more) do t[i] = ("%.4f"):format(n) end
+    line = line .. "|" .. table.concat(t, ";")
+  end
   return line
 end
 
 -- Whether a value satisfies a rule. `slack` widens a rule on a range
 -- (above, below, between) -- a layout switch that's on stays on until the
 -- knob is that far back past its line, so one sitting on it can't flicker.
-function M.show_match(v, r, slack)
+-- `same(n)`, when given: whether the setting it reads now is the one at
+-- n, by the plugin's own text (nil: it can't say) -- a list read off a
+-- plugin sits at the middles of its settings only roughly, and the text
+-- doesn't care how far from the middle the plugin keeps it.
+function M.show_match(v, r, slack, same)
   v = v or 0
   slack = slack or 0
   local op, eps = M.show_op(r), 1e-6
@@ -1812,7 +1981,10 @@ function M.show_match(v, r, slack)
     if a > b then a, b = b, a end
     return v >= a - eps - slack and v <= b + eps + slack
   end
-  local hit = math.abs(v - r.norm) <= r.tol
+  local hit = false
+  for _, n in ipairs(M.show_values(r)) do
+    if math.abs(v - n) <= r.tol or (same and same(n)) then hit = true break end
+  end
   if op == "not" then return not hit end
   return hit
 end
@@ -1822,13 +1994,18 @@ end
 -- virtual control's, param -1 then), plus the set of
 -- indexes (into `controls`) it hides. The list keeps the controls'
 -- own tables, so a caller can still find each one in the full list.
-function M.visible(controls, getv)
+-- `same(param, n)`, when given: whether a parameter reads now as it would
+-- at n (by its text), for rules on a list's settings (M.show_match).
+function M.visible(controls, getv, same)
   local out, hidden, any = {}, {}, false
   for i, c in ipairs(controls or {}) do
     local r = c.show
     if r and c.type ~= "page" then
       any = true
-      if M.show_match(getv(r.param, r.vname), r) then out[#out + 1] = c else hidden[i] = true end
+      -- (a list's settings, not a switch's two halves)
+      local by_text = same and not r.vname and (r.tol or 0.499) < 0.49
+        and function(n) return same(r.param, n) end or nil
+      if M.show_match(getv(r.param, r.vname), r, nil, by_text) then out[#out + 1] = c else hidden[i] = true end
     else
       out[#out + 1] = c
     end
@@ -2003,7 +2180,14 @@ function M.rule_text(r, pname, fmt, vfind)
   end
   local op = M.show_op(r)
   local t = src .. " " .. (OP_WORDS[op] or op) .. " " .. say(r.norm or 0)
-  if op == "between" then t = t .. " and " .. say(r.norm2 or r.norm or 0) end
+  if op == "between" then t = t .. " and " .. say(r.norm2 or r.norm or 0)
+  elseif r.more and #r.more > 0 and (op == "is" or op == "not") then
+    -- "is Hall, Plate or Room"
+    local names = {}
+    for _, n in ipairs(M.show_values(r)) do names[#names + 1] = say(n) end
+    t = src .. " " .. (OP_WORDS[op] or op) .. " " .. table.concat(names, ", ", 1, #names - 1)
+      .. " or " .. names[#names]
+  end
   return t
 end
 
@@ -2245,6 +2429,110 @@ function M.set_default_look(fam, c)
   def_cache = {}
 end
 
+-- ---------------------------------------------------------------------
+-- a panel's style, copied onto another (Pro: the panel menu's Copy style /
+-- Paste style)
+-- ---------------------------------------------------------------------
+-- The faceplate, and one look for each kind of control -- the one most of
+-- that kind on the source wear -- put on every control of that kind on the
+-- target, whatever plugin it's for. Canvas colours go with it.
+local BACK = { "back", "brush", "finish", "corners", "metal" }
+local STYLE_FIELDS = {
+  knob     = { "style", "look", "cap", "scale_ink", "arcc", "arc" },
+  dual     = { "style", "style2", "look", "look2", "cap" },
+  toggle   = { "style", "cap" },
+  buttons  = { "style", "cap" },
+  dropdown = { "style", "cap" },
+  fader    = { "style", "cap" },
+  xy       = { "style", "cap" },
+  section  = { "style", "cap", "brush", "finish", "metal", "corners", "edge" },
+  divider  = { "style", "cap", "brush", "finish", "metal", "corners", "edge" },
+  text     = { "edge" },
+}
+for kind, f in pairs(STYLE_FIELDS) do
+  if kind ~= "section" and kind ~= "divider" and kind ~= "text" then
+    for _, b in ipairs(BACK) do f[#f + 1] = b end
+  end
+end
+
+function M.style_kind(c)
+  local t = c and c.type
+  if t == "knob" or t == "stepped" or t == nil then return "knob" end
+  if t == "combo" then return c.buttons and "buttons" or "dropdown" end
+  return STYLE_FIELDS[t] and t or nil
+end
+
+local function look_copy(v) return (type(v) == "table") and KP.copy(v) or v end
+
+-- A layout's style: { plate, brush, metal, finish, cols, kinds = { [kind]
+-- = { field = value } } }.
+function M.style_of(layout)
+  if not layout then return nil end
+  local s = { plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
+              kinds = {} }
+  if layout.canvas and layout.canvas.cols then
+    s.cols = {}
+    for k, v in pairs(layout.canvas.cols) do s.cols[k] = v end
+  end
+  -- each kind: the look most of its controls have
+  local tally = {}
+  for _, c in ipairs(layout.controls or {}) do
+    local kind = M.style_kind(c)
+    if kind then
+      local f, parts = STYLE_FIELDS[kind], {}
+      for i, k in ipairs(f) do
+        local v = c[k]
+        parts[i] = (type(v) == "table") and (KP.encode(v) or "") or tostring(v)
+      end
+      local sig = table.concat(parts, "|")
+      tally[kind] = tally[kind] or {}
+      local e = tally[kind][sig]
+      if not e then e = { n = 0, c = c }; tally[kind][sig] = e end
+      e.n = e.n + 1
+    end
+  end
+  for kind, sigs in pairs(tally) do
+    local best
+    for _, e in pairs(sigs) do if not best or e.n > best.n then best = e end end
+    local look = {}
+    for _, k in ipairs(STYLE_FIELDS[kind]) do look[k] = look_copy(best.c[k]) end
+    s.kinds[kind] = look
+  end
+  return s
+end
+
+-- Puts style `s` on `layout` (changed in place). Returns how many controls
+-- took it.
+function M.apply_style(layout, s)
+  if not (layout and s) then return 0 end
+  layout.plate, layout.brush, layout.metal, layout.finish = s.plate, s.brush, s.metal, s.finish
+  if layout.canvas then
+    if s.cols then
+      layout.canvas.cols = {}
+      for k, v in pairs(s.cols) do layout.canvas.cols[k] = v end
+    else
+      layout.canvas.cols = nil
+    end
+  end
+  local n = 0
+  for _, c in ipairs(layout.controls or {}) do
+    local kind = M.style_kind(c)
+    local look = kind and s.kinds[kind]
+    if look then
+      for _, k in ipairs(STYLE_FIELDS[kind]) do
+        if k == "arc" then
+          -- a centred knob keeps its centred arc
+          c.arc = c.bipolar and "mid" or ((look.arc == "mid") and "pos" or look.arc)
+        else
+          c[k] = look_copy(look[k])
+        end
+      end
+      n = n + 1
+    end
+  end
+  return n
+end
+
 -- Give a new control the default look of its kind. A knob's arc follows
 -- whether it's centred: a centred knob gets the Centred arc whenever the
 -- default has an arc, and the rest get the default's (Positive when the
@@ -2383,59 +2671,118 @@ end
 
 M.choice_ver = 0          -- goes up with every change (renamed lists are cached by it)
 
-function M.get_choice_names(key, param)
+-- Names can follow another control (ChoicesBy<p>=<q>): a plugin whose
+-- list changes with another of its settings (Seventh Heaven's presets,
+-- its bank) and only names them by number. Then each of that control's
+-- settings has its own set, and the one in use is the set for what it
+-- reads now. M.choice_by: that control, or nil.
+function M.choice_by(key, param)
   local l = M.get(key)
-  local map = l and l.choice_names and l.choice_names[param]
+  return l and l.choice_by and l.choice_by[param] or nil
+end
+
+function M.set_choice_by(key, param, q)
+  local l = M.get(key) or { controls = {}, aliases = {} }
+  l.choice_by = l.choice_by or {}
+  l.choice_by[param] = q
+  if not next(l.choice_by) then l.choice_by = nil end
+  M.choice_ver = M.choice_ver + 1
+  M.set(key, l)
+end
+
+-- What the control the names follow reads now (on `track`'s plugin at
+-- `addr`), or nil when they follow none (or there's no plugin to ask).
+function M.choice_context(key, param, track, addr)
+  local q = M.choice_by(key, param)
+  if not (q and track and addr) then return nil end
+  local ok, t = reaper.TrackFX_GetFormattedParamValue(track, addr, q, "")
+  t = ok and U.trim(t or "") or ""
+  return (t ~= "") and (t:gsub("[~|\r\n]", " ")) or nil
+end
+
+-- A choice named M.HIDDEN ("-") is left out of the list: a bank with
+-- fewer presets than the plugin has places for.
+M.HIDDEN = "-"
+
+-- The names in use: { [plugin's text] = your name }, or nil. With names
+-- that follow another control, the set for what it reads now (`track`
+-- and `addr` give the plugin to ask; without them, none), or for `ctx`
+-- when given.
+function M.get_choice_names(key, param, track, addr, ctx)
+  local l = M.get(key)
+  if not l then return nil end
+  local map
+  if l.choice_by and l.choice_by[param] then
+    local c = ctx or M.choice_context(key, param, track, addr)
+    map = c and l.choice_ctx and l.choice_ctx[param] and l.choice_ctx[param][c]
+  else
+    map = l.choice_names and l.choice_names[param]
+  end
   if map and next(map) then return map end
   return nil
 end
 
 -- `map`: { [plugin's text] = your name }; an empty name drops that one.
--- Writes straight through, as aliases and state names do.
-function M.set_choice_names(key, param, map)
+-- With names that follow another control, they're the set for what it
+-- reads now. Writes straight through, as aliases and state names do.
+function M.set_choice_names(key, param, map, track, addr, ctx)
   local l = M.get(key) or { controls = {}, aliases = {} }
   local keep = {}
   for t, n in pairs(map or {}) do
     t, n = clean_choice(t), U.trim((clean_choice(n):gsub("=", " ")))
     if t ~= "" and n ~= "" and n ~= t then keep[t] = n end
   end
-  l.choice_names = l.choice_names or {}
-  l.choice_names[param] = next(keep) and keep or nil
-  if not next(l.choice_names) then l.choice_names = nil end
+  if l.choice_by and l.choice_by[param] then
+    local c = ctx or M.choice_context(key, param, track, addr)
+    if not c then return end
+    l.choice_ctx = l.choice_ctx or {}
+    l.choice_ctx[param] = l.choice_ctx[param] or {}
+    l.choice_ctx[param][c] = next(keep) and keep or nil
+    if not next(l.choice_ctx[param]) then l.choice_ctx[param] = nil end
+    if not next(l.choice_ctx) then l.choice_ctx = nil end
+  else
+    l.choice_names = l.choice_names or {}
+    l.choice_names[param] = next(keep) and keep or nil
+    if not next(l.choice_names) then l.choice_names = nil end
+  end
   M.choice_ver = M.choice_ver + 1
   M.set(key, l)
 end
 
 -- What a choice shows: your name for it, or the plugin's text `shown`.
-function M.choice_text(key, param, shown)
-  local map = M.get_choice_names(key, param)
+function M.choice_text(key, param, shown, track, addr)
+  local map = M.get_choice_names(key, param, track, addr)
   if not map or not shown then return shown end
-  return map[U.trim(shown)] or shown
+  local n = map[U.trim(shown)]
+  return (n and n ~= M.HIDDEN) and n or shown
 end
 
 -- A list of choices ({ norm, text }, as TS_CV_Panel's) with your names
 -- in: the list itself when there are none, else a renamed copy (kept, so
 -- it is made once per list and change, not every frame).
 local renamed = setmetatable({}, { __mode = "k" })
-function M.choice_list(key, param, list)
+function M.choice_list(key, param, list, track, addr)
   if type(list) ~= "table" then return list end
-  local map = M.get_choice_names(key, param)
+  local map = M.get_choice_names(key, param, track, addr)
   if not map then return list end
   local hit = renamed[list]
-  if hit and hit.ver == M.choice_ver and hit.key == key and hit.param == param then return hit.list end
+  if hit and hit.ver == M.choice_ver and hit.key == key and hit.param == param and hit.map == map then return hit.list end
   local out = {}
-  for i, e in ipairs(list) do
+  for _, e in ipairs(list) do
     local n = e.text and map[U.trim(e.text)]
-    if n then
+    if n == M.HIDDEN then
+      -- (left out)
+    elseif n then
       local ne = {}
       for k, v in pairs(e) do ne[k] = v end
       ne.text = n
-      out[i] = ne
+      ne.raw = e.raw or e.text      -- the plugin's own text (its colour is kept by it)
+      out[#out + 1] = ne
     else
-      out[i] = e
+      out[#out + 1] = e
     end
   end
-  renamed[list] = { ver = M.choice_ver, key = key, param = param, list = out }
+  renamed[list] = { ver = M.choice_ver, key = key, param = param, map = map, list = out }
   return out
 end
 
@@ -2835,10 +3182,12 @@ function M.copy(layout)
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
-                        invert2 = c.invert2, edge = c.edge,
+                        invert2 = c.invert2, edge = c.edge, align = c.align,
+                        ccols = c.ccols and M.choice_cols_of(M.choice_cols_line(c.ccols)) or nil,
                         at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),
                                             norm = c.show.norm, norm2 = c.show.norm2,
+                                            more = c.show.more and { table.unpack(c.show.more) } or nil,
                                             tol = c.show.tol } or nil,
                         virtual = c.virtual and { start = c.virtual.start, choices = { table.unpack(c.virtual.choices or {}) },
                                                   actions = c.virtual.actions and M.vact_of(M.vact_line(c.virtual.actions, 64)) or nil } or nil }
@@ -2854,6 +3203,20 @@ function M.copy(layout)
     for p, map in pairs(layout.choice_names) do
       out.choice_names[p] = {}
       for t, n in pairs(map) do out.choice_names[p][t] = n end
+    end
+  end
+  if layout.choice_by then
+    out.choice_by = {}
+    for p, q in pairs(layout.choice_by) do out.choice_by[p] = q end
+  end
+  if layout.choice_ctx then
+    out.choice_ctx = {}
+    for p, sets in pairs(layout.choice_ctx) do
+      out.choice_ctx[p] = {}
+      for t, map in pairs(sets) do
+        out.choice_ctx[p][t] = {}
+        for a, b in pairs(map) do out.choice_ctx[p][t][a] = b end
+      end
     end
   end
   if layout.ranges then

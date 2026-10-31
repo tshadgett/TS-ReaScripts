@@ -451,6 +451,24 @@ do
   M.save(); M.reload()
   local gb = M.get(gk)
   check("grid file: a section's outline", gb.controls[3].edge, "#ff8800")
+  -- words anywhere on the grid, and a short dropdown
+  M.set("GridText", { grid = { cols = 16, rows = 8 }, controls = {
+    { param = -1, type = "text", label = "COMPRESSOR", size = "large", align = "left", edge = "#d0a060",
+      at = { c = 0, r = 0, w = 12, h = 2 } },
+    { param = -1, type = "text", label = "INPUT", at = { c = 14, r = 0, w = 2, h = 8 } },
+    { param = 3, type = "combo", label = "Mode", at = { c = 0, r = 2, w = 8, h = 2 } },
+    { param = 4, type = "combo", label = "Type", at = { c = 0, r = 4, w = 8, h = 4 } } } })
+  M.save(); M.reload()
+  local gt = M.get("GridText").controls
+  check("text: read back", table.concat({ gt[1].type, gt[1].label, gt[1].size, gt[1].align, gt[1].edge }, " "),
+        "text COMPRESSOR large left #d0a060")
+  check("text: centred and normal without lines", tostring(gt[2].align) .. " " .. tostring(gt[2].size), "nil nil")
+  check("text: copied", M.copy({ controls = gt }).controls[1].align, "left")
+  local lt = P.layout(gt, ph(2))
+  check("text: drawn as words, not controls", #lt.texts .. " " .. #lt.items, "2 2")
+  check("text: up when taller than wide", lt.texts[2].h > lt.texts[2].w, true)
+  check("combo: half a cell tall is short", tostring(lt.items[1].short) .. " " .. tostring(lt.items[2].short), "true nil")
+  M.remove("GridText"); M.save(); M.reload()
   check("grid file: a line any way", M.at_line(gb.controls[4].at), "0,8,8,-8")
   check("grid file: a line's colour, a faceplate's", gb.controls[4].edge, "cream")
   check("grid file: drawn in it", P.layout(gb.controls, ph(2)).segs[2].col, C.PLATE.cream.bg)
@@ -556,6 +574,136 @@ do
   check("canvas size: copied", M.copy(M.get(key)).canvas.w, 520)
   GE.close()
   M.remove(key); M.save()
+end
+-- a panel's style, onto another plugin's panel
+do
+  local src = { plate = "cream", brush = true, finish = "satin", controls = {
+    { param = 0, type = "knob", style = "chicken", cap = "red", arc = "pos" },
+    { param = 1, type = "knob", style = "chicken", cap = "red", arc = "pos" },
+    { param = 2, type = "knob", style = "arc" },
+    { param = 3, type = "toggle", style = "backlit", cap = "amber" },
+    { param = 4, type = "combo", style = "raised", cap = "green" },
+    { param = -1, type = "text", edge = "#ff0000", label = "Hi" } },
+    canvas = { kind = "eq", bands = {}, cols = { curve = 0xff4a3a } } }
+  local st = M.style_of(src)
+  check("style: the faceplate", st.plate .. " " .. tostring(st.brush) .. " " .. st.finish, "cream true satin")
+  check("style: most knobs' look", st.kinds.knob.style .. " " .. st.kinds.knob.cap, "chicken red")
+  local dst = { controls = {
+    { param = 7, type = "stepped", bipolar = true },
+    { param = 8, type = "toggle", style = "lens" },
+    { param = 9, type = "combo", buttons = "across", nbtn = 3, style = "lens" },
+    { param = 10, type = "combo" },
+    { param = -1, type = "text", label = "Yo" } }, canvas = { kind = "comp" } }
+  local n = M.apply_style(dst, st)
+  check("style: pasted onto", n, 4)
+  check("style: knobs", dst.controls[1].style .. " " .. dst.controls[1].cap .. " " .. dst.controls[1].arc, "chicken red mid")
+  check("style: buttons", dst.controls[2].style .. " " .. dst.controls[2].cap, "backlit amber")
+  check("style: a button row has none on the source, its own kept", dst.controls[3].style, "lens")
+  check("style: dropdowns", dst.controls[4].style .. " " .. dst.controls[4].cap, "raised green")
+  check("style: text colour", dst.controls[5].edge, "#ff0000")
+  check("style: faceplate and canvas colours", dst.plate .. " " .. tostring(dst.canvas.cols and dst.canvas.cols.curve), "cream " .. tostring(0xff4a3a))
+end
+-- REAPER's track spacer size (trackgapmax), for the mixer's spacers
+do
+  local real = reaper
+  local t = 100
+  reaper = setmetatable({ time_precise = function() return t end,
+    get_config_var_string = function(k) if k == "trackgapmax" then return true, "23" end return false, "" end },
+    { __index = real })
+  check("spacer: REAPER's size", C.spacer_w(), 23)
+  reaper = setmetatable({ time_precise = function() return t end,
+    get_config_var_string = function() return false, "" end }, { __index = real })
+  t = 110
+  check("spacer: none set, 16", C.spacer_w(), 16)
+  reaper = real
+end
+-- a value typed in (Ctrl+click a knob or fader)
+do
+  local CH_ = require("TS_CV_Channel")
+  check("typed volume: -6 dB", math.abs(CH_.typed_vol("-6") - 10 ^ (-6 / 20)) < 1e-9, true)
+  check("typed volume: -inf", CH_.typed_vol("-inf"), 0)
+  check("typed volume: not a number", CH_.typed_vol("loud"), nil)
+  check("typed pan", tostring(CH_.typed_pan("30L")) .. " " .. tostring(CH_.typed_pan("15r")) .. " " .. tostring(CH_.typed_pan("c")) .. " " .. tostring(CH_.typed_pan("-50")), "-0.3 0.15 0 -0.5")
+  local UN_ = require("TS_CV_Units")
+  local real = reaper
+  local now = 0.5
+  local function txt(n) local hz = 20 * 1000 ^ n; return hz >= 1000 and ("%.2f kHz"):format(hz / 1000) or ("%.1f Hz"):format(hz) end
+  reaper = setmetatable({
+    TrackFX_GetFormattedParamValue = function() return true, txt(now) end,
+    TrackFX_FormatParamValueNormalized = function(_, _, _, n) return true, txt(n) end,
+    TrackFX_GetFXGUID = function() return "{TYPETEST}" end,
+  }, { __index = real })
+  local n1 = UN_.typed_norm("tr", 0, 7, "2k")
+  check("typed value: 2k on a frequency", n1 and txt(n1):sub(1, 4), "2.00")
+  now = UN_.typed_norm("tr", 0, 7, "2k")
+  local n2 = UN_.typed_norm("tr", 0, 7, "5")
+  check("typed value: a bare number in the unit it shows (kHz)", n2 and txt(n2):sub(1, 4), "5.00")
+  local n3 = UN_.typed_norm("tr", 0, 7, "300 Hz")
+  check("typed value: with its unit", n3 and txt(n3):sub(1, 3), "300")
+  reaper = real
+end
+-- an EQ curve on a grid: kept, and the canvas drawn there, not beside
+do
+  local key = "VST3: CurveTest :: EQ"
+  M.set(key, { grid = { cols = 24, rows = 8 }, canvas = { kind = "eq", bands = {} }, aliases = {}, controls = {
+    { param = 3, type = "knob", label = "", at = { c = 0, r = 0, w = 4, h = 4 } },
+    { param = -1, type = "curve", label = "", at = { c = 4, r = 0, w = 16, h = 8 } } } })
+  M.save(); M.reload()
+  local l = M.get(key)
+  check("curve: kept", l.controls[2] and l.controls[2].type, "curve")
+  check("curve: its place", l.controls[2] and l.controls[2].at and (l.controls[2].at.w .. "x" .. l.controls[2].at.h), "16x8")
+  check("curve: the layout has one", M.has_curve(l), true)
+  local P_ = require("TS_CV_Panel")
+  check("curve: no canvas beside the controls", P_.canvas_of(l) == nil, true)
+  table.remove(l.controls, 2)
+  check("curve: without one, the canvas beside", P_.canvas_of(l) ~= nil, true)
+  M.remove(key); M.save()
+end
+-- Show when's choices for a list along a knob that reports no steps
+-- (ValhallaDelay's Mode): read by name
+do
+  local E_ = require("TS_CV_Editor")
+  local real = reaper
+  local MODES = { "Tape", "HiFi", "BBD", "BBDuck", "Digital", "Ghost", "Pitch" }
+  local function txt(n) return MODES[math.min(#MODES, math.floor(n * #MODES) + 1)] end
+  reaper = setmetatable({
+    TrackFX_GetParameterStepSizes = function() return false end,
+    TrackFX_GetParamEx = function() return 0, 0, 1 end,
+    TrackFX_FormatParamValueNormalized = function(_, _, p, n) if p == 32 then return true, txt(n) end return true, "" end,
+    TrackFX_GetParamName = function(_, _, p) return true, "Mode" end,
+    TrackFX_GetFormattedParamValue = function() return true, "Tape" end,
+  }, { __index = real })
+  local src = E_.show_sources("tr", 0, "VST3: ValTest", { { param = 32, type = "combo" }, { param = 25, type = "knob" } }, nil)
+  check("show when: a list along a knob, by name", src[1] and (#src[1].choices .. " " .. src[1].choices[4].text) or "none", "7 BBDuck")
+  -- a plugin that only says what it reads now (ValhallaDelay): moved
+  -- through once and put back
+  local now = 0.0417
+  local V12 = { "Tape", "HiFi", "BBD", "BBDuck", "Digital", "Ghost", "Pitch", "Ratio", "Single", "Dual", "Rainbow", "RevSwell" }
+  -- (wraps to the first at the very end, as Valhalla's does)
+  local function vtxt(n) return V12[(math.floor(n * 12) % 12) + 1] end
+  reaper = setmetatable({
+    TrackFX_GetParameterStepSizes = function() return false end,
+    TrackFX_GetParamEx = function() return 0, 0, 1 end,
+    TrackFX_FormatParamValueNormalized = function() return true, vtxt(now) end,
+    TrackFX_GetFormattedParamValue = function() return true, vtxt(now) end,
+    TrackFX_GetParamNormalized = function() return now end,
+    TrackFX_SetParamNormalized = function(_, _, _, v) now = v end,
+    TrackFX_GetFXGUID = function() return "{VALTEST}" end,
+    TrackFX_GetParamName = function() return true, "Mode" end,
+    GetTrackAutomationMode = function() return 0 end,
+    GetPlayState = function() return 0 end,
+  }, { __index = real })
+  local src2 = E_.show_sources("tr2", 1, "VST3: ValTest2", { { param = 32, type = "combo" } }, nil)
+  local ch = src2[1] and src2[1].choices
+  check("show when: read by moving it once", ch and (#ch .. " " .. ch[4].text) or "none", "12 BBDuck")
+  check("show when: put back", now, 0.0417)
+  local r = { param = 32, op = "is", norm = ch and ch[1].norm or 0, tol = src2[1] and src2[1].tol or 0 }
+  check("show when: its setting now matches its first", M.show_match(0.0417, r), true)
+  local P_ = require("TS_CV_Panel")
+  local pl = P_.read_choices("tr2", 1, 32, "VST3: ValTest2")
+  check("dropdown: a list from a plugin that only says what it reads now", pl and (#pl .. " " .. pl[2].text) or "none", "12 HiFi")
+  check("dropdown: a step along it", P_.step_choice(pl, "Tape", 0.0417, 1, true) == pl[2].norm, true)
+  reaper = real
 end
 -- several selected in the grid editor: aligned, spaced, copied, pasted,
 -- their shared settings made on all
@@ -764,6 +912,58 @@ do
   check("choice names: line read back, = in the plugin's text",
         M.choices_of_line("Q=1=Narrow|Q=2=Wide")["Q=2"], "Wide")
   check("choice names: an empty line, none", M.choices_of_line(""), nil)
+  -- names that follow another control: a set for each of its settings
+  do
+    local real = reaper
+    local bank = "Plates 1"
+    reaper = setmetatable({ TrackFX_GetFormattedParamValue = function(_, _, q) return true, (q == 9) and bank or "x" end },
+                          { __index = real })
+    M.set_choice_by(key, 4, 9)
+    M.set_choice_names(key, 4, { ["06 (Preset Index)"] = "06 Big Plate" }, "tr", 1)
+    bank = "Rooms 2"
+    M.set_choice_names(key, 4, { ["06 (Preset Index)"] = "06 Drum Room" }, "tr", 1)
+    check("follow: this bank's name", M.choice_text(key, 4, "06 (Preset Index)", "tr", 1), "06 Drum Room")
+    bank = "Plates 1"
+    check("follow: the other bank's", M.choice_text(key, 4, "06 (Preset Index)", "tr", 1), "06 Big Plate")
+    bank = "Halls"
+    check("follow: a bank with none, the plugin's", M.choice_text(key, 4, "06 (Preset Index)", "tr", 1), "06 (Preset Index)")
+    check("follow: no plugin to ask, none", M.choice_text(key, 4, "06 (Preset Index)"), "06 (Preset Index)")
+    M.save(); M.reload()
+    bank = "Rooms 2"
+    check("follow: survives reload", M.choice_text(key, 4, "06 (Preset Index)", "tr", 1), "06 Drum Room")
+    check("follow: copied", M.copy(M.get(key)).choice_ctx[4]["Plates 1"]["06 (Preset Index)"], "06 Big Plate")
+    -- a bank with fewer presets: the rest left out; naming another bank
+    -- without being on it
+    M.set_choice_names(key, 4, { ["01 (Preset Index)"] = "01 Small", ["02 (Preset Index)"] = "-", ["03 (Preset Index)"] = "-" },
+                       "tr", 1, "Halls")
+    bank = "Halls"
+    local hl = M.choice_list(key, 4, { { norm = 0, text = "01 (Preset Index)" }, { norm = 0.5, text = "02 (Preset Index)" },
+                                      { norm = 1, text = "03 (Preset Index)" } }, "tr", 1)
+    check("hidden: left out of the list", #hl .. " " .. hl[1].text, "1 01 Small")
+    check("hidden: the one it's on still reads", M.choice_text(key, 4, "02 (Preset Index)", "tr", 1), "02 (Preset Index)")
+    M.set_choice_by(key, 4, nil)
+    check("follow: off, the plain names again", M.choice_text(key, 4, "06 (Preset Index)", "tr", 1), "06 (Preset Index)")
+    reaper = real
+  end
+  do
+    -- a dropdown's colours per choice (ChoiceCol<n>), by the plugin's text
+    local ck = "VST3: ChoiceColTest (Test)"
+    M.set(ck, { controls = { { param = 3, type = "combo", cap = "blue",
+                               ccols = { Opto = "amber", ["Vocal Mode"] = "#FF8800", Bad = "nope" } },
+                             { param = 4, type = "knob", ccols = { Opto = "red" } } }, aliases = {} })
+    M.save(); M.reload()
+    local cc = M.get(ck).controls
+    check("choice colours: a named one",  M.choice_col(cc[1], "Opto"), "amber")
+    check("choice colours: your own, trimmed text", M.choice_col(cc[1], " Vocal Mode "), "#ff8800")
+    check("choice colours: not a colour, dropped", M.choice_col(cc[1], "Bad"), nil)
+    check("choice colours: the control's own kept", cc[1].cap, "blue")
+    check("choice colours: dropdowns only", cc[2].ccols, nil)
+    check("choice colours: copied", M.copy(M.get(ck)).controls[1].ccols.Opto, "amber")
+    check("choice colours: line", M.choice_cols_line({ B = "red", A = "#00ff00", C = "x" }), "A=#00ff00|B=red")
+    local named = M.choice_list(key, 3, { { norm = 0, text = "Opto" } })
+    check("choice colours: a renamed choice keeps the plugin's text", named[1].raw, "Opto")
+    M.remove(ck); M.save()
+  end
   M.set_choice_names(key, 3, {})
   check("choice names: cleared",              M.get_choice_names(key, 3), nil)
   M.save(); M.reload()
@@ -910,6 +1110,8 @@ checkf("hyphens = underscores", function()
   return IX.norm_key("WaveShell1-VST3 14.15_x64.vst3") == IX.norm_key("WaveShell1_VST3_14.15_x64.vst3")
 end)
 check("spaces = underscores", IX.norm_key("Nectar Pro.vst3"),              "nectar_pro.vst3")
+check("brackets = underscores (u-he's files, as REAPER's tag file keys them)",
+      IX.norm_key([[C:\Program Files\Common Files\VST3\Satin(x64).vst3]]) == IX.norm_key("Satin_x64_.vst3"), true)
 checkf("space/underscore agree", function()
   return IX.norm_key("Nectar Pro.vst3") == IX.norm_key("Nectar_Pro.vst3")
 end)
@@ -1659,6 +1861,63 @@ do
 end
 
 
+
+-- a canvas's own colours: stored with its layout, drawn in while it draws
+do
+  local M_ = require("TS_CV_Mappings")
+  local cols = M_.canvas_cols_of("curve:#ff4a3a|bg:#2a0e0e|band3:#00ff00|junk:#123456|grid:#zzzzzz")
+  check("canvas colours: read", ("%06x %06x %06x"):format(cols.curve, cols.bg, cols.band3), "ff4a3a 2a0e0e 00ff00")
+  check("canvas colours: unknown and bad ones dropped", tostring(cols.junk) .. tostring(cols.grid), "nilnil")
+  check("canvas colours: written back", M_.canvas_cols_line(cols), "band3:#00ff00|bg:#2a0e0e|curve:#ff4a3a")
+  check("canvas colours: none", tostring(M_.canvas_cols_of("")) .. tostring(M_.canvas_cols_line({})), "nilnil")
+  check("canvas colours: copied with the canvas", M_.copy_canvas({ kind = "comp", cols = cols }).cols.curve, 0xff4a3a)
+  local P = require("TS_CV_Panel")
+  local Cc = require("TS_CV_Config")
+  local was_accent, was_grid = Cc.COL.accent, Cc.COL.eq_grid
+  local seen
+  local ok = pcall(P.with_canvas_cols, { cols = { curve = 0x112233 } }, "dl", 0, 0, 10, 10,
+    function(a) seen = { Cc.COL.accent, Cc.COL.eq_grid, a } end, "arg")
+  check("canvas colours: the curve stands in for the accent while it draws",
+    tostring(ok) .. " " .. (seen and ("%08x %s"):format(seen[1], seen[3]) or ""), "true 112233ff arg")
+  check("canvas colours: the grid untouched when not set", seen and seen[2] == was_grid, true)
+  check("canvas colours: the theme back after", Cc.COL.accent == was_accent, true)
+  local ok2 = pcall(P.with_canvas_cols, { cols = { curve = 0x112233 } }, "dl", 0, 0, 10, 10, function() error("boom") end)
+  check("canvas colours: back after an error too", tostring(ok2) .. " " .. tostring(Cc.COL.accent == was_accent), "false true")
+end
+
+-- a dropdown's list read by name, without moving the plugin (any length,
+-- stepped or not), and stepping along it
+do
+  local P = require("TS_CV_Panel")
+  local M_ = require("TS_CV_Mappings")
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetParameterStepSizes", "TrackFX_FormatParamValueNormalized", "TrackFX_SetParamNormalized" }) do saved[k] = reaper[k] end
+  local sets = 0
+  reaper.TrackFX_SetParamNormalized = function() sets = sets + 1 end
+  -- no steps reported: 120 programs along a plain knob
+  reaper.TrackFX_GetParameterStepSizes = function() return false end
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, _, v)
+    return true, ("%03d Program"):format(math.min(119, math.floor(v * 120)) + 1)
+  end
+  P.clear_caches()
+  local list = P.read_choices("tr", 0, 7, "Big")
+  check("read by name: 120 programs, past 64", list and #list, 120)
+  check("read by name: each in the middle of its run", list and (list[1].norm > 0 and list[1].norm < 1 / 120), true)
+  check("read by name: nothing moved", sets, 0)
+  check("step: next by its name", P.step_choice(list, "002 Program", 0, 1, false) == list[3].norm, true)
+  check("step: arrows go round", P.step_choice(list, "120 Program", 1, 1, true) == list[1].norm, true)
+  check("step: the wheel stops at the end", P.step_choice(list, "120 Program", 1, 1, false) == list[120].norm, true)
+  -- a plugin that can only name the setting it's on: not readable
+  reaper.TrackFX_FormatParamValueNormalized = function() return true, "Hall" end
+  check("read by name: one name everywhere is no list", P.read_choices("tr", 0, 7, "Big"), nil)
+  for k, v in pairs(saved) do reaper[k] = v end
+  check("width: Size 3 on a dropdown", M_.combo_cells({ type = "combo", size = "3" }), 3)
+  check("width: none is one cell", M_.combo_cells({ type = "combo" }), 1)
+  check("width: not on a knob", M_.combo_cells({ type = "knob", size = "3" }), 1)
+  check("width: two to four only", tostring(M_.combo_width_of("5")) .. tostring(M_.combo_width_of("1")), "nilnil")
+  local w, h = P.cell_size({ type = "combo", size = "4" }, 8)
+  check("width: four cells take eight half-cells", w .. "x" .. h, "8x2")
+end
 
 -- scan budgeting and the on-disk cache of stepped choices
 do
@@ -3825,7 +4084,7 @@ do
     "TS_ChannelView_TCP", "TS_CV_Arrange", "TS_CV_Toolbar", "TS_CV_Envelopes", "TS_CV_Actions", "TS_CV_Lanes",
     "TS_CV_Chains", "TS_CV_Taps", "TS_CV_WebLink", "TS_ChannelView_Web_Startup", "TS_CV_HwOut",
     "TS_CV_Drawers", "TS_CV_ActionEditor", "TS_ChannelView_Toolbars", "TS_ChannelView_OrganiseActions",
-    "TS_CV_Vendors",
+    "TS_CV_Vendors", "TS_ChannelView_ToggleToolbars", "TS_ChannelView_ToggleRackToolbars",
   }
 
   -- Comments only: a "-- see W.foo()" in prose must not read as a call.
@@ -3963,6 +4222,20 @@ do
     local line = "1|top|1|128|both|drawer_1|0|Edit;2|window|0|90|icons|drawer_2|-3|Tracks"
     local l = DR.parse(line)
     check("bars: count", #l, 2)
+    do
+      -- Show/hide toolbars: a window's drawers at once, the ones closed
+      -- come back
+      local g = DR.parse("1|top|1|128|both|d1|0|Edit;2|left|0|128|both|d2|0|L;3|rtop|1|128|both|d3|0|R;4|window|1|90|icons|d4|-3|W;5|bottom|1|128|both|d5|0|B")
+      local on, ids = DR.toggle_group(g, "cv", "")
+      check("toggle bars: hidden", tostring(on) .. " " .. ids, "false 1,5")
+      check("toggle bars: other places left", g[3].open and g[4].open, true)
+      on = DR.toggle_group(g, "cv", ids)
+      check("toggle bars: the same ones back", tostring(on) .. (g[1].open and "1" or "") .. (g[2].open and "2" or "") .. (g[5].open and "5" or ""), "true15")
+      DR.toggle_group(g, "cv", "")
+      DR.toggle_group(g, "cv", "99")
+      check("toggle bars: none to bring back, all", g[1].open and g[2].open and g[5].open, true)
+      check("toggle bars: the rack's own", select(2, DR.toggle_group(g, "rack", "")), "3")
+    end
     check("bars: fields", l[2].side == "window" and l[2].open == false and l[2].width == 90 and l[2].style == "icons" and l[2].dock == -3, true)
     check("bars: round-trip (sizes added)", DR.serialize(l), "1|top|1|128|both|drawer_1|0|24|--|Edit;2|window|0|90|icons|drawer_2|-3|24|--|Tracks")
     local sized = "1|top|1|128|both|drawer_1|0|30|Edit;2|left|1|90|icons|drawer_2|0|99|7"
@@ -6004,6 +6277,27 @@ do
   check("show: parse toggle rule", M.show_line(M.show_of("3|1|0.499|0")), "3|1.0000|0.4990|0")
   check("show: parse short rule", M.show_of("4|0").tol, 0.499)
   check("show: parse not (old 0/1 field)", M.show_of("4|0|0.1|1").op, "not")
+  do
+    -- several settings: "is" any of them, "not" none of them
+    local r = M.show_of("7|0.2500|0.0500|0|0.5000;0.7500")
+    check("show several: read", #M.show_values(r), 3)
+    check("show several: written back", M.show_line(r), "7|0.2500|0.0500|0|0.5000;0.7500")
+    check("show several: is any", tostring(M.show_match(0.5, r)) .. tostring(M.show_match(0.75, r)) .. tostring(M.show_match(0, r)), "truetruefalse")
+    local n = M.show_of("7|0.2500|0.0500|1|0.7500")
+    check("show several: not any", tostring(M.show_match(0.75, n)) .. tostring(M.show_match(0.5, n)), "falsetrue")
+    check("show several: one alone, as before", M.show_line(M.show_of("7|0.2500|0.0500|0")), "7|0.2500|0.0500|0")
+    check("show several: none left, no rule", M.show_set_values({}, {}), false)
+    local fmt = function(_, v) return ({ [0.25] = "Hall", [0.5] = "Plate", [0.75] = "Room" })[v] end
+    check("show several: said", M.rule_text(r, function() return "Mode" end, fmt), "Mode is Hall, Plate or Room")
+    -- a list read off a plugin sits at its settings' middles only roughly:
+    -- by text, the setting it's on counts wherever in its run it is
+    local rr = M.show_of("32|0.1925|0.0170|0|0.3200")
+    local function same(n) return math.abs(n - 0.3200) < 1e-6 end   -- (it reads as at 0.32)
+    check("show by text: off the middle, still that setting", M.show_match(0.2990, rr, nil, same), true)
+    check("show by text: without, by distance only", M.show_match(0.2990, rr), false)
+    check("show by text: is not, too", M.show_match(0.2990, M.show_of("32|0.1925|0.0170|1|0.3200"), nil, same), false)
+    check("show several: between ignores them", M.show_line(M.show_of("7|0.2|0.05|4|0.6")), "7|0.2000|0.0500|4|0.6000")
+  end
   check("show: bad line", M.show_of("x|y"), nil)
   check("show: nil line", M.show_of(nil), nil)
   check("show: value clamped", M.show_of("2|7").norm, 1)
@@ -6473,6 +6767,37 @@ do
   local fr = ME.centres()
   check("mapeq: 120 bands", #fr, 120)
   local function synth(b) local D = {} for i, f in ipairs(fr) do D[i] = ME.band_db(b, f) end return D end
+  do
+    -- a dynamics switch on a band that isn't dynamic yet (Pro-Q: every
+    -- band's dynamics "Enabled", its range 0 dB): makes it dynamic
+    local real = reaper
+    local pv = { [9] = 0.5, [10] = 1 }
+    local function txt(p, n)
+      if p == 9 then return ("%.2f dB"):format((n * 2 - 1) * 30) end
+      return n >= 0.5 and "Dynamics Enabled" or "Dynamics Disabled"
+    end
+    reaper = setmetatable({
+      TrackFX_GetParamNormalized = function(_, _, p) return pv[p] or 0 end,
+      TrackFX_SetParamNormalized = function(_, _, p, v) pv[p] = v end,
+      TrackFX_GetFormattedParamValue = function(_, _, p) return true, txt(p, pv[p] or 0) end,
+      TrackFX_FormatParamValueNormalized = function(_, _, p, n) return true, txt(p, n) end,
+      TrackFX_GetFXGUID = function() return "{DYNTEST}" end,
+    }, { __index = real })
+    local b = { dyn = { range = 9, on = 10, rev = {} } }
+    check("dyn: no range, not made dynamic", ME.read_dyn("tr", 0, b).made, false)
+    ME.toggle_dyn("tr", 0, b)
+    local dy = ME.read_dyn("tr", 0, b)
+    check("dyn: switched on, given a range", dy.made and dy.on and math.abs(dy.range - ME.DYN_START) < 0.5, true)
+    ME.toggle_dyn("tr", 0, b)
+    dy = ME.read_dyn("tr", 0, b)
+    check("dyn: then off, its range kept", (not dy.on) and dy.made, true)
+    reaper = real
+  end
+  check("mapeq: a frequency table, rising", ME.f_table_ok({ { 0, 20 }, { 0.5, 600 }, { 1, 20000 } }), true)
+  check("mapeq: a frequency table, falling", ME.f_table_ok({ { 0, 20000 }, { 1, 20 } }), true)
+  check("mapeq: one point, not readable", ME.f_table_ok({ { 0, 30000 } }), false)
+  check("mapeq: a cut measured at its far end, not readable",
+        ME.f_table_ok({ { 0, 3950 }, { 0.25, 574.5 }, { 0.5, 574.5 }, { 0.75, 4584 }, { 1, 22500 } }), false)
   checkf("mapeq: bell peak = gain", function() return math.abs(ME.band_db({ type = "bell", f = 1000, g = 6, q = 1 }, 1000) - 6) < 0.01 end)
   checkf("mapeq: low shelf full gain far below", function() return math.abs(ME.band_db({ type = "ls", f = 1000, g = 6, q = 0.7 }, 20) - 6) < 0.1 end)
   checkf("mapeq: 12 dB/oct cut", function()
@@ -8135,6 +8460,42 @@ do
   check("switch: no words, by value", tostring(R("Dyn", "", 0.2)) .. "/" .. tostring(R("Dyn", "", 0.8)), "false/true")
   check("switch: Off (Stereo) is off", R("Dyn", "Off (Stereo)", 0), false)
   check("switch: Not Active is off", R("Dyn", "Not Active", 0), false)
+  check("switch: Used / Unused (Pro-Q)", tostring(R("Band 1 Used", "Used", 1)) .. "/" .. tostring(R("Band 1 Used", "Unused", 0)), "true/false")
+end
+
+-- an EQ band's in-use switch (Pro-Q: "Band k Used"): found beside its
+-- controls, and an unused band taken into use (and turned on) when changed
+do
+  local ME = require("TS_CV_MapEQ")
+  local names, vals = {}, {}
+  for k = 1, 3 do
+    local base = (k - 1) * 4
+    names[base] = "Band " .. k .. " Used"; names[base + 1] = "Band " .. k .. " Enabled"
+    names[base + 2] = "Band " .. k .. " Frequency"; names[base + 3] = "Band " .. k .. " Gain"
+    vals[base], vals[base + 1], vals[base + 2], vals[base + 3] = 0, 0, 0.5, 0.5
+  end
+  local real = reaper
+  reaper = setmetatable({
+    TrackFX_GetFXGUID = function() return "{PQ}" end,
+    TrackFX_GetNumParams = function() return 12 end,
+    TrackFX_GetParamName = function(_, _, p) return true, names[p] or "" end,
+    TrackFX_GetFormattedParamValue = function(_, _, p)
+      local n = names[p] or ""
+      if n:find("Used") then return true, (vals[p] >= 0.5) and "Used" or "Unused" end
+      if n:find("Enabled") then return true, (vals[p] >= 0.5) and "Enabled" or "Disabled" end
+      return true, tostring(vals[p])
+    end,
+    TrackFX_GetParamNormalized = function(_, _, p) return vals[p] or 0 end,
+    TrackFX_SetParamNormalized = function(_, _, p, v) vals[p] = v end,
+  }, { __index = real })
+  local b2 = { freq = 6, gain = 7, on = 5 }
+  check("in use: band 2's switch found by name", ME.find_used("tr", 1, b2), 4)
+  check("in use: band 2 starts unused", ME.in_use("tr", 1, b2), false)
+  check("in use: a band with no such switch counts as used", ME.in_use("tr", 1, { freq = 99 }), true)
+  check("in use: taken into use, and turned on", tostring(ME.take_in_use("tr", 1, b2)) .. " " .. vals[4] .. " " .. vals[5], "true 1 1")
+  check("in use: already in use, nothing done", ME.take_in_use("tr", 1, b2), false)
+  check("in use: band 1 untouched", vals[0] .. " " .. vals[1], "0 0")
+  reaper = real
 end
 
 -- freeze: the frozen plugins out of a track chunk
@@ -9815,6 +10176,12 @@ do
     local proj = { ["compare:{T}"] = "c={C};a={A};b={B};s={S}" }
     reaper = setmetatable({
       GetTrackGUID = function() return "{T}" end,
+      -- (the record lives on the track; here, in the same slot the tests seed)
+      GetSetMediaTrackInfo_String = function(_, k, v, set)
+        local key = (k == "P_EXT:TS_CV_compare") and "compare:{T}" or k
+        if set then proj[key] = v return true, v end
+        return true, proj[key] or ""
+      end,
       GetProjExtState = function(_, _, k) return 1, proj[k] or "" end,
       SetProjExtState = function(_, _, k, val) proj[k] = val end,
       time_precise = function() return 100 end,
@@ -9842,6 +10209,35 @@ do
     proj["compare:{T}"] = "c={C};a={A};b={B};s={S}"
     CMP.clear("tr")
     check("compare: cleared", tostring(CMP.load("tr")), "nil")
+    do
+      -- a record kept in the project's ext state (before it lived on the
+      -- track) moves onto the track when read
+      local ext, onto = {}, {}
+      local was = reaper
+      reaper = setmetatable({
+        GetTrackGUID = function() return "{T2}" end,
+        GetProjExtState = function(_, _, k) return 1, ext[k] or "" end,
+        SetProjExtState = function(_, _, k, val) ext[k] = val end,
+        GetSetMediaTrackInfo_String = function(_, k, v, set)
+          if set then onto[k] = v return true, v end
+          return true, onto[k] or ""
+        end,
+        time_precise = function() return 300 end,
+      }, { __index = was })
+      ext["compare:{T2}"] = "c={C};a={A};b={B};s={S};blind=1"
+      local got = CMP.load("tr2")
+      check("compare: an older record moves onto the track",
+        tostring(got and got.blind) .. " " .. tostring(onto["P_EXT:TS_CV_compare"]) .. " [" .. ext["compare:{T2}"] .. "]",
+        "true c={C};a={A};b={B};s={S};blind=1 []")
+      -- an undo puts the track's data back: the record comes with it
+      CMP.clear("tr2")
+      onto["P_EXT:TS_CV_compare"] = "c={C};a={A};b={B};s={S};blind=1"
+      CMP.forget_cache()
+      local back = CMP.load("tr2")
+      check("compare: back after an undo, blind and all", tostring(back and back.blind), "true")
+      reaper = was
+      CMP.forget_cache()
+    end
     Tt.collect, Tt.guid_at = collect, guid_at
     reaper = real
   end
@@ -9926,6 +10322,12 @@ do
     local params = { [0] = 1, [1] = -1.4, [2] = 1, [3] = -14, [4] = -12.6, [5] = 1 }
     reaper = setmetatable({
       GetTrackGUID = function() return "{T}" end,
+      -- (the record lives on the track; here, in the same slot the tests seed)
+      GetSetMediaTrackInfo_String = function(_, k, v, set)
+        local key = (k == "P_EXT:TS_CV_compare") and "compare:{T}" or k
+        if set then proj[key] = v return true, v end
+        return true, proj[key] or ""
+      end,
       GetProjExtState = function(_, _, k) return 1, proj[k] or "" end,
       SetProjExtState = function(_, _, k, val) proj[k] = val end,
       time_precise = function() return 200 end,

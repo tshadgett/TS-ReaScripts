@@ -335,6 +335,10 @@ def module_signatures(sources):
         mod = fname[:-4]
         for d in re.finditer(r"^function\s+\w+\.(\w+)\s*\(([^)]*)\)", src, re.M):
             params = [p.strip() for p in d.group(2).split(",") if p.strip()]
+            # (a trailing ... takes any number more, none needed)
+            varargs = bool(params) and params[-1] == "..."
+            if varargs:
+                params = params[:-1]
             # Only THIS function's body decides which of its own arguments
             # are optional -- a module-wide search would call `peak_db`
             # optional here because some other function defaults it.
@@ -347,7 +351,7 @@ def module_signatures(sources):
                                  r"|\bif\s+%s\s+(?:then|and)\b" % (p, p, p, p), body):
                     break
                 required -= 1
-            sigs[(mod, d.group(1))] = (params, required)
+            sigs[(mod, d.group(1))] = (params, required, varargs)
     return sigs
 
 
@@ -367,7 +371,7 @@ def check_call_arity(fname, src, raw, sigs, problems):
         entry = sigs.get((bind.get(m.group(1)), m.group(2)))
         if entry is None:
             continue
-        params, required = entry
+        params, required, varargs = entry
         i, depth = m.end(), 1
         while i < len(src) and depth:
             if src[i] in "([{":
@@ -376,7 +380,7 @@ def check_call_arity(fname, src, raw, sigs, problems):
                 depth -= 1
             i += 1
         n = len(split_args(src[m.end():i - 1]))
-        if n > len(params) or n < required:
+        if (n > len(params) and not varargs) or n < required:
             problems.append((
                 "ARG COUNT", fname, src[:m.start()].count("\n") + 1,
                 "%s.%s" % (m.group(1), m.group(2)),

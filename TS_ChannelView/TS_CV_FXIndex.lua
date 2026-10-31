@@ -51,9 +51,10 @@ local function norm_key(s)
   -- The "<hash" suffix is KEPT: it is what tells one shell plugin's
   -- builds apart (every Waves plugin lives in one WaveShell), and
   -- REAPER's tag file keys them with it too.
-  -- Spaces, underscores and hyphens are the same: REAPER writes
-  -- "WaveShell1_VST3_14.15_x64.vst3" for "WaveShell1-VST3 14.15_x64.vst3".
-  s = s:lower():gsub("[%s_%-]+", "_")
+  -- Spaces, underscores, hyphens and brackets are the same: REAPER writes
+  -- "WaveShell1_VST3_14.15_x64.vst3" for "WaveShell1-VST3 14.15_x64.vst3",
+  -- and "Satin_x64_.vst3" for u-he's "Satin(x64).vst3".
+  s = s:lower():gsub("[%s_%-%(%)%[%]]+", "_")
   return s
 end
 IX.norm_key = norm_key

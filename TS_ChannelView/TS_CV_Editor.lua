@@ -435,13 +435,32 @@ end
 -- stepped knob), else nil: it's continuous, and takes a slider. Also the
 -- tolerance a rule on one of them wants. `controls`: the layout's, where
 -- one placed as a button counts as a switch.
+local read_cache = {}       -- a list read by name, kept a moment (it's drawn every frame)
 local function param_choices(tr, addr, p, controls, key)
   local P = require("TS_CV_Panel")
   local list = P.button_choices(tr, addr, p, key or st.key, nil)
   if #list >= 2 and #list <= 64 then
     local step = list[2].norm - list[1].norm
     -- (by your names for them, when you've given some)
-    return M.choice_list(key or st.key, p, list), math.max(0.0005, step * 0.5 - 0.0005)
+    return M.choice_list(key or st.key, p, list, tr, addr), math.max(0.0005, step * 0.5 - 0.0005)
+  end
+  -- a list along a knob that reports no steps (a mode, a program): its
+  -- names read without moving it, each at the middle of its run
+  local ck = tostring(tr) .. ":" .. tostring(addr) .. ":" .. p
+  local now = reaper.time_precise()
+  local hit = read_cache[ck]
+  local rl
+  if hit and now < hit.until_t then rl = hit.list
+  else
+    -- (a plugin that only says what it reads now, Valhalla's, is moved
+    -- through its range once: P.read_choices)
+    rl = P.read_choices(tr, addr, p, key or st.key) or false
+    read_cache[ck] = { list = rl, until_t = now + 2 }
+  end
+  if rl and #rl >= 2 and #rl <= 64 then
+    local least = 1
+    for i = 2, #rl do least = math.min(least, rl[i].norm - rl[i - 1].norm) end
+    return M.choice_list(key or st.key, p, rl, tr, addr), math.max(0.0005, least * 0.5 - 0.0005)
   end
   -- a two-state switch: the plugin reports a step as big as the whole
   -- range (or says it's a toggle), which reads as "no steps" above;
@@ -558,7 +577,7 @@ function E.show_sources(tr, addr, key, controls, skip)
        and (o.type == "toggle" or o.type == "combo" or o.type == "stepped") then
       seen[p] = true
       local list, tol = param_choices(tr, addr, p, controls, key)
-      if list and #list >= 2 and #list <= 24 then
+      if list and #list >= 2 and #list <= 64 then
         local _, pn = reaper.TrackFX_GetParamName(tr, addr, p, "")
         out[#out + 1] = { label = M.display_name(key, p, o.label, pn, false), param = p, choices = list, tol = tol }
       end
@@ -580,8 +599,9 @@ end
 local OP_LABEL = { is = "is", ["not"] = "is not", above = "is above", below = "is below", between = "is between" }
 -- The rule's operator and value(s): a dropdown of the source's choices,
 -- or a slider showing what it reads as there. `row(text)` starts a row
--- for the "and" value of a between. Changes r.
-local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row)
+-- for the "and" value of a between. Changes r. `multi`: "is" and "is not"
+-- on a source with choices take several, ticked in its list (Show when).
+local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row, multi)
   r.op = M.show_op(r); r.inv = nil
   local list, ctol = rule_choices(tr, addr, r, controls)
   local function value_field(fid, norm, w)
@@ -627,8 +647,39 @@ local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row)
       "is between: both ends included")
   end
   ImGui.SameLine(ctx, 0, 4)
-  local v = value_field(id .. "v", r.norm, val_w)
-  if v then r.norm = v; changed = true end
+  if multi and list and (r.op == "is" or r.op == "not") then
+    -- the settings it names, ticked (one at least)
+    local on = {}
+    for _, n in ipairs(M.show_values(r)) do
+      local bi, bd = nil, math.huge
+      for k, e in ipairs(list) do
+        local d = math.abs(e.norm - n)
+        if d < bd then bi, bd = k, d end
+      end
+      if bi then on[bi] = true end
+    end
+    local names = {}
+    for k, e in ipairs(list) do
+      if on[k] then names[#names + 1] = ((e.text or tostring(k)):gsub("%z", "")) end
+    end
+    ImGui.SetNextItemWidth(ctx, val_w)
+    if ImGui.BeginCombo(ctx, id .. "v", table.concat(names, ", ")) then
+      for k, e in ipairs(list) do
+        if ImGui.Checkbox(ctx, ((e.text or tostring(k)):gsub("%z", "")) .. "##" .. k, on[k] or false) then
+          local was = on[k]
+          on[k] = not was
+          local keep = {}
+          for k2, e2 in ipairs(list) do if on[k2] then keep[#keep + 1] = e2.norm end end
+          if M.show_set_values(r, keep) then changed = true else on[k] = was end
+        end
+      end
+      ImGui.EndCombo(ctx)
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Tick one or more.") end
+  else
+    local v = value_field(id .. "v", r.norm, val_w)
+    if v then r.norm = v; r.more = nil; changed = true end
+  end
   local tol = list and ctol or 0.005
   if r.tol ~= tol then r.tol = tol end
   if r.op == "between" then
@@ -1105,6 +1156,13 @@ draw_entry_body = function(ctx)
     if not ok then ImGui.EndDisabled(ctx) end
     tip(ok and "Show the choices as buttons, the current one lit."
       or ("Only for 2 to %d choices."):format(C.BUTTONS_MAX))
+    if not c.buttons and not st.grid then  -- (on a grid: the width of its place)
+      row_name("Width")
+      ImGui.SetNextItemWidth(ctx, FIELD_W)
+      local wch, wi = ImGui.Combo(ctx, "##cwidth", M.combo_cells(c) - 1, "1 cell\0" .. "2 cells\0" .. "3 cells\0" .. "4 cells\0")
+      if wch then c.size = (wi > 0) and tostring(wi + 1) or nil end
+      tip("Wide: arrows each side step it.")
+    end
   elseif c.type == "fader" then
     values_row(c.param)
     -- a fader's shape (Shape<n>): which way, how long, how thick (on a
@@ -1238,7 +1296,7 @@ draw_entry_body = function(ctx)
     if c.show then
       row_name("")
       rule_value_ui(ctx, "##show", tr, addr, c.show, st.scratch.controls, 92, FIELD_W - 96,
-        function(t) row_name(t) end)
+        function(t) row_name(t) end, true)
     end
   end
 
@@ -1322,7 +1380,11 @@ draw_entry_body = function(ctx)
     local P = require("TS_CV_Panel")
     local list = P.button_choices(st.track, st.fx.addr, c.param, st.key, c.nbtn)
     row_name("Choice names")
-    if type(list) ~= "table" or #list < 2 then
+    if st.scratch.choice_by and st.scratch.choice_by[c.param] then
+      ImGui.TextDisabled(ctx, "they follow another control:")
+      row_name("")
+      ImGui.TextDisabled(ctx, "right-click it on the panel \u{25B8} Name")
+    elseif type(list) ~= "table" or #list < 2 then
       ImGui.TextDisabled(ctx, "open the dropdown once to read them")
     else
       st.scratch.choice_names = st.scratch.choice_names or {}

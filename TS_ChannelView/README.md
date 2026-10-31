@@ -54,6 +54,11 @@ panel's background, the empty space between plugin panels, or the empty
 space to the right of the last mixer strip, to come back. Not the fader:
 that means unity.
 
+Double-click a track's name in the track list to rename it, as on REAPER's
+track panel. A track with one of REAPER's spacers above it has a gap
+before it, in the mixer and the track list, as wide as REAPER draws its
+spacers (Preferences ▸ Appearance).
+
 Mixer strip headers carry the track colour and no name. The name is
 directly below at full width in the track list, and the header could only
 have shown a truncation of it. Unselected, the header and its button
@@ -430,8 +435,14 @@ outline would have nothing to stand against.
   plugin, on the right half after it, in that plugin's container. A blue
   line shows where it will land (violet when it's going into a container);
   the move goes through REAPER's undo.
+* **Drag a panel onto another track** in the track list along the bottom
+  to copy the plugin there, with its settings, to the end of that track's
+  chain. The track it'll go to is outlined. Hold Alt as you let go to move
+  it instead. One undo step.
 * **Alt+click a panel's name** to remove the plugin from the chain, as in
   REAPER's FX chain. ChannelView asks first; Undo puts it back.
+* **Shift+click a panel's name** to bypass the plugin, or bring it back,
+  as in REAPER's mixer.
 * **Parallel FX and containers.** A bracket over the panels marks what runs
   together: a parallel group (marked `||`) and each FX container (marked
   with a small square, in a colour of its own). Panels only drop as far as
@@ -482,7 +493,8 @@ outline would have nothing to stand against.
 * **A short fader panel.** When the panel is too short for the fader to
   be of use, the volume becomes a knob with the level meter as a ring
   round it (left inside, right outside, a tick at the peak hold).
-  Double-click it for unity, right-click for the fader's menu.
+  Double-click it for unity, right-click for the fader's menu. Shorter
+  still, the pan knob goes and the volume takes its place.
 * **Strip width.** View ▸ *Strip width* sets how wide the fader panel,
   every mixer strip and the track name buttons are, from 72 to 240 px
   (112 by default). The meter grows and shrinks with it, the fader a
@@ -851,7 +863,11 @@ put them. Every bar is global, not per project.
   two and the web's take one bar each, and moving a bar onto one swaps it
   with the bar there. The header's drawers button lists the drawers and
   windowed bars (click to open or close one), makes new ones and opens
-  **Organise actions**.
+  **Organise actions**. The **TS_ChannelView_ToggleToolbars** action hides
+  every drawer in ChannelView's window and brings the same ones back (for
+  a shortcut, or a button on another toolbar, which lights while they're
+  out); **TS_ChannelView_ToggleRackToolbars** (Pro) does the same for the
+  Rack's. Bars in their own windows stay as they are.
 - **Menus.** A button can be a menu of actions, separators and further
   menus, nested as deep as you like. Clicking it always opens the menu.
   *Large submenus* (its right-click, or in Organise actions) shows the
@@ -1004,8 +1020,8 @@ the grid editor, a window of its own. A layout that isn't a grid yet
 becomes one as it opens, arranged as it was (**Undo** puts it back).
 
 - **On the left**, the plugin's parameters (find one by name) and what
-  else a layout can hold: a line, a section, a virtual knob, button or
-  selector. Drag any of them onto the grid, or double-click a parameter to
+  else a layout can hold: a line, a section, text, an EQ curve, a virtual
+  knob, button or selector. Drag any of them onto the grid, or double-click a parameter to
   put it where it first fits. With **Learn** on, touching a control in
   the plugin's own window puts it on the panel. A parameter already on the
   panel is greyed: click it to select it there, drag it to move it.
@@ -1073,6 +1089,19 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   keeping its look and place; any that plugin hasn't got are left out and
   named. With several selected, a control's right-click has **Paste
   style to the selected** (after *Copy style* on any control).
+- **Text** is words anywhere on the grid, over anything: across, or up
+  when its place is taller than wide. On the right: what it says, *Small*,
+  *Normal* or *Large*, its place along its room and its colour.
+- **EQ curve** draws the layout's EQ canvas in a place on the grid: its
+  bands, dragged and turned as on the canvas. A layout with one has no
+  canvas beside its controls, and can have several (each with the same
+  bands). It needs a layout with an EQ canvas (*New layout ▸ With a
+  canvas ▸ EQ*); its *Set up the EQ bands…* opens the setup.
+- **Canvas colours.** With nothing selected, a canvas layout has its own
+  colours: the curve (its fill and handles follow), the background, the
+  grid and its text, the meters, the canvas's small knobs, and an EQ's
+  bands one by one. ✕ puts one back to the theme's; *Copy* and *Paste*
+  move a set between canvases.
 - Every change is saved as you make it. **Undo** and **Redo** step back
   and forward through what you've done since the window opened.
 
@@ -1091,10 +1120,23 @@ default), shared with the TCP window and the web page.
 - **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
   *Buttons down*: one button per choice, the current one lit. For 2 to 8
   choices; a column too tall for the panel shows as a dropdown.
+- **Wide dropdowns.** Right-click a dropdown ▸ Look ▸ *Width*: one to
+  four cells. A wide one has arrows each side that step back and forward
+  through its choices (round from the end); click its name for the list.
+  The list shows every choice, read from the plugin without moving it,
+  scrolls past 14, and has a search box on top past 12 (Enter takes the
+  first match). On a grid a dropdown is as wide as its place, and one in
+  a place half a cell tall is just its box, its name in the tooltip.
 - **(Pro) Raised dropdowns.** Right-click a dropdown ▸ Style ▸ *Raised*: the box
   becomes a dark cap like a *Backlit* button (unlit), standing off the
   faceplate with a shadow under it; *Flat* (the default) prints it on the
   panel. *Apply to every dropdown on this panel* does the rest.
+- **(Pro) Dropdown colours.** Right-click a dropdown ▸ Style ▸ *Text
+  colour* sets the colour of its text, and *Choice colours* gives any of
+  its choices a colour of its own: the dropdown's text takes the colour of
+  the choice it's on, and its list shows each in its colour. On a dropdown
+  shown as buttons, each choice's button lights in its own colour. The web
+  page shows them too.
 - **(Pro) Sections.** A divider owns the controls after it, up to
   the next divider. Right-click any of them ▸ Section to put them on an
   **inset** or on a **faceplate of their own**. To style the first group,
@@ -1168,7 +1210,11 @@ default), shared with the TCP window and the web page.
   when* for the quick ones: *Always*, or one click on any button,
   dropdown, stepped knob or virtual control on the layout; anything else
   opens the editor at that control. Conditional controls are marked ◐ in
-  the editor's panel list.
+  the editor's panel list. A rule can name several of a dropdown's
+  settings: tick them in the right-click's list (it stays open) or the
+  editor's, and the control shows while it's on any of them (*is not*:
+  hidden on any of them). The setting it's on is matched by its name, so
+  a plugin that keeps a setting anywhere along its range still counts.
 - **(Pro) Virtual controls.** A layout can have controls of its own that drive
   no parameter: a **button** (two named states), a **selector** (choices,
   as chips or a dropdown) or a **knob**. Add one with the editor's
@@ -1218,7 +1264,11 @@ Leave a box empty to keep the plugin's. They're the plugin's everywhere
 that parameter shows: the dropdown and its list, a dropdown shown as
 buttons, a stepped knob, tooltips, the Show-rule pickers and the web page.
 Each follows its choice by the plugin's name for it, so a plugin that
-reorders its list keeps them right.
+reorders its list keeps them right. **Names follow** sets them per
+setting of another control, for a list that changes with it and only
+numbers its choices (a reverb's presets by bank): pick the setting to name
+in *Naming* (which switches the plugin to it). **How many** leaves the
+rest out of the list, and ✕ leaves one out (↺ puts it back).
 
 A **plugin instance** renamed in REAPER's FX chain shows that name on its
 panel and keeps its layout, which belongs to the plugin. The panel menu's
@@ -1355,7 +1405,10 @@ On the canvas, drag a node across for frequency (a switch snaps to its
 settings) and up or down for gain; the wheel turns Q; double-click takes
 the band out (flat, or off). Right-click a node for its shapes and its On
 switch, or Alt+wheel to step the shape. The nodes say what the plugin's
-own controls read.
+own controls read. Where nodes sit together, band 1 is on top. A plugin
+with more band slots than bands in use (Pro-Q's *Used*) leaves an unused
+band off the canvas until you move it, which takes it into use;
+double-clicking a node takes it back out.
 
 Bands can be any shape: bell, shelves, cuts at any slope up to 96 dB/oct
 and brickwall, notch, band pass, tilt shelf, flat tilt, flat top, sword and
@@ -1379,7 +1432,9 @@ An EQ layout can be a **dynamic EQ**: turn on *Dynamics* in its setup and map
 each band's threshold, range, ratio, attack, release and dynamics switch.
 Learning holds the dynamics off; the canvas draws each dynamic band's
 reach, with its range node to drag, and the picked band's level going in
-against its threshold.
+against its threshold. *DYN* on a band that isn't dynamic yet makes it
+dynamic, with a range of −3 dB to start; on one that is, it turns its
+dynamics on and off.
 
 **A compressor layout** maps roles to the plugin's controls: Threshold,
 Input, Ratio, Knee, Attack, Hold, Release, Make-up and Mix, each optional.
@@ -1445,7 +1500,10 @@ the decay time (or held, when frozen) — and, under it, *decay by
 frequency* with the lows' and highs' crossovers and multipliers, a tone
 tilt or shelves, and the low and high cuts. Style chips and FREEZE along
 the top. A decay that doesn't read in seconds can be **measured**
-(*Measure decay* plays bursts through a hidden copy).
+(*Measure decay* plays bursts through a hidden copy). With a pre-delay
+sync switch and note control mapped (*Pre-delay sync*, *Pre-delay note*),
+a synced pre-delay is drawn as its note value at the project's tempo and
+dragged from one note value to the next.
 
 **Modulation.** A scope of its LFO whose timebase follows the rate, depth,
 rate and phase handles, shape chips, and up to three **voices** (a
@@ -1576,6 +1634,14 @@ highlights stay put as a knob turns. **View ▸ Lighting** sets how strongly
 
 Like everything else on a panel, the look is saved with the plugin's layout,
 so every instance of that plugin wears it.
+
+**Copy panel style** in a panel's menu takes its whole look — the
+faceplate, its canvas colours, and for each kind of control (knobs,
+buttons, button rows, dropdowns, faders, sections, lines, text) the look
+most of that kind wear — and **Paste panel style** puts it on another
+panel, any plugin's: every control of a kind the copied panel had takes
+that kind's look. The copy stays until you copy another, so you can paste
+it panel after panel.
 
 **Track faders** — the Channel panel's, a mixer strip's, the TCP window's —
 have looks too: right-click the fader for its **Style** (Flat, Console,
@@ -1763,6 +1829,8 @@ them up the first time ChannelView shows it.
 | `TS_ChannelView_ToggleMixer.lua` | the *Toggle mixer view* action, for a shortcut or toolbar |
 | `TS_ChannelView_PatchBay.lua`, `TS_ChannelView_TCP_PatchBay.lua` | open or close the patch bay, in ChannelView or its TCP window (Pro) |
 | `TS_ChannelView_BypassModulation.lua` | the *Bypass modulation* action: every modulator on the selected tracks held still, or moving again |
+| `TS_ChannelView_ToggleToolbars.lua` | the *Show/hide toolbars* action: ChannelView's drawers hidden, or the same ones back |
+| `TS_ChannelView_ToggleRackToolbars.lua` | the same for the Rack's drawers (Pro) |
 | `TS_CV_Toolbar.lua` | an action bar: its buttons, menus, switches, icon picker |
 | `TS_CV_Thumbs.lua` | pictures of plugins for the plugin buttons and the plugin list (Pro) |
 | `TS_CV_PopOut.lua` | popped-out panels: their windows, saved with the project (Pro) |
@@ -2026,6 +2094,14 @@ sweep under write, touch or latch writes the whole sweep into the lane,
 which is damage to the project rather than a click — so that is refused
 even for an explicit click, and no setting overrides it.
 
+Most plugins say what each setting is called without being moved, and a
+dropdown reads its whole list that way when it's opened or stepped — no
+sweep, and a list that changes with another control (a reverb's presets
+with its bank) is always the current one. A plugin that only names the
+setting it's on (Valhalla's) is moved through its range once, as above,
+and put back; its dropdowns then step one setting at a time and open
+their list.
+
 A **stepped knob** (Show as ▸ *Stepped knob*) turns like a knob but lands
 only on the parameter's positions — the plugin's own choices once they've
 been read. It keeps count of a slow drag, so it clicks round one position
@@ -2081,6 +2157,12 @@ back to its default on a double-click:
 | pre/post | post-fader, which is REAPER's default for a new send |
 | mute, solo, phase, record arm, sidechain | off |
 | monitoring | off — the only way out of a three-state cycle without going round it |
+
+**Ctrl+click** (Cmd+click on a Mac) a knob or fader to type a value:
+a plugin's in its own terms (*-3*, *2k*, *250 ms*, *+5 semi*; a number
+with no unit is in the unit it shows now), the channel's volume in dB
+(*-6*, *-inf*) and its pan as *30L*, *15R* or *C*. Enter sets it, Escape
+leaves it.
 
 On a two-state button a double-click is the same as two clicks, so the
 first click toggles and the second click's default wins. That is

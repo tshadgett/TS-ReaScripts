@@ -25,7 +25,7 @@ local W   = {}
 -- Flat button, no colours or looks of their own (those are Pro:
 -- TS_CV_Edition). The options a control is drawn with, so.
 local PLAIN = { style = true, look = true, cap = true, on_col = true, arc = true,
-                style2 = true, look2 = true, cap2 = true }
+                style2 = true, look2 = true, cap2 = true, on_cols = true, ink = true, ink_of = true }
 local function plain(o)
   if ED.PRO or not o then return o end
   local p = {}
@@ -1161,6 +1161,58 @@ end
 -- opts.snaps -- the plugin's own choices' places (0..1), when they're
 -- known: the knob lands only on those, which matters when a plugin reports
 -- a fine step but names only a few positions along it.
+-- Ctrl+click (Cmd+click on a Mac) on a knob or fader asks for a value to
+-- be typed (act.type_in) instead of starting a drag; held, it moves
+-- nothing until it's let go.
+local typing_press = {}
+local function type_press(ctx, id, act, active)
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+    local mods = ImGui.GetKeyMods(ctx)
+    if (mods & ImGui.Mod_Ctrl) ~= 0 or (mods & ImGui.Mod_Super) ~= 0 then
+      act.type_in, act.double_click = true, false
+      typing_press[id] = true
+    end
+  end
+  if not active then typing_press[id] = nil end
+  return typing_press[id] == true
+end
+W.type_press = type_press
+
+-- The box a value is typed into: a small popup by the control, opened
+-- when `open_now` (a knob's or fader's act.type_in). Returns the text
+-- typed when Enter is pressed; Escape or a click elsewhere drops it.
+-- `now`: what it reads now, the box's hint.
+local type_bufs = {}
+function W.type_box(ctx, id, open_now, title, now)
+  local pid = id .. "##typein"
+  if open_now then
+    ImGui.OpenPopup(ctx, pid)
+    type_bufs[pid] = { buf = "", focus = true }
+  end
+  local out
+  if ImGui.BeginPopup(ctx, pid) then
+    local t = type_bufs[pid] or { buf = "" }
+    type_bufs[pid] = t
+    if title and title ~= "" then ImGui.TextDisabled(ctx, title) end
+    if t.focus then ImGui.SetKeyboardFocusHere(ctx); t.focus = false end
+    ImGui.SetNextItemWidth(ctx, 150)
+    local _, v = ImGui.InputTextWithHint(ctx, "##tv", now or "", t.buf)
+    t.buf = v
+    local enter = ImGui.IsItemDeactivated(ctx) and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+      or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter))
+    if enter then
+      if U.trim(t.buf) ~= "" then out = t.buf end
+      ImGui.CloseCurrentPopup(ctx)
+    elseif ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    ImGui.EndPopup(ctx)
+  else
+    type_bufs[pid] = nil
+  end
+  return out
+end
+
 function W.knob(ctx, id, label, value, formatted, opts)
   opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -1185,12 +1237,13 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local st = (opts.step_norm and opts.step_norm > 0) and opts.step_norm or nil
   local snaps = (opts.snaps and #opts.snaps > 1) and opts.snaps or nil
   local stepped = st or snaps
+  local typing = type_press(ctx, id, act, active)
 
   local changed = false
   -- The cell accepts right-clicks so it can raise its context menu, which
   -- also makes IsItemActive true during a right-drag. Only a LEFT drag may
   -- move the value.
-  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+  if active and not typing and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     local nv = W.drag_from(ctx, id, value)
     -- The drag's own running position (W.drag_from), snapped to the
     -- nearest position before it's compared against the current value --
@@ -1891,6 +1944,7 @@ end
 --   n        how many buttons the cell was given room for
 --   w, h     the cell, in pixels
 --   on_col   the lit colour (C.TOGGLE_COLS), nil for the theme's
+--   on_cols  a lit colour per choice (by its place), in place of on_col
 --   style    the buttons' face (W.button_face), nil for flat
 --   tooltip
 -- returns changed, value, act -- the value being the clicked choice's.
@@ -1951,14 +2005,16 @@ function W.button_row(ctx, id, label, value, choices, opts)
     cur, value, changed = under, choices[under].norm, true
   end
 
-  local on_col = opts.on_col or C.COL.toggle_on
-  local on_ink = U.is_light(on_col) and 0x0d1116ff or 0xf4f4f2ff
+  local base_col = opts.on_col or C.COL.toggle_on
+  local on_cols = opts.on_cols or {}
   if W.FACED[opts.style or ""] then
     for _, r in ipairs(rects) do W.hw_shadow_rect(dl, r[1], r[2], r[3], r[4], 2.0) end
   end
   W.push_small(ctx)
   for i, r in ipairs(rects) do
     local lit = (i == cur)
+    local on_col = on_cols[i] or base_col
+    local on_ink = U.is_light(on_col) and 0x0d1116ff or 0xf4f4f2ff
     local ink, dy, gcol = W.button_face(dl, r[1], r[2], r[3], r[4], 2.0, lit, on_col,
       opts.style, i == under)
     if not ink then
@@ -1981,7 +2037,7 @@ function W.button_row(ctx, id, label, value, choices, opts)
       if r[2] < rects[best][2] - 0.5 or (math.abs(r[2] - rects[best][2]) <= 0.5 and r[3] > rects[best][3]) then best = i end
     end
     local r = rects[best]
-    W.mod_corner(dl, r[3], r[2], 5, best == cur and on_col or C.COL.toggle_off)
+    W.mod_corner(dl, r[3], r[2], 5, best == cur and (on_cols[cur] or base_col) or C.COL.toggle_off)
   end
 
   W.tip(ctx, id, under and choices[under].text or opts.tooltip, hovered, false)
@@ -2005,11 +2061,26 @@ end
 -- backlit) carried over to a dropdown counts as raised too. Else flat.
 function W.combo_raised(style) return style == "raised" or W.FACED[style or ""] == true end
 
+-- A dropdown. opts.w: its width (a wide one, two cells or more, has
+-- arrows each side that step back and forward, and its name between them
+-- opens the list). opts.list_step: the wheel and the arrows ask the caller
+-- for the next or previous choice (act.step = -1 / 1) instead of moving
+-- the value along its step grid -- for a list the caller reads when asked.
+-- opts.current: the name it shows now, which picks the current one in the
+-- list (for choices spread over runs of a knob, not single positions).
+-- opts.ink: the colour its text shows in (the current choice's own, or the
+-- control's); opts.ink_of(entry): a list entry's colour, or nil.
+local combo_find = {}     -- a list's search box text, by its popup
+local COMBO_ROWS = 14     -- rows shown before the list scrolls
+local COMBO_SEARCH = 12   -- more choices than this: a search box on top
 function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
-  local cw, ch = C.CELL_W, C.CELL_H
+  local cw, ch = opts.w or C.CELL_W, C.CELL_H
+  -- short: half a cell tall, just the box (its name in the tooltip)
+  if opts.short then ch = C.CELL_H * 0.5 end
+  local wide = cw >= C.CELL_W * 2 - 1
 
   W.allow_overlap(ctx)
   local pressed = ImGui.InvisibleButton(ctx, id, cw, ch,
@@ -2054,8 +2125,21 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
 
   if opts.open_now and have then ImGui.OpenPopup(ctx, pop) end
 
+  local label_h = W.LABEL_H
+  local bx1, by1 = x + 4, y + label_h + C.LABEL_GAP + 1
+  local bx2, by2 = x + cw - 4, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
+  if opts.short then by1, by2 = y + 2, y + ch - 2 end
+  local cx = x + cw * 0.5
+  -- a wide one's arrows: a box's height wide at each end
+  local aw = wide and math.min(22, (by2 - by1) + 4) or 0
+  local mx = ImGui.GetMousePos(ctx)
+  local zone = (wide and hovered) and ((mx < bx1 + aw) and -1 or (mx > bx2 - aw) and 1 or 0) or 0
+
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
-    if have then
+    if zone ~= 0 then
+      -- an arrow: the previous or next choice, round from the end
+      if opts.list_step then act.step, act.wrap = zone, true else bump(zone, true) end
+    elseif have then
       ImGui.OpenPopup(ctx, pop)
     elseif steps == nil then
       act.want_steps = true          -- fetch it; the panel opens it next frame
@@ -2065,26 +2149,55 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
     end
   elseif hovered then
     local wheel = W.control_wheel(ctx)
-    if wheel ~= 0 then bump(wheel > 0 and 1 or -1, false); W.take_wheel() end
+    if wheel ~= 0 then
+      if opts.list_step then act.step = wheel > 0 and 1 or -1 else bump(wheel > 0 and 1 or -1, false) end
+      W.take_wheel()
+    end
   end
 
+  -- the list: as wide as the box at least, scrolling past COMBO_ROWS, with
+  -- a search box on top when it's long; the current one in view
+  local list = steps or {}
+  local rows = math.min(#list, COMBO_ROWS) + ((#list > COMBO_SEARCH) and 2 or 0)
+  ImGui.SetNextWindowSizeConstraints(ctx, bx2 - bx1, 0, math.max(bx2 - bx1, 520),
+    rows * ImGui.GetTextLineHeightWithSpacing(ctx) + 16)
   if ImGui.BeginPopup(ctx, pop) then
-    for i, sv in ipairs(steps or {}) do
-      local sel = st and math.abs(sv.norm - value) < st * 0.5
-                     or math.abs(sv.norm - value) < 1e-4
-      if ImGui.Selectable(ctx, sv.text .. "##s" .. i, sel and true or false) then
-        value, changed = sv.norm, true
+    local appearing = ImGui.IsWindowAppearing(ctx)
+    local q = ""
+    if #list > COMBO_SEARCH then
+      if appearing then combo_find[pop] = ""; ImGui.SetKeyboardFocusHere(ctx) end
+      ImGui.SetNextItemWidth(ctx, -1)
+      local fch, fv = ImGui.InputTextWithHint(ctx, "##find", "type to search\u{2026}", combo_find[pop] or "")
+      if fch then combo_find[pop] = fv end
+      q = U.trim(combo_find[pop] or ""):lower()
+    end
+    local first
+    for i, sv in ipairs(list) do
+      if q == "" or sv.text:lower():find(q, 1, true) then
+        local sel = st and math.abs(sv.norm - value) < st * 0.5
+                       or math.abs(sv.norm - value) < 1e-4
+        -- (a list read by name: the one with the name it shows now)
+        if opts.current then sel = (sv.text == opts.current) end
+        first = first or sv
+        local ink = opts.ink_of and opts.ink_of(sv)
+        if ink then ImGui.PushStyleColor(ctx, ImGui.Col_Text, ink) end
+        if ImGui.Selectable(ctx, sv.text .. "##s" .. i, sel and true or false) then
+          value, changed = sv.norm, true
+        end
+        if ink then ImGui.PopStyleColor(ctx) end
+        if sel and appearing then ImGui.SetScrollHereY(ctx, 0.4) end
       end
+    end
+    -- Enter takes the first match
+    if q ~= "" and first and not changed and (ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+                                             or ImGui.IsKeyPressed(ctx, ImGui.Key_KeypadEnter)) then
+      value, changed = first.norm, true
+      ImGui.CloseCurrentPopup(ctx)
     end
     ImGui.EndPopup(ctx)
   end
 
-  local label_h = W.LABEL_H
-  local bx1, by1 = x + 4, y + label_h + C.LABEL_GAP + 1
-  local bx2, by2 = x + cw - 4, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
-  local cx = x + cw * 0.5
-
-  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  if not opts.short then centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true) end
   if W.combo_raised(opts.style) then
     -- raised: a backlit button's cap, unlit, standing off the plate
     W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 3.0)
@@ -2101,7 +2214,7 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
 
   local txt = formatted or ""
   local tw, th = ImGui.CalcTextSize(ctx, txt)
-  local inner = (bx2 - bx1) - 6
+  local inner = (bx2 - bx1) - 6 - aw * 2
   if tw > inner then
     local n = #txt
     while n > 1 do
@@ -2114,13 +2227,22 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   -- The box is a knob-body fill on every faceplate, so its text and caret
   -- take the toggle's ink, which is made for that fill -- not the panel's
   -- value ink, which a light faceplate (aluminium, cream) turns dark.
-  ImGui.DrawList_AddText(dl, cx - tw * 0.5, (by1 + by2) * 0.5 - th * 0.5, C.COL.toggle_text, txt)
+  local ink = opts.ink or C.COL.toggle_text
+  ImGui.DrawList_AddText(dl, cx - tw * 0.5, (by1 + by2) * 0.5 - th * 0.5, ink, txt)
 
+  if wide then
+    -- arrows each side: lit under the pointer
+    local ay = (by1 + by2) * 0.5
+    for _, d in ipairs({ -1, 1 }) do
+      local ax = (d < 0) and (bx1 + aw * 0.5) or (bx2 - aw * 0.5)
+      local c = (zone == d) and C.COL.icon_hot or U.with_alpha(ink, 0xa0)
+      ImGui.DrawList_AddTriangleFilled(dl, ax - 2.5 * d, ay - 4, ax - 2.5 * d, ay + 4, ax + 2.5 * d, ay, c)
+    end
   -- a caret on anything that opens a list, including one not yet fetched
-  if have or steps == nil then
+  elseif have or steps == nil then
     local ax, ay = bx2 - 5, (by1 + by2) * 0.5 + 1
     ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2,
-      hovered and C.COL.icon_hot or U.with_alpha(C.COL.toggle_text, 0xa0))
+      hovered and C.COL.icon_hot or U.with_alpha(ink, 0xa0))
   end
   if opts.mod then W.mod_corner(dl, bx2, by1, 5, W.combo_raised(opts.style) and C.COL.toggle_off or C.COL.knob_body) end
 
@@ -2223,9 +2345,10 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
     double_click = hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
   }
   if ImGui.IsItemActivated(ctx) then fader_moved[id] = false end
+  local typing = type_press(ctx, id, act, active)
 
   local changed = false
-  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+  if active and not typing and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     local _, dy = ImGui.GetMouseDelta(ctx)
     if dy ~= 0 then
       local mods = ImGui.GetKeyMods(ctx)
@@ -2395,8 +2518,9 @@ function W.hfader(ctx, id, x, y, w, h, value, label, unity, look)
   W.last_fader = { v = false, x0 = x, x1 = x + w, y0 = y, y1 = y + h,
                    p0 = x + 4 + cap_w * 0.5, p1 = x + 4 + cap_w * 0.5 + trav }
 
+  local typing = type_press(ctx, id, act, active)
   local changed = false
-  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+  if active and not typing and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     local dx = ImGui.GetMouseDelta(ctx)
     if dx ~= 0 then
       local mods = ImGui.GetKeyMods(ctx)

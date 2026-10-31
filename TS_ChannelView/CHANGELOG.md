@@ -1,5 +1,67 @@
 # ChannelView — changelog
 
+## 3.7.5 — typed values, wide dropdowns, EQ curves on a grid
+
+### ChannelView
+
+- **Type a value.** Ctrl+click (Cmd+click on a Mac) a knob or fader and
+  type what you want: a plugin's value in its own terms (*-3*, *2k*,
+  *250 ms*, *+5 semi*), the channel's volume in dB, its pan as *30L*,
+  *15R* or *C*. Double-click still means default.
+- **Wide dropdowns, whole lists.** A dropdown can be one to four cells
+  wide (right-click ▸ Look ▸ *Width*); a wide one has arrows each side to
+  step through its choices. The list shows every choice, read from the
+  plugin without moving it, scrolls when it's long and has a search box.
+- **Plugins that only name their current setting** (Valhalla's) are read
+  by moving the control through its range once: their dropdowns list
+  their settings and step one at a time.
+- **Copy a plugin to another track:** drag its panel onto that track in
+  the track list along the bottom (Alt moves it instead).
+- **Shift+click a panel's name** to bypass the plugin, as in REAPER's
+  mixer.
+- **Double-click a track's name** in the track list to rename it.
+- **Choice names** can follow another control (a reverb's presets per
+  bank), and choices can be left out of the list.
+- **Show/hide toolbars:** a new action, *TS_ChannelView_ToggleToolbars*,
+  hides ChannelView's toolbar drawers and brings the same ones back.
+- **A short fader panel** drops the pan knob before the volume.
+- **REAPER's track spacers** are as wide in the mixer as REAPER draws
+  them (its own spacer size setting).
+- **u-he plugins** now show in the add-a-plugin list.
+
+### ChannelView Pro
+
+- **EQ curve on a grid.** *EQ curve* in Edit layout's list puts the
+  layout's EQ canvas in a place of its own on the grid, as small or large
+  as you like, with its bands to drag as on the canvas. Several can share
+  a layout.
+- **Text on a grid:** words anywhere, across or up, in three sizes and
+  any colour.
+- **Copy panel style / Paste panel style** in a panel's menu: one panel's
+  faceplate and each kind of control's look, onto any other panel.
+- **Dropdown colours:** a dropdown's text colour, and a colour for each of
+  its choices (a button row lights each in its own).
+- **Canvas colours:** a canvas layout's curve, background, grid, meters,
+  knobs and EQ bands in colours of its own (Edit layout).
+- **Show when** can name several of a dropdown's settings (*is* any of
+  them, *is not* any of them), and matches the setting by its name.
+- **Short dropdowns:** a dropdown in a place half a cell tall is just its
+  box.
+- **EQ canvases:** a plugin's unused bands (Pro-Q's *Used*) are taken into
+  use when moved; band 1 sits on top where bands share a place; *DYN* makes
+  a band dynamic; cuts whose learning went wrong are drawn and dragged by
+  the plugin's own reading.
+- **Reverb canvas:** a synced pre-delay is drawn and dragged as note
+  values; a decay that reads in time is taken at its word.
+- **Compare:** undo after *Keep A* or *Keep B* brings back the compare as
+  it was.
+- **Edit layout:** a knob turned into a fader where there's little room
+  becomes a short fader; a canvas layout's folded controls show while
+  it's being edited.
+- **Show/hide Rack toolbars:** *TS_ChannelView_ToggleRackToolbars*.
+- **Web companion:** dropdown colours, spacer widths, and the choices of
+  controls that report no steps.
+
 ## 3.7.0 — compare two plugins, choice names
 
 ### ChannelView

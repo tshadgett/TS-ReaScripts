@@ -212,6 +212,62 @@ function UN.positions(fmt, n, max_pos)
   return runs
 end
 
+-- Whether parameter p reads now as it would at n, by its text: true or
+-- false, nil when the plugin can't say (yet). What it would read at n is
+-- kept a few seconds (asked every frame, for each Show rule).
+local at_cache = {}
+function UN.reads_as(track, addr, guid, p, n)
+  local ck = tostring(guid) .. ":" .. p .. ":" .. ("%.4f"):format(n)
+  local now = reaper.time_precise()
+  local hit = at_cache[ck]
+  local want
+  if hit and now < hit.until_t then want = hit.text
+  else
+    want = UN.formatter(track, addr, p)(n) or false
+    at_cache[ck] = { text = want, until_t = now + 3 }
+  end
+  if not want then return nil end
+  local _, cur = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+  return trim(cur) == want
+end
+
+-- Where parameter p goes for a value typed as `text` ("-3", "2k",
+-- "250 ms", "+5 semi"): the normalised value that reads nearest it, or nil
+-- when it can't be read as a number. A number typed without a unit is in
+-- the unit it shows now ("2" on a control at "1.50 kHz" is 2 kHz). A
+-- control that reads no numbers takes a plain number as a percentage.
+function UN.typed_norm(track, addr, p, text)
+  local v, unit = UN.parse(text or "")
+  if not v then return nil end
+  local _, cur = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+  local cv = UN.parse(cur or "")
+  local shown = first_number(cur or "")
+  if unit == "" and cv and shown and shown ~= 0 and cv ~= 0 then v = v * (cv / shown) end
+  local n = UN.find_norm(UN.formatter(track, addr, p), v)
+  if n then return n end
+  return math.max(0, math.min(1, v / 100))
+end
+
+-- A control's settings as a list, { norm, text } each at the middle of
+-- its run, read through `fmt` (UN.formatter); nil when it isn't a list
+-- (more than max_pos runs, or nothing to read yet). A name seen twice is
+-- one setting, at its wider run: a plugin that wraps at the very end of
+-- its range (Valhalla's Mode reads Tape again at 1.0) lists it once.
+function UN.choice_runs(fmt, max_pos)
+  local pos = UN.positions(fmt, nil, max_pos)
+  if not pos then return nil end
+  local best = {}
+  for i, r in ipairs(pos) do
+    local b = best[r.text]
+    if not b or (r.hi - r.lo) > (pos[b].hi - pos[b].lo) then best[r.text] = i end
+  end
+  local out = {}
+  for i, r in ipairs(pos) do
+    if best[r.text] == i then out[#out + 1] = { norm = (r.lo + r.hi) * 0.5, text = r.text } end
+  end
+  return (#out >= 2) and out or nil
+end
+
 -- The normalised value at which the plugin's text reads `target` (in the
 -- unit it parses to), by bisection. Assumes the value rises or falls
 -- with the parameter (true of any knob worth mapping). `lo`, `hi` narrow

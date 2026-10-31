@@ -1,15 +1,17 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.7.0
+-- @version 3.7.5
 -- @changelog
---  Choice names: your own names for a dropdown's choices. Pro: compare
---  two plugins side by side. See the CHANGELOG.
+--  Ctrl+click a knob or fader to type a value; wide dropdowns with their
+--  whole list; drag a panel onto another track to copy the plugin;
+--  Shift+click a panel's name to bypass. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
 --  [main]   TS_ChannelView_TCP.lua
 --  [main]   TS_ChannelView_ToggleMixer.lua
 --  [main]   TS_ChannelView_BypassModulation.lua
+--  [main]   TS_ChannelView_ToggleToolbars.lua
 --  [webinterface] TS_CV_ActionIcons.json
 --  [nomain] TS_CV_Actions.lua
 --  [nomain] TS_CV_Arrange.lua
@@ -525,6 +527,7 @@ local function rescan(force)
     -- Menus hold an INDEX into the old chain, so they can't survive it
     -- changing shape.
     app.menu_fx, app.ctl_menu, app.drag, app.box_for = nil, nil, nil, nil
+    MX.fx_drag = nil
     P.clear_caches()
     M.clear_default_cache()
     T.clear_gr_cache()
@@ -567,6 +570,7 @@ local function follow_selection()
   if tr ~= app.track then
     app.track = tr
     app.menu_fx, app.ctl_menu, app.drag = nil, nil, nil
+    MX.fx_drag = nil
     St.clear_cache()
     S.request_scroll()
     rescan(true)
@@ -1276,6 +1280,8 @@ local function toggle_colour_menu(fx, key, idx, c)
     local lit = W.lit_col(c.cap) or C.COL.toggle_on
     swatch_extras("lit", c.cap, lit >> 8, body_col and "Rocker colour" or "Lit colour", choose, fx)
   end
+  -- a dropdown's buttons: a lit colour for each choice, too
+  if c.type == "combo" then app.choice_colours(fx, key, idx, c) end
   -- small: a half-height lit push-button with its name on it (buttons
   -- for a dropdown's choices have no sizes: their count sets their room)
   if c.type == "toggle" then
@@ -1703,6 +1709,97 @@ dual_style_grid = function(fx, key, idx, c)
   ImGui.Separator(ctx)
 end
 
+-- A dropdown's colours per choice (ChoiceCol<n>): a submenu with a row
+-- for each of its choices (your names), each opening the lit colours and
+-- the picker. Kept by the plugin's text, so they follow the choice. The
+-- list is read when the menu opens, and again every second or so.
+function app.choice_colours(fx, key, idx, c)
+  if not (c.param and c.param >= 0) then return end
+  ImGui.Spacing(ctx)
+  local n_set = 0
+  for _ in pairs(c.ccols or {}) do n_set = n_set + 1 end
+  local function rows()
+    local tag = fx.guid .. ":" .. c.param
+    local now_t = reaper.time_precise()
+    local cl = app.ccol_list
+    if not cl or cl.tag ~= tag or now_t > cl.until_t then
+      local raw = P.read_choices(app.track, fx.addr, c.param, key)
+        or P.button_choices(app.track, fx.addr, c.param, key, c.nbtn)
+      cl = { tag = tag, until_t = now_t + 1.5, list = raw }
+      app.ccol_list = cl
+    end
+    local list = (type(cl.list) == "table") and M.choice_list(key, c.param, cl.list, app.track, fx.addr) or nil
+    local function set_col(raw, k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then
+        lc.ccols = lc.ccols or {}
+        lc.ccols[raw] = k
+        if not next(lc.ccols) then lc.ccols = nil end
+      end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    if type(list) ~= "table" or #list < 2 then
+      ImGui.TextDisabled(ctx, "Open the dropdown once to read its choices.")
+    else
+      local dl = ImGui.GetWindowDrawList(ctx)
+      local _, th = ImGui.CalcTextSize(ctx, "Ag")
+      for i, e in ipairs(list) do
+        local raw = U.trim(e.raw or e.text or tostring(i))
+        local ck = c.ccols and c.ccols[raw]
+        local col = W.lit_col(ck)
+        local x, y = ImGui.GetCursorScreenPos(ctx)
+        local open = ImGui.BeginMenu(ctx, "      " .. (e.text or raw) .. "##ccrow" .. i)
+        local sy = y + (th - SWATCH_H) * 0.5
+        if col then
+          ImGui.DrawList_AddRectFilled(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, col, 2.0)
+        end
+        ImGui.DrawList_AddRect(dl, x + 1, sy, x + 1 + SWATCH_W, sy + SWATCH_H, C.COL.panel_border, 2.0, 0, 1.0)
+        if open then
+          for j, cp in ipairs(C.TOGGLE_COLS) do
+            if j > 1 then ImGui.SameLine(ctx, 0, 4) end
+            local none = cp.key == "theme"
+            if ImGui.ColorButton(ctx, cp.label .. "##ccc_" .. i .. cp.key, cp.col or C.COL.knob_body,
+                ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+              set_col(raw, (not none) and cp.key or nil, true)
+            end
+            if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, none and "None: the control's colour" or cp.label) end
+            if none then
+              local x0, y0 = ImGui.GetItemRectMin(ctx)
+              local x1, y1 = ImGui.GetItemRectMax(ctx)
+              ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx), x0 + 3, y1 - 3, x1 - 3, y0 + 3, C.COL.label, 1.5)
+            end
+            if (none and not ck) or cp.key == ck then
+              local x0, y0 = ImGui.GetItemRectMin(ctx)
+              local x1, y1 = ImGui.GetItemRectMax(ctx)
+              ImGui.DrawList_AddRect(ImGui.GetWindowDrawList(ctx), x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+            end
+          end
+          swatch_extras("ccx" .. i, ck, col and (col >> 8) or nil, (e.text or raw) .. " colour",
+            function(k, save) set_col(raw, k, save) end, fx)
+          ImGui.EndMenu(ctx)
+        end
+      end
+      if n_set > 0 then
+        ImGui.Separator(ctx)
+        if ImGui.MenuItem(ctx, "Clear all##ccclear") then
+          local l = materialise(fx)
+          local lc = l.controls[idx]
+          if lc then lc.ccols = nil end
+          M.set(key, l); M.save()
+        end
+      end
+    end
+  end
+  if ImGui.BeginMenu(ctx, "Choice colours" .. (n_set > 0 and ("  (" .. n_set .. ")") or "") .. "##ccols") then
+    rows()
+    ImGui.EndMenu(ctx)
+  elseif ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "A colour for each choice.")
+  end
+end
+
 -- A dropdown's look: printed flat on the faceplate, or raised (a backlit
 -- button's cap, unlit, standing off it). A button row's lit styles count
 -- as raised on a dropdown (W.combo_raised).
@@ -1727,6 +1824,35 @@ local function combo_style_menu(fx, key, idx, c)
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, o[3]) end
     W.combo_swatch(dl, x + 3, y + 3, x + 41, y + rh - 3, o[1])
   end
+  -- its text's colour: the theme's, a lamp colour or your own
+  ImGui.Spacing(ctx)
+  ImGui.TextDisabled(ctx, "Text colour")
+  do
+    local now = c.cap or "theme"
+    local function choose(k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then lc.cap = k end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    for i, cp in ipairs(C.TOGGLE_COLS) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.ColorButton(ctx, cp.label .. "##ctcol_" .. cp.key, cp.col or C.COL.toggle_text,
+          ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+        choose((cp.key ~= "theme") and cp.key or nil, true)
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, cp.label) end
+      if cp.key == now then
+        local x0, y0 = ImGui.GetItemRectMin(ctx)
+        local x1, y1 = ImGui.GetItemRectMax(ctx)
+        ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+      end
+    end
+    local ink = W.lit_col(c.cap) or C.COL.toggle_text
+    swatch_extras("ctext", c.cap, ink >> 8, "Text colour", choose, fx)
+  end
+  app.choice_colours(fx, key, idx, c)
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Apply to every dropdown on this panel") then
@@ -2455,6 +2581,28 @@ local function panel_menu()
     ImGui.EndMenu(ctx)
   end
   locked_tip()
+  -- the panel's whole style, onto other panels (TS_CV_Mappings M.style_of):
+  -- the copy stays until another is made
+  if not own_panel then
+    if ED.item(ImGui, ctx, "Copy panel style") then
+      app.style_clip = M.style_of(layout)
+      app.style_from = U.fx_label(fx)
+    end
+    if ED.PRO and ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Its faceplate and each kind of control's look,\nto paste onto other panels.")
+    end
+    if ED.item(ImGui, ctx, "Paste panel style" .. (app.style_from and ("  (" .. app.style_from .. ")") or ""), nil, false,
+        app.style_clip ~= nil and not locked) then
+      local l = materialise(fx)
+      M.apply_style(l, app.style_clip)
+      M.set(key, l); M.save()
+    end
+    if ED.PRO and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, locked and "Layout locked: unlock with the padlock\nin the panel's foot."
+        or app.style_clip and "Its faceplate, and every knob, button, dropdown and fader\nin the copied panel's looks."
+        or "Copy a panel's style first.")
+    end
+  end
   if ImGui.BeginMenu(ctx, "Meters") then
     -- The meter is a property of the plugin, so it saves with the layout and
     -- applies to every instance -- same as everything else here.
@@ -3125,27 +3273,114 @@ local function name_menu(fx, key, layout, idx, c)
   if (c.type == "combo" or c.type == "stepped") and (c.param or -1) >= 0 then
     ImGui.Separator(ctx)
     ImGui.TextDisabled(ctx, "Choice names: this plugin, everywhere")
-    local list = P.button_choices(app.track, fx.addr, c.param, key, c.nbtn)
+    -- names that follow another control (a list that changes with it and
+    -- only numbers its choices): a set for each of its settings, the one
+    -- being named picked here (which switches the plugin to it)
+    -- (the setting being named is kept here, app.choice_ctx, not read back
+    -- from the plugin: a plugin can take a moment to show a change)
+    local by = M.choice_by(key, c.param)
+    if by and not app.choice_ctx then app.choice_ctx = M.choice_context(key, c.param, app.track, fx.addr) end
+    local function load_buf()
+      app.choice_buf = {}
+      for t, nm in pairs(M.get_choice_names(key, c.param, app.track, fx.addr, app.choice_ctx) or {}) do app.choice_buf[t] = nm end
+    end
+    do
+      local opts, keys, now = { "Nothing" }, { false }, 0
+      for _, o in ipairs(layout.controls or {}) do
+        if (o.type == "combo" or o.type == "stepped") and o.param and o.param >= 0 and o.param ~= c.param then
+          local _, pn = reaper.TrackFX_GetParamName(app.track, fx.addr, o.param, "")
+          opts[#opts + 1] = M.display_name(key, o.param, o.label, pn, false)
+          keys[#keys + 1] = o.param
+          if o.param == by then now = #keys - 1 end
+        end
+      end
+      if #keys > 1 or by then
+        ImGui.SetNextItemWidth(ctx, 150)
+        local fch, fi = ImGui.Combo(ctx, "Names follow##chby", now, table.concat(opts, "\0") .. "\0")
+        if fch then
+          materialise(fx)
+          M.set_choice_by(key, c.param, keys[fi + 1] or nil)
+          M.save()
+          by = M.choice_by(key, c.param)
+          app.choice_ctx = by and M.choice_context(key, c.param, app.track, fx.addr) or nil
+          load_buf()
+        end
+        tip("For a list that changes with another control:\na set of names for each of its settings.")
+      end
+    end
+    if by then
+      -- which of its settings is being named: picking one switches the
+      -- plugin to it (what's typed for the one before is kept first)
+      local blist = P.read_choices(app.track, fx.addr, by, key) or P.button_choices(app.track, fx.addr, by, key, nil)
+      local cur = app.choice_ctx
+      if type(blist) == "table" and #blist > 1 then
+        local names, now = {}, 0
+        for i, e in ipairs(blist) do
+          names[i] = (e.text or tostring(i)):gsub("%z", "")
+          if e.text == cur then now = i - 1 end
+        end
+        ImGui.SetNextItemWidth(ctx, 150)
+        local bch, bi = ImGui.Combo(ctx, "Naming##chctx", now, table.concat(names, "\0") .. "\0")
+        if bch and blist[bi + 1] then
+          materialise(fx)
+          -- what's typed stays with the one it was typed for
+          if cur then M.set_choice_names(key, c.param, app.choice_buf or {}, app.track, fx.addr, cur) end
+          reaper.TrackFX_SetParamNormalized(app.track, fx.addr, by, blist[bi + 1].norm)
+          app.choice_ctx = (blist[bi + 1].text or ""):gsub("[~|\r\n]", " ")
+          M.save()
+          load_buf()
+        end
+        tip("The setting whose names you're typing.\nPicking one switches the plugin to it.")
+      elseif cur then
+        ImGui.TextDisabled(ctx, "For " .. cur .. ":")
+      end
+    end
+    local list = P.read_choices(app.track, fx.addr, c.param, key) or P.button_choices(app.track, fx.addr, c.param, key, c.nbtn)
     if type(list) ~= "table" or #list < 2 then
       ImGui.TextDisabled(ctx, "Open the dropdown once to read its choices.")
     else
       app.choice_buf = app.choice_buf or {}
+      local buf = app.choice_buf
+      local HID = M.HIDDEN
+      -- how many there are: the rest are left out of the list
+      local count = 0
+      for i, e in ipairs(list) do if buf[e.text or tostring(i)] ~= HID then count = i end end
+      ImGui.SetNextItemWidth(ctx, 90)
+      local cch, cv_ = ImGui.InputInt(ctx, "How many##chcount", count)
+      if cch then
+        cv_ = math.max(1, math.min(#list, cv_))
+        for i, e in ipairs(list) do
+          local t = e.text or tostring(i)
+          if i > cv_ then buf[t] = HID elseif buf[t] == HID then buf[t] = nil end
+        end
+      end
+      tip("How many it has here: the rest are left out of the list.")
       local rows = math.min(#list, 12)
       local entered = false
       local fh = ImGui.GetFrameHeightWithSpacing(ctx)
-      if ImGui.BeginChild(ctx, "##chnames", 230, rows * fh + 4, 0) then
+      if ImGui.BeginChild(ctx, "##chnames", 250, rows * fh + 4, 0) then
         for i, e in ipairs(list) do
           local t = e.text or tostring(i)
-          ImGui.SetNextItemWidth(ctx, 210)
-          local _, nv = ImGui.InputTextWithHint(ctx, "##chn" .. i, t, app.choice_buf[t] or "")
-          if enter_pressed() then entered = true end
-          app.choice_buf[t] = nv
+          local hidden = buf[t] == HID
+          if hidden then ImGui.BeginDisabled(ctx, true) end
+          ImGui.SetNextItemWidth(ctx, 200)
+          local _, nv = ImGui.InputTextWithHint(ctx, "##chn" .. i, t, hidden and "" or (buf[t] or ""))
+          if not hidden then
+            if enter_pressed() then entered = true end
+            buf[t] = nv
+          end
+          if hidden then ImGui.EndDisabled(ctx) end
+          ImGui.SameLine(ctx, 0, 4)
+          if ImGui.SmallButton(ctx, (hidden and "\u{21BA}" or "\u{2715}") .. "##chx" .. i) then
+            buf[t] = (not hidden) and HID or nil
+          end
+          if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, hidden and "Put it back in the list" or "Leave it out of the list") end
         end
         ImGui.EndChild(ctx)
       end
       if ImGui.Button(ctx, "Set##choices") or entered then
         materialise(fx)
-        M.set_choice_names(key, c.param, app.choice_buf)
+        M.set_choice_names(key, c.param, buf, app.track, fx.addr, by and app.choice_ctx or nil)
         M.save()
         ImGui.CloseCurrentPopup(ctx)
       end
@@ -3290,14 +3525,34 @@ local function show_when_menu(fx, key, layout, idx, c)
   local list = E.show_sources(app.track, fx.addr, key, layout.controls, c)
   if #list > 0 then ImGui.Separator(ctx) end
   for i, e in ipairs(list) do
-    local mine = c.show and M.show_op(c.show) == "is"
+    -- its settings with ticks: shown while it's on any ticked one (the
+    -- list stays open, to tick several); a "not" rule on it keeps its op
+    local op = c.show and M.show_op(c.show)
+    local mine = c.show and (op == "is" or op == "not")
       and ((e.vname and c.show.vname == e.vname) or (not e.vname and not c.show.vname and c.show.param == e.param))
     if ImGui.BeginMenu(ctx, U.truncate(e.label, 28) .. "##sw" .. i) then
+      local now = mine and M.show_values(c.show) or {}
+      local function ticked(n)
+        for _, v in ipairs(now) do if math.abs(v - n) < 1e-4 then return true end end
+        return false
+      end
+      if mine and op == "not" then ImGui.TextDisabled(ctx, "Hidden on the ticked ones") end
       for k, ch in ipairs(e.choices) do
-        local cur = mine and math.abs((c.show.norm or 0) - ch.norm) < 1e-4
-        if ImGui.MenuItem(ctx, "is " .. U.truncate((ch.text or tostring(k)):gsub("%z", ""), 24) .. "##swc" .. k, nil, cur) then
-          set({ param = e.param, vname = e.vname, op = "is", norm = ch.norm, tol = e.tol })
+        local cur = ticked(ch.norm)
+        if ImGui.Checkbox(ctx, U.truncate((ch.text or tostring(k)):gsub("%z", ""), 24) .. "##swc" .. k, cur) then
+          local keep = {}
+          for _, ch2 in ipairs(e.choices) do
+            local on = ticked(ch2.norm)
+            if ch2.norm == ch.norm then on = not on end
+            if on then keep[#keep + 1] = ch2.norm end
+          end
+          local r = { param = e.param, vname = e.vname, op = mine and op or "is", tol = e.tol }
+          set(M.show_set_values(r, keep) and r or nil)
         end
+      end
+      if mine then
+        ImGui.Separator(ctx)
+        if ImGui.MenuItem(ctx, "Clear##swclr" .. i) then set(nil) end
       end
       ImGui.EndMenu(ctx)
     end
@@ -3635,6 +3890,25 @@ local function control_menu()
   if styled and ED.menu(ImGui, ctx, "Style") then
     style_menu(fx, key, idx, c)
     ImGui.EndMenu(ctx)
+  end
+  -- a dropdown's width: one to four cells (on a grid, its place's)
+  if c.type == "combo" and not c.buttons then
+    local on_grid = layout.grid ~= nil
+    if ImGui.BeginMenu(ctx, "Width", not on_grid) then
+      local now = M.combo_cells(c)
+      for n = 1, 4 do
+        if ImGui.MenuItem(ctx, n == 1 and "1 cell" or (n .. " cells"), nil, now == n) then
+          local l = materialise(fx)
+          local lc = l.controls[idx]
+          if lc then lc.size = (n > 1) and tostring(n) or nil end
+          M.set(key, l); M.save()
+        end
+      end
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, on_grid and "On a grid: the width of its place." or "Wide: arrows each side step it.")
+    end
   end
   -- its own background, over its section's; neighbours with the same one
   -- join into one shape
@@ -4945,6 +5219,8 @@ local function panel_requests(i, fx, layout, key, req)
     if req.begin_drag and not app.drag then
       app.drag = { chain_i = i, guid = fx.guid, path = fx.path_t,
                    what = fx.is_container and "container" or "plugin" }
+      -- (the track row outlines another track it's over: copied there)
+      MX.fx_drag = { track = app.track, name = U.fx_label(fx) }
     end
     if req.open_menu then
       app.menu_fx = i
@@ -5008,7 +5284,8 @@ local function panel_requests(i, fx, layout, key, req)
       local st = c and c.param and M.get_states(key, c.param)
       app.state_buf = { st and st[1] or "", st and st[2] or "" }
       app.choice_buf = {}
-      for t, nm in pairs(c and c.param and M.get_choice_names(key, c.param) or {}) do app.choice_buf[t] = nm end
+      app.choice_ctx = nil
+      for t, nm in pairs(c and c.param and M.get_choice_names(key, c.param, app.track, fx.addr) or {}) do app.choice_buf[t] = nm end
       app.open_ctl_menu = true
     end
 end
@@ -5319,7 +5596,7 @@ local function panel_row(row_h, row_w)
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   P.has_io(app.track, fx, lay),
                                   St.is_gr_open(fx.guid), M.locked(lay),
-                                  (not P.own_eq(k) and not P.own_rc(k)) and lay.canvas or nil)
+                                  (not P.own_eq(k) and not P.own_rc(k)) and P.canvas_of(lay) or nil)
           if i > 1 then total = total + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)
@@ -5406,6 +5683,9 @@ local function panel_row(row_h, row_w)
       local out = POP.PO and r and app.drag.what == "plugin"
                   and not (mx >= r[1] and mx < r[1] + r[3] and my >= r[2] and my < r[2] + r[4])
       local into = out and POP.at(mx, my)
+      -- over another track in the track row: copied (moved) there instead
+      local to_track = MX.fx_drop
+      if to_track then drop, out = nil, false end
       if out then
         drop = nil
         local w = into and POP.PO.window(into)
@@ -5429,7 +5709,19 @@ local function panel_row(row_h, row_w)
             if f.guid == app.drag.guid then POP.pop_out(app.track, f, into, { mx - 20, my - 10 }) break end
           end
         end
-        app.drag, app.drop_gap = nil, nil
+        if to_track and reaper.ValidatePtr2(0, to_track, "MediaTrack*") then
+          -- to the end of that track's chain, with its settings; Alt moves it
+          local move = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Alt) ~= 0
+          for _, f in ipairs(app.chain) do
+            if f.guid == app.drag.guid then
+              reaper.Undo_BeginBlock()
+              reaper.TrackFX_CopyToTrack(app.track, f.addr, to_track, reaper.TrackFX_GetCount(to_track), move)
+              reaper.Undo_EndBlock("ChannelView: " .. (move and "move " or "copy ") .. U.fx_label(f) .. " to another track", -1)
+              break
+            end
+          end
+        end
+        app.drag, app.drop_gap, MX.fx_drag, MX.fx_drop = nil, nil, nil, nil
       end
     end
 
@@ -5731,7 +6023,7 @@ local function rack_inside(rack_w)
     end
     if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
       if drop then move_to(app.drag.path, drop.parent, drop.gap, app.drag.what) end
-      app.drag, app.drop_gap = nil, nil
+      app.drag, app.drop_gap, MX.fx_drag = nil, nil, nil
     end
   end
 end
@@ -6159,15 +6451,20 @@ local function frame()
     local n_gaps = 1 + (ma_on and 1 or 0) + (mo_on and 1 or 0) + (sd_on and 1 or 0) + (rv_on and 1 or 0)
     local mid_w  = math.max(80, full_w - ch_w - mr_w - rv_w - sd_w - C.PANEL_GAP * n_gaps)
 
-    -- A double-click on a NAME BUTTON opens that track in channel view,
-    -- in either branch below -- the button means the same thing whether
-    -- it's sitting under a strip or on its own. One place to act on it,
-    -- since MX.draw_row hands it back the same way from both views.
+    -- A double-click on a NAME BUTTON renames that track (name_dbl), in
+    -- either branch below -- the button means the same thing whether it's
+    -- sitting under a strip or on its own. One place to act on it, since
+    -- MX.draw_row hands it back the same way from both views.
     local function open_from_name(tr)
       app.track = tr
       S.request_scroll()
       rescan(true)
       set_view(false)
+    end
+    -- a name button double-clicked: renamed there, as on REAPER's track
+    -- panel (the master, which has no name to change, opens)
+    local function name_dbl(tr)
+      if tr == reaper.GetMasterTrack(0) then open_from_name(tr) else TM.open_rename(tr) end
     end
 
     -- the side drawers, beside a row h tall starting at the cursor; the
@@ -6215,7 +6512,7 @@ local function frame()
         rescan(true)
         set_view(false)
       elseif dbl_track then
-        open_from_name(dbl_track)
+        name_dbl(dbl_track)
       end
     else
       side_drawers(row_h)
@@ -6266,7 +6563,7 @@ local function frame()
       if want_mixer then
         set_view(true)
       elseif dbl_track then
-        open_from_name(dbl_track)
+        name_dbl(dbl_track)
       end
       -- the bottom drawers: under the track names, where mixer view has
       -- them too

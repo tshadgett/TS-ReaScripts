@@ -230,7 +230,7 @@ function S.layout_key(fx_name, guid, track, addr)
       local v
       if r.vname then v = S.vvalue(guid, r.vname, base, nil)
       else v = reaper.TrackFX_GetParamNormalized(track, addr, r.param) end
-      if v and M.show_match(v, r, (was == i) and S.SWITCH_SLACK or 0) then
+      if v and M.show_match(v, r, (was == i) and S.SWITCH_SLACK or 0, nil) then
         local k = M.variant_key(base, r.layout)
         if k == base or M.has(k) then rule_on[guid] = i; return k end
       end

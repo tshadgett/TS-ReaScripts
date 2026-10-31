@@ -253,6 +253,29 @@ local function get(track, key, dflt) return CH.read(track, key, dflt) end
 -- value -- see TS_CV_Gang.
 local function set(track, key, v) G.set(track, key, v) end
 
+-- Ctrl+click (Cmd on a Mac) on the volume or pan: a value typed in (W.type_box).
+-- Volume in dB ("-6", "+2.5", "-inf"); pan as "30L", "15R", "C" or -100..100.
+function CH.typed_vol(text)
+  local low = (text or ""):lower()
+  if low:match("inf") then return 0 end
+  local db = tonumber(low:match("[%+%-]?%d*%.?%d+") or "")
+  if not db then return nil end
+  return 10 ^ (math.min(24, db) / 20)
+end
+function CH.typed_pan(text)
+  local up = U.trim(text or ""):upper()
+  if up == "C" or up == "CENTRE" or up == "CENTER" then return 0 end
+  local n = tonumber(up:match("[%+%-]?%d*%.?%d+") or "")
+  if not n then return nil end
+  if up:find("L") then n = -math.abs(n) elseif up:find("R") then n = math.abs(n) end
+  return math.max(-1, math.min(1, n / 100))
+end
+local function type_vol(ctx, id, act, track, vol)
+  local t = W.type_box(ctx, id, act and act.type_in, "Volume (dB)", U.db_text(vol))
+  local v = t and CH.typed_vol(t)
+  if v then set(track, "D_VOL", v) end
+end
+
 -- The master track has no record arm, no input monitoring and no phase
 -- invert. Drawing dead buttons for them would be worse than leaving the
 -- space to the fader and meter, which the master does have.
@@ -695,6 +718,7 @@ local function volume_knob(ctx, dl, x, w, top, bottom, track, idp, vol, now)
     local nv = U.fader_to_vol(knv)
     if dbl then set(track, "D_VOL", nv) else G.vol(track, nv) end
   end
+  type_vol(ctx, idp .. "volk", kact, track, vol)
   local k = W.last_knob
   if not k then return end
   -- the ring: one arc a channel (left inside, right outside), over the
@@ -760,32 +784,42 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   y = y + CH.INPUT_ROW_H
   h = h - CH.INPUT_ROW_H
 
+  -- (the body's lines: buttons along the bottom, the fader above them;
+  -- y and h are below the input row now, the geometry counts from the
+  -- body's own top -- CH.geometry)
+  local master = CH.is_master(track)
+  local geo = CH.geometry(y - CH.INPUT_ROW_H, h + CH.INPUT_ROW_H, master)
+  -- Too short for a fader, and too short for the volume knob under the
+  -- pan: the pan goes and the volume takes its place.
+  local no_pan = geo.fh < CH.FADER_MIN and (geo.btm - 4 - geo.top) < C.CELL_H
+
   -- pan across the top
-  local pan = get(track, "D_PAN")
-  local pan_txt = (math.abs(pan) < 0.005) and "C"
-    or string.format("%d%s", math.floor(math.abs(pan) * 100 + 0.5),
-                     pan < 0 and "L" or "R")
-  ImGui.SetCursorScreenPos(ctx, x + (w - C.CELL_W) * 0.5, y + 2)
-  local pch, pnv, pact = W.knob(ctx, idp .. "pan", "Pan", (pan + 1) * 0.5, pan_txt,
-    { bipolar = true, tooltip = pan_txt })
-  local dblp = pact and pact.double_click
-  if dblp then pnv, pch = 0.5, true end
-  if pact and pact.right_click then ImGui.OpenPopup(ctx, idp .. "panmenu") end
-  if ImGui.BeginPopup(ctx, idp .. "panmenu") then
-    CH.lane_item(ctx, track, "Pan")
-    ImGui.EndPopup(ctx)
-  end
-  -- Centre is a place; a drag is a distance. See the fader below.
-  if pch then
-    local np = pnv * 2 - 1
-    if dblp then set(track, "D_PAN", np) else G.pan(track, np) end
+  if not no_pan then
+    local pan = get(track, "D_PAN")
+    local pan_txt = (math.abs(pan) < 0.005) and "C"
+      or string.format("%d%s", math.floor(math.abs(pan) * 100 + 0.5),
+                       pan < 0 and "L" or "R")
+    ImGui.SetCursorScreenPos(ctx, x + (w - C.CELL_W) * 0.5, y + 2)
+    local pch, pnv, pact = W.knob(ctx, idp .. "pan", "Pan", (pan + 1) * 0.5, pan_txt,
+      { bipolar = true, tooltip = pan_txt })
+    local dblp = pact and pact.double_click
+    if dblp then pnv, pch = 0.5, true end
+    if pact and pact.right_click then ImGui.OpenPopup(ctx, idp .. "panmenu") end
+    if ImGui.BeginPopup(ctx, idp .. "panmenu") then
+      CH.lane_item(ctx, track, "Pan")
+      ImGui.EndPopup(ctx)
+    end
+    -- Centre is a place; a drag is a distance. See the fader below.
+    if pch then
+      local np = pnv * 2 - 1
+      if dblp then set(track, "D_PAN", np) else G.pan(track, np) end
+    end
+    local tp = W.type_box(ctx, idp .. "pan", pact and pact.type_in, "Pan (30L, 15R, C)", pan_txt)
+    local tpv = tp and CH.typed_pan(tp)
+    if tpv then set(track, "D_PAN", tpv) end
   end
 
   -- buttons along the bottom, two columns, three rows (see CH.geometry)
-  local master = CH.is_master(track)
-  -- (y and h are below the input row now; the geometry counts from the
-  -- body's own top)
-  local geo = CH.geometry(y - CH.INPUT_ROW_H, h + CH.INPUT_ROW_H, master)
   local bh, bgap = geo.bh, geo.bgap
   local bw = (w - pad * 2 - bgap) * 0.5
   local btm = geo.btm
@@ -862,7 +896,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
 
   if fh < CH.FADER_MIN then
     -- too short for a fader to be any use: a knob, the meter round it
-    volume_knob(ctx, dl, x + pad, inner, top, btm - 4, track, idp, vol, now)
+    volume_knob(ctx, dl, x + pad, inner, no_pan and (y + 2) or top, btm - 4, track, idp, vol, now)
   else
     local fx = x + pad + (half - fw) * 0.5
     local fch, fnv, fact = W.fader(ctx, idp .. "fader", fx, top, fw, fh,
@@ -876,6 +910,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
       local nv = U.fader_to_vol(fnv)
       if dblv then set(track, "D_VOL", nv) else G.vol(track, nv) end
     end
+    type_vol(ctx, idp .. "fader", fact, track, vol)
 
     -- the fader's own value, with the fader rather than lost among the
     -- buttons

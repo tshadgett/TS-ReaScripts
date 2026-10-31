@@ -493,6 +493,23 @@ C.HEADER_NUDGE = 0
 -- The gap a TCP spacer opens in the track strip along the bottom.
 C.STRIP_SPACER = 14
 
+-- REAPER's own track spacer size (Preferences > Appearance: 1-64 px,
+-- 16 unless set; reaper.ini trackgapmax), read every few seconds, so a
+-- spacer is as wide in the mixer as REAPER draws it.
+local spacer_now, spacer_at = nil, -10
+function C.spacer_w()
+  local t = reaper.time_precise and reaper.time_precise() or 0
+  if spacer_now and t - spacer_at < 3 then return spacer_now end
+  spacer_at = t
+  local v
+  if reaper.get_config_var_string then
+    local ok, sv = reaper.get_config_var_string("trackgapmax")
+    v = ok and tonumber(sv) or nil
+  end
+  spacer_now = math.max(1, math.min(64, math.floor(v or 16)))
+  return spacer_now
+end
+
 -- ---------------------------------------------------------------------
 -- The TCP (TS_ChannelView_TCP.lua)
 -- ---------------------------------------------------------------------
