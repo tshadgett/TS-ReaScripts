@@ -1907,6 +1907,7 @@ do
   check("canvas colours: unknown and bad ones dropped", tostring(cols.junk) .. tostring(cols.grid), "nilnil")
   check("canvas colours: written back", M_.canvas_cols_line(cols), "band3:#00ff00|bg:#2a0e0e|curve:#ff4a3a")
   check("canvas colours: none", tostring(M_.canvas_cols_of("")) .. tostring(M_.canvas_cols_line({})), "nilnil")
+  check("canvas colours: highlight", M_.canvas_cols_line(M_.canvas_cols_of("hi:#E0A33A|curve:#4aa3df")), "curve:#4aa3df|hi:#e0a33a")
   check("canvas colours: copied with the canvas", M_.copy_canvas({ kind = "comp", cols = cols }).cols.curve, 0xff4a3a)
   local P = require("TS_CV_Panel")
   local Cc = require("TS_CV_Config")
@@ -1921,6 +1922,53 @@ do
   local ok2 = pcall(P.with_canvas_cols, { cols = { curve = 0x112233 } }, "dl", 0, 0, 10, 10, function() error("boom") end)
   check("canvas colours: back after an error too", tostring(ok2) .. " " .. tostring(Cc.COL.accent == was_accent), "false true")
 end
+
+-- words and an EQ curve in a layout without a grid, and in a grid
+-- flowing too tall: placed, given their room, not missing
+do
+  local function ph(n) return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H end
+  local cu = { param = -1, type = "curve", label = "" }
+  local tx = { param = -1, type = "text", label = "Dynamics" }
+  check("flow: a curve four cells by two", table.concat({ P.cell_size(cu, 8) }, " "), "8 4 curve")
+  check("flow: a curve no taller than the panel", select(2, P.cell_size(cu, 2)), 2)
+  check("flow: words as wide as they are", (select(1, P.cell_size(tx, 8))) >= 2 and select(2, P.cell_size(tx, 8)) == 1, true)
+  check("flow: a grid's room kept", table.concat({ P.cell_size({ type = "curve", at = { c = 0, r = 0, w = 12, h = 6 } }, 8) }, " "), "6 3 curve")
+  local lay = P.layout({ { type = "knob", param = 0 }, cu, tx }, ph(4))
+  local kinds = {}
+  for _, it in ipairs(lay.items) do kinds[#kinds + 1] = it.kind or "-" end
+  check("flow: the curve and the words placed", table.concat(kinds, " "), "- curve text")
+  check("flow: the curve under the knob", lay.items[2].x .. "," .. lay.items[2].y, "0," .. C.CELL_H)
+  -- a grid too tall: the unit laid out afresh keeps its curve
+  local g = { { type = "knob", param = 0, at = { c = 0, r = 0, w = 4, h = 4 } },
+              { type = "curve", param = -1, label = "", at = { c = 0, r = 4, w = 16, h = 8 } } }
+  g.grid = { cols = 16, rows = 12 }
+  local l2 = P.layout(g, ph(2))
+  local found
+  for _, it in ipairs(l2.items) do if it.ctl == g[2] then found = it.kind end end
+  check("grid flowing: the curve kept", found, "curve")
+end
+
+-- canvas colours made from a faceplate
+do
+  local M_ = require("TS_CV_Mappings")
+  local red = M_.plate_canvas_cols({ bg = 0xa02020ff, text = 0xf0e0e0ff })
+  check("from the faceplate: background, grid, curve, highlight, meters",
+    tostring(red.bg ~= nil and red.grid ~= nil and red.curve ~= nil and red.hi ~= nil and red.meter ~= nil), "true")
+  check("from the faceplate: a darker background in its hue", (red.bg >> 16) > (red.bg & 0xff) and (red.bg >> 16) < 0xa0, true)
+  check("from the faceplate: the curve in its hue", ("%06x"):format(red.curve):sub(1, 2), "f2")
+  local grey = M_.plate_canvas_cols({ bg = 0x808080ff, text = 0x101010ff })
+  check("from the faceplate: a grey plate keeps the theme's curve", tostring(grey.curve) .. " " .. tostring(grey.bg ~= nil), "nil true")
+  check("from the faceplate: none", M_.plate_canvas_cols(nil), nil)
+  check("canvas colours: the fill", M_.canvas_cols_line(M_.canvas_cols_of("fill:#102030")), "fill:#102030")
+  local P_ = require("TS_CV_Panel")
+  local Cc = require("TS_CV_Config")
+  local seen
+  P_.with_canvas_cols({ cols = { fill = 0x445566 } }, "dl", 0, 0, 10, 10, function() seen = Cc.CANVAS.fill end)
+  check("canvas colours: the fill while it draws, gone after", ("%08x"):format(seen or 0) .. " " .. tostring(Cc.CANVAS.fill), "445566ff nil")
+end
+
+-- a knob's lamp: the same for the panel and the web page
+check("lamp: one for both", P.lamp == require("TS_CV_FXTree").lamp and P.LAMP == require("TS_CV_FXTree").LAMP, true)
 
 -- a dropdown's list read by name, without moving the plugin (any length,
 -- stepped or not), and stepping along it
@@ -10685,6 +10733,13 @@ do
   check("offer: nothing it knows", d("VST3: Thing (Acme)", { "Volume", "Pan", "Width" }), "nil")
   check("offer: a name alone with no controls for it isn't enough", d("VST3: Big Comp (Acme)", { "Volume", "Pan" }) ~= "comp", true)
   check("offer: kind words", CS.KIND_WORD.eq .. "/" .. CS.KIND_WORD.limit, "EQ/limiter")
+  -- not sure: nothing offered
+  check("offer: a synth's envelope isn't offered", d("VSTi: Thing (Acme)", { "Attack", "Decay", "Sustain", "Release", "Cutoff" }), "nil")
+  check("offer: a threshold without a ratio", d("VST3: Thing (Acme)", { "Threshold", "Attack", "Release" }), "nil")
+  check("offer: drive and mix alone", d("VST3: Thing (Acme)", { "Drive", "Mix", "Output" }), "nil")
+  check("offer: time and mix alone", d("VST3: Thing (Acme)", { "Time", "Mix", "Rate" }), "nil")
+  check("offer: named, but its controls don't fit", d("VST3: Big Gate (Acme)", { "Threshold", "Output" }), "nil")
+  check("offer: named, with what it needs", d("VST3: Big Gate (Acme)", { "Threshold", "Hold" }), "gate:Threshold,Hold")
 end
 
 -- ---------------------------------------------------------------------

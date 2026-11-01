@@ -959,4 +959,96 @@ function T.reports_gr(track, addr, guid)
   return T.gr_estimated(track, addr, guid)
 end
 
+-- ---------------------------------------------------------------------
+-- a control's lamp, from the plugin's gain reduction (reported, or
+-- measured by the probes):
+--   reduction (compressor, limiter, clipper, saturator): green with signal
+--     and none, amber reducing up to 6 dB, red past that
+--   gate: green open, amber partly closed, red closed (as far as it's
+--     closed lately: its range)
+-- Dark with no signal or bypassed. Set on a control (its menu's Lamp:
+-- ctl.lamp); with none set, a layout without a canvas whose plugin
+-- reports or measures its reduction has one on its Threshold (a limiter's
+-- or clipper's Ceiling when it has none).
+-- ---------------------------------------------------------------------
+T.LAMP = { green = 0x3fbf5fff, amber = 0xf5a524ff, red = 0xe5484dff }
+local lamp_fx = {}          -- fx guid -> { at, map, layout, t = {}, col = {}, held, held_t }
+local lamp_names = {}       -- fx guid -> { thr, ceil }: its controls' names, read once
+local function lamp_signal(track, guid)
+  local lv = require("TS_CV_Taps").levels(track, guid)
+  if lv and not lv.old and lv.in_pk then return lv.in_pk end
+  local pk = math.max(reaper.Track_GetPeakInfo(track, 0) or 0, reaper.Track_GetPeakInfo(track, 1) or 0)
+  return pk > 0 and 20 * math.log(pk, 10) or -150
+end
+-- which controls have one, and what kind: param -> "gr" | "gate"
+local function lamp_targets(track, fx, layout)
+  local own, any = {}, false
+  for _, c in ipairs((layout and layout.controls) or {}) do
+    if c.lamp then
+      any = true
+      if c.lamp ~= "off" and c.param then own[c.param] = c.lamp end
+    end
+  end
+  if any then return own end
+  -- (a canvas shows all this and more)
+  if layout and layout.canvas then return nil end
+  if not T.reports_gr(track, fx.addr, fx.guid) then return nil end
+  local nm = (fx.name or ""):lower()
+  local kind = (nm:find("gate", 1, true) or nm:find("expand", 1, true)) and "gate" or "gr"
+  local edge = nm:find("limit", 1, true) or nm:find("clip", 1, true)
+  local n = lamp_names[fx.guid]
+  if not n then
+    n = {}
+    for q = 0, (reaper.TrackFX_GetNumParams(track, fx.addr) or 0) - 1 do
+      local _, pn = reaper.TrackFX_GetParamName(track, fx.addr, q, "")
+      pn = (pn or ""):lower()
+      if not n.thr and pn:find("thresh", 1, true) then n.thr = q end
+      if not n.ceil and pn:find("ceil", 1, true) then n.ceil = q end
+    end
+    lamp_names[fx.guid] = n
+  end
+  local p = n.thr or (edge and n.ceil) or nil
+  return p and { [p] = kind } or nil
+end
+-- A control's lamp: nil none, false dark, else its colour.
+function T.lamp(track, fx, layout, p)
+  if not (track and fx and fx.guid and fx.guid ~= "" and p) then return nil end
+  local now = reaper.time_precise()
+  local e = lamp_fx[fx.guid]
+  if not e or e.layout ~= layout or now - e.at > 2 then
+    e = { at = now, map = lamp_targets(track, fx, layout), layout = layout, t = {}, col = {},
+          held = e and e.held or 0, held_t = e and e.held_t or now }
+    lamp_fx[fx.guid] = e
+  end
+  local kind = e.map and e.map[p]
+  if not kind then return nil end
+  if e.t[p] and now - e.t[p] < 0.03 then return e.col[p] end
+  e.t[p] = now
+  local col
+  if not T.get_enabled(track, fx.addr) then
+    col = false
+  else
+    local gr = T.gain_reduction(track, fx.addr)
+    if gr == nil then e.col[p] = false; return false end
+    local sig = lamp_signal(track, fx.guid) > -60
+    if kind == "gate" then
+      -- its range: the most it's closed by lately, held a few seconds
+      if gr >= e.held then e.held, e.held_t = gr, now
+      elseif now - e.held_t > 4 then e.held = math.max(gr, e.held - 6 * 0.03) end
+      local closed = math.max(6, e.held - 1.5)
+      if gr >= closed then col = T.LAMP.red
+      elseif gr >= 0.5 then col = T.LAMP.amber
+      elseif sig then col = T.LAMP.green
+      else col = false end
+    else
+      if gr >= 6 then col = T.LAMP.red
+      elseif gr >= 0.1 then col = T.LAMP.amber
+      elseif sig then col = T.LAMP.green
+      else col = false end
+    end
+  end
+  e.col[p] = col
+  return col
+end
+
 return T

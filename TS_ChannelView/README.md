@@ -1109,11 +1109,14 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   bands). It needs a layout with an EQ canvas (*New layout ▸ With a
   canvas ▸ EQ*); its *Set up the EQ bands…* opens the setup.
 - **Canvas colours.** With nothing selected, a canvas layout has its own
-  colours: the curve (its fill, its handles and what they set follow — a
-  compressor's input bar, a de-esser's band), the background, the grid and
-  its text, the meters (the spectrum, levels, gain reduction and the live
-  dots), the canvas's small knobs, and an EQ's bands one by one. ✕ puts one back to the theme's; *Copy* and *Paste*
-  move a set between canvases.
+  colours: the curve (the threshold and their handles), the fill under it
+  (the curve's until you set it), the highlight (a compressor's input
+  bar, the reduction wedge, a de-esser's band and the other gold handles
+  and markers), the background, the grid and its text, the meters (the
+  spectrum, levels, gain reduction and the live dots), the canvas's small
+  knobs, and an EQ's bands one by one. ✕ puts one back to the theme's;
+  *From the faceplate* makes a set to match the layout's faceplate;
+  *Copy* and *Paste* move a set between canvases.
 - Every change is saved as you make it. **Undo** and **Redo** step back
   and forward through what you've done since the window opened.
 
@@ -1363,9 +1366,10 @@ new layout and the one you started from is left as it was.
 
 ### Canvas layouts for any plugin (Pro)
 
-**The offer.** A plugin with no layout of its own whose name or controls
-look like a kind of canvas gets a box across the top of its panel: *Looks
-like a compressor (Threshold, Ratio, Attack, Release)*. **Use the canvas**
+**The offer.** A plugin with no layout of its own that's clearly a kind
+of canvas, by its name and its controls, gets a box across the top of its
+panel: *Looks like a compressor (Threshold, Ratio, Attack, Release)*. One
+it can't place gets no box. **Use the canvas**
 makes a layout with that canvas, makes it the plugin's default and opens
 its setup; **Other…** picks another kind; **Not now** hides it until
 ChannelView starts again; **Never** stops it for that plugin. *View ▸
@@ -1767,7 +1771,7 @@ reduction: right-click it ▸ **Lamp**.
 It's dark with no signal, or with the plugin bypassed. A plugin that
 doesn't report its gain reduction has it measured by a TS_TrackProbe pair
 (*Measured gain reduction*, below): choosing a lamp turns that on, and
-offers to add the pair.
+offers to add the pair. The web page (Pro) shows the lamps too.
 
 ## Presets
 

@@ -348,8 +348,8 @@ local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
                      xy = true, dual = true, page = true, section = true, text = true, curve = true }
 
--- A layout's EQ curves on its grid (Ctl<n>=-1|curve|0|): the canvas's
--- bands, drawn and dragged in each one's place. A layout with one draws
+-- A layout's EQ curves (Ctl<n>=-1|curve|0|): the canvas's bands, drawn
+-- and dragged in each one's place. A layout with one draws
 -- its EQ canvas there and not beside its controls.
 function M.has_curve(layout)
   for _, c in ipairs((layout and layout.controls) or {}) do
@@ -907,9 +907,59 @@ end
 -- A canvas's own colours (CanvasCol=curve:#rrggbb|bg:#...|...): what it
 -- draws in instead of the theme's, by element (M.CANVAS_COLS, and band1 to
 -- band8 for an EQ's bands), as 0xrrggbb. nil when there are none.
-M.CANVAS_COLS = { "curve", "bg", "grid", "meter", "knob" }
-local CANVAS_COL_OK = { curve = true, bg = true, grid = true, meter = true, knob = true }
+M.CANVAS_COLS = { "curve", "fill", "hi", "bg", "grid", "meter", "knob" }
+local CANVAS_COL_OK = { curve = true, fill = true, hi = true, bg = true, grid = true, meter = true, knob = true }
 for k = 1, 8 do CANVAS_COL_OK["band" .. k] = true end
+
+-- A canvas's colours made from a faceplate (C.plate_of; its bg 0xRRGGBBAA):
+-- its background a shade of the plate, the grid between that and the
+-- plate's text, and the curve, highlight and meters in the plate's hue (a
+-- grey plate keeps the theme's). As 0xrrggbb, for cols.
+local function rgb_hsv(r, g, b)
+  local mx, mn = math.max(r, g, b), math.min(r, g, b)
+  local d = mx - mn
+  local h = 0
+  if d > 0 then
+    if mx == r then h = ((g - b) / d) % 6 elseif mx == g then h = (b - r) / d + 2 else h = (r - g) / d + 4 end
+    h = h / 6
+  end
+  return h, (mx > 0) and d / mx or 0, mx
+end
+local function hsv_rgb(h, s, v)
+  h = (h % 1) * 6
+  local i = math.floor(h)
+  local f = h - i
+  local p, q, t = v * (1 - s), v * (1 - s * f), v * (1 - s * (1 - f))
+  local r, g, b
+  if i == 0 then r, g, b = v, t, p elseif i == 1 then r, g, b = q, v, p elseif i == 2 then r, g, b = p, v, t
+  elseif i == 3 then r, g, b = p, q, v elseif i == 4 then r, g, b = t, p, v else r, g, b = v, p, q end
+  local function c(x) return math.floor(math.max(0, math.min(1, x)) * 255 + 0.5) end
+  return (c(r) << 16) | (c(g) << 8) | c(b)
+end
+local function mix_rgb(a, b, t)
+  local out = 0
+  for sh = 16, 0, -8 do
+    local x, y = (a >> sh) & 0xff, (b >> sh) & 0xff
+    out = out | (math.floor(x + (y - x) * t + 0.5) << sh)
+  end
+  return out
+end
+function M.plate_canvas_cols(plate)
+  if not (plate and plate.bg) then return nil end
+  local pbg = (plate.bg >> 8) & 0xffffff
+  local ink = plate.text and ((plate.text >> 8) & 0xffffff) or 0xffffff
+  local h, s, v = rgb_hsv(((pbg >> 16) & 0xff) / 255, ((pbg >> 8) & 0xff) / 255, (pbg & 0xff) / 255)
+  local light = v > 0.6 and s < 0.5
+  local out = {}
+  out.bg = light and mix_rgb(pbg, 0x000000, 0.06) or hsv_rgb(h, s, v * 0.45)
+  out.grid = mix_rgb(out.bg, ink, 0.22)
+  if s >= 0.12 then
+    out.curve = hsv_rgb(h, math.max(s, 0.65), light and 0.55 or 0.95)
+    out.hi = hsv_rgb(h, 0.35, light and 0.45 or 1.0)
+    out.meter = hsv_rgb(h + 0.14, 0.55, light and 0.55 or 0.95)
+  end
+  return out
+end
 function M.canvas_cols_of(v)
   local out, any = {}, false
   for item in ((v or "") .. "|"):gmatch("([^|]*)|") do

@@ -63,7 +63,7 @@ P.own_eq, P.own_rc, P.own_trim = own_eq, own_rc, own_trim
 local own_layout = {}
 -- a layout's canvas, when there's Pro to draw it
 -- The canvas drawn beside a layout's controls: none when its EQ canvas is
--- drawn in curve controls on its grid instead (M.has_curve).
+-- drawn in its curve controls instead (M.has_curve).
 local function canvas_of(layout)
   local cv = MP ~= nil and layout and layout.canvas or nil
   if cv and cv.kind == "eq" and M.has_curve(layout) then return nil end
@@ -204,6 +204,19 @@ function P.cell_size(ctl, half_rows)
   if ctl.type == "xy" then
     local pw, ph = M.pad_dims(ctl)
     return pw * 2, math.min(half_rows, ph * 2), "xy"
+  end
+  -- words and an EQ curve: the room a grid gave them, or else a curve
+  -- four cells by two, words as wide as they are
+  if ctl.type == "curve" or ctl.type == "text" then
+    local a, w, h = ctl.at
+    if a then
+      w, h = math.max(2, math.ceil(a.w / 2)), math.max(1, math.ceil(a.h / 2))
+    elseif ctl.type == "curve" then
+      w, h = 8, 4
+    else
+      w, h = math.max(2, math.ceil((#(ctl.label or "") * 7 + 8) / hx(1))), (ctl.size == "large") and 2 or 1
+    end
+    return w, math.min(half_rows, h), ctl.type
   end
   local bw, bh = P.button_span(ctl)
   if bw and bh <= half_rows then return bw, bh, "buttons" end
@@ -2586,97 +2599,9 @@ local function draw_tab_strip(ctx, dl, x, y, w, fx, pages, cur, req)
   end
 end
 
--- ---------------------------------------------------------------------
--- a control's lamp, from the plugin's gain reduction (reported, or
--- measured by the probes):
---   reduction (compressor, limiter, clipper, saturator): green with signal
---     and none, amber reducing up to 6 dB, red past that
---   gate: green open, amber partly closed, red closed (as far as it's
---     closed lately: its range)
--- Dark with no signal or bypassed. Set on a control (its menu's Lamp:
--- ctl.lamp); with none set, a layout without a canvas whose plugin
--- reports or measures its reduction has one on its Threshold (a limiter's
--- or clipper's Ceiling when it has none).
--- ---------------------------------------------------------------------
-P.LAMP = { green = 0x3fbf5fff, amber = 0xf5a524ff, red = 0xe5484dff }
-local lamp_fx = {}          -- fx guid -> { at, map, layout, t = {}, col = {}, held, held_t }
-local lamp_names = {}       -- fx guid -> { thr, ceil }: its controls' names, read once
-local function lamp_signal(track, guid)
-  local lv = TP.levels(track, guid)
-  if lv and not lv.old and lv.in_pk then return lv.in_pk end
-  local pk = math.max(reaper.Track_GetPeakInfo(track, 0) or 0, reaper.Track_GetPeakInfo(track, 1) or 0)
-  return pk > 0 and 20 * math.log(pk, 10) or -150
-end
--- which controls have one, and what kind: param -> "gr" | "gate"
-local function lamp_targets(track, fx, layout)
-  local own, any = {}, false
-  for _, c in ipairs((layout and layout.controls) or {}) do
-    if c.lamp then
-      any = true
-      if c.lamp ~= "off" and c.param then own[c.param] = c.lamp end
-    end
-  end
-  if any then return own end
-  -- (a canvas shows all this and more)
-  if layout and layout.canvas then return nil end
-  if not T.reports_gr(track, fx.addr, fx.guid) then return nil end
-  local nm = (fx.name or ""):lower()
-  local kind = (nm:find("gate", 1, true) or nm:find("expand", 1, true)) and "gate" or "gr"
-  local edge = nm:find("limit", 1, true) or nm:find("clip", 1, true)
-  local n = lamp_names[fx.guid]
-  if not n then
-    n = {}
-    for q = 0, (reaper.TrackFX_GetNumParams(track, fx.addr) or 0) - 1 do
-      local _, pn = reaper.TrackFX_GetParamName(track, fx.addr, q, "")
-      pn = (pn or ""):lower()
-      if not n.thr and pn:find("thresh", 1, true) then n.thr = q end
-      if not n.ceil and pn:find("ceil", 1, true) then n.ceil = q end
-    end
-    lamp_names[fx.guid] = n
-  end
-  local p = n.thr or (edge and n.ceil) or nil
-  return p and { [p] = kind } or nil
-end
--- A control's lamp: nil none, false dark, else its colour.
-function P.lamp(track, fx, layout, p)
-  if not (track and fx and fx.guid and fx.guid ~= "" and p) then return nil end
-  local now = reaper.time_precise()
-  local e = lamp_fx[fx.guid]
-  if not e or e.layout ~= layout or now - e.at > 2 then
-    e = { at = now, map = lamp_targets(track, fx, layout), layout = layout, t = {}, col = {},
-          held = e and e.held or 0, held_t = e and e.held_t or now }
-    lamp_fx[fx.guid] = e
-  end
-  local kind = e.map and e.map[p]
-  if not kind then return nil end
-  if e.t[p] and now - e.t[p] < 0.03 then return e.col[p] end
-  e.t[p] = now
-  local col
-  if not T.get_enabled(track, fx.addr) then
-    col = false
-  else
-    local gr = T.gain_reduction(track, fx.addr)
-    if gr == nil then e.col[p] = false; return false end
-    local sig = lamp_signal(track, fx.guid) > -60
-    if kind == "gate" then
-      -- its range: the most it's closed by lately, held a few seconds
-      if gr >= e.held then e.held, e.held_t = gr, now
-      elseif now - e.held_t > 4 then e.held = math.max(gr, e.held - 6 * 0.03) end
-      local closed = math.max(6, e.held - 1.5)
-      if gr >= closed then col = P.LAMP.red
-      elseif gr >= 0.5 then col = P.LAMP.amber
-      elseif sig then col = P.LAMP.green
-      else col = false end
-    else
-      if gr >= 6 then col = P.LAMP.red
-      elseif gr >= 0.1 then col = P.LAMP.amber
-      elseif sig then col = P.LAMP.green
-      else col = false end
-    end
-  end
-  e.col[p] = col
-  return col
-end
+-- a control's lamp (TS_CV_FXTree T.lamp)
+P.LAMP = T.LAMP
+P.lamp = T.lamp
 
 -- `panel_h` is the panel's FULL height, header included -- the same value
 -- P.width() was given, so the column count here can't disagree with the
@@ -2954,6 +2879,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     elseif ctl.type == "blank" then
       local _, _, act = W.blank(ctx, id)
       if act.right_click then req.ctx_control = i end
+
+    elseif ctl.type == "curve" then
+      P.draw_curve_item(ctx, dl, gx0 + item.x, gy0 + item.y, hx(item.w), hy(item.h), track, fx, layout, req, "f" .. i)
+
+    elseif ctl.type == "text" then
+      P.draw_text_item(ctx, dl, gx0, gy0, { x = item.x, y = item.y, w = hx(item.w), h = hy(item.h), by = ctl })
 
     elseif M.is_virtual(ctl) then
       local act = draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
@@ -3664,8 +3595,10 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
     end
   end
   if cols.bg then ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, ((cols.bg & 0xffffff) << 8) | 0xff, 3.0) end
-  local was_c, was_m = C.CANVAS.curve, C.CANVAS.meter
+  local was_c, was_h, was_m, was_f = C.CANVAS.curve, C.CANVAS.hi, C.CANVAS.meter, C.CANVAS.fill
   C.CANVAS.curve = cols.curve and (((cols.curve & 0xffffff) << 8) | 0xff) or nil
+  C.CANVAS.fill  = cols.fill and (((cols.fill & 0xffffff) << 8) | 0xff) or nil
+  C.CANVAS.hi    = cols.hi and (((cols.hi & 0xffffff) << 8) | 0xff) or nil
   C.CANVAS.meter = cols.meter and (((cols.meter & 0xffffff) << 8) | 0xff) or nil
   local bands
   for k = 1, 8 do
@@ -3675,13 +3608,13 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
   local was = EQP and EQP.set_band_colours(bands)
   local r = table.pack(pcall(fn, ...))
   for k, v in pairs(saved) do C.COL[k] = v end
-  C.CANVAS.curve, C.CANVAS.meter = was_c, was_m
+  C.CANVAS.curve, C.CANVAS.hi, C.CANVAS.meter, C.CANVAS.fill = was_c, was_h, was_m, was_f
   if EQP then EQP.set_band_colours(was) end
   if not r[1] then error(r[2], 0) end
   return table.unpack(r, 2, r.n)
 end
 
--- An EQ curve on a grid (TS_CV_Mappings "curve"): the layout's EQ
+-- An EQ curve (TS_CV_Mappings "curve"): the layout's EQ
 -- canvas (TS_CV_MapPanel) in its place, on a screen of its own, in the
 -- canvas's colours (CanvasCol). `n`: which of the layout's curves, so each
 -- has its own nodes. Pro (the canvases); a placeholder without an EQ.
@@ -3705,7 +3638,7 @@ function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n)
   ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 3.0, 0, 1.0)
 end
 
--- A text control on a grid (TS_CV_Mappings "text"): its words in its
+-- A text control (TS_CV_Mappings "text"): its words in its
 -- place, across, or up when the place is taller than wide; Size small or
 -- large, its colour (Edge), left / centred / right along its room.
 local TEXT_PX = { small = 11, large = 18 }

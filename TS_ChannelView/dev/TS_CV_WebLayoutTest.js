@@ -58,5 +58,13 @@ cases.forEach((c, ci) => {
   console.log((bad ? "FAIL " : "ok   ") + "web layout baseline: " + c.name.slice(0, 22) + (bad ? "  " + bad : ""));
   if (bad) fails++;
 });
+// words and an EQ curve among the controls: drawn as a grid's are
+{
+  const lay = api.placeControls([{ t: "knob" }, { t: "curve" }, { t: "text", l: "Dynamics" }], 4 * api.CELL_H);
+  const ok = lay.items.length === 1 && (lay.curves || []).length === 1 && (lay.texts || []).length === 1
+    && lay.curves[0].y === api.CELL_H && lay.curves[0].h === 2 * api.CELL_H;
+  console.log((ok ? "ok   " : "FAIL ") + "web flow: a curve and words placed, not controls");
+  if (!ok) fails++;
+}
 console.log(fails ? `\n${fails} FAILURES` : "\nALL PASS");
 process.exit(fails ? 1 : 0);

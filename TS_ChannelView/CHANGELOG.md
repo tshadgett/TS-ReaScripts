@@ -1,5 +1,22 @@
 # ChannelView — changelog
 
+## 3.8.1 — canvas colours, lamps on the web page
+
+### ChannelView
+
+- Nothing new without Pro: this version moves with ChannelView Pro.
+
+### ChannelView Pro
+
+- **Canvas colours:** a *Fill* colour for the fill under the curve (the
+  curve's until you set it), and *From the faceplate*, a set made to
+  match the layout's faceplate.
+- **The canvas offer** only comes up for a plugin it's sure of.
+- **Web companion:** knobs show their lamps; fader slots follow a light
+  panel colour.
+- Text and EQ curves on a grid layout too tall for the panel stay on it
+  when the grid flows (they showed as missing).
+
 ## 3.8.0 — Visual Options, lamps, plugin pictures on the bars
 
 ### ChannelView

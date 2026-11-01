@@ -1,10 +1,8 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.8.0
+-- @version 3.8.1
 -- @changelog
---  Visual Options: one window for how every view looks; strip width per
---  group; gain-reduction lamps on knobs; Dot and Ball track faders. See
---  the CHANGELOG.
+--  Moves with ChannelView Pro 3.8.1. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

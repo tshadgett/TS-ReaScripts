@@ -714,7 +714,8 @@ panel settings as layout.vo.
 
 ## Lamps
 
-P.lamp: per control, Lamp<n>=gr|gate|off. With none set on a layout (and
+T.lamp (TS_CV_FXTree; P.lamp is the same function, and the web bridge
+sends it as lm per knob): per control, Lamp<n>=gr|gate|off. With none set on a layout (and
 no canvas), the control whose name has "thresh" (or "ceil" for a limiter
 or clipper) of a plugin that reports or measures gain reduction. A gate's
 range is the most it has closed lately, held four seconds. ImGui's hover
