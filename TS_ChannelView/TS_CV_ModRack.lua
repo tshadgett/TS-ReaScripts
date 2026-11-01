@@ -1432,7 +1432,7 @@ local function slim(ctx, dl, which, x, y, ww, wh, n)
   local btn = C.ICON_SIZE
   if MR.STRIP_W then
     -- folded in a strip: a header bar, the title left and the unfold right
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_bg, 3.0)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_bg, C.PANEL_RR)
     local label = TITLE[which] .. (n > 0 and (" · " .. n) or "")
     local _, th = ImGui.CalcTextSize(ctx, label)
     ImGui.DrawList_AddText(dl, x + 6, y + (wh - th) * 0.5, C.COL.header_dim, label)
@@ -1455,8 +1455,10 @@ end
 -- `extra(bx, by)`, when given, draws a button left of the fold button.
 local function frame_of(ctx, dl, which, x, y, ww, wh, foot, extra)
   local btn = C.ICON_SIZE
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + C.HEADER_H, C.COL.header_bg, 0)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + C.HEADER_H, C.COL.header_bg, C.PANEL_RR,
+    ImGui.DrawFlags_RoundCornersTop)
   ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + ww, y + C.HEADER_H, C.COL.panel_border, 1.0)
+  ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)  -- (its edge over the header)
   local _, th = ImGui.CalcTextSize(ctx, TITLE[which])
   ImGui.DrawList_AddText(dl, x + 6, y + (C.HEADER_H - th) * 0.5, C.COL.header_text, TITLE[which])
   ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + 3)
@@ -1467,7 +1469,7 @@ local function frame_of(ctx, dl, which, x, y, ww, wh, foot, extra)
   -- the foot, as every panel's: how many are in use, centred
   local fh = C.FOOTER_H
   local fy = y + wh - fh
-  ImGui.DrawList_AddRectFilled(dl, x + 1, fy, x + ww - 1, y + wh - 1, C.COL.header_bg, 2.5,
+  ImGui.DrawList_AddRectFilled(dl, x + 1, fy, x + ww - 1, y + wh - 1, C.COL.header_bg, C.PANEL_RR,
     ImGui.DrawFlags_RoundCornersBottom)
   ImGui.DrawList_AddLine(dl, x, fy, x + ww, fy, C.COL.panel_border, 1.0)
   W.push_small(ctx)
@@ -1499,8 +1501,8 @@ function MR.draw_macros(ctx, track, avail_h)
     local dl = ImGui.GetWindowDrawList(ctx)
     local x, y = ImGui.GetWindowPos(ctx)
     local ww, wh = ImGui.GetWindowSize(ctx)
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
-    ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, C.PANEL_RR)
+    ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)
     if pending_popup and pending_popup:find("^mchoices") then
       ImGui.OpenPopup(ctx, pending_popup)
       pending_popup = nil
@@ -1535,8 +1537,8 @@ function MR.draw_mods(ctx, track, avail_h)
     local dl = ImGui.GetWindowDrawList(ctx)
     local x, y = ImGui.GetWindowPos(ctx)
     local ww, wh = ImGui.GetWindowSize(ctx)
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
-    ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, C.PANEL_RR)
+    ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)
     if not track or MR.is_collapsed("mods") or ww <= C.COLLAPSED_W + 0.5 then
       slim(ctx, dl, "mods", x, y, ww, wh, #s.mods)
       return

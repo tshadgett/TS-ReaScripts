@@ -632,6 +632,9 @@ end
 -- ---------------------------------------------------------------------
 
 M.MAX_BANDS = 8
+-- a control's lamp (Lamp<n>): "gr" by the reduction, "gate" a gate's, "off"
+-- none (nor the automatic one on the Threshold)
+M.LAMPS = { gr = true, gate = true, off = true }
 M.COMP_ROLES = { "Threshold", "Input", "Ratio", "Knee", "Attack", "Hold", "Release", "Makeup", "Mix" }
 -- the roles each kind of role canvas has, in the order setup lists them
 M.ROLES = {
@@ -1670,6 +1673,8 @@ local function parse_section(sect)
         -- a dropdown's colour per choice (ChoiceCol<n>=<plugin's text>=<colour>|...)
         ccols   = (t == "combo") and M.choice_cols_of(sect["ChoiceCol" .. i]) or nil,
         virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i], sect["VAct" .. i]) or nil,
+        -- its lamp (Lamp<n>=gr|gate|off): reduction, a gate's, or none
+        lamp    = M.LAMPS[U.trim(sect["Lamp" .. i] or "")] and U.trim(sect["Lamp" .. i]) or nil,
       }
       -- a virtual selector shown as chips: one for each of its choices
       do
@@ -1853,6 +1858,7 @@ local function serialize(layout)
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
+    if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
     if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
@@ -3182,7 +3188,7 @@ function M.copy(layout)
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
-                        invert2 = c.invert2, edge = c.edge, align = c.align,
+                        invert2 = c.invert2, edge = c.edge, align = c.align, lamp = c.lamp,
                         ccols = c.ccols and M.choice_cols_of(M.choice_cols_line(c.ccols)) or nil,
                         at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),
@@ -3224,6 +3230,59 @@ function M.copy(layout)
     for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve } end
   end
   return out
+end
+
+-- ---------------------------------------------------------------------
+-- the style clipboards, shared by ChannelView and the Rack
+-- ---------------------------------------------------------------------
+-- A copied panel style ("panel": M.style_of) and a copied control look
+-- ("look": { look = M.look_of }) are held in ExtState for the REAPER
+-- session (not saved), so one window can paste what the other copied.
+-- Kept as a Lua table literal of strings, numbers, booleans and tables.
+local function ser(v, out)
+  local t = type(v)
+  if t == "table" then
+    out[#out + 1] = "{"
+    for k, x in pairs(v) do
+      if type(k) == "string" and k:match("^[%a_][%w_]*$") then out[#out + 1] = k .. "="
+      elseif type(k) == "number" or type(k) == "string" then
+        out[#out + 1] = "["; ser(k, out); out[#out + 1] = "]="
+      else goto skip end
+      ser(x, out)
+      out[#out + 1] = ","
+      ::skip::
+    end
+    out[#out + 1] = "}"
+  elseif t == "string" then out[#out + 1] = ("%q"):format(v)
+  elseif t == "number" then
+    out[#out + 1] = (math.type(v) == "integer") and tostring(v) or ("%.17g"):format(v)
+  elseif t == "boolean" then out[#out + 1] = tostring(v)
+  else out[#out + 1] = "nil" end
+end
+M.ser = function(v) local out = {}; ser(v, out); return table.concat(out) end
+M.deser = function(str)
+  if type(str) ~= "string" or str == "" then return nil end
+  local f = load("return " .. str, "clip", "t", {})
+  if not f then return nil end
+  local ok, v = pcall(f)
+  return ok and v or nil
+end
+
+local clip_cache = {}
+function M.clip_put(kind, v, from)
+  reaper.SetExtState(C.EXT_SECT, "clip_" .. kind, M.ser(v), false)
+  reaper.SetExtState(C.EXT_SECT, "clip_" .. kind .. "_from", from or "", false)
+end
+-- The copied table (a fresh one each time it changes) and where it came from.
+function M.clip_get(kind)
+  local raw = reaper.GetExtState(C.EXT_SECT, "clip_" .. kind)
+  local c = clip_cache[kind]
+  if not c or c.raw ~= raw then
+    c = { raw = raw, v = M.deser(raw) }
+    clip_cache[kind] = c
+  end
+  local from = reaper.GetExtState(C.EXT_SECT, "clip_" .. kind .. "_from")
+  return c.v, (from ~= "" and from or nil)
 end
 
 return M

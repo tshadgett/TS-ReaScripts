@@ -87,13 +87,17 @@ DR.HALIGN = { { "Left", "l" }, { "Centre", "c" }, { "Right", "r" } }
 DR.VALIGN = { { "Top", "t" }, { "Centre", "c" }, { "Bottom", "b" } }
 -- The align field also carries how button colours show: a third
 -- character "i" (coloured icons); none means underlines.
+-- (then "n": no plugin pictures on hover; how plugin buttons with a
+-- picture show on the bar, "P", "T" or "I"; and in its menus, "1" to "3":
+-- TS_CV_Toolbar's pmode and mmode)
 local function align_of(v)
-  local h, a, c = tostring(v or ""):match("^([lcr%-])([tcb%-])([ui]?)$")
-  if not h then return "-", "-", "u" end
-  return h, a, (c == "i") and "i" or "u"
+  local h, a, c, n, pm, mm = tostring(v or ""):match("^([lcr%-])([tcb%-])([ui]?)(n?)([PTI]?)([123]?)$")
+  if not h then return "-", "-", "u", true, "", "" end
+  return h, a, (c == "i") and "i" or "u", n ~= "n", pm, mm
 end
 local function align_field(d)
   return (d.halign or "-") .. (d.valign or "-") .. ((d.cstyle == "i") and "i" or "")
+    .. ((d.pics == false) and "n" or "") .. (d.pmode or "") .. (d.mmode or "")
 end
 DR.align_of = align_of
 local function size_of(v)
@@ -144,10 +148,10 @@ function DR.parse(s)
   if not s or s == "" or s == "none" then return out end
   for part in (s .. ";"):gmatch("([^;]*);") do
     local id, side, open, width, style, key, dock, size, align, bg, name =
-      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?)|(#%x%x%x%x%x%x)|(.*)$")
+      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?n?[PTI]?[123]?)|(#%x%x%x%x%x%x)|(.*)$")
     if not id then
       id, side, open, width, style, key, dock, size, align, name =
-        part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?)|(.*)$")
+        part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?n?[PTI]?[123]?)|(.*)$")
     end
     if not id then
       id, side, open, width, style, key, dock, size, name =
@@ -170,7 +174,7 @@ function DR.parse(s)
                         key = (key and key ~= "") and key or ("drawer_" .. id),
                         dock = tonumber(dock) or 0, size = size_of(size), name = name }
       local e = out[#out]
-      e.halign, e.valign, e.cstyle = align_of(align)
+      e.halign, e.valign, e.cstyle, e.pics, e.pmode, e.mmode = align_of(align)
       e.bg = DR.bg_of(bg)
     end
   end
@@ -412,7 +416,7 @@ function DR.parse_export(text)
       elseif k == "width" then cur.width = math.max(DR.W_MIN, math.min(DR.W_MAX, tonumber(v) or DR.W_DEF))
       elseif k == "dock" then cur.dock = tonumber(v) or 0
       elseif k == "size" then cur.size = size_of(v)
-      elseif k == "align" then cur.halign, cur.valign, cur.cstyle = align_of(v)
+      elseif k == "align" then cur.halign, cur.valign, cur.cstyle, cur.pics, cur.pmode, cur.mmode = align_of(v)
       elseif k == "bg" then cur.bg = DR.bg_of(v)
       elseif k == "items" then cur.items = TB.parse(v ~= "" and v or "none")
       elseif k == "web" then cur.web_items = DR.from_web(DR.json_decode(v) or {})
@@ -445,6 +449,8 @@ local function bar_for(d)
   tb.style = d.style
   tb.btn = size_of(d.size)
   tb.halign, tb.valign, tb.cstyle = d.halign or "-", d.valign or "-", d.cstyle or "u"
+  tb.pics = d.pics ~= false
+  tb.pmode, tb.mmode = d.pmode or "", d.mmode or ""
   tb.organise = function(item) if DR.organise then DR.organise(d, item) end end
   tb.extra_bg = function(ctx, where) DR.drawer_menu(ctx, d, where) end
   -- toolbar switches (TS_CV_Toolbar): what this bar is, and the others
@@ -480,6 +486,8 @@ function DR.save()
     if d.tb then
       d.tb.style = d.style; d.tb.btn = size_of(d.size); d.tb.bar_name = DR.name_of(d)
       d.tb.halign, d.tb.valign, d.tb.cstyle = d.halign or "-", d.valign or "-", d.cstyle or "u"
+      d.tb.pics = d.pics ~= false
+      d.tb.pmode, d.tb.mmode = d.pmode or "", d.mmode or ""
     end
   end
 end
@@ -684,6 +692,10 @@ function DR.import(entries, use_places)
     d.tb.btn = d.size
     d.halign, d.valign, d.cstyle = e.halign or "-", e.valign or "-", e.cstyle or "u"
     d.tb.halign, d.tb.valign, d.tb.cstyle = d.halign, d.valign, d.cstyle
+    d.pics = e.pics ~= false
+    d.tb.pics = d.pics
+    d.pmode, d.mmode = e.pmode or "", e.mmode or ""
+    d.tb.pmode, d.tb.mmode = d.pmode, d.mmode
     d.bg = DR.bg_of(e.bg)
     local items = (d.side == "web" and e.web_items) or e.items
     d.tb.items = TB.copy_items(items or {})
@@ -813,8 +825,9 @@ end
 -- buttons need, up to three.
 local function bar_h(ctx, d, w)
   local bh = size_of(d.size)
+  local rh = d.tb.row_h(bh)      -- a tile's height when it shows tiles
   local rows = math.min(3, d.tb.rows_needed(ctx, w - name_w(ctx, d) - PAD * 2, bh))
-  return rows * bh + (rows - 1) * C.TB_GAP + PAD * 2
+  return rows * rh + (rows - 1) * C.TB_GAP + PAD * 2
 end
 
 -- All of a side's open drawers: the height (top, bottom) or the width
@@ -1112,6 +1125,25 @@ function DR.drawer_menu(ctx, d, where)
     ImGui.Separator(ctx)
     if ImGui.MenuItem(ctx, "Colours as underlines##drcu" .. d.id, nil, d.cstyle ~= "i") then d.cstyle = "u"; DR.save() end
     if ImGui.MenuItem(ctx, "Coloured icons##drci" .. d.id, nil, d.cstyle == "i") then d.cstyle = "i"; DR.save() end
+    if W.thumbs() and d.side ~= "web" then
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Plugin pictures on hover##drpo" .. d.id, nil, d.pics ~= false) then
+        if d.pics == false then d.pics = nil else d.pics = false end
+        DR.save()
+      end
+      if ImGui.BeginMenu(ctx, "Plugin buttons##drpb" .. d.id) then
+        for _, m in ipairs(TB.PMODES) do
+          if ImGui.MenuItem(ctx, m[2] .. "##drpb" .. d.id .. m[1], nil, (d.pmode or "") == m[1]) then d.pmode = m[1]; DR.save() end
+        end
+        ImGui.EndMenu(ctx)
+      end
+      if ImGui.BeginMenu(ctx, "Plugins in menus##drpm" .. d.id) then
+        for _, m in ipairs(TB.MMODES) do
+          if ImGui.MenuItem(ctx, m[2] .. "##drpm" .. d.id .. m[1], nil, (d.mmode or "") == m[1]) then d.mmode = m[1]; DR.save() end
+        end
+        ImGui.EndMenu(ctx)
+      end
+    end
     ImGui.EndMenu(ctx)
   end
   if ImGui.BeginMenu(ctx, "Rename##dr" .. d.id) then

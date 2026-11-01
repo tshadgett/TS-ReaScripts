@@ -1,10 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.7.5
+-- @version 3.8.0
 -- @changelog
---  Ctrl+click a knob or fader to type a value; wide dropdowns with their
---  whole list; drag a panel onto another track to copy the plugin;
---  Shift+click a panel's name to bypass. See the CHANGELOG.
+--  Visual Options: one window for how every view looks; strip width per
+--  group; gain-reduction lamps on knobs; Dot and Ball track faders. See
+--  the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -71,6 +71,7 @@
 --  [nomain] TS_CV_Freeze.lua
 --  [nomain] TS_CV_AutoFloat.lua
 --  [nomain] TS_CV_Util.lua
+--  [nomain] TS_CV_VisualOptions.lua
 --  [nomain] TS_CV_Widgets.lua
 --  [nomain] TS_CV_WebLink.lua
 --  [effect] TS_TrackProbe.jsfx
@@ -376,27 +377,26 @@ local DOCK_KEY = RACK and "rack_dock" or "dock"
 local dock_id = tonumber(ext_get(DOCK_KEY, "0")) or 0
 C.SHOW_VALUES = ext_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
-C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
--- (stored under the key plate_texture, so saved choices still load)
-C.EFFECT_3D = ED.PRO and ext_get("plate_texture", C.EFFECT_3D and "1" or "0") == "1" or false
-C.SHADOW = math.max(0, math.min(C.SHADOW_MAX, tonumber(ext_get("shadow", tostring(C.SHADOW))) or C.SHADOW))
-ED.light().STRENGTH = C.SHADOW / 100
-C.LIGHT = math.max(0, math.min(C.LIGHT_MAX, tonumber(ext_get("light", tostring(C.LIGHT))) or C.LIGHT))
-require("TS_CV_KnobParts").LIGHT = C.LIGHT / 100
 C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 -- Which of the two views is up. Persisted, because reopening the window
 -- into the view you were not in is a small daily annoyance.
 C.MIXER_VIEW  = (not RACK) and ext_get("mixer_view", "0") == "1"
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
-do
-  local h, t = pal_get()
-  C.BASE_HUE = h or C.BASE_HUE
-  C.TINT     = t or C.TINT
-end
 C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
-C.TRACK_ICONS = ext_get("track_icons", "0") == "1"
-C.build_palette()
+-- View > Visual Options: colours, the default control styles, panels,
+-- track buttons, sizes and depth -- the rack's own tab, or ChannelView's
+-- (TS_CV_VisualOptions; it brings older settings over the first time)
+app.VO = require("TS_CV_VisualOptions")
+app.vo_tab = RACK and "rack" or "cv"
+app.VO.load(not RACK)
+app.VO.apply(app.vo_tab)
+app.VO.attach(ImGui)
+CH.group_looks = function() app.VO.show(app.vo_tab, "faders") end
+-- the default knob built from parts: in the knob look editor
+app.VO.customise = ED.PRO and function(start, apply)
+  KE.open({ title = "Default knob", look = start, apply = function(look) apply(look) end })
+end or nil
 
 -- ---------------------------------------------------------------------
 -- chain tracking
@@ -703,8 +703,8 @@ local function frozen_strip(ctx, id, x, y, w, h, name, st)
     ImGui.OpenPopup(ctx, id .. "_m")
   end
   if hov then ImGui.SetTooltip(ctx, name .. " (frozen)\nClick: Unfreeze") end
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, hov and C.COL.frozen_head or C.COL.frozen_bg, 3.0)
-  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, U.with_alpha(C.COL.frozen_line, 0x70), 3.0, 0, 1.0)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, hov and C.COL.frozen_head or C.COL.frozen_bg, C.PANEL_RR)
+  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, U.with_alpha(C.COL.frozen_line, 0x70), C.PANEL_RR, 0, 1.0)
   local isz = math.min(14, w - 6, h - 6)
   if w >= h then
     W.ICONS.freeze(dl, x + 5, y + (h - isz) * 0.5, isz, C.COL.frozen_text)
@@ -1169,32 +1169,6 @@ local function style_family(t)
   return nil
 end
 
--- The look new knobs or buttons start with (M.default_look): this
--- control's, or forget it. Ticked while this control has that look.
-local function new_look_items(fam, c, noun)
-  local d = M.default_look(fam)
-  local same = d ~= nil and (d.style or false) == (c.style or false) and (d.cap or false) == (c.cap or false)
-  if same and fam == "knob" then
-    same = (d.scale_ink or false) == (c.scale_ink or false)
-           and (KPm.encode(d.look) or "") == (KPm.encode(c.look) or "")
-           and ((d.arc ~= nil) == (c.arc ~= nil))
-  end
-  if ImGui.MenuItem(ctx, "Use this look for new " .. noun, nil, same) then
-    M.set_default_look(fam, c)
-  end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, (fam == "knob")
-      and "New and automatic layouts, and knobs added in the editor,\n" ..
-          "start with this knob's style, colours and value arc.\n" ..
-          "(A centred knob gets the Centred arc.)"
-      or "New and automatic layouts, and buttons added in the editor,\n" ..
-         "start with this button's style and lit colour.")
-  end
-  if d and ImGui.MenuItem(ctx, "Forget the look for new " .. noun) then
-    M.set_default_look(fam, nil)
-  end
-end
-
 -- A toggle has no style, only the colour it lights when on (C.TOGGLE_COLS);
 -- "Theme" is the theme's own toggle colour, following Hue/Tint.
 local function toggle_colour_menu(fx, key, idx, c)
@@ -1211,7 +1185,7 @@ local function toggle_colour_menu(fx, key, idx, c)
   ImGui.TextDisabled(ctx, "Style")
   do
     -- (a switch's style is lit in its own row below, not Flat's)
-    local cur = (c.style and (C.BUTTON_STYLE[c.style] or C.SWITCH[c.style])) and c.style or "flat"
+    local cur = (c.style and (C.BUTTON_STYLE[c.style] or C.SWITCH[c.style])) and c.style or nil
     local lit = W.lit_col(c.cap) or C.COL.toggle_on
     local _, th = ImGui.CalcTextSize(ctx, "Ag")
     local rh = math.max(th, 20)
@@ -1221,7 +1195,7 @@ local function toggle_colour_menu(fx, key, idx, c)
           KEEP_OPEN, 150, rh) then
         local l = materialise(fx)
         local lc = l.controls[idx]
-        if lc then lc.style = (bs.key ~= "flat") and bs.key or nil end
+        if lc then lc.style = bs.key end
         M.set(key, l); M.save()
       end
       local bx1, by1, bx2, by2 = x + 3, y + 3, x + 33, y + rh - 3
@@ -1305,6 +1279,12 @@ local function toggle_colour_menu(fx, key, idx, c)
 
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
+  if c.style and ImGui.MenuItem(ctx, "Reset style to default") then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.style = nil end
+    M.set(key, l); M.save()
+  end
   if ImGui.MenuItem(ctx, "Apply to every button on this panel") then
     local l = materialise(fx)
     for _, o in ipairs(l.controls) do
@@ -1312,7 +1292,6 @@ local function toggle_colour_menu(fx, key, idx, c)
     end
     M.set(key, l); M.save()
   end
-  if c.type == "toggle" then new_look_items("toggle", c, "buttons") end
 end
 
 -- The finish of a control's background or a divider's section: a combo
@@ -1806,6 +1785,7 @@ end
 local function combo_style_menu(fx, key, idx, c)
   local dl = ImGui.GetWindowDrawList(ctx)
   local raised = W.combo_raised(c.style)
+  local cur = c.style
   local function set(v)
     local l = materialise(fx)
     local lc = l.controls[idx]
@@ -1815,15 +1795,18 @@ local function combo_style_menu(fx, key, idx, c)
   ImGui.TextDisabled(ctx, "Style")
   local _, th = ImGui.CalcTextSize(ctx, "Ag")
   local rh = math.max(th, 20)
-  for _, o in ipairs({ { false, "Flat", "Printed on the faceplate." },
-                       { true, "Raised", "A backlit button's cap, unlit, standing off the faceplate." } }) do
+  for _, o in ipairs({ { "flat", "Flat", "Printed on the faceplate." },
+                       { "raised", "Raised", "A backlit button's cap, unlit, standing off the faceplate." },
+                       { "minimal", "Minimal", "A flat block, no outline." } }) do
     local x, y = ImGui.GetCursorScreenPos(ctx)
-    if ImGui.Selectable(ctx, "            " .. o[2] .. "##cstyle_" .. o[2], raised == o[1], KEEP_OPEN, 160, rh) then
-      set(o[1] and "raised" or nil)
+    local on = (o[1] == "raised") and raised or (cur == o[1])
+    if ImGui.Selectable(ctx, "            " .. o[2] .. "##cstyle_" .. o[2], on, KEEP_OPEN, 160, rh) then
+      set(o[1])
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, o[3]) end
-    W.combo_swatch(dl, x + 3, y + 3, x + 41, y + rh - 3, o[1])
+    W.combo_swatch(dl, x + 3, y + 3, x + 41, y + rh - 3, o[1] == "raised", o[1] == "minimal")
   end
+  if c.style and ImGui.MenuItem(ctx, "Reset to default") then set(nil) end
   -- its text's colour: the theme's, a lamp colour or your own
   ImGui.Spacing(ctx)
   ImGui.TextDisabled(ctx, "Text colour")
@@ -1858,7 +1841,7 @@ local function combo_style_menu(fx, key, idx, c)
   if ImGui.MenuItem(ctx, "Apply to every dropdown on this panel") then
     local l = materialise(fx)
     for _, o in ipairs(l.controls) do
-      if o.type == "combo" and not o.buttons then o.style = raised and "raised" or nil end
+      if o.type == "combo" and not o.buttons then o.style = c.style end
     end
     M.set(key, l); M.save()
   end
@@ -1870,7 +1853,8 @@ local function style_menu(fx, key, idx, c)
   local fam = style_family(c.type)
   if fam == "toggle" or c.type == "combo" then return toggle_colour_menu(fx, key, idx, c) end
   local list = (fam == "fader") and C.FADER_STYLES or C.KNOB_STYLES
-  local cur = C.KNOB_STYLE_ALIAS[c.style] or c.style or list[1].key
+  -- (no style: Visual Options' default, Reset to default below)
+  local cur = C.KNOB_STYLE_ALIAS[c.style] or c.style
   local dl = ImGui.GetWindowDrawList(ctx)
   local _, th = ImGui.CalcTextSize(ctx, "Ag")
   local row_h = (fam == "knob") and math.max(th, 26) or 0
@@ -1894,7 +1878,7 @@ local function style_menu(fx, key, idx, c)
       if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
       local x, y = ImGui.GetCursorScreenPos(ctx)
       if ImGui.Selectable(ctx, "##style_" .. st.key, st.key == cur and not c.look, KEEP_OPEN, CS, CS) then
-        set({ style = (st.key ~= list[1].key) and st.key or false, look = false })
+        set({ style = st.key, look = false })
       end
       if ImGui.IsItemHovered(ctx) then hov_label = st.label end
       local r = CS * 0.5 - 6     -- the scale ticks sit outside this
@@ -1931,12 +1915,12 @@ local function style_menu(fx, key, idx, c)
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Build this knob from parts.") end
     ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff,
-      "Style: " .. (hov_label or (now_def and now_def.label) or (c.look and "Your own look") or ""))
+      "Style: " .. (hov_label or (now_def and now_def.label) or (c.look and "Your own look") or "Default"))
   else
     ImGui.TextDisabled(ctx, "Style")
     for _, st in ipairs(list) do
       if ImGui.Selectable(ctx, st.label .. "##style_" .. st.key, st.key == cur, KEEP_OPEN, 150, row_h) then
-        set({ style = (st.key ~= list[1].key) and st.key or false })
+        set({ style = st.key })
       end
     end
   end
@@ -2115,7 +2099,6 @@ local function style_menu(fx, key, idx, c)
     end
     M.set(key, l); M.save()
   end
-  if fam == "knob" then new_look_items("knob", c, "knobs") end
   if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale_ink ~= nil
                      or c.arc ~= nil) then
     set({ style = false, cap = false, scale_ink = false, arc = false })
@@ -2584,22 +2567,23 @@ local function panel_menu()
   -- the panel's whole style, onto other panels (TS_CV_Mappings M.style_of):
   -- the copy stays until another is made
   if not own_panel then
+    -- (one clipboard for ChannelView and the Rack: M.clip_put / clip_get)
     if ED.item(ImGui, ctx, "Copy panel style") then
-      app.style_clip = M.style_of(layout)
-      app.style_from = U.fx_label(fx)
+      M.clip_put("panel", M.style_of(layout), U.fx_label(fx))
     end
     if ED.PRO and ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "Its faceplate and each kind of control's look,\nto paste onto other panels.")
     end
-    if ED.item(ImGui, ctx, "Paste panel style" .. (app.style_from and ("  (" .. app.style_from .. ")") or ""), nil, false,
-        app.style_clip ~= nil and not locked) then
+    local clip, from = M.clip_get("panel")
+    if ED.item(ImGui, ctx, "Paste panel style" .. (from and ("  (" .. from .. ")") or ""), nil, false,
+        clip ~= nil and not locked) then
       local l = materialise(fx)
-      M.apply_style(l, app.style_clip)
+      M.apply_style(l, clip)
       M.set(key, l); M.save()
     end
     if ED.PRO and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
       ImGui.SetTooltip(ctx, locked and "Layout locked: unlock with the padlock\nin the panel's foot."
-        or app.style_clip and "Its faceplate, and every knob, button, dropdown and fader\nin the copied panel's looks."
+        or clip and "Its faceplate, and every knob, button, dropdown and fader\nin the copied panel's looks."
         or "Copy a panel's style first.")
     end
   end
@@ -2871,7 +2855,7 @@ end
 -- ---------------------------------------------------------------------
 -- One copied look, for this session: from any control on any panel,
 -- pasted onto one control, or every one of its kind in a section or on
--- the panel. app.style_clip = { look = M.look_of(control) }.
+-- the panel; ChannelView and the Rack share it (M.clip_put("look", ...)).
 
 local LOOK_NOUN = { knob = "knob", fader = "fader", button = "button" }
 
@@ -2926,13 +2910,13 @@ local function look_items(fx, key, layout, idx, c, locked)
   -- (Standard: copy and paste are Pro's)
   if not ED.PRO and not locked then ED.menu(ImGui, ctx, "Copy / paste style") return end
   if ImGui.MenuItem(ctx, "Copy style") then
-    app.style_clip = { look = M.look_of(c) }
+    M.clip_put("look", { look = M.look_of(c) })
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx, "Copy its whole look to paste onto other controls.")
   end
   if locked then return end
-  local s = app.style_clip and app.style_clip.look
+  local s = (M.clip_get("look") or {}).look
   local have = s ~= nil
   local function tip()
     if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
@@ -3879,6 +3863,35 @@ local function control_menu()
     ImGui.SetTooltip(ctx, "Flip the direction on screen only.")
   end
 
+  -- a lamp before its name, from the plugin's gain reduction (TS_CV_Panel
+  -- P.lamp); one that isn't reported is measured by the probes
+  local lamp_ok = (c.type == "knob" or c.type == "stepped" or c.type == nil) and c.param and c.param >= 0
+  if lamp_ok and ImGui.BeginMenu(ctx, "Lamp") then
+    for _, o in ipairs({ { false, "Automatic", "On the Threshold, without a canvas." },
+                         { "gr", "Reduction", "Green with signal, amber reducing up to 6 dB,\nred past that. Compressors, limiters,\nclippers, saturators." },
+                         { "gate", "Gate", "Green open, amber partly closed, red closed." },
+                         { "off", "None", "No lamp on this plugin's controls\nbut those set here." } }) do
+      if ImGui.MenuItem(ctx, o[2], nil, (c.lamp or false) == o[1]) then
+        local l = commit()
+        local lc = l.controls[idx]
+        if lc then lc.lamp = o[1] or nil end
+        local measure = o[1] and o[1] ~= "off" and not T.reports_gr(app.track, fx.addr, fx.guid)
+        if measure then l.measure = true; M.set_meter(l, true) end
+        M.set(key, l); M.save()
+        if measure then
+          TP.invalidate()
+          if TP.status(app.track, fx.guid) == "no_probes" and reaper.MB("Its gain reduction is measured by a TS_TrackProbe\n" ..
+              "pair, which this track doesn't have.\n\nAdd them now?", "ChannelView", 4) == 6 then
+            local ok, why = TP.insert_probes(app.track)
+            if not ok then reaper.MB(why, "ChannelView", 0) end
+          end
+        end
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, o[3]) end
+    end
+    ImGui.EndMenu(ctx)
+  end
+
   if ED.menu(ImGui, ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then
     show_when_menu(fx, key, layout, idx, c)
     ImGui.EndMenu(ctx)
@@ -4390,6 +4403,18 @@ local function menu_bar()
           "come to its track, and it closes when you move on, unless you pin it\n" ..
           "(the pin in its panel's header).")
       end
+      -- a plugin with no layout of its own: a strip offering a canvas (Pro)
+      if ED.PRO then
+        if ImGui.MenuItem(ctx, "Offer canvases for new plugins", nil, C.CANVAS_OFFERS) then
+          C.CANVAS_OFFERS = not C.CANVAS_OFFERS
+          ext_set("canvas_offers", C.CANVAS_OFFERS and "1" or "0")
+          if C.CANVAS_OFFERS then require("TS_CV_CanvasSetup").forget_nevers() end
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "A plugin with no layout whose controls look like a\n" ..
+            "compressor, EQ, gate... offers that canvas.\nTurning it on again asks again for every plugin.")
+        end
+      end
       if ImGui.MenuItem(ctx, "Auto-hide this header", nil, app.header_hide) then
         app.header_hide = not app.header_hide
         ext_set(app.hide_key, app.header_hide and "1" or "0")
@@ -4422,107 +4447,12 @@ local function menu_bar()
         end
       end
 
-      -- the width of a control's column, for every panel
-      if ImGui.BeginMenu(ctx, "Control spacing") then
-        ImGui.SetNextItemWidth(ctx, 140)
-        local cwch, cwv = ST.slider_int(ctx, "##cell_w", C.CELL_W, C.CELL_W_MIN, C.CELL_W_MAX, "%d px")
-        if cwch then
-          C.set_cell_w(cwv)
-          ext_set("cell_w", tostring(C.CELL_W))
-        end
-        if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "Width of each control's column.\nCtrl+click: type a value.")
-        end
-        if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CELL_W_DEFAULT), nil, false, C.CELL_W ~= C.CELL_W_DEFAULT) then
-          C.set_cell_w(C.CELL_W_DEFAULT)
-          ext_set("cell_w", tostring(C.CELL_W))
-        end
-        ImGui.EndMenu(ctx)
-      end
-
-      -- the width of an expanded channel strip: the pinned fader panel, every
-      -- mixer strip and the track name buttons (collapsed ones keep theirs)
-      if ImGui.BeginMenu(ctx, "Strip width") then
-        ImGui.SetNextItemWidth(ctx, 140)
-        local swch, swv = ST.slider_int(ctx, "##channel_w", C.CHANNEL_W, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX, "%d px")
-        if swch then
-          C.set_channel_w(swv)
-          ext_set("channel_w", tostring(C.CHANNEL_W))
-        end
-        if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "Width of the fader panel, mixer strips and name buttons.\nCtrl+click: type a value.")
-        end
-        if ImGui.MenuItem(ctx, ("Reset to %d px"):format(C.CHANNEL_W_DEFAULT), nil, false,
-                          C.CHANNEL_W ~= C.CHANNEL_W_DEFAULT) then
-          C.set_channel_w(C.CHANNEL_W_DEFAULT)
-          ext_set("channel_w", tostring(C.CHANNEL_W))
-        end
-        ImGui.EndMenu(ctx)
-      end
-
       if ImGui.MenuItem(ctx, "Preset bar", nil, C.PRESET_BAR) then
         C.PRESET_BAR = not C.PRESET_BAR
         ext_set("preset_bar", C.PRESET_BAR and "1" or "0")
       end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Preset controls along each panel's foot.")
-      end
-
-      if ED.item(ImGui, ctx, "3D effect", nil, C.EFFECT_3D) then
-        C.EFFECT_3D = not C.EFFECT_3D
-        ext_set("plate_texture", C.EFFECT_3D and "1" or "0")
-      end
-      if ED.PRO and ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "Gradients, lit edges and soft shadows.")
-      end
-
-      -- how strongly the light models the plates and knobs
-      if ED.menu(ImGui, ctx, "Lighting", C.EFFECT_3D) then
-        ImGui.SetNextItemWidth(ctx, 140)
-        local lch, lv = ST.slider_int(ctx, "##light", C.LIGHT, 0, C.LIGHT_MAX, "%d%%")
-        if lch then
-          C.LIGHT = lv
-          require("TS_CV_KnobParts").LIGHT = C.LIGHT / 100
-          ext_set("light", tostring(C.LIGHT))
-        end
-        if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "Above 100: studio-lit, bright top left to deep bottom right.\nCtrl+click: type a value.")
-        end
-        if ImGui.MenuItem(ctx, "Reset to 100%", nil, false, C.LIGHT ~= 100) then
-          C.LIGHT = 100
-          require("TS_CV_KnobParts").LIGHT = 1
-          ext_set("light", "100")
-        end
-        ImGui.EndMenu(ctx)
-      end
-
-      -- how deep and far the shadows fall (all of them: knobs, switches,
-      -- buttons, fader caps; and the web page's)
-      if ED.menu(ImGui, ctx, "Shadows", C.EFFECT_3D) then
-        ImGui.SetNextItemWidth(ctx, 140)
-        local shch, shv = ST.slider_int(ctx, "##shadow", C.SHADOW, 0, C.SHADOW_MAX, "%d%%")
-        if shch then
-          C.SHADOW = shv
-          ED.light().STRENGTH = C.SHADOW / 100
-          ext_set("shadow", tostring(C.SHADOW))
-        end
-        if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "0: none. 200: deep and long.\nCtrl+click: type a value.")
-        end
-        if ImGui.MenuItem(ctx, "Reset to 100%", nil, false, C.SHADOW ~= 100) then
-          C.SHADOW = 100
-          ED.light().STRENGTH = 1
-          ext_set("shadow", "100")
-        end
-        ImGui.EndMenu(ctx)
-      end
-
-      if ImGui.MenuItem(ctx, "Track icons", nil, C.TRACK_ICONS) then
-        C.TRACK_ICONS = not C.TRACK_ICONS
-        ext_set("track_icons", C.TRACK_ICONS and "1" or "0")
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "Track icons above the name buttons.")
       end
 
       -- Keyboard focus back to REAPER after a click here, so its shortcuts
@@ -4553,49 +4483,9 @@ local function menu_bar()
         ImGui.EndMenu(ctx)
       end
       ImGui.Separator(ctx)
-      if ImGui.BeginMenu(ctx, "Colour") then
-        -- One hue drives the whole palette, so this can be brought into
-        -- line with a REAPER theme without picking thirty colours. Bypass
-        -- and warnings deliberately don't follow it -- see TS_CV_Config.
-        ImGui.SetNextItemWidth(ctx, 190)
-        local hch, hv = ST.slider_int(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
-        if hch then
-          C.BASE_HUE = hv
-          C.build_palette()
-          pal_set(hv, C.TINT)
-        end
-
-        ImGui.SetNextItemWidth(ctx, 190)
-        local tch, tv = ST.slider_double(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
-        if tch then
-          C.TINT = tv
-          C.build_palette()
-          pal_set(C.BASE_HUE, tv)
-        end
-        W.tip(ctx, "tint",
-          "How much the greys lean toward the hue.\n0: neutral, 1: default.",
-          ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx))
-
-        -- a live swatch, so the slider isn't guesswork
-        local dl = ImGui.GetWindowDrawList(ctx)
-        local cx, cy = ImGui.GetCursorScreenPos(ctx)
-        local sw, sh = 190, 14
-        local keys = { "win_bg", "panel_bg", "header_bg", "knob_body",
-                       "knob_ring", "label", "accent", "knob_fill_bi", "warn" }
-        for i, k in ipairs(keys) do
-          local x0 = cx + (i - 1) * (sw / #keys)
-          ImGui.DrawList_AddRectFilled(dl, x0, cy, x0 + sw / #keys, cy + sh,
-            C.COL[k] or 0, 0)
-        end
-        ImGui.Dummy(ctx, sw, sh + 2)
-
-        ImGui.Separator(ctx)
-        if ImGui.MenuItem(ctx, "Reset to default") then
-          C.BASE_HUE, C.TINT = 219, 1.0
-          C.build_palette()
-          pal_set(219, 1.0)
-        end
-        ImGui.EndMenu(ctx)
+      if ImGui.MenuItem(ctx, "Visual Options\u{2026}") then app.VO.show(app.vo_tab) end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Colours, control styles, panels, sizes.")
       end
 
       ImGui.EndMenu(ctx)
@@ -6143,12 +6033,15 @@ local function frame()
     local now = reaper.time_precise()
     if now - colour_poll > 0.5 then
       colour_poll = now
-      do
+      -- Visual Options changed in another window (the rack, the TCP's),
+      -- or the shared hue and tint by another TS_ tool
+      if app.VO.poll() then
+        app.VO.apply(app.vo_tab)
+      elseif app.vo_tab == "cv" or app.VO.follows(app.vo_tab) then
         local h, t = pal_get()
         C.apply_colour(h or C.BASE_HUE, t or C.TINT)
       end
       -- and the view options the two windows share
-      C.TRACK_ICONS = ext_get("track_icons", "0") == "1"
       C.SHOW_VALUES = ext_get("show_values", "1") == "1"
       C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
       C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
@@ -6156,7 +6049,6 @@ local function frame()
       -- a layout saved by the other window (ChannelView / its Rack view)
       local ms, ss = M.sync(), SC.sync()
       if ms or ss then rescan(true) end
-      C.set_cell_w(ext_get("cell_w", tostring(C.CELL_W_DEFAULT)))
       C.set_channel_w(ext_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
     end
   end
@@ -6621,6 +6513,8 @@ local function frame()
   AE.draw(ctx)
   -- the knob look editor (Style > Customise...), its own window too
   KE.draw(ctx)
+  -- View > Visual Options
+  app.VO.draw(ctx, app.vo_tab)
   -- the grid editor (Edit layout...), and the menu of a control
   -- right-clicked in it
   do

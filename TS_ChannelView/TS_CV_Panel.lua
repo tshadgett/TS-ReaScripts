@@ -76,7 +76,24 @@ P.canvas_of = canvas_of
 -- there, for the lock. Its height comes off the body, so everything that
 -- sizes the body -- the row count, the grid, the meters, the EQ canvas --
 -- asks here.
-function P.footer_h() return C.FOOTER_H end
+-- The header's and foot's height in a panel's layout: none while Visual
+-- Options auto-hides them (they're drawn over the body then, while the
+-- pointer is on the panel).
+function P.footer_h() return C.HIDE_FOOT and 0 or C.FOOTER_H end
+function P.head_h() return C.HIDE_HEAD and 0 or C.HEADER_H end
+P.hover = {}    -- fx GUID -> { head, foot }: the pointer was over where they go, last frame
+-- a draw-list splitter per panel's draw list, kept while ReaImGui keeps
+-- it (it lets one go that went a frame unused, or whose list went: then a
+-- new one)
+local splitters = {}
+function P.splitter(dl)
+  local sp = splitters[dl]
+  if not (sp and ImGui.ValidatePtr(sp, "ImGui_DrawListSplitter*")) then
+    sp = ImGui.CreateDrawListSplitter(dl)
+    splitters[dl] = sp
+  end
+  return sp
+end
 
 -- ---------------------------------------------------------------------
 -- geometry
@@ -91,7 +108,7 @@ function P.rows_for(panel_h)
   -- Top and bottom pads differ: the grid starts tight under the header
   -- so a cell's name line isn't pushed down, and keeps the full pad at
   -- the bottom.
-  local body_h = panel_h - C.HEADER_H - P.footer_h() - C.GRID_TOP_PAD - C.PANEL_PAD
+  local body_h = panel_h - P.head_h() - P.footer_h() - C.GRID_TOP_PAD - C.PANEL_PAD
   return math.max(C.MIN_ROWS, math.floor(body_h / C.CELL_H))
 end
 
@@ -587,7 +604,7 @@ end
 
 -- The height a panel's grid has, inside its header, foot and padding.
 local function grid_room(panel_h)
-  return panel_h - C.HEADER_H - P.footer_h() - C.GRID_TOP_PAD - C.PANEL_PAD
+  return panel_h - P.head_h() - P.footer_h() - C.GRID_TOP_PAD - C.PANEL_PAD
 end
 
 local function new_out()
@@ -1198,7 +1215,7 @@ end
 -- Whether a locked panel's grid is taller than its body, and scrolls.
 function P.scrolls(lay, panel_h, lock)
   if not lock then return false end
-  local body = panel_h - C.HEADER_H - P.footer_h()
+  local body = panel_h - P.head_h() - P.footer_h()
   return C.GRID_TOP_PAD + lay.height + C.PANEL_PAD > body
 end
 
@@ -1485,37 +1502,8 @@ P.button_choices = button_choices
 -- instead; nil when that can't be done yet either. Read again whenever
 -- it's asked for, not kept: a plugin's list can follow another of its
 -- controls (Seventh Heaven's programs, its category).
-local READ_POINTS = 1024
 function P.read_choices(track, addr, param, key)
-  if not reaper.TrackFX_FormatParamValueNormalized then return nil end
-  local st = step_norm(track, addr, param, key)
-  local n = st and (math.floor(1 / st + 0.5) + 1) or nil
-  local stepped = n ~= nil and n >= 2 and n <= READ_POINTS
-  local count = stepped and n or READ_POINTS
-  local out, first, differ = {}, nil, false
-  local run_t, run_a, run_b
-  local function flush()
-    if run_t then out[#out + 1] = { norm = stepped and run_a or (run_a + run_b) * 0.5, text = run_t } end
-  end
-  for k = 0, count - 1 do
-    local v = stepped and math.min(1, k * st) or k / (count - 1)
-    local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
-    t = ok and U.trim(t or "") or ""
-    if t == "" then return nil end
-    if first == nil then first = t elseif t ~= first then differ = true end
-    if t == run_t then run_b = v else flush(); run_t, run_a, run_b = t, v, v end
-  end
-  flush()
-  if not differ or #out < 2 then
-    -- a plugin that only says what it reads now (Valhalla's): read by
-    -- moving it through its range once and back (TS_CV_Units, kept for
-    -- the session; not while writing automation or playing), each setting
-    -- at the middle of its run
-    local UN = require("TS_CV_Units")
-    out = UN.choice_runs(UN.formatter(track, addr, param), 64)
-    if not out then return nil end
-  end
-  return out
+  return require("TS_CV_Units").read_choices(track, addr, param, step_norm(track, addr, param, key))
 end
 
 -- The choice `step` along from the one shown now (its name, or nearest
@@ -1822,10 +1810,12 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   -- flag, since that's what the bypass button toggles and what its
   -- tooltip and icon state describe.
   local tint_bypassed = (not enabled) or T.chain_bypassed(track)
+  -- (rounded at the top with the panel's corners)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h,
     dragging and C.COL.header_drag
       or (req.offline and C.COL.header_bg_off)
-      or (tint_bypassed and C.COL.header_bg_byp or C.COL.header_bg), 0)
+      or (tint_bypassed and C.COL.header_bg_byp or C.COL.header_bg),
+    C.PANEL_RR, ImGui.DrawFlags_RoundCornersTop)
   ImGui.DrawList_AddLine(dl, x, y + h, x + w, y + h, C.COL.panel_border, 1.0)
 
   local btn = C.ICON_SIZE
@@ -1979,8 +1969,10 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   end
 
   at(1)
-  if W.icon_button(ctx, "byp##" .. fx.guid, "power", btn, not enabled,
-      enabled and "Bypass (or Shift+click the name)" or "Bypassed\nClick: enable",
+  local byp_tip = enabled and "Bypass (or Shift+click the name)" or "Bypassed\nClick: enable"
+  if C.POWER == "lamp" then
+    if W.power_lamp(ctx, "byp##" .. fx.guid, btn, enabled, byp_tip) then req.toggle_bypass = true end
+  elseif W.icon_button(ctx, "byp##" .. fx.guid, "power", btn, not enabled, byp_tip,
       C.COL.bypass_on) then
     req.toggle_bypass = true
   end
@@ -2023,8 +2015,10 @@ local function draw_collapsed(ctx, dl, x, y, w, h, track, fx, enabled, req, mete
   end
 
   ImGui.SetCursorScreenPos(ctx, cx - btn * 0.5, y + 4 + btn + 3)
-  if W.icon_button(ctx, "xbyp##" .. fx.guid, "power", btn, not enabled,
-      enabled and "Bypass" or "Bypassed\nClick: enable",
+  local byp_tip = enabled and "Bypass" or "Bypassed\nClick: enable"
+  if C.POWER == "lamp" then
+    if W.power_lamp(ctx, "xbyp##" .. fx.guid, btn, enabled, byp_tip) then req.toggle_bypass = true end
+  elseif W.icon_button(ctx, "xbyp##" .. fx.guid, "power", btn, not enabled, byp_tip,
       C.COL.bypass_on) then
     req.toggle_bypass = true
   end
@@ -2592,6 +2586,98 @@ local function draw_tab_strip(ctx, dl, x, y, w, fx, pages, cur, req)
   end
 end
 
+-- ---------------------------------------------------------------------
+-- a control's lamp, from the plugin's gain reduction (reported, or
+-- measured by the probes):
+--   reduction (compressor, limiter, clipper, saturator): green with signal
+--     and none, amber reducing up to 6 dB, red past that
+--   gate: green open, amber partly closed, red closed (as far as it's
+--     closed lately: its range)
+-- Dark with no signal or bypassed. Set on a control (its menu's Lamp:
+-- ctl.lamp); with none set, a layout without a canvas whose plugin
+-- reports or measures its reduction has one on its Threshold (a limiter's
+-- or clipper's Ceiling when it has none).
+-- ---------------------------------------------------------------------
+P.LAMP = { green = 0x3fbf5fff, amber = 0xf5a524ff, red = 0xe5484dff }
+local lamp_fx = {}          -- fx guid -> { at, map, layout, t = {}, col = {}, held, held_t }
+local lamp_names = {}       -- fx guid -> { thr, ceil }: its controls' names, read once
+local function lamp_signal(track, guid)
+  local lv = TP.levels(track, guid)
+  if lv and not lv.old and lv.in_pk then return lv.in_pk end
+  local pk = math.max(reaper.Track_GetPeakInfo(track, 0) or 0, reaper.Track_GetPeakInfo(track, 1) or 0)
+  return pk > 0 and 20 * math.log(pk, 10) or -150
+end
+-- which controls have one, and what kind: param -> "gr" | "gate"
+local function lamp_targets(track, fx, layout)
+  local own, any = {}, false
+  for _, c in ipairs((layout and layout.controls) or {}) do
+    if c.lamp then
+      any = true
+      if c.lamp ~= "off" and c.param then own[c.param] = c.lamp end
+    end
+  end
+  if any then return own end
+  -- (a canvas shows all this and more)
+  if layout and layout.canvas then return nil end
+  if not T.reports_gr(track, fx.addr, fx.guid) then return nil end
+  local nm = (fx.name or ""):lower()
+  local kind = (nm:find("gate", 1, true) or nm:find("expand", 1, true)) and "gate" or "gr"
+  local edge = nm:find("limit", 1, true) or nm:find("clip", 1, true)
+  local n = lamp_names[fx.guid]
+  if not n then
+    n = {}
+    for q = 0, (reaper.TrackFX_GetNumParams(track, fx.addr) or 0) - 1 do
+      local _, pn = reaper.TrackFX_GetParamName(track, fx.addr, q, "")
+      pn = (pn or ""):lower()
+      if not n.thr and pn:find("thresh", 1, true) then n.thr = q end
+      if not n.ceil and pn:find("ceil", 1, true) then n.ceil = q end
+    end
+    lamp_names[fx.guid] = n
+  end
+  local p = n.thr or (edge and n.ceil) or nil
+  return p and { [p] = kind } or nil
+end
+-- A control's lamp: nil none, false dark, else its colour.
+function P.lamp(track, fx, layout, p)
+  if not (track and fx and fx.guid and fx.guid ~= "" and p) then return nil end
+  local now = reaper.time_precise()
+  local e = lamp_fx[fx.guid]
+  if not e or e.layout ~= layout or now - e.at > 2 then
+    e = { at = now, map = lamp_targets(track, fx, layout), layout = layout, t = {}, col = {},
+          held = e and e.held or 0, held_t = e and e.held_t or now }
+    lamp_fx[fx.guid] = e
+  end
+  local kind = e.map and e.map[p]
+  if not kind then return nil end
+  if e.t[p] and now - e.t[p] < 0.03 then return e.col[p] end
+  e.t[p] = now
+  local col
+  if not T.get_enabled(track, fx.addr) then
+    col = false
+  else
+    local gr = T.gain_reduction(track, fx.addr)
+    if gr == nil then e.col[p] = false; return false end
+    local sig = lamp_signal(track, fx.guid) > -60
+    if kind == "gate" then
+      -- its range: the most it's closed by lately, held a few seconds
+      if gr >= e.held then e.held, e.held_t = gr, now
+      elseif now - e.held_t > 4 then e.held = math.max(gr, e.held - 6 * 0.03) end
+      local closed = math.max(6, e.held - 1.5)
+      if gr >= closed then col = P.LAMP.red
+      elseif gr >= 0.5 then col = P.LAMP.amber
+      elseif sig then col = P.LAMP.green
+      else col = false end
+    else
+      if gr >= 6 then col = P.LAMP.red
+      elseif gr >= 0.1 then col = P.LAMP.amber
+      elseif sig then col = P.LAMP.green
+      else col = false end
+    end
+  end
+  e.col[p] = col
+  return col
+end
+
 -- `panel_h` is the panel's FULL height, header included -- the same value
 -- P.width() was given, so the column count here can't disagree with the
 -- width the panel was allotted.
@@ -2628,7 +2714,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   end
   local lock = M.locked(layout)
   local lay = P.layout(page_controls, panel_h, lock)
-  local h = panel_h - C.HEADER_H - P.footer_h()
+  local h = panel_h - P.head_h() - P.footer_h()
   local scroll = P.scrolls(lay, panel_h, lock)
 
   local grid_x0 = x + C.PANEL_PAD
@@ -3094,6 +3180,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- W.fader doesn't care what 0..1 means, only that the caller
         -- does.
         local look = (ctl.style or ctl.cap) and { style = ctl.style, cap = W.cap_col(ctl.cap) } or nil
+        -- (no style of its own: Visual Options' default fader)
+        if C.DEF.fader and not ctl.style then
+          look = { style = C.DEF.fader, cap = W.cap_col(ctl.cap or C.DEF.fader_cap) }
+        end
         local unity = ctl.bipolar and 0.5 or nil
         local under = cur_bg.plate and cur_bg.plate.bg or C.COL.panel_bg
         if P.fader_kind(ctl) == "column" then
@@ -3137,7 +3227,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         end
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
-            step_norm = st, snaps = snaps, mod = modded, ring = ring,
+            step_norm = st, snaps = snaps, mod = modded, ring = ring, lamp = P.lamp(track, fx, layout, p),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
@@ -3145,6 +3235,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
+            lamp = P.lamp(track, fx, layout, p),
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
@@ -3366,7 +3457,7 @@ end
 -- flake and sheen over it if chosen. The border is drawn over it afterwards
 -- and tidies the corners.
 local function draw_plate(ctx, dl, x, y, w, h, pl, finish, metal)
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, 3.0)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, C.PANEL_RR)
   -- the light falling on it (3D effect)
   if C.EFFECT_3D then
     local split = y + h * 0.4
@@ -3503,7 +3594,7 @@ draw_footer = function(ctx, dl, x, y, w, h, track, fx, layout, avail_h, is_eq, r
     PU.footer(ctx, dl, x, y, w, h, track, fx, lw)
   else
     ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h - 1,
-      req.offline and C.COL.header_bg_off or C.COL.header_bg, 2.5,
+      req.offline and C.COL.header_bg_off or C.COL.header_bg, C.PANEL_RR,
       ImGui.DrawFlags_RoundCornersBottom)
     ImGui.DrawList_AddLine(dl, x, y, x + w, y, C.COL.panel_border, 1.0)
   end
@@ -3573,6 +3664,9 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
     end
   end
   if cols.bg then ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, ((cols.bg & 0xffffff) << 8) | 0xff, 3.0) end
+  local was_c, was_m = C.CANVAS.curve, C.CANVAS.meter
+  C.CANVAS.curve = cols.curve and (((cols.curve & 0xffffff) << 8) | 0xff) or nil
+  C.CANVAS.meter = cols.meter and (((cols.meter & 0xffffff) << 8) | 0xff) or nil
   local bands
   for k = 1, 8 do
     local b = cols["band" .. k]
@@ -3581,6 +3675,7 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
   local was = EQP and EQP.set_band_colours(bands)
   local r = table.pack(pcall(fn, ...))
   for k, v in pairs(saved) do C.COL[k] = v end
+  C.CANVAS.curve, C.CANVAS.meter = was_c, was_m
   if EQP then EQP.set_band_colours(was) end
   if not r[1] then error(r[2], 0) end
   return table.unpack(r, 2, r.n)
@@ -3666,11 +3761,11 @@ end
 local function rc_body(ctx, dl, x, y, ww, bh, track, fx, req, io, enabled, plate, saved)
   local ex, ew = x, ww
   if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
-                    y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
+                    y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
     ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
   end
-  return on_screen(plate, saved, dl, ex + 1, y + C.HEADER_H + 1, ew - 2, bh - 2,
-    CP.draw, ctx, dl, ex, y + C.HEADER_H, ew, bh, track, fx, req)
+  return on_screen(plate, saved, dl, ex + 1, y + P.head_h() + 1, ew - 2, bh - 2,
+    CP.draw, ctx, dl, ex, y + P.head_h(), ew, bh, track, fx, req)
 end
 
 local draw_panel, size_grip, fold_tab, fold_pop
@@ -3742,7 +3837,7 @@ function P.rack_canvas_h(w, cv)
 end
 -- a grid of n rows: the panel height that holds it
 local function grid_panel_h(n, paged)
-  return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H
+  return P.head_h() + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H
          + (paged and C.TAB_STRIP_H or 0)
 end
 -- the least panel height whose grid fits across w (all of it, when
@@ -3793,7 +3888,7 @@ end
 -- (`shared`: ChannelView shows this layout too, P.rack_from_rows)
 function P.rack_height(track, fx, layout, key, w, shared)
   if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
-  local base = C.HEADER_H + P.footer_h()
+  local base = P.head_h() + P.footer_h()
   if own_trim(key) then return base + (layout.own_h or TRP.rack_body_h(w)) end
   local io = P.has_io(track, fx, layout)
   if own_eq(key) or own_rc(key) then
@@ -3864,7 +3959,7 @@ local function ctl_room(track, fx, layout, key, ww, wh, canvas, io)
     canvas.fold_rack = nil
     local full = P.rack_height(track, fx, layout, key, ww, nil)
     canvas.fold_rack = was
-    return math.max(0, full - C.HEADER_H - P.footer_h() - P.rack_canvas_h(ww - io_w(io), canvas))
+    return math.max(0, full - P.head_h() - P.footer_h() - P.rack_canvas_h(ww - io_w(io), canvas))
   end
   return math.max(0, P.width(vis, wh, false, false, nil, false, false, M.locked(layout)) - C.PANEL_PAD)
 end
@@ -3890,7 +3985,7 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
   local rack = P.RACK
   local gx, gy, gw, gh
   if rack then gx, gy, gw, gh = x + 10, y + wh - 5, ww - 20, 5
-  else gx, gy, gw, gh = x + ww - 5, y + C.HEADER_H, 5, wh - C.HEADER_H end
+  else gx, gy, gw, gh = x + ww - 5, y + P.head_h(), 5, wh - P.head_h() end
   if gw < 4 or gh < 4 then return end
   local hov, act = edge_button(ctx, "szgrip##" .. fx.guid, gx, gy, gw, gh)
   local function get()
@@ -3899,7 +3994,7 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
       return MP.width(canvas.kind, canvas)
     end
     -- the Trimmer: its body's height in the rack, its width here
-    if is_trim then return rack and (layout.own_h or (wh - C.HEADER_H - P.footer_h())) or (layout.own_w or ww) end
+    if is_trim then return rack and (layout.own_h or (wh - P.head_h() - P.footer_h())) or (layout.own_w or ww) end
     if rack then return P.rack_canvas_h(ww - io_w(io), layout.own_h and { h = layout.own_h } or nil) end
     return layout.own_w or (is_eq and C.EQ_PANEL_W or C.RC_PANEL_W)
   end
@@ -4022,7 +4117,7 @@ fold_pop = function(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate)
     local wx, wy = ImGui.GetWindowPos(ctx)
     local saved = plate and push_plate(plate)
     if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, M.finish(layout, plate), M.metal(layout, plate))
-    else ImGui.DrawList_AddRectFilled(pdl, wx, wy, wx + pw, wy + ph, C.COL.panel_bg, 3.0) end
+    else ImGui.DrawList_AddRectFilled(pdl, wx, wy, wx + pw, wy + ph, C.COL.panel_bg, C.PANEL_RR) end
     ImGui.DrawList_AddRect(pdl, wx, wy, wx + pw, wy + ph, C.COL.accent, 3.0, 0, 1.0)
     if P.RACK then
       draw_controls(ctx, pdl, wx, wy, pw, ph, track, fx, layout, key, req, nil, nil)
@@ -4100,14 +4195,14 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     cur_bg.plate, cur_bg.y, cur_bg.h = plate, y, wh
 
     if is_drag_source then
-      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, 3.0)
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, C.PANEL_RR)
     elseif plate then
       draw_plate(ctx, dl, x, y, ww, wh, plate, M.finish(layout, plate), M.metal(layout, plate))
     else
-      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, C.PANEL_RR)
     end
     ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh,
-      is_drag_source and C.COL.drop_marker or C.COL.panel_border, 3.0, 0,
+      is_drag_source and C.COL.drop_marker or C.COL.panel_border, C.PANEL_RR, 0,
       is_drag_source and 2.0 or 1.0)
 
     -- The selected plugin: the panel last clicked. Plugin and FX chain
@@ -4125,7 +4220,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     req.offline = T.get_offline(track, fx.addr)
     if collapsed then
       if req.offline and not is_drag_source then
-        ImGui.DrawList_AddRectFilled(dl, x + 1, y + 1, x + ww - 1, y + wh - 1, C.COL.header_bg_off, 3.0)
+        ImGui.DrawList_AddRectFilled(dl, x + 1, y + 1, x + ww - 1, y + wh - 1, C.COL.header_bg_off, C.PANEL_RR)
       end
       if P.RACK then
         draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
@@ -4133,14 +4228,33 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
       end
     else
-      draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req)
+      -- An auto-hidden header and foot (Visual Options) are drawn over
+      -- the body while the pointer is on the panel: submitted first, so
+      -- their buttons take the clicks, on a channel painted last.
+      local sp
+      -- (each shown while the pointer is over where it goes)
+      local hv = P.hover[fx.guid] or {}
+      local show_h = C.HIDE_HEAD and (hv.head or is_drag_source)
+      local show_f = C.HIDE_FOOT and C.FOOTER_H > 0 and hv.foot
+      if show_h or show_f then
+        sp = P.splitter(dl)
+        ImGui.DrawListSplitter_Split(sp, 2)
+        ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
+        if show_h then draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req) end
+        if show_f then
+          draw_footer(ctx, dl, x, y + wh - C.FOOTER_H, ww, C.FOOTER_H, track, fx, layout, avail_h,
+            is_eq or is_trim, req)
+        end
+        ImGui.DrawListSplitter_SetCurrentChannel(sp, 0)
+      end
+      if not C.HIDE_HEAD then draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req) end
       local fh = P.footer_h()
       -- the body: as wide as the panel's own layout, centred on a wider plate
       local bx, bw = x + off, ww - (w - nat_w)
       if req.offline then
-        draw_offline(ctx, dl, bx, y + C.HEADER_H, bw, wh - C.HEADER_H - fh, track, fx)
+        draw_offline(ctx, dl, bx, y + P.head_h(), bw, wh - P.head_h() - fh, track, fx)
       elseif is_trim then
-        TRP.draw(ctx, dl, bx, y + C.HEADER_H, bw, wh - C.HEADER_H - fh, track, fx, req)
+        TRP.draw(ctx, dl, bx, y + P.head_h(), bw, wh - P.head_h() - fh, track, fx, req)
       elseif is_eq then
         -- The whole body becomes the draggable-node curve canvas rather
         -- than the ordinary parameter grid: a ReaEQ panel IS the EQ view,
@@ -4149,20 +4263,20 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         -- too, and the canvas keeps its own width between them.
         local ex, ew = bx, bw
         if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
-                          y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W,
-                          wh - C.HEADER_H - fh - C.PANEL_PAD * 2, track, fx, enabled) then
+                          y + P.head_h() + C.PANEL_PAD, C.IO_COL_W,
+                          wh - P.head_h() - fh - C.PANEL_PAD * 2, track, fx, enabled) then
           ex, ew = bx + C.IO_COL_W + C.PANEL_PAD, bw - (C.IO_COL_W + C.PANEL_PAD) * 2
         end
-        EQP.draw(ctx, dl, ex, y + C.HEADER_H, ew, wh - C.HEADER_H - fh, track, fx, req)
+        EQP.draw(ctx, dl, ex, y + P.head_h(), ew, wh - P.head_h() - fh, track, fx, req)
       elseif canvas then
         -- any plugin's EQ or compressor layout: the canvas, then the
         -- layout's own controls in columns beside it; with input/output
         -- meters, they take the two outside edges, as on any panel
         local cw = MP.width(canvas.kind, canvas)
-        local bh = wh - C.HEADER_H - fh
+        local bh = wh - P.head_h() - fh
         local ex, ew = bx, bw
         if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
-                          y + C.HEADER_H + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
+                          y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
           ex, ew = bx + C.IO_COL_W + C.PANEL_PAD, bw - (C.IO_COL_W + C.PANEL_PAD) * 2
         end
         -- the rack: the canvas across the whole width, the controls under it
@@ -4177,19 +4291,19 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         local todo = M.canvas_todo(canvas) or (canvas.kind ~= "eq" and not next(canvas.roles or {}))
         local function screen(fn, ...)
           if todo then return fn(...) end
-          return on_screen(plate, saved, dl, ex + 1, y + C.HEADER_H + 1, cw - 2, bh - 2,
-            P.with_canvas_cols, canvas, dl, ex + 1, y + C.HEADER_H + 1, cw - 2, bh - 2, fn, ...)
+          return on_screen(plate, saved, dl, ex + 1, y + P.head_h() + 1, cw - 2, bh - 2,
+            P.with_canvas_cols, canvas, dl, ex + 1, y + P.head_h() + 1, cw - 2, bh - 2, fn, ...)
         end
         if RP.KINDS[canvas.kind] then
-          if not screen(RP.draw, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, req, canvas) then
-            MP.draw_setup(ctx, dl, ex, y + C.HEADER_H, cw, bh, fx, canvas, req)
+          if not screen(RP.draw, ctx, dl, ex, y + P.head_h(), cw, bh, track, fx, req, canvas) then
+            MP.draw_setup(ctx, dl, ex, y + P.head_h(), cw, bh, fx, canvas, req)
           end
         elseif canvas.kind ~= "eq" then
-          if not screen(CP.draw_mapped, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, req, canvas) then
-            MP.draw_setup(ctx, dl, ex, y + C.HEADER_H, cw, bh, fx, canvas, req)
+          if not screen(CP.draw_mapped, ctx, dl, ex, y + P.head_h(), cw, bh, track, fx, req, canvas) then
+            MP.draw_setup(ctx, dl, ex, y + P.head_h(), cw, bh, fx, canvas, req)
           end
         else
-          screen(MP.draw_eq, ctx, dl, ex, y + C.HEADER_H, cw, bh, track, fx, layout, req)
+          screen(MP.draw_eq, ctx, dl, ex, y + P.head_h(), cw, bh, track, fx, layout, req)
         end
         if #(layout.controls or {}) > 0 and folded then
           fold_req = true
@@ -4199,29 +4313,42 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
             -- the canvas leaves, with a header and foot's worth added back
             -- (none left: every control hidden just now)
             if full_bh - bh >= C.CELL_H then
-              draw_controls(ctx, dl, ex, y + C.HEADER_H + bh, ew, C.HEADER_H + fh + (full_bh - bh),
+              draw_controls(ctx, dl, ex, y + P.head_h() + bh, ew, P.head_h() + fh + (full_bh - bh),
                             track, fx, layout, key, req, nil, nil)
             end
           else
-            draw_controls(ctx, dl, ex + cw - C.PANEL_PAD, y + C.HEADER_H, ew - cw + C.PANEL_PAD, wh, track, fx, layout,
+            draw_controls(ctx, dl, ex + cw - C.PANEL_PAD, y + P.head_h(), ew - cw + C.PANEL_PAD, wh, track, fx, layout,
                           key, req, nil, nil)
           end
         end
-      elseif is_rc and rc_body(ctx, dl, bx, y, bw, wh - C.HEADER_H - fh, track, fx, req, io, enabled, plate, saved) then
+      elseif is_rc and rc_body(ctx, dl, bx, y, bw, wh - P.head_h() - fh, track, fx, req, io, enabled, plate, saved) then
         -- drawn: the transfer-curve canvas (one missing a parameter it
         -- needs falls through to the ordinary grid below instead)
       else
-        draw_controls(ctx, dl, bx, y + C.HEADER_H, bw, wh, track, fx, layout,
+        -- no layout of its own: the offer of the canvas it looks like (Pro),
+        -- the controls under it
+        local ofr = C.CANVAS_OFFERS and not M.has(key) and ED.module("TS_CV_CanvasSetup")
+        local oh = (ofr and ofr.offer) and ofr.offer(ctx, dl, track, fx, layout, key, bx, y + P.head_h(), bw) or 0
+        draw_controls(ctx, dl, bx, y + P.head_h() + oh, bw, wh, track, fx, layout,
                       key, req, meter, io)
       end
       if fh > 0 then draw_footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx, layout, avail_h, is_eq or is_trim, req) end
+      if sp then ImGui.DrawListSplitter_Merge(sp) end
     end
     if W.hw > 0 then W.metal_edges(dl, x, y, ww, wh, W.hw) end
+    -- the corners rounded over anything drawn square across them, and the
+    -- edge drawn again round them
+    if C.PANEL_RR >= 0.5 then
+      W.round_off(dl, x, y, ww, wh, C.PANEL_RR, C.COL.win_bg)
+      ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh,
+        is_drag_source and C.COL.drop_marker or C.COL.panel_border, C.PANEL_RR, 0,
+        is_drag_source and 2.0 or 1.0)
+    end
     W.hw = 0
     -- the selected plugin's outline, last, so the header, footer and
     -- edges don't cover parts of it
     if not is_drag_source and FB.selected(track) == fx.guid then
-      ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + ww - 0.5, y + wh - 0.5, C.COL.accent, 3.0, 0, 1.6)
+      ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + ww - 0.5, y + wh - 0.5, C.COL.accent, C.PANEL_RR, 0, 1.6)
     end
     if saved then pop_plate(saved) end
     if not collapsed and (canvas or is_eq or is_rc or is_trim) then
@@ -4233,6 +4360,14 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     -- (a compare's letter, TS_CV_Compare): drawn on the row's list it
     -- would sit behind this child window
     if P.over_panel then P.over_panel(ctx, dl, track, fx, x, y, ww, wh) end
+    -- (whether the pointer's where the header or foot goes: an
+    -- auto-hidden one shows next frame)
+    do
+      local on = ImGui.IsWindowHovered(ctx,
+        ImGui.HoveredFlags_ChildWindows | ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+      local _, my = ImGui.GetMousePos(ctx)
+      P.hover[fx.guid] = on and { head = my < y + C.HEADER_H, foot = my > y + wh - C.FOOTER_H } or nil
+    end
     -- ReaImGui: EndChild only when BeginChild returned true.
     ImGui.EndChild(ctx)
     if folded_here then fold_pop(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate) end

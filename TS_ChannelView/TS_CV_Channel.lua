@@ -164,45 +164,9 @@ local function fader_menu(ctx, track, pid)
     ImGui.SetTooltip(ctx, cat_label and ("Back to the " .. cat_label:lower() .. " look") or "Back to the Default look")
   end
 
-  -- each group's look, under its own flyout
-  if ImGui.BeginMenu(ctx, "Group looks") then
-    for _, c in ipairs(TO.FADER_CATS) do
-      local mine = (c.key == cat) or (c.key == "default" and not cat)
-      local label = ((c.key == "default") and "Default (every other track)" or c.label)
-                    .. (mine and "  (this track)" or "")
-      if ImGui.BeginMenu(ctx, label .. "##fcat_" .. c.key) then
-        local raw = reaper.GetExtState(C.EXT_SECT, "fader_defaults")
-        local function grevert()
-          reaper.SetExtState(C.EXT_SECT, "fader_defaults", raw, true)
-          TO.reload_fader_defaults()
-        end
-        local d = TO.fader_default(c.key)
-        local dc = W.cap_col(d and d.cap)
-        look_choices(ctx, "fcat" .. c.key, d, "None",
-          (c.key == "default") and "Plain, unless the track or group has a look"
-            or "The Default look, unless the track has its own",
-          function(field, value, save) TO.set_fader_default(c.key, field, value, save) end,
-          grevert, dc and (dc >> 8), c.label .. " fader colour")
-        -- the strip's background in the track's colour, at a strength
-        ImGui.Spacing(ctx)
-        ST.caption(ctx, "Background")
-        ImGui.SetNextItemWidth(ctx, 240)
-        local pct = TO.bg_tint(c.key)
-        local tch, tv = ST.slider_int(ctx, "##bgt" .. c.key, pct, 0, 100,
-          pct > 0 and "%d%% track colour" or "Off")
-        if tch then TO.set_bg_tint(c.key, tv, true) end
-        if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "Strip, name and Channel panel tinted in the track colour\n" ..
-            ((c.key == "default") and "For tracks in no group"
-              or "For tracks in this group"))
-        end
-        ImGui.EndMenu(ctx)
-      end
-    end
-    ImGui.Separator(ctx)
-    ImGui.TextDisabled(ctx, "A track's own look wins, then its group's, then the Default.\nBackgrounds: the group's strength, else the Default's.")
-    ImGui.EndMenu(ctx)
-  end
+  -- each group's look, width and background: Visual Options ▸ Faders &
+  -- strips (the window that drew this hands CH.group_looks its opener)
+  if CH.group_looks and ImGui.MenuItem(ctx, "Group looks\u{2026}") then CH.group_looks() end
   ImGui.EndPopup(ctx)
 end
 
@@ -420,7 +384,8 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
     ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + C.HEADER_H, opts.base,
       C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersTop)
   else
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + C.HEADER_H, C.COL.header_bg, 0)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + C.HEADER_H, C.COL.header_bg, C.PANEL_RR,
+      ImGui.DrawFlags_RoundCornersTop)
   end
   ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + w, y + C.HEADER_H,
     C.COL.panel_border, 1.0)
@@ -888,7 +853,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   local inner = w - pad * 2
   local half  = inner * 0.5
   -- the strip's width against the default: the meter scales with it, and
-  -- the fader a little (its cap stays a cap -- View > Strip width)
+  -- the fader a little (its cap stays a cap -- the strip width)
   local k     = w / C.CHANNEL_W_DEFAULT
   local fw    = math.floor(C.FADER_W * math.max(0.75, math.min(1.35, k)) + 0.5)
   local top   = geo.top
@@ -1071,8 +1036,8 @@ function CH.draw(ctx, track, avail_h)
         inks = W.push_tinted(bg, tc)
       end
     end
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, bg, 3.0)
-    ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, bg, C.PANEL_RR)
+    ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)
 
     -- The panel's own background is a double-click target: back to mixer
     -- view. Submitted BEFORE the controls so all of them sit on top of

@@ -469,6 +469,34 @@ local function bar_settings(ctx, bar)
   ST.done(ctx)
   if cpick then d.cstyle = cpick; DR.save() end
   measure(ctx, "cstyle")
+  if d.side ~= "web" and W.thumbs() then
+    flow(ctx, "pics", 14)
+    ST.cap(ctx, "Plugin pictures")
+    local pch, pv = ST.checkbox(ctx, "On hover##aepics", d.pics ~= false)
+    ST.done(ctx)
+    if pch then
+      if pv then d.pics = nil else d.pics = false end
+      DR.save()
+    end
+    measure(ctx, "pics")
+    -- how plugin buttons with a picture show, on the bar and in its menus
+    for _, f in ipairs({ { "pmode", "Plugin buttons", TB.PMODES }, { "mmode", "Plugins in menus", TB.MMODES } }) do
+      flow(ctx, f[1], 14)
+      ST.cap(ctx, f[2])
+      ImGui.SetNextItemWidth(ctx, 130)
+      local cur = d[f[1]] or ""
+      local cur_name = f[3][1][2]
+      for _, m in ipairs(f[3]) do if m[1] == cur then cur_name = m[2] end end
+      if ImGui.BeginCombo(ctx, "##ae" .. f[1], cur_name) then
+        for _, m in ipairs(f[3]) do
+          if ImGui.Selectable(ctx, m[2] .. "##ae" .. f[1] .. m[1], cur == m[1]) then d[f[1]] = m[1]; DR.save() end
+        end
+        ImGui.EndCombo(ctx)
+      end
+      ST.done(ctx)
+      measure(ctx, f[1])
+    end
+  end
   if d.side == "window" then
     flow(ctx, "dock", 14)
     ST.cap(ctx, "Dock")

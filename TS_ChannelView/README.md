@@ -25,11 +25,13 @@ this guide marked **(Pro)** need it.
 Pro adds grid layouts and the grid editor (*Edit layout*), the Rack view,
 the web companion, canvases (EQ, compressor and the rest, for any plugin,
 and ReaEQ's and ReaComp's), knob and button styles and colours, faceplates,
-finishes, sections and backgrounds, the 3D effect's lighting and shadows,
-the plugin's own colours, vendor looks, more than one layout per plugin and
-switching between them, Show when rules and virtual controls, the TS_CV
-Trimmer, the gain-reduction trace, the patch bay (in the mixer and the
-TCP window) and comparing two plugins.
+finishes, sections and backgrounds, most of Visual Options (the panel
+colour and accent, default control styles, corners, the 3D effect's
+lighting and shadows, presets), the plugin's own colours, vendor looks,
+plugin pictures on action bars, more than one layout per plugin and
+switching between them, the offer of a canvas for a new plugin, Show when
+rules and virtual controls, the TS_CV Trimmer, the gain-reduction trace,
+the patch bay (in the mixer and the TCP window) and comparing two plugins.
 
 Without Pro, everything else works as described, and a layout made with Pro
 still works: its grid, Show rules and virtual controls are drawn as they
@@ -495,10 +497,12 @@ outline would have nothing to stand against.
   round it (left inside, right outside, a tick at the peak hold).
   Double-click it for unity, right-click for the fader's menu. Shorter
   still, the pan knob goes and the volume takes its place.
-* **Strip width.** View ▸ *Strip width* sets how wide the fader panel,
-  every mixer strip and the track name buttons are, from 72 to 240 px
-  (112 by default). The meter grows and shrinks with it, the fader a
-  little; collapsed strips keep their width. The web companion follows.
+* **Strip width.** Visual Options ▸ *Faders & strips* sets how wide the
+  fader panel, every mixer strip and the track name buttons are (the
+  *Default* row, 72 to 240 px, 112 to start), and folder parents, VCA
+  leaders and FX returns can each have their own. The meter grows and
+  shrinks with it, the fader a little; collapsed strips keep their width.
+  The web companion follows.
 * **Offline.** A panel's menu ▸ *Set offline* unloads the plugin — unlike
   bypass, it frees its CPU and memory — and the panel's header and foot
   turn steel blue, with *Bring online* where its controls were.
@@ -640,7 +644,7 @@ outline would have nothing to stand against.
   left.
 * *View ▸ Macros*, *Modulators*, *Sends* and *Receives* show or hide those
   panels; a hidden one gives its room to the plugins.
-* *View ▸ Colour* has a **base hue** slider: the whole palette is generated
+* *Visual Options ▸ Colour* has a **Hue** slider: the whole palette is generated
   from one hue, so it can be brought into line with a REAPER theme without
   picking thirty colours. Bypass and warning colours deliberately don't
   follow it, and lightness never changes — the contrast relationships are
@@ -907,6 +911,13 @@ put them. Every bar is global, not per project.
   the top of a developer's list in the add-a-plugin menu. They're taken
   one after another, never while REAPER plays; a line at the foot of
   REAPER's window says how far it's got, and the same menu stops it.
+  Each bar shows them its own way: right-click it ▸ *Show* ▸ **Plugin
+  buttons** — *Names*, *Pictures* (the picture is the button), *Tiles*
+  (the picture with the name under it; the bar's rows grow to fit) or
+  *Picture icons* (a square of it beside the name) — and **Plugins in
+  menus** — *Names*, *Thumbnails*, *Large thumbnails* or *Grid*. *Plugin
+  pictures on hover* turns the hover picture off for a bar. Organise
+  actions has the same.
 - **Toolbar switches.** A button that puts another bar in this bar's place
   — its spot, width, docker or window position — and puts this one away;
   lit while its bar is the one showing, so a row of them copied onto each
@@ -1098,9 +1109,10 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   bands). It needs a layout with an EQ canvas (*New layout ▸ With a
   canvas ▸ EQ*); its *Set up the EQ bands…* opens the setup.
 - **Canvas colours.** With nothing selected, a canvas layout has its own
-  colours: the curve (its fill and handles follow), the background, the
-  grid and its text, the meters, the canvas's small knobs, and an EQ's
-  bands one by one. ✕ puts one back to the theme's; *Copy* and *Paste*
+  colours: the curve (its fill, its handles and what they set follow — a
+  compressor's input bar, a de-esser's band), the background, the grid and
+  its text, the meters (the spectrum, levels, gain reduction and the live
+  dots), the canvas's small knobs, and an EQ's bands one by one. ✕ puts one back to the theme's; *Copy* and *Paste*
   move a set between canvases.
 - Every change is saved as you make it. **Undo** and **Redo** step back
   and forward through what you've done since the window opened.
@@ -1108,8 +1120,9 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
 ## Panel layout: sizes, button rows and sections
 
 Controls sit on a grid of half-cells. An ordinary control is one cell;
-**View ▸ Control spacing** sets how wide a column is (46–64 px, 50 by
-default), shared with the TCP window and the web page.
+**Visual Options ▸ Sizes** sets how wide a column is (46–64 px, 50 by
+default), for ChannelView, the TCP window and the web page (each its own,
+or following ChannelView's).
 
 - **Sizes.** *Size* in the editor (with Pro, also right-click a knob ▸
   Style ▸ Size): *Small* is half height — a
@@ -1350,6 +1363,15 @@ new layout and the one you started from is left as it was.
 
 ### Canvas layouts for any plugin (Pro)
 
+**The offer.** A plugin with no layout of its own whose name or controls
+look like a kind of canvas gets a box across the top of its panel: *Looks
+like a compressor (Threshold, Ratio, Attack, Release)*. **Use the canvas**
+makes a layout with that canvas, makes it the plugin's default and opens
+its setup; **Other…** picks another kind; **Not now** hides it until
+ChannelView starts again; **Never** stops it for that plugin. *View ▸
+Offer canvases for new plugins* turns the offers off (on again, it asks
+again for every plugin).
+
 ReaEQ and ReaComp have canvases of their own, and ReaGate and ReaLimit
 start with a gate and a limiter canvas already set up (Set up the canvas…
 changes it, as for any other): ReaGate's with its pre-open drawn before the
@@ -1520,6 +1542,44 @@ tooltip, the numbers round the dial and the web page. *The plugin's own*
 goes back. The same is in the editor's *Values* row. For a knob, *Values*
 also holds the **numbers round the dial**: *None*, *Values* or *0–10*.
 
+## Visual Options
+
+**View ▸ Visual Options…** is one window for how ChannelView looks. It
+also opens from the TCP window's settings menu, and from a track fader's
+right-click ▸ *Group looks…*.
+
+- **Tabs:** ChannelView, Rack (Pro), TCP window and Web (Pro), each with
+  settings of its own. The Rack, the TCP window and the web page *Follow
+  ChannelView* to start; untick it to give one its own (it starts as a
+  copy of ChannelView's). Changes show at once, in every window that's
+  open.
+- **Presets (Pro)** along the top: *Standard*, *Minimal dark*, *Minimal
+  light* and *Studio*, and your own (**+** saves, renames or deletes). A
+  preset sets every setting of the tab; your own keep *Faders & strips*
+  too. A * after its name means something's changed since.
+- **Colour:** Hue and Tint (shared with the other TS_ tools), the panel
+  colour (Pro: any colour, light or dark, with the window, headers and
+  text following it) and the accent (Pro: from the hue, or one you pick).
+- **Controls (Pro):** the default knob (any style or recipe, or your own
+  with *Customise…*, its colour and a value arc), button, dropdown and
+  plugin fader — what a control with no style of its own draws as.
+- **Panels (Pro):** corner rounding, the power switch (an icon or a
+  lamp), and the header and foot hidden until the pointer is over them.
+- **Track buttons:** the track's colour on its name button (Pro: *Bar
+  below*, *Bar above* or *Filled*) and the track icons.
+- **Faders & strips:** each group's fader style and colour, strip width
+  and background tint (folder parents, VCA leaders, FX returns and the
+  Default), and REAPER's spacer size (needs SWS). They describe tracks,
+  not a window, so every tab shares them.
+- **Sizes:** control spacing.
+- **Depth (Pro):** the 3D effect, Lighting and Shadows.
+- **The TCP window's tab** has its rows' own settings too: corner rounding
+  for its track panels (Pro; the panels' own, or its own), background
+  tint, folder indent (0 for none) and which track buttons show.
+
+The preview at the right shows the tab's look as you change it, and its
+controls work.
+
 ## Hardware looks (Pro)
 
 Everything here is Pro except **Track faders** and **Background tint**, at
@@ -1531,9 +1591,11 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   pointer), *Bar* (a dome with a raised bar across it), *Fluted* (a domed
   body with finger flutes), *Bezel* (a black centre in a chrome ring),
   *Reverse bezel* (a satin black ring round a metal centre), *Hi-fi* (a
-  spun-aluminium knob) and *LED ring* (a ring of lamps close round an
+  spun-aluminium knob), *LED ring* (a ring of lamps close round an
   encoder, lit up to the value, or out from the middle on a centred
-  control, in its cap colour). Knob caps are matte, the way the skirted
+  control, in its cap colour), *Minimal* (the arc alone, with a pointer
+  from the centre in its colour) and *Studio* (a shaded body, a white
+  pointer and a thin arc just outside it). Knob caps are matte, the way the skirted
   knob's skirt is. Then the **recipes**, built from parts: *Bakelite*,
   *Machined*, *Red gloss*, *Chicken-head*, *Printed skirt*,
   *Soft-touch*, *Chrome*, *Two-tone*, *Cream fluted*, *Coin edge*,
@@ -1558,7 +1620,8 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Your recipes* in every Style menu. Recipes are kept in
   `TS_ChannelView_Recipes.ini` beside your layouts. **Faders:** *Flat* (the default), *Console*, *Rail* and
   *Slim* (a fine groove and a small cap, filled to the value in its
-  colour — made for rows of narrow faders).
+  colour — made for rows of narrow faders), *Dot* (a dot on a line,
+  filled up to it) and *Ball* (a lit ball in a slot sunk into the panel).
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,
   Silver, Stone, Black, White, Brown and Gold. *Apply to every knob on this panel* copies one
   control's look to the rest. **Copy style** (right-click any control)
@@ -1570,8 +1633,9 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   with knobs, but its colour goes onto a fader or a button. A toggle's Style is the colour it lights
   when on (Amber, Green, Red, Blue, Yellow, White or the theme's), and so
   is a button row's, along with its face: *Flat*, *Lit lens* (dark tinted
-  glass that glows when on), *LED window* (a lamp strip across its top) or
-  *Backlit* (a dark cap whose edge and lettering light up). A toggle can
+  glass that glows when on), *LED window* (a lamp strip across its top),
+  *Backlit* (a dark cap whose edge and lettering light up), *Minimal* (a
+  flat block) or *Solid* (solid when lit, a fine edge when not). A toggle can
   also be a **switch**: *Bat toggle*, *Paddle toggle*, *Pill rocker*, *Lit
   rocker*, *Slide*, *Pill slider*, *Lamp button*, *Round button*, *Jewel
   lamp* or *Guarded toggle* (a cover to lift first), lit in its colour —
@@ -1579,13 +1643,10 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   of its cap (black when it has none). With the 3D effect off the levers
   draw as the pill slider. Under either row of swatches, **[+]** opens the colour
   picker for any colour at all, with your recent colours beside it.
-- **The look new controls start with.** Style ▸ *Use this look for new
-  knobs* (or *buttons*) on any knob or toggle: new layouts, the layouts
-  ChannelView makes for plugins you haven't set up, and controls added
-  in the editor start with it — a knob's style or own look, colours and
-  value arc (a centred knob gets *Centred*), a button's style and lit
-  colour. Layouts you've saved keep their looks. *Forget the look for new
-  knobs* (*buttons*) goes back to the plain ones.
+- **Defaults.** A control with no style of its own draws as Visual
+  Options' default for its kind (*Controls*), so changing a default
+  changes every such control on every panel. Style ▸ *Reset to default*
+  puts a control back on it.
 - **Faceplates:** Theme, Charcoal, Gunmetal, Aluminium, Steel blue, Navy,
   Cream, Cobalt, Amber, Stone, Racing green, Oxblood and Gold — or any
   colour at all: **[+] Custom colour…** after the list opens the colour
@@ -1623,14 +1684,15 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
 Only *Theme* and the *Accent* cap follow Hue/Tint; every other faceplate and
 cap colour is fixed, the way hardware is. The menus stay open while you
 click through them, so you can try a few and watch the panel change.
-**View ▸ 3D effect** (on by default) lights the panels from the top left:
+Visual Options ▸ *Depth* ▸ **3D effect** (on by default) lights the panels
+from the top left:
 a gentle gradient on the faceplates (Theme stays flat), panel edges that
 catch the light, and shadows under knobs, switches, styled buttons and
 fader caps (not the Arc knob, which is a printed scale, nor flat buttons and
 flat dropdowns, which are printed on the panel). One light lights everything, so
-highlights stay put as a knob turns. **View ▸ Lighting** sets how strongly
-(a more pronounced gradient on faceplates and knobs above 100%), and **View
-▸ Shadows** how deep and far the shadows fall.
+highlights stay put as a knob turns. **Lighting** sets how strongly (a
+more pronounced gradient on faceplates and knobs above 100%), and
+**Shadows** how deep and far the shadows fall.
 
 Like everything else on a panel, the look is saved with the plugin's layout,
 so every instance of that plugin wears it.
@@ -1644,11 +1706,11 @@ that kind's look. The copy stays until you copy another, so you can paste
 it panel after panel.
 
 **Track faders** — the Channel panel's, a mixer strip's, the TCP window's —
-have looks too: right-click the fader for its **Style** (Flat, Console,
-Rail) and **Colour** (the cap colours, [+] for any colour, recent colours).
+have looks too: right-click the fader for its **Style** (any of the fader
+styles) and **Colour** (the cap colours, [+] for any colour, recent colours).
 It acts on the selection when the track is part of it, as REAPER's menus
-do, and is saved with the track in the project. **Group looks** in the same
-menu give every **folder parent**, **VCA leader** and **FX return** (a
+do, and is saved with the track in the project. **Group looks…** in the
+same menu opens Visual Options ▸ *Faders & strips*, which gives every **folder parent**, **VCA leader** and **FX return** (a
 track with receives that's neither a folder parent nor in a folder) a look
 of its own, and **Default** covers every other track — and whatever a
 group leaves unset — all kept with ChannelView for every project. A
@@ -1657,12 +1719,13 @@ and *Reset to default* takes it back to its group's (or the Default).
 A VCA leader that's also a folder parent counts as a VCA leader.
 
 **Background tint** gives a track's mixer strip, its name button and the
-Channel panel a share of the track's colour. Each group in *Group looks*
-has a **Background** strength (folder parents at 60% and everything else at
+Channel panel a share of the track's colour. Each group in *Faders &
+strips* has a **Background** strength (folder parents at 60% and everything else at
 15%, say), and a track can have its own in the fader menu's **Background**
 slider; *As group* goes back to its group's. Off by default. A light
 colour is held back so the readouts on it stay readable. The TCP window's
-rows follow, unless its View menu ▸ *Background tint* is off; the fader
+rows follow, unless Visual Options ▸ TCP window ▸ *Background tint* is
+off; the fader
 panel it opens always does. The web page has it too.
 
 The Channel panel's header, like the fader panel the TCP window opens, is
@@ -1685,6 +1748,26 @@ In ChannelView's option sheets and dialogs every setting has its name in
 small letters above it. A switch is a chip with a light: click it on or
 off. A choice of a few is a row of joined chips. A slider shows its value
 at the right; double-click or Ctrl-click it to type one.
+
+### Lamps
+
+A knob can have a lamp before its name, lit by the plugin's gain
+reduction: right-click it ▸ **Lamp**.
+
+- *Reduction* (compressors, limiters, clippers, a saturator's drive):
+  green with signal and no reduction, amber reducing by up to 6 dB, red
+  past that.
+- *Gate:* green open, amber partly closed, red closed.
+- *Automatic*, to start: on a layout without a canvas, a plugin whose
+  gain reduction is metered gets one on its Threshold (a limiter's or
+  clipper's Ceiling when it has no Threshold), as a gate's when its name
+  says gate or expander. A canvas shows all this already.
+- *None:* only the knobs you've set have one.
+
+It's dark with no signal, or with the plugin bypassed. A plugin that
+doesn't report its gain reduction has it measured by a TS_TrackProbe pair
+(*Measured gain reduction*, below): choosing a lamp turns that on, and
+offers to add the pair.
 
 ## Presets
 
@@ -1743,7 +1826,7 @@ meters** shows each track's plugin delay compensation under its meter,
 in samples and milliseconds — on tracks with any, when the row is tall
 enough.
 
-Its **Track buttons** (the settings menu) choose which of monitoring,
+Visual Options ▸ TCP window ▸ **Track buttons** choose which of monitoring,
 record arm, mute and solo are on every row; with *Show the others while
 on*, the rest appear only while they're on. Each keeps its own place, in
 that order, so they line up down the panel. Press mute, solo or record arm
@@ -1790,6 +1873,7 @@ them up the first time ChannelView shows it.
 | `TS_CV_GridEditor.lua` | the grid editor (*Edit layout*) (Pro) |
 | `TS_CV_Widgets.lua` | knob / button / stepped-value drawing |
 | `TS_CV_Style.lua` | the look of option sheets and dialogs: captions, chips, switches, sliders |
+| `TS_CV_VisualOptions.lua` | View ▸ Visual Options: its window, its presets, and each window's settings |
 | `TS_CV_Panel.lua` | one plugin's panel |
 | `TS_CV_Editor.lua` | the Setup Edit Parameters dialog |
 | `TS_CV_Mixer.lua` | mixer view, and the shared track row (`MX.draw_row`) both views draw into |
@@ -1974,8 +2058,10 @@ script into the action list.
   shows or hides the macros, modulators, sends and receives on this
   device.
 - **Looks:** finishes, corners, switches, knob recipes, your own knob
-  looks and concentric pairs draw as on the desktop, lit and shadowed to
-  the desktop's Lighting and Shadows.
+  looks and concentric pairs draw as on the desktop. Visual Options' *Web*
+  tab (or ChannelView's, while it follows it) sets its colours, default
+  styles, corners, power switch, auto-hidden header and foot, track
+  buttons, Lighting and Shadows.
 - **XY pads and concentric knobs** play here too: touch the pad to put the
   dot there; on a concentric knob, start on the inner knob or the ring.
   Modulated controls carry the same marks as on the desktop.

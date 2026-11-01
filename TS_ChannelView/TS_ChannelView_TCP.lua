@@ -14,9 +14,9 @@
     * a strip of the track's colour down the left, indented per folder
       level the way REAPER's own panel does it
     * the name, and a horizontal peak meter under it
-    * the track's icon on the right, when View > Track icons is on
+    * the track's icon on the right, when Visual Options ▸ Track buttons ▸ Track icons is on
     * small monitoring / record arm / M / S buttons, each in a fixed
-      place: always there, or only while on (settings ▸ Track buttons);
+      place: always there, or only while on (Visual Options ▸ Track buttons);
       M, S and arm swipe down the column, as in the mixer
 
   What you can do to one:
@@ -167,22 +167,22 @@ local function pal_get()
   return tonumber(h), tonumber(t)
 end
 
-do
-  local h, t = pal_get()
-  C.BASE_HUE = h or C.BASE_HUE
-  C.TINT     = t or C.TINT
-end
 C.FOCUS_BACK = cv_get("focus_back", "1") == "1"
-C.build_palette()
+-- Visual Options (colours, control styles, sizes): the TCP window's own
+-- tab, or ChannelView's while it follows it
+local VO = require("TS_CV_VisualOptions")
+VO.load(false)
+VO.apply("tcp")
+VO.attach(ImGui)
+CH.group_looks = function() VO.show("tcp", "faders") end
 
 -- View options that mean the same thing in both windows live in
 -- ChannelView's own keys: one setting, both windows follow it.
-C.TCP_ICONS       = cv_get("track_icons", "0") == "1"
 C.SHOW_VALUES     = cv_get("show_values", C.SHOW_VALUES and "1" or "0") == "1"
 C.WHEEL_CONTROLS  = cv_get("wheel_controls", "1") == "1"
-C.set_cell_w(cv_get("cell_w", tostring(C.CELL_W_DEFAULT)))
 C.set_channel_w(cv_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
 C.TCP_INDENT_FOLDERS = ext_get("indent", C.TCP_INDENT_FOLDERS and "1" or "0") == "1"
+C.TCP_INDENT      = tonumber(ext_get("indent_px", "")) or C.TCP_INDENT
 C.TCP_LANES       = ext_get("lanes", C.TCP_LANES and "1" or "0") == "1"
 C.TCP_STATE_CHIPS = ext_get("chips", C.TCP_STATE_CHIPS and "1" or "0") == "1"
 C.TCP_ALWAYS      = ext_get("always", C.TCP_ALWAYS)
@@ -240,16 +240,22 @@ local app = {
 local function poll_shared(now)
   if now - app.last_poll < 0.5 then return end
   app.last_poll = now
-  do
+  if VO.poll() then
+    VO.apply("tcp")
+  elseif VO.follows("tcp") then
     local h, t = pal_get()
     C.apply_colour(h or C.BASE_HUE, t or C.TINT)
   end
   C.FOCUS_BACK = cv_get("focus_back", "1") == "1"
-  C.TCP_ICONS   = cv_get("track_icons", "0") == "1"
   C.SHOW_VALUES = cv_get("show_values", "1") == "1"
   C.WHEEL_CONTROLS = cv_get("wheel_controls", "1") == "1"
+  -- the rows' settings, set in Visual Options
+  TCP_TINT = ext_get("tint", "1") == "1"
+  C.TCP_INDENT_FOLDERS = ext_get("indent", C.TCP_INDENT_FOLDERS and "1" or "0") == "1"
+  C.TCP_INDENT = tonumber(ext_get("indent_px", "")) or C.TCP_INDENT
+  C.TCP_ALWAYS = ext_get("always", C.TCP_ALWAYS)
+  C.TCP_STATE_CHIPS = ext_get("chips", C.TCP_STATE_CHIPS and "1" or "0") == "1"
   TO.reload_fader_defaults()        -- ChannelView may have changed them
-  C.set_cell_w(cv_get("cell_w", tostring(C.CELL_W_DEFAULT)))
   C.set_channel_w(cv_get("channel_w", tostring(C.CHANNEL_W_DEFAULT)))
 end
 
@@ -413,8 +419,14 @@ local function draw_row_inner(dl, e, x, w, now)
   local row_bg = sel and C.COL.header_bg or C.COL.panel_bg
   local tint = (TCP_TINT and not e.master) and TO.track_tint(tr) or 0
   if tint > 0 and col then row_bg = U.tint_readable(row_bg, col, tint) end
-  ImGui.DrawList_AddRectFilled(dl, ix, y0, x + w, y1 - 1, row_bg, 0)
-  ImGui.DrawList_AddRectFilled(dl, ix, y0, body_l, y1 - 1, base, 0)
+  -- (Visual Options' corner rounding for track panels, C.TCP_RR)
+  local rr = math.min(C.TCP_RR or 0, (y1 - 1 - y0) * 0.5)
+  ImGui.DrawList_AddRectFilled(dl, ix, y0, x + w, y1 - 1, row_bg, rr)
+  -- the colour strip: the left of the row's own rounded shape (a strip
+  -- only a few pixels wide can't take a rounding wider than itself)
+  ImGui.DrawList_PushClipRect(dl, ix, y0, body_l, y1 - 1, true)
+  ImGui.DrawList_AddRectFilled(dl, ix, y0, x + w, y1 - 1, base, rr)
+  ImGui.DrawList_PopClipRect(dl)
   if e.env > 1 then
     -- Envelope lanes belong to the track: the colour carries on down
     -- beside them, faintly, the way REAPER's own panel does it.
@@ -423,7 +435,7 @@ local function draw_row_inner(dl, e, x, w, now)
   end
   if sel then
     local oc = U.sel_colour(C.SEL_OUTLINE, col, C.COL.strip_sel)
-    ImGui.DrawList_AddRect(dl, ix + 0.5, y0 + 0.5, x + w - 0.5, y1 - 1.5, oc, 0, 0, 1.0)
+    ImGui.DrawList_AddRect(dl, ix + 0.5, y0 + 0.5, x + w - 0.5, y1 - 1.5, oc, rr, 0, 1.0)
   end
   if app.fly and app.fly.guid == e.guid then
     -- The row whose panel is open gets a notch on the right edge,
@@ -1103,10 +1115,6 @@ local function settings_menu()
     ImGui.Separator(ctx)
   end
 
-  if ImGui.MenuItem(ctx, "Track icons", nil, C.TCP_ICONS) then
-    C.TCP_ICONS = not C.TCP_ICONS
-    cv_set("track_icons", C.TCP_ICONS and "1" or "0")
-  end
   if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
     C.SHOW_VALUES = not C.SHOW_VALUES
     cv_set("show_values", C.SHOW_VALUES and "1" or "0")
@@ -1118,14 +1126,6 @@ local function settings_menu()
     C.TCP_LANES = not C.TCP_LANES
     ext_set("lanes", C.TCP_LANES and "1" or "0")
   end
-  if ImGui.MenuItem(ctx, "Background tint", nil, TCP_TINT) then
-    TCP_TINT = not TCP_TINT
-    ext_set("tint", TCP_TINT and "1" or "0")
-  end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Rows tinted in the track's colour\n" ..
-      "Strength: set in ChannelView (fader right-click)")
-  end
   do
     local bay = BAY.pb()
     if require("TS_CV_Edition").item(ImGui, ctx, "Patch bay", nil, bay and bay.enabled()) and bay then
@@ -1134,33 +1134,6 @@ local function settings_menu()
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "Rest on the window's left edge: a chip that opens it.\nOff: no chip, and its actions do nothing.\nShared with ChannelView")
     end
-  end
-  if ImGui.MenuItem(ctx, "Indent folders", nil, C.TCP_INDENT_FOLDERS) then
-    C.TCP_INDENT_FOLDERS = not C.TCP_INDENT_FOLDERS
-    ext_set("indent", C.TCP_INDENT_FOLDERS and "1" or "0")
-  end
-  if ImGui.BeginMenu(ctx, "Track buttons") then
-    ImGui.TextDisabled(ctx, "Always show")
-    for _, b in ipairs({ { "I", "Monitoring" }, { "R", "Record arm" }, { "M", "Mute" }, { "S", "Solo" } }) do
-      local on = C.TCP_ALWAYS:find(b[1], 1, true) ~= nil
-      if ImGui.MenuItem(ctx, b[2] .. "##tba" .. b[1], nil, on) then
-        local t = {}
-        for _, k in ipairs({ "I", "R", "M", "S" }) do
-          if (k == b[1]) ~= (C.TCP_ALWAYS:find(k, 1, true) ~= nil) then t[#t + 1] = k end
-        end
-        C.TCP_ALWAYS = table.concat(t)
-        ext_set("always", C.TCP_ALWAYS)
-      end
-    end
-    ImGui.Separator(ctx)
-    if ImGui.MenuItem(ctx, "Show the others while on", nil, C.TCP_STATE_CHIPS) then
-      C.TCP_STATE_CHIPS = not C.TCP_STATE_CHIPS
-      ext_set("chips", C.TCP_STATE_CHIPS and "1" or "0")
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Buttons keep their place on every row")
-    end
-    ImGui.EndMenu(ctx)
   end
   if ImGui.MenuItem(ctx, "Plugin delay (PDC) under meters", nil, C.TCP_PDC) then
     C.TCP_PDC = not C.TCP_PDC
@@ -1200,27 +1173,8 @@ local function settings_menu()
   end
 
   ImGui.Separator(ctx)
-  if ImGui.BeginMenu(ctx, "Colour") then
-    -- ChannelView's own two settings, written back to ChannelView's own
-    -- keys: the palette is one choice, and both windows follow it.
-    ImGui.SetNextItemWidth(ctx, 190)
-    local hch, hv = ST.slider_int(ctx, "Hue", math.floor(C.BASE_HUE), 0, 359)
-    if hch then
-      C.BASE_HUE = hv; C.build_palette(); cv_set("base_hue", hv)
-    end
-    ImGui.SetNextItemWidth(ctx, 190)
-    local tch, tv = ST.slider_double(ctx, "Tint", C.TINT, 0.0, 2.0, "%.2f")
-    if tch then
-      C.TINT = tv; C.build_palette(); cv_set("tint", string.format("%.3f", tv))
-    end
-    ImGui.TextDisabled(ctx, "Shared with ChannelView.")
-    if ImGui.MenuItem(ctx, "Reset to default") then
-      C.BASE_HUE, C.TINT = 219, 1.0
-      C.build_palette()
-      cv_set("base_hue", 219); cv_set("tint", "1.000")
-    end
-    ImGui.EndMenu(ctx)
-  end
+  if ImGui.MenuItem(ctx, "Visual Options\u{2026}") then VO.show("tcp") end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Colours, control styles, sizes.") end
 
   if ImGui.BeginMenu(ctx, "Dock") then
     for _, d in ipairs(DOCKS) do
@@ -1296,6 +1250,9 @@ local function frame()
   ST.push(ctx)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, 0, 0)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_ItemSpacing, 4, 4)
+  -- no border: ImGui keeps a border's width clear at the window's edges,
+  -- and the rows' right edge (a selected row's outline) would be cut off
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowBorderSize, 0)
   local visible, open = ImGui.Begin(ctx, C.TCP_WIN_TITLE, true,
     ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
 
@@ -1415,7 +1372,8 @@ local function frame()
     -- Docked behind another tab: no TCP on screen, so no flyout beside it.
     app.win = nil
   end
-  ImGui.PopStyleVar(ctx, 2)
+  ImGui.PopStyleVar(ctx, 3)
+  VO.draw(ctx, "tcp")      -- View ▸ Visual Options, its own window
   ST.pop(ctx)
   ImGui.PopStyleColor(ctx)
 

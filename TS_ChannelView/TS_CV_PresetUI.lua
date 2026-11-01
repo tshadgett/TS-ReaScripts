@@ -68,7 +68,7 @@ end
 -- `inset` keeps clear of that much at the bar's left (the layout lock).
 function PU.footer(ctx, dl, x, y, w, h, track, fx, inset)
   local addr, guid = fx.addr, fx.guid
-  ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h - 1, C.COL.header_bg, 2.5,
+  ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h - 1, C.COL.header_bg, C.PANEL_RR,
     ImGui.DrawFlags_RoundCornersBottom)
   ImGui.DrawList_AddLine(dl, x, y, x + w, y, C.COL.panel_border, 1.0)
 

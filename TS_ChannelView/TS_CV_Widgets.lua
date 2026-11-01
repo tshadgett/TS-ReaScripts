@@ -33,6 +33,39 @@ local function plain(o)
   return p
 end
 W.plain = plain
+
+-- A control with no style of its own takes Visual Options' default for
+-- its kind (C.DEF): `fam` "knob", "button", "combo" or "fader". A copy
+-- when it changes anything, so the caller's options are left alone.
+local function defaulted(o, fam)
+  local d = C.DEF
+  if not o or o.style or o.look then return o end
+  local st, col
+  -- (a knob: its value arc too, when the default has one and it hasn't
+  -- one of its own -- centred on a centred knob)
+  local add_arc = fam == "knob" and d.knob_arc and o.arc == nil
+  if fam == "knob" and d.knob_look then
+    local c = {}
+    for k, v in pairs(o) do c[k] = v end
+    c.look = d.knob_look
+    if d.knob_cap and not c.cap then c.cap = W.cap_col(d.knob_cap) end
+    if add_arc then c.arc = c.bipolar and "mid" or "pos" end
+    return c
+  end
+  if fam == "knob" then st, col = d.knob, d.knob_cap
+  elseif fam == "button" then st, col = d.button, d.button_col
+  elseif fam == "combo" then st = d.combo
+  end
+  if not st and not col and not add_arc then return o end
+  local c = {}
+  for k, v in pairs(o) do c[k] = v end
+  c.style = st
+  if add_arc then c.arc = c.bipolar and "mid" or "pos" end
+  if fam == "knob" and col and not c.cap then c.cap = W.cap_col(col) end
+  if fam == "button" and col and not c.on_col then c.on_col = W.lit_col(col) end
+  return c
+end
+W.defaulted = defaulted
 local ImGui                      -- injected by W.attach()
 
 -- The band a cell reserves above its control for the parameter name.
@@ -155,13 +188,63 @@ end
 
 -- The box's edges: lit along the top and left, falling away bottom and
 -- right. Drawn after the border.
+-- Rounds a box's corners after the fact: whatever was drawn square over
+-- them (a faceplate's light and finish, a header or foot strip) is covered
+-- outside the rounding by `col`, the colour behind the box.
+function W.round_off(dl, x, y, w, h, r, col)
+  if r < 0.5 then return end
+  r = math.min(r, w * 0.5, h * 0.5)
+  -- each corner: a quarter ring from the rounding out past the corner
+  -- (r to r*sqrt 2 from its centre), stroked; what falls outside the box
+  -- is clipped with it
+  local pi = math.pi
+  local mid, thick = r * (1 + math.sqrt(2)) * 0.5 + 0.5, r * (math.sqrt(2) - 1) + 2
+  local corners = {
+    { x + r, y + r, pi, 1.5 * pi },
+    { x + w - r, y + r, 1.5 * pi, 2 * pi },
+    { x + w - r, y + h - r, 0, 0.5 * pi },
+    { x + r, y + h - r, 0.5 * pi, pi },
+  }
+  for _, c in ipairs(corners) do
+    ImGui.DrawList_PathArcTo(dl, c[1], c[2], mid, c[3], c[4], 12)
+    ImGui.DrawList_PathStroke(dl, col, 0, thick)
+  end
+end
+
 function W.metal_edges(dl, x, y, w, h, k)
-  local hi = math.floor(0x3d * k)
-  local lo = math.floor(0x4c * k)
-  ImGui.DrawList_AddLine(dl, x + 2, y + 1.5, x + w - 2, y + 1.5, 0xffffff00 | hi, 1.0)
-  ImGui.DrawList_AddLine(dl, x + 1.5, y + 2, x + 1.5, y + h - 2, 0xffffff00 | hi, 1.0)
-  ImGui.DrawList_AddLine(dl, x + 2, y + h - 1.5, x + w - 2, y + h - 1.5, 0x00000000 | lo, 1.0)
-  ImGui.DrawList_AddLine(dl, x + w - 1.5, y + 2, x + w - 1.5, y + h - 2, 0x00000000 | lo, 1.0)
+  local hi = 0xffffff00 | math.floor(0x3d * k)
+  local lo = 0x00000000 | math.floor(0x4c * k)
+  -- following the panel's corners (C.PANEL_RR): the straight runs stop
+  -- where the rounding starts, and each corner's arc takes the light of
+  -- the edges it joins (half and half where a lit edge meets a shaded one)
+  -- (concentric with the edge's own rounding -- ImGui centres it half a
+  -- pixel in -- so the light keeps the same pixel's distance from the
+  -- edge all the way round)
+  local r = math.max(0, math.min(C.PANEL_RR or 0, w * 0.5, h * 0.5) - 1)
+  local e = math.max(2, r + 1.5)
+  ImGui.DrawList_AddLine(dl, x + e, y + 1.5, x + w - e, y + 1.5, hi, 1.0)
+  ImGui.DrawList_AddLine(dl, x + 1.5, y + e, x + 1.5, y + h - e, hi, 1.0)
+  ImGui.DrawList_AddLine(dl, x + e, y + h - 1.5, x + w - e, y + h - 1.5, lo, 1.0)
+  ImGui.DrawList_AddLine(dl, x + w - 1.5, y + e, x + w - 1.5, y + h - e, lo, 1.0)
+  if r >= 1 then
+    local pi = math.pi
+    -- (a curve's antialiasing spreads a 1 px line over two, which halves
+    -- a faint one: a little thicker and stronger, so it reads as the
+    -- straight runs do)
+    local hi2 = 0xffffff00 | math.floor(math.min(0xff, 0x3d * k * 1.4))
+    local lo2 = 0x00000000 | math.floor(math.min(0xff, 0x4c * k * 1.4))
+    local function corner(cx, cy, a0, a1, col)
+      ImGui.DrawList_PathArcTo(dl, cx, cy, r, a0, a1, math.max(6, math.floor(r)))
+      ImGui.DrawList_PathStroke(dl, (col == hi) and hi2 or lo2, 0, 1.4)
+    end
+    local l, t, rt, b = x + 1.5 + r, y + 1.5 + r, x + w - 1.5 - r, y + h - 1.5 - r
+    corner(l, t, pi, 1.5 * pi, hi)                      -- top left: lit
+    corner(rt, t, 1.5 * pi, 1.75 * pi, hi)              -- top right
+    corner(rt, t, 1.75 * pi, 2 * pi, lo)
+    corner(rt, b, 0, 0.5 * pi, lo)                      -- bottom right: shaded
+    corner(l, b, 0.5 * pi, 0.75 * pi, lo)               -- bottom left
+    corner(l, b, 0.75 * pi, pi, hi)
+  end
 end
 
 -- A smaller font for meter readouts. Optional: without one the readout
@@ -350,7 +433,7 @@ local function centred_text(ctx, dl, cx, y, text, col, max_w, abbrev)
     tw = ImGui.CalcTextSize(ctx, text)
   end
   ImGui.DrawList_AddText(dl, cx - tw * 0.5, y, col, text)
-  return th
+  return th, tw
 end
 
 W.centred_text = centred_text
@@ -668,6 +751,43 @@ local function cap_ink(cap)
   return U.is_light(cap) and 0x1d1e20ff or 0xf3f3f1ff
 end
 
+-- The Studio knob: a shaded round body, lighter toward the top
+-- left, with a soft drop beneath it and a white pointer; the value is a
+-- thin arc just outside the body, with no track under it.
+local function face_studio(dl, cx, cy, r, v, o)
+  local a = A_MIN + A_SPAN * v
+  local mid = (o.arc == "mid") or (o.arc == nil and o.bipolar)
+  local fill_col = o.cap or (mid and C.COL.knob_fill_bi or C.COL.knob_fill)
+  if o.dim then fill_col = U.with_alpha(fill_col, 0x66) end
+  local R = r - 1
+  if o.arc == "neg" then
+    arc(dl, cx, cy, R, a, A_MAX, fill_col, 2.2)
+  elseif mid then
+    local a_mid = A_MIN + A_SPAN * 0.5
+    if math.abs(a - a_mid) > 0.01 then
+      arc(dl, cx, cy, R, math.min(a, a_mid), math.max(a, a_mid), fill_col, 2.2)
+    end
+  elseif v > 0.002 then
+    arc(dl, cx, cy, R, A_MIN, a, fill_col, 2.2)
+  end
+  local rb = r - 5
+  ImGui.DrawList_AddCircleFilled(dl, cx + 0.8, cy + 1.8, rb + 0.6, 0x00000070, 32)
+  local dark = U.tint(C.COL.knob_body, 0x000000ff, 0.35)
+  local lite = U.lighten(C.COL.knob_body, o.hot and 0.28 or 0.22)
+  local n = 7
+  for i = 0, n - 1 do               -- the shading: rings toward the light
+    local t = i / (n - 1)
+    local rr = rb * (1 - t * 0.78)
+    local off = rb * 0.22 * t
+    ImGui.DrawList_AddCircleFilled(dl, cx - off, cy - off, rr, lerp_col(dark, lite, t ^ 0.8), 32)
+  end
+  ImGui.DrawList_AddCircle(dl, cx, cy, rb, 0x0f1012ff, 32, 1.0)
+  local p1, p2 = rb * 0.35, rb - 1.5
+  ImGui.DrawList_AddLine(dl, cx + math.cos(a) * p1, cy + math.sin(a) * p1,
+    cx + math.cos(a) * p2, cy + math.sin(a) * p2, o.dim and 0xf2f2f288 or 0xf2f2f2ff, 2.0)
+  if o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring) end
+end
+
 local function face_arc(dl, cx, cy, r, v, o)
   local a = A_MIN + A_SPAN * v
   ImGui.DrawList_AddCircleFilled(dl, cx, cy, r,
@@ -700,7 +820,29 @@ local function face_arc(dl, cx, cy, r, v, o)
   if o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring) end
 end
 
--- ---------------------------------------------------------------------
+-- The Minimal knob: the arc alone, no body or rim, and a pointer from the
+-- centre out to the arc in the arc's colour.
+local function face_minimal(dl, cx, cy, r, v, o)
+  local a = A_MIN + A_SPAN * v
+  arc(dl, cx, cy, r - 2, A_MIN, A_MAX, o.hot and C.COL.knob_ring or C.COL.knob_track, 3.0)
+  local mid = (o.arc == "mid") or (o.arc == nil and o.bipolar)
+  local fill_col = o.cap or (mid and C.COL.knob_fill_bi or C.COL.knob_fill)
+  if o.dim then fill_col = U.with_alpha(fill_col, 0x66) end
+  if o.arc == "neg" then
+    arc(dl, cx, cy, r - 2, a, A_MAX, fill_col, 3.0)
+  elseif mid then
+    local a_mid = A_MIN + A_SPAN * 0.5
+    if a >= a_mid then arc(dl, cx, cy, r - 2, a_mid, a, fill_col, 3.0)
+    else               arc(dl, cx, cy, r - 2, a, a_mid, fill_col, 3.0) end
+  else
+    arc(dl, cx, cy, r - 2, A_MIN, a, fill_col, 3.0)
+  end
+  local px2, py2 = cx + math.cos(a) * (r - 2), cy + math.sin(a) * (r - 2)
+  ImGui.DrawList_AddLine(dl, cx, cy, px2, py2, fill_col, 2.0)
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, 1.4, fill_col, 8)
+  if o.marks then mark_ticks(dl, cx, cy, r, o.marks, C.COL.knob_ring) end
+end
+
 -- a strip or row in its track's colour (Group looks ▸ Background)
 -- ---------------------------------------------------------------------
 -- On a tinted body the theme's neutral greys -- the meter's slot, the
@@ -804,7 +946,10 @@ end
 local function knob_centre_col(style, cap, look)
   if look then return KP.centre_col(look, cap) end
   style = C.KNOB_STYLE_ALIAS[style] or style
+  if not style and not look and C.DEF.knob then style = C.DEF.knob end
   if not (style and C.KNOB_STYLE[style]) or style == "arc" then return C.COL.knob_body end
+  if style == "minimal" then return C.COL.panel_bg end
+  if style == "studio" then return U.lighten(C.COL.knob_body, 0.22) end
   if style == "led" then return 0x2c2f33ff end
   if style == "trim" then return 0xa1a6acff end
   if C.KNOB_STYLE[style].parts then
@@ -821,7 +966,7 @@ local WASH_R = { skirted = 37, trim = 40, bar = BAR_R, fluted = FLUTE_R,
                  bezel = BEZEL_R, rbezel = BEZEL_R, hifi = HIFI_R, led = LED_KNOB }
 
 function W.knob_face(dl, cx, cy, r, value, o)
-  o = o or {}
+  o = defaulted(o or {}, "knob")
   local v = math.max(0, math.min(1, value or 0))
   local style = C.KNOB_STYLE_ALIAS[o.style] or o.style
   -- a knob's own look (Look<n>) is drawn in place of its style
@@ -831,6 +976,8 @@ function W.knob_face(dl, cx, cy, r, value, o)
     -- shadow under it)
     return face_arc(dl, cx, cy, r, v, o)
   end
+  if not own and style == "minimal" then return face_minimal(dl, cx, cy, r, v, o) end
+  if not own and style == "studio" then return face_studio(dl, cx, cy, r, v, o) end
   local def = own and { parts = own, cap = "black" } or C.KNOB_STYLE[style]
   if def.parts then
     -- built from parts (TS_CV_KnobParts), with the scale round it
@@ -1213,6 +1360,19 @@ function W.type_box(ctx, id, open_now, title, now)
   return out
 end
 
+-- A small lamp centred at x, y: lit in `col` with a soft glow, or dark
+-- (col false).
+function W.lamp(dl, x, y, col)
+  if col then
+    ImGui.DrawList_AddCircleFilled(dl, x, y, 5.5, U.with_alpha(col, 0x38), 16)
+    ImGui.DrawList_AddCircleFilled(dl, x, y, 3.2, col, 12)
+    ImGui.DrawList_AddCircleFilled(dl, x - 0.9, y - 0.9, 1.1, U.with_alpha(0xffffffff, 0x70), 8)
+  else
+    ImGui.DrawList_AddCircleFilled(dl, x, y, 3.2, U.darken(C.COL.knob_track, 0.35), 12)
+    ImGui.DrawList_AddCircle(dl, x, y, 3.2, U.with_alpha(0x000000ff, 0x60), 12, 1.0)
+  end
+end
+
 function W.knob(ctx, id, label, value, formatted, opts)
   opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -1307,12 +1467,18 @@ function W.knob(ctx, id, label, value, formatted, opts)
     cy = math.max(cy, y + label_h + C.LABEL_GAP + r)
   end
 
+  -- a lamp before the name (opts.lamp: its colour, or false for dark)
+  local lw = (opts.lamp ~= nil) and 9 or 0
+  local lth, ltw
   if small then
     W.push_small(ctx)
-    centred_text(ctx, dl, cx, y - 1, label or "", C.COL.label, cw - 2, true)
+    lth, ltw = centred_text(ctx, dl, cx + lw * 0.5, y - 1, label or "", C.COL.label, cw - 2 - lw, true)
     W.pop_small(ctx)
   else
-    centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+    lth, ltw = centred_text(ctx, dl, cx + lw * 0.5, y, label or "", C.COL.label, cw - 2 - lw, true)
+  end
+  if lw > 0 then
+    W.lamp(dl, cx + lw * 0.5 - (ltw or 0) * 0.5 - 5, y + (lth or 13) * 0.5 + (small and -1 or 0), opts.lamp)
   end
 
   W.knob_face(dl, cx, cy, dial_r, value, {
@@ -1772,7 +1938,17 @@ W.FACED = { lens = true, window = true, backlit = true }
 
 function W.button_face(dl, x1, y1, x2, y2, rr, on, col, style, hot)
   local w, h = x2 - x1, y2 - y1
-  if style == "lens" then
+  if style == "minimal" or style == "solid" then
+    -- Minimal: a flat block, no outline. Solid: the same lit, with a fine
+    -- edge unlit and rounder corners. The text judged against the fill.
+    local solid = style == "solid"
+    local r2 = solid and math.max(rr, 4.0) or math.min(rr, 2.0)
+    local bg = on and col or C.COL.toggle_off
+    if hot then bg = on and U.lighten(bg, 0.08) or C.COL.knob_body_hi end
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, bg, r2)
+    if solid and not on then ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, r2, 0, 1.0) end
+    return on and (U.is_light(bg) and 0x0d1116ff or 0xf4f4f2ff) or C.COL.toggle_text, 0, nil
+  elseif style == "lens" then
     if on then
       glow(dl, x1, y1, x2, y2, rr, col, 5, 0x60)
       ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, lerp_col(col, 0x000000ff, 0.28), rr)
@@ -1850,7 +2026,7 @@ end
 -- a lit push-button on hardware -- no name above or value below, so the
 -- caller puts the name on the button when the state has no name of its own.
 function W.toggle(ctx, id, label, value, formatted, opts)
-  opts = plain(opts or {})
+  opts = defaulted(plain(opts or {}), "button")
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local small = opts.size == "small"
@@ -1951,7 +2127,8 @@ end
 -- Labels are in the small type, shortened to fit; the full one is in the
 -- tooltip of whichever button is under the pointer.
 function W.button_row(ctx, id, label, value, choices, opts)
-  opts = plain(opts or {})
+  opts = defaulted(plain(opts or {}), "button")
+  if SW.is(opts.style) then opts.style = nil end     -- (a switch can't be a row)
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local cw, ch = opts.w or C.CELL_W, opts.h or C.CELL_H
@@ -2074,7 +2251,7 @@ local combo_find = {}     -- a list's search box text, by its popup
 local COMBO_ROWS = 14     -- rows shown before the list scrolls
 local COMBO_SEARCH = 12   -- more choices than this: a search box on top
 function W.combo(ctx, id, label, value, formatted, step_norm, opts)
-  opts = plain(opts or {})
+  opts = defaulted(plain(opts or {}), "combo")
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local cw, ch = opts.w or C.CELL_W, C.CELL_H
@@ -2206,10 +2383,13 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
     vfill(dl, bx1 + 1, by1 + 1, bx2 - 1, by1 + (by2 - by1) * 0.5, 0xffffff12, 0xffffff00)
     ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, 0x00000099, 3.0, 0, 1.0)
   else
-    -- flat, so no shadow
+    -- flat, so no shadow (Minimal: no outline either)
+    local mini = opts.style == "minimal"
     ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
-      hovered and C.COL.knob_body_hi or C.COL.knob_body, 3.0)
-    ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
+      hovered and C.COL.knob_body_hi or C.COL.knob_body, mini and 2.0 or 3.0)
+    if not mini then
+      ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
+    end
   end
 
   local txt = formatted or ""
@@ -2251,8 +2431,10 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
 end
 
 -- A dropdown's box, small, for a Style menu: flat or raised.
-function W.combo_swatch(dl, x1, y1, x2, y2, raised)
-  if raised then
+function W.combo_swatch(dl, x1, y1, x2, y2, raised, minimal)
+  if minimal then
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, C.COL.knob_body, 2.0)
+  elseif raised then
     ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, C.COL.toggle_off, 2.5)
     vfill(dl, x1 + 1, y1 + 1, x2 - 1, y1 + (y2 - y1) * 0.5, 0xffffff12, 0xffffff00)
     ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, 0x00000099, 2.5, 0, 1.0)
@@ -2284,7 +2466,45 @@ end
 -- moved, true once it has. Only used to tell a click from a drag.
 local fader_moved = {}
 
-local FADER_CAP = { console = 28, rail = 34, slim = 9 }
+local FADER_CAP = { console = 28, rail = 34, slim = 9, dot = 12, ball = 12 }
+
+-- The Ball fader's slot: sunk into the panel, lit from the top left (its
+-- upper or left wall in shadow, the other catching the light).
+function W.ball_groove(dl, x0, y0, x1, y1, across)
+  local S = (C.SHADOW or 100) / 100
+  local L = (C.LIGHT or 100) / 100
+  ImGui.DrawList_AddRectFilled(dl, x0, y0, x1, y1, U.darken(C.COL.knob_track, 0.45), 2.0)
+  local sh = U.with_alpha(0x000000ff, math.floor(math.min(255, 0x80 * S)))
+  local hi = U.with_alpha(0xffffffff, math.floor(math.min(255, 0x1c * L)))
+  if across then
+    ImGui.DrawList_AddLine(dl, x0 + 1, y0 + 0.5, x1 - 1, y0 + 0.5, sh, 1.0)
+    ImGui.DrawList_AddLine(dl, x0 + 1, y1 - 0.5, x1 - 1, y1 - 0.5, hi, 1.0)
+  else
+    ImGui.DrawList_AddLine(dl, x0 + 0.5, y0 + 1, x0 + 0.5, y1 - 1, sh, 1.0)
+    ImGui.DrawList_AddLine(dl, x1 - 0.5, y0 + 1, x1 - 0.5, y1 - 1, hi, 1.0)
+  end
+end
+
+-- The Ball fader's cap: shaded from a darker edge to a lighter top left,
+-- a faint highlight, and a soft shadow down and to the right.
+function W.ball_cap(dl, x, y, r, col, lit)
+  local S = (C.SHADOW or 100) / 100
+  local L = (C.LIGHT or 100) / 100
+  if lit then col = U.lighten(col, 0.12) end
+  ImGui.DrawList_AddCircleFilled(dl, x + 0.9, y + 1.4, r + 0.6,
+    U.with_alpha(0x000000ff, math.floor(math.min(255, 0x38 * S))), 20)
+  ImGui.DrawList_AddCircleFilled(dl, x + 0.5, y + 0.9, r,
+    U.with_alpha(0x000000ff, math.floor(math.min(255, 0x48 * S))), 20)
+  local n = 8
+  for i = 0, n do
+    local t = i / n
+    local c = (t < 0.6) and U.darken(col, 0.3 * (1 - t / 0.6))
+              or U.lighten(col, 0.14 * L * (t - 0.6) / 0.4)
+    ImGui.DrawList_AddCircleFilled(dl, x - r * 0.3 * t, y - r * 0.36 * t, r * (1 - 0.62 * t), c, 20)
+  end
+  ImGui.DrawList_AddCircleFilled(dl, x - r * 0.36, y - r * 0.42, r * 0.17,
+    U.with_alpha(0xffffffff, math.floor(math.min(255, 0x40 * L))), 12)
+end
 local grad_ok = true
 local function vgrad(dl, x0, y0, x1, y1, top, bot)
   if y1 - y0 < 0.5 then return end
@@ -2394,8 +2614,10 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   -- collapsed strip -- so it gets no slot of its own and a cap you can
   -- see through: it has to be grabbable without hiding what it sits on.
   local slim = (style == "slim")
-  if not ghost then
-    local gw = slim and 1 or 2
+  if not ghost and style == "ball" then
+    W.ball_groove(dl, cx - 2, y + 4, cx + 2, y + h - 4)
+  elseif not ghost then
+    local gw = (slim or style == "dot") and 1 or 2
     ImGui.DrawList_AddRectFilled(dl, cx - gw, y + 4, cx + gw, y + h - 4,
       C.COL.knob_track, 2.0)
   end
@@ -2411,7 +2633,7 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
 
   -- A styled fader gets a scale either side of its slot, like hardware
   -- (not a ghost one: it lies over a meter, which has its own).
-  if look and not ghost and not slim then
+  if look and not ghost and not slim and style ~= "dot" and style ~= "ball" then
     for i = 0, 10 do
       local ty = math.floor(y + 4 + cap_h * 0.5 + trav * i / 10) + 0.5
       ImGui.DrawList_AddLine(dl, x, ty, x + 4, ty, C.COL.knob_ring, 1.0)
@@ -2422,6 +2644,25 @@ function W.fader(ctx, id, x, y, w, h, value, label, unity, ghost, look)
   -- cap
   local cy   = y + 4 + trav * (1 - math.max(0, math.min(1, value)))
   local lit  = (hovered or active)
+
+  if style == "dot" or style == "ball" then
+    -- a dot on the line (a ball in its slot), the line filled up to it
+    -- (out from unity when it has one) in the cap's colour
+    local col = (look and look.cap) or C.COL.accent
+    local dy_ = cy + cap_h * 0.5
+    local from = unity and (y + 4 + cap_h * 0.5 + trav * (1 - math.max(0, math.min(1, unity))))
+                 or (y + h - 4)
+    ImGui.DrawList_AddRectFilled(dl, cx - 1, math.min(from, dy_), cx + 1, math.max(from, dy_),
+      ghost and U.with_alpha(col, 0x99) or col)
+    if style == "ball" then
+      W.ball_cap(dl, cx, dy_, math.min(w * 0.5 - 1, 5.5), col, lit)
+    else
+      local rd = math.min(w * 0.5 - 1, lit and 6 or 5)
+      ImGui.DrawList_AddCircleFilled(dl, cx, dy_, rd, lit and U.lighten(col, 0.18) or col, 16)
+    end
+    W.tip(ctx, id, label, hovered, active)
+    return changed, value, act
+  end
 
   if slim then
     -- a thin groove filled up to the cap -- out from unity when it has
@@ -2542,8 +2783,12 @@ function W.hfader(ctx, id, x, y, w, h, value, label, unity, look)
   end
 
   local cy = y + h * 0.5
-  local gh = slim and 1 or 2
-  ImGui.DrawList_AddRectFilled(dl, x + 4, cy - gh, x + w - 4, cy + gh, C.COL.knob_track, 2.0)
+  if style == "ball" then
+    W.ball_groove(dl, x + 4, cy - 2, x + w - 4, cy + 2, true)
+  else
+    local gh = (slim or style == "dot") and 1 or 2
+    ImGui.DrawList_AddRectFilled(dl, x + 4, cy - gh, x + w - 4, cy + gh, C.COL.knob_track, 2.0)
+  end
   local function at(v) return x + 4 + cap_w * 0.5 + trav * math.max(0, math.min(1, v)) end
   if unity then
     local ux = at(unity)
@@ -2552,6 +2797,20 @@ function W.hfader(ctx, id, x, y, w, h, value, label, unity, look)
   end
   local cx = x + 4 + trav * math.max(0, math.min(1, value))
   local lit = hovered or active
+  if style == "dot" or style == "ball" then
+    local col = (look and look.cap) or C.COL.accent
+    local dx_ = cx + cap_w * 0.5
+    local from = unity and at(unity) or (x + 4)
+    ImGui.DrawList_AddRectFilled(dl, math.min(from, dx_), cy - 1, math.max(from, dx_), cy + 1, col)
+    if style == "ball" then
+      W.ball_cap(dl, dx_, cy, math.min(h * 0.5 - 1, 5.5), col, lit)
+    else
+      ImGui.DrawList_AddCircleFilled(dl, dx_, cy, math.min(h * 0.5 - 1, lit and 6 or 5),
+        lit and U.lighten(col, 0.18) or col, 16)
+    end
+    W.tip(ctx, id, label, hovered, active)
+    return changed, value, act
+  end
   local ch = math.min(h - 2, slim and 16 or 26)
   local y0, y1 = cy - ch * 0.5, cy + ch * 0.5
   if slim then
@@ -2594,6 +2853,14 @@ end
 -- nil for none) }. Returns changed, value, act.
 function W.param_fader(ctx, id, x, y, w, h, value, label, shown, o)
   o = plain(o)
+  -- no style of its own: Visual Options' default fader
+  if C.DEF.fader and not (o.look and o.look.style) then
+    local c = {}
+    for k, v in pairs(o) do c[k] = v end
+    c.look = { style = C.DEF.fader,
+               cap = (o.look and o.look.cap) or (C.DEF.fader_cap and W.cap_col(C.DEF.fader_cap)) }
+    o = c
+  end
   local dl = ImGui.GetWindowDrawList(ctx)
   local changed, act
   if o.dir == "h" then
@@ -3143,7 +3410,8 @@ end
 -- so. `dim`: measured, but its zero hasn't been measured yet -- a lighter
 -- wash of that colour.
 function W.gr_fill_col(est, dim)
-  local c = est and C.COL.gr_measured or C.COL.knob_fill_bi
+  -- (on a canvas with a meters colour of its own: that)
+  local c = (not est and C.CANVAS.meter) or (est and C.COL.gr_measured or C.COL.knob_fill_bi)
   return dim and U.with_alpha(c, 0x8c) or c
 end
 
@@ -3850,6 +4118,23 @@ function W.icon_button(ctx, id, icon, size, active, tooltip, on_col, ink)
     draw(dl, x, y, size, col)
   end
 
+  W.tip(ctx, id, tooltip, hovered, false)
+  return pressed
+end
+
+-- The lamp power switch (Visual Options), at the cursor: a square lamp, lit in
+-- the accent while the plugin runs, a dark one while it's bypassed.
+-- Returns pressed.
+function W.power_lamp(ctx, id, size, on, tooltip)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local pressed = ImGui.InvisibleButton(ctx, id, size, size)
+  local hovered = ImGui.IsItemHovered(ctx)
+  local s = math.floor(size * 0.30 + 0.5)
+  local cx, cy = x + size * 0.5, y + size * 0.5
+  local col = on and C.COL.accent or C.COL.knob_ring
+  if hovered then col = U.lighten(col, 0.15) end
+  ImGui.DrawList_AddRectFilled(dl, cx - s, cy - s, cx + s, cy + s, col, 1.0)
   W.tip(ctx, id, tooltip, hovered, false)
   return pressed
 end

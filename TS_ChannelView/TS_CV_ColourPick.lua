@@ -372,6 +372,16 @@ end
 -- when there's no custom colour. `pick(key, save)`: makes a choice --
 -- `save` false while the picker is only showing it. `revert()`: puts back
 -- what was there when the picker's Cancel is pressed.
+-- (CP.cap_swatches_win: the same, its custom colour picked in a window of
+-- its own rather than a modal -- see CP.draw)
+local swatch_win = false
+function CP.cap_swatches_win(...)
+  swatch_win = true
+  local ok, err = pcall(CP.cap_swatches, ...)
+  swatch_win = false
+  if not ok then error(err, 0) end
+end
+
 function CP.cap_swatches(ctx, id, now, from, title, pick, revert)
   local dl = ImGui.GetWindowDrawList(ctx)
   local function outline()
@@ -396,6 +406,7 @@ function CP.cap_swatches(ctx, id, now, from, title, pick, revert)
       preview = function(rgb) pick(("#%06x"):format(rgb), false) end,
       apply   = function(rgb) pick(("#%06x"):format(rgb), true) end,
       cancel  = revert,
+      window  = swatch_win,
     })
   end
   tip(ctx, "Custom colour\u{2026}")
@@ -441,7 +452,8 @@ local dlg      -- { req, s, title, preview, apply, cancel }
 function CP.open(o)
   if dlg and dlg.cancel then dlg.cancel() end
   dlg = { req = true, s = CP.new_state(o.rgb), title = o.title or "Colour",
-          preview = o.preview, apply = o.apply, cancel = o.cancel, nested = o.nested and true or false }
+          preview = o.preview, apply = o.apply, cancel = o.cancel, nested = o.nested and true or false,
+          window = o.window }
 end
 
 -- Whether a dialog is waiting for the host's top-level CP.draw (one
@@ -461,12 +473,25 @@ function CP.draw(ctx, nested)
     if fc == nested_at then return false end
     nested_at = fc
   end
+  -- `window`: a window of its own rather than a modal, so nothing behind
+  -- it is dimmed (choosing a colour for the whole look, the look has to be
+  -- seen as it changes)
+  local as_win = dlg.window
   if dlg.req then
     dlg.req = false
-    ImGui.OpenPopup(ctx, DLG_ID)
+    if as_win then ImGui.SetNextWindowFocus(ctx) else ImGui.OpenPopup(ctx, DLG_ID) end
   end
-  local visible, open = ImGui.BeginPopupModal(ctx, dlg.title .. DLG_ID, true,
-    ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoCollapse)
+  local visible, open
+  if as_win then
+    visible, open = ImGui.Begin(ctx, dlg.title .. DLG_ID, true,
+      ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_NoDocking)
+    -- (ReaImGui: End only when Begin returned true; hidden but open, it
+    -- stays open)
+    if not visible and open then return false end
+  else
+    visible, open = ImGui.BeginPopupModal(ctx, dlg.title .. DLG_ID, true,
+      ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoCollapse)
+  end
   if not visible then
     -- closed with its X (or never shown): as Cancel
     if dlg then
@@ -521,10 +546,16 @@ function CP.draw(ctx, nested)
 
   if done then
     CP.release(s)
-    ImGui.CloseCurrentPopup(ctx)
+    if not as_win then ImGui.CloseCurrentPopup(ctx) end
     dlg = nil
   end
-  ImGui.EndPopup(ctx)
+  if as_win then
+    if visible then
+      ImGui.End(ctx)
+    end
+  else
+    ImGui.EndPopup(ctx)
+  end
   if not open and dlg then
     CP.release(s)
     if d.cancel then d.cancel() end

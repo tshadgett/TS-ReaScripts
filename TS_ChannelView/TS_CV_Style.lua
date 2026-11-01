@@ -78,6 +78,7 @@ function ST.colours()
     { "Col_TitleBg",              K.win_bg },
     { "Col_TitleBgActive",        K.header_bg },
     { "Col_TitleBgCollapsed",     K.win_bg },
+    { "Col_MenuBarBg",            K.header_bg },      -- the window's header bar
     { "Col_Separator",            K.panel_border },
     { "Col_SeparatorHovered",     alpha(K.accent, 0x90) },
     { "Col_SeparatorActive",      K.accent },

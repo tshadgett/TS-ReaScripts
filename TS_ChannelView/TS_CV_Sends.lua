@@ -527,13 +527,13 @@ local function make(kind)
       local x, y = ImGui.GetWindowPos(ctx)
       local ww, wh = ImGui.GetWindowSize(ctx)
 
-      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, 3.0)
-      ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, 3.0, 0, 1.0)
+      ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, C.PANEL_RR)
+      ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)
 
       if collapsed and SD.STRIP_W then
         -- folded in a strip: a header bar, the title left, the unfold right
         local btn = C.ICON_SIZE
-        ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_bg, 3.0)
+        ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_bg, C.PANEL_RR)
         local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
         local label = title_of(track) .. (n > 0 and (" · " .. n) or "")
         local _, th = ImGui.CalcTextSize(ctx, label)
@@ -555,9 +555,11 @@ local function make(kind)
           title_of(track):upper() .. " " .. n, C.COL.header_dim, wh - btn - 16)
       else
         -- header
-        ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + C.HEADER_H, C.COL.header_bg, 0)
+        ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + C.HEADER_H, C.COL.header_bg, C.PANEL_RR,
+          ImGui.DrawFlags_RoundCornersTop)
         ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + ww, y + C.HEADER_H,
           C.COL.panel_border, 1.0)
+        ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)
         local title = title_of(track)
         local _, th = ImGui.CalcTextSize(ctx, title)
         ImGui.DrawList_AddText(dl, x + 6, y + (C.HEADER_H - th) * 0.5,

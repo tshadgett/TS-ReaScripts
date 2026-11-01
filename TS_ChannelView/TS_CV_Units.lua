@@ -248,6 +248,42 @@ function UN.typed_norm(track, addr, p, text)
   return math.max(0, math.min(1, v / 100))
 end
 
+-- A dropdown's whole list, read without moving the plugin: what it would
+-- call each setting (TrackFX_FormatParamValueNormalized) at each of its
+-- steps (`st`, normalised), or at READ_POINTS points along one that has
+-- none (a program or mode list behind a plain knob). A run of one name is
+-- one choice, at the middle of its run. A plugin that can't name a setting
+-- it isn't on (every point reads the same) is moved through its range once
+-- instead (UN.choice_runs); nil when that can't be done yet either. Read
+-- again whenever it's asked for: a plugin's list can follow another of its
+-- controls (Seventh Heaven's programs, its category).
+local READ_POINTS = 1024
+function UN.read_choices(track, addr, param, st)
+  if not reaper.TrackFX_FormatParamValueNormalized then return nil end
+  local n = st and (math.floor(1 / st + 0.5) + 1) or nil
+  local stepped = n ~= nil and n >= 2 and n <= READ_POINTS
+  local count = stepped and n or READ_POINTS
+  local out, first, differ = {}, nil, false
+  local run_t, run_a, run_b
+  local function flush()
+    if run_t then out[#out + 1] = { norm = stepped and run_a or (run_a + run_b) * 0.5, text = run_t } end
+  end
+  for k = 0, count - 1 do
+    local v = stepped and math.min(1, k * st) or k / (count - 1)
+    local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+    t = ok and trim(t or "") or ""
+    if t == "" then return nil end
+    if first == nil then first = t elseif t ~= first then differ = true end
+    if t == run_t then run_b = v else flush(); run_t, run_a, run_b = t, v, v end
+  end
+  flush()
+  if not differ or #out < 2 then
+    out = UN.choice_runs(UN.formatter(track, addr, param), 64)
+    if not out then return nil end
+  end
+  return out
+end
+
 -- A control's settings as a list, { norm, text } each at the middle of
 -- its run, read through `fmt` (UN.formatter); nil when it isn't a list
 -- (more than max_pos runs, or nothing to read yet). A name seen twice is

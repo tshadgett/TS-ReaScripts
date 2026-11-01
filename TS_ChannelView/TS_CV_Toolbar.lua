@@ -98,6 +98,16 @@ TB.cstyle = "u"
 -- "icons": a button is its icon, or its label when it has none (the TCP's
 -- look). "both": an icon and a label side by side (a drawer can ask).
 TB.style = "icons"
+-- A plugin button's picture (TS_CV_Thumbs, Pro) on hover: false turns it off.
+TB.pics = true
+-- How plugin buttons with a picture show, on the bar (TB.pmode): "" their
+-- name, "P" the picture as the button, "T" a tile with the name under the
+-- picture, "I" a square of the picture as the icon, the name beside it.
+-- In the bar's menus (TB.mmode): "" names, "1" a small picture before the
+-- name, "2" a larger one, "3" a grid of tiles.
+TB.pmode, TB.mmode = "", ""
+TB.PMODES = { { "", "Names" }, { "P", "Pictures" }, { "T", "Tiles" }, { "I", "Picture icons" } }
+TB.MMODES = { { "", "Names" }, { "1", "Thumbnails" }, { "2", "Large thumbnails" }, { "3", "Grid" } }
 -- Optional hooks, set by whoever shows the bar: extra entries for the
 -- bar's own right-click menu (fn(ctx)), and "Organise actions..." (fn()).
 TB.extra_bg, TB.organise = nil, nil
@@ -718,6 +728,46 @@ TB.text_of = text_of
 -- A button whose click opens a menu: a menu, or the menu of bars.
 local function has_caret(it) return it.menu or TB.switch_of(it) == "menu" end
 
+-- A plugin button's picture (TS_CV_Thumbs, Pro): the module, its key and
+-- its width over its height; nil without one.
+local function pic_of(it)
+  local k, ident = FB.kind(it)
+  if k ~= "fx" then return nil end
+  local th = W.thumbs()
+  if not (th and th.aspect) then return nil end
+  local key = th.key_of_ident(ident)
+  local a = key and th.aspect(key)
+  if not a then return nil end
+  return th, key, a
+end
+-- A tile's size on a bar of buttons bh tall.
+local function tile_h(bh) return math.floor(bh * 2.6 + 0.5) end
+local function tile_w(bh) return math.floor(tile_h(bh) * 1.45 + 0.5) end
+
+-- A row's height: a tile's while the bar shows tiles and has one.
+function TB.row_h(bh)
+  bh = bh or TB.btn
+  if TB.pmode ~= "T" then return bh end
+  for _, it in ipairs(TB.items) do
+    if pic_of(it) then return tile_h(bh) end
+  end
+  return bh
+end
+
+-- `text` cut to `room` px, with a "." where it was cut.
+local function fit_text(ctx, text, room)
+  local tw = ImGui.CalcTextSize(ctx, text)
+  if tw <= room then return text, tw end
+  local n = #text
+  while n > 1 do
+    n = n - 1
+    local t = text:sub(1, n) .. "."
+    tw = ImGui.CalcTextSize(ctx, t)
+    if tw <= room then return t, tw end
+  end
+  return "", 0
+end
+
 -- The little triangle on a menu button. `dir`: "down", "up", "right" or
 -- "left": the way its menu opens.
 local function caret(dl, cx, cy, dir, col)
@@ -777,7 +827,7 @@ local function press(ctx, i, it, x, y, bw, bh, dir)
     -- plugin is on the selected track
     local text = (it.label ~= "" and (it.label .. "\n") or "") .. FB.tip(it)
     -- a plugin with a picture (TS_CV_Thumbs, Pro): the picture, the text under it
-    local th = hovered and FB.kind(it) == "fx" and W.thumbs()
+    local th = hovered and TB.pics ~= false and FB.kind(it) == "fx" and W.thumbs()
     if not (th and th.preview(ctx, th.key_of_ident(select(2, FB.kind(it))), text)) then
       W.tip(ctx, ID .. i, text, hovered, false)
     end
@@ -807,6 +857,14 @@ end
 local function item_width(ctx, it, bh)
   if it.gap then return math.floor(bh * 0.5 + 0.5) end
   if it.sep then return 7 end
+  if TB.pmode ~= "" then
+    local th, _, a = pic_of(it)
+    if th then
+      if TB.pmode == "P" then return math.floor(math.max(bh, math.min(bh * 4, bh * a)) + 0.5) end
+      if TB.pmode == "T" then return tile_w(bh) end
+      return 16 + (bh - 6) + 5 + ImGui.CalcTextSize(ctx, text_of(it))
+    end
+  end
   if TB.style == "both" then
     local w = 16
     if it.icon ~= "" and icon_width(ctx, it.icon, wide_icon(it.icon, bh)) then w = w + wide_icon(it.icon, bh) + 5 end
@@ -1097,6 +1155,49 @@ local function paint_wide(ctx, dl, it, x, y, bw, bh, show_label, dir, hovered, h
   if under then underline(dl, x, y, bw, bh, col) end
 end
 
+-- A plugin button with a picture, as the bar's TB.pmode shows it, in
+-- x, y, bw by bh. False when it isn't one (or the bar shows names).
+local function draw_pic(ctx, dl, i, it, x, y, bw, bh, dir, show_label)
+  if TB.pmode == "" or it.sep then return false end
+  local th, key = pic_of(it)
+  if not th then return false end
+  local v = view(it)
+  local hovered, held, on = press(ctx, i, v, x, y, bw, bh, dir)
+  local text = text_of(v)
+  if TB.pmode == "P" then
+    th.draw(dl, key, x, y, x + bw, y + bh, 2.5)
+    ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh,
+      (hovered or held) and C.COL.icon_hot or C.COL.knob_ring, 2.5, 0, 1.0)
+    if on then underline(dl, x, y, bw, bh, C.COL.accent) end
+    return true
+  end
+  local bg = (hovered or held) and C.COL.knob_body_hi or C.COL.toggle_off
+  if TB.pmode == "T" then
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, bg, 3.0)
+    local _, lh = ImGui.CalcTextSize(ctx, "X")
+    local py1 = y + bh - lh - 6
+    th.draw(dl, key, x + 4, y + 4, x + bw - 4, py1, 2.0)
+    local t, tw = fit_text(ctx, text, bw - 8)
+    ImGui.DrawList_AddText(dl, math.floor(x + (bw - tw) * 0.5), py1 + 2,
+      (hovered or held) and C.COL.icon_hot or C.COL.label, t)
+    if on then underline(dl, x, y, bw, bh, C.COL.accent) end
+    return true
+  end
+  -- "I": a square of it as the icon, the name beside it (in a narrow
+  -- column, the square alone)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + bw, y + bh, on and C.COL.accent or bg, 2.5)
+  ImGui.DrawList_AddRect(dl, x, y, x + bw, y + bh, C.COL.knob_ring, 2.5, 0, 1.0)
+  local sq = bh - 6
+  local ix = (show_label == false) and math.floor(x + (bw - sq) * 0.5) or (x + 3)
+  th.draw(dl, key, ix, y + 3, ix + sq, y + 3 + sq, 2.0)
+  if show_label ~= false then
+    local t = fit_text(ctx, text, x + bw - 4 - (ix + sq + 5))
+    local _, lh = ImGui.CalcTextSize(ctx, "X")
+    ImGui.DrawList_AddText(dl, ix + sq + 5, y + (bh - lh) * 0.5, on and C.COL.icon_on or C.COL.label, t)
+  end
+  return true
+end
+
 local function draw_wide(ctx, dl, i, it, x, y, bw, bh, show_label, dir, vertical)
   if it.sep then return draw_sep(ctx, dl, i, it, x, y, bw, bh, vertical) end
   it = view(it)
@@ -1187,8 +1288,10 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
   -- Settings, hard right.
   local mb = C.ICON_SIZE + 4
   local mx = x + w - mb - 4
-  local rows = math.max(1, math.floor((h - 4 + C.TB_GAP) / (bh + C.TB_GAP)))
-  local top = y + math.max(2, (h - (rows * bh + (rows - 1) * C.TB_GAP)) * 0.5)
+  -- a row as tall as a tile when the bar shows tiles
+  local rh = math.min(TB.row_h(bh), h - 4)
+  local rows = math.max(1, math.floor((h - 4 + C.TB_GAP) / (rh + C.TB_GAP)))
+  local top = y + math.max(2, (h - (rows * rh + (rows - 1) * C.TB_GAP)) * 0.5)
 
   -- The empty space is the toolbar's own right-click target, submitted
   -- first so every button sits on top of it.
@@ -1219,15 +1322,17 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
   for i, it in ipairs(TB.items) do ws[i] = item_width(ctx, it, bh) end
   local pos, used = TB.place_rows(ws, x + 4, right, C.TB_GAP, rows, TB.halign)
   if used > 0 then
-    top = TB.place_v(y, h, used * bh + (used - 1) * C.TB_GAP, TB.valign) or top
+    top = TB.place_v(y, h, used * rh + (used - 1) * C.TB_GAP, TB.valign) or top
   end
   for i, it in ipairs(TB.items) do
     local p = pos[i]
     if not p then
       if not it.sep then res.overflow[#res.overflow + 1] = it end
     else
-      local by = top + p.row * (bh + C.TB_GAP)
-      if TB.style == "both" then
+      local by = top + p.row * (rh + C.TB_GAP)
+      if draw_pic(ctx, dl, i, it, p.x, by, p.w, (TB.pmode == "T") and rh or bh, dir) then
+        -- (drawn: a plugin's picture)
+      elseif TB.style == "both" then
         draw_wide(ctx, dl, i, it, p.x, by, p.w, bh, true, dir, false)
       else
         draw_item(ctx, dl, i, it, p.x, by, p.w, bh, dir)
@@ -1273,6 +1378,7 @@ function TB.draw_v(ctx, x, y, w, h, dir)
     local total = 0
     for _, it in ipairs(TB.items) do
       local ih = it.gap and math.floor(bh * 0.5) or (it.sep and 7 or bh)
+      if TB.pmode == "T" and pic_of(it) then ih = tile_h(bh) end
       if total + ih > h - 6 then break end
       total = total + ih + C.TB_GAP
     end
@@ -1286,8 +1392,11 @@ function TB.draw_v(ctx, x, y, w, h, dir)
   end
   for i, it in ipairs(TB.items) do
     local ih = it.gap and math.floor(bh * 0.5) or (it.sep and 7 or bh)
+    if TB.pmode == "T" and pic_of(it) then ih = tile_h(bh) end
     if cy + ih > y + h - 2 then break end
-    draw_wide(ctx, dl, i, it, x + 4, cy, bw, ih, show_label, dir, true)
+    if not draw_pic(ctx, dl, i, it, x + 4, cy, bw, ih, dir, show_label) then
+      draw_wide(ctx, dl, i, it, x + 4, cy, bw, ih, show_label, dir, true)
+    end
     cy = cy + ih + C.TB_GAP
   end
   if pick and show_label and cy + 16 < y + h then
@@ -1362,6 +1471,46 @@ end
 -- The bar's button height while a large menu is drawn (pop_menu), else nil.
 local menu_large = nil
 
+-- A plugin in a menu, with its picture (TB.mmode): a row with the picture
+-- before the name ("1" small, "2" larger), or a tile in a grid ("3"),
+-- ticked while the plugin is on the selected track. True when clicked.
+local GRID_COLS, GRID_W = 3, 100
+local function menu_tick(dl, x, cy, col)
+  ImGui.DrawList_AddLine(dl, x + 1, cy, x + 4, cy + 3, col, 1.6)
+  ImGui.DrawList_AddLine(dl, x + 4, cy + 3, x + 9, cy - 3, col, 1.6)
+end
+local function menu_pic(ctx, it, vi, th, key, id)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local lh = ImGui.GetTextLineHeight(ctx)
+  local on = FB.is_on(it)
+  if TB.mmode == "3" then
+    local ph = math.floor(GRID_W * 0.46 + 0.5)
+    local x0, y0 = ImGui.GetCursorScreenPos(ctx)
+    local clicked = ImGui.Selectable(ctx, id, false, 0, GRID_W, ph + lh + 6)
+    th.draw(dl, key, x0 + 1, y0 + 1, x0 + GRID_W - 1, y0 + 1 + ph, 2.0)
+    local t, tw = fit_text(ctx, text_of(vi), GRID_W - 4)
+    ImGui.DrawList_AddText(dl, math.floor(x0 + (GRID_W - tw) * 0.5), y0 + ph + 4,
+      ImGui.GetStyleColor(ctx, ImGui.Col_Text), t)
+    if on then
+      ImGui.DrawList_AddRectFilled(dl, x0 + 4, y0 + ph + lh + 4, x0 + GRID_W - 4, y0 + ph + lh + 6, C.COL.accent, 1.0)
+    end
+    return clicked
+  end
+  local ph = (TB.mmode == "2") and math.floor(lh * 2.6 + 0.5) or math.floor(lh + 4)
+  local pw = math.floor(ph * 2.2 + 0.5)
+  local sw = ImGui.CalcTextSize(ctx, " ")
+  local pad = (" "):rep(math.ceil((14 + pw + 8) / ((sw and sw > 0) and sw or 4)))
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_SelectableTextAlign, 0, 0.5)
+  local clicked = ImGui.Selectable(ctx, pad .. text_of(vi) .. "   " .. id, false, 0, 0, ph + 4)
+  ImGui.PopStyleVar(ctx)
+  local x0, y0 = ImGui.GetItemRectMin(ctx)
+  local _, y1 = ImGui.GetItemRectMax(ctx)
+  local py = y0 + ((y1 - y0) - ph) * 0.5
+  if on then menu_tick(dl, x0, y0 + (y1 - y0) * 0.5, C.COL.accent) end
+  th.draw(dl, key, x0 + 14, py, x0 + 14 + pw, py + ph, 2.0)
+  return clicked
+end
+
 -- A list of items as menu entries, menus as submenus to any depth: what a
 -- menu button opens, and the TCP's overflow list. `path` keeps ids apart.
 function TB.menu_entries(ctx, items, path)
@@ -1397,10 +1546,24 @@ function TB.menu_entries(ctx, items, path)
   local th = ImGui.GetTextLineHeight(ctx)
   local ext = menu_large and math.max(0, math.floor((menu_large - th) * 0.5))
   local room = ext and math.max(0, ext - 4)
+  local grid_n = 0
   for k, it in ipairs(items) do
     local vi = views[k]
     local key = "##" .. ID .. path .. "." .. k
-    if it.menu then
+    local mth, mkey
+    if TB.mmode ~= "" and not it.sep then mth, mkey = pic_of(it) end
+    if not (mth and TB.mmode == "3") then grid_n = 0 end
+    if mth then
+      -- a plugin with its picture (TB.mmode)
+      if TB.mmode == "3" then
+        if grid_n % GRID_COLS ~= 0 then ImGui.SameLine(ctx, 0, 4) end
+        grid_n = grid_n + 1
+      end
+      if menu_pic(ctx, it, vi, mth, mkey, key) then TB.run_fx(it) end
+      if TB.mmode == "1" and TB.pics ~= false and ImGui.IsItemHovered(ctx) then
+        mth.preview(ctx, mkey)
+      end
+    elseif it.menu then
       if ext then ImGui.Dummy(ctx, 1, room) end
       local open = ImGui.BeginMenu(ctx, pad .. text_of(it) .. key)
       if open then
@@ -1437,7 +1600,7 @@ function TB.menu_entries(ctx, items, path)
     elseif FB.kind(it) then
       if ImGui.MenuItem(ctx, pad .. text_of(vi) .. key, nil, FB.is_on(it)) then TB.run_fx(it) end
       -- a plugin with a picture (TS_CV_Thumbs, Pro): the picture beside it
-      local th = FB.kind(it) == "fx" and ImGui.IsItemHovered(ctx) and W.thumbs()
+      local th = TB.pics ~= false and FB.kind(it) == "fx" and ImGui.IsItemHovered(ctx) and W.thumbs()
       if th then th.preview(ctx, th.key_of_ident(select(2, FB.kind(it)))) end
       if marks then row_icon(ctx, vi, ih, strip, iw) end
     else

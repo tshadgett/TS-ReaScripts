@@ -1,5 +1,59 @@
 # ChannelView — changelog
 
+## 3.8.0 — Visual Options, lamps, plugin pictures on the bars
+
+### ChannelView
+
+- **Visual Options** (View ▸ *Visual Options…*): one window for how
+  ChannelView, the Rack, the TCP window and the web page look, a tab each.
+  The others follow ChannelView's tab until you give them their own. It
+  takes in what was spread over the View menu (colour, 3D effect,
+  lighting, shadows, track icons, control spacing, strip width) and the
+  fader menu's *Group looks*, which now opens it.
+- **Faders & strips:** each group (folder parents, VCA leaders, FX
+  returns, the Default) has its own strip width as well as its fader look
+  and background tint, and REAPER's spacer size is set here too (needs
+  SWS).
+- **Lamps:** a knob can have a lamp before its name, lit by the plugin's
+  gain reduction (right-click ▸ *Lamp*): green with signal, amber
+  reducing, red past 6 dB; on a gate, green open, amber closing, red
+  closed. A plugin whose gain reduction is metered has one on its
+  Threshold to start. One that doesn't report it is measured by the
+  probes.
+- **New fader styles for track faders:** *Dot* and *Ball*.
+- **The TCP window:** its background tint, folder indent (now an amount)
+  and track buttons are set in Visual Options ▸ *TCP window*.
+- The track colour stripe on the track buttons is thinner.
+- A selected track's outline in the TCP window reaches its right edge.
+
+### ChannelView Pro
+
+- **Visual Options:** the panel colour (light or dark) and accent, the
+  default knob, button, dropdown and fader (what a control with no style
+  of its own draws as, live), corner rounding, a lamp power switch, the
+  header and foot hidden until the pointer's over them, the track's
+  colour on its button as a bar below, a bar above or filled, the 3D
+  effect, and presets: *Standard*, *Minimal dark*, *Minimal light*,
+  *Studio* and your own. The TCP window's track panels round their
+  corners too.
+- **New styles:** *Minimal* and *Studio* knobs, *Minimal* and *Solid*
+  buttons, a *Minimal* dropdown, *Dot* and *Ball* faders.
+- **Plugin pictures on the bars:** a plugin button can be its picture, a
+  tile with its name, or have the picture as its icon; in a bar's menus,
+  thumbnails beside the names, larger ones, or a grid. Each bar has its
+  own (right-click ▸ *Show*), and its own *Plugin pictures on hover*.
+- **A canvas for a new plugin:** a plugin with no layout whose controls
+  look like a compressor, gate, EQ and the rest offers that canvas (or
+  another). Taking it makes the layout, makes it the default and opens
+  its setup. *View ▸ Offer canvases for new plugins* turns it off.
+- **Canvas colours** now reach the handles and what they set (a
+  compressor's input bar, a de-esser's band) and the live readings.
+- **Copy and paste styles** between ChannelView and the Rack.
+- **Web companion:** its own tab in Visual Options, with the new styles,
+  corners, power lamp, auto-hidden header and foot and track buttons.
+- Fixed: a hardware send from the patch bay kept the last send's output
+  channel; clicking the selected delay tap again now deselects it.
+
 ## 3.7.5 — typed values, wide dropdowns, EQ curves on a grid
 
 ### ChannelView

@@ -792,9 +792,48 @@ function TO.track_tint(track)
   return (v or 0) / 100
 end
 
+-- ---------------------------------------------------------------------
+-- strip width by group
+-- ---------------------------------------------------------------------
+-- A group's mixer strips can be wider or narrower than the strip width
+-- (C.CHANNEL_W, the Default's): ExtState "group_w", "vca=110;parent=120".
+-- Unset, a group's strips are the strip width. (Visual Options ▸ Faders &
+-- strips)
+local GW_KEY = "group_w"
+local gws
+local function read_gws()
+  if gws then return gws end
+  gws = {}
+  for k, v in (reaper.GetExtState(C.EXT_SECT, GW_KEY) or ""):gmatch("(%w+)=([^;]*)") do
+    local n = tonumber(v)
+    if n then gws[k] = math.max(C.CHANNEL_W_MIN, math.min(C.CHANNEL_W_MAX, math.floor(n + 0.5))) end
+  end
+  return gws
+end
+
+-- A group's own strip width, or nil for the strip width.
+function TO.group_w(cat) return cat and read_gws()[cat] or nil end
+
+function TO.set_group_w(cat, px)
+  local d = read_gws()
+  d[cat] = px and math.max(C.CHANNEL_W_MIN, math.min(C.CHANNEL_W_MAX, math.floor(px + 0.5))) or nil
+  local parts = {}
+  for _, c in ipairs(TO.FADER_CATS) do
+    if d[c.key] then parts[#parts + 1] = c.key .. "=" .. d[c.key] end
+  end
+  reaper.SetExtState(C.EXT_SECT, GW_KEY, table.concat(parts, ";"), true)
+end
+
+-- A track's strip width: its group's, else the strip width.
+function TO.track_width(track)
+  if not track or TO.is_master(track) or not next(read_gws()) then return C.CHANNEL_W end
+  local cat = TO.fader_category(track)
+  return (cat and read_gws()[cat]) or C.CHANNEL_W
+end
+
 -- Another window (the TCP's, or ChannelView's) may have changed the
 -- groups' looks: read them again next time.
-function TO.reload_fader_defaults() defaults = nil; tints = nil end
+function TO.reload_fader_defaults() defaults = nil; tints = nil; gws = nil end
 
 -- What a track's fader looks like: its own choice, else its group's, else
 -- the Default look, part by part. { style, cap } or nil for the plain fader.

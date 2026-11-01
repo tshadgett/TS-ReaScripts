@@ -862,6 +862,20 @@ do
   check("arc colour: junk ignored", tostring(M.arc_col_of("nonsense")), "nil")
   M.remove("ArcColPlug"); M.save()
 end
+-- a control's lamp: kept, read back, copied
+do
+  M.set("LampPlug", { controls = {
+    { param = 0, type = "knob", label = "", lamp = "gr" },
+    { param = 1, type = "knob", label = "", lamp = "gate" },
+    { param = 2, type = "knob", label = "", lamp = "off" },
+    { param = 3, type = "knob", label = "", lamp = "bogus" } } })
+  M.save(); M.reload()
+  local l = M.get("LampPlug")
+  check("lamp: read back", tostring(l.controls[1].lamp) .. " " .. tostring(l.controls[2].lamp) .. " "
+    .. tostring(l.controls[3].lamp) .. " " .. tostring(l.controls[4].lamp), "gr gate off nil")
+  check("lamp: copied", M.copy(l).controls[2].lamp, "gate")
+  M.remove("LampPlug"); M.save()
+end
 check("rows at h=120", P.rows_for(120), 1)
 check("cols for 8 @1 row", cols_for(8, 120), 8)
 
@@ -1167,6 +1181,29 @@ ch("accent unaffected by tint",  C.COL.accent ~= C.COL.panel_bg)
 -- and back
 C.BASE_HUE, C.TINT = 219, 1.0; C.build_palette()
 ch("reset restores the original", C.COL.accent == ORIGINAL.accent)
+-- Visual Options' colours: a picked accent as it is, its family spaced
+-- from it, the greys and fixed colours untouched; a light background
+-- turns the inks dark; and back
+do
+  local grey0, solo0 = C.COL.panel_bg, C.COL.solo_on
+  C.ACCENT = 0x3f7fd0ff; C.build_palette()
+  ch("accent: the picked colour", C.COL.accent == 0x3f7fd0ff and C.COL.toggle_on == 0x3f7fd0ff)
+  local dh = (C.hue_of(C.COL.knob_fill_bi) - C.hue_of(C.COL.accent)) % 360
+  ch("accent: bipolar fill keeps its distance", math.abs(dh - 192.2) < 3, ("%.1f"):format(dh))
+  ch("accent: greys and fixed colours stay", C.COL.panel_bg == grey0 and C.COL.solo_on == solo0)
+  C.ACCENT, C.BG = 0x1a1a1aff, 0xc4c4c4ff; C.build_palette()
+  ch("light background: panel as picked, dark type", C.COL.panel_bg == 0xc4c4c4ff and C.LIGHT_UI
+    and select(1, rgb(C.COL.value)) < 40)
+  ch("light background: a grey accent fills centred knobs too", C.COL.knob_fill_bi == 0x1a1a1aff)
+  do local r2, g2, b2 = rgb(C.COL.win_bg)
+    ch("light background: a neutral one gives neutral greys", r2 == g2 and g2 == b2, ("%d,%d,%d"):format(r2, g2, b2)) end
+  C.ACCENT, C.BG = nil, 0x303030ff; C.build_palette()
+  ch("dark background: panel as picked, light type, darker window", C.COL.panel_bg == 0x303030ff
+    and not C.LIGHT_UI and select(1, rgb(C.COL.value)) > 180
+    and select(1, rgb(C.COL.win_bg)) < select(1, rgb(C.COL.panel_bg)))
+  C.BG = nil; C.build_palette()
+  ch("no picks: accent from the hue again", C.COL.accent == ORIGINAL.accent)
+end
 ch("C.COL identity is stable", (function()
   local ref = C.COL; C.BASE_HUE = 300; C.build_palette()
   local same = (ref == C.COL)   -- modules hold this reference
@@ -4432,6 +4469,14 @@ do
     local l = DR.parse("1|top|1|128|both|k|0|24|cbi|Edit;2|top|1|128|both|k2|0|24|--|B")
     check("colour style: read", l[1].cstyle .. l[1].halign .. l[1].valign .. "/" .. l[2].cstyle, "icb/u")
     check("colour style: written", DR.serialize({ l[1], l[2] }), "1|top|1|128|both|k|0|24|cbi|Edit;2|top|1|128|both|k2|0|24|--|B")
+    local p = DR.parse("1|top|1|128|both|k|0|24|cbin|Edit;2|top|1|128|both|k2|0|24|--n|B")
+    check("hover pictures: read", tostring(p[1].pics) .. p[1].cstyle .. "/" .. tostring(p[2].pics) .. "/" .. tostring(l[1].pics) .. "/" .. p[2].name,
+      "falsei/false/true/B")
+    check("hover pictures: written", DR.serialize({ p[1], p[2] }), "1|top|1|128|both|k|0|24|cbin|Edit;2|top|1|128|both|k2|0|24|--n|B")
+    local q = DR.parse("1|top|1|128|both|k|0|24|cbiT3|Edit;2|top|1|128|both|k2|0|24|--nP|B;3|top|1|128|both|k3|0|24|--2|C")
+    check("picture modes: read", q[1].pmode .. q[1].mmode .. tostring(q[1].pics) .. "/" .. q[2].pmode .. q[2].mmode .. tostring(q[2].pics)
+      .. "/" .. q[3].pmode .. q[3].mmode .. "/" .. q[1].name .. q[3].name, "T3true/Pfalse/2/EditC")
+    check("picture modes: written", DR.serialize(q), "1|top|1|128|both|k|0|24|cbiT3|Edit;2|top|1|128|both|k2|0|24|--nP|B;3|top|1|128|both|k3|0|24|--2|C")
   end
 end
 
@@ -10496,6 +10541,223 @@ do
   end
   package.loaded["TS_CV_Browser"] = saved_b
   reaper = real
+end
+
+-- ---------------------------------------------------------------------
+-- the style clipboards, shared by ChannelView and the Rack
+-- ---------------------------------------------------------------------
+do
+  local ext = {}
+  local g, s = reaper.GetExtState, reaper.SetExtState
+  reaper.GetExtState = function(sec, k) return ext[sec .. "/" .. k] or "" end
+  reaper.SetExtState = function(sec, k, v) ext[sec .. "/" .. k] = v end
+  local MP = require "TS_CV_Mappings"
+  local KPx = require "TS_CV_KnobParts"
+  local look = KPx.decode("grip=grooves,n=24,mat=metal,col=#c0c0c0")
+  local v = { plate = "cream", kinds = { knob = { style = "skirted", cap = "red", look = look, arc = "mid" },
+    toggle = { style = "lens" } }, list = { 1, 2.5, "three", true } }
+  MP.clip_put("panel", v, "Pro-Q 4")
+  local back, from = MP.clip_get("panel")
+  check("clip: from", from, "Pro-Q 4")
+  local function same(a, b)
+    if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+    for k, x in pairs(a) do if not same(x, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+  end
+  check("clip: a copy, the same", same(back, v) and back ~= v, true)
+  check("clip: a knob's parts survive", KPx.encode(back.kinds.knob.look), KPx.encode(look))
+  check("clip: floats exact", back.list[2], 2.5)
+  check("clip: empty is nothing", (MP.clip_get("look")), nil)
+  check("clip: junk is nothing", MP.deser("os.exit()"), nil)
+  reaper.GetExtState, reaper.SetExtState = g, s
+end
+
+-- ---------------------------------------------------------------------
+-- Visual Options: storage, following, presets, applying, migrating
+-- ---------------------------------------------------------------------
+do
+  local ext = {}
+  local g, s, d = reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState
+  local tp = reaper.time_precise
+  reaper.GetExtState = function(sec, k) return ext[sec .. "/" .. k] or "" end
+  reaper.SetExtState = function(sec, k, v) ext[sec .. "/" .. k] = v end
+  reaper.DeleteExtState = function(sec, k) ext[sec .. "/" .. k] = nil end
+  local tick = 0
+  reaper.time_precise = function() tick = tick + 1; return tick end
+  local ED = require("TS_CV_Edition")
+  local was = ED.PRO
+  ED.PRO = { RELEASE = ED.RELEASE }
+  local MP = require "TS_CV_Mappings"
+  -- what ChannelView had before
+  ext["TS_ChannelView/cell_w"] = "58"
+  ext["TS_ChannelView/plate_texture"] = "0"
+  ext["TS_ChannelView/look"] = "studio"
+  MP.set_default_look("toggle", { type = "toggle", style = "lens", cap = "green" })
+  package.loaded["TS_CV_VisualOptions"] = nil
+  local VO = require("TS_CV_VisualOptions")
+  VO.load(true)
+  VO.apply("cv")
+  check("vo: brought over: spacing, 3D off, Studio, the button for new",
+    table.concat({ C.CELL_W, tostring(C.EFFECT_3D), C.DEF.knob, tostring(C.PANEL_RR), C.DEF.button, C.DEF.button_col }, "|"),
+    "58|false|studio|9|lens|green")
+  check("vo: 'look for new' forgotten", MP.default_look("toggle"), nil)
+  -- the rack follows ChannelView to start; then a copy of its own
+  VO.apply("rack")
+  check("vo: rack follows", C.DEF.knob .. tostring(VO.follows("rack")), "studiotrue")
+  -- a tab with nothing set is the theme as it was
+  ext["TS_ChannelView_Visual/follow_tcp"] = "0"
+  VO.load(false)
+  VO.apply("tcp")
+  check("vo: an empty tab is plain", tostring(C.DEF.knob) .. tostring(C.ACCENT) .. C.POWER .. C.TRACK_COL,
+    "nilniliconstripe")
+  -- a preset, and a change to it
+  VO.attach(nil)
+  VO.set("tcp", "knob", "minimal")
+  check("vo: a change shows in its own window", C.DEF.knob == nil, true)      -- (own tab is cv)
+  VO.apply("tcp")
+  check("vo: then applied", C.DEF.knob, "minimal")
+  -- another window sees the change
+  local rev = ext["TS_ChannelView_Visual/rev"]
+  ext["TS_ChannelView_Visual/rev"] = "changed"
+  check("vo: poll sees another window's change", VO.poll(), true)
+  check("vo: and only once", VO.poll(), false)
+  ext["TS_ChannelView_Visual/rev"] = rev
+  -- your own preset keeps every setting, Faders & strips too, and puts
+  -- them back
+  do
+    VO.set("tcp", "cell_w", 60); VO.set("tcp", "icons", true); VO.set("tcp", "hue", 30)
+    ext["TS_ChannelView/group_w"] = "vca=130"
+    VO.save_preset_for_test("tcp", "Mine")
+    VO.set("tcp", "cell_w", 50); VO.set("tcp", "icons", false); VO.set("tcp", "hue", 200)
+    ext["TS_ChannelView/group_w"] = ""
+    VO.apply_preset_for_test("tcp", "Mine")
+    VO.apply("tcp")
+    check("preset: every setting back", table.concat({ C.CELL_W, tostring(C.TRACK_ICONS), C.BASE_HUE,
+      ext["TS_ChannelView/group_w"] }, "|"), "60|true|30|vca=130")
+    check("preset: not changed since", VO.modified_for_test("tcp"), false)
+    VO.set("tcp", "cell_w", 52)
+    check("preset: changed shows", VO.modified_for_test("tcp"), true)
+  end
+  -- Standard: none of the Pro options
+  ED.PRO = nil
+  VO.apply("cv")
+  check("vo: Standard draws plainly", tostring(C.DEF.knob) .. tostring(C.BG) .. tostring(C.EFFECT_3D) .. C.PANEL_RR,
+    "nilnilfalse3.0")
+  check("vo: Standard keeps its spacing", C.CELL_W, 58)
+  ED.PRO = was
+  -- the defaults on a control with no style of its own
+  C.DEF = { knob = "minimal", knob_cap = "red", button = "solid", combo = "minimal" }
+  local o = W.defaulted({ bipolar = true }, "knob")
+  check("default: a knob takes the style and colour", o.style .. "|" .. tostring(o.cap == W.cap_col("red")), "minimal|true")
+  local own = { style = "skirted" }
+  check("default: its own style wins", W.defaulted(own, "knob"), own)
+  check("default: a button", W.defaulted({}, "button").style, "solid")
+  C.DEF = { knob_arc = true }
+  check("default: a value arc, centred on a centred knob",
+    W.defaulted({}, "knob").arc .. "|" .. W.defaulted({ bipolar = true }, "knob").arc, "pos|mid")
+  check("default: a knob's own arc wins", W.defaulted({ arc = "neg" }, "knob").arc, "neg")
+  C.DEF = {}
+  reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState = g, s, d
+  reaper.time_precise = tp
+  C.set_cell_w(C.CELL_W_DEFAULT)
+  C.EFFECT_3D, C.PANEL_RR, C.POWER, C.TRACK_COL, C.BG, C.ACCENT = true, 3.0, "icon", "stripe", nil, nil
+  C.BASE_HUE, C.TINT = 219, 1.0
+  C.build_palette()
+end
+
+-- ---------------------------------------------------------------------
+-- the canvas offer: what kind of canvas a plugin looks like
+-- ---------------------------------------------------------------------
+do
+  local CS = require("TS_CV_CanvasSetup")
+  local function d(name, names)
+    local k, r = CS.detect(name, names)
+    return tostring(k) .. (r and (":" .. table.concat(r, ",")) or "")
+  end
+  check("offer: a compressor by its controls", d("VST3: Thing (Acme)", { "Input", "Threshold", "Ratio", "Attack", "Release", "Output" }),
+    "comp:Threshold,Ratio,Attack,Release")
+  check("offer: a gate by its name", d("VST3: Fancy Gate (Acme)", { "Threshold", "Range", "Hold", "Release" }),
+    "gate:Threshold,Range,Hold,Release")
+  check("offer: a limiter by its controls", d("VST3: Wall (Acme)", { "Gain", "Ceiling", "Release" }), "limit:Input,Ceiling,Release")
+  check("offer: a saturator by its controls", d("VST3: Thing (Acme)", { "Drive", "Tone", "Mix" }), "sat:Drive,Tone,Mix")
+  check("offer: a delay by its controls", d("VST3: Thing (Acme)", { "Time", "Feedback", "Mix" }), "delay:Time,Feedback,Mix")
+  check("offer: nothing it knows", d("VST3: Thing (Acme)", { "Volume", "Pan", "Width" }), "nil")
+  check("offer: a name alone with no controls for it isn't enough", d("VST3: Big Comp (Acme)", { "Volume", "Pan" }) ~= "comp", true)
+  check("offer: kind words", CS.KIND_WORD.eq .. "/" .. CS.KIND_WORD.limit, "EQ/limiter")
+end
+
+-- ---------------------------------------------------------------------
+-- plugin pictures on a bar and in its menus: every mode draws
+-- ---------------------------------------------------------------------
+do
+  local CONST = { Col = 1, MouseButton = 1, StyleVar = 1, HoveredFlags = 1, SelectableFlags = 1, WindowFlags = 1,
+    DrawFlags = 1, Key = 1, Mod = 1, MouseCursor = 1, TableFlags = 1, ColorEditFlags = 1, Cond = 1, ChildFlags = 1,
+    PopupFlags = 1, ComboFlags = 1, TabItemFlags = 1, SliderFlags = 1, FocusedFlags = 1, InputTextFlags = 1,
+    ButtonFlags = 1, TreeNodeFlags = 1 }
+  local seen = {}
+  local IG = setmetatable({
+    CalcTextSize = function(_, t) return #tostring(t) * 7, 13 end,
+    GetTextLineHeight = function() return 13 end,
+    GetCursorScreenPos = function() return 0, 0 end,
+    GetItemRectMin = function() return 0, 0 end,
+    GetItemRectMax = function() return 100, 20 end,
+    GetMouseDelta = function() return 0, 0 end,
+    GetWindowDrawList = function() return "dl" end,
+    GetContentRegionAvail = function() return 300, 300 end,
+  }, { __index = function(_, k)
+    local pre = k:match("^(%a+)_")
+    if pre and CONST[pre] and not k:match("^DrawList_") then return 0 end
+    return function()
+      seen[k] = (seen[k] or 0) + 1
+      if k:match("^Is") or k:match("^Begin") or k == "Selectable" or k == "MenuItem"
+          or k:match("Button$") then return false end
+      return 0, 0
+    end
+  end })
+  local W = require("TS_CV_Widgets")
+  local TBx = require("TS_CV_Toolbar")
+  local FB = require("TS_CV_FXButtons")
+  local real_thumbs = W.thumbs
+  local pics = 0
+  W.thumbs = function()
+    return { aspect = function() return 2.2 end, draw = function() pics = pics + 1; return true end,
+             key_of_ident = function(i) return i end, preview = function() return true end }
+  end
+  local real_reaper = reaper
+  reaper = setmetatable({}, { __index = function(_, k)
+    local v = real_reaper[k]
+    if v ~= nil then return v end
+    return function() return nil end
+  end })
+  local ok, err = pcall(function()
+    W.attach(IG); TBx.attach(IG)
+    local bar = TBx.make("smoke_pics", "sp", {})
+    bar.items = { { cmd = "40001", icon = "", label = "Add" }, { cmd = FB.fx_cmd("VST3: Pro-Q 3 (FabFilter)"), icon = "", label = "Q" },
+                  { menu = true, icon = "", label = "M", items = { { cmd = FB.fx_cmd("VST3: Pro-L 2 (FabFilter)"), icon = "", label = "L" },
+                    { cmd = FB.fx_cmd("VST3: Pro-C 2 (FabFilter)"), icon = "", label = "C" }, { cmd = "40001", icon = "", label = "A" } } } }
+    bar.sync = function() end; bar.poll = function() end
+    for _, pm in ipairs({ "", "P", "T", "I" }) do
+      bar.pmode = pm
+      bar.draw(nil, 0, 0, 600, 90, true, "down")
+      bar.draw_v(nil, 0, 0, 150, 400, "right")
+    end
+    for _, mm in ipairs({ "", "1", "2", "3" }) do
+      bar.mmode = mm
+      bar.menu_entries(nil, bar.items[3].items, "m")
+    end
+    -- a knob with its lamp, lit and dark
+    W.knob(nil, "##lk1", "Threshold", 0.5, "-18 dB", { lamp = 0x3fbf5fff })
+    W.knob(nil, "##lk2", "Threshold", 0.5, "-18 dB", { lamp = false, size = "small" })
+    bar.pmode = "T"
+    check("pictures: a row is a tile tall", bar.row_h(28), 73)
+    bar.pmode = "P"
+    check("pictures: other modes keep the button height", bar.row_h(28), 28)
+  end)
+  W.thumbs = real_thumbs
+  reaper = real_reaper
+  check("pictures: every bar and menu mode draws", ok and true or err, true)
+  check("pictures: drawn", pics > 0, true)
 end
 
 -- ---------------------------------------------------------------------

@@ -19,9 +19,10 @@ C.WIN_TITLE = "ChannelView"
 -- A control occupies one CELL. Panels are a fixed HEIGHT (they fill the
 -- window) and grow in COLUMNS: controls flow top-to-bottom down a column,
 -- then wrap into a new column to the right, which widens the panel.
-C.CELL_W      = 50        -- width of one control cell (View > Control spacing)
--- View > Control spacing moves the cell width between these (one setting
--- for ChannelView, its TCP window and the web page); the cell's height,
+C.CELL_W      = 50        -- width of one control cell (Visual Options ▸ Sizes)
+-- Visual Options ▸ Sizes moves the cell width between these (each of
+-- ChannelView, the rack, its TCP window and the web page, or ChannelView's
+-- for those following it); the cell's height,
 -- the knobs and the type stay as they are, only the air between columns
 -- changes. Below the minimum a knob's scale ticks would touch.
 C.CELL_W_DEFAULT, C.CELL_W_MIN, C.CELL_W_MAX = 50, 46, 64
@@ -120,6 +121,9 @@ C.DRAG_SENS       = 0.006 -- normalised units per pixel of vertical drag
 C.FINE_MULT       = 0.15  -- multiplier while Shift is held
 C.WHEEL_STEP      = 0.02  -- normalised units per mouse-wheel notch
 C.SHOW_VALUES     = true  -- value text under each knob (else hover only)
+-- a plugin with no layout of its own: a strip offering the canvas its
+-- controls look like (TS_CV_CanvasSetup.offer; View menu)
+C.CANVAS_OFFERS   = not (reaper and reaper.GetExtState and reaper.GetExtState("TS_ChannelView", "canvas_offers") == "0")
 C.WHEEL_CONTROLS  = true  -- the mouse wheel turns the control under it (View menu;
                           -- off, it only ever scrolls)
 C.AUTO_DEFAULT_N  = 8     -- controls auto-shown for an unmapped plugin
@@ -268,12 +272,13 @@ C.GR_RANGE_RELAX = 3.0    -- seconds before the scale steps back down
 -- Fader and meter split the panel's inner width in half each, so the two
 -- read as a balanced pair rather than a fader with an afterthought beside
 -- it. FADER_W is just the moving part; its half is wider than that.
-C.CHANNEL_W   = 112       -- expanded width of the Channel panel (View > Strip width)
+C.CHANNEL_W   = 112       -- expanded width of the Channel panel (Visual Options ▸ Faders & strips, Default)
                           -- (fader and meter take half each, and the
                           --  meter's scale needs room for its numbers)
 -- The width of an expanded channel strip: the pinned Channel panel, every
--- mixer strip, and the track name buttons, which share it. Set from View >
--- Strip width; the fader and meter scale with it (TS_CV_Channel.draw_body),
+-- mixer strip, and the track name buttons, which share it (a group can
+-- have its own: TO.track_width). Set in Visual Options ▸ Faders & strips;
+-- the fader and meter scale with it (TS_CV_Channel.draw_body),
 -- so it can go narrower than the default as well as wider. Collapsed
 -- strips keep their own width.
 C.CHANNEL_W_DEFAULT, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX = 112, 72, 240
@@ -509,6 +514,8 @@ function C.spacer_w()
   spacer_now = math.max(1, math.min(64, math.floor(v or 16)))
   return spacer_now
 end
+-- read it again next time (Visual Options has just set it)
+function C.spacer_refresh() spacer_now = nil end
 
 -- ---------------------------------------------------------------------
 -- The TCP (TS_ChannelView_TCP.lua)
@@ -520,12 +527,11 @@ C.TCP_EXT_SECT   = "TS_ChannelView_TCP"   -- its own settings; colour stays
                                           -- in C.EXT_SECT, shared with CV
 C.TCP_WIN_TITLE  = "ChannelView TCP"
 -- The track-colour mark: the TCP's strip down the left of a row, and the
--- stripe along the bottom of ChannelView's name buttons. One number, so
--- the two stay the same thickness.
-C.COLOUR_STRIPE  = 7
-C.TCP_STRIP_W    = C.COLOUR_STRIPE
-C.TCP_INDENT     = 8      -- per folder level, the way REAPER indents
-C.TCP_INDENT_FOLDERS = true  -- indent at all (settings menu)
+-- stripe along ChannelView's name buttons.
+C.COLOUR_STRIPE  = 3
+C.TCP_STRIP_W    = 7
+C.TCP_INDENT     = 8      -- per folder level, the way REAPER indents (Visual Options)
+C.TCP_INDENT_FOLDERS = true  -- indent at all
 C.TCP_PAD        = 4      -- inner padding of a row
 C.TCP_METER_H    = 12     -- the horizontal meter under the name
 C.TCP_METER_THIN = 4      -- ...and the line it shrinks to on short rows
@@ -598,6 +604,52 @@ C.ROW_ALIGN = "left"
 C.BASE_HUE  = 219      -- degrees, 0-360
 C.TINT      = 1.0      -- how far the greys lean toward the base hue
 C.ALERT_HUE = 17       -- bypass / warning hue, independent of the base
+
+-- VISUAL OPTIONS (TS_CV_VisualOptions sets these; the defaults are the
+-- theme's)
+--   BG        the panel colour picked (0xRRGGBBAA), or nil for the theme's
+--             greys; the window, header, fields and text follow it, light
+--             or dark (a light one takes C.LIGHT_LUM)
+--   ACCENT    the accent picked, or nil to follow the hue; the accent
+--             family ("solid") keeps its spacing round the wheel from it
+--   PANEL_RR  a panel's corners
+--   POWER     a panel's bypass switch: "icon" or "lamp"
+--   TRACK_COL a track name button's colour: "stripe" (below), "bar"
+--             (above) or "filled"
+--   HIDE_HEAD, HIDE_FOOT  a panel's header and foot shown only while the
+--             pointer is over it
+C.BG, C.ACCENT = nil, nil
+C.PANEL_RR = 3.0
+C.TCP_RR = 0               -- the TCP window's track panels' corners
+C.POWER, C.TRACK_COL = "icon", "stripe"
+C.HIDE_HEAD, C.HIDE_FOOT = false, false
+C.LIGHT_UI = false
+
+-- Visual Options' defaults (Pro): what a control with no style of its own
+-- draws as. knob/button/combo/fader: a style key, or nil for the plain one;
+-- knob_cap/button_col/fader_cap: a cap or lamp key or #hex, or nil;
+-- knob_look: a knob built from parts, in place of knob; knob_arc: a value
+-- arc round it (centred on a centred knob).
+C.DEF = {}
+
+-- A light background's lightness for the entries that change: the greys
+-- and inks turned round, and the dark backgrounds of bypass, offline and
+-- frozen made light (set for a #c4c4c4 panel). Everything else keeps its
+-- own.
+C.LIGHT_LUM = {
+  win_bg = 0.663, panel_bg = 0.769, panel_border = 0.600, header_bg = 0.722,
+  header_text = 0.080, header_dim = 0.360, label = 0.300, value = 0.080,
+  knob_track = 0.640, knob_body = 0.820, knob_body_hi = 0.870,
+  knob_pointer = 0.120, knob_ring = 0.550, toggle_off = 0.700,
+  ui_field = 0.860, ui_chip = 0.800, ui_chip_hov = 0.760, ui_chip_on = 0.700,
+  ui_edge = 0.580, ui_hi = 0.100, toggle_text = 0.080, strip_bg = 0.700,
+  empty_text = 0.420, header_drag = 0.660, icon = 0.300, icon_hot = 0.050,
+  icon_on = 0.950, fader_cap = 0.250, eq_grid = 0.740, eq_grid_0db = 0.620,
+  eq_preview = 0.450, eq_spectrum = 0.720, meter_ink = 0.250,
+  route_off = 0.620, auto_trim = 0.550,
+  header_bg_byp = 0.640, header_bg_off = 0.640, ui_remove_bg = 0.750,
+  frozen_bg = 0.800, frozen_head = 0.740, frozen_text = 0.300, frozen_line = 0.400,
+}
 
 C.PALETTE = {
   win_bg        = { "tint",    7.7, 0.209, 0.084 },
@@ -759,23 +811,87 @@ C.hsl = hsl
 -- Filled by build_palette: format -> { bg, fg }.
 C.FORMAT_COL = {}
 
--- Rebuilds C.COL in place from C.PALETTE. Call after changing BASE_HUE or
--- TINT. In place matters: other modules hold a reference to C.COL.
+-- 0xRRGGBBAA -> hue in degrees.
+local function hue_of(col)
+  local r = ((col >> 24) & 0xff) / 255
+  local g = ((col >> 16) & 0xff) / 255
+  local b = ((col >> 8) & 0xff) / 255
+  local mx, mn = math.max(r, g, b), math.min(r, g, b)
+  local d = mx - mn
+  if d == 0 then return 0 end
+  local h
+  if mx == r then h = ((g - b) / d) % 6
+  elseif mx == g then h = (b - r) / d + 2
+  else h = (r - g) / d + 4 end
+  return h * 60
+end
+C.hue_of = hue_of
+
+-- 0xRRGGBBAA -> HSL lightness, 0..1.
+function C.lum_of(col)
+  local r = ((col >> 24) & 0xff) / 255
+  local g = ((col >> 16) & 0xff) / 255
+  local b = ((col >> 8) & 0xff) / 255
+  return (math.max(r, g, b) + math.min(r, g, b)) * 0.5
+end
+
+-- The accent's own offset in the palette: the entries at it ARE the
+-- accent, so a picked accent goes there as it is.
+local ACCENT_DH = -14.0
+
+-- Rebuilds C.COL in place from C.PALETTE. Call after changing BASE_HUE,
+-- TINT, BG or ACCENT. In place matters: other modules hold a
+-- reference to C.COL.
 function C.build_palette()
   C.COL = C.COL or {}
+  local picked = C.ACCENT
+  local acc_h = picked and hue_of(picked)
+  -- a picked background: light or dark, and how far its lightness sits
+  -- from the panel's in that table; the surfaces move by as much, the
+  -- inks stay (light ones on dark, dark ones on light)
+  local bg_l = C.BG and C.lum_of(C.BG)
+  C.LIGHT_UI = bg_l ~= nil and bg_l > 0.5
+  local light = C.LIGHT_UI and C.LIGHT_LUM
+  local shift = bg_l and (bg_l - (light and light.panel_bg or C.PALETTE.panel_bg[4])) or 0
+  -- and its colour: the greys take its hue, and its saturation in
+  -- proportion (Tint still scales them; a neutral background, neutral greys)
+  local bg_h, bg_s = nil, 0
+  if C.BG then
+    bg_h = hue_of(C.BG)
+    local r, g, b = ((C.BG >> 24) & 0xff) / 255, ((C.BG >> 16) & 0xff) / 255, ((C.BG >> 8) & 0xff) / 255
+    local mx, mn = math.max(r, g, b), math.min(r, g, b)
+    bg_s = (mx == mn) and 0 or (mx - mn) / (1 - math.abs(mx + mn - 1))
+  end
+  local panel_s = C.PALETTE.panel_bg[3]
   for name, e in pairs(C.PALETTE) do
     local role, dh, sat, lum = e[1], e[2], e[3], e[4]
+    if light and light[name] then lum = light[name] end
+    if shift ~= 0 and role == "tint" and ((light and lum > 0.5) or (not light and lum < 0.4)) then
+      lum = math.max(0, math.min(1, lum + shift))
+    end
     local h, s
     if role == "fixed" then
       h, s = dh, sat
     elseif role == "alert" then
       h, s = C.ALERT_HUE + dh, sat
+    elseif role == "tint" and bg_h then
+      h, s = bg_h, math.min(1, bg_s * (sat / panel_s)) * C.TINT
     elseif role == "tint" then
       h, s = C.BASE_HUE + dh, sat * C.TINT
+    elseif picked then
+      h, s = acc_h + (dh - ACCENT_DH), sat
     else
       h, s = C.BASE_HUE + dh, sat
     end
-    C.COL[name] = hsl(h, s, lum, 0xff)
+    C.COL[name] = (picked and role == "solid" and dh == ACCENT_DH) and picked
+                  or hsl(h, s, lum, 0xff)
+  end
+  if C.BG then C.COL.panel_bg = C.BG end
+  -- a grey accent (black, white) has no hue to space the rest from, so
+  -- the centred fill takes it too
+  if picked then
+    local r, g, b = (picked >> 24) & 0xff, (picked >> 16) & 0xff, (picked >> 8) & 0xff
+    if math.max(r, g, b) - math.min(r, g, b) < 24 then C.COL.knob_fill_bi = picked end
   end
 
   -- Format badges. Saturated enough to tell apart at 30 pixels wide, dark
@@ -919,6 +1035,10 @@ for _, t in ipairs(C.TOGGLE_COLS) do C.TOGGLE_COL[t.key] = t end
 -- saved is drawn as.
 C.KNOB_STYLES = {
   { key = "arc",     label = "Arc",      cap = "accent" },
+  -- the flat ones: an arc with a pointer from the centre in its colour,
+  -- and a shaded body with a thin arc just outside it
+  { key = "minimal", label = "Minimal",  cap = "accent" },
+  { key = "studio",  label = "Studio",   cap = "accent" },
   { key = "skirted", label = "Skirted",  cap = "black" },
   { key = "pointer", label = "Pointer",  cap = "black" },
   { key = "trim",    label = "Trim pot", cap = "grey" },
@@ -975,6 +1095,8 @@ C.BUTTON_STYLES = {
   { key = "lens",    label = "Lit lens" },
   { key = "window",  label = "LED window" },
   { key = "backlit", label = "Backlit" },
+  { key = "minimal", label = "Minimal" },     -- a flat block, no outline
+  { key = "solid",   label = "Solid" },       -- solid lit, a fine edge unlit
 }
 C.BUTTON_STYLE = {}
 for _, b in ipairs(C.BUTTON_STYLES) do C.BUTTON_STYLE[b.key] = b end
@@ -1018,6 +1140,11 @@ C.FINISHES = {
 C.FINISH = {}
 for _, f in ipairs(C.FINISHES) do C.FINISH[f.key] = f end
 
+-- A canvas's own colours while it draws (TS_CV_Panel.with_canvas_cols):
+-- its curve's (the handles and what they set) and its meters' (what's
+-- playing), as 0xRRGGBBAA; nil for the theme's.
+C.CANVAS = {}
+
 C.FADER_STYLES = {
   { key = "flat",    label = "Flat" },
   { key = "console", label = "Console",  cap = "cream" },
@@ -1026,6 +1153,10 @@ C.FADER_STYLES = {
   -- middle when centred) in the cap's colour: made for rows of narrow
   -- faders, a graphic EQ's bands say
   { key = "slim",    label = "Slim" },
+  -- a dot on a line, the line filled up to it in the cap's colour
+  { key = "dot",     label = "Dot" },
+  -- a lit ball in a slot sunk into the panel, the slot filled up to it
+  { key = "ball",    label = "Ball" },
 }
 
 C.PLATE, C.CAP, C.KNOB_STYLE, C.FADER_STYLE = {}, {}, {}, {}

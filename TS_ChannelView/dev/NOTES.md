@@ -694,3 +694,30 @@ TS_CV_Learn.jsfx and TS_CV_Learn.lua share gmem from 0x380000
 (LN.BASE): the probes use blocks from 0x100000 and the Trimmer from
 0x200000. A gain envelope (timing) is at +2000, 9000 points, with the
 input level after it.
+
+## Visual Options: where it keeps things
+
+ExtState section `TS_ChannelView_Visual`: `tab_<cv|rack|tcp|web>` (each
+tab's fields, `key=value;...`), `follow_<tab>`, `presets` (one per line,
+`name<TAB>encoded`) and `rev`, bumped on every change; the other windows
+(separate scripts) poll it twice a second and apply again. ChannelView's
+Hue and Tint stay in the shared TS_Palette section. The TCP window's row
+settings (tint, indent, indent_px, always, chips) are in its own section
+and never followed. Faders & strips are kept in
+TS_CV_TrackOps' ExtState lines, ChannelView's channel_w, REAPER's
+trackgapmax; your presets copy them as g_* fields. Writing trackgapmax
+needs SWS (SNM_SetIntConfigVar).
+
+A control with no style draws as C.DEF (W.defaulted); the web page gets the
+same defaults sent per control (o.st, o.cap, o.lit, o.kl, o.va) and the
+panel settings as layout.vo.
+
+## Lamps
+
+P.lamp: per control, Lamp<n>=gr|gate|off. With none set on a layout (and
+no canvas), the control whose name has "thresh" (or "ceil" for a limiter
+or clipper) of a plugin that reports or measures gain reduction. A gate's
+range is the most it has closed lately, held four seconds. ImGui's hover
+rule matters for anything drawn over controls: an earlier item without
+AllowOverlap keeps the hover, so the canvas offer is drawn before the
+controls and they start under it.

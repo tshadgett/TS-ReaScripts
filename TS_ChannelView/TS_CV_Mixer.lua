@@ -97,8 +97,9 @@ MX.any_icon = false
 -- point of them being the same object. `folded` is true when the track
 -- sits in a folder whose children are collapsed, which draws it
 -- collapsed whatever its own state is.
-function MX.col_width(guid, folded)
-  return CH.width(folded or St.is_collapsed("mx:" .. guid))
+function MX.col_width(guid, folded, track)
+  if folded or St.is_collapsed("mx:" .. guid) then return CH.width(true) end
+  return TO.track_width(track)      -- its group's width, else the strip width
 end
 
 -- ---------------------------------------------------------------------
@@ -307,6 +308,11 @@ local function name_button(ctx, label, col, selected, id, w, t)
   -- One button for the whole slot, icon block included: clicking the
   -- icon is clicking the track.
   local pressed = ImGui.InvisibleButton(ctx, "tsname" .. id, w, full_h)
+  -- drawn on whole pixels: the row scrolls to centre the selected track,
+  -- which can leave it between two, and a stroke there blurs over three
+  local xr = math.floor(x + w)
+  x, y = math.floor(x), math.floor(y)
+  w = xr - x
   local hovered = ImGui.IsItemHovered(ctx)
   local rclick  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
   if t then drag_source(ctx, t) end
@@ -314,8 +320,7 @@ local function name_button(ctx, label, col, selected, id, w, t)
   if MX.drag then pressed = false end
 
   -- A neutral button with the track's colour as a stripe along its
-  -- bottom edge -- the same thickness as the TCP's colour strip
-  -- (C.COLOUR_STRIPE), so the two read as the same mark. With an icon
+  -- bottom edge (C.COLOUR_STRIPE). With an icon
   -- row, the icon sits in the top part on the same neutral fill, and the
   -- stripe runs along the bottom of the whole button. Tracks without an
   -- icon get the same top part, empty, so the row stays one even height.
@@ -330,6 +335,15 @@ local function name_button(ctx, label, col, selected, id, w, t)
   -- track keeps its own fill, so it stays the obvious one)
   local tint = (t and t.track and not selected) and TO.track_tint(t.track) or 0
   if tint > 0 and col then fill = U.tint(fill, col, tint) end
+  -- (Visual Options ▸ Track buttons) Filled: the button is the track's
+  -- colour, a little lighter hovered, the selected one outlined in the
+  -- name's ink; Bar: the colour along the top
+  local studio = C.TRACK_COL == "filled" and col
+  local bar = C.TRACK_COL == "bar"
+  if studio then
+    fill = hovered and U.lighten(col, 0.12) or col
+    sel_ring = C.COL.header_text
+  end
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + full_h, fill, C.STRIP_ROUND)
   if block > 0 and t and t.icon then
     local pad = 4
@@ -338,14 +352,25 @@ local function name_button(ctx, label, col, selected, id, w, t)
   -- One outline round the whole thing, inset by half the stroke: centred
   -- on the bounds it would spill outwards, and the clip rect would eat the
   -- spill on one side only.
-  ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + full_h - o,
-    sel_ring, C.STRIP_ROUND, 0, lw)
+  -- (a bar or a fill: only the selected one outlined)
+  if selected or not (bar or studio) then
+    ImGui.DrawList_AddRect(dl, x + o, y + o, x + w - o, y + full_h - o,
+      sel_ring, C.STRIP_ROUND, 0, lw)
+  end
   -- The stripe goes on AFTER the outline and out to the button's edge, so
   -- it covers the border along the bottom rather than sitting inside it
-  -- with a pixel of fill showing between the two.
-  ImGui.DrawList_AddRectFilled(dl, x, y + full_h - sh, x + w, y + full_h,
-    col or C.COL.panel_border, C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersBottom)
-  y = y + block                         -- the name part is laid out below
+  -- with a pixel of fill showing between the two. Bar above puts it
+  -- along the top, over the name.
+  if studio then
+    sh = 0                              -- no stripe: it's all colour
+  elseif bar then
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + sh,
+      col or C.COL.panel_border, C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersTop)
+  else
+    ImGui.DrawList_AddRectFilled(dl, x, y + full_h - sh, x + w, y + full_h,
+      col or C.COL.panel_border, C.STRIP_ROUND, ImGui.DrawFlags_RoundCornersBottom)
+  end
+  y = y + block + (bar and sh or 0)   -- the name part is laid out below
   local text_h = h - sh                 -- what the stripe leaves for the name
 
   -- Light ink on the neutral fill; dark once a strong tint of a pale
@@ -508,7 +533,7 @@ end
 -- -- which may be the same track, or nil, independently.
 local function column(ctx, t, avail_h, cur_track, lift)
   local collapsed = t.folded or St.is_collapsed("mx:" .. t.guid)
-  local w = MX.col_width(t.guid, t.folded)
+  local w = MX.col_width(t.guid, t.folded, t.track)
   -- Selected as REAPER sees it, so a multi-selection lights every strip
   -- in it -- with the track channel view is showing always lit, even on
   -- the master, which REAPER does not always report as selected.
@@ -532,7 +557,9 @@ local function column(ctx, t, avail_h, cur_track, lift)
   if ok then
     local dl = ImGui.GetWindowDrawList(ctx)
     local x, y = ImGui.GetWindowPos(ctx)
-    local ww = w
+    -- on whole pixels (a scrolled row can leave it between two)
+    local ww = math.floor(x + w) - math.floor(x)
+    x, y = math.floor(x), math.floor(y)
     -- Only for dimming the header -- selection is decided by item
     -- hover below, deliberately.
     local over = ImGui.IsWindowHovered(ctx)
@@ -824,7 +851,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
           rx, by + 2, rx, by + inner_h - 2, C.COL.panel_border, 1.0)
       end
 
-      local w = MX.col_width(t.guid, t.folded)
+      local w = MX.col_width(t.guid, t.folded, t.track)
       rects[#rects + 1] = { x = (ImGui.GetCursorScreenPos(ctx)), w = w, num = t.num,
                            track = t.track, name = track_label(t) }
 
