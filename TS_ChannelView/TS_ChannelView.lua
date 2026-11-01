@@ -1,8 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.8.1
+-- @version 3.8.2
 -- @changelog
---  Moves with ChannelView Pro 3.8.1. See the CHANGELOG.
+--  Fonts for the panels' text, headers and action bars; a clear bypassed
+--  panel; light tooltips on a light panel; two crashes fixed. See the
+--  CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -3699,6 +3701,31 @@ require("TS_CV_GridEditor").hooks = (function()
 end)()
 end
 
+-- A VU meter's settings changed (its switch or its menu): saved with the
+-- layout. Showing levels or a reduction the plugin doesn't report needs
+-- the TS_TrackProbe pair: offered when the track hasn't one.
+function app.vu_set(fx, idx, changes)
+  local l, key = materialise(fx)
+  local c = l.controls and l.controls[idx]
+  if not (c and c.type == "vu") then return end
+  c.vu = c.vu or M.vu_default()
+  for k, v in pairs(changes) do c.vu[k] = v end
+  M.set(key, l); M.save()
+  if changes.src then
+    local needs = changes.src ~= "gr" or not T.reports_gr_natively(app.track, fx.addr, fx.guid)
+    if needs then
+      -- laid now, not on the track's next turn
+      TP.invalidate()
+      TP.sync(app.track)
+      if TP.status(app.track, fx.guid) == "no_probes" and reaper.MB("It's measured by a TS_TrackProbe pair,\n" ..
+          "which this track doesn't have.\n\nAdd them now?", "ChannelView", 4) == 6 then
+        local ok, why = TP.insert_probes(app.track)
+        if not ok then reaper.MB(why, "ChannelView", 0) end
+      end
+    end
+  end
+end
+
 local function control_menu()
   if not ImGui.BeginPopup(ctx, "ctlmenu") then return end
   local cm = app.ctl_menu
@@ -3726,6 +3753,46 @@ local function control_menu()
       end
       ImGui.Separator(ctx)
       if not ED.PRO and ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then E.open(app.track, fx, key, layout, idx) end
+      if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+        require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
+          { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
+          rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
+      end
+    end
+    plugin_sub(fx)
+    ImGui.EndPopup(ctx)
+    return
+  end
+
+  -- a VU meter: what it shows, its look, where 0 VU sits, its peak lamp
+  if c.type == "vu" then
+    local vu = c.vu or M.vu_default()
+    ImGui.TextDisabled(ctx, "VU meter  \u{00B7}  " .. U.truncate(U.fx_label(fx), 20))
+    ImGui.Separator(ctx)
+    for _, o in ipairs({ { "in", "Shows: In" }, { "out", "Shows: Out" }, { "gr", "Shows: GR" } }) do
+      if ImGui.MenuItem(ctx, o[2], nil, vu.src == o[1]) then app.vu_set(fx, idx, { src = o[1] }) end
+    end
+    ImGui.Separator(ctx)
+    if ImGui.BeginMenu(ctx, "Look") then
+      for _, o in ipairs({ { "classic", "Classic" }, { "dark", "Dark" }, { "bar", "Bar" } }) do
+        if ImGui.MenuItem(ctx, o[2], nil, vu.look == o[1]) then app.vu_set(fx, idx, { look = o[1] }) end
+      end
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.BeginMenu(ctx, "0 VU =") then
+      for _, r in ipairs(M.VU_REFS) do
+        if ImGui.MenuItem(ctx, r .. " dBFS", nil, vu.ref == r) then app.vu_set(fx, idx, { ref = r }) end
+      end
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.MenuItem(ctx, "Peak lamp", nil, vu.peak ~= false) then app.vu_set(fx, idx, { peak = vu.peak == false }) end
+    if not M.locked(layout) then
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Remove from panel") then
+        local l = materialise(fx); M.save()
+        table.remove(l.controls, idx)
+        M.set(key, l); M.save()
+      end
       if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
         require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
           { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
@@ -5135,6 +5202,10 @@ local function panel_requests(i, fx, layout, key, req)
         M.set(key, l); M.save()
       end
     end
+    if req.vu_src then
+      -- a VU meter's switch: In, Out or GR
+      app.vu_set(fx, req.vu_src.idx, { src = req.vu_src.src })
+    end
     if req.page_cap then
       -- a page tab's colour, from its right-click picker: previewed as
       -- you hover (not saved to disk until you pick)
@@ -6080,8 +6151,10 @@ local function frame()
   end
 
   ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.win_bg)
-  -- the look of every panel, dialogue and menu drawn this frame
+  -- the look of every panel, dialogue and menu drawn this frame, in its
+  -- text font (Visual Options > Text)
   ST.push(ctx)
+  local text_font = W.push_font(ctx, "text")
   -- Read BEFORE our own ItemSpacing goes on the stack: what the header
   -- arithmetic wants is the spacing Track Analyser gets, which is the
   -- default. There is no GetStyleVar in this build, but the difference
@@ -6532,6 +6605,7 @@ local function frame()
 
   -- The style pushes happened before Begin, so they unwind either way.
   ImGui.PopStyleVar(ctx, 1)
+  W.pop_font(ctx, text_font)
   ST.pop(ctx)
   ImGui.PopStyleColor(ctx)
 
@@ -6591,11 +6665,25 @@ end
 -- traceback naming every frame on the way down, the layouts are saved,
 -- and the loop stops rather than throwing the same error sixty times a
 -- second.
+--
+-- ReaImGui can't start a frame while a screen reports no scale (macOS,
+-- with the display asleep, say): the first call of the frame fails on
+-- new_dpi_scale. Nothing has been drawn then, so the loop waits half a
+-- second and tries again instead of stopping.
 function safe_frame()
+  if app.dpi_wait and reaper.time_precise() - app.dpi_wait < 0.5 then
+    reaper.defer(safe_frame)
+    return
+  end
   local ok, err = xpcall(timed_frame, function(e)
     return debug.traceback(tostring(e), 2)
   end)
-  if ok then return end
+  if ok then app.dpi_wait = nil return end
+  if tostring(err):find("new_dpi_scale", 1, true) then
+    app.dpi_wait = reaper.time_precise()
+    reaper.defer(safe_frame)
+    return
+  end
   M.save(); SC.save()
   local report = "\n--- ChannelView stopped on an error -------------------------\n" ..
     tostring(err) ..

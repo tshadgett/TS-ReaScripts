@@ -28,7 +28,7 @@ and ReaEQ's and ReaComp's), knob and button styles and colours, faceplates,
 finishes, sections and backgrounds, most of Visual Options (the panel
 colour and accent, default control styles, corners, the 3D effect's
 lighting and shadows, presets), the plugin's own colours, vendor looks,
-plugin pictures on action bars, more than one layout per plugin and
+plugin pictures on action bars, VU meters, more than one layout per plugin and
 switching between them, the offer of a canvas for a new plugin, Show when
 rules and virtual controls, the TS_CV Trimmer, the gain-reduction trace,
 the patch bay (in the mixer and the TCP window) and comparing two plugins.
@@ -445,6 +445,9 @@ outline would have nothing to stand against.
   REAPER's FX chain. ChannelView asks first; Undo puts it back.
 * **Shift+click a panel's name** to bypass the plugin, or bring it back,
   as in REAPER's mixer.
+* **A bypassed plugin's panel** is darkened with **BYPASSED** across it,
+  and its controls are locked until you switch it back on (its header and
+  power button still work). The web page shows it the same way.
 * **Parallel FX and containers.** A bracket over the panels marks what runs
   together: a parallel group (marked `||`) and each FX container (marked
   with a small square, in a colour of its own). Panels only drop as far as
@@ -1031,8 +1034,8 @@ the grid editor, a window of its own. A layout that isn't a grid yet
 becomes one as it opens, arranged as it was (**Undo** puts it back).
 
 - **On the left**, the plugin's parameters (find one by name) and what
-  else a layout can hold: a line, a section, text, an EQ curve, a virtual
-  knob, button or selector. Drag any of them onto the grid, or double-click a parameter to
+  else a layout can hold: a line, a section, text, an EQ curve, a VU
+  meter, a virtual knob, button or selector. Drag any of them onto the grid, or double-click a parameter to
   put it where it first fits. With **Learn** on, touching a control in
   the plugin's own window puts it on the panel. A parameter already on the
   panel is greyed: click it to select it there, drag it to move it.
@@ -1108,6 +1111,15 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   canvas beside its controls, and can have several (each with the same
   bands). It needs a layout with an EQ canvas (*New layout ▸ With a
   canvas ▸ EQ*); its *Set up the EQ bands…* opens the setup.
+- **VU meter** shows the plugin's input or output level, or its gain
+  reduction, picked on the **IN · OUT · GR** switch under it. In and Out
+  move as a VU does, with 0 VU at -18 dBFS (or -24 to -12); GR runs
+  across the whole scale, 0 at the far right. Looks: *Classic* (a cream
+  face), *Dark* (black, an amber needle) or *Bar*. A peak lamp lights at
+  -1 dBFS. In and Out are measured by the TS_TrackProbe pair, as is GR for
+  a plugin that doesn't report it: choosing them offers to add the pair.
+  Set it on the right, or right-click it on the panel. On the web page it
+  shows as a gap.
 - **Canvas colours.** With nothing selected, a canvas layout has its own
   colours: the curve (the threshold and their handles), the fill under it
   (the curve's until you set it), the highlight (a compressor's input
@@ -1575,6 +1587,12 @@ right-click ▸ *Group looks…*.
   and background tint (folder parents, VCA leaders, FX returns and the
   Default), and REAPER's spacer size (needs SWS). They describe tracks,
   not a window, so every tab shares them.
+- **Text:** the font for the panels' text, for their headers, and for the
+  action bars, each with its size and Bold, Italic and Underline. *Default*
+  is ReaImGui's own; headers and action bars can follow the text. Pick a
+  font from the list, *sans-serif*, *serif* or *monospace*, or type any
+  installed font's name under *Other…*. A larger header font makes the
+  header taller; control cells keep their size. Presets keep the fonts.
 - **Sizes:** control spacing.
 - **Depth (Pro):** the 3D effect, Lighting and Shadows.
 - **The TCP window's tab** has its rows' own settings too: corner rounding
@@ -1927,6 +1945,7 @@ them up the first time ChannelView shows it.
 | `TS_CV_Finish.lua`, `textures/` | faceplate, section and background finishes, and their texture tiles (copied to `reaper_www_root/` for the web page) (Pro) |
 | `TS_CV_Switches.lua` | the switch styles for toggles (Pro) |
 | `TS_CV_Light.lua` | the one light and the shadows (Pro) |
+| `TS_CV_VU.lua` | the VU meter a layout can hold (Pro) |
 | `TS_CV_KnobParts.lua` | knobs drawn from parts, for the recipes and your own looks |
 | `TS_CV_KnobEditor.lua` | the *Knob look* window (Pro) |
 | `TS_CV_Recipes.lua` | your knob recipes (Pro) |

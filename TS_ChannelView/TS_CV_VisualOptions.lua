@@ -14,6 +14,8 @@
     Panels         corner rounding, the power switch, auto-hiding the
                    header and foot (Pro)
     Track buttons  the track's colour on its name button (Pro); icons
+    Text           the panels' text, their headers and the toolbars: a
+                   font, size, bold, italic, underline each
     Sizes          control spacing
     Depth          3D effect, Lighting, Shadows (Pro)
 
@@ -84,6 +86,23 @@ local FIELDS = {
   { "trackcol",   "stripe", "str",  true },
   { "icons",      false,    "bool", true },
   { "cell_w",     C.CELL_W_DEFAULT, "num", true },
+  -- Text: t_ the panels' text, h_ their headers, b_ the toolbars; a font
+  -- nil is ReaImGui's own (t_) or the text's (h_, b_)
+  { "t_font",     nil,      "str",  true },
+  { "t_size",     13,       "num",  true },
+  { "t_b",        false,    "bool", true },
+  { "t_i",        false,    "bool", true },
+  { "t_u",        false,    "bool", true },
+  { "h_font",     nil,      "str",  true },
+  { "h_size",     13,       "num",  true },
+  { "h_b",        false,    "bool", true },
+  { "h_i",        false,    "bool", true },
+  { "h_u",        false,    "bool", true },
+  { "b_font",     nil,      "str",  true },
+  { "b_size",     13,       "num",  true },
+  { "b_b",        false,    "bool", true },
+  { "b_i",        false,    "bool", true },
+  { "b_u",        false,    "bool", true },
   { "d3",         true,     "bool", true },
   { "light",      100,      "num",  true },
   { "shadow",     100,      "num",  true },
@@ -98,6 +117,8 @@ local FIELDS = {
 }
 local FIELD = {}
 for _, f in ipairs(FIELDS) do FIELD[f[1]] = f end
+-- whether a setting is kept in a preset (a tab's own)
+function VO.field_in_preset(k) return FIELD[k] ~= nil and FIELD[k][4] == true end
 
 VO.BUILTIN = {
   { name = "Standard", s = {} },
@@ -304,12 +325,35 @@ function VO.apply(tab)
   C.TRACK_ICONS = val(s, "icons")
   C.TCP_ICONS   = C.TRACK_ICONS
   C.set_cell_w(val(s, "cell_w"))
+  VO.apply_fonts(s)
   C.EFFECT_3D = pro and val(s, "d3") or false
   C.LIGHT  = math.max(0, math.min(C.LIGHT_MAX, val(s, "light")))
   C.SHADOW = math.max(0, math.min(C.SHADOW_MAX, val(s, "shadow")))
   KP.LIGHT = C.LIGHT / 100
   ED.light().STRENGTH = C.SHADOW / 100
   C.build_palette()
+end
+
+-- Visual Options > Text into C.FONTS (TS_CV_Widgets W.push_font): each
+-- of text, head and bar { name, size, b, i, u, key }, or nil for ReaImGui's
+-- own font at its own size. A taller header font makes the header taller.
+VO.SIZE_DEFAULT = 13
+VO.SIZES = { t = { 11, 14 }, h = { 11, 18 }, b = { 11, 15 } }
+function VO.apply_fonts(s)
+  local function one(p, name)
+    local lim = VO.SIZES[p]
+    local size = math.max(lim[1], math.min(lim[2], math.floor(val(s, p .. "_size") + 0.5)))
+    local f = { name = name, size = size, b = val(s, p .. "_b"), i = val(s, p .. "_i"), u = val(s, p .. "_u") }
+    if not f.name and size == VO.SIZE_DEFAULT and not f.b and not f.i and not f.u then return nil end
+    f.key = ("%s|%d|%s%s"):format(f.name or "", size, f.b and "b" or "", f.i and "i" or "")
+    return f
+  end
+  C.FONTS = {
+    text = one("t", s.t_font),
+    head = one("h", s.h_font or s.t_font),
+    bar  = one("b", s.b_font or s.t_font),
+  }
+  C.HEADER_H = math.max(20, (C.FONTS.head and C.FONTS.head.size or VO.SIZE_DEFAULT) + 7)
 end
 
 -- ---------------------------------------------------------------------
@@ -443,6 +487,7 @@ VO.PAGES = {
   { key = "panels",   label = "Panels" },
   { key = "tracks",   label = "Track buttons" },
   { key = "faders",   label = "Faders & strips" },
+  { key = "text",     label = "Text" },
   { key = "sizes",    label = "Sizes" },
   { key = "depth",    label = "Depth" },
 }
@@ -882,6 +927,67 @@ local function page_faders(ctx)
   local _ = now
 end
 
+-- the fonts offered by name (any other: Other...)
+local OS = (reaper.GetOS and reaper.GetOS() or ""):lower()
+local FONT_LIST = (OS:find("osx") or OS:find("mac"))
+  and { "Helvetica Neue", "Arial", "Avenir Next", "Futura", "Gill Sans", "Menlo" }
+  or { "Segoe UI", "Arial", "Verdana", "Tahoma", "Calibri", "Consolas" }
+local GENERIC = { "sans-serif", "serif", "monospace" }
+local other_name = {}     -- section -> the name being typed in Other...
+local function font_row(ctx, tab, s, p, first)
+  row(ctx, "Font")
+  local cur = s[p .. "_font"]
+  ImGui.SetNextItemWidth(ctx, 200)
+  if ImGui.BeginCombo(ctx, "##vo_ff" .. p, cur or first) then
+    if ImGui.Selectable(ctx, first, cur == nil) then set(tab, p .. "_font", nil); other_name[p] = nil end
+    ImGui.Separator(ctx)
+    for _, n in ipairs(FONT_LIST) do
+      if ImGui.Selectable(ctx, n, cur == n) then set(tab, p .. "_font", n); other_name[p] = nil end
+    end
+    ImGui.Separator(ctx)
+    for _, n in ipairs(GENERIC) do
+      if ImGui.Selectable(ctx, n, cur == n) then set(tab, p .. "_font", n); other_name[p] = nil end
+    end
+    ImGui.Separator(ctx)
+    if ImGui.Selectable(ctx, "Other\u{2026}", false) then other_name[p] = cur or "" end
+    ImGui.EndCombo(ctx)
+  end
+  if other_name[p] then
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 160)
+    local _, v = ImGui.InputTextWithHint(ctx, "##vo_fo" .. p, "Font name", other_name[p])
+    other_name[p] = v
+    if ImGui.IsItemDeactivatedAfterEdit(ctx) then
+      local n = v:match("^%s*(.-)%s*$")
+      set(tab, p .. "_font", n ~= "" and n or nil)
+      other_name[p] = nil
+    end
+  end
+  row(ctx, "Size")
+  ImGui.SetNextItemWidth(ctx, 200)
+  local lim = VO.SIZES[p]
+  local ch, v = ST.slider_int(ctx, "##vo_fz" .. p, math.floor(val(s, p .. "_size")), lim[1], lim[2], "%d px")
+  if ch then set(tab, p .. "_size", v) end
+  row(ctx, "Style")
+  local bch, bv = ST.checkbox(ctx, "Bold##vo_fb" .. p, val(s, p .. "_b"))
+  if bch then set(tab, p .. "_b", bv) end
+  ImGui.SameLine(ctx)
+  local ich, iv = ST.checkbox(ctx, "Italic##vo_fi" .. p, val(s, p .. "_i"))
+  if ich then set(tab, p .. "_i", iv) end
+  ImGui.SameLine(ctx)
+  local uch, uv = ST.checkbox(ctx, "Underline##vo_fu" .. p, val(s, p .. "_u"))
+  if uch then set(tab, p .. "_u", uv) end
+end
+
+local function page_text(ctx, tab, s)
+  section(ctx, "Text")
+  font_row(ctx, tab, s, "t", "Default")
+  section(ctx, "Headers")
+  font_row(ctx, tab, s, "h", "Same as text")
+  section(ctx, "Toolbars")
+  font_row(ctx, tab, s, "b", "Same as text")
+end
+
 local function page_sizes(ctx, tab, s)
   section(ctx, "Sizes")
   row(ctx, "Control spacing")
@@ -912,7 +1018,7 @@ local function page_depth(ctx, tab, s)
 end
 
 local PAGE_FN = { colour = page_colour, controls = page_controls, panels = page_panels,
-                  tracks = page_tracks, sizes = page_sizes, depth = page_depth }
+                  tracks = page_tracks, text = page_text, sizes = page_sizes, depth = page_depth }
 
 -- the preset bar: previous, the list, next, and + (save, rename, delete)
 local naming = nil          -- { mode = "save"|"rename", name, old }
@@ -1024,7 +1130,15 @@ local function draw_preview(ctx, tab)
   else
     W.ICONS.power(dl, x + 5, y + 4, 14, win.pw and C.COL.icon or C.COL.header_dim)
   end
-  ImGui.DrawList_AddText(dl, x + 22, y + 4, C.COL.header_text, "Compressor")
+  do
+    local hf = W.push_font(ctx, "head")
+    local tw, th = ImGui.CalcTextSize(ctx, "Compressor")
+    local ty = y + (22 - th) * 0.5
+    ImGui.DrawList_AddText(dl, x + 22, ty, C.COL.header_text, "Compressor")
+    if W.underlined("head") then W.underline(dl, x + 22, ty, tw, th, C.COL.header_text) end
+    W.pop_font(ctx, hf)
+  end
+  local text_font = W.push_font(ctx, "text")
   local KD = 34
   for i = 1, 3 do
     local cx = x + 36 + (i - 1) * 68
@@ -1038,7 +1152,7 @@ local function draw_preview(ctx, tab)
       if wh ~= 0 then win.kv[i] = math.max(0, math.min(1, win.kv[i] + wh * 0.02)); W.take_wheel() end
       if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then win.kv[i] = (i == 2) and 0.5 or 0.45 end
     end
-    ImGui.DrawList_AddText(dl, cx - 16, y + 30, C.COL.label, ({ "Thresh", "Gain", "Mix" })[i])
+    W.centred_text(ctx, dl, cx, y + 30, ({ "Thresh", "Gain", "Mix" })[i], C.COL.label, 64)
     W.knob_face(dl, cx, y + 66, KD * 0.5, win.kv[i], { bipolar = (i == 2), ctx = ctx })
   end
   -- buttons
@@ -1089,7 +1203,21 @@ local function draw_preview(ctx, tab)
     ImGui.DrawList_AddText(dl, bx + 5, by + (C.TRACK_COL == "bar" and 5 or 3),
       filled and U.contrast_text(tc) or C.COL.header_text, ({ "4 Vox", "5 BV", "6 Keys" })[i])
   end
-  ImGui.SetCursorScreenPos(ctx, x, y + h + 32)
+  W.pop_font(ctx, text_font)
+  -- a toolbar's buttons
+  local bar_font = W.push_font(ctx, "bar")
+  local bx = x
+  for _, t in ipairs({ "EQ", "Comp", "Reverb" }) do
+    local tw, th = ImGui.CalcTextSize(ctx, t)
+    local bw, by = tw + 14, y + h + 34
+    ImGui.DrawList_AddRectFilled(dl, bx, by, bx + bw, by + 22, C.COL.toggle_off, 2.5)
+    ImGui.DrawList_AddRect(dl, bx, by, bx + bw, by + 22, C.COL.knob_ring, 2.5, 0, 1.0)
+    ImGui.DrawList_AddText(dl, bx + 7, by + (22 - th) * 0.5, C.COL.label, t)
+    if W.underlined("bar") then W.underline(dl, bx + 7, by + (22 - th) * 0.5, tw, th, C.COL.label) end
+    bx = bx + bw + 4
+  end
+  W.pop_font(ctx, bar_font)
+  ImGui.SetCursorScreenPos(ctx, x, y + h + 60)
   ImGui.Dummy(ctx, w, 1)
   if swapped then VO.apply(own_tab) end
 end

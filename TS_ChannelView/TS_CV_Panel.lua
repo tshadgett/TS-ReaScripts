@@ -33,6 +33,7 @@ local RC  = require("TS_CV_ReaComp")
 local CP  = ED.module("TS_CV_CompPanel")
 local RP  = ED.module("TS_CV_RolePanel")
 local MP  = ED.module("TS_CV_MapPanel")
+local VU  = ED.module("TS_CV_VU")
 local CK  = require("TS_CV_ColourPick")
 local TP  = require("TS_CV_Taps")
 local ML  = require("TS_CV_MidiLearn")
@@ -49,7 +50,7 @@ local panel_at = {}
 -- there: TS_CV_Edition)
 function P.attach(imgui)
   ImGui = imgui; PU.attach(imgui)
-  for _, m in ipairs({ EQP, CP, MP, RP, TRP, FN }) do if m then m.attach(imgui) end end
+  for _, m in ipairs({ EQP, CP, MP, RP, TRP, FN, VU }) do if m then m.attach(imgui) end end
 end
 -- Whether `key` is a plugin with a panel of its own (Pro): ReaEQ, ReaComp,
 -- the Trimmer. Without Pro, each is an ordinary plugin's panel.
@@ -82,17 +83,12 @@ P.canvas_of = canvas_of
 function P.footer_h() return C.HIDE_FOOT and 0 or C.FOOTER_H end
 function P.head_h() return C.HIDE_HEAD and 0 or C.HEADER_H end
 P.hover = {}    -- fx GUID -> { head, foot }: the pointer was over where they go, last frame
--- a draw-list splitter per panel's draw list, kept while ReaImGui keeps
--- it (it lets one go that went a frame unused, or whose list went: then a
--- new one)
-local splitters = {}
+-- A draw-list splitter for a panel's draw list: a new one each time
+-- (ReaImGui lets it go after the frame). One kept by the list's address
+-- can meet another window that later has the same address, and a splitter
+-- can't be used over two windows.
 function P.splitter(dl)
-  local sp = splitters[dl]
-  if not (sp and ImGui.ValidatePtr(sp, "ImGui_DrawListSplitter*")) then
-    sp = ImGui.CreateDrawListSplitter(dl)
-    splitters[dl] = sp
-  end
-  return sp
+  return ImGui.CreateDrawListSplitter(dl)
 end
 
 -- ---------------------------------------------------------------------
@@ -204,6 +200,13 @@ function P.cell_size(ctl, half_rows)
   if ctl.type == "xy" then
     local pw, ph = M.pad_dims(ctl)
     return pw * 2, math.min(half_rows, ph * 2), "xy"
+  end
+  -- a VU meter: the room a grid gave it, or else two cells by one and a half
+  if ctl.type == "vu" then
+    local a = ctl.at
+    local w, h = 4, 3
+    if a then w, h = math.max(2, math.ceil(a.w / 2)), math.max(2, math.ceil(a.h / 2)) end
+    return w, math.min(half_rows, h), "vu"
   end
   -- words and an EQ curve: the room a grid gave them, or else a curve
   -- four cells by two, words as wide as they are
@@ -629,7 +632,7 @@ end
 -- Faders, XY pads and dropdowns shown as buttons fill their place; any
 -- other control is its own size in the middle of it (a dropdown takes
 -- the place's width).
-local STRETCH = { vfader = true, hfader = true, xy = true, buttons = true }
+local STRETCH = { vfader = true, hfader = true, xy = true, buttons = true, vu = true }
 local function put(out, ctl, c, r, w, h, dx, dy)
   local x, y = dx + qx(c), dy + qy(r)
   x, y = math.tointeger(x) or x, math.tointeger(y) or y
@@ -1933,7 +1936,9 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     end
   end
 
+  -- the name in the header font (Visual Options > Text)
   local name = U.fx_label(fx)
+  local head_font = W.push_font(ctx, "head")
   local nw, nh = ImGui.CalcTextSize(ctx, name)
   if nw > name_w then
     local k = #name
@@ -1944,8 +1949,10 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
       if nw <= name_w then name = t break end
     end
   end
-  ImGui.DrawList_AddText(dl, name_x, y + (h - nh) * 0.5,
-    enabled and C.COL.header_text or C.COL.header_dim, name)
+  local name_col = enabled and C.COL.header_text or C.COL.header_dim
+  ImGui.DrawList_AddText(dl, name_x, y + (h - nh) * 0.5, name_col, name)
+  if W.underlined("head") then W.underline(dl, name_x, y + (h - nh) * 0.5, math.min(nw, name_w), nh, name_col) end
+  W.pop_font(ctx, head_font)
 
   if wet_w > 0 then
     local wx = wet_x
@@ -2886,6 +2893,21 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     elseif ctl.type == "text" then
       P.draw_text_item(ctx, dl, gx0, gy0, { x = item.x, y = item.y, w = hx(item.w), h = hy(item.h), by = ctl })
 
+    elseif ctl.type == "vu" then
+      -- a VU meter (Pro): its face, and the switch under it
+      local vw, vh = item.pw or item.sw or hx(item.w), item.sh or hy(item.h)
+      local vx, vy = gx0 + (item.sx or item.x), gy0 + (item.sy or item.y)
+      if VU then
+        local act = VU.draw(ctx, dl, vx, vy, vw, vh, track, fx, ctl, id)
+        if act.right_click then req.ctx_control = i end
+        if act.src then req.vu_src = { idx = i, src = act.src } end
+      else
+        ImGui.DrawList_AddRectFilled(dl, vx + 1, vy + 1, vx + vw - 1, vy + vh - 1, 0x00000038, 3.0)
+        local msg = "VU meter (Pro)"
+        local tw, th = ImGui.CalcTextSize(ctx, msg)
+        ImGui.DrawList_AddText(dl, vx + (vw - tw) * 0.5, vy + (vh - th) * 0.5, C.COL.header_dim, msg)
+      end
+
     elseif M.is_virtual(ctl) then
       local act = draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
       if act and act.right_click then req.ctx_control = i end
@@ -3420,6 +3442,21 @@ local function draw_plate(ctx, dl, x, y, w, h, pl, finish, metal)
     W.flake_rect(ctx, dl, x + 1, y + 1, x + w - 1, y + h - 1, U.is_light(pl.bg), x, y)
     W.metal_sheen(dl, x, y, w, h)
   end
+end
+
+-- BYPASSED. Its body behind a veil with BYPASSED across the middle; its
+-- controls are locked (BeginDisabled round them) until it's enabled again.
+function P.bypassed_veil(ctx, dl, x, y, w, h)
+  if w <= 2 or h <= 2 then return end
+  ImGui.DrawList_AddRectFilled(dl, x + 1, y, x + w - 1, y + h, U.with_alpha(C.COL.panel_bg, 0x9e))
+  local msg = "BYPASSED"
+  local tw, th = ImGui.CalcTextSize(ctx, msg)
+  local bw, bh = tw + 16, th + 6
+  if bw > w - 4 or bh > h - 4 then return end
+  local bx, by = math.floor(x + (w - bw) * 0.5), math.floor(y + (h - bh) * 0.5)
+  ImGui.DrawList_AddRectFilled(dl, bx, by, bx + bw, by + bh, U.with_alpha(C.COL.panel_bg, 0xe6), 3.0)
+  ImGui.DrawList_AddRect(dl, bx + 0.5, by + 0.5, bx + bw - 0.5, by + bh - 0.5, P.LAMP.red, 3.0, 0, 1.0)
+  ImGui.DrawList_AddText(dl, bx + 8, by + 3, P.LAMP.red, msg)
 end
 
 -- OFFLINE. An unloaded plugin has no parameters to show: its body says so
@@ -4048,10 +4085,15 @@ fold_pop = function(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate)
   if visible then
     local pdl = ImGui.GetWindowDrawList(ctx)
     local wx, wy = ImGui.GetWindowPos(ctx)
+    -- its controls' tooltip in a window of its own: ChannelView's, painted
+    -- at the end of the frame, would be under this window
+    local outer_tip = W.take_tip()
     local saved = plate and push_plate(plate)
     if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, M.finish(layout, plate), M.metal(layout, plate))
     else ImGui.DrawList_AddRectFilled(pdl, wx, wy, wx + pw, wy + ph, C.COL.panel_bg, C.PANEL_RR) end
     ImGui.DrawList_AddRect(pdl, wx, wy, wx + pw, wy + ph, C.COL.accent, 3.0, 0, 1.0)
+    local locked = not T.get_enabled(track, fx.addr)
+    if locked then ImGui.BeginDisabled(ctx, true) end
     if P.RACK then
       draw_controls(ctx, pdl, wx, wy, pw, ph, track, fx, layout, key, req, nil, nil)
     else
@@ -4063,7 +4105,14 @@ fold_pop = function(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate)
       ImGui.DrawList_PopClipRect(pdl)
       draw_controls(ctx, pdl, wx, wy + C.HEADER_H, pw, ph, track, fx, layout, key, req, nil, nil)
     end
+    if locked then
+      ImGui.EndDisabled(ctx)
+      local top = P.RACK and 0 or C.HEADER_H
+      P.bypassed_veil(ctx, pdl, wx, wy + top, pw, ph - top)
+    end
     if saved then pop_plate(saved) end
+    W.tip_window(ctx, W.take_tip())
+    W.put_tip(outer_tip)
     on_it = ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows | ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
       or ImGui.IsAnyItemActive(ctx)
     -- ReaImGui: End only when Begin returned true
@@ -4184,6 +4233,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       local fh = P.footer_h()
       -- the body: as wide as the panel's own layout, centred on a wider plate
       local bx, bw = x + off, ww - (w - nat_w)
+      local locked = not enabled and not req.offline and not is_drag_source
+      if locked then ImGui.BeginDisabled(ctx, true) end
       if req.offline then
         draw_offline(ctx, dl, bx, y + P.head_h(), bw, wh - P.head_h() - fh, track, fx)
       elseif is_trim then
@@ -4264,6 +4315,10 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         local oh = (ofr and ofr.offer) and ofr.offer(ctx, dl, track, fx, layout, key, bx, y + P.head_h(), bw) or 0
         draw_controls(ctx, dl, bx, y + P.head_h() + oh, bw, wh, track, fx, layout,
                       key, req, meter, io)
+      end
+      if locked then
+        ImGui.EndDisabled(ctx)
+        P.bypassed_veil(ctx, dl, x, y + P.head_h(), ww, wh - P.head_h() - fh)
       end
       if fh > 0 then draw_footer(ctx, dl, x, y + wh - fh, ww, fh, track, fx, layout, avail_h, is_eq or is_trim, req) end
       if sp then ImGui.DrawListSplitter_Merge(sp) end

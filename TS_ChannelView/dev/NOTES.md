@@ -722,3 +722,31 @@ range is the most it has closed lately, held four seconds. ImGui's hover
 rule matters for anything drawn over controls: an earlier item without
 AllowOverlap keeps the hover, so the canvas offer is drawn before the
 controls and they start under it.
+
+## VU meters
+
+TS_CV_VU (Pro). In and Out read TP.levels (rms for the needle, peak for the
+lamp); a VU on in/out makes Taps' wants_levels true, one on gr makes
+wants_measure true. The needle is an exponential with tau 65 ms (99% of a
+step in 300 ms). The VU scale is a voltage scale from -20 to +3 VU (0 VU
+about 0.69 across); GR runs 0 dB at the far right to 20 dB at the far left.
+Changing the source syncs the track's taps at once (app.vu_set). The window
+and the web bridge both lay taps from their own copy of the code: after an
+update, one still running the old code lays them differently and the two
+re-lay them in turn (levels come and go) until REAPER is restarted.
+
+## Fonts
+
+Visual Options > Text sets C.FONTS (text, head, bar). W.font_of makes each
+font once per name and weight/slant and attaches it; PushFont with a nil
+font only changes the size. The main window and the TCP window push "text"
+for the whole frame; draw_header pushes "head" round the name; the toolbar
+functions are wrapped in "bar". ImGui can't underline its own text, so
+underline is drawn under what ChannelView draws itself.
+
+## Draw-list splitters
+
+A splitter is bound to the window whose draw list it was made from. One
+kept per draw-list address met another window later given the same
+address ("cannot use DrawListSplitter over multiple windows"); P.splitter
+makes a new one each time, which ReaImGui frees after the frame.

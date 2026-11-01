@@ -252,6 +252,44 @@ end
 local meter_font = nil
 function W.set_meter_font(f) meter_font = f end
 
+-- Visual Options' text settings (C.FONTS: "text" the panels' text,
+-- "head" their headers, "bar" the toolbars; each { name, size, b, i, u,
+-- key }, nil for ReaImGui's own font at its own size). A font is made once
+-- per name, weight and slant and kept with the context.
+local fonts = {}
+function W.font_of(ctx, f)
+  if not f then return nil end
+  local flags = (f.b and ImGui.FontFlags_Bold or 0) | (f.i and ImGui.FontFlags_Italic or 0)
+  if not f.name and flags == 0 then return nil end
+  local key = tostring(ctx) .. "|" .. (f.name or "sans-serif") .. "|" .. flags
+  local font = fonts[key]
+  if font == nil then
+    local ok, made = pcall(ImGui.CreateFont, f.name or "sans-serif", flags)
+    font = (ok and made) or false
+    if font and not pcall(ImGui.Attach, ctx, font) then font = false end
+    fonts[key] = font
+  end
+  return font or nil
+end
+
+-- Pushes one of the three ("text", "head", "bar"); true when it pushed,
+-- for W.pop_font.
+function W.push_font(ctx, which)
+  local f = C.FONTS and C.FONTS[which]
+  if not f then return false end
+  ImGui.PushFont(ctx, W.font_of(ctx, f), f.size)
+  return true
+end
+function W.pop_font(ctx, pushed) if pushed then ImGui.PopFont(ctx) end end
+
+-- Whether that one is underlined, and a line under text at x, y, w wide
+-- and h tall.
+function W.underlined(which) local f = C.FONTS and C.FONTS[which]; return f and f.u or false end
+function W.underline(dl, x, y, w, h, col)
+  local ly = math.floor(y + h) + 0.5
+  ImGui.DrawList_AddLine(dl, x, ly, x + w, ly, col, 1.0)
+end
+
 -- The smaller face, for readouts. Always a pair: when there is no font
 -- attached both are no-ops, so the push and the pop stay balanced
 -- whether or not one was ever set.
@@ -344,6 +382,14 @@ function W.tip(ctx, id, text, hovered, active)
   tip_now = { x = t.x, y = t.y, text = text }
 end
 
+-- A tooltip's box, edge and text: dark with light text, or on a light
+-- panel (dark header text) a light box, so the text always shows.
+function W.tip_cols()
+  local text = C.COL.header_text
+  if U.is_light(text) then return 0x0d1116f0, C.COL.knob_ring, text end
+  return U.with_alpha(U.lighten(C.COL.panel_bg, 0.6), 0xf4), C.COL.knob_ring, text
+end
+
 -- Painted once, after everything else, so nothing can cover it.
 function W.draw_tip(ctx)
   local t = tip_now
@@ -391,11 +437,55 @@ function W.draw_tip(ctx)
     if y - pad < by0 then y = by0 + pad end
   end
 
+  local bg, ring, ink = W.tip_cols()
   ImGui.DrawList_AddRectFilled(dl, x - pad, y - pad + 1,
-    x + tw + pad, y + th + pad - 1, 0x0d1116f0, 3.0)
+    x + tw + pad, y + th + pad - 1, bg, 3.0)
   ImGui.DrawList_AddRect(dl, x - pad, y - pad + 1,
-    x + tw + pad, y + th + pad - 1, C.COL.knob_ring, 3.0, 0, 1.0)
-  ImGui.DrawList_AddText(dl, x, y, C.COL.header_text, t.text)
+    x + tw + pad, y + th + pad - 1, ring, 3.0, 0, 1.0)
+  ImGui.DrawList_AddText(dl, x, y, ink, t.text)
+end
+
+-- The tooltip waiting to be painted, taken off (nil when there's none),
+-- and one put back: a window drawn over ChannelView (a canvas's side
+-- panel) takes the one its own controls set and paints it with
+-- W.tip_window, so the window can't cover it.
+function W.take_tip()
+  local t = tip_now
+  tip_now = nil
+  return t
+end
+function W.put_tip(t) if t then tip_now = t end end
+
+-- A tooltip from W.take_tip in a tooltip window of its own, above every
+-- other window, in the same place and colours as W.draw_tip's.
+function W.tip_window(ctx, t)
+  if not t then return end
+  local pad = 5
+  local tw, th = ImGui.CalcTextSize(ctx, t.text)
+  local x, y = t.x, t.y
+  local vp = ImGui.GetMainViewport and ImGui.GetMainViewport(ctx)
+  if vp then
+    local vx, vy = ImGui.Viewport_GetWorkPos(vp)
+    local vw, vh = ImGui.Viewport_GetWorkSize(vp)
+    if x + tw + pad > vx + vw then x = t.x - tw - 28 end
+    if x - pad < vx then x = vx + pad end
+    if y + th + pad > vy + vh then y = t.y - th - 26 end
+    if y - pad < vy then y = vy + pad end
+  end
+  ImGui.SetNextWindowPos(ctx, x - pad, y - pad + 1)
+  local bg, ring, ink = W.tip_cols()
+  ImGui.PushStyleColor(ctx, ImGui.Col_PopupBg, bg)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Border, ring)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, ink)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, pad, pad - 1)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_PopupRounding, 3)
+  ImGui.PushStyleVar(ctx, ImGui.StyleVar_PopupBorderSize, 1)
+  if ImGui.BeginTooltip(ctx) then
+    ImGui.Text(ctx, t.text)
+    ImGui.EndTooltip(ctx)
+  end
+  ImGui.PopStyleVar(ctx, 3)
+  ImGui.PopStyleColor(ctx, 3)
 end
 
 -- ---------------------------------------------------------------------
@@ -412,7 +502,8 @@ local function centred_text(ctx, dl, cx, y, text, col, max_w, abbrev)
   if not text or text == "" then return end
   local tw, th = ImGui.CalcTextSize(ctx, text)
   if max_w and tw > max_w then
-    local key = text .. "\0" .. math.floor(max_w) .. "\0" .. th .. (abbrev and "a" or "")
+    local tf = C.FONTS and C.FONTS.text
+    local key = text .. "\0" .. math.floor(max_w) .. "\0" .. th .. (abbrev and "a" or "") .. (tf and tf.key or "")
     local fitted = fit_cache[key]
     if not fitted then
       local function fits(s) return ImGui.CalcTextSize(ctx, s) <= max_w end
@@ -433,6 +524,7 @@ local function centred_text(ctx, dl, cx, y, text, col, max_w, abbrev)
     tw = ImGui.CalcTextSize(ctx, text)
   end
   ImGui.DrawList_AddText(dl, cx - tw * 0.5, y, col, text)
+  if W.underlined("text") then W.underline(dl, cx - tw * 0.5, y, tw, th, col) end
   return th, tw
 end
 

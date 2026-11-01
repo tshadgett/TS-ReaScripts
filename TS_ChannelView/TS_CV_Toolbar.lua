@@ -1060,6 +1060,7 @@ local function draw_item(ctx, dl, i, it, x, y, bw, bh, dir)
     if tint and not lit then ink = (hovered or held) and lighten(col, 0.35) or col end
     if fillc then ink = lit and FILL_INK_ON or FILL_INK end
     ImGui.DrawList_AddText(dl, x + (room - tw) * 0.5, y + (bh - th) * 0.5, ink, text)
+    if W.underlined("bar") then W.underline(dl, x + (room - tw) * 0.5, y + (bh - th) * 0.5, tw, th, ink) end
     if has_caret(it) then caret(dl, x + bw - 8, y + bh * 0.5, dir == "up" and "up" or "down", ink) end
     if under then underline(dl, x, y, bw, bh, col) end
   end
@@ -1149,6 +1150,7 @@ local function paint_wide(ctx, dl, it, x, y, bw, bh, show_label, dir, hovered, h
       end
       local tx = (show_label and has_icon) and cx or (show_label and x + 8 or x + (bw - tw) * 0.5 - (menu_ and 3 or 0))
       ImGui.DrawList_AddText(dl, tx, y + (bh - th) * 0.5, ink, text)
+      if W.underlined("bar") then W.underline(dl, tx, y + (bh - th) * 0.5, tw, th, ink) end
     end
   end
   if menu_ then caret(dl, x + bw - 7, y + bh * 0.5, dir, ink) end
@@ -2231,6 +2233,17 @@ function TB.draw_menus(ctx, where)
     pop_menu(ctx)
   end
   icon_picker(ctx, where)
+end
+
+-- A bar and its menus in the toolbars' font (Visual Options > Text)
+for _, k in ipairs({ "draw", "draw_v", "draw_menus" }) do
+  local f = TB[k]
+  TB[k] = function(ctx, ...)
+    local pushed = W.push_font(ctx, "bar")
+    local r = table.pack(f(ctx, ...))
+    W.pop_font(ctx, pushed)
+    return table.unpack(r, 1, r.n)
+  end
 end
 
 return TB

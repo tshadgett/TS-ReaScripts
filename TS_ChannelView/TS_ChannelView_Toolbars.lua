@@ -176,9 +176,18 @@ local function frame()
   reaper.defer(safe_frame)
 end
 
+-- ReaImGui can't start a frame while a screen reports no scale (macOS,
+-- with the display asleep, say): nothing is drawn yet, so wait and retry.
+local dpi_wait
 safe_frame = function()
+  if dpi_wait and reaper.time_precise() - dpi_wait < 0.5 then reaper.defer(safe_frame) return end
   local ok, err = xpcall(frame, function(e) return debug.traceback(tostring(e), 2) end)
-  if ok then return end
+  if ok then dpi_wait = nil return end
+  if tostring(err):find("new_dpi_scale", 1, true) then
+    dpi_wait = reaper.time_precise()
+    reaper.defer(safe_frame)
+    return
+  end
   DR.cancel_picks()
   reaper.ShowConsoleMsg("\n--- ChannelView toolbars stopped on an error ---\n" .. tostring(err) .. "\n")
 end

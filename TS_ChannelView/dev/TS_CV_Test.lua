@@ -876,6 +876,40 @@ do
   check("lamp: copied", M.copy(l).controls[2].lamp, "gate")
   M.remove("LampPlug"); M.save()
 end
+-- a VU meter: kept, read back, copied; what it asks the probes for
+do
+  M.set("VuPlug", { controls = {
+    { param = -1, type = "vu", label = "", vu = { src = "gr", look = "dark", ref = -14, peak = false } },
+    { param = -1, type = "vu", label = "" } } })
+  M.save(); M.reload()
+  local l = M.get("VuPlug")
+  local a, b = l.controls[1], l.controls[2]
+  check("vu: a type of its own", a.type .. " " .. b.type, "vu vu")
+  check("vu: read back", a.vu.src .. " " .. a.vu.look .. " " .. a.vu.ref .. " " .. tostring(a.vu.peak), "gr dark -14 false")
+  check("vu: the default", b.vu.src .. " " .. b.vu.look .. " " .. b.vu.ref .. " " .. tostring(b.vu.peak), "in classic -18 true")
+  check("vu: copied", M.copy(l).controls[1].vu.look, "dark")
+  check("vu: a bad line, the default", M.vu_line(M.vu_of("x|y|9|")), "in|classic|-18|1")
+  check("vu: wants gain reduction", tostring(M.has_vu(l, "gr")) .. " " .. tostring(M.has_vu(l, "lvl")), "true true")
+  check("vu: none", tostring(M.has_vu({ controls = { { type = "knob" } } }, "gr")), "false")
+  check("vu: its room in a flow", table.concat({ P.cell_size({ type = "vu", param = -1 }, 8) }, " "), "4 3 vu")
+  M.remove("VuPlug"); M.save()
+end
+do
+  local ok, VUm = pcall(require, "TS_CV_VU")
+  if ok and VUm then
+    check("vu scale: -20 VU at the left, +3 at the right", ("%.2f %.2f"):format(VUm.vu_pos(-20), VUm.vu_pos(3)), "0.00 1.00")
+    check("vu scale: 0 VU about seven tenths across", VUm.vu_pos(0) > 0.65 and VUm.vu_pos(0) < 0.72, true)
+    check("vu scale: GR 0 at the far right, 20 at the far left", ("%.2f %.2f"):format(VUm.gr_pos(0), VUm.gr_pos(20)), "1.00 0.00")
+    check("vu scale: GR clamped", ("%.2f %.2f"):format(VUm.gr_pos(-3), VUm.gr_pos(40)), "1.00 0.00")
+    local p0 = VUm.needle_for_test("t1", 0, 10.0)
+    local p1
+    for k = 1, 10 do p1 = VUm.needle_for_test("t1", 1, 10.0 + k * 0.03) end
+    check("vu ballistics: a step reaches 99% in 300 ms", p0 == 0 and p1 > 0.985 and p1 < 1.0, true)
+    local q = VUm.needle_for_test("t2", 0, 20.0)
+    q = VUm.needle_for_test("t2", 1, 20.065)
+    check("vu ballistics: not at once", q > 0.55 and q < 0.7, true)
+  end
+end
 check("rows at h=120", P.rows_for(120), 1)
 check("cols for 8 @1 row", cols_for(8, 120), 8)
 
@@ -1965,6 +1999,64 @@ do
   local seen
   P_.with_canvas_cols({ cols = { fill = 0x445566 } }, "dl", 0, 0, 10, 10, function() seen = Cc.CANVAS.fill end)
   check("canvas colours: the fill while it draws, gone after", ("%08x"):format(seen or 0) .. " " .. tostring(Cc.CANVAS.fill), "445566ff nil")
+end
+
+-- a tooltip taken off for a window of its own (a canvas's side panel) and
+-- the one before it put back
+do
+  local W_ = require("TS_CV_Widgets")
+  W_.take_tip()
+  W_.put_tip({ x = 0, y = 0, text = "outer" })
+  local outer = W_.take_tip()
+  check("tip: taken off", outer and outer.text, "outer")
+  check("tip: none left", W_.take_tip(), nil)
+  W_.put_tip({ x = 0, y = 0, text = "inner" })
+  local mine = W_.take_tip()
+  W_.put_tip(outer)
+  check("tip: the side panel's own, the outer one back", (mine and mine.text or "") .. " " .. ((W_.take_tip() or {}).text or ""), "inner outer")
+  W_.put_tip(nil)
+  check("tip: putting none back leaves none", W_.take_tip(), nil)
+end
+
+-- a tooltip's colours: its text always shows against its box
+do
+  local W_ = require("TS_CV_Widgets")
+  local U_ = require("TS_CV_Util")
+  local Cc = require("TS_CV_Config")
+  local was_t, was_p = Cc.COL.header_text, Cc.COL.panel_bg
+  Cc.COL.header_text, Cc.COL.panel_bg = 0xe8e8e8ff, 0x202327ff
+  local bg, _, ink = W_.tip_cols()
+  check("tip colours: dark panel, dark box, light text", tostring(U_.is_light(bg)) .. " " .. tostring(U_.is_light(ink)), "false true")
+  Cc.COL.header_text, Cc.COL.panel_bg = 0x1d1e20ff, 0xd8d6d0ff
+  bg, _, ink = W_.tip_cols()
+  check("tip colours: light panel, light box, dark text", tostring(U_.is_light(bg)) .. " " .. tostring(U_.is_light(ink)), "true false")
+  Cc.COL.header_text, Cc.COL.panel_bg = was_t, was_p
+end
+
+-- Visual Options > Text: the panels' text, headers and toolbars
+do
+  local VO_ = require("TS_CV_VisualOptions")
+  local Cc = require("TS_CV_Config")
+  local was_h = Cc.HEADER_H
+  VO_.apply_fonts({})
+  check("fonts: none set, ReaImGui's own", tostring(Cc.FONTS.text) .. tostring(Cc.FONTS.head) .. tostring(Cc.FONTS.bar) .. " " .. Cc.HEADER_H, "nilnilnil 20")
+  VO_.apply_fonts({ t_font = "Arial", h_size = 16, h_b = true, b_i = true, b_u = true })
+  local F = Cc.FONTS
+  check("fonts: headers and toolbars take the text's font", F.head.name .. " " .. F.bar.name, "Arial Arial")
+  check("fonts: header size and bold", F.head.size .. " " .. tostring(F.head.b), "16 true")
+  check("fonts: a taller header font, a taller header", Cc.HEADER_H, 23)
+  check("fonts: toolbars italic and underlined", tostring(F.bar.i) .. " " .. tostring(F.bar.u), "true true")
+  VO_.apply_fonts({ t_size = 20, h_font = "Verdana" })
+  check("fonts: text size kept to its range", Cc.FONTS.text.size, 14)
+  check("fonts: headers their own font", Cc.FONTS.head.name, "Verdana")
+  check("fonts: toolbars still ReaImGui's", Cc.FONTS.bar, nil)
+  local in_presets = 0
+  for _, k in ipairs({ "t_font", "t_size", "t_b", "t_i", "t_u", "h_font", "h_size", "h_b", "h_i", "h_u",
+                       "b_font", "b_size", "b_b", "b_i", "b_u" }) do
+    if VO_.field_in_preset and VO_.field_in_preset(k) then in_presets = in_presets + 1 end
+  end
+  check("fonts: saved with a preset", in_presets, 15)
+  VO_.apply_fonts({}); Cc.HEADER_H = was_h
 end
 
 -- a knob's lamp: the same for the panel and the web page

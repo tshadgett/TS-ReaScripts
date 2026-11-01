@@ -1,5 +1,32 @@
 # ChannelView — changelog
 
+## 3.8.2 — fonts, a clear bypass, VU meters
+
+### ChannelView
+
+- **Fonts:** *Visual Options ▸ Text* sets the font for the panels' text,
+  their headers and the action bars, each with its size and Bold, Italic
+  and Underline. Presets keep them.
+- **A bypassed plugin's panel** is darkened with BYPASSED across it, its
+  controls locked until it's switched back on.
+- Tooltips on a light panel were a dark box with dark text; they're light
+  now.
+- **Fixed:** ChannelView stopped on an error some time after the panel's
+  header and foot were set to hide (a "DrawListSplitter" error), and on a
+  Mac when a menu stayed open while the display slept (a "new_dpi_scale"
+  error). The TCP window and the toolbars window wait the same way.
+
+### ChannelView Pro
+
+- **VU meter:** a layout can hold one (*Edit layout*, on the left). An
+  IN · OUT · GR switch under it picks the plugin's input or output level
+  or its gain reduction; *Classic*, *Dark* or *Bar*; 0 VU from -24 to
+  -12 dBFS; a peak lamp. In and Out are measured by the TS_TrackProbe pair.
+- The tooltips of a canvas's side panel showed under it; they're on top
+  now.
+- **Web companion:** a bypassed plugin's panel shows as bypassed; the
+  fonts follow Visual Options.
+
 ## 3.8.1 — canvas colours, lamps on the web page
 
 ### ChannelView

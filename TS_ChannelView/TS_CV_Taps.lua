@@ -402,14 +402,15 @@ local function wants_measure(tr, addr)
   local key = St.layout_key(fx_name(tr, addr), fx_guid(tr, addr), tr, addr)
   if RQ.is_eq(key) then return false end
   local layout = M.get(key)
-  if not (layout and layout.measure == true) then return false end
+  if not (layout and (layout.measure == true or (M.has_vu and M.has_vu(layout, "gr")))) then return false end
   return not TP.native_gr(tr, addr, fx_guid(tr, addr))
 end
 
--- Whether a plugin's input and output levels are wanted (Levels=1).
+-- Whether a plugin's input and output levels are wanted (Levels=1, or a VU
+-- meter showing its in or out).
 local function wants_levels(tr, addr)
   local layout = M.get(St.layout_key(fx_name(tr, addr), fx_guid(tr, addr), tr, addr))
-  return layout ~= nil and layout.levels == true
+  return layout ~= nil and (layout.levels == true or (M.has_vu and M.has_vu(layout, "lvl")))
 end
 
 -- Whether this instance's gain-reduction meter is opened out into its trace

@@ -142,6 +142,9 @@
   ends may be at a half. A "curve" control (Ctl<n>=-1|curve|0|) is the
   layout's EQ canvas in a place of its own (a layout with one has no
   canvas beside its controls; several may show the same bands).
+  A "vu" control (Ctl<n>=-1|vu|0|) is a VU meter, Vu<n>=<shows>|<look>|
+  <0 VU in dBFS>|<peak lamp 1/0>: shows in, out or gr; look classic, dark
+  or bar.
   A "text" control (Ctl<n>=-1|text|0|<its words>)
   is words anywhere on the grid, across or (taller than wide) up, sized
   by Size<n> (small, large), coloured by Edge<n>, placed by Align<n>
@@ -346,7 +349,48 @@ end
 
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
-                     xy = true, dual = true, page = true, section = true, text = true, curve = true }
+                     xy = true, dual = true, page = true, section = true, text = true, curve = true,
+                     vu = true }
+
+-- A VU meter's settings (Vu<n>=<shows>|<look>|<0 VU dBFS>|<peak lamp>):
+-- shows "in", "out" or "gr"; look "classic", "dark" or "bar"; 0 VU at
+-- `ref` dBFS; the peak lamp on or off.
+M.VU_SHOWS = { "in", "out", "gr" }
+M.VU_LOOKS = { "classic", "dark", "bar" }
+M.VU_REFS = { -24, -20, -18, -14, -12 }
+local VU_SHOW_OK = { ["in"] = true, out = true, gr = true }
+local VU_LOOK_OK = { classic = true, dark = true, bar = true }
+function M.vu_default() return { src = "in", look = "classic", ref = -18, peak = true } end
+function M.vu_of(v)
+  local d = M.vu_default()
+  local a, b, c, e = (v or ""):match("^%s*([^|]*)|?([^|]*)|?([^|]*)|?([^|]*)")
+  if VU_SHOW_OK[a or ""] then d.src = a end
+  if VU_LOOK_OK[b or ""] then d.look = b end
+  local r = tonumber(c or "")
+  if r and r <= 0 and r >= -40 then d.ref = r end
+  if e == "0" then d.peak = false end
+  return d
+end
+function M.vu_line(vu)
+  vu = vu or M.vu_default()
+  return ("%s|%s|%s|%s"):format(vu.src or "in", vu.look or "classic", tostring(math.tointeger(vu.ref) or vu.ref or -18),
+    vu.peak == false and "0" or "1")
+end
+function M.vu_copy(vu)
+  if not vu then return nil end
+  return { src = vu.src, look = vu.look, ref = vu.ref, peak = vu.peak }
+end
+-- Whether a layout has a VU meter showing levels ("lvl": in or out) or
+-- gain reduction ("gr"): the probes measure what they show.
+function M.has_vu(layout, what)
+  for _, c in ipairs((layout and layout.controls) or {}) do
+    if c.type == "vu" then
+      local src = (c.vu and c.vu.src) or "in"
+      if (what == "gr") == (src == "gr") then return true end
+    end
+  end
+  return false
+end
 
 -- A layout's EQ curves (Ctl<n>=-1|curve|0|): the canvas's bands, drawn
 -- and dragged in each one's place. A layout with one draws
@@ -1725,6 +1769,8 @@ local function parse_section(sect)
         virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i], sect["VAct" .. i]) or nil,
         -- its lamp (Lamp<n>=gr|gate|off): reduction, a gate's, or none
         lamp    = M.LAMPS[U.trim(sect["Lamp" .. i] or "")] and U.trim(sect["Lamp" .. i]) or nil,
+        -- a VU meter's settings (Vu<n>)
+        vu      = (t == "vu") and M.vu_of(sect["Vu" .. i]) or nil,
       }
       -- a virtual selector shown as chips: one for each of its choices
       do
@@ -1909,6 +1955,7 @@ local function serialize(layout)
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
     if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
+    if c.type == "vu" then out["Vu" .. (i - 1)] = M.vu_line(c.vu) end
     if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
@@ -3239,6 +3286,7 @@ function M.copy(layout)
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
                         invert2 = c.invert2, edge = c.edge, align = c.align, lamp = c.lamp,
+                        vu = M.vu_copy(c.vu),
                         ccols = c.ccols and M.choice_cols_of(M.choice_cols_line(c.ccols)) or nil,
                         at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),

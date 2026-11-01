@@ -1248,6 +1248,7 @@ local function frame()
   end
   ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.win_bg)
   ST.push(ctx)
+  local text_font = W.push_font(ctx, "text")
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, 0, 0)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_ItemSpacing, 4, 4)
   -- no border: ImGui keeps a border's width clear at the window's edges,
@@ -1374,6 +1375,7 @@ local function frame()
   end
   ImGui.PopStyleVar(ctx, 3)
   VO.draw(ctx, "tcp")      -- View ▸ Visual Options, its own window
+  W.pop_font(ctx, text_font)
   ST.pop(ctx)
   ImGui.PopStyleColor(ctx)
 
@@ -1384,11 +1386,20 @@ local function frame()
   end
 end
 
+-- ReaImGui can't start a frame while a screen reports no scale (macOS,
+-- with the display asleep, say): nothing is drawn yet, so wait and retry.
+local dpi_wait
 function safe_frame()
+  if dpi_wait and reaper.time_precise() - dpi_wait < 0.5 then reaper.defer(safe_frame) return end
   local ok, err = xpcall(frame, function(e)
     return debug.traceback(tostring(e), 2)
   end)
-  if ok then return end
+  if ok then dpi_wait = nil return end
+  if tostring(err):find("new_dpi_scale", 1, true) then
+    dpi_wait = reaper.time_precise()
+    reaper.defer(safe_frame)
+    return
+  end
   TB.cancel_pick(); TB2.cancel_pick()
   reaper.ShowConsoleMsg(
     "\n--- ChannelView TCP stopped on an error ---------------------\n" ..
