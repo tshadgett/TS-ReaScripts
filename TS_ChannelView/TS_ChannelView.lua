@@ -1,9 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.8.3
+-- @version 3.9.0
 -- @changelog
---  Fixed: ReaEQ bands set to Band (alt) or Band (alt 2) showed or moved
---  as another band. See the CHANGELOG.
+--  TS_TrackProbe 2.4.0 (left and right levels, a stereo tap, no clash
+--  with the Trimmer); plugins that only report where a control is now
+--  read right. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -2479,6 +2480,8 @@ local function panel_menu()
         -- controls, as a normal layout
         local from = layout
         if not shown and require("TS_CV_ReaFX").has_panel(key) then from = M.build_default(app.track, fx.addr) end
+        -- the Trimmer's own panel: a layout like it, to change
+        if not empty and TRM and P.own_trim(key) then from = TRM.starter_layout() end
         local _, nm = M.new_variant(base, txt, from, empty)
         if nm then St.set_variant(fx.guid, nm); app.var_name = nil; ImGui.CloseCurrentPopup(ctx) end
       end
@@ -3710,7 +3713,10 @@ function app.vu_set(fx, idx, changes)
   c.vu = c.vu or M.vu_default()
   for k, v in pairs(changes) do c.vu[k] = v end
   M.set(key, l); M.save()
-  if changes.src then
+  -- a Trimmer's 0 VU is its own setting (Auto and Listen aim for it)
+  if changes.ref and TRM and TRM.is(fx.name or "") then TRM.set(app.track, fx.addr, TRM.P.REF, changes.ref) end
+  -- (a Trimmer's levels are its own: no probes)
+  if changes.src and not (TRM and TRM.is(fx.name or "")) then
     local needs = changes.src ~= "gr" or not T.reports_gr_natively(app.track, fx.addr, fx.guid)
     if needs then
       -- laid now, not on the track's next turn
@@ -3773,10 +3779,14 @@ local function control_menu()
     end
     ImGui.Separator(ctx)
     if ImGui.BeginMenu(ctx, "Look") then
-      for _, o in ipairs({ { "classic", "Classic" }, { "dark", "Dark" }, { "bar", "Bar" } }) do
+      for _, o in ipairs({ { "classic", "Classic" }, { "dark", "Dark" }, { "analogue", "Analogue" }, { "bar", "Bar" } }) do
         if ImGui.MenuItem(ctx, o[2], nil, vu.look == o[1]) then app.vu_set(fx, idx, { look = o[1] }) end
       end
       ImGui.EndMenu(ctx)
+    end
+    if ImGui.MenuItem(ctx, "Stereo (left and right)", nil, vu.stereo == true) then app.vu_set(fx, idx, { stereo = not vu.stereo }) end
+    if ImGui.MenuItem(ctx, "Hide the In / Out / GR buttons", nil, vu.noswitch == true) then
+      app.vu_set(fx, idx, { noswitch = not vu.noswitch })
     end
     if ImGui.BeginMenu(ctx, "0 VU =") then
       for _, r in ipairs(M.VU_REFS) do
@@ -3785,6 +3795,27 @@ local function control_menu()
       ImGui.EndMenu(ctx)
     end
     if ImGui.MenuItem(ctx, "Peak lamp", nil, vu.peak ~= false) then app.vu_set(fx, idx, { peak = vu.peak == false }) end
+    if not M.locked(layout) then
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, "Remove from panel") then
+        local l = materialise(fx); M.save()
+        table.remove(l.controls, idx)
+        M.set(key, l); M.save()
+      end
+      if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+        require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
+          { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
+          rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
+      end
+    end
+    plugin_sub(fx)
+    ImGui.EndPopup(ctx)
+    return
+  end
+
+  -- an act button (a Trimmer's Auto, Listen): no parameter of its own
+  if c.type == "act" then
+    ImGui.TextDisabled(ctx, (M.ACTS[c.act or ""] or "Button") .. "  \u{00B7}  " .. U.truncate(U.fx_label(fx), 20))
     if not M.locked(layout) then
       ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, "Remove from panel") then
@@ -5183,7 +5214,8 @@ local function panel_requests(i, fx, layout, key, req)
     if req.open_editor and not M.locked(layout) then
       E.open(app.track, fx, key, layout)
     end
-    if req.canvas_setup then CS.open(app.track, fx, key) end
+    -- (a number: an EQ curve's own bands, that control's)
+    if req.canvas_setup then CS.open(app.track, fx, key, math.type(req.canvas_setup) and req.canvas_setup or nil) end
     -- a modulator's link dropped on a control: linked, after asking
     -- when that replaces another modulator
     if req.mod_drop then

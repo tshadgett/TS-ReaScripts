@@ -115,13 +115,16 @@ local function raw_formatter(track, addr, p)
 end
 UN.SWEEP_N = 128
 local swept = {}        -- fx GUID:param -> false (answers fine) | its readings, 0..SWEEP_N
-local function sweep(track, addr, p)
+-- `suffix`: the unit its own display leaves off a plain number (" kHz"),
+-- put back on every plain number read
+local function sweep(track, addr, p, suffix)
   local cur = reaper.TrackFX_GetParamNormalized(track, addr, p)
   local t, first, varied = {}, nil, false
   for i = 0, UN.SWEEP_N do
     reaper.TrackFX_SetParamNormalized(track, addr, p, i / UN.SWEEP_N)
     local _, s = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
     t[i] = trim(s)
+    if suffix and t[i]:match("^%-?[%d%.]+$") then t[i] = t[i] .. suffix end
     if first == nil then first = t[i] elseif t[i] ~= first then varied = true end
   end
   reaper.TrackFX_SetParamNormalized(track, addr, p, cur)
@@ -159,14 +162,21 @@ function UN.formatter(track, addr, p)
     t = false
     local f0, f1 = raw(0), raw(1)
     if f0 and f0 == f1 and raw(0.5) == f0 then
+      -- the same text wherever it's asked: the plugin answers with where it
+      -- is now (its display may add a unit: "0.20" shown, "0.20 kHz" given)
       local _, now = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
-      if trim(now) == f0 then
+      now = trim(now or "")
+      local suffix
+      if now ~= "" and now ~= f0 and f0:sub(1, #now) == now and f0:sub(#now + 1):match("^%s*[%a%%]+$") then
+        suffix = f0:sub(#now + 1)
+      end
+      if now == f0 or suffix then
         local am = reaper.GetTrackAutomationMode and reaper.GetTrackAutomationMode(track) or 0
         local playing = reaper.GetPlayState and ((reaper.GetPlayState() or 0) & 5) ~= 0
         -- writing automation (it would record the sweep) or playing (it
         -- would be heard): not now, and asked again later
         if am >= 2 or playing then return function() return nil end end
-        t = sweep(track, addr, p)
+        t = sweep(track, addr, p, suffix)
       end
     end
     swept[k] = t

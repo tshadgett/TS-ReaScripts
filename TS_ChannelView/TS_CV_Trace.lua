@@ -42,12 +42,15 @@ local TP = require("TS_CV_Taps")
 local Tr = {}
 
 local TW_BASE, TW_HDR, TW_COLS = 0x54000, 0x5C000, 2048
-local TW_BASE2 = 0x208000      -- taps 5..8 (a probe that takes eight)
+-- taps 5..8 (a probe that takes eight): where the writer says ([7]), or
+-- where a probe before 2.4.0 puts them
+local TW_BASE2_OLD = 0x208000
+local tw_base2 = TW_BASE2_OLD
 local TAPS = 8
 -- tap t's (1-based) column c
 local function tw_at(t, c)
   if t <= 4 then return TW_BASE + ((t - 1) * TW_COLS + c) * 4 end
-  return TW_BASE2 + ((t - 5) * TW_COLS + c) * 4
+  return tw_base2 + ((t - 5) * TW_COLS + c) * 4
 end
 Tr.COLS = TW_COLS
 
@@ -79,6 +82,8 @@ local function tw_sync()
   -- the taps the writer has (an older probe doesn't say: four)
   local taps = math.floor(rd(TW_HDR + 6) or 0)
   taps = (taps >= 1 and taps <= TAPS) and taps or 4
+  local b2 = math.floor(rd(TW_HDR + 7) or 0)
+  tw_base2 = (b2 >= 0x300000 and b2 < 0x340000) and b2 or TW_BASE2_OLD
   if n ~= tw.n or writer ~= tw.writer then
     local todo = n - tw.n
     if tw.n < 0 or writer ~= tw.writer or todo < 0 or todo >= TW_COLS then todo = TW_COLS end
@@ -93,6 +98,9 @@ local function tw_sync()
   end
   return tw.live
 end
+
+-- for the tests
+Tr._tw = { sync = tw_sync, at = tw_at, data = tw }
 
 -- Reported reduction, laid onto the probe's column clock, per instance.
 local reps = {}

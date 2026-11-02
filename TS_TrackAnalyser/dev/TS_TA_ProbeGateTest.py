@@ -72,9 +72,11 @@ def eight(src):
     print("eight  true mean %.2f | taps 1..8 mean %s | capacity %d" % (a[:, 0].mean(), " ".join("%.2f" % a[:, k].mean() for k in range(1, 9)), int(a[-1, 9])))
     # the waveforms: taps 5..8 at TW_BASE2, and nothing left in 1..4's place for them
     prog = eight_prog(src, 8, secs=4).replace(PRINT, '')
-    prog = prog.rstrip() + '\nk8 = 0; loop(8, w = k8 < 4 ? GMB + 0x54000 + (k8 * 2048 + 10) * 4 : GMB + 0x208000 + ((k8 - 4) * 2048 + 10) * 4; printf("%f %f\n", w[1], w[2]); k8 += 1; );\n'
+    prog = prog.rstrip() + '\nb2 = GMB[0x5C000 + 7] > 0 ? GMB[0x5C000 + 7] : 0x208000; k8 = 0; loop(8, w = k8 < 4 ? GMB + 0x54000 + (k8 * 2048 + 10) * 4 : GMB + b2 + ((k8 - 4) * 2048 + 10) * 4; printf("%f %f\n", w[1], w[2]); k8 += 1; );\n'
+    prog += 'old = 0; i = 0x200000; loop(0x10000, old += abs(GMB[i]); i += 1; ); printf("%f %f\n", GMB[0x5C000 + 7], GMB[0x4F000 + 9]); printf("%f 0\n", old);\n'
     a = eel(prog, 2)
-    print("eight  waveforms, column 10, output max / input peak: " + " ".join("%.2f/%.2f" % (r[0], r[1]) for r in a))
+    print("eight  waveforms, column 10, output max / input peak: " + " ".join("%.2f/%.2f" % (r[0], r[1]) for r in a[:8]))
+    print("eight  taps 5..8's waveforms at 0x%x; written in the Trimmer's 0x200000..0x210000: %g" % (int(a[8][0]), a[9][0]))
 
 def rates(src):
     for sr in (44100, 96000, 192000):

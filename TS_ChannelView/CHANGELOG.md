@@ -1,5 +1,51 @@
 # ChannelView — changelog
 
+## 3.9.0 — visualisers, Trimmer layouts, an analogue VU
+
+### ChannelView
+
+- **TS_TrackProbe 2.4.0** measures each plugin's left and right levels
+  apart, and one plugin's stereo picture (for Pro's stereo VU meter and
+  Width visualiser). Reopen a project after updating, so the new probe
+  runs.
+- **Fixed:** plugins that report a control only where it is now, without
+  its unit (Sonimus A-Console's filters), read wrong and jumped when
+  dragged. ChannelView now reads them right.
+- **Fixed:** with a TS_CV Trimmer in the project and five or more plugins
+  measured on a track, the Trimmer's meters and the measured reduction
+  and waveforms of the fifth to eighth plugins could disturb each other.
+  TS_TrackProbe 2.4.0 keeps them apart (reopen the project after
+  updating).
+- **Fixed:** with the web companion running, Track Analyser's
+  gain-reduction trace could start over every few seconds on a track
+  whose plugin's latency ChannelView had measured.
+
+### ChannelView Pro
+
+- **Visualisers:** *Edit layout ▸ Visualisers* adds a part of a canvas
+  anywhere on a grid, from a few of the plugin's controls: EQ curve
+  (with bands of its own on a layout without an EQ canvas), Filters,
+  Filter strip, Compressor envelope, Threshold, Limiter, Drive meter,
+  Harmonics, Saturation curve, Frequency range (up to four bands, each
+  with what it's reducing, and a line that can be any control) and Width.
+  Each finds its controls by name and sits on the panel's colour.
+- **VU meter:** an *Analogue* look, lit from behind under glass; *Classic*
+  and *Dark* shaped like the Trimmer's meters; a *Face* (its own, the
+  panel's or a colour); a style for its In / Out / GR buttons, or none;
+  *Stereo* for left and right meters.
+- **Trimmer layouts:** *Layout ▸ Copy to new layout* on a Trimmer starts
+  a layout from its panel, with Auto, Listen, the Trimmer filters and its
+  VU meters as controls to move and style.
+- **Edit layout:** the *Parameters*, *Add* and *Visualisers* headings
+  fold away (remembered); lines and sections come off the panel when
+  dragged back to the list; a column of buttons grows taller with its
+  place.
+- Canvas setup finds cuts named hi pass, lo pass, Hi-Pass or LO_PASS too.
+- **Fixed:** a compressor's lookahead that reads the same all along its
+  range (Pro-C 3's, with Maximum Lookahead off) didn't move on the
+  canvas.
+- Envelope readouts that don't fit along a canvas's foot move up top.
+
 ## 3.8.3 — ReaEQ's alt bands
 
 ### ChannelView

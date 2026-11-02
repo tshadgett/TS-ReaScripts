@@ -294,6 +294,21 @@ do
     { [0] = 0.9, [1] = 0.3, [2] = 0.1, [3] = 0.9, [4] = 0.9, [5] = 0.2 },
     { [0] = 0.0, [1] = 0.55, [2] = 0.9, [3] = 0.4, [4] = 0.1, [5] = 0.5 } })
   checkf(("eq73: curve within 1 dB (%.2f)"):format(w), function() return w < 1 end)
+  -- the same bands as an EQ curve's own (no canvas on the layout): learned
+  -- into the curve and kept with it
+  do
+    local own = { kind = "eq", all_on = 7, bands = ME.guess(names) }
+    local cl = { controls = { { param = -1, type = "curve", label = "", vis = own } }, aliases = {} }
+    M.set("EQ73 :: Curve", cl)
+    local jc = LN.start(user, 0, "EQ73 :: Curve", cl, nil, own)
+    run(jc)
+    check("eq73 curve: learned", jc.state, "done")
+    check("eq73 curve: ready", M.canvas_todo(own), nil)
+    check("eq73 curve: no canvas made", M.get("EQ73 :: Curve").canvas, nil)
+    check("eq73 curve: kept with the curve", M.canvas_todo(M.get("EQ73 :: Curve").controls[1].vis), nil)
+    check("eq73 curve: the same shapes", ME.decode(own.bands[3].learn).shapes[1].type, "bell")
+    M.remove("EQ73 :: Curve")
+  end
   -- HPF off: the band is off
   user.fx[1].vals[0] = 0
   local r = ME.read_band(user, 0, layout.canvas.bands[1], 7)
@@ -796,6 +811,21 @@ do
   check("saturator: learned", job.state, "done")
   local c = layout.canvas.sat_cal
   check("saturator: drive points, styles, tones", c and ("%d %d %s"):format(#c.dn, #c.sn, tostring(c.tn[1])), "5 2 false")
+  -- a drive meter visualiser's own: learned into it, kept with it
+  do
+    local own = { kind = "drive", roles = { Drive = 0, Style = 1, Mix = 2 }, rev = {} }
+    local vl = { controls = { { param = -1, type = "vis", label = "", vis = own } }, aliases = {} }
+    M.set("Sat :: Vis", vl)
+    local jv = LN.start_sat(user, 0, "Sat :: Vis", vl, own)
+    run(jv)
+    check("drive meter: learned", jv.state, "done")
+    check("drive meter: into its own", own.sat_cal and #own.sat_cal.dn, 5)
+    check("drive meter: no canvas made", M.get("Sat :: Vis").canvas, nil)
+    M.save(); M.reload()
+    local back = M.get("Sat :: Vis").controls[1].vis
+    check("drive meter: its curve read back", back and back.kind .. " " .. tostring(back.sat_cal and #back.sat_cal.dn), "drive 5")
+    M.remove("Sat :: Vis")
+  end
   -- between the learned drives: the curve near the fake's own
   local at = M.sat_at(c, 0.4, 0, 0)
   local y = truth_sat({ [0] = 0.4, 0 })
@@ -811,8 +841,21 @@ do
   local _, thd_q = M.sat_harm(c, at, -18)
   local _, thd_l = M.sat_harm(c, at, 0)
   checkf(("saturator: quieter is cleaner (%.1f%% at -18, %.1f%% at 0)"):format(thd_q, thd_l), function() return thd_q < thd_l end)
-  local b = M.sat_bite(at)
+  local b = M.sat_bite(at, c)
   checkf(("saturator: bites from %.1f dBFS"):format(b or 99), function() return b and b < -6 and b > -30 end)
+  -- from the fundamental's gain: 1 dB down between the levels learned, past
+  -- the loudest by its last slope, never when it doesn't squash
+  local function gains(a, b2, c3) return { L = { -18, -6, 0 } }, { h = { { a }, { b2 }, { c3 } } } end
+  local gc, ga = gains(-2.0, -2.1, -3.1)
+  checkf(("saturator: squashed 1 dB near 0 dBFS (%.1f)"):format(M.sat_bite(ga, gc) or 99),
+    function() local v = M.sat_bite(ga, gc); return v and v > -1 and v < 0 end)
+  gc, ga = gains(5.8, -1.7, -7.6)
+  checkf(("saturator: driven hard, it bites early (%.1f)"):format(M.sat_bite(ga, gc) or 99),
+    function() local v = M.sat_bite(ga, gc); return v and v < -15 end)
+  gc, ga = gains(0, 0, -0.5)
+  check("saturator: past the loudest by its slope", M.sat_bite(ga, gc), 6)
+  gc, ga = gains(0, 0, 0)
+  check("saturator: never squashed, no bite", M.sat_bite(ga, gc), nil)
   check("saturator: no bite in a clean one", M.sat_bite({ up = (function() local t = {} for i = 1, 24 do t[i] = -1 + (i - 0.5) / 12 end return t end)(), dn = {}, h = {} }), nil)
   -- kept through a save
   M.save(); M.reload()

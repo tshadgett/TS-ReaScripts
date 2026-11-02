@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.3.0
+version: 2.4.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -49,11 +49,15 @@ author: Tim Shadgett
 //   0x60000    measuring the taps' zero, + track index * 8 (THE ZERO POINT)
 //   0x70000    third-octave reduction, + track index * 128
 //   0x100000   THE PROBE BLOCK, + (track index + 1) * 128 (the master is 0)
-//   0x200000   tap traces for taps 5..8
-//   0x208000   per-tap waveforms for taps 5..8
+//   0x310000   tap traces for taps 5..8 (its address at 0x4F000 + 9)
+//   0x318000   per-tap waveforms for taps 5..8 (its address at 0x5C000 + 7)
+//   0x340000   one tap's stereo scope (STEREO, ONE TAP)
+//   0x350000   each tap's levels per channel, + (track index + 1) * 64
+//              (LEVELS PER CHANNEL)
 //   73         tap heartbeat, bumped by any reader
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
+//   77         which track writes the stereo scope (index + 2; 0 none)
 //
 // THE PROBE BLOCK, at 0x100000 + (track index + 1) * 128.
 //   The scripts write:
@@ -66,6 +70,7 @@ author: Tim Shadgett
 //     8  tap_n         9..12  tap_lag1..4     13..16  tap_rst1..4
 //    17  tap_gen      18  cal_arm (pre)      19  tap_nogr
 //    20  tap_mb       21..23  tap_mbx1..3    24  tap_fine
+//    25  tap_st (the stereo tap, 1..8; 0 none)
 //    50..53  tap_lag5..8   54..57  tap_rst5..8
 //   The probes write:
 //    32  the pre probe's block count     33  the post probe's (a probe
@@ -81,6 +86,8 @@ author: Tim Shadgett
 //    105..108  tap_inpk5..8  109..112  tap_outpk5..8
 //    113..116  tap_inrms5..8 117..120  tap_outrms5..8
 //    121  how many plugins this probe can measure (8; nothing from older ones: 4)
+//    122  the stereo tap's correlation   123..124  its mid and side (dBFS, RMS)
+//    125  1: this probe measures stereo (nothing from older ones)
 //   Taps 5..8 sit apart from 1..4 so that a script or probe that knows
 //   only four finds 1..4 where it expects them. The names are those of
 //   the readings; the probe keeps them in TV_* (one per tap).
@@ -100,6 +107,22 @@ author: Tim Shadgett
 //   measurement. While the zero is being measured the levels fall away
 //   rather than show the test noise.
 //
+// LEVELS PER CHANNEL
+//   Each tap's levels, left and right apart, for ChannelView's stereo VU
+//   meters: at 0x350000 + (track index + 1) * 64 + tap * 8, [0..3] the
+//   peaks (input L, R, output L, R), [4..7] the RMS the same way, in dBFS,
+//   published with the others. Tracks to index 2999 (the region stops
+//   short of 0x380000, ChannelView's Learn).
+//
+// STEREO, ONE TAP
+//   For ChannelView's Width visualiser: the output of the tap named by
+//   tap_st, its correlation (-1..+1) and its mid and side levels, over the
+//   same 300 ms as the RMS levels, published with them. And a scope: its
+//   last 512 samples (taken at about 24 kHz), L and R, oldest first, at
+//   0x340010 -- [0x340000] counts the frames, [+1] the points, [+2] the
+//   writer (track index + 2). One track writes it, the one ChannelView
+//   names in gmem[77].
+//
 // PER-PLUGIN WAVEFORMS
 //   For ChannelView's expanded gain-reduction panel: each tapped plugin's
 //   output waveform (min and max), its input peak, and -- for a tap that
@@ -114,8 +137,9 @@ author: Tim Shadgett
 //              [3] sample rate    [4] writer (track index + 1)
 //              [5] columns written, ever (a reader spots a stalled writer)
 //              [6] taps in use (older probes leave it 0: read four)
+//              [7] where taps 5..8 are (older probes leave it 0: 0x208000)
 //     0x54000 + (tap * 2048 + column) * 4 for taps 1..4, and
-//     0x208000 + ((tap - 4) * 2048 + column) * 4 for taps 5..8 (0-based tap):
+//     0x318000 + ((tap - 4) * 2048 + column) * 4 for taps 5..8 (0-based tap):
 //              [0] output min  [1] output max  [2] input peak  [3] GR dB
 
 // Control block (the panel writes these; 0 means "use my default"):
@@ -417,6 +441,17 @@ out_pin:right
     t += 1;
   );
   tap_mb = 0; tap_mbx1 = tap_mbx2 = tap_mbx3 = 0;
+  // the stereo tap (STEREO, ONE TAP): its sums, its readings, its scope's
+  // ring (L R pairs, here) and where it's published
+  PB_ST = 25; PB_CORR = 122; PB_STM = 123; PB_STS = 124; PB_STCAP = 125;
+  CTRL_STTRK = 77;
+  STH_BASE = 0x340000; STP_BASE = 0x340010; STP_N = 512;
+  STR_RING = 1600000;
+  // levels per channel (LEVELS PER CHANNEL)
+  PLV_BASE = 0x350000; PLV_STRIDE = 64; PLV_TRACKS = 3000;
+  tap_st = 0; stc_was = 0; stc_pos = 0; stc_skip = 0; stc_seq = 0;
+  stc_ll = stc_rr = stc_lr = stc_mm = stc_ss = 0;
+  stc_corr = 0; stc_mdb = stc_sdb = -150;
   tap_mbgr1 = tap_mbgr2 = tap_mbgr3 = tap_mbgr4 = 0;
   tap_fine = 0;
   tap_mbl1 = tap_mbl2 = tap_mbl3 = tap_mbl4 = -150;
@@ -669,9 +704,9 @@ out_pin:right
 
   //-- the taps ----------------------------------------------------------
   CTRL_TAPHB  = 73;               // bumped by any reader; taps idle when it stops
-  TAPTR_HDR   = 0x4F000;          // [0] taps in use, [1..8] each tap's reading
+  TAPTR_HDR   = 0x4F000;          // [0] taps in use, [1..8] each tap's reading, [9] TAPTR_BASE2
   TAPTR_BASE  = 0x50000;          // tap t's column t*SCOPE_COLS + cur (taps 1..4)
-  TAPTR_BASE2 = 0x200000;         // ... taps 5..8, (t-4)*SCOPE_COLS + cur
+  TAPTR_BASE2 = 0x310000;         // ... taps 5..8, (t-4)*SCOPE_COLS + cur (clear of the Trimmer's blocks)
   TAP_MAX     = 8;
   TAP_BASE    = 1048576;          // clear of everything above (and the FFT rings)
   TAP_STRIDE  = 66560;            // a delay line, then the state below
@@ -697,6 +732,8 @@ out_pin:right
   TS_MBP = 300;                   // a multiband tap: each filterbank band's input power this column
   TS_MBL = 320;                   // ... and each of the plugin's bands' input level (dBFS)
   TS_RPOS = 340;                  // where the next sample goes in its ring (THE TEN BANDS, BY FFT)
+  TS_LCP = 350;                   // levels per channel: peaks (in L, R, out L, R), then mean squares
+  TS_LCR = 354;
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -724,7 +761,7 @@ out_pin:right
   // per-plugin waveforms (PER-PLUGIN WAVEFORMS)
   CTRL_TWTRK = 74;
   TW_BASE = 0x54000;              // taps 1..4
-  TW_BASE2 = 0x208000;            // taps 5..8
+  TW_BASE2 = 0x318000;            // taps 5..8 (clear of the Trimmer's blocks)
   function twAt(t, c) ( t < 4 ? TW_BASE + (t * TW_COLS + c) * 4 : TW_BASE2 + ((t - 4) * TW_COLS + c) * 4; );
   TW_HDR  = 0x5C000;
   TW_COLS = 2048;
@@ -1252,12 +1289,29 @@ out_pin:right
     v = max(abs(al), abs(ar)); s[TS_LOP] = max(v, s[TS_LOP] * tap_lvpk);
     s[TS_LIR] += ((bl * bl + br * br) * 0.5 - s[TS_LIR]) * tap_lvrk;
     s[TS_LOR] += ((al * al + ar * ar) * 0.5 - s[TS_LOR]) * tap_lvrk;
+    // and each channel apart (LEVELS PER CHANNEL)
+    s[TS_LCP] = max(abs(bl), s[TS_LCP] * tap_lvpk); s[TS_LCP + 1] = max(abs(br), s[TS_LCP + 1] * tap_lvpk);
+    s[TS_LCP + 2] = max(abs(al), s[TS_LCP + 2] * tap_lvpk); s[TS_LCP + 3] = max(abs(ar), s[TS_LCP + 3] * tap_lvpk);
+    s[TS_LCR] += (bl * bl - s[TS_LCR]) * tap_lvrk; s[TS_LCR + 1] += (br * br - s[TS_LCR + 1]) * tap_lvrk;
+    s[TS_LCR + 2] += (al * al - s[TS_LCR + 2]) * tap_lvrk; s[TS_LCR + 3] += (ar * ar - s[TS_LCR + 3]) * tap_lvrk;
   );
 
   // dBFS to a tenth, -150 for silence. `ms` is a mean square.
   function lvAmp(x) ( x > 0.0000000316 ? floor(200 * log10(x) + 0.5) / 10 : -150; );
   function lvMS(ms) ( ms > 0.000000000000001 ? floor(100 * log10(ms) + 0.5) / 10 : -150; );
   function lvGet(t, k) ( t < tap_cfg ? (TAP_BASE + t * TAP_STRIDE + TAP_S)[k] : 0; );
+  // A tap's levels per channel into this track's place, or silence.
+  function tapLevelsLR(t, quiet) local(b, k) (
+    (role == 1 && pl_tr >= -1 && pl_tr + 1 < PLV_TRACKS) ? (
+      b = PLV_BASE + (pl_tr + 1) * PLV_STRIDE + t * 8;
+      k = 0;
+      loop(4,
+        gmem[b + k] = quiet ? -150 : lvAmp(lvGet(t, TS_LCP + k));
+        gmem[b + 4 + k] = quiet ? -150 : lvMS(lvGet(t, TS_LCR + k));
+        k += 1;
+      );
+    );
+  );
 
   tapBands();
 
@@ -1306,8 +1360,9 @@ out_pin:right
       tap_mbx1 = gmem[pb + PB_MBX]; tap_mbx2 = gmem[pb + PB_MBX + 1]; tap_mbx3 = gmem[pb + PB_MBX + 2];
       tap_fine = gmem[pb + PB_FINE];
       tap_watch = gmem[pb + PB_WATCH];
+      tap_st = gmem[pb + PB_ST];
     ) : (
-      tap_n = 0; tap_mb = 0; tap_fine = 0; tap_watch = 0;
+      tap_n = 0; tap_mb = 0; tap_fine = 0; tap_watch = 0; tap_st = 0;
     );
     // Track Analyser's spectrum release
     v = gmem[CTRL_REL];
@@ -1333,6 +1388,8 @@ out_pin:right
       gmem[pb + PB_MBGR + 2] = tap_mbgr3; gmem[pb + PB_MBGR + 3] = tap_mbgr4;
       gmem[pb + PB_MBL] = tap_mbl1; gmem[pb + PB_MBL + 1] = tap_mbl2;
       gmem[pb + PB_MBL + 2] = tap_mbl3; gmem[pb + PB_MBL + 3] = tap_mbl4;
+      gmem[pb + PB_CORR] = stc_corr; gmem[pb + PB_STM] = stc_mdb; gmem[pb + PB_STS] = stc_sdb;
+      gmem[pb + PB_STCAP] = 1;
       gmem[pb + PB_RSEQ] += 1;
     );
   );
@@ -1464,6 +1521,13 @@ out_pin:right
       t += 1;
     );
   );
+  // the stereo tap: started afresh when it's another one
+  tap_st != stc_was ? (
+    stc_was = tap_st;
+    stc_ll = stc_rr = stc_lr = stc_mm = stc_ss = 0;
+    memset(STR_RING, 0, STP_N * 2);
+  );
+  stc_dec = max(1, floor(srate / 24000 + 0.5));
   // The readings, every block: a tap not in use, or not running, reads 0.
   t = 0; loop(TAP_MAX, TV_GR[t] = (tap_run && tapIsGR(t)) ? tapReading(t) : 0; t += 1; );
   // a multiband tap's bands, the same way
@@ -1493,13 +1557,34 @@ out_pin:right
       loop(TAP_MAX,
         TV_INPK[t] = lvAmp(lvGet(t, TS_LIP)); TV_OUTPK[t] = lvAmp(lvGet(t, TS_LOP));
         TV_INRMS[t] = lvMS(lvGet(t, TS_LIR)); TV_OUTRMS[t] = lvMS(lvGet(t, TS_LOR));
+        tapLevelsLR(t, t >= tap_cfg);
         t += 1;
+      );
+      // the stereo tap's, and its scope when this track writes it
+      (tap_st >= 1 && tap_st <= tap_cfg) ? (
+        stc_corr = (stc_ll > 0.000000000001 && stc_rr > 0.000000000001)
+          ? floor(stc_lr / sqrt(stc_ll * stc_rr) * 1000 + 0.5) / 1000 : 0;
+        stc_mdb = lvMS(stc_mm); stc_sdb = lvMS(stc_ss);
+        gmem[CTRL_STTRK] == pl_tr + 2 ? (
+          stc_i = 0;
+          loop(STP_N,
+            stc_k = ((stc_pos + stc_i) % STP_N) * 2;
+            gmem[STP_BASE + stc_i * 2] = STR_RING[stc_k];
+            gmem[STP_BASE + stc_i * 2 + 1] = STR_RING[stc_k + 1];
+            stc_i += 1;
+          );
+          gmem[STH_BASE + 1] = STP_N; gmem[STH_BASE + 2] = pl_tr + 2;
+          stc_seq += 1; gmem[STH_BASE] = stc_seq;
+        );
+      ) : (
+        stc_corr = 0; stc_mdb = stc_sdb = -150;
       );
       lvChanged = 1;
     );
   ) : (tap_lvdead == 0 ? (
     tap_lvdead = 1;
-    t = 0; loop(TAP_MAX, TV_INPK[t] = TV_OUTPK[t] = TV_INRMS[t] = TV_OUTRMS[t] = -150; t += 1; );
+    t = 0; loop(TAP_MAX, TV_INPK[t] = TV_OUTPK[t] = TV_INRMS[t] = TV_OUTRMS[t] = -150; tapLevelsLR(t, 1); t += 1; );
+    stc_corr = 0; stc_mdb = stc_sdb = -150;
     lvChanged = 1;
   ));
   lvChanged ? (
@@ -1509,6 +1594,7 @@ out_pin:right
   (active && tap_cfg > 0) ? (
     gmem[TAPTR_HDR] = tap_run ? tap_cfg : 0;
     t = 0; loop(TAP_MAX, gmem[TAPTR_HDR + 1 + t] = TV_GR[t]; t += 1; );
+    gmem[TAPTR_HDR + 9] = TAPTR_BASE2;
   );
 
   //-- measuring the zero (THE ZERO POINT) ----------------------------------
@@ -1536,6 +1622,7 @@ out_pin:right
     gmem[TW_HDR + 3] = srate;
     gmem[TW_HDR + 4] = cal_pl + 1;
     gmem[TW_HDR + 6] = tap_cfg;
+    gmem[TW_HDR + 7] = TW_BASE2;
   );
   cal_play = (play_state & 1) == 1;
 
@@ -1911,6 +1998,22 @@ out_pin:right
     ) : (
       t = 0;
       loop(tap_cfg, tapLevels(t, spl(2 + t * 4), spl(3 + t * 4), spl(4 + t * 4), spl(5 + t * 4)); t += 1; );
+      // the stereo tap's output: its sums, and its scope's ring
+      (tap_st >= 1 && tap_st <= tap_cfg) ? (
+        stv_l = spl(4 + (tap_st - 1) * 4); stv_r = spl(5 + (tap_st - 1) * 4);
+        stc_ll += (stv_l * stv_l - stc_ll) * tap_lvrk;
+        stc_rr += (stv_r * stv_r - stc_rr) * tap_lvrk;
+        stc_lr += (stv_l * stv_r - stc_lr) * tap_lvrk;
+        stv_m = (stv_l + stv_r) * 0.5; stv_s = (stv_l - stv_r) * 0.5;
+        stc_mm += (stv_m * stv_m - stc_mm) * tap_lvrk;
+        stc_ss += (stv_s * stv_s - stc_ss) * tap_lvrk;
+        stc_skip += 1;
+        stc_skip >= stc_dec ? (
+          stc_skip = 0;
+          STR_RING[stc_pos * 2] = stv_l; STR_RING[stc_pos * 2 + 1] = stv_r;
+          stc_pos = (stc_pos + 1) % STP_N;
+        );
+      );
     );
     // Gain reduction, only for the taps measuring it.
     t = 0;

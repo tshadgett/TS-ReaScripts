@@ -735,6 +735,15 @@ and the web bridge both lay taps from their own copy of the code: after an
 update, one still running the old code lays them differently and the two
 re-lay them in turn (levels come and go) until REAPER is restarted.
 
+The line is Vu<n>=src|look|ref|peak|face|bstyle|stereo|hide (trailing
+empty fields left off): look classic, dark, analogue or bar; face empty
+(the look's own), "panel" or #RRGGBB; bstyle a C.BUTTON_STYLES key; "st"
+for stereo (two meters from TP.levels_lr); "hide" for no In / Out / GR
+buttons. On a Trimmer layout a VU reads TR.meters and the Trimmer's REF
+and CEIL instead of probes. Analogue's glow is 64 rings widest first, each
+adding what takes the light to the profile there; its corner shade is a
+16 x 10 grid of AddRectFilledMultiColor (ring strokes left seams).
+
 ## Fonts
 
 Visual Options > Text sets C.FONTS (text, head, bar). W.font_of makes each
@@ -750,3 +759,66 @@ A splitter is bound to the window whose draw list it was made from. One
 kept per draw-list address met another window later given the same
 address ("cannot use DrawListSplitter over multiple windows"); P.splitter
 makes a new one each time, which ReaImGui frees after the frame.
+
+## Visualisers
+
+A layout control Ctl<n>=-1|vis|0| with c.vis, its own canvas-like lines
+after Vis<n>: Vis<n>Canvas (the kind), Vis<n>Role<name>, Vis<n>SatCal,
+Vis<n>CanvasCol. An EQ curve (Ctl<n>=-1|curve|0|) with bands of its own
+keeps a whole EQ canvas there (Vis<n>Band1, Vis<n>Learn1...); M.curve_cv
+gives its own, else the layout's canvas. Kinds: filters, fstrip, cenv,
+thresh, limit, drive, harm, scurve (M.SAT_KINDS share the saturator's
+roles and SatCal), frange (ranges 2..M.FR_MAX as R<k><role>; Threshold
+is shown as "Line" and takes any control), width, trimfilt (no roles:
+the Trimmer's own filters). RP.draw_vis sets CP.vis_bare round the draw so
+the canvas parts leave out their screens and frames. Learn takes job.cv
+for a control's own canvas. Taps: frange wants the multiband split
+(TP.set_mb), drive/harm/scurve/width want levels, width the stereo tap.
+
+M.sat_bite: the input level where the learned fundamental has fallen 1 dB
+(bite_of_gain), carried past the loudest level by its last slope up to
++12 dB; the curve-based knee is the fallback (it pinned on plugins whose
+tone filters bend the curve).
+
+## Act buttons
+
+Act<n>=trim_auto|trim_listen: a Trimmer layout's Auto and Listen, drawn
+by TRP.draw_act. P.own_trim(key) is true only for the Trimmer's Standard
+layout; its other layouts are ordinary grids that start from
+TR.starter_layout().
+
+## TS_TrackProbe 2.4.0: stereo and levels per channel
+
+Block 25 is tap_st (the stereo tap, 1..8); 122..124 its correlation, mid
+and side; 125 is 1 on a probe that measures stereo. The scope is at
+0x340000 (frame count, points, writer = track index + 2), 512 L/R pairs
+from 0x340010; gmem[77] names the track allowed to write it. Levels per
+channel: 0x350000 + (track index + 1) * 64 + tap * 8, peaks [0..3] (in L,
+in R, out L, out R) then RMS [4..7], tracks to index 2999 (stops short of
+Learn's 0x380000). Taps 5..8's traces and waveforms moved from 0x200000 /
+0x208000 (inside the Trimmer's blocks, 0x200000 + (index + 1) * 256, up
+to 0x301100) to 0x310000 / 0x318000; the probe says where at 0x4F000 + 9
+and 0x5C000 + 7, and a reader seeing 0 there (an older probe) uses the
+old places.
+
+## Plugins that only say where they are
+
+Some plugins (Sonimus A-Console) answer FormatParamValueNormalized with
+the control's current text whatever value is asked, and their display
+leaves the unit off ("0.20" shown, "0.20 kHz" given). UN.formatter sweeps
+such a plugin (moving the control and reading it back) when the two texts
+match or differ only by a unit, and puts that unit back on every plain
+number it reads. While the plugin plays or writes automation it can't be
+swept. Pro-C 3's Lookahead reads "0.000 ms" all along its range while its
+Maximum Lookahead is off: CP's reads_flat places such a time along its
+range instead.
+
+## Measured latency, shared
+
+TS_CV_Trace measures a tapped plugin's delay from the audio and the tap is
+laid with it (TP.set_measured_lag). The window and the web bridge each
+re-check the routing, so the measured lags go through ExtState
+TS_CV_WEB/lags ("guid=samples,...", TP.lag_of); before that the bridge
+laid the reported latency back each time the window laid the measured
+one, and every rewrite of the tap record (P_EXT:TS_CV_TAPS, part of Track
+Analyser's chain signature) made Track Analyser start over.

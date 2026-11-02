@@ -1,5 +1,15 @@
 # Track Analyser — changelog
 
+## 2.6.1 — TS_TrackProbe 2.4.0
+
+- **TS_TrackProbe 2.4.0** also measures each plugin's left and right
+  levels apart, and one plugin's stereo picture (its correlation, mid and
+  side, and a scope), for ChannelView's stereo VU meters and Width
+  visualiser. Reopen a project after updating, so the new probe runs.
+- **Fixed:** with ChannelView's TS_CV Trimmer in the project, the
+  reduction traces of the fifth to eighth measured plugins on a track
+  could be disturbed by the Trimmer's meters (and the other way round).
+
 ## 2.6.0 — new look, TS_TrackProbe 2.3.0
 
 - **Settings in ChannelView's look:** every setting has its name above it,

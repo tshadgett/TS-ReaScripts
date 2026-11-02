@@ -2,11 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.6.0
+-- @version 2.6.1
 -- @changelog
---  Settings in ChannelView's new look. TS_TrackProbe 2.3.0: up to eight
---  measured plugins per track, ten bands by FFT at a quarter of the CPU,
---  and only the tracks being looked at are measured.
+--  TS_TrackProbe 2.4.0: each plugin's left and right levels, and one
+--  plugin's stereo picture, for ChannelView; plugins 5 to 8's traces no
+--  longer clash with the TS_CV Trimmer. Reopen a project after updating.
 -- @about
 --  # Track Analyser
 --
@@ -965,7 +965,13 @@ local G = TA.gmem
 -- that keeps them running, and where the post probe writes each tap's
 -- reduction per scope column while this panel has the track armed.
 local TAP_HB, TAP_TRACE, TAP_COLS = 73, 0x50000, 4096
-local TAP_TRACE2 = 0x200000   -- taps 5..8
+-- taps 5..8: where the probe says (its tap header's [9]), or where a
+-- probe before 2.4.0 puts them
+local TAP_HDR, TAP_TRACE2_OLD = 0x4F000, 0x200000
+local function tapTrace2()
+  local b = math.floor(r.gmem_read(TAP_HDR + 9) or 0)
+  return (b >= 0x300000 and b < 0x340000) and b or TAP_TRACE2_OLD
+end
 local tapBeat = 0
 TA.attach()
 
@@ -1816,6 +1822,7 @@ local function pumpGR()
   --   above -- the trace for a measured plugin is sharper than for a
   --   reported one, not blurrier.
   if grLastCol and span > 0 and span <= MAX_BRIDGE then
+    local TAP_TRACE2 = tapTrace2()
     for j, src in ipairs(rigSources) do
       if src.est and src.route and src.route.index then
         local ix = src.route.index

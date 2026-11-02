@@ -889,10 +889,209 @@ do
   check("vu: the default", b.vu.src .. " " .. b.vu.look .. " " .. b.vu.ref .. " " .. tostring(b.vu.peak), "in classic -18 true")
   check("vu: copied", M.copy(l).controls[1].vu.look, "dark")
   check("vu: a bad line, the default", M.vu_line(M.vu_of("x|y|9|")), "in|classic|-18|1")
+  check("vu: its face kept", tostring(M.vu_of("in|dark|-18|1|panel").face) .. " " .. M.vu_line(M.vu_of("out|bar|-14|0|#12AB9f")),
+    "panel out|bar|-14|0|#12AB9F")
+  check("vu: its face copied", M.vu_copy({ src = "in", look = "classic", ref = -18, face = 0x112233 }).face, 0x112233)
+  check("vu: its buttons' style kept", tostring(M.vu_of("in|dark|-18|1||lens").bstyle) .. " " .. tostring(M.vu_of("in|dark|-18|1|panel|window").face)
+    .. " " .. M.vu_line(M.vu_of("in|dark|-18|1||backlit")) .. " " .. M.vu_line(M.vu_of("in|dark|-18|1|#102030|solid"))
+    .. " " .. tostring(M.vu_of("in|dark|-18|1||flat").bstyle), "lens panel in|dark|-18|1||backlit in|dark|-18|1|#102030|solid nil")
+  check("vu: stereo kept", tostring(M.vu_of("out|classic|-18|1|||st").stereo) .. " " .. M.vu_line({ src = "out", look = "classic", ref = -18,
+    stereo = true }) .. " " .. M.vu_line(M.vu_of("in|classic|-18|1|||")), "true out|classic|-18|1|||st in|classic|-18|1")
+  check("vu: its buttons hidden", tostring(M.vu_of("gr|dark|-18|1||||hide").noswitch) .. " " .. M.vu_line({ src = "gr", look = "dark",
+    ref = -18, noswitch = true }) .. " " .. tostring(M.vu_copy({ noswitch = true }).noswitch), "true gr|dark|-18|1||||hide true")
   check("vu: wants gain reduction", tostring(M.has_vu(l, "gr")) .. " " .. tostring(M.has_vu(l, "lvl")), "true true")
+  -- the Trimmer's starter layout: kept and read back as it was made
+  do
+  local TRs = require("TS_CV_Trimmer")
+  M.set("TrimStart", TRs.starter_layout())
+  M.save(); M.reload()
+  local ts = M.get("TrimStart")
+  local kinds = {}
+  for _, c in ipairs(ts.controls) do kinds[#kinds + 1] = c.type .. (c.act and (":" .. c.act) or "") .. (c.vis and (":" .. c.vis.kind) or "") end
+  check("trimmer layout: its controls", table.concat(kinds, " "),
+    "vu knob act:trim_auto knob act:trim_listen toggle vis:trimfilt")
+  check("trimmer layout: a stereo meter, on a grid", tostring(ts.controls[1].vu.stereo) .. " " .. tostring(ts.grid and ts.grid.cols)
+    .. " " .. M.at_line(ts.controls[7].at), "true 12 " .. M.at_line({ c = 0, r = 13, w = 12, h = 8 }))
+  check("trimmer layout: copied", M.copy(ts).controls[3].act, "trim_auto")
+  M.remove("TrimStart"); M.save()
+  check("trimmer: its own panel is its Standard layout only", tostring(P.own_trim(TRs.DESC)) .. " "
+    .. tostring(P.own_trim(M.variant_key(TRs.DESC, "Mine"))), "true false")
+  end
   check("vu: none", tostring(M.has_vu({ controls = { { type = "knob" } } }, "gr")), "false")
   check("vu: its room in a flow", table.concat({ P.cell_size({ type = "vu", param = -1 }, 8) }, " "), "4 3 vu")
   M.remove("VuPlug"); M.save()
+end
+-- an EQ curve with bands of its own (Vis<n>...): kept, read back, copied;
+-- the layout's EQ canvas is still drawn beside its controls
+do
+  local own = { kind = "eq", all_on = 9, bands = {
+    { name = "Low", freq = 1, gain = 2, q = 3, learn_sig = "1,2,3,-,-", learn = "abc" },
+    { name = "High", freq = 4, gain = 5, dyn = { thr = 6, rev = { thr = true } } } } }
+  M.set("CurvePlug", { canvas = { kind = "eq", bands = { { name = "B", freq = 20, gain = 21 } } }, controls = {
+    { param = 0, type = "knob", label = "" },
+    { param = -1, type = "curve", label = "", vis = own },
+    { param = -1, type = "curve", label = "" } } })
+  M.save(); M.reload()
+  local l = M.get("CurvePlug")
+  local a, b = l.controls[2], l.controls[3]
+  check("curve: its own bands read back", a.vis and (#a.vis.bands .. " " .. a.vis.bands[1].name .. " " .. a.vis.bands[2].freq
+    .. " " .. tostring(a.vis.all_on)), "2 Low 4 9")
+  check("curve: its learning kept", tostring(a.vis.bands[1].learn) .. " " .. tostring(a.vis.bands[1].learn_sig), "abc 1,2,3,-,-")
+  check("curve: its dynamics kept", tostring(a.vis.bands[2].dyn and a.vis.bands[2].dyn.thr) .. " "
+    .. tostring(a.vis.bands[2].dyn and a.vis.bands[2].dyn.rev.thr), "6 true")
+  check("curve: without, none", tostring(b.vis), "nil")
+  check("curve: which EQ each draws", M.curve_cv(l, a).bands[1].name .. " " .. M.curve_cv(l, b).bands[1].name, "Low B")
+  check("curve: copied", M.copy(l).controls[2].vis.bands[2].name, "High")
+  check("curve: copied apart", tostring(M.copy(l).controls[2].vis ~= a.vis), "true")
+  check("curve: the canvas still drawn in the shared one", tostring(M.has_curve(l)), "true")
+  l.controls[3] = nil
+  check("curve: only its own: the canvas beside", tostring(M.has_curve(l)), "false")
+  check("curve: no EQ anywhere", tostring(M.curve_cv({ controls = {} }, { type = "curve" })), "nil")
+  check("curve: a comp canvas isn't an EQ", tostring(M.curve_cv({ canvas = { kind = "comp" } }, { type = "curve" })), "nil")
+  M.remove("CurvePlug"); M.save()
+end
+-- a visualiser (Ctl<n>=-1|vis|0|): its roles kept after Vis<n>; filters
+-- guessed by side and part; a slope from its text; its room in a flow
+do
+  M.set("VisPlug", { controls = {
+    { param = -1, type = "vis", label = "", vis = { kind = "filters", roles = { LowCut = 3, HighCut = 7, LowSlope = 4 },
+                                                     rev = { HighCut = true }, cols = { curve = 0x112233 } } },
+    { param = -1, type = "vis", label = "", vis = { kind = "fstrip", roles = { HighCut = 2 }, rev = {} } } } })
+  M.save(); M.reload()
+  local l = M.get("VisPlug")
+  local a, b = l.controls[1], l.controls[2]
+  check("vis: a type of its own", a.type .. " " .. b.type, "vis vis")
+  check("vis: its kind and roles", a.vis.kind .. " " .. a.vis.roles.LowCut .. " " .. a.vis.roles.HighCut .. " "
+    .. a.vis.roles.LowSlope .. " " .. tostring(a.vis.rev.HighCut), "filters 3 7 4 true")
+  check("vis: its colours", tostring(a.vis.cols and a.vis.cols.curve), tostring(0x112233))
+  check("vis: a strip", b.vis.kind .. " " .. b.vis.roles.HighCut, "fstrip 2")
+  check("vis: copied", M.copy(l).controls[1].vis.roles.LowSlope, 4)
+  check("vis: not a canvas", tostring(l.canvas), "nil")
+  check("vis: its room in a flow", table.concat({ P.cell_size(a, 8) }, " ") .. " / " .. table.concat({ P.cell_size(b, 8) }, " "),
+    "8 4 vis / 8 2 vis")
+  M.remove("VisPlug"); M.save()
+  -- a frequency range: its first range's roles plain, the others R<k>,
+  -- and a frequency alone around it
+  M.set("VisRange", { controls = {
+    { param = -1, type = "vis", label = "", vis = { kind = "frange", dshape = "around",
+      roles = { Frequency = 1, Threshold = 2, R2Low = 4, R2High = 5, R2Threshold = 6 }, rev = { R2Low = true } } } } })
+  M.save(); M.reload()
+  local fr = M.get("VisRange").controls[1].vis
+  check("vis: a frequency range kept", fr.kind .. " " .. fr.roles.Frequency .. " " .. fr.roles.R2Low .. " "
+    .. tostring(fr.rev.R2Low) .. " " .. tostring(fr.dshape), "frange 1 4 true around")
+  check("vis: a range's role", table.concat({ M.fr_split("R3Width") }, " ") .. " " .. M.fr_key(1, "Width") .. " " .. M.fr_key(2, "Width"),
+    "3 Width Width R2Width")
+  M.remove("VisRange"); M.save()
+  local CS = require("TS_CV_CanvasSetup")
+  local gf = CS.guess({ "Frequency", "Threshold", "Range", "Mix" }, "frange")
+  check("vis guess: one range, a de-esser's", gf.kind .. " " .. tostring(gf.roles.Frequency) .. " " .. tostring(gf.roles.Threshold)
+    .. " " .. tostring(gf.roles.R2Threshold) .. " " .. tostring(gf.roles.Range), "frange 0 1 nil nil")
+  local gf2 = CS.guess({ "Band 1 Freq", "Band 1 Thresh", "Band 2 Freq", "Band 2 Thresh", "Band 3 Freq", "Output" }, "frange")
+  check("vis guess: numbered ranges", tostring(gf2.roles.Frequency) .. " " .. tostring(gf2.roles.Threshold) .. " "
+    .. tostring(gf2.roles.R2Frequency) .. " " .. tostring(gf2.roles.R2Threshold) .. " " .. tostring(gf2.roles.R3Frequency),
+    "0 1 2 3 4")
+  local g = CS.guess({ "Input", "Low Cut Freq", "Low Cut Slope", "High Cut Freq", "HPF On", "LPF Slope", "Hi Cut Enable", "Output" }, "filters")
+  check("vis guess: the cuts", g.kind .. " " .. tostring(g.roles.LowCut) .. " " .. tostring(g.roles.HighCut), "filters 1 3")
+  check("vis guess: slopes and switches", tostring(g.roles.LowSlope) .. " " .. tostring(g.roles.HighSlope) .. " "
+    .. tostring(g.roles.LowCutOn) .. " " .. tostring(g.roles.HighCutOn), "2 5 4 6")
+  local gc = CS.guess({ "Gate Attack", "Gate Release", "Comp Attack", "Comp Release", "Comp Hold", "Auto Release",
+    "Lookahead", "Attack Curve" }, "cenv")
+  check("vis guess: a compressor's envelope over a gate's", gc.kind .. " " .. tostring(gc.roles.Attack) .. " "
+    .. tostring(gc.roles.Release) .. " " .. tostring(gc.roles.Hold) .. " " .. tostring(gc.roles.Preopen), "cenv 2 3 4 6")
+  local gc2 = CS.guess({ "Threshold", "Ratio", "Attack", "Release", "Auto Release" }, "cenv")
+  check("vis guess: a plain compressor's envelope", tostring(gc2.roles.Attack) .. " " .. tostring(gc2.roles.Release)
+    .. " " .. tostring(gc2.roles.Hold), "2 3 nil")
+  local gl = CS.guess({ "Gain", "Out Ceiling", "Release" }, "limit")
+  check("vis guess: a limiter", gl.kind .. " " .. tostring(gl.roles.Input) .. " " .. tostring(gl.roles.Ceiling) .. " "
+    .. tostring(gl.roles.Release), "limit 0 1 2")
+  local gdv = CS.guess({ "Drive", "Saturation Type", "Tone", "Mix" }, "drive")
+  check("vis guess: a drive meter's saturator", gdv.kind .. " " .. tostring(gdv.roles.Drive), "drive 0")
+  check("vis: a drive meter keeps its learned curve", tostring(M.SAT_KINDS.drive) .. " " .. tostring(M.SAT_KINDS.filters), "true nil")
+  local gw = CS.guess({ "Input", "Stereo Width", "Balance", "Mono Below", "Output" }, "width")
+  check("vis guess: an imager", gw.kind .. " " .. tostring(gw.roles.Width) .. " " .. tostring(gw.roles.Pan) .. " "
+    .. tostring(gw.roles.MonoBelow), "width 1 2 3")
+  check("vis: a saturation curve keeps its curve", tostring(M.SAT_KINDS.scurve) .. " " ..
+    tostring(CS.guess({ "Drive", "Saturation Type", "Tone", "Mix" }, "scurve").roles.Drive), "true 0")
+  check("vis: harmonics keep theirs, and guess the drive", tostring(M.SAT_KINDS.harm) .. " " ..
+    tostring(CS.guess({ "Drive", "Saturation Type", "Tone", "Mix" }, "harm").roles.Drive), "true 0")
+  local gt = CS.guess({ "Input", "Ceiling", "Output" }, "thresh")
+  check("vis guess: a clipper's ceiling as its threshold", gt.kind .. " " .. tostring(gt.roles.Threshold), "thresh 1")
+  check("vis guess: a strip", CS.guess({ "HP Freq", "LP Freq" }, "fstrip").kind .. " "
+    .. tostring(CS.guess({ "HP Freq", "LP Freq" }, "fstrip").roles.HighCut), "fstrip 1")
+  local g2 = CS.guess({ "Hi-Pass Freq", "Lo_Pass Freq", "LoPass Order", "HiPass On" }, "filters")
+  check("vis guess: hi and lo pass", tostring(g2.roles.LowCut) .. " " .. tostring(g2.roles.HighCut) .. " "
+    .. tostring(g2.roles.HighSlope) .. " " .. tostring(g2.roles.LowCutOn), "0 1 2 3")
+  local g3 = CS.guess({ "High Pass", "Low Pass", "HP", "LP Freq" }, "filters")
+  check("vis guess: high and low pass", tostring(g3.roles.LowCut) .. " " .. tostring(g3.roles.HighCut), "0 1")
+  -- the same words elsewhere: a delay's, a reverb's, a gate's detector, an EQ's cuts
+  local gd = CS.guess({ "Time", "Feedback", "Hi-Pass", "Lo Pass" }, "delay")
+  check("pass words: a delay's cuts", tostring(gd.roles.LowCut) .. " " .. tostring(gd.roles.HighCut), "2 3")
+  local gr = CS.guess({ "Decay", "HiPass", "LoPass", "Hi Pass On" }, "reverb")
+  check("pass words: a reverb's cuts", tostring(gr.roles.LowCut) .. " " .. tostring(gr.roles.HighCut) .. " "
+    .. tostring(gr.roles.LowCutOn), "1 2 3")
+  local gg = CS.guess({ "Threshold", "SC Hi-Pass", "SC Lo-Pass" }, "gate")
+  check("pass words: a gate's detector", tostring(gg.roles.Hipass) .. " " .. tostring(gg.roles.Lowpass), "1 2")
+  local MEt = require("TS_CV_MapEQ")
+  local eb = MEt.guess({ "Hi-Pass Freq", "Low Gain", "Low Freq", "Lo Pass Freq" })
+  check("pass words: an EQ's cuts", tostring(eb[1] and eb[1].name) .. " " .. tostring(eb[1] and eb[1].freq) .. " "
+    .. tostring(eb[#eb] and eb[#eb].name) .. " " .. tostring(eb[#eb] and eb[#eb].freq), "Low cut 0 High cut 3")
+  -- a plugin that only ever says where it is now (Sonimus A-Console): its
+  -- display leaves the unit off ("0.20"), its formatted text has it ("0.20
+  -- kHz") whatever it's asked; read by sweeping it, the unit put back on
+  do
+    local saved = {}
+    for _, k in ipairs({ "TrackFX_GetFXGUID", "TrackFX_SetParamNormalized", "TrackFX_GetParamNormalized",
+                         "TrackFX_GetFormattedParamValue", "TrackFX_FormatParamValueNormalized", "GetPlayState",
+                         "GetTrackAutomationMode" }) do saved[k] = reaper[k] end
+    local now = 0.084
+    local function khz(n) return 0.1 + 21.9 * n * n end
+    reaper.TrackFX_GetFXGUID = function() return "{ACONSOLE}" end
+    reaper.TrackFX_SetParamNormalized = function(_, _, p, n) if p == 66 then now = n end return true end
+    reaper.TrackFX_GetParamNormalized = function(_, _, p) return p == 66 and now or 0 end
+    reaper.TrackFX_GetFormattedParamValue = function(_, _, p) return true, p == 66 and ("%.2f"):format(khz(now)) or "" end
+    reaper.TrackFX_FormatParamValueNormalized = function(_, _, p) return true, p == 66 and ("%.2f kHz"):format(khz(now)) or "" end
+    reaper.GetPlayState = function() return 0 end
+    reaper.GetTrackAutomationMode = function() return 0 end
+    local UNt = require("TS_CV_Units")
+    local fmt = UNt.formatter({}, 0, 66)
+    local v, unit = UNt.at(fmt, 0.5)
+    local n = UNt.find_norm(fmt, 1200)
+    local RCt = require("TS_CV_ReaComp")
+    local vt = UNt.parse(RCt.text({}, 0, 66, 1.0))
+    local was_now = now
+    for k, f in pairs(saved) do reaper[k] = f end
+    check("says where it is: swept, its unit kept", tostring(math.abs((v or 0) - khz(0.5) * 1000) < 10) .. " " .. tostring(unit), "true hz")
+    check("says where it is: found by value", ("%.2f"):format(khz(n or 0)), "1.20")
+    check("says where it is: read where it isn't", ("%.0f"):format(vt or -1), "22000")
+    check("says where it is: put back after", ("%.3f"):format(was_now), "0.084")
+  end
+  local RP = require("TS_CV_RolePanel")
+  -- a cut that reads "800" low down and "5.0k" higher up: Hz all along
+  -- (not along its range, which jumped as the text changed); "Off" its end
+  do
+    local fpn_ = reaper.TrackFX_FormatParamValueNormalized
+    reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+      if p ~= 77 then return fpn_(_, _, p, n) end
+      if n < 0.05 then return true, "Off" end
+      local hz = 20 * 1000 ^ n
+      return true, hz >= 1000 and ("%.1fk"):format(hz / 1000) or ("%.0f"):format(hz)
+    end
+    local function rd(n)
+      local _, t = reaper.TrackFX_FormatParamValueNormalized(nil, 0, 77, n)
+      local v, unit = require("TS_CV_Units").parse(t)
+      return { p = 77, n = n, text = t, v = v, unit = unit }
+    end
+    local f1, a1 = RP._cut_hz({}, 0, "hzg", rd(0.3), "LowCut", {})
+    local f2, a2 = RP._cut_hz({}, 0, "hzg", rd(0.7), "LowCut", {})
+    local f3, _, o3 = RP._cut_hz({}, 0, "hzg", rd(0.0), "LowCut", {})
+    local f4, _, o4 = RP._cut_hz({}, 0, "hzg", rd(0.0), "HighCut", {})
+    reaper.TrackFX_FormatParamValueNormalized = fpn_
+    check("vis cut: plain numbers are Hz", ("%.0f %s"):format(f1, tostring(a1)), ("%.0f false"):format(20 * 1000 ^ 0.3))
+    check("vis cut: so are k", ("%.0f %s"):format(f2, tostring(a2)), "2500 false")
+    check("vis cut: Off at its end", f3 .. " " .. tostring(o3) .. " " .. f4 .. " " .. tostring(o4), "20 true 20000 true")
+  end
+  check("vis slope: dB an octave", RP.slope_db("24 dB/oct") .. " " .. RP.slope_db("48") .. " " .. RP.slope_db("2")
+    .. " " .. RP.slope_db("Off") .. " " .. RP.slope_db(nil), "24 48 12 12 12")
 end
 do
   local ok, VUm = pcall(require, "TS_CV_VU")
@@ -908,6 +1107,10 @@ do
     local q = VUm.needle_for_test("t2", 0, 20.0)
     q = VUm.needle_for_test("t2", 1, 20.065)
     check("vu ballistics: not at once", q > 0.55 and q < 0.7, true)
+    local lp = VUm._look_of({ look = "dark", face = "panel" })
+    local ll, ld = VUm._look_of({ look = "dark", face = 0xeeeeee }), VUm._look_of({ look = "classic", face = 0x101010 })
+    check("vu face: the panel's, none of its own", ("%x %s"):format(lp.face, tostring(lp.outline ~= nil)), "0 true")
+    check("vu face: ink to read on it", ("%x %x"):format(ll.ink, ld.ink), "2b2620ff d8daddff")
   end
 end
 check("rows at h=120", P.rows_for(120), 1)
@@ -7936,6 +8139,24 @@ do
     Tr.realign(h, d, 0, cur, 100)
     check("gr align: reports 40 late", h.k, -40)
   end
+  -- taps 5..8's waveforms: where the probe says (2.4.0: clear of the
+  -- Trimmer's blocks), or where an older probe puts them
+  do
+    local rd0, gpt, tp0 = reaper.gmem_read, reaper.GetPlayState, reaper.time_precise
+    for _, case in ipairs({ { 0x318000, 0x318000 }, { 0, 0x208000 } }) do
+      local gm = { [0x5C000 + 5] = 1, [0x5C000 + 2] = 192, [0x5C000 + 3] = 48000, [0x5C000 + 6] = 8,
+                   [0x5C000 + 7] = case[1] }
+      gm[case[2] + 0], gm[case[2] + 3] = -0.5, 6
+      reaper.gmem_read = function(i) return gm[i] or 0 end
+      reaper.GetPlayState = function() return 1 end
+      reaper.time_precise = function() return 10 end
+      Tr.begin_frame(); Tr._tw.sync()
+      local d = Tr._tw.data[5]
+      check(("trace: tap 5 read at 0x%x"):format(case[2]), tostring(d.mn[0]) .. " " .. tostring(d.gr[0]), "-0.5 6")
+      check(("trace: tap 5's place, header 0x%x"):format(case[1]), Tr._tw.at(5, 0), case[2])
+    end
+    reaper.gmem_read, reaper.GetPlayState, reaper.time_precise = rd0, gpt, tp0
+  end
   -- silence: nothing to go on, nothing found
   local h = { gr = {} }
   local d = { mn = {}, mx = {}, ip = {}, gr = {} }
@@ -9007,6 +9228,82 @@ do
     local okdl, errdl = pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 600, 400, {},
       { addr = 0, guid = "dl-draw", name = "VST: SomeDelay" }, {}, dcv)
     check("delay: its canvas draws, with its filters", okdl and "ok" or tostring(errdl), "ok")
+    -- the filter visualisers: large and as a strip
+    local RPv = require("TS_CV_RolePanel")
+    local vcv = { kind = "filters", rev = {}, roles = { LowCut = 6, HighCut = 5, LowSlope = 7, HighCutOn = 8 } }
+    local okv, errv = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 400, 160, {}, { addr = 0, guid = "vf-draw", name = "VST: SomeStrip" }, {}, vcv, { id = ":v1" })
+    check("vis: filters draw", okv and tostring(errv) or tostring(errv), "true")
+    vcv.kind = "fstrip"
+    local okv2, errv2 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 400, 50, {}, { addr = 0, guid = "vf-draw", name = "VST: SomeStrip" }, {}, vcv, { id = ":v2" })
+    check("vis: the strip draws", okv2 and tostring(errv2) or tostring(errv2), "true")
+    local okv3, errv3 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 400, 50, {}, { addr = 0, guid = "vf-draw", name = "VST: SomeStrip" }, {},
+      { kind = "filters", rev = {}, roles = {} }, nil)
+    check("vis: nothing set up, nothing drawn", okv3 and tostring(errv3) or tostring(errv3), "false")
+    local okv4, errv4 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 300, 140, {}, { addr = 0, guid = "vc-draw", name = "VST: SomeStrip" }, {},
+      { kind = "cenv", rev = {}, roles = { Attack = 1, Release = 2, Hold = 4, Preopen = 3 } }, { id = ":v3" })
+    check("vis: a compressor envelope draws", okv4 and tostring(errv4) or tostring(errv4), "true")
+    local okv5, errv5 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 300, 120, {}, { addr = 0, guid = "vt-draw", name = "VST: SomeClipper" }, {},
+      { kind = "thresh", rev = {}, roles = { Threshold = 0, Range = 9 } }, { id = ":v4" })
+    check("vis: a threshold draws", okv5 and tostring(errv5) or tostring(errv5), "true")
+    local okv6, errv6 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 300, 140, {}, { addr = 0, guid = "vl-draw", name = "VST: SomeLimit" }, {},
+      { kind = "limit", rev = {}, roles = { Threshold = 0, Ceiling = 9, Release = 2 } }, { id = ":v5" })
+    check("vis: a limiter draws", okv6 and tostring(errv6) or tostring(errv6), "true")
+    local okv7, errv7 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 200, 160, {}, { addr = 0, guid = "vd-draw", name = "VST: SomeSat" }, {},
+      { kind = "drive", rev = {}, roles = { Drive = 1, Style = 7 } }, { id = ":v6" })
+    check("vis: a drive meter draws (not learned yet)", okv7 and tostring(errv7) or tostring(errv7), "true")
+    local okv8, errv8 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 200, 120, {}, { addr = 0, guid = "vh-draw", name = "VST: SomeSat" }, {},
+      { kind = "harm", rev = {}, roles = { Drive = 1, Style = 7 } }, { id = ":v7" })
+    check("vis: harmonics draw (not learned yet)", okv8 and tostring(errv8) or tostring(errv8), "true")
+    local okv10, errv10 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 240, 200, {}, { addr = 0, guid = "vc-draw", name = "VST: SomeSat" }, {},
+      { kind = "scurve", rev = {}, roles = { Drive = 1, Style = 7, Tone = 2, Mix = 3 } }, { id = ":v9" })
+    check("vis: a saturation curve draws (not learned yet)", okv10 and tostring(errv10) or tostring(errv10), "true")
+    local okv11, errv11 = pcall(RPv.draw, "ctx", "dl", 0, 0, 520, 300, {}, { addr = 0, guid = "sc-draw", name = "VST: SomeSat" }, {},
+      { kind = "sat", rev = {}, roles = { Drive = 1, Style = 7, Tone = 2, Output = 4, Mix = 3 } })
+    check("sat canvas: draws (not learned yet)", okv11 and tostring(errv11) or tostring(errv11), "true")
+    local okv12, errv12 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 260, 200, {}, { addr = 0, guid = "vw-draw", name = "VST: SomeImager" }, {},
+      { kind = "width", rev = {}, roles = { Width = 1, Pan = 2, MonoBelow = 3 } }, { id = ":v10" })
+    check("vis: a width draws (no probe)", okv12 and tostring(errv12) or tostring(errv12), "true")
+    -- the VU meter, every look, on its own face, the panel's and a colour
+    local VUd = require("TS_CV_VU")
+    VUd.attach(fake)
+    local vu_bad = {}
+    for _, lk in ipairs(M.VU_LOOKS) do
+      for fi, fc in ipairs({ false, "panel", 0x203040 }) do
+        for _, src in ipairs({ "in", "gr" }) do
+          local bs = ({ nil, "lens", "solid" })[fi]
+          local okd, errd = pcall(VUd.draw, "ctx", "dl", 0, 0, 220, 130, {}, { addr = 0, guid = "vu-draw", name = "VST: Some" },
+            { type = "vu", vu = { src = src, look = lk, ref = -18, peak = true, face = fc or nil, bstyle = bs, stereo = fi == 2,
+              noswitch = fi == 3 } },
+            "vu" .. lk .. src)
+          if not okd then vu_bad[#vu_bad + 1] = lk .. "/" .. tostring(fc) .. "/" .. src .. ": " .. tostring(errd) end
+        end
+      end
+    end
+    check("vu: every look and face draws", #vu_bad == 0 and "ok" or table.concat(vu_bad, "; "), "ok")
+    -- the Trimmer's act buttons and filters, as a layout has them
+    do
+    local TRPd = require("TS_CV_TrimmerPanel")
+    TRPd.attach(fake)
+    local tfx = { addr = 0, guid = "trim-draw", name = require("TS_CV_Trimmer").DESC }
+    local oka, erra = pcall(TRPd.draw_act, "ctx", "dl", 0, 0, 60, 20, {}, tfx, { type = "act", act = "trim_listen", style = "lens" }, "ta1")
+    local okb, errb = pcall(TRPd.draw_act, "ctx", "dl", 0, 0, 60, 20, {}, tfx, { type = "act", act = "trim_auto" }, "ta2")
+    local stub = { TrackFX_GetParam = function(_, _, p) return (p == 5) and 20000 or 20, 0, 1 end,
+                   GetProjExtState = function() return 0, "" end, gmem_attach = function() end,
+                   gmem_read = function() return 0 end, gmem_write = function() end,
+                   GetMediaTrackInfo_Value = function() return 1 end }
+    local was_ = {}
+    for k, f in pairs(stub) do was_[k] = reaper[k]; reaper[k] = reaper[k] or f end
+    local okf, errf = pcall(TRPd.draw_filters, "ctx", "dl", 0, 0, 260, 140, {}, tfx, true)
+    for k in pairs(stub) do reaper[k] = was_[k] end
+    check("trimmer: its buttons and filters draw on a layout", (oka and okb and okf) and "ok"
+      or (tostring(erra) .. " " .. tostring(errb) .. " " .. tostring(errf)), "ok")
+    end
+    local okv9, errv9 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 300, 140, {}, { addr = 0, guid = "vr-draw", name = "VST: SomeDeEss" }, {},
+      { kind = "frange", rev = {}, roles = { Frequency = 1, Threshold = 2, R2Low = 4, R2High = 5, R2Threshold = 6 } }, { id = ":v8" })
+    check("vis: a frequency range draws, two ranges", okv9 and tostring(errv9) or tostring(errv9), "true")
+    local okv13, errv13 = pcall(RPv.draw_vis, "ctx", "dl", 0, 0, 300, 140, {}, { addr = 0, guid = "vb-draw", name = "VST: SomeImager" }, {},
+      { kind = "frange", rev = {}, roles = { Low = 1, High = 2, Threshold = 3, R2Low = 2, R2High = 4, R2Threshold = 5 } }, { id = ":v11" })
+    check("vis: a frequency range's line is any control", okv13 and tostring(errv13) or tostring(errv13), "true")
     -- every handle and cut driven
     MDg.link_of = function() return { macro = true, mod = src_, baseline = 0.2, scale = 0.5 } end
     local CMt = require("TS_CV_CanvasMod")

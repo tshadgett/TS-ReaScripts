@@ -494,6 +494,34 @@ check("multiband: a levels-only tap can't", TP.set_mb(track, "{C3}", { 300 }), f
 F(5).params[TP.P_MB] = 2
 check("multiband: another tap's bands aren't its", TP.band_gr(track, "{C1}", 2), nil)
 F(5).params[TP.P_MB] = 0
+-- stereo: one tap's output (TS_TrackProbe 2.4.0+), and the scope one
+-- track writes; an older probe says so
+if NEW then
+  local b = 0x100000 + 3 * 128
+  gmem[b + 125] = 0
+  check("stereo: an older probe",        TP.set_stereo(track, "{C3}"), "old")
+  gmem[b + 125] = 1
+  check("stereo: asked",                 TP.set_stereo(track, "{C3}"), true)
+  local ti = TP.tap_index(track, "{C3}")
+  check("stereo: its tap and the scope's writer", ("%d %d"):format(gmem[b + 25], gmem[TP.ST_CTRL]), ti .. " 4")
+  gmem[b + 122], gmem[b + 123], gmem[b + 124] = 0.5, -12, -20
+  gmem[TP.ST_HDR], gmem[TP.ST_HDR + 1], gmem[TP.ST_HDR + 2] = 7, 2, 4
+  for k = 0, 3 do gmem[TP.ST_PTS + k] = (k + 1) / 10 end
+  local sv = TP.stereo(track, "{C3}")
+  check("stereo: read",                  ("%.1f %d %d %d %.1f"):format(sv.corr, sv.mid, sv.side, #sv.pts, sv.pts[4]),
+        "0.5 -12 -20 4 0.4")
+  check("stereo: not another plugin's",  TP.stereo(track, "{C1}"), nil)
+  gmem[TP.ST_HDR + 2] = 9
+  check("stereo: another track's scope", TP.stereo(track, "{C3}").pts, nil)
+  -- each channel's levels, at this track's place for this tap
+  local lb = TP.LR_BASE + 3 * TP.LR_STRIDE + (ti - 1) * 8
+  for k = 0, 7 do gmem[lb + k] = -10 - k end
+  local lr = TP.levels_lr(track, "{C3}")
+  check("stereo: levels per channel", ("%d %d %d %d"):format(lr.in_pk[1], lr.in_pk[2], lr.out_pk[2], lr.out_rms[2]), "-10 -11 -13 -17")
+  gmem[b + 125] = 0
+  check("stereo: an older probe's levels per channel", TP.levels_lr(track, "{C3}").old, true)
+  gmem[b + 125] = 1
+end
 -- third-octaves: one tap a probe, read back from gmem
 check("fine: a gain tap can be",       TP.fine_ok(track, "{C1}"), true)
 check("fine: a levels-only tap can't", TP.fine_ok(track, "{C3}"), false)
@@ -979,6 +1007,21 @@ if NEW then
   check("eight: taps in use", gmem[0x100000 + 3 * 128 + 8], 6)
 end
 check("eight: settles", TP.sync(track), false)
+
+-- a latency the window measured: the web bridge (its own TP, which never
+-- measured it) lays the same, so the two don't undo each other
+do
+  local g = rec8.taps[1].guid
+  TP.set_measured_lag(g, 777)
+  TP.sync(track)
+  check("lag: the measured one laid", TP.parse_record(track.ext[TP.EXT_KEY]).taps[1].lag, 777)
+  for k in pairs(TP.measured_lag) do TP.measured_lag[k] = nil end
+  now_t = now_t + 1
+  check("lag: another script reads it", TP.lag_of(g), 777)
+  TP.invalidate()
+  check("lag: and leaves the record", TP.sync(track), false)
+  check("lag: still the measured one", TP.parse_record(track.ext[TP.EXT_KEY]).taps[1].lag, 777)
+end
 
 -- ---------------------------------------------------------------- records
 check("v2 round trip", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")),

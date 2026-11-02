@@ -235,6 +235,12 @@ end
 function RC.text(track, addr, p, nv)
   local rg = U.range_of and U.range_of(p)
   if rg then return U.range_text(rg, nv or reaper.TrackFX_GetParamNormalized(track, addr, p)) end
+  -- somewhere it isn't: as the plugin reads there (TS_CV_Units UN.formatter,
+  -- which sweeps a plugin that only ever says where it is now)
+  if nv and math.abs(nv - (reaper.TrackFX_GetParamNormalized(track, addr, p) or 0)) > 1e-6 then
+    local t = require("TS_CV_Units").formatter(track, addr, p)(nv)
+    if t then return t end
+  end
   local fmt = reaper.TrackFX_FormatParamValueNormalized
   if fmt then
     local ok, t = fmt(track, addr, p, nv or reaper.TrackFX_GetParamNormalized(track, addr, p), "")

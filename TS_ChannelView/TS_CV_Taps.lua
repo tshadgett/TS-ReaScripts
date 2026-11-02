@@ -79,9 +79,31 @@ TP.EXT_KEY    = "P_EXT:TS_CV_TAPS"
 -- A tapped plugin's delay from input to output, samples, as the trace
 -- measured it from the audio (TS_CV_Trace): used for its tap in place of
 -- its reported latency. { [guid] = samples }
+-- Shared through ExtState TS_CV_WEB/lags ("guid=samples,..."): the window
+-- and the web bridge each re-check the routing, and a bridge that only
+-- knew the reported latency would put it back every time the window laid
+-- the measured one (Track Analyser starting over each time).
 TP.measured_lag = {}
+local lags_read = -10
+local function shared_lags()
+  local now = reaper.time_precise()
+  if now - lags_read < 0.5 then return end
+  lags_read = now
+  local s = reaper.GetExtState("TS_CV_WEB", "lags") or ""
+  for g, n in s:gmatch("([^,=]+)=(%-?%d+)") do TP.measured_lag[g] = tonumber(n) end
+end
 function TP.set_measured_lag(guid, n)
-  if TP.measured_lag[guid] ~= n then TP.measured_lag[guid] = n end
+  shared_lags()
+  if TP.measured_lag[guid] == n then return end
+  TP.measured_lag[guid] = n
+  local parts = {}
+  for g, v in pairs(TP.measured_lag) do parts[#parts + 1] = g .. "=" .. v end
+  table.sort(parts)
+  reaper.SetExtState("TS_CV_WEB", "lags", table.concat(parts, ","), false)
+end
+function TP.lag_of(guid)
+  shared_lags()
+  return TP.measured_lag[guid]
 end
 TP.GMEM_NS    = "TS_TA_Mem"
 TP.HB_SLOT    = 73
@@ -406,11 +428,14 @@ local function wants_measure(tr, addr)
   return not TP.native_gr(tr, addr, fx_guid(tr, addr))
 end
 
--- Whether a plugin's input and output levels are wanted (Levels=1, or a VU
--- meter showing its in or out).
+-- Whether a plugin's input and output levels are wanted (Levels=1, a VU
+-- meter showing its in or out, a drive meter, harmonics or curve, or a
+-- width).
 local function wants_levels(tr, addr)
   local layout = M.get(St.layout_key(fx_name(tr, addr), fx_guid(tr, addr), tr, addr))
-  return layout ~= nil and (layout.levels == true or (M.has_vu and M.has_vu(layout, "lvl")))
+  return layout ~= nil and (layout.levels == true or (M.has_vu and M.has_vu(layout, "lvl"))
+    or (M.has_vis and (M.has_vis(layout, "drive") or M.has_vis(layout, "harm") or M.has_vis(layout, "scurve")
+      or M.has_vis(layout, "width"))))
 end
 
 -- Whether this instance's gain-reduction meter is opened out into its trace
@@ -499,9 +524,9 @@ local function wants_wave(tr, addr)
 end
 
 -- Whether this instance's panel wants its reduction split by frequency:
--- a multiband or de-esser layout's (its bands), or any panel showing
--- its reduction by frequency (TP.want_fine). It is measured then even
--- when the plugin reports a reduction of its own.
+-- a multiband or de-esser layout's (its bands), a frequency range's, or
+-- any panel showing its reduction by frequency (TP.want_fine). It is
+-- measured then even when the plugin reports a reduction of its own.
 local fine_asked = {}
 function TP.want_fine(guid) fine_asked[guid] = reaper.time_precise() end
 local function wants_mb(tr, addr)
@@ -509,6 +534,11 @@ local function wants_mb(tr, addr)
   if not panel_open(guid) then return false end
   if fine_asked[guid] and reaper.time_precise() - fine_asked[guid] < 1.0 then return true end
   local layout = M.get(St.layout_key(fx_name(tr, addr), guid, tr, addr))
+  -- an EQ curve's own dynamic bands too, and a frequency range's
+  for _, c in ipairs((layout and layout.controls) or {}) do
+    for _, b in ipairs((c.vis and c.vis.bands) or {}) do if M.band_dynamic(b) then return true end end
+    if c.vis and c.vis.kind == "frange" then return true end
+  end
   local cv = layout and layout.canvas
   local k = cv and cv.kind
   if k == "eq" then
@@ -665,7 +695,7 @@ function TP.desired(tr)
         -- latency can be wrong: one reporting none but 2048 samples out
         -- reads as about 9 dB of reduction that isn't there), else as the
         -- plugin reports
-        lag = TP.measured_lag[fx_guid(tr, a)] or math.floor(tonumber(ok and pdc or 0) or 0),
+        lag = TP.lag_of(fx_guid(tr, a)) or math.floor(tonumber(ok and pdc or 0) or 0),
         what = (gr and "g" or "") .. (lvl and "l" or ""),
       }
     end
@@ -1681,6 +1711,63 @@ function TP.levels(tr, guid)
   local function g(f) return PL.get(tr, rd.probe, f, i) or -150 end
   return { in_pk = g("inpk"), out_pk = g("outpk"),
            in_rms = g("inrms"), out_rms = g("outrms") }
+end
+
+-- STEREO, ONE TAP (TS_TrackProbe 2.4.0+): a plugin's output in stereo,
+-- for the Width visualiser. One stereo tap per probe, and one scope in all
+-- (gmem[TP.ST_CTRL] names the track that writes it): the last open panel
+-- to ask has them.
+TP.ST_CTRL, TP.ST_HDR, TP.ST_PTS = 77, 0x340000, 0x340010
+-- Asks for it. Returns true; "old" when the project's probe predates it
+-- (a project keeps the probe it opened with); false when it isn't tapped.
+function TP.set_stereo(tr, guid)
+  local i, rd = tap_for(tr, guid, "")
+  if not i or not rd.probe then return false end
+  if PL.is_legacy(tr, rd.probe) or PL.get(tr, rd.probe, "st_cap") < 0.5 then return "old" end
+  PL.set(tr, rd.probe, "st", 1, i)
+  local ti = PL.track_index(tr)
+  if ti and reaper.gmem_read(TP.ST_CTRL) ~= ti + 2 then reaper.gmem_write(TP.ST_CTRL, ti + 2) end
+  return true
+end
+-- What it measures: { corr (-1..1), mid, side (dBFS, RMS over 300 ms),
+-- pts (the scope: L, R, L, R ..., oldest first, or nil when another
+-- track has it) }, or nil when it isn't this plugin's.
+local st_pts = {}
+function TP.stereo(tr, guid)
+  local i, rd = tap_for(tr, guid, "")
+  if not i or not rd.probe then return nil end
+  if math.floor(PL.get(tr, rd.probe, "st") + 0.5) ~= i then return nil end
+  local out = { corr = PL.get(tr, rd.probe, "corr"), mid = PL.get(tr, rd.probe, "st_mid"),
+                side = PL.get(tr, rd.probe, "st_side") }
+  local ti = PL.track_index(tr)
+  if ti and reaper.gmem_read(TP.ST_HDR + 2) == ti + 2 then
+    local seq = reaper.gmem_read(TP.ST_HDR)
+    local c = st_pts[guid]
+    if not c or c.seq ~= seq then
+      local n = math.max(0, math.min(512, math.floor(reaper.gmem_read(TP.ST_HDR + 1) + 0.5)))
+      c = { seq = seq, pts = {} }
+      for k = 0, n * 2 - 1 do c.pts[k + 1] = reaper.gmem_read(TP.ST_PTS + k) end
+      st_pts[guid] = c
+    end
+    out.pts = c.pts
+  end
+  return out
+end
+
+-- LEVELS PER CHANNEL (TS_TrackProbe 2.4.0+): this plugin's levels, left
+-- and right apart: { in_pk = { l, r }, out_pk, in_rms, out_rms } (dBFS);
+-- { old = true } from an older probe; nil when it isn't measured (or past
+-- the probe's 3000 tracks).
+TP.LR_BASE, TP.LR_STRIDE, TP.LR_TRACKS = 0x350000, 64, 3000
+function TP.levels_lr(tr, guid)
+  local i, rd = tap_for(tr, guid, "l")
+  if not i or not rd.probe then return nil end
+  if PL.is_legacy(tr, rd.probe) or PL.get(tr, rd.probe, "st_cap") < 0.5 then return { old = true } end
+  local ti = PL.track_index(tr)
+  if not ti or ti + 1 >= TP.LR_TRACKS then return nil end
+  local b = TP.LR_BASE + (ti + 1) * TP.LR_STRIDE + (i - 1) * 8
+  local function g(k) return reaper.gmem_read(b + k) or -150 end
+  return { in_pk = { g(0), g(1) }, out_pk = { g(2), g(3) }, in_rms = { g(4), g(5) }, out_rms = { g(6), g(7) } }
 end
 
 -- The measured reduction, positive dB, or nil when this plugin isn't

@@ -62,6 +62,7 @@ PL.F = {
   mb       = { off = 20, leg = 41 },
   mbx      = { off = 21, leg = 42, n = 3 },
   fine     = { off = 24, leg = 49 },
+  st       = { off = 25 },                -- the stereo tap (new probe only, 2.4.0+)
   ack_pre  = { off = 32 },
   ack_post = { off = 33 },
   gr       = { off = 64, leg = 14, n = 4, off2 = 97 },
@@ -72,6 +73,10 @@ PL.F = {
   outrms   = { off = 84, leg = 37, n = 4, off2 = 117 },
   mbgr     = { off = 88, leg = 45, n = 4 },
   mbl      = { off = 92, leg = 50, n = 4 },
+  corr     = { off = 122 },               -- the stereo tap's correlation, mid and side (dBFS)
+  st_mid   = { off = 123 },
+  st_side  = { off = 124 },
+  st_cap   = { off = 125 },               -- 1: the probe measures stereo
 }
 -- A field's place in the block: the i-th (0-based) of it, taps 5..8 apart
 local function at(f, i)

@@ -139,12 +139,29 @@
   one 6 x 6), and At<n>=<column>,<row>,<width>,<height> puts control n
   on it. A divider is a line from <column>,<row> to <column + width>,
   <row + height>, any way (width and height may be below 0), and its
-  ends may be at a half. A "curve" control (Ctl<n>=-1|curve|0|) is the
-  layout's EQ canvas in a place of its own (a layout with one has no
-  canvas beside its controls; several may show the same bands).
+  ends may be at a half. A "curve" control (Ctl<n>=-1|curve|0|) is an
+  EQ curve: its own bands when it has them (Vis<n>Canvas=eq, Vis<n>Band<k>
+  and the rest of an EQ canvas's lines, each after Vis<n>), else the
+  layout's EQ canvas in a place of its own (a layout with such a curve
+  has no canvas beside its controls; several may show the same bands).
+  A "vis" control (Ctl<n>=-1|vis|0|) is a visualiser drawing roles of its
+  own, kept as a canvas's are after Vis<n> (Vis<n>Canvas=<kind>,
+  Vis<n>Role<name>): kind filters (the cuts, large), fstrip (a strip),
+  cenv (a compressor's envelope), thresh (a threshold over the signal),
+  frange (a de-esser's band, and up to three more ranges, R<k><role>),
+  width (a stereo imager's width, over a scope of its output),
+  limit (the limiter canvas, in its place), drive (a saturator's drive
+  meter), harm (its harmonics) or scurve (its curve); their curves are
+  learned and kept as SatCal.
+  An "act" control (Ctl<n>=-1|act|0|<label>) is a button that does
+  something of ChannelView's, Act<n>: trim_auto or trim_listen (a
+  Trimmer's Auto and Listen).
   A "vu" control (Ctl<n>=-1|vu|0|) is a VU meter, Vu<n>=<shows>|<look>|
-  <0 VU in dBFS>|<peak lamp 1/0>: shows in, out or gr; look classic, dark
-  or bar.
+  <0 VU in dBFS>|<peak lamp 1/0>|<face>|<buttons>|<stereo>: shows in, out
+  or gr; look classic, dark, analogue or bar; face its look's own (left
+  out), panel, or #RRGGBB; buttons the switch's style (a button style; left
+  out: flat); stereo st (two meters, left and right; left out: one); hide
+  (no In / Out / GR buttons).
   A "text" control (Ctl<n>=-1|text|0|<its words>)
   is words anywhere on the grid, across or (taller than wide) up, sized
   by Size<n> (small, large), coloured by Edge<n>, placed by Align<n>
@@ -350,16 +367,23 @@ end
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
                      xy = true, dual = true, page = true, section = true, text = true, curve = true,
-                     vu = true }
+                     vu = true, vis = true, act = true }
+-- What an "act" control does (Act<n>): the Trimmer's Auto and Listen.
+M.ACTS = { trim_auto = "Auto", trim_listen = "Listen" }
 
--- A VU meter's settings (Vu<n>=<shows>|<look>|<0 VU dBFS>|<peak lamp>):
--- shows "in", "out" or "gr"; look "classic", "dark" or "bar"; 0 VU at
--- `ref` dBFS; the peak lamp on or off.
+-- A VU meter's settings (Vu<n>=<shows>|<look>|<0 VU dBFS>|<peak lamp>|
+-- <face>|<buttons>|<stereo>|<hide>): shows "in", "out" or "gr"; look "classic",
+-- "dark", "analogue" or "bar"; 0 VU at `ref` dBFS; the peak lamp on or
+-- off; its face its look's own (empty), the panel's ("panel": none of its
+-- own), or a colour (#RRGGBB: `face` the number); its In / Out / GR
+-- buttons' style (C.BUTTON_STYLES; empty: flat); stereo "st" (two meters,
+-- left and right) or empty (one); "hide": no In / Out / GR buttons under it.
+-- Trailing empty fields are left off.
 M.VU_SHOWS = { "in", "out", "gr" }
-M.VU_LOOKS = { "classic", "dark", "bar" }
+M.VU_LOOKS = { "classic", "dark", "analogue", "bar" }
 M.VU_REFS = { -24, -20, -18, -14, -12 }
 local VU_SHOW_OK = { ["in"] = true, out = true, gr = true }
-local VU_LOOK_OK = { classic = true, dark = true, bar = true }
+local VU_LOOK_OK = { classic = true, dark = true, analogue = true, bar = true }
 function M.vu_default() return { src = "in", look = "classic", ref = -18, peak = true } end
 function M.vu_of(v)
   local d = M.vu_default()
@@ -369,17 +393,36 @@ function M.vu_of(v)
   local r = tonumber(c or "")
   if r and r <= 0 and r >= -40 then d.ref = r end
   if e == "0" then d.peak = false end
+  local f, bs, stf, hf = (v or ""):match("^[^|]*|[^|]*|[^|]*|[^|]*|%s*([^|%s]*)%s*|?%s*([^|%s]*)%s*|?%s*([^|%s]*)%s*|?%s*([^|%s]*)")
+  if stf == "st" then d.stereo = true end
+  if hf == "hide" then d.noswitch = true end
+  if f == "panel" then d.face = "panel"
+  elseif f and f:match("^#%x%x%x%x%x%x$") then d.face = tonumber(f:sub(2), 16) end
+  if bs and bs:match("^%a+$") and bs ~= "flat" then d.bstyle = bs end
   return d
 end
 function M.vu_line(vu)
   vu = vu or M.vu_default()
+  local more = { (vu.face == "panel") and "panel" or (type(vu.face) == "number" and ("#%06X"):format(vu.face & 0xffffff)) or "",
+                 vu.bstyle or "", vu.stereo and "st" or "", vu.noswitch and "hide" or "" }
+  while #more > 0 and more[#more] == "" do more[#more] = nil end
   return ("%s|%s|%s|%s"):format(vu.src or "in", vu.look or "classic", tostring(math.tointeger(vu.ref) or vu.ref or -18),
-    vu.peak == false and "0" or "1")
+    vu.peak == false and "0" or "1") .. (#more > 0 and ("|" .. table.concat(more, "|")) or "")
 end
 function M.vu_copy(vu)
   if not vu then return nil end
-  return { src = vu.src, look = vu.look, ref = vu.ref, peak = vu.peak }
+  return { src = vu.src, look = vu.look, ref = vu.ref, peak = vu.peak, face = vu.face, bstyle = vu.bstyle,
+           stereo = vu.stereo, noswitch = vu.noswitch }
 end
+-- Whether a layout has a visualiser of `kind` ("drive", "harm", "scurve":
+-- it wants the plugin's levels).
+function M.has_vis(layout, kind)
+  for _, c in ipairs((layout and layout.controls) or {}) do
+    if c.type == "vis" and c.vis and c.vis.kind == kind then return true end
+  end
+  return false
+end
+
 -- Whether a layout has a VU meter showing levels ("lvl": in or out) or
 -- gain reduction ("gr"): the probes measure what they show.
 function M.has_vu(layout, what)
@@ -392,14 +435,42 @@ function M.has_vu(layout, what)
   return false
 end
 
--- A layout's EQ curves (Ctl<n>=-1|curve|0|): the canvas's bands, drawn
--- and dragged in each one's place. A layout with one draws
--- its EQ canvas there and not beside its controls.
+-- A layout's EQ curves (Ctl<n>=-1|curve|0|) without bands of their own:
+-- the canvas's bands, drawn and dragged in each one's place. A layout with
+-- one draws its EQ canvas there and not beside its controls.
 function M.has_curve(layout)
   for _, c in ipairs((layout and layout.controls) or {}) do
-    if c.type == "curve" then return true end
+    if c.type == "curve" and not c.vis then return true end
   end
   return false
+end
+
+-- The EQ an EQ curve draws: its own bands (c.vis), else the layout's EQ
+-- canvas, else nil.
+function M.curve_cv(layout, c)
+  if c and c.vis then return c.vis end
+  local cv = layout and layout.canvas
+  return (cv and cv.kind == "eq") and cv or nil
+end
+
+-- A visualiser's own canvas: the canvas's lines, each key after Vis<i>
+-- (Vis3Canvas, Vis3Band1, ...); nil without them.
+function M.vis_of(sect, i)
+  local pre = "Vis" .. i
+  local view, any = {}, false
+  for k, v in pairs(sect) do
+    if k:sub(1, #pre) == pre then
+      local rest = k:sub(#pre + 1)
+      if rest:match("^%u") then view[rest] = v; any = true end
+    end
+  end
+  return any and M.canvas_of(view) or nil
+end
+function M.vis_lines(cv, i, out)
+  if not cv then return end
+  local t = {}
+  M.canvas_lines(cv, t)
+  for k, v in pairs(t) do out["Vis" .. i .. k] = v end
 end
 
 -- ---------------------------------------------------------------------
@@ -697,7 +768,52 @@ M.ROLES = {
           "Square", "Saw", "Triangle", "Sine2", "Sine2Tune", "PulseWidth", "Detune", "Portamento", "Volume" },
   mod = { "Rate", "Depth", "Shape", "Phase", "Delay", "Feedback", "Mix", "Voices" },
   sat = { "Drive", "Style", "Tone", "Tone2", "Output", "Mix" },
+  -- visualisers' own (a "vis" control's): a pair of cuts, large or a strip
+  filters = { "LowCut", "LowSlope", "LowCutOn", "HighCut", "HighSlope", "HighCutOn" },
+  -- a compressor's envelope: how its reduction comes in, holds and lets go
+  cenv = { "Attack", "Hold", "Release", "Preopen" },
+  -- a threshold over the signal (a de-esser's lower half, a clipper's ceiling)
+  thresh = { "Threshold", "Range" },
 }
+-- a drive meter (a saturator's: learned, as its canvas is)
+M.ROLES.drive = M.ROLES.sat
+M.ROLES.harm = M.ROLES.sat
+M.ROLES.scurve = M.ROLES.sat
+-- the kinds with a saturator's learned curve (SatCal)
+M.SAT_KINDS = { sat = true, drive = true, harm = true, scurve = true }
+M.ROLES.fstrip = M.ROLES.filters
+-- what each visualiser kind is called
+M.VIS_NAMES = { filters = "Filters", fstrip = "Filter strip", cenv = "Compressor envelope", thresh = "Threshold",
+                limit = "Limiter", drive = "Drive meter", harm = "Harmonics", scurve = "Saturation curve", frange = "Frequency range" }
+-- The Trimmer's own filters (TS_CV_TrimmerPanel), as a visualiser: no
+-- roles, the plugin's own controls
+M.ROLES.trimfilt = {}
+M.VIS_NAMES.trimfilt = "Trimmer filters"
+-- A width visualiser (a stereo imager's): its width, its pan or balance,
+-- and the frequency it makes mono below
+M.ROLES.width = { "Width", "Pan", "MonoBelow" }
+M.VIS_NAMES.width = "Width"
+-- A frequency range visualiser: its first range a de-esser's band, and up
+-- to M.FR_MAX - 1 more, each with the same roles named R<k><role>; its
+-- Threshold is any control, drawn as a line across it ("Line")
+M.FR_MAX = 4
+M.FR_ROLES = { "Frequency", "Low", "High", "Width", "Threshold" }
+do
+  local r = {}
+  for _, x in ipairs(M.FR_ROLES) do r[#r + 1] = x end
+  for k = 2, M.FR_MAX do
+    for _, x in ipairs(M.FR_ROLES) do r[#r + 1] = "R" .. k .. x end
+  end
+  M.ROLES.frange = r
+end
+-- A range's role's range and role ("R2Width" -> 2, "Width"), or nil.
+function M.fr_split(name)
+  local k, r = (name or ""):match("^R(%d)(%u%a+)$")
+  if k then return tonumber(k), r end
+  return nil
+end
+-- Range k's role named `r` ("Width") as the roles have it.
+function M.fr_key(k, r) return (k == 1) and r or ("R" .. k .. r) end
 -- A multiband compressor: up to M.MB_MAX bands, each with the compressor's
 -- roles (named B<k><role>), the crossovers between them, and its output.
 M.MB_MAX = 8
@@ -911,9 +1027,11 @@ function M.canvas_of(sect)
     local r0 = tonumber(sect.Ref0 and U.trim(sect.Ref0) or "")
     if r0 and r0 > -96 and r0 < 24 then cv.ref0 = r0 end
     -- a saturator's learned curve and harmonics
-    if kind == "sat" and sect.SatCal then cv.sat_cal = M.sat_decode(U.trim(sect.SatCal)) end
+    if M.SAT_KINDS[kind] and sect.SatCal then cv.sat_cal = M.sat_decode(U.trim(sect.SatCal)) end
     -- a de-esser with only a frequency: a shelf from it up, or a band around it
-    if kind == "deess" and sect.DeessShape and U.trim(sect.DeessShape):lower() == "around" then cv.dshape = "around" end
+    if (kind == "deess" or kind == "frange") and sect.DeessShape and U.trim(sect.DeessShape):lower() == "around" then
+      cv.dshape = "around"
+    end
     local dc = sect.DecayCal and U.trim(sect.DecayCal)
     if dc and dc ~= "" then
       local p, sz, rest = dc:match("^(%d+)%s*|%s*([%d%-]+)%s*|%s*(.*)$")
@@ -1058,8 +1176,8 @@ function M.canvas_lines(cv, out)
       out.DecayCal = ("%d|%s|%s"):format(dc.p, dc.s and tostring(dc.s) or "-", table.concat(t, " "))
     end
     if cv.ref0 and cv.ref0 ~= M.REF0 then out.Ref0 = ("%g"):format(cv.ref0) end
-    if cv.kind == "deess" and cv.dshape == "around" then out.DeessShape = "around" end
-    if cv.kind == "sat" and cv.sat_cal then out.SatCal = M.sat_encode(cv.sat_cal) end
+    if (cv.kind == "deess" or cv.kind == "frange") and cv.dshape == "around" then out.DeessShape = "around" end
+    if M.SAT_KINDS[cv.kind] and cv.sat_cal then out.SatCal = M.sat_encode(cv.sat_cal) end
     local tc = cv.thr_cal
     if tc and tc.p and tc.pts and #tc.pts >= 2 then
       local t = {}
@@ -1287,10 +1405,43 @@ function M.sat_curve(at, x, side)
   return a + (b - a) * t
 end
 
--- Where it starts to bite: the input level (dBFS) at which the curve has
--- fallen 1 dB under its small-signal slope, or nil when it never does.
-function M.sat_bite(at)
+-- Where it starts to bite: the input level (dBFS) at which it has
+-- squashed 1 dB, or nil when it never does. From the fundamental's gain
+-- at the levels learned (`c`) when there are two or more, past the
+-- loudest by its last slope up to 12 dB on; else from the curve, where it
+-- has fallen 1 dB under its small-signal slope.
+local function bite_of_gain(c, at)
+  local L = c and c.L
+  if not (L and L[1] ~= false and #L >= 2 and at and at.h) then return nil end
+  local g = {}
+  for i = 1, #L do
+    g[i] = at.h[i] and at.h[i][1]
+    if not g[i] then return nil end
+  end
+  -- how far under the loudest gain so far it has gone, level by level
+  local ref, sq = g[1], { 0 }
+  for i = 2, #L do
+    ref = math.max(ref, g[i - 1])
+    sq[i] = math.max(sq[i - 1], ref - g[i])
+  end
+  for i = 2, #L do
+    if sq[i] >= 1 then
+      local t = (1 - sq[i - 1]) / (sq[i] - sq[i - 1])
+      return L[i - 1] + (L[i] - L[i - 1]) * t
+    end
+  end
+  local n = #L
+  local slope = (sq[n] - sq[n - 1]) / (L[n] - L[n - 1])
+  if slope <= 0 then return false end
+  local b = L[n] + (1 - sq[n]) / slope
+  if b > L[n] + 12 then return false end
+  return b
+end
+
+function M.sat_bite(at, c)
   if not at then return nil end
+  local gb = bite_of_gain(c, at)
+  if gb ~= nil then return gb or nil end
   local n = M.SAT_CB
   local function xc(i) return -1 + (i - 0.5) * 2 / n end
   local lo, hi = M.sat_curve(at, xc(n / 2)), M.sat_curve(at, xc(n / 2 + 1))
@@ -1771,6 +1922,10 @@ local function parse_section(sect)
         lamp    = M.LAMPS[U.trim(sect["Lamp" .. i] or "")] and U.trim(sect["Lamp" .. i]) or nil,
         -- a VU meter's settings (Vu<n>)
         vu      = (t == "vu") and M.vu_of(sect["Vu" .. i]) or nil,
+        -- what an act button does (Act<n>)
+        act     = (t == "act") and M.ACTS[U.trim(sect["Act" .. i] or "")] and U.trim(sect["Act" .. i]) or nil,
+        -- an EQ curve's own bands, a visualiser's roles (Vis<n>...)
+        vis     = (t == "curve" or t == "vis") and M.vis_of(sect, i) or nil,
       }
       -- a virtual selector shown as chips: one for each of its choices
       do
@@ -1956,6 +2111,8 @@ local function serialize(layout)
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
     if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
     if c.type == "vu" then out["Vu" .. (i - 1)] = M.vu_line(c.vu) end
+    if c.type == "act" and M.ACTS[c.act or ""] then out["Act" .. (i - 1)] = c.act end
+    if c.type == "curve" or c.type == "vis" then M.vis_lines(c.vis, i - 1, out) end
     if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
@@ -3286,7 +3443,7 @@ function M.copy(layout)
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
                         invert2 = c.invert2, edge = c.edge, align = c.align, lamp = c.lamp,
-                        vu = M.vu_copy(c.vu),
+                        vu = M.vu_copy(c.vu), vis = M.copy_canvas(c.vis), act = c.act,
                         ccols = c.ccols and M.choice_cols_of(M.choice_cols_line(c.ccols)) or nil,
                         at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),

@@ -57,7 +57,8 @@ end
 -- (their Standard layout; another of theirs is a normal one: TS_CV_ReaFX)
 local function own_eq(key) return EQP ~= nil and require("TS_CV_ReaFX").own_eq(key) end
 local function own_rc(key) return CP ~= nil and require("TS_CV_ReaFX").own_comp(key) end
-local function own_trim(key) return TR ~= nil and TR.is(key) end
+-- (the Trimmer's Standard layout; another of its layouts is a normal one)
+local function own_trim(key) return TR ~= nil and TR.is(key) and select(2, M.split_variant(key)) == nil end
 P.own_eq, P.own_rc, P.own_trim = own_eq, own_rc, own_trim
 -- the layout each own panel (ReaEQ, ReaComp, the Trimmer) was last drawn
 -- with, for its size (P.own_w, P.width)
@@ -200,6 +201,22 @@ function P.cell_size(ctl, half_rows)
   if ctl.type == "xy" then
     local pw, ph = M.pad_dims(ctl)
     return pw * 2, math.min(half_rows, ph * 2), "xy"
+  end
+  -- a visualiser: the room a grid gave it, or else four cells by two (a
+  -- filter strip by one)
+  if ctl.type == "vis" then
+    local a = ctl.at
+    local w, h = 8, (ctl.vis and ctl.vis.kind == "fstrip") and 2 or 4
+    if a then w, h = math.max(2, math.ceil(a.w / 2)), math.max(1, math.ceil(a.h / 2)) end
+    return w, math.min(half_rows, h), "vis"
+  end
+  -- an act button (a Trimmer's Auto, Listen): the room a grid gave it, or
+  -- else a cell by half a cell
+  if ctl.type == "act" then
+    local a = ctl.at
+    local w, h = 2, 1
+    if a then w, h = math.max(1, math.ceil(a.w / 2)), math.max(1, math.ceil(a.h / 2)) end
+    return w, math.min(half_rows, h), "act"
   end
   -- a VU meter: the room a grid gave it, or else two cells by one and a half
   if ctl.type == "vu" then
@@ -632,7 +649,7 @@ end
 -- Faders, XY pads and dropdowns shown as buttons fill their place; any
 -- other control is its own size in the middle of it (a dropdown takes
 -- the place's width).
-local STRETCH = { vfader = true, hfader = true, xy = true, buttons = true, vu = true }
+local STRETCH = { vfader = true, hfader = true, xy = true, buttons = true, vu = true, vis = true }
 local function put(out, ctl, c, r, w, h, dx, dy)
   local x, y = dx + qx(c), dy + qy(r)
   x, y = math.tointeger(x) or x, math.tointeger(y) or y
@@ -2837,7 +2854,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
   -- its EQ curves (curve controls): the canvas's bands in each place
   for n, cu in ipairs(lay.curves or {}) do
-    P.draw_curve_item(ctx, dl, gx0 + cu.x, gy0 + cu.y, cu.w, cu.h, track, fx, layout, req, n)
+    P.draw_curve_item(ctx, dl, gx0 + cu.x, gy0 + cu.y, cu.w, cu.h, track, fx, layout, req, n, cu.by)
   end
 
   -- a grid's lines, from end to end
@@ -2888,10 +2905,27 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       if act.right_click then req.ctx_control = i end
 
     elseif ctl.type == "curve" then
-      P.draw_curve_item(ctx, dl, gx0 + item.x, gy0 + item.y, hx(item.w), hy(item.h), track, fx, layout, req, "f" .. i)
+      P.draw_curve_item(ctx, dl, gx0 + item.x, gy0 + item.y, hx(item.w), hy(item.h), track, fx, layout, req, "f" .. i, ctl)
 
     elseif ctl.type == "text" then
       P.draw_text_item(ctx, dl, gx0, gy0, { x = item.x, y = item.y, w = hx(item.w), h = hy(item.h), by = ctl })
+
+    elseif ctl.type == "vis" then
+      -- a visualiser (Pro): its own roles drawn in its place
+      P.draw_vis_item(ctx, dl, gx0 + (item.sx or item.x), gy0 + (item.sy or item.y), item.pw or item.sw or hx(item.w),
+        item.sh or hy(item.h), track, fx, layout, req, ctl, i)
+
+    elseif ctl.type == "act" then
+      -- an act button (a Trimmer's Auto, Listen: TS_CV_TrimmerPanel)
+      local aw, ah = item.pw or item.sw or hx(item.w), item.sh or hy(item.h)
+      local ax, ay = gx0 + (item.sx or item.x), gy0 + (item.sy or item.y)
+      if TRP and TR and TR.is(fx.name or "") then
+        local act = TRP.draw_act(ctx, dl, ax, ay, aw, ah, track, fx, ctl, id)
+        if act.right_click then req.ctx_control = i end
+      else
+        local _, _, act = W.blank(ctx, id)
+        if act.right_click then req.ctx_control = i end
+      end
 
     elseif ctl.type == "vu" then
       -- a VU meter (Pro): its face, and the switch under it
@@ -3651,18 +3685,24 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
   return table.unpack(r, 2, r.n)
 end
 
--- An EQ curve (TS_CV_Mappings "curve"): the layout's EQ
--- canvas (TS_CV_MapPanel) in its place, on a screen of its own, in the
--- canvas's colours (CanvasCol). `n`: which of the layout's curves, so each
--- has its own nodes. Pro (the canvases); a placeholder without an EQ.
-function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n)
+-- An EQ curve (TS_CV_Mappings "curve", `ctl`): its own bands or the
+-- layout's EQ canvas (M.curve_cv), drawn by TS_CV_MapPanel in its place,
+-- on a screen of its own, in that EQ's colours (CanvasCol). `n`: which of
+-- the layout's curves, so each has its own nodes. Pro (the canvases); a
+-- placeholder without an EQ.
+function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n, ctl)
   local x1, y1, x2, y2 = x + 1, y + 1, x + w - 1, y + h - 1
   ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, U.with_alpha(C.COL.panel_bg, 0xff), 3.0)
   ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, 0x00000038, 3.0)
-  local cv = layout and layout.canvas
-  if not (MP and cv and cv.kind == "eq") then
+  local cv = M.curve_cv(layout, ctl)
+  -- its own bands: set up by its control's number
+  local setup
+  if cv and ctl and ctl.vis then
+    for i, c in ipairs(layout.controls or {}) do if c == ctl then setup = i break end end
+  end
+  if not (MP and cv) then
     W.push_small(ctx)
-    local msg = MP and "EQ curve: this layout has no EQ bands" or "EQ curve (Pro)"
+    local msg = MP and "EQ curve: no bands yet" or "EQ curve (Pro)"
     local tw, th = ImGui.CalcTextSize(ctx, msg)
     ImGui.DrawList_PushClipRect(dl, x1, y1, x2, y2, true)
     ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + (h - th) * 0.5, C.COL.header_dim, msg)
@@ -3670,7 +3710,43 @@ function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n)
     W.pop_small(ctx)
   else
     P.with_canvas_cols(cv, dl, x1, y1, x2 - x1, y2 - y1, MP.draw_eq, ctx, dl, x1, y1, x2 - x1, y2 - y1,
-      track, fx, layout, req, { id = ":c" .. n, small = true })
+      track, fx, layout, req, { id = ":c" .. n, small = true, cv = cv, setup = setup })
+  end
+  ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 3.0, 0, 1.0)
+end
+
+-- A visualiser (TS_CV_Mappings "vis", control `ctl`, number `i`): its
+-- roles drawn by TS_CV_RolePanel on the panel, in its colours (CanvasCol,
+-- its Background behind it); until its roles are set up, a button to set
+-- them up (req.canvas_setup). Pro; a placeholder without.
+function P.draw_vis_item(ctx, dl, x, y, w, h, track, fx, layout, req, ctl, i)
+  local x1, y1, x2, y2 = x + 1, y + 1, x + w - 1, y + h - 1
+  local cv = ctl.vis
+  local name = M.VIS_NAMES[cv and cv.kind or ""] or "Visualiser"
+  local drawn
+  if cv and cv.kind == "trimfilt" then
+    -- the Trimmer's own filters (TS_CV_TrimmerPanel): its spectrum, slopes
+    -- and nodes
+    drawn = TRP and TR and TR.is(fx.name or "") and P.with_canvas_cols(cv, dl, x1, y1, x2 - x1, y2 - y1, TRP.draw_filters,
+      ctx, dl, x1 + 2, y1 + 2, x2 - x1 - 4, y2 - y1 - 4, track, fx, true) or false
+  else
+    drawn = RP and cv and P.with_canvas_cols(cv, dl, x1, y1, x2 - x1, y2 - y1, RP.draw_vis, ctx, dl, x1 + 1, y1 + 1,
+      x2 - x1 - 2, y2 - y1 - 2, track, fx, req, cv, { id = ":v" .. i })
+  end
+  if not drawn then
+    W.push_small(ctx)
+    local msg = RP and (name .. ": not set up") or (name .. " (Pro)")
+    local tw, th = ImGui.CalcTextSize(ctx, msg)
+    local cy = y + h * 0.5 - (RP and th or th * 0.5)
+    ImGui.DrawList_PushClipRect(dl, x1, y1, x2, y2, true)
+    ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, cy, C.COL.header_dim, msg)
+    ImGui.DrawList_PopClipRect(dl)
+    W.pop_small(ctx)
+    if RP and cv and h >= 40 then
+      local bw = math.min(w - 8, 150)
+      ImGui.SetCursorScreenPos(ctx, x + (w - bw) * 0.5, cy + th + 4)
+      if ImGui.Button(ctx, "Set it up\u{2026}##vis" .. fx.guid .. i, bw, 0) then req.canvas_setup = i end
+    end
   end
   ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 3.0, 0, 1.0)
 end

@@ -2248,7 +2248,8 @@ function W.button_row(ctx, id, label, value, choices, opts)
   local top = y + W.LABEL_H + C.LABEL_GAP
   local rects = {}
   if opts.dir == "down" then
-    local bh = 14
+    -- taller as the cell grows, as a row's grow wider
+    local bh = math.max(14, math.floor((y + ch - top - 2 - (n - 1) * 2) / n))
     for i = 1, n do
       local by = top + (i - 1) * (bh + 2)
       rects[i] = { x + 4, by, x + cw - 4, by + bh }

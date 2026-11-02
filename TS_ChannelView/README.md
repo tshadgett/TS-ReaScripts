@@ -28,7 +28,7 @@ and ReaEQ's and ReaComp's), knob and button styles and colours, faceplates,
 finishes, sections and backgrounds, most of Visual Options (the panel
 colour and accent, default control styles, corners, the 3D effect's
 lighting and shadows, presets), the plugin's own colours, vendor looks,
-plugin pictures on action bars, VU meters, more than one layout per plugin and
+plugin pictures on action bars, VU meters and visualisers, more than one layout per plugin and
 switching between them, the offer of a canvas for a new plugin, Show when
 rules and virtual controls, the TS_CV Trimmer, the gain-reduction trace,
 the patch bay (in the mixer and the TCP window) and comparing two plugins.
@@ -692,6 +692,12 @@ plugin, the pre probe and the modulators; with one there, it's the menu.
   switch by the slope lists): drag a handle, wheel over it for the slope,
   or double-click the canvas to put the low cut (under 1 kHz) or the high
   cut there. With the spectrum off, two knobs.
+- **Layouts of its own.** The panel menu's *Layout ▸ Copy to new layout*
+  starts one from the Trimmer's panel: a stereo VU meter, the trims, Auto,
+  Listen and the link, then the filters, each a control you can move,
+  resize and style. *Add* has *Auto*, *Listen* and *Trimmer filters* for
+  it, and its VU meters read the Trimmer's own meters, 0 VU and ceiling.
+  The Standard layout stays the Trimmer's own panel.
 
 ## Macros and modulators
 
@@ -1034,9 +1040,11 @@ the grid editor, a window of its own. A layout that isn't a grid yet
 becomes one as it opens, arranged as it was (**Undo** puts it back).
 
 - **On the left**, the plugin's parameters (find one by name) and what
-  else a layout can hold: a line, a section, text, an EQ curve, a VU
-  meter, a virtual knob, button or selector. Drag any of them onto the grid, or double-click a parameter to
-  put it where it first fits. With **Learn** on, touching a control in
+  else a layout can hold: a line, a section, text, a virtual knob, button
+  or selector, and the visualisers (below). Drag any of them onto the
+  grid, or double-click a parameter to put it where it first fits. Click a
+  heading (*Parameters*, *Add*, *Visualisers*) to fold it away; they stay
+  as you leave them, and finding or learning a parameter opens the list. With **Learn** on, touching a control in
   the plugin's own window puts it on the panel. A parameter already on the
   panel is greyed: click it to select it there, drag it to move it.
 - **In the middle**, the panel as it is, with the grid over it in quarter
@@ -1048,9 +1056,10 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   left, then press on one corner of the grid and let go on another, any
   way; click Line again (or right-click the grid) to stop. Drag a line's
   end to move it, or the line to move it all. Two controls can't share a place unless
-  they have Show rules (they take turns). Drag a control back to the
-  list, or use **Take it off the panel** on the right, to remove it: over
-  the list, it turns red and the list shows a bin and *Release to remove*. The
+  they have Show rules (they take turns). Drag a control, a line or a
+  section back to the list, or use **Take it off the panel** on the right,
+  to remove it: over the list, it turns red and the list shows a bin and
+  *Release to remove*. A section comes off on its own; what's on it stays. The
   numbers under and beside the grid insert or delete a column or row of
   cells; **+** adds one at the end.
 - **On the right**, everything about what's selected. For a control: its
@@ -1106,20 +1115,48 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
 - **Text** is words anywhere on the grid, over anything: across, or up
   when its place is taller than wide. On the right: what it says, *Small*,
   *Normal* or *Large*, its place along its room and its colour.
-- **EQ curve** draws the layout's EQ canvas in a place on the grid: its
-  bands, dragged and turned as on the canvas. A layout with one has no
-  canvas beside its controls, and can have several (each with the same
-  bands). It needs a layout with an EQ canvas (*New layout ▸ With a
-  canvas ▸ EQ*); its *Set up the EQ bands…* opens the setup.
-- **VU meter** shows the plugin's input or output level, or its gain
-  reduction, picked on the **IN · OUT · GR** switch under it. In and Out
-  move as a VU does, with 0 VU at -18 dBFS (or -24 to -12); GR runs
-  across the whole scale, 0 at the far right. Looks: *Classic* (a cream
-  face), *Dark* (black, an amber needle) or *Bar*. A peak lamp lights at
-  -1 dBFS. In and Out are measured by the TS_TrackProbe pair, as is GR for
-  a plugin that doesn't report it: choosing them offers to add the pair.
-  Set it on the right, or right-click it on the panel. On the web page it
-  shows as a gap.
+- **Visualisers** draw a part of a canvas in a place on the grid, from a
+  few of the plugin's controls, on the panel's colour (*Colours ▸
+  Background* gives one its own). Dropped on the grid, one finds its
+  controls by their names; **Set up its controls…** on the right picks
+  them, **Guess them again** starts over. Drag their handles as on a
+  canvas. Each draws as it would on its canvas:
+  - **EQ curve**: an EQ's bands. On a layout with an EQ canvas, the
+    canvas's bands (several curves share them, and there's no canvas
+    beside the controls); otherwise bands of its own, guessed and set up
+    like a canvas's (*Set up its bands…*, learned the same way).
+  - **Filters** and **Filter strip**: a low cut and a high cut, large over
+    the spectrum (drag a cut, wheel for its slope, double-click to switch
+    it) or as a thin strip.
+  - **Compressor envelope**: attack, hold, release and pre-open.
+  - **Threshold**: the signal scrolling past its threshold, with what's
+    being reduced, and its range.
+  - **Limiter**: the threshold or input, ceiling and release.
+  - **Drive meter**, **Harmonics** and **Saturation curve**: a
+    saturator's drive against where its learned curve starts to bite, the
+    harmonics it adds, and its curve with the drive on it. Learned as the
+    saturation canvas is; on a saturation layout they take its curve.
+  - **Frequency range**: up to four bands over the spectrum (a
+    de-esser's, or a multiband's), each with what it's reducing, and a
+    **Line** across it that can be any control: a dB one on the
+    spectrum's scale, any other along its range.
+  - **Width**: a stereo imager's width as a wedge over a scope of the
+    plugin's output, turned by its pan, with the correlation under it and
+    the frequency it makes mono below (*Mono*) as a slider.
+  - **VU meter**: the plugin's input or output level, or its gain
+    reduction, picked on the **IN · OUT · GR** buttons under it. In and
+    Out move as a VU does, with 0 VU at -18 dBFS (or -24 to -12); GR runs
+    across the whole scale, 0 at the far right. Looks: *Classic* (a cream
+    face), *Dark* (black, an amber needle), *Analogue* (lit from behind,
+    under glass) or *Bar*. **Face**: its look's own, the panel's, or a
+    colour. **Buttons**: the In / Out / GR buttons' style, or *Hide
+    buttons*. **Stereo**: two meters, left and right (GR stays one). A
+    peak lamp lights at -1 dBFS.
+
+  The meters, Threshold, Frequency range and Width are measured by the
+  TS_TrackProbe pair (Width and the stereo VU need TS_TrackProbe 2.4.0:
+  reopen a project after updating); choosing one offers to add the pair.
+  On the web page a visualiser or VU meter shows as a gap.
 - **Canvas colours.** With nothing selected, a canvas layout has its own
   colours: the curve (the threshold and their handles), the fill under it
   (the curve's until you set it), the highlight (a compressor's input
@@ -1147,7 +1184,8 @@ or following ChannelView's).
   panel one row tall draws at medium.
 - **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
   *Buttons down*: one button per choice, the current one lit. For 2 to 8
-  choices; a column too tall for the panel shows as a dropdown.
+  choices; a column too tall for the panel shows as a dropdown. On a grid
+  the buttons fill their place, wider across or taller down.
 - **Wide dropdowns.** Right-click a dropdown ▸ Look ▸ *Width*: one to
   four cells. A wide one has arrows each side that step back and forward
   through its choices (round from the end); click its name for the list.
