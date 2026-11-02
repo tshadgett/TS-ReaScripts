@@ -1,10 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.8.2
+-- @version 3.8.3
 -- @changelog
---  Fonts for the panels' text, headers and action bars; a clear bypassed
---  panel; light tooltips on a light panel; two crashes fixed. See the
---  CHANGELOG.
+--  Fixed: ReaEQ bands set to Band (alt) or Band (alt 2) showed or moved
+--  as another band. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

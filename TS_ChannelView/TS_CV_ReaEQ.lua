@@ -165,8 +165,17 @@ local function band_flag(track, addr, pos)
   return tonumber(v) ~= 0
 end
 
+-- ReaEQ's "Band (alt)" and "Band (alt 2)" (BANDTYPE<n> 9 and 2) answer
+-- GetEQParam as a plain band numbered among themselves, so one can share
+-- its type and number with a plain band (both "2:0"), and SetEQParam with
+-- that pair reaches the plain one. A band is its run of parameters, in
+-- order; an alt band gets a number of its own (RQ.ALT_IDX + its place) and
+-- is written by its own parameters (RQ.write_norm).
+RQ.ALT_IDX = 1000
+local ALT_TYPE = { ["9"] = true, ["2"] = true }
+
 function RQ.read(track, addr)
-  local by_key, order, master = {}, {}, nil
+  local list, master, cur = {}, nil, nil
 
   local i = 0
   while i < 1024 do   -- generous; ReaEQ never has remotely this many params
@@ -178,13 +187,13 @@ function RQ.read(track, addr)
     if bandtype == RQ.BAND_TYPE.MASTER then
       master = { val = parse_num(formatted) or 0, norm = normval, pidx = i }
     else
-      local bkey = bandtype .. ":" .. bandidx
-      local b = by_key[bkey]
-      if not b then
-        b = { bandtype = bandtype, bandidx = bandidx }
-        by_key[bkey] = b
-        order[#order + 1] = bkey
+      -- a new band at each frequency (its first parameter), or when the
+      -- type and number change
+      if paramtype == 0 or not cur or cur.bandtype ~= bandtype or cur.bandidx ~= bandidx then
+        cur = { bandtype = bandtype, bandidx = bandidx }
+        list[#list + 1] = cur
       end
+      local b = cur
       if paramtype == 0 then
         -- Fallback if the string ever fails to parse: place it from the
         -- normalized value on this canvas's own log scale. Not
@@ -216,10 +225,21 @@ function RQ.read(track, addr)
   -- band list, which is the parameters' order). GetEQBandEnabled finds a
   -- band by its type, and the "alt" band types (Band (alt), Band (alt 2))
   -- read as plain bands there, so it can't find them and says off.
-  local bands = {}
-  for pos, bkey in ipairs(order) do
-    local b = by_key[bkey]
+  local bands, seen = {}, {}
+  for pos, b in ipairs(list) do
     b.pos = pos - 1
+    -- an alt band (by ReaEQ's own type; without it, a second band with
+    -- the same type and number)
+    local key = b.bandtype .. ":" .. b.bandidx
+    local okt, named = false, nil
+    if reaper.TrackFX_GetNamedConfigParm then
+      okt, named = reaper.TrackFX_GetNamedConfigParm(track, addr, "BANDTYPE" .. b.pos)
+    end
+    if (okt and ALT_TYPE[tostring(named)]) or ((not okt) and seen[key]) then
+      b.alt = true
+      b.bandidx = RQ.ALT_IDX + b.pos
+    end
+    seen[key] = true
     local on = band_flag(track, addr, b.pos)
     if on == nil then on = reaper.TrackFX_GetEQBandEnabled(track, addr, b.bandtype, b.bandidx) end
     b.enabled = on
@@ -230,12 +250,39 @@ end
 
 -- How many bands of `bandtype` already exist -- the next one lands at
 -- this count, per GetEQParam's own "0=first matching, 1=2nd..." scheme.
+-- Alt bands are numbered apart and don't count.
 function RQ.next_bandidx(bands, bandtype)
   local n = 0
   for _, b in ipairs(bands) do
-    if b.bandtype == bandtype then n = n + 1 end
+    if b.bandtype == bandtype and not b.alt then n = n + 1 end
   end
   return n
+end
+
+-- ReaEQ's frequency against its parameter's 0..1 (read off ReaEQ at 0,
+-- 0.05 .. 1): what an alt band's frequency is written as.
+local FREQ_LAW = { 20.0, 40.9, 69.2, 107.4, 158.9, 228.3, 322.1, 448.6, 619.3, 849.7, 1160.5,
+                   1580.1, 2146.2, 2910.1, 3941.0, 5332.2, 7209.5, 9742.8, 13161.4, 17774.7, 24000.0 }
+function RQ.freq_norm(hz)
+  if not hz or hz <= FREQ_LAW[1] then return 0 end
+  if hz >= FREQ_LAW[#FREQ_LAW] then return 1 end
+  local lf = math.log(hz)
+  for k = 1, #FREQ_LAW - 1 do
+    local a, b = math.log(FREQ_LAW[k]), math.log(FREQ_LAW[k + 1])
+    if lf <= b then return ((k - 1) + (lf - a) / (b - a)) * 0.05 end
+  end
+  return 1
+end
+
+-- A band's parameter (0 freq, 1 gain, 2 Q) written as 0..1: by its type
+-- and number, or an alt band by its own parameter.
+function RQ.write_norm(track, addr, band, paramtype, norm)
+  if band.alt then
+    local p = (paramtype == 0) and band.freq_pidx or (paramtype == 1) and band.gain_pidx or band.q_pidx
+    if p then reaper.TrackFX_SetParamNormalized(track, addr, p, norm) end
+  else
+    reaper.TrackFX_SetEQParam(track, addr, band.bandtype, band.bandidx, paramtype, norm, true)
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -261,7 +308,8 @@ local GAIN_CLAMP = RQ.GAIN_CLAMP
 
 function RQ.set_freq(track, addr, band, hz)
   hz = math.max(C.EQ_FREQ_LO, math.min(C.EQ_FREQ_HI, hz))
-  reaper.TrackFX_SetEQParam(track, addr, band.bandtype, band.bandidx, 0, hz, false)
+  if band.alt then RQ.write_norm(track, addr, band, 0, RQ.freq_norm(hz))
+  else reaper.TrackFX_SetEQParam(track, addr, band.bandtype, band.bandidx, 0, hz, false) end
   band.freq = hz
 end
 
@@ -327,9 +375,7 @@ function RQ.set_gain(track, addr, band, db, state)
     local dir = (db >= cur_real) and 1 or -1
     next_norm = math.max(0, math.min(1, cur_norm + dir * BOOTSTRAP_PROBE))
   end
-  if next_norm ~= cur_norm then
-    reaper.TrackFX_SetEQParam(track, addr, band.bandtype, band.bandidx, 1, next_norm, true)
-  end
+  if next_norm ~= cur_norm then RQ.write_norm(track, addr, band, 1, next_norm) end
   state.prev_norm, state.prev_real = cur_norm, cur_real
 end
 
@@ -345,9 +391,7 @@ function RQ.set_q(track, addr, band, q, state)
     local dir = (q >= cur_real) and 1 or -1
     next_norm = math.max(0, math.min(1, cur_norm + dir * BOOTSTRAP_PROBE))
   end
-  if next_norm ~= cur_norm then
-    reaper.TrackFX_SetEQParam(track, addr, band.bandtype, band.bandidx, 2, next_norm, true)
-  end
+  if next_norm ~= cur_norm then RQ.write_norm(track, addr, band, 2, next_norm) end
   state.prev_norm, state.prev_real = cur_norm, cur_real
 end
 

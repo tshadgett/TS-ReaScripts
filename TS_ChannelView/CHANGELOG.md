@@ -1,5 +1,17 @@
 # ChannelView — changelog
 
+## 3.8.3 — ReaEQ's alt bands
+
+### ChannelView
+
+- **Fixed:** ReaEQ bands set to *Band (alt)* or *Band (alt 2)* could show
+  in another band's place, and moving one could move a different band.
+
+### ChannelView Pro
+
+- The ReaEQ canvas follows the same fix: an alt band's node sits where
+  the band is and drags that band.
+
 ## 3.8.2 — fonts, a clear bypass, VU meters
 
 ### ChannelView

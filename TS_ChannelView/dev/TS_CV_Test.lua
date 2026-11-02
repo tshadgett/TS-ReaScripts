@@ -2059,6 +2059,50 @@ do
   VO_.apply_fonts({}); Cc.HEADER_H = was_h
 end
 
+-- ReaEQ: an alt band (Band (alt), Band (alt 2)) answers GetEQParam with a
+-- plain band's type and number; it's still a band of its own, and is
+-- written by its own parameters
+do
+  local RQx = require("TS_CV_ReaEQ")
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetEQParam", "TrackFX_GetFormattedParamValue", "TrackFX_GetNamedConfigParm",
+                       "TrackFX_GetEQBandEnabled", "TrackFX_SetParamNormalized", "TrackFX_SetEQParam" }) do saved[k] = reaper[k] end
+  -- as ReaEQ reports them: plain 2:0 at 300 Hz, alt (9) 2:0 at 74 Hz, alt 2 (2) 2:0 at 614 Hz, plain 2:1 at 2309 Hz
+  local B = { { 2, 0, "8", "300.0", "0.0" }, { 2, 0, "9", "74.1", "0.0" }, { 2, 0, "2", "613.8", "3.8" }, { 2, 1, "8", "2308.6", "-3.2" } }
+  reaper.TrackFX_GetEQParam = function(_, _, i)
+    local b = B[math.floor(i / 3) + 1]
+    if not b then return false end
+    return true, b[1], b[2], i % 3, 0.5
+  end
+  reaper.TrackFX_GetFormattedParamValue = function(_, _, i)
+    local b = B[math.floor(i / 3) + 1]
+    local pt = i % 3
+    return true, pt == 0 and b[4] or pt == 1 and b[5] or "2.00"
+  end
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k)
+    local n = tonumber(k:match("BANDTYPE(%d+)"))
+    if n then return true, B[n + 1][3] end
+    if k:match("BANDENABLED") then return true, "1" end
+    return false
+  end
+  reaper.TrackFX_GetEQBandEnabled = function() return true end
+  local bands = RQx.read("tr", 0)
+  local fr = {}
+  for _, b in ipairs(bands) do fr[#fr + 1] = ("%d%s"):format(math.floor(b.freq + 0.5), b.alt and "a" or "") end
+  check("reaeq: every band, the alt ones apart", table.concat(fr, " "), "300 74a 614a 2309")
+  check("reaeq: alt bands numbered apart", bands[2].bandidx ~= bands[1].bandidx and bands[3].bandidx ~= bands[1].bandidx, true)
+  check("reaeq: the next plain band", RQx.next_bandidx(bands, 2), 2)
+  local wrote = {}
+  reaper.TrackFX_SetParamNormalized = function(_, _, p, v) wrote[#wrote + 1] = "p" .. p end
+  reaper.TrackFX_SetEQParam = function(_, _, bt, bi, pt) wrote[#wrote + 1] = ("eq%d:%d:%d"):format(bt, bi, pt) end
+  RQx.set_gain("tr", 0, bands[3], 8, {})
+  RQx.set_gain("tr", 0, bands[1], 8, {})
+  RQx.set_freq("tr", 0, bands[3], 1000)
+  check("reaeq: an alt band written by its own parameters", table.concat(wrote, " "), "p7 eq2:0:1 p6")
+  check("reaeq: frequency law", ("%.2f %.2f %.3f"):format(RQx.freq_norm(20), RQx.freq_norm(24000), RQx.freq_norm(1160.5)), "0.00 1.00 0.500")
+  for k, v in pairs(saved) do reaper[k] = v end
+end
+
 -- a knob's lamp: the same for the panel and the web page
 check("lamp: one for both", P.lamp == require("TS_CV_FXTree").lamp and P.LAMP == require("TS_CV_FXTree").LAMP, true)
 
