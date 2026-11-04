@@ -995,7 +995,9 @@ put them. Every bar is global, not per project.
   A bar in a window shows its name as a drawer does (at the start of a
   row, over a column), as a docker doesn't always show a window's title.
   **Background** (its right-click, or in Organise actions) gives it a
-  colour of its own: a faceplate colour or any colour at all.
+  colour of its own: a faceplate colour or any colour at all. Its
+  buttons and menus are drawn on it too, dark on a light colour and
+  light on a dark one.
 
 ## Panels are a fixed height and grow in columns
 

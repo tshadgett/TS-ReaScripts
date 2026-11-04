@@ -11377,6 +11377,24 @@ do
   M.remove("SizeKey")
 end
 
+-- a bar with its own background: its buttons and menus drawn on it
+do
+  local DRm = require("TS_CV_Drawers")
+  local pushed, popped = 0, 0
+  local fake = setmetatable({ PushStyleColor = function() pushed = pushed + 1 end,
+                              PopStyleColor = function(_, n) popped = popped + (n or 1) end },
+    { __index = function(_, k) if k:match("^Col_") then return 0 end return function() end end })
+  DRm.attach(fake)
+  local lg, dg = DRm.ground({ bg = "#f0f0f0" }), DRm.ground({ bg = "#202020" })
+  check("bar ground: none on the theme's", DRm.ground({}), nil)
+  check("bar ground: dark ink on a light bar, a darker chip", ((lg.label >> 24) < 0x80) and ((lg.toggle_off >> 24) < 0xf0), true)
+  check("bar ground: light ink on a dark bar, a lighter chip", ((dg.label >> 24) > 0x80) and ((dg.toggle_off >> 24) > 0x20), true)
+  local was = C.COL.toggle_off
+  local seen
+  DRm.with_ground("ctx", { bg = "#f0f0f0" }, function() seen = C.COL.toggle_off end)
+  check("bar ground: in force while drawn, put back after", (seen == lg.toggle_off) and (C.COL.toggle_off == was) and pushed == popped, true)
+end
+
 -- P.split: one splitter per panel, kept; made again when let go or refused
 do
   local made, splits, valid, refuse = 0, 0, {}, {}

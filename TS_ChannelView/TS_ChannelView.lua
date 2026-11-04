@@ -1,10 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.9.1
+-- @version 3.9.2
 -- @changelog
---  REAPER's mixer follows a track clicked in ChannelView's mixer;
---  controls read by moving them read more carefully; a fix for an error
---  with auto-hidden headers. See the CHANGELOG.
+--  A toolbar window with its own background draws its buttons and menus
+--  on it too. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

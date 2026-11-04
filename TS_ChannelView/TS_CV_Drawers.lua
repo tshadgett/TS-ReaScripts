@@ -140,6 +140,49 @@ function DR.bg_of(v)
   return (type(v) == "string" and v:match("^#%x%x%x%x%x%x$")) and v:lower() or nil
 end
 
+-- A bar with its own background: its buttons and menus drawn on it too.
+-- The colours a bar's buttons are drawn with, worked out from its
+-- background (a step darker on a light one, lighter on a dark one; ink
+-- by contrast); nil for a bar on the theme's.
+local function mix(c, to, t)
+  local function ch(sh) local v = (c >> sh) & 0xff; local w = (to >> sh) & 0xff; return math.floor(v + (w - v) * t + 0.5) end
+  return (ch(24) << 24) | (ch(16) << 16) | (ch(8) << 8) | 0xff
+end
+function DR.ground(d)
+  local hex = DR.bg_of(d and d.bg)
+  if not hex then return nil end
+  local base = (tonumber(hex:sub(2), 16) << 8) | 0xff
+  local r, g, b = (base >> 24) & 0xff, (base >> 16) & 0xff, (base >> 8) & 0xff
+  local light = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5
+  local to = light and 0x000000ff or 0xffffffff
+  local ink = light and 0x1e2124ff or 0xeceeefff
+  return {
+    bg = base,
+    toggle_off = mix(base, to, 0.10), knob_body_hi = mix(base, to, 0.20), knob_ring = mix(base, to, 0.32),
+    label = ink, icon = mix(ink, base, 0.15), icon_hot = ink, header_dim = mix(ink, base, 0.40),
+  }
+end
+
+-- Draws fn() with a bar's ground in force: the theme's colours its
+-- buttons use swapped for its own, and its menus' (ImGui's popup, text
+-- and highlight colours) too. A bar on the theme's: fn() as it is.
+function DR.with_ground(ctx, d, fn, ...)
+  local g = DR.ground(d)
+  if not g then return fn(...) end
+  local was = {}
+  for k, v in pairs(g) do if k ~= "bg" then was[k] = C.COL[k]; C.COL[k] = v end end
+  local cols = {
+    { ImGui.Col_PopupBg, g.bg }, { ImGui.Col_Text, g.label }, { ImGui.Col_TextDisabled, g.header_dim },
+    { ImGui.Col_Header, g.toggle_off }, { ImGui.Col_HeaderHovered, g.knob_body_hi }, { ImGui.Col_HeaderActive, g.knob_ring },
+    { ImGui.Col_Border, g.knob_ring }, { ImGui.Col_Separator, g.knob_ring },
+  }
+  for _, c in ipairs(cols) do ImGui.PushStyleColor(ctx, c[1], c[2]) end
+  local ok, err = pcall(fn, ...)
+  ImGui.PopStyleColor(ctx, #cols)
+  for k, v in pairs(was) do C.COL[k] = v end
+  if not ok then error(err, 0) end
+end
+
 -- Every form: id|place|open|width|style|key|dock|size|align|bg|name (bg
 -- only when the bar has one), the same without align, without size too,
 -- and the older drawers-only id|side|open|width|style|name.

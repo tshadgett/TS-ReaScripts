@@ -1,5 +1,17 @@
 # ChannelView — changelog
 
+## 3.9.2 — toolbar colours
+
+### ChannelView
+
+- A toolbar window with its own *Background* draws its buttons and its
+  menus on that colour too, dark on a light colour and light on a dark
+  one, so a bar can blend in with a light setup.
+
+### ChannelView Pro
+
+- Nothing new: this version moves with ChannelView.
+
 ## 3.9.1 — multiband thresholds, fixes
 
 ### ChannelView
