@@ -84,12 +84,22 @@ P.canvas_of = canvas_of
 function P.footer_h() return C.HIDE_FOOT and 0 or C.FOOTER_H end
 function P.head_h() return C.HIDE_HEAD and 0 or C.HEADER_H end
 P.hover = {}    -- fx GUID -> { head, foot }: the pointer was over where they go, last frame
--- A draw-list splitter for a panel's draw list: a new one each time
--- (ReaImGui lets it go after the frame). One kept by the list's address
--- can meet another window that later has the same address, and a splitter
--- can't be used over two windows.
-function P.splitter(dl)
-  return ImGui.CreateDrawListSplitter(dl)
+-- A draw-list splitter for a panel (`key`), split into n channels. Kept,
+-- since a new one every frame trips ReaImGui's limit on short-lived
+-- objects; made again when ReaImGui has let it go (unused for a frame) or
+-- won't split it (it was last used in another window: every window's draw
+-- list can have the same address).
+local splitters = {}
+function P.split(dl, n, key)
+  local sp = splitters[key]
+  if sp and ImGui.ValidatePtr(sp, "ImGui_DrawListSplitter*")
+      and pcall(ImGui.DrawListSplitter_Split, sp, n) then
+    return sp
+  end
+  sp = ImGui.CreateDrawListSplitter(dl)
+  splitters[key] = sp
+  ImGui.DrawListSplitter_Split(sp, n)
+  return sp
 end
 
 -- ---------------------------------------------------------------------
@@ -3988,7 +3998,11 @@ end
 -- height -- what the grid editor's Canvas width / height set, kept with
 -- the layout (ReaEQ's and ReaComp's own canvases: own_w / own_h).
 -- Double-click the edge: the usual size again.
-local size_drag = nil   -- { guid, v0 }
+local size_drag = nil   -- { guid, owner, v0, t }
+-- Whether a panel's edge is being dragged: the grid editor takes the new
+-- size when it's let go, not every frame of the drag. (A drag last seen
+-- a moment ago: one whose panel went away mid-drag doesn't hold it up.)
+function P.resizing() return size_drag ~= nil and reaper.time_precise() - (size_drag.t or 0) < 0.25 end
 -- A canvas layout with controls beside the canvas (under it in the rack)
 -- folds them away when its edge is dragged in past the point where the
 -- canvas, at its least, and the controls fit; dragged back out, they
@@ -4078,18 +4092,22 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
     size_drag = nil
     return
   end
+  -- whose drag it is: the same panel is drawn in the grid editor's
+  -- window too (P.PREVIEW), where its edge isn't the one held
+  local owner = fx.guid .. (P.PREVIEW and ":ed" or "") .. (rack and ":rack" or "")
   if act and ImGui.IsMouseDown(ctx, 0) then
-    if not size_drag or size_drag.guid ~= fx.guid then
+    if not size_drag or size_drag.owner ~= owner then
       -- a generated default is made again whenever the chain is scanned,
       -- so the size would be lost: it becomes the plugin's layout first
       if not M.get(key) then M.set(key, layout) end
-      size_drag = { guid = fx.guid, v0 = get() }
+      size_drag = { guid = fx.guid, owner = owner, v0 = get() }
       -- the controls' room, and whether they're folded now
       if canvas then
         size_drag.room = ctl_room(track, fx, layout, key, ww, wh, canvas, io)
         size_drag.fold0 = rack and canvas.fold_rack or (not rack and canvas.fold)
       end
     end
+    size_drag.t = reaper.time_precise()
     local dx, dy = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left, 0)
     local d = rack and dy or dx
     if canvas and (size_drag.room or 0) > 0 then
@@ -4107,11 +4125,13 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
     local v = size_drag.v0 + d
     if rack then v = math.max(120, math.min(900, v)) else v = math.max(is_trim and 160 or 200, math.min(1200, v)) end
     put(math.floor(v + 0.5))
-  elseif size_drag and size_drag.guid == fx.guid then
+  elseif size_drag and size_drag.owner == owner then
     size_drag = nil
     keep()
   end
 end
+
+P._size_grip = function(...) return size_grip(...) end   -- (for the tests)
 
 -- Folded controls: a tab on the canvas's edge (the right, the bottom in
 -- the rack, above the footer); with the pointer on it they pop out beside the panel (under it
@@ -4295,8 +4315,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       local show_h = C.HIDE_HEAD and (hv.head or is_drag_source)
       local show_f = C.HIDE_FOOT and C.FOOTER_H > 0 and hv.foot
       if show_h or show_f then
-        sp = P.splitter(dl)
-        ImGui.DrawListSplitter_Split(sp, 2)
+        sp = P.split(dl, 2, fx.guid)
         ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
         if show_h then draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req) end
         if show_f then

@@ -103,8 +103,11 @@ end
 -- back where it was), and those readings kept for the session: numbers
 -- between two steps are drawn in between, anything else is the nearer
 -- step. Not while its track is writing automation (that would record the
--- sweep) or the transport is playing (it would be heard): it reads as
--- nothing until then.
+-- sweep), the transport is playing or the track is armed with its input
+-- heard (it would be heard): it reads as nothing until then. Never one
+-- that loads something as it moves (a program, preset, impulse response,
+-- sample or file), and not kept when the plugin didn't come back to what
+-- it showed before (one that answers late).
 local function raw_formatter(track, addr, p)
   return function(norm)
     if not reaper.TrackFX_FormatParamValueNormalized then return nil end
@@ -119,6 +122,7 @@ local swept = {}        -- fx GUID:param -> false (answers fine) | its readings,
 -- put back on every plain number read
 local function sweep(track, addr, p, suffix)
   local cur = reaper.TrackFX_GetParamNormalized(track, addr, p)
+  local _, before = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
   local t, first, varied = {}, nil, false
   for i = 0, UN.SWEEP_N do
     reaper.TrackFX_SetParamNormalized(track, addr, p, i / UN.SWEEP_N)
@@ -128,7 +132,22 @@ local function sweep(track, addr, p, suffix)
     if first == nil then first = t[i] elseif t[i] ~= first then varied = true end
   end
   reaper.TrackFX_SetParamNormalized(track, addr, p, cur)
+  -- back where it was, and saying so: one that answers late (its display
+  -- a step behind) or didn't take it back can't be read this way
+  local _, after = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+  local back = reaper.TrackFX_GetParamNormalized(track, addr, p)
+  if not back or math.abs(back - cur) > 1e-4 then reaper.TrackFX_SetParamNormalized(track, addr, p, cur) end
+  if trim(after or "") ~= trim(before or "") then return false end
   return varied and t or false
+end
+-- Never moved to read it: a control that loads something as it moves (a
+-- program, preset, impulse response, sample or file)
+local NO_SWEEP = { "program", "preset", "patch", "bank", "impulse", "sample", "file", "load" }
+local function loads_as_it_moves(track, addr, p)
+  local _, nm = reaper.TrackFX_GetParamName(track, addr, p, "")
+  nm = (nm or ""):lower()
+  for _, w in ipairs(NO_SWEEP) do if nm:find(w, 1, true) then return true end end
+  return nm:find("%f[%w]ir%f[%W]") ~= nil
 end
 local SUF = { ms = " ms", pct = " %", hz = " Hz", db = " dB", [""] = "" }
 -- a reading between two kept steps
@@ -176,6 +195,12 @@ function UN.formatter(track, addr, p)
         -- writing automation (it would record the sweep) or playing (it
         -- would be heard): not now, and asked again later
         if am >= 2 or playing then return function() return nil end end
+        -- armed with its input heard (the sweep would be heard): later
+        local gv = reaper.GetMediaTrackInfo_Value
+        if gv and (gv(track, "I_RECARM") or 0) > 0 and (gv(track, "I_RECMON") or 0) > 0 then
+          return function() return nil end
+        end
+        if loads_as_it_moves(track, addr, p) then return raw end
         t = sweep(track, addr, p, suffix)
       end
     end

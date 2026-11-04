@@ -1,5 +1,34 @@
 # ChannelView — changelog
 
+## 3.9.1 — multiband thresholds, fixes
+
+### ChannelView
+
+- Clicking a track in ChannelView's mixer scrolls REAPER's mixer to it,
+  when REAPER's mixer is set to *Scroll view when tracks activated*.
+- Plugins that report a control only where it is now are read more
+  carefully: not on a track armed with its input monitored, never a
+  control that loads something as it moves (a program, preset, impulse
+  response, sample or file), and the control is always put back where it
+  was.
+- **Fixed:** ChannelView could stop with an "excessive creation of
+  short-lived resources" error while a panel's auto-hidden header or foot
+  was showing (newer ReaImGui).
+
+### ChannelView Pro
+
+- **Multiband canvas** (ReaXcomp and others): each band's threshold is a
+  line across its range over the spectrum; drag it up or down. The band
+  strips under it keep their sliders and switches.
+- **Delay canvas:** short delays (down to a few milliseconds) spread
+  across the canvas instead of bunching at the left, and dragging a time
+  keeps a steady scale.
+- **Fixed:** resizing a canvas panel with *Edit layout* open made the
+  panel's width run away and Edit layout lag.
+- **Fixed:** *Measure* timing on a compressor could stop ChannelView
+  ("attempt to compare number with string") when a release reduced too
+  little to time.
+
 ## 3.9.0 — visualisers, Trimmer layouts, an analogue VU
 
 ### ChannelView

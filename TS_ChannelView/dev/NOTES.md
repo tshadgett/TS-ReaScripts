@@ -755,10 +755,12 @@ underline is drawn under what ChannelView draws itself.
 
 ## Draw-list splitters
 
-A splitter is bound to the window whose draw list it was made from. One
-kept per draw-list address met another window later given the same
-address ("cannot use DrawListSplitter over multiple windows"); P.splitter
-makes a new one each time, which ReaImGui frees after the frame.
+A splitter is bound to the window it was first split in, and every
+window's draw list can have the same address ("cannot use DrawListSplitter
+over multiple windows"). A new one every frame trips newer ReaImGui's
+"excessive creation of short-lived resources". P.split keeps one per
+panel (fx GUID; this ReaImGui has no GetID), made again when ValidatePtr
+says it was let go or Split refuses it (a panel in another window).
 
 ## Visualisers
 

@@ -197,6 +197,22 @@ function MX.clear_selection()
   reaper.UpdateArrange()
 end
 
+-- Selected, made the last-touched track, and REAPER's mixer scrolled to
+-- it when REAPER is set to ("Scroll view when tracks activated", 40221):
+-- no API selection scrolls it, and REAPER's own track actions put the
+-- track leftmost, so SetMixerScroll does the same. Callers then redraw
+-- REAPER's track lists (TrackList_AdjustWindows), which UpdateArrange
+-- doesn't.
+MX.MIXER_FOLLOWS = 40221   -- Mixer: Toggle scroll view when tracks activated
+function MX.select_only(track)
+  reaper.SetOnlyTrackSelected(track)
+  reaper.Main_OnCommand(40914, 0)          -- Track: Set first selected track as last touched track
+  if (reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER") or 0) > 0
+      and reaper.GetToggleCommandState(MX.MIXER_FOLLOWS) == 1 and reaper.SetMixerScroll then
+    reaper.SetMixerScroll(track)
+  end
+end
+
 function MX.click(track, guid, mods)
   if not track then return end
   local ctrl  = (mods & ImGui.Mod_Ctrl) ~= 0 or (mods & ImGui.Mod_Super) ~= 0
@@ -229,14 +245,15 @@ function MX.click(track, guid, mods)
     else
       -- The anchor has been hidden or deleted since. Fall back to a
       -- plain click rather than guessing at what the range meant.
-      reaper.SetOnlyTrackSelected(track)
+      MX.select_only(track)
       MX.anchor = guid
     end
 
   else
-    reaper.SetOnlyTrackSelected(track)
+    MX.select_only(track)
     MX.anchor = guid
   end
+  reaper.TrackList_AdjustWindows(false)
   reaper.UpdateArrange()
 end
 

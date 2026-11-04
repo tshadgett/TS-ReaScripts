@@ -1,10 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.9.0
+-- @version 3.9.1
 -- @changelog
---  TS_TrackProbe 2.4.0 (left and right levels, a stereo tap, no clash
---  with the Trimmer); plugins that only report where a control is now
---  read right. See the CHANGELOG.
+--  REAPER's mixer follows a track clicked in ChannelView's mixer;
+--  controls read by moving them read more carefully; a fix for an error
+--  with auto-hidden headers. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -6499,7 +6499,8 @@ local function frame()
         set_view(false)
       end
       if open_it then
-        reaper.SetOnlyTrackSelected(open_it)
+        MX.select_only(open_it)
+        reaper.TrackList_AdjustWindows(false)
         reaper.UpdateArrange()
         app.track = open_it
         S.request_scroll()

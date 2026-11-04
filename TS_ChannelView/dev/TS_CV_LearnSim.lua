@@ -961,6 +961,26 @@ do
   M.remove("Drums :: Comp")
 end
 
+-- one that barely reduces: each fit fails with a reason, release steps
+-- included, and the job says so rather than stopping
+do
+  local base = truth_time
+  truth_time = function(vals) local a, r = base(vals); return a, r, 1 end
+  tracks = {}
+  local user = newtrack("Soft"); tracks[1] = user
+  user.fx[1] = { kind = "eq", vals = { [0] = 0.9, 0.1, 0.3, 0.6, 0.7 } }
+  local layout = { controls = {}, aliases = {}, canvas = { kind = "comp", rev = {},
+    roles = { Threshold = 0, Ratio = 1, Attack = 2, Release = 3, Mix = 4 } } }
+  M.set("Soft :: Comp", layout)
+  local job = LN.start_time(user, 0, "Soft :: Comp", layout)
+  local ok, err = pcall(run, job)
+  check("timing, too little: no error (" .. tostring(err) .. ")", ok, true)
+  check("timing, too little: says why (" .. tostring(job.msg) .. ")",
+    job.state == "error" and (job.msg or ""):find("reduced only") ~= nil, true)
+  M.remove("Soft :: Comp")
+  truth_time = base
+end
+
 os.remove(tmpdir .. "TS_ChannelView_Mappings.ini")
 os.remove(tmpdir .. "TS_ChannelView_Mappings.bak.ini")
 print(fails == 0 and ("\nALL PASS") or ("\n" .. fails .. " FAILURES"))

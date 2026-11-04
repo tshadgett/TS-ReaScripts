@@ -34,6 +34,7 @@ reaper = {
   ColorFromNative = function(v) return (v>>16)&0xff, (v>>8)&0xff, v&0xff end,
   GetMediaTrackInfo_Value = function(_, k)
     if k == "I_AUTOMODE" then return AUTOMODE end
+    if k == "I_RECARM" or k == "I_RECMON" then return 0 end
     return 0x1000000 | 0x3366cc
   end,
   -- TS_CV_Test.lua sits in Scripts/ChannelView, so REAPER's resource root
@@ -523,6 +524,19 @@ do
   T.undo()
   check("grid editor: and undone", M.get(key).controls[2].back, nil)
   check("grid editor: the label kept", M.get(key).controls[1].label, "Drive")
+  -- a panel's edge being dragged in ChannelView: the editor waits for it
+  do
+    local real = P.resizing
+    P.resizing = function() return true end
+    local l2 = M.get(key); l2.controls[2].back = "inset"; M.set(key, l2)
+    local n_undo = #T.undo_list()
+    T.sync()
+    check("grid editor: waits while a panel is resized", tostring(T.cur().controls[2].back) .. " " .. (#T.undo_list() - n_undo), "nil 0")
+    P.resizing = real
+    T.sync()
+    check("grid editor: then takes it", T.cur().controls[2].back, "inset")
+    T.undo()
+  end
   check("grid editor: no going on another", T.free(0, 4, 4, 4, nil), false)
   check("grid editor: room beside it", T.free(4, 4, 4, 4, nil), true)
   local k = { type = "knob" }
@@ -3428,6 +3442,7 @@ do
       Main_OnCommand = reaper.Main_OnCommand,
       UpdateArrange = reaper.UpdateArrange,
       GetMediaTrackInfo_Value = reaper.GetMediaTrackInfo_Value,
+      GetToggleCommandState = reaper.GetToggleCommandState, SetMixerScroll = reaper.SetMixerScroll,
     }
     local ALL = { MASTER, TRACKS[1], TRACKS[2], TRACKS[3] }
     local function clear() for _, t in ipairs(ALL) do t.sel = false end end
@@ -3445,10 +3460,22 @@ do
       for _, t in ipairs(ALL) do if t.sel then n = n + 1 end end
       return n
     end
-    reaper.Main_OnCommand = function(id) if id == 40297 then clear() end end
+    local touched, redrawn, went, follows = 0, 0, {}, 1
+    reaper.Main_OnCommand = function(id)
+      if id == 40297 then clear() end
+      if id == 40914 then touched = touched + 1 end
+    end
+    reaper.GetToggleCommandState = function(id) return id == 40221 and follows or 0 end
+    reaper.SetMixerScroll = function(t) went[#went + 1] = "scroll:" .. t.name end
+    local adj_real = reaper.TrackList_AdjustWindows
+    reaper.TrackList_AdjustWindows = function() redrawn = redrawn + 1 end
     reaper.UpdateArrange = function() end
     reaper.GetMediaTrackInfo_Value = function(t, k)
       if k == "I_SELECTED" then return t.sel and 1 or 0 end
+      if k == "IP_TRACKNUMBER" then
+        for i, x in ipairs(TRACKS) do if x == t then return i end end
+        return -1
+      end
       if k == "B_SHOWINMIXER" then return t.show end
       if k == "I_SPACER" then return t.space end
       if k == "I_CUSTOMCOLOR" then return 0 end
@@ -3464,6 +3491,15 @@ do
     MX.click(TRACKS[1], "{Kick}", NONE)
     check("a plain click takes the track", selected_names(), "Kick")
     check("and drops whatever was there", reaper.CountSelectedTracks2(0, true), 1)
+    check("made last touched, REAPER's mixer redrawn", touched .. " " .. redrawn, "1 1")
+    check("REAPER's mixer scrolled to it (set to follow)", table.concat(went, " "), "scroll:Kick")
+    went = {}
+    follows = 0
+    MX.click(TRACKS[3], "{Bass}", NONE)
+    check("not when REAPER isn't set to", table.concat(went, " ") .. " " .. selected_names(), " Bass")
+    follows = 1
+    MX.click(TRACKS[1], "{Kick}", NONE)
+    went = {}
 
     MX.click(TRACKS[3], "{Bass}", CTRL)
     check("ctrl adds to it", selected_names(), "Bass,Kick")
@@ -3511,6 +3547,7 @@ do
     check("nothing is not selected", MX.selected(nil), false)
 
     for k, v in pairs(sel_real) do reaper[k] = v end
+    reaper.TrackList_AdjustWindows = adj_real
     MX.anchor = nil
   end
 
@@ -7586,6 +7623,9 @@ do
     -- pans as SSL writes them
     check("delay pans", table.concat({ DLY.pan_of(rd("L--")), DLY.pan_of(rd("L50")), DLY.pan_of(rd("-C-")), DLY.pan_of(rd("50R")),
       DLY.pan_of(rd("--R")), DLY.pan_of(rd("-50")) }, " "), "-1 -0.5 0 0.5 1 -0.5")
+    -- a short delay spreads across the canvas
+    mdl = DLY.model({ Time = rd("20.0 ms"), Feedback = rd("50 %") }, { nt = 0, rev = {} }, { bpm = 120 })
+    check("delay: a 20 ms delay's canvas spans 104 ms", ("%.0f"):format(mdl.span or -1), "104")
     -- the modes and taps survive the file
     local cvd = M.parse_canvas and nil
     check("delay modes round trip", M.dl_modes_write(M.dl_modes_parse("Single:mono;PingPong:pp;Tape:none")), "PingPong:pp;Single:mono;Tape:none")
@@ -7654,6 +7694,29 @@ do
     check("dead formatter: read by moving", ("%s %s %.2f"):format(f(0), f(1), val), "0.0 ms 1000.0 ms 0.30")
     check("dead formatter: between steps", f(0.5004) ~= nil and select(1, UN.parse(f(0.5004))) > 500, true)
     check("dead formatter: find", ("%.3f"):format(UN.find_norm(f, 250)), "0.250")
+    -- not moved: armed with its input heard (asked again later), or a
+    -- control that loads something as it moves
+    stub("GetMediaTrackInfo_Value", function(_, k) return (k == "I_RECARM" or k == "I_RECMON") and 1 or 0 end)
+    local sets = 0
+    stub("TrackFX_SetParamNormalized", function(_, _, _, n) val = n; sets = sets + 1 end)
+    stub("TrackFX_GetFXGUID", function() return "{VAL2}" end)
+    local f2 = UN.formatter({}, 0, 4)
+    check("dead formatter: not while armed and heard", tostring(f2(0)) .. " " .. sets, "nil 0")
+    reaper.GetMediaTrackInfo_Value = function() return 0 end
+    stub("TrackFX_GetParamName", function() return true, "Program" end)
+    stub("TrackFX_GetFXGUID", function() return "{VAL3}" end)
+    UN.formatter({}, 0, 4)
+    check("dead formatter: a program list never moved", sets, 0)
+    -- one whose display comes a step late: moved, put back, not kept
+    stub("TrackFX_GetParamName", function() return true, "Time" end)
+    stub("TrackFX_GetFXGUID", function() return "{VAL4}" end)
+    local shown = val
+    stub("TrackFX_SetParamNormalized", function(_, _, _, n) shown = val; val = n end)
+    stub("TrackFX_GetFormattedParamValue", function() return true, ("%.1f ms"):format(shown * 1000) end)
+    stub("TrackFX_FormatParamValueNormalized", function() return true, ("%.1f ms"):format(shown * 1000) end)
+    val, shown = 0.3, 0.3
+    local f4 = UN.formatter({}, 0, 4)
+    check("dead formatter: a late one, put back and not kept", ("%.2f %s"):format(val, tostring(f4(0) == f4(0.5))), "0.30 true")
     for k, fn in pairs(saved) do reaper[k] = fn end
   end
   check("delay mode", tostring(M.dl_mode_of("Ping-Pong")) .. tostring(M.dl_mode_of("Dual")) .. tostring(M.dl_mode_of("Single"))
@@ -11275,6 +11338,65 @@ do
     ls:close()
     check("no module reads an unknown global", table.concat(bad, " "), "")
   end
+end
+
+-- a panel's edge dragged in ChannelView while the grid editor draws the
+-- same panel: the editor's copy of the edge leaves the drag alone
+do
+  local held, dx, saved = true, 0, 0
+  local fake = setmetatable({
+    InvisibleButton = function() end, BeginChild = function() return true end,
+    IsItemHovered = function() return false end, IsItemActive = function() return held end,
+    IsMouseDown = function() return held end, IsMouseDoubleClicked = function() return false end,
+    GetMouseDragDelta = function() return dx, 0 end,
+    WindowFlags_NoScrollbar = 1, WindowFlags_NoScrollWithMouse = 2, WindowFlags_NoBackground = 4, WindowFlags_NoNav = 8,
+    MouseCursor_ResizeEW = 0, MouseCursor_ResizeNS = 0, MouseButton_Left = 0,
+  }, { __index = function() return function() return 0 end end })
+  P.attach(fake)
+  local Wm = require("TS_CV_Widgets"); local tip_real = Wm.tip; Wm.tip = function() end
+  local save_real = M.save; M.save = function() saved = saved + 1 end
+  local tp_real = reaper.time_precise; reaper.time_precise = function() return 100 end
+  local fx = { guid = "{SZ}", addr = 0 }
+  local cv_l, ed_l = { controls = {}, own_w = 300 }, { controls = {}, own_w = 300 }
+  M.set("SizeKey", cv_l)
+  local function frame(d)
+    dx = d
+    fake.IsItemActive = function() return held end
+    P._size_grip({}, {}, fx, cv_l, "SizeKey", 0, 0, 300, 200, nil, true, false, nil, false, {})
+    P.PREVIEW = true
+    fake.IsItemActive = function() return false end
+    P._size_grip({}, {}, fx, ed_l, "SizeKey", 0, 0, 300, 200, nil, true, false, nil, false, {})
+    P.PREVIEW = nil
+  end
+  frame(10); frame(20); frame(30)
+  check("panel edge: dragged 30 px with the editor open", cv_l.own_w .. " " .. saved, "330 0")
+  check("panel edge: the editor waits", P.resizing(), true)
+  held = false; frame(30)
+  check("panel edge: saved once, on letting go", cv_l.own_w .. " " .. saved, "330 1")
+  M.save = save_real; Wm.tip = tip_real; reaper.time_precise = tp_real
+  M.remove("SizeKey")
+end
+
+-- P.split: one splitter per panel, kept; made again when let go or refused
+do
+  local made, splits, valid, refuse = 0, 0, {}, {}
+  local fake = setmetatable({
+    CreateDrawListSplitter = function() made = made + 1; local sp = {}; valid[sp] = true; return sp end,
+    ValidatePtr = function(sp) return valid[sp] end,
+    DrawListSplitter_Split = function(sp)
+      if refuse[sp] then error("cannot use DrawListSplitter over multiple windows") end
+      splits = splits + 1
+    end,
+  }, { __index = function() return function() end end })
+  P.attach(fake)
+  local a1 = P.split("dl", 2, "A"); local a2 = P.split("dl", 2, "A")
+  check("splitter kept across frames", a1 == a2 and made, 1)
+  local b = P.split("dl", 2, "B")
+  check("another panel, its own splitter", b ~= a1 and made, 2)
+  valid[a1] = nil; local a3 = P.split("dl", 2, "A")
+  check("let go: made again", a3 ~= a1 and made, 3)
+  refuse[a3] = true; local a4 = P.split("dl", 2, "A")
+  check("refused: made again and split", a4 ~= a3 and splits, 5)
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

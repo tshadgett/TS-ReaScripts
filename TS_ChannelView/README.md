@@ -71,7 +71,8 @@ included. Ctrl (or Cmd) adds and removes, Shift takes the range back to
 the last click, and the track buttons answer the same gestures. Hidden
 tracks are not in a range: the range is what you can see. And ctrl can
 never take the selection down to nothing, because channel view has to
-have a track to show.
+have a track to show. With REAPER's mixer set to *Scroll view when tracks
+activated*, a click scrolls REAPER's mixer to the track too.
 
 ## Rack view (Pro)
 
@@ -1543,9 +1544,9 @@ and the ceiling.
 
 **Multiband.** Up to eight bands, split by shared crossovers or by each
 band's own edges (as Pro-MB does). *All bands* shows the bands over the
-spectrum with a strip each — a small transfer curve with its threshold,
-a dot riding it at the band's level going in, and sliders for ratio,
-attack, release, RMS and gain — plus solo, bypass, a band's own
+spectrum, each with its threshold as a line across its range (drag it
+up or down), and a strip each — sliders for ratio, attack, release, RMS
+and gain — plus solo, bypass, a band's own
 automatic make-up, automatic release and feedback-detector switches
 where it has them, and its in-use setting; + BAND takes an unused band
 into use. Click a band for the full compressor canvas. One reduction
