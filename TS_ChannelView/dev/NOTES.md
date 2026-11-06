@@ -934,3 +934,34 @@ mix and six stems:
   it is, with tracks hidden from the mixer passed over. The bar against a
   strip runs under it by the strip's rounding, and MX.fold_edges paints
   over the strip's outline on that side, so the two meet with no gap.
+
+## Plugins ChannelView knows: ReEQ2
+
+- ReEQ2 (a JSFX) gives the host its sliders' own numbers: frequency 0..104
+  for 10 Hz x 2205^(x / 100), Q 0..100 for 0.1 x 400^(x / 100), slope
+  steps of 6 dB/oct. M.known_ranges gives any ReEQ2 layout (saved or
+  default) ranges for them and for gain and the dynamics, where it has
+  none of its own, so its controls read in their units everywhere
+  (U.fmt_value, UN.formatter).
+- ME.builtin maps its 16 bands (parameter numbers in M.REEQ2, checked
+  against the names) with a learn line that's D=1 (the canvas uses the
+  readings) and X=1 (its types are its own: the shape names don't
+  override them). M.known_ranges also puts that line on any band of a
+  ReEQ2 layout mapped the same way, so a change to the recipes reaches
+  canvases already made.
+- Its types are modelled from its own recipes
+  (Dependencies/reeq-analog-adapter.jsfx-inc ri_recipe, drawn by
+  ivantsov_filter's ivf_sec_amag): cuts with every second-order section at
+  Q (hpq, lpq) or Butterworth (hpbw, lpbw), a tilt of a full shelf each
+  way (rtilt), Pultec Low (a low shelf at 1.5 f and a dip there of
+  Q / 40 x the boost, to 10 dB), Vintage Lo (a low shelf at 1.25 f and a
+  first-order low cut at f), Vintage Hi (a high shelf and a second-order
+  high cut at 22 kHz when boosting, f x (1 + 3.25 t) when cutting,
+  t = 1 + gain / 12). The test rebuilds its curves from those recipes and
+  compares. ME.FAMILY says which plain type each behaves like for focus,
+  spans and gain nodes.
+- Mode has three settings: Off (ME.find_used: the band unused), Disabled
+  (off), Enabled. Turning a band off sets Disabled; a double-click sets
+  Off.
+- Learn runs inside the layout's ranges (CanvasSetup round LN.step), so a
+  plugin given custom ranges in Hz, dB and Q learns the quick way.

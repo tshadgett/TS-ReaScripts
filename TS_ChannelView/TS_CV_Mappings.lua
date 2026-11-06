@@ -746,7 +746,7 @@ end
 -- canvases (Canvas, Band<k>, Learn<k>, Role<name>)
 -- ---------------------------------------------------------------------
 
-M.MAX_BANDS = 8
+M.MAX_BANDS = 24
 -- a control's lamp (Lamp<n>): "gr" by the reduction, "gate" a gate's, "off"
 -- none (nor the automatic one on the Threshold)
 M.LAMPS = { gr = true, gate = true, off = true }
@@ -1068,10 +1068,10 @@ end
 
 -- A canvas's own colours (CanvasCol=curve:#rrggbb|bg:#...|...): what it
 -- draws in instead of the theme's, by element (M.CANVAS_COLS, and band1 to
--- band8 for an EQ's bands), as 0xrrggbb. nil when there are none.
+-- band24 for an EQ's bands), as 0xrrggbb. nil when there are none.
 M.CANVAS_COLS = { "curve", "fill", "hi", "bg", "grid", "meter", "knob" }
 local CANVAS_COL_OK = { curve = true, fill = true, hi = true, bg = true, grid = true, meter = true, knob = true }
-for k = 1, 8 do CANVAS_COL_OK["band" .. k] = true end
+for k = 1, M.MAX_BANDS do CANVAS_COL_OK["band" .. k] = true end
 
 -- A canvas's colours made from a faceplate (C.plate_of; its bg 0xRRGGBBAA):
 -- its background a shade of the plate, the grid between that and the
@@ -1811,6 +1811,71 @@ function M.canvas_todo(cv)
   end
   if total > 0 and learned == total then return nil end
   return { mapped = mapped, learned = learned, total = total }
+end
+
+-- ---------------------------------------------------------------------
+-- plugins ChannelView knows
+-- ---------------------------------------------------------------------
+-- Their parameters' ranges, so they read in their own units (Hz, Q, dB)
+-- where the plugin gives only its sliders' numbers, and an EQ canvas's
+-- bands (TS_CV_MapEQ ME.builtin). Parameter numbers as REAPER gives them.
+
+-- ReEQ2 (ReJJ): 16 bands of Mode, Group, Type, Frequency, Gain, Q, Slope,
+-- bands 1-5 from parameter 17 and 6-16 from 57; each band's dynamics
+-- (on, threshold, ratio, range, attack, release) from 136. Its frequency
+-- slider runs 0..104 for 10 Hz x 2205^(x / 100), its Q 0..100 for
+-- 0.1 x 400^(x / 100), its slope steps 6 dB/oct each.
+local REEQ2 = { id = "reeq2", bands = 16, FREQ_HI = 10 * 2205 ^ 1.04 }
+function REEQ2.band(k) return (k <= 5) and (17 + 7 * (k - 1)) or (57 + 7 * (k - 6)) end
+function REEQ2.dyn(k) return 136 + 6 * (k - 1) end
+function REEQ2.ranges()
+  local r = {}
+  for k = 1, REEQ2.bands do
+    local b, d = REEQ2.band(k), REEQ2.dyn(k)
+    r[b + 3] = { lo = 10, hi = REEQ2.FREQ_HI, unit = "Hz", curve = "log" }
+    r[b + 4] = { lo = -18, hi = 18, unit = "dB", curve = "lin" }
+    r[b + 5] = { lo = 0.1, hi = 40, unit = "", curve = "log" }
+    r[b + 6] = { lo = 6, hi = 120, unit = "dB/oct", curve = "lin" }
+    r[d + 1] = { lo = -60, hi = 0, unit = "dB", curve = "lin" }
+    r[d + 2] = { lo = 1, hi = 20, unit = ":1", curve = "lin" }
+    r[d + 3] = { lo = -24, hi = 24, unit = "dB", curve = "lin" }
+    r[d + 4] = { lo = 0.1, hi = 200, unit = "ms", curve = "lin" }
+    r[d + 5] = { lo = 5, hi = 2000, unit = "ms", curve = "lin" }
+  end
+  return r
+end
+M.REEQ2 = REEQ2
+
+-- The plugin a layout's key names, when it's one ChannelView knows.
+function M.known_of(key)
+  if (key or ""):lower():find("reeq2", 1, true) then return REEQ2 end
+  return nil
+end
+
+-- A layout with the ranges a known plugin's parameters have, where it
+-- has none of its own for them; and its EQ canvas's bands that are the
+-- plugin's own (mapped as TS_CV_MapEQ ME.builtin maps them) with what
+-- ChannelView knows of their shapes now. Returns the layout.
+function M.known_ranges(key, layout)
+  local kp = layout and M.known_of(key)
+  if not kp then return layout end
+  layout.ranges = layout.ranges or {}
+  for p, r in pairs(kp.ranges()) do
+    if not layout.ranges[p] then layout.ranges[p] = r end
+  end
+  local cv = layout.canvas
+  local ok, ME = pcall(require, "TS_CV_MapEQ")
+  local known = cv and cv.kind == "eq" and ok and ME.builtin and ME.builtin(nil)
+  if known then
+    for _, b in ipairs(cv.bands or {}) do
+      for _, kb in ipairs(known.bands) do
+        if b.freq == kb.freq and b.gain == kb.gain and b.q == kb.q and b.shape == kb.shape and b.on == kb.on then
+          b.learn, b.learn_sig = kb.learn, M.band_sig(b, cv.model)
+        end
+      end
+    end
+  end
+  return layout
 end
 
 local function parse_section(sect)
@@ -2618,7 +2683,7 @@ function M.get(key)
   if cache[key] then return cache[key] end
   local s = sections[key]
   if not s then return nil end
-  cache[key] = parse_section(s)
+  cache[key] = M.known_ranges(key, parse_section(s))
   return cache[key]
 end
 
@@ -2647,6 +2712,7 @@ function M.get_or_default(key, track, addr, cache_id)
     else d = M.build_default(track, addr) end
     -- ReaGate's, ReaLimit's, ReaXcomp's and ReaSynth's start with a canvas
     if RB.DEFAULT_CANVAS[kind or ""] then d = RB.default_canvas(track, addr, cache_id, kind, d) end
+    d = M.known_ranges(key, d)
     def_cache[id] = d
   end
   return RB.ensure(track, addr, cache_id, key, d), true

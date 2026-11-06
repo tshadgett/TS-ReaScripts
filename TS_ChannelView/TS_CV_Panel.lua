@@ -3704,7 +3704,7 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
   C.CANVAS.hi    = cols.hi and (((cols.hi & 0xffffff) << 8) | 0xff) or nil
   C.CANVAS.meter = cols.meter and (((cols.meter & 0xffffff) << 8) | 0xff) or nil
   local bands
-  for k = 1, 8 do
+  for k = 1, M.MAX_BANDS do
     local b = cols["band" .. k]
     if b then bands = bands or {}; bands[k] = ((b & 0xffffff) << 8) | 0xff end
   end

@@ -1,10 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.0.0
+-- @version 4.0.1
 -- @changelog
---  Measured gain reduction (TS_TrackProbe 2.5.0; reopen a project after
---  updating), MIDI envelopes for the modulators, folder borders, typing
---  a value into more controls, and fixes. See the CHANGELOG.
+--  ReEQ2 reads in its own units; EQ canvases take up to 24 bands. See the
+--  CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

@@ -11477,5 +11477,120 @@ do
   check("refused: made again and split", a4 ~= a3 and splits, 5)
 end
 
+-- ReEQ2: a known plugin, its EQ canvas mapped and read through its own
+-- formulas, nothing learned
+do
+  local dir = (debug.getinfo(1, "S").source:sub(2):match("(.*/)") or "./")
+  local PR = dofile(dir .. "TS_CV_ReEQ2Params.lua")
+  local ME_, M_, U_ = require("TS_CV_MapEQ"), require("TS_CV_Mappings"), require("TS_CV_Util")
+  local names, byp = {}, {}
+  for _, r in ipairs(PR) do names[r[1] + 1] = r[2]; byp[r[1]] = r end
+  -- a JSFX's parameters: the slider's value from 0..1, its text the value
+  -- (or its choice)
+  local vals = {}
+  local function slider(p, n) local r = byp[p]; return r[3] + n * (r[4] - r[3]) end
+  local function text(p, n)
+    local r, v = byp[p], slider(p, n)
+    if r[5] then return r[5][math.floor(v + 0.5) + 1] end
+    return ("%.2f"):format(v)
+  end
+  local function setv(p, v) local r = byp[p]; vals[p] = (v - r[3]) / (r[4] - r[3]) end
+  local real = reaper
+  reaper = setmetatable({
+    TrackFX_GetParamNormalized = function(_, _, p) return vals[p] or 0 end,
+    TrackFX_SetParamNormalized = function(_, _, p, n) vals[p] = n end,
+    TrackFX_GetFormattedParamValue = function(_, _, p) return true, text(p, vals[p] or 0) end,
+    TrackFX_FormatParamValueNormalized = function(_, _, p, n) return true, text(p, n) end,
+    TrackFX_GetParamName = function(_, _, p) return true, names[p + 1] or "" end,
+    TrackFX_GetNumParams = function() return #names end,
+    TrackFX_GetFXGUID = function() return "{REEQ2}" end,
+  }, { __index = real })
+  local cv = ME_.builtin(names)
+  check("ReEQ2: known, 16 bands", cv and #cv.bands, 16)
+  local b6 = cv.bands[6]
+  check("ReEQ2: band 6's controls", ("%d %d %d %d %d %d"):format(b6.on, b6.shape, b6.freq, b6.gain, b6.q, b6.slope), "57 59 60 61 62 63")
+  check("ReEQ2: band 16's dynamics", cv.bands[16].dyn.thr .. " " .. cv.bands[16].dyn.rel, "227 231")
+  check("ReEQ2: learned already", M_.band_learned(cv.bands[1], nil), true)
+  check("ReEQ2: another plugin isn't", ME_.builtin({ "Gain", "Freq" }), nil)
+  local lay = M_.known_ranges("JS: ReEQ2 - Parametric Graphic Equalizer", { controls = {} })
+  local was = U_.with_ranges(lay.ranges)
+  local b = cv.bands[1]
+  -- its own sliders: 50.81 is 10 x 2205^0.5081 Hz, Q 32.647 is 0.707
+  setv(b.on, 2); setv(b.shape, 0); setv(b.freq, 50.81); setv(b.gain, 6); setv(b.q, 32.647); setv(b.slope, 3)
+  local rb = ME_.read_band("tr", 0, b)
+  check("ReEQ2: frequency by its formula", math.abs(rb.f - 10 * 2205 ^ 0.5081) / rb.f < 0.01, true)
+  check("ReEQ2: Q by its formula", math.abs(rb.q - 0.1 * 400 ^ 0.32647) < 0.01, true)
+  check("ReEQ2: gain, a bell", rb.type .. " " .. rb.g, "bell 6.0")
+  setv(b.shape, 1)
+  rb = ME_.read_band("tr", 0, b)
+  check("ReEQ2: a low cut at its slope (24 dB/oct)", rb.type .. " " .. tostring(rb.order), "hpq 4")
+  setv(b.shape, 12)
+  check("ReEQ2: Vintage Lo, its own", ME_.read_band("tr", 0, b).type, "vlo")
+  ME_.set_freq("tr", 0, b, 1000)
+  check("ReEQ2: set to 1 kHz", math.abs(ME_.read_band("tr", 0, b).f - 1000) < 15, true)
+  setv(b.shape, 0)
+  ME_.set_gain("tr", 0, b, -3)
+  check("ReEQ2: gain set", ME_.read_band("tr", 0, b).g, -3.0)
+  -- Mode: Off out of use, Disabled off, Enabled on
+  setv(b.on, 0)
+  rb = ME_.read_band("tr", 0, b)
+  check("ReEQ2: Off is unused", tostring(rb.unused) .. " " .. tostring(rb.on), "true false")
+  ME_.set_gain("tr", 0, b, 2)
+  check("ReEQ2: touched, taken into use (Enabled)", text(b.on, vals[b.on]), "Enabled")
+  ME_.toggle_on("tr", 0, b)
+  check("ReEQ2: off is Disabled, not Off", text(b.on, vals[b.on]), "Disabled")
+  ME_.reset("tr", 0, b)
+  check("ReEQ2: double-click takes it out (Off)", text(b.on, vals[b.on]), "Off")
+  U_.with_ranges(was)
+  reaper = real
+  -- its recipes drawn as it draws them: its sections (reeq-analog-adapter's
+  -- ri_recipe) through its own analogue magnitude (ivantsov_filter's
+  -- ivf_sec_amag, ivf_op_amag), against the canvas's models
+  local function sec(kind, f0, q, db, f)
+    local o, z, A = f / f0, 0.5 / q, (db == 0) and 1 or 10 ^ (db / 40)
+    local o2 = o * o
+    local dr, di, nr, ni = 1 - o2, 2 * z * o, 1, 0
+    if kind == 0 then nr = -o2
+    elseif kind == 3 then local r = math.sqrt(A); dr = A - o2; di = 2 * z * r * o; nr = A * (1 - A * o2); ni = A * di
+    elseif kind == 4 then local r = math.sqrt(A); dr = 1 - A * o2; di = 2 * z * r * o; nr = A * (A - o2); ni = A * di
+    elseif kind == 7 then nr = dr; ni = di * A; di = di / A end
+    return math.sqrt((nr * nr + ni * ni) / (dr * dr + di * di))
+  end
+  local function op(kind, f0, f) local o = f / f0; return kind == 1 and 1 / math.sqrt(1 + o * o) or o / math.sqrt(1 + o * o) end
+  local function reeq(t, hz, q, db, slope, f)
+    local m = 1
+    if t == 1 or t == 2 or t == 5 or t == 6 then
+      local ord = math.min(20, math.max(1, math.floor(slope) + 1))
+      local k = (t <= 2) and 0 or 1
+      for i = 0, math.floor(ord / 2) - 1 do
+        local qq = (t == 2 or t == 6) and 0.5 / math.cos(math.pi * (2 * i + 1 + ord % 2) / (2 * ord)) or q
+        m = m * sec(k, hz, qq, 0, f)
+      end
+      if ord % 2 == 1 then m = m * op(k, hz, f) end
+    elseif t == 9 then m = sec(3, hz, q, db, f) * sec(4, hz, q, -db, f)
+    elseif t == 10 then
+      local cut = (q / 40) * math.min(math.max(db, 0), 10)
+      m = sec(4, 1.5 * hz, 0.701, db, f) * sec(7, 1.5 * hz, 0.701, -cut, f)
+    elseif t == 12 then m = sec(4, 1.25 * hz, 0.701, db, f) * op(0, hz, f)
+    elseif t == 13 then
+      local tt = 1 + math.max(db, -12) / 12
+      local cut = math.min(22040, db > 0 and 22000 or hz * (1 + 3.25 * tt))
+      m = sec(3, hz, 0.701, db, f) * sec(1, cut, 0.701, 0, f)
+    end
+    return 20 * math.log(m, 10)
+  end
+  local worst = 0
+  for _, c in ipairs({ { 1, "hpq", 1.4, 0, 3 }, { 2, "hpbw", 0.7, 0, 2 }, { 5, "lpq", 2, 0, 1 }, { 6, "lpbw", 0.7, 0, 4 },
+                       { 9, "rtilt", 0.9, 5, 0 }, { 10, "pultec", 20, 8, 0 }, { 12, "vlo", 0.7, 4, 0 },
+                       { 13, "vhi", 0.7, 6, 0 }, { 13, "vhi", 0.7, -6, 0 } }) do
+    for _, f in ipairs({ 30, 100, 300, 1000, 3000, 10000, 18000 }) do
+      local want = reeq(c[1], 1000, c[3], c[4], c[5], f)
+      local got = ME_.band_db({ type = c[2], f = 1000, q = c[3], g = c[4], order = c[5] + 1 }, f)
+      worst = math.max(worst, math.abs(want - got))
+    end
+  end
+  check("ReEQ2: every recipe drawn as it draws it (worst dB off < 0.01)", worst < 0.01, true)
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

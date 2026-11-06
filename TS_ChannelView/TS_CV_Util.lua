@@ -392,7 +392,7 @@ end
 -- their own internal numbers). { lo, hi, unit, curve }: curve "lin",
 -- "log" (lo and hi the same sign, neither 0) or "sq" (squared: times).
 -- ---------------------------------------------------------------------
-U.RANGE_UNITS = { "", "Hz", "kHz", "ms", "s", "dB", "%", ":1" }
+U.RANGE_UNITS = { "", "Hz", "kHz", "ms", "s", "dB", "%", ":1", "dB/oct" }
 U.RANGE_CURVES = { "lin", "log", "sq" }
 -- The ranges in force while one plugin's panel (or values) is worked out:
 -- param -> range. Set round each plugin by its drawer (U.with_ranges).

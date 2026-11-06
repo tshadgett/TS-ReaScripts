@@ -1,5 +1,27 @@
 # ChannelView — changelog
 
+## 4.0.1 — ReEQ2
+
+### ChannelView
+
+- **ReEQ2 reads in its own units:** its knobs show Hz, Q, dB and dB/oct
+  instead of its sliders' numbers.
+- **EQ canvases take up to 24 bands** (they stopped at 8): all of Pro-Q's,
+  and ReEQ2's 16.
+- A custom range can be in **dB/oct**.
+
+### ChannelView Pro
+
+- **ReEQ2 on the EQ canvas:** all 16 bands mapped and ready with nothing to
+  learn. *Guess from names* in *Set up layout* (and a new EQ canvas) fills
+  them in from ReEQ2's own formulas: frequency, Q, slopes, dynamics, and
+  its Mode (*Off* takes a band out, *Disabled* turns it off). Each of its
+  14 types is drawn as ReEQ2 builds it, Pultec Low and Vintage Lo / Hi
+  included. A ReEQ2 canvas made before needs *Guess from names* again.
+- **Learn** reads a control through its custom range, so one set to read
+  in Hz, dB and Q is learned the quick way.
+- A dynamic EQ band's range tail shows only while its dynamics are on.
+
 ## 4.0.0 — measured gain reduction, MIDI envelopes, Console setup
 
 ### ChannelView

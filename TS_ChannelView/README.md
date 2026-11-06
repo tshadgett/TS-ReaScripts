@@ -1548,7 +1548,7 @@ it; *Set up this layout…* in the same menu, the panel's own
 button, or *Set up the … canvas…* in Edit Parameters brings it back.
 Canvases show no text readouts of what they measure: they draw it.
 
-**An EQ layout** has up to 8 bands. Name each band's controls — frequency,
+**An EQ layout** has up to 24 bands. Name each band's controls — frequency,
 gain, Q, a shape switch, an On switch; any can be left out — or **Guess**
 them from the parameters' names. Drag a band's colour swatch up or down to
 move it in the list; **Sort** puts the bands in the plugin's own order. A plugin's controls don't say what shape a
@@ -1557,7 +1557,8 @@ hidden track between a pair of its own measuring plugins
 (`TS_CV_Learn.jsfx`), plays noise through it and measures what each
 setting does — every position of a switch, a range of gains (boost and cut
 separately, since many EQs differ), each shape and the Q. A band whose
-plugin reports its frequency, gain and Q needs only a quick check of each
+plugin reports its frequency, gain and Q (or whose controls read that way
+through a custom range, *Values* below) needs only a quick check of each
 shape, at each gain; bands that are alike (the same shape switch) are
 learned once and share it. REAPER has to be processing FX while stopped
 (Preferences ▸ Audio ▸ *Run FX when stopped*, on by default). The canvas is
@@ -1571,6 +1572,12 @@ own controls read. Where nodes sit together, band 1 is on top. A plugin
 with more band slots than bands in use (Pro-Q's *Used*) leaves an unused
 band off the canvas until you move it, which takes it into use;
 double-clicking a node takes it back out.
+
+**ReEQ2** needs no learning: *Guess* (or a new EQ canvas) maps all 16 of
+its bands from ReEQ2's own formulas, its frequency, Q and slopes, its
+dynamics, and each of its 14 types drawn as ReEQ2 builds it. Its *Mode*
+works as in ReEQ2: *Off* takes a band out, *Disabled* turns it off. Its
+knobs read in Hz, Q, dB and dB/oct everywhere, without a layout too.
 
 Bands can be any shape: bell, shelves, cuts at any slope up to 96 dB/oct
 and brickwall, notch, band pass, tilt shelf, flat tilt, flat top, sword and
