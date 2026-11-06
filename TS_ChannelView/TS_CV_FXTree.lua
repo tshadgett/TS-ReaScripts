@@ -925,16 +925,23 @@ function T.gain_reduction(track, addr)
   local pok, ok, str = pcall(reaper.TrackFX_GetNamedConfigParm,
                              track, addr, "GainReduction_dB")
   local v = (pok and ok) and tonumber(str) or nil
-  if v then return math.abs(v) end
+  local TP = require("TS_CV_Taps")
+  if v then
+    -- reported, but measured too: the measured one, once its zero is in
+    -- (Setup, a reporting plugin's meter: Measured)
+    return TP.measured_for_reporting(track, T.guid_at(track, addr), math.abs(v)) or math.abs(v)
+  end
   -- Not reported: measured instead, when a tap is on it (TS_CV_Taps).
-  return require("TS_CV_Taps").reading(track, T.guid_at(track, addr))
+  return TP.reading(track, T.guid_at(track, addr))
 end
 
 -- Whether this plugin's reading is MEASURED by a probe tap rather than
 -- reported by the plugin -- an estimate, and drawn as one.
 function T.gr_estimated(track, addr, guid)
   guid = (guid ~= nil and guid ~= "") and guid or T.guid_at(track, addr)
-  return require("TS_CV_Taps").is_tapped(track, guid)
+  local TP = require("TS_CV_Taps")
+  if T.reports_gr_natively(track, addr, guid) then return TP.measured_for_reporting(track, guid) ~= nil end
+  return TP.is_tapped(track, guid)
 end
 
 -- Whether this plugin reports GR at all. Static for a given plugin, so

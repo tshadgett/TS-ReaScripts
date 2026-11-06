@@ -824,3 +824,113 @@ TS_CV_WEB/lags ("guid=samples,...", TP.lag_of); before that the bridge
 laid the reported latency back each time the window laid the measured
 one, and every rewrite of the tap record (P_EXT:TS_CV_TAPS, part of Track
 Analyser's chain signature) made Track Analyser start over.
+
+## Measured gain reduction, checked against real plugins (4.0)
+
+A live rig (outside the repo, in D:\Projects\ConsoleRig: GRTest_Run.lua
+and friends) runs a plugin on four tracks with the same audio: the
+plugin alone (rendered), and copies between probe pairs laid as
+ChannelView lays them, logging each copy's GainReduction_dB and each
+probe's reading. The truth is the gain change in the renders (processed
+against dry, 2 ms windows), with the plugin's zero taken from quiet pink
+noise through a separate instance. 13 compressors and limiters, a mastered
+mix and six stems:
+
+- With the zero measured while stopped, TS_TrackProbe is within ±0.2 dB
+  of the real gain change on every pass (0.1–0.3 dB rms offline). Plugins'
+  own GainReduction_dB reads up to about 3 dB high (FabFilter, ReaLimit,
+  SSL Bus Compressor 2, Weiss, API-2500), close on CLA-76, CL 1B and
+  SSLComp. Hence measured first for reporting plugins.
+- Without the stopped zero, dense material that's always compressed reads
+  0.7–4 dB low: the zero learnt from the music never sees the plugin at
+  rest. Material with gaps is fine.
+- REAPER delays the channels a plugin doesn't use by the latency it
+  reports, so a tap's "before" copy (written in front of the plugin, passing
+  through it untouched) arrives in line with the "after" one. A tap lag of
+  the reported latency put them out of line and read reduction that wasn't
+  there. A lag is only for latency the plugin doesn't report (the trace
+  measures it).
+- Widening a track makes pins that were mapped past its channels live.
+  Waves SSLComp and API-2500 (4 in, sidechain on 3/4) then key from silent
+  channels 3/4 and stop compressing; unplugging those inputs fixes it
+  (unplug_past, noted in the hold record and put back by release_holds).
+- A new tab asks the audio device for whatever its template does; another
+  rate can restart the device, and some interfaces then stay closed.
+
+## Console setup (Pro)
+
+- Each console is a description in TS_CV_Consoles.lua (CO.LIST): its
+  channel and buss plugins (found by name), which parameters are its type,
+  drive, in, group and channel number, its target level and its slot.
+  Parameters are found by name and kept per FX GUID (CO.param), never by
+  index: Sonimus's Buss module has fewer parameters than its Channel.
+- Sonimus keeps its module (Channel / Buss), its group and the group
+  settings in its saved state, not in parameters. TS_CV_ConsoleState reads
+  the JUCE XML out of REAPER's VST3 chunk and writes an edited one back,
+  fixing every size field that counts it (REAPER's header, which holds the
+  pin maps and can wrap onto more lines; the component length; the bank's
+  byte and chunk sizes; JUCE's XML length). An unedited block round-trips
+  byte for byte. A rewritten Buss needs its own paramAttachments
+  (CO.SONIMUS_BUS_ATTACH) or it has no parameters. A group's settings live
+  in one Buss's <MasterGrouping> and only group that console's own
+  instances.
+- NLS: setting Bank loads a preset and puts the instance back in VCA group
+  1, so Bank goes first and the group after. Its VCA controls set from
+  outside are ignored (only the plugin's own AUTO instance takes them);
+  every instance is switched through its own Studio, Bypass and Drive.
+  Drive adds level, so its Output (Trim on the Buss) is set to minus the
+  measured make-up (CO.NLS_MAKEUP) to keep in and out level.
+- VCC: a module joining an occupied group takes the group's Console,
+  Drive and Input (with Group I/O on), so Group I/O goes off before it
+  joins. Setting every VCC parameter in turn, and opening a new project tab
+  while VCC is loaded, have both crashed REAPER: nothing sweeps its
+  parameters.
+- The Analog Molecule's Flavor and Link aren't set: its Link is
+  overwritten by its own shared memory every block. A type is set as the
+  Flux / Thermal / Analog values the flavour applies (CO.TAMD_FLAVOURS).
+  The Hot Summer's buses send to their stem's channel pair on SUM with
+  their master send off.
+- Levels for gain staging come from CalculateNormalization over each item's
+  stretch of its source, which reads the whole stretch: slow on a long
+  file, so each is kept per source and stretch in the project
+  (TS_CV_con_levels) and Console setup measures one track a quarter second
+  apart.
+- Console setup asks a lot every frame (each row's stage, in, number). The
+  slow answers are kept: whether a plugin is installed (EnumInstalledFX
+  searched once per name), whether the first slot is ARA (that needs the
+  track's state chunk, which every plugin on it has to write out; kept
+  until the first slot's FX GUID changes) and NLS's own Bypass among its
+  three.
+- Console setup's picks wait in st.choice until Apply.
+
+## MIDI envelopes and trigger tracks
+
+- Envelope, Envelope × velocity and Duck are MIDI Source 5–7. ChannelView
+  Modulators had no sliders to spare (REAPER's limit is 256), so they keep
+  their settings in the Follower's fields, which a MIDI modulator otherwise
+  doesn't use: Attack, Release, Floor as Sustain (-80..0 dB is 0..100 %),
+  Ceiling as Decay (-60..12 is 0..2000 ms, squared), Gate as Exp curve,
+  Hold as Legato. The rack and the web page show them under those names
+  (MD.sustain_of, MD.decay_of and back).
+- The envelope runs at block rate in @block, after the MIDI has been read
+  (the MIDI loop comes before the modulators, so a note acts in its own
+  block). Linear stages step by the block's length; Exp curve approaches
+  the target with exp(-6.9 t / T), about -60 dB over the stage's time.
+- A trigger track is a MIDI-only send (I_SRCCHAN -1) onto MIDI bus 8 + j
+  of this track (I_MIDIFLAGS dest bus at >> 22). The plugin sets
+  ext_midi_bus, reads midi_bus, and for a modulator whose bit is set in
+  slider 250 (Trigger tracks) takes only that bus's notes and passes none
+  of them on. MD.trigger finds the send by its bus; CO.roles counts only
+  audio receives, so a trigger doesn't make a track a return.
+- The JSFX was checked outside REAPER with WDL's loose_eel: its @init and
+  @block, with slider() turned into memory and midirecv_buf / midisend_buf
+  stubbed, stepped through notes for each source.
+
+## Folder borders
+
+- C.fold_bw() (ExtState fold_borders / fold_bw, read every second, so the
+  web bridge follows it). MX.tracks gives each row lbars (outermost first)
+  and rbars (innermost first): the folders whose first and last shown track
+  it is, with tracks hidden from the mixer passed over. The bar against a
+  strip runs under it by the strip's rounding, and MX.fold_edges paints
+  over the strip's outline on that side, so the two meet with no gap.

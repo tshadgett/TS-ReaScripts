@@ -2256,7 +2256,9 @@ do
   local Cc = require("TS_CV_Config")
   local was_h = Cc.HEADER_H
   VO_.apply_fonts({})
-  check("fonts: none set, ReaImGui's own", tostring(Cc.FONTS.text) .. tostring(Cc.FONTS.head) .. tostring(Cc.FONTS.bar) .. " " .. Cc.HEADER_H, "nilnilnil 20")
+  -- none set: ReaImGui's own face, but its size always given (13), so it
+  -- scales with Windows' display scaling the way 12 and 14 do
+  check("fonts: none set, ReaImGui's face at 13", tostring(Cc.FONTS.text.name) .. " " .. Cc.FONTS.text.size .. " " .. Cc.FONTS.bar.size .. " " .. Cc.HEADER_H, "nil 13 13 20")
   VO_.apply_fonts({ t_font = "Arial", h_size = 16, h_b = true, b_i = true, b_u = true })
   local F = Cc.FONTS
   check("fonts: headers and toolbars take the text's font", F.head.name .. " " .. F.bar.name, "Arial Arial")
@@ -2266,7 +2268,7 @@ do
   VO_.apply_fonts({ t_size = 20, h_font = "Verdana" })
   check("fonts: text size kept to its range", Cc.FONTS.text.size, 14)
   check("fonts: headers their own font", Cc.FONTS.head.name, "Verdana")
-  check("fonts: toolbars still ReaImGui's", Cc.FONTS.bar, nil)
+  check("fonts: toolbars still ReaImGui's face", tostring(Cc.FONTS.bar.name) .. " " .. Cc.FONTS.bar.size, "nil 13")
   local in_presets = 0
   for _, k in ipairs({ "t_font", "t_size", "t_b", "t_i", "t_u", "h_font", "h_size", "h_b", "h_i", "h_u",
                        "b_font", "b_size", "b_b", "b_i", "b_u" }) do
@@ -3415,6 +3417,43 @@ do
   -- The master's number is 0, which is what tells the header to print
   -- its name alone rather than "0 MASTER".
   check("the master has no number", list[1].num, 0)
+
+  -- folder borders: A holds B, B holds C and D (hidden from the mixer), E
+  -- after; both close on D, so their right bars go on C, B's nearer
+  do
+    local keep = { TRACKS[1], TRACKS[2], TRACKS[3] }
+    for k = 1, 3 do TRACKS[k] = nil end
+    local FT = { { name = "A", show = 1, space = 0, d = 1 }, { name = "B", show = 1, space = 0, d = 1 },
+                 { name = "C", show = 1, space = 0, d = 0 }, { name = "D", show = 0, space = 0, d = -2 },
+                 { name = "E", show = 1, space = 0, d = 0 } }
+    for k, t in ipairs(FT) do TRACKS[k] = t end
+    local gv, gx = reaper.GetMediaTrackInfo_Value, reaper.GetExtState
+    reaper.GetMediaTrackInfo_Value = function(t, k)
+      if k == "I_FOLDERDEPTH" then return t.d or 0 end
+      return gv(t, k)
+    end
+    local CFG = require "TS_CV_Config"
+    reaper.GetExtState = function(sec, k)
+      if sec == CFG.EXT_SECT and k == "fold_borders" then return "1" end
+      return gx and gx(sec, k) or ""
+    end
+    CFG.fold_refresh()
+    local fl = MX.tracks()
+    local function ks(b) local o = {} for _, f in ipairs(b or {}) do o[#o + 1] = f.k end return table.concat(o, ",") end
+    check("folder borders: each parent's left", ks(fl[2].lbars) .. "|" .. ks(fl[3].lbars), "1|2")
+    check("folder borders: on the last track shown, innermost first", ks(fl[4].rbars), "2,1")
+    check("folder borders: none outside the folders", fl[5].name .. ks(fl[5].lbars) .. ks(fl[5].rbars), "E")
+    reaper.GetExtState = function(sec, k)
+      if sec == CFG.EXT_SECT and k == "fold_borders" then return "0" end
+      return gx and gx(sec, k) or ""
+    end
+    CFG.fold_refresh()
+    check("folder borders: off, none", MX.tracks()[2].lbars, nil)
+    reaper.GetMediaTrackInfo_Value, reaper.GetExtState = gv, gx
+    CFG.fold_refresh()
+    for k = 1, 5 do TRACKS[k] = nil end
+    for k, t in ipairs(keep) do TRACKS[k] = t end
+  end
 
   -- The mixer and the track strip are ONE object: a button lines up
   -- under its own strip, so both take their width from here and neither
@@ -7218,6 +7257,21 @@ do
   check("units: thousands comma", pv("1,200 Hz"), "1200|hz")
   check("units: decimal comma", pv("1,5 dB"), "1.5|db")
   check("units: no number", UN.parse("Off"), nil)
+  do
+    local semis = {}
+    for k = -12, 12 do semis[#semis + 1] = { norm = (k + 12) / 24, text = ("%+d st"):format(k) } end
+    check("typed setting: a number, nearest", UN.typed_choice(semis, "3", "+0 st"), 15 / 24)
+    check("typed setting: a negative number", UN.typed_choice(semis, "-7", "+0 st"), 5 / 24)
+    check("typed setting: past the end, the nearest end", UN.typed_choice(semis, "20", "+0 st"), 1)
+    local modes = { { norm = 0, text = "Plate A" }, { norm = 0.5, text = "Hall 2" }, { norm = 1, text = "Big", raw = "Room" } }
+    check("typed setting: a name, any case", UN.typed_choice(modes, "hall 2", ""), 0.5)
+    check("typed setting: a name's start", UN.typed_choice(modes, "pla", ""), 0)
+    check("typed setting: the plugin's own name of a renamed one", UN.typed_choice(modes, "room", ""), 1)
+    check("typed setting: a number in a name", UN.typed_choice(modes, "2", ""), 0.5)
+    check("typed setting: nothing like it", UN.typed_choice(modes, "spring", ""), nil)
+    local khz = { { norm = 0, text = "1.00 kHz" }, { norm = 0.5, text = "2.00 kHz" }, { norm = 1, text = "5.00 kHz" } }
+    check("typed setting: a bare number in the unit it shows", UN.typed_choice(khz, "5", "2.00 kHz"), 1)
+  end
   local steps = { "Off", "50", "80", "160", "300" }
   local fmt = function(n) return steps[math.min(5, math.floor(n * 5) + 1)] end
   local pos = UN.positions(fmt)
@@ -9811,7 +9865,13 @@ do
   check("edition: says so", ED.mismatch_text():find("Update ChannelView Pro:", 1, true) ~= nil, true)
   ED.mismatch = "9.0.0"
   check("edition: ChannelView behind", ED.behind(), "ChannelView")
-  check("edition: 3.10 is after 3.9", (function() ED.mismatch = "3.10.0"; local r = ED.behind(); return r end)(), "ChannelView")
+  check("edition: 3.10 is after 3.9", (function()
+    local rel = ED.RELEASE
+    ED.RELEASE, ED.mismatch = "3.9.0", "3.10.0"
+    local r = ED.behind()
+    ED.RELEASE = rel
+    return r
+  end)(), "ChannelView")
   ED.mismatch = "3.0.0"
   ED.warn_mismatch(); ED.warn_mismatch()
   check("edition: once for a pair", #boxes, 1)

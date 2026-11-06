@@ -484,6 +484,72 @@ function U.val2db(v)
   return 20 * math.log(v, 10)
 end
 
+-- Tracks a solo silences, as REAPER's own meters show them: while any
+-- track is soloed, a track is heard if it's soloed (or solo-defeated),
+-- inside a soloed folder, a folder holding a soloed track, or fed by a
+-- send from a heard one; the rest are silent. Track_GetPeakInfo keeps
+-- reading them. Worked out a few times a second, for every track at once.
+local solo_cache = { at = -1 }
+function U.solo_silenced(track)
+  local now = reaper.time_precise()
+  if now - solo_cache.at > 0.1 then
+    solo_cache.at = now
+    solo_cache.silent = nil
+    if reaper.AnyTrackSolo(0) then
+      local n = reaper.CountTracks(0)
+      local heard, list = {}, {}
+      for i = 0, n - 1 do
+        local tr = reaper.GetTrack(0, i)
+        list[#list + 1] = tr
+        if (reaper.GetMediaTrackInfo_Value(tr, "I_SOLO") or 0) > 0
+           or (reaper.GetMediaTrackInfo_Value(tr, "B_SOLO_DEFEAT") or 0) > 0 then
+          heard[tr] = true
+        end
+      end
+      -- a soloed folder's tracks, and the folders above a soloed track
+      for _, tr in ipairs(list) do
+        if heard[tr] then
+          local p = reaper.GetParentTrack(tr)
+          while p do heard[p] = true; p = reaper.GetParentTrack(p) end
+        else
+          local p = reaper.GetParentTrack(tr)
+          while p do
+            if (reaper.GetMediaTrackInfo_Value(p, "I_SOLO") or 0) > 0 then heard[tr] = true; break end
+            p = reaper.GetParentTrack(p)
+          end
+        end
+      end
+      -- what a heard track sends to (and on, a few hops)
+      for _ = 1, 4 do
+        local more = false
+        for _, tr in ipairs(list) do
+          if heard[tr] then
+            for k = 0, reaper.GetTrackNumSends(tr, 0) - 1 do
+              local d = reaper.GetTrackSendInfo_Value(tr, 0, k, "P_DESTTRACK")
+              if d and not heard[d] and (reaper.GetTrackSendInfo_Value(tr, 0, k, "B_MUTE") or 0) < 0.5 then
+                heard[d] = true; more = true
+                local p = reaper.GetParentTrack(d)
+                while p do heard[p] = true; p = reaper.GetParentTrack(p) end
+              end
+            end
+          end
+        end
+        if not more then break end
+      end
+      solo_cache.silent = {}
+      for _, tr in ipairs(list) do if not heard[tr] then solo_cache.silent[tr] = true end end
+    end
+  end
+  return solo_cache.silent ~= nil and solo_cache.silent[track] == true
+end
+
+-- A track's meter reading on one channel (0-based), linear: REAPER's
+-- peak, or nothing on a track a solo silences.
+function U.track_peak(track, ch)
+  if U.solo_silenced(track) then return 0 end
+  return reaper.Track_GetPeakInfo(track, ch) or 0
+end
+
 function U.db2val(db)
   if not db or db <= U.MIN_DB then return 0 end
   return 10 ^ (db / 20)

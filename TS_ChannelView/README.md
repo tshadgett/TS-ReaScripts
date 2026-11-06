@@ -31,7 +31,8 @@ lighting and shadows, presets), the plugin's own colours, vendor looks,
 plugin pictures on action bars, VU meters and visualisers, more than one layout per plugin and
 switching between them, the offer of a canvas for a new plugin, Show when
 rules and virtual controls, the TS_CV Trimmer, the gain-reduction trace,
-the patch bay (in the mixer and the TCP window) and comparing two plugins.
+the patch bay (in the mixer and the TCP window), comparing two plugins and
+Console setup.
 
 Without Pro, everything else works as described, and a layout made with Pro
 still works: its grid, Show rules and virtual controls are drawn as they
@@ -72,7 +73,10 @@ the last click, and the track buttons answer the same gestures. Hidden
 tracks are not in a range: the range is what you can see. And ctrl can
 never take the selection down to nothing, because channel view has to
 have a track to show. With REAPER's mixer set to *Scroll view when tracks
-activated*, a click scrolls REAPER's mixer to the track too.
+activated*, a click scrolls REAPER's mixer to the track too. A track
+selected somewhere else (the arrange view, the track list) scrolls mixer
+view just far enough to show its strip; one clicked in mixer view stays
+where it is.
 
 ## Rack view (Pro)
 
@@ -618,7 +622,15 @@ outline would have nothing to stand against.
   or the editor) and it saves with that plugin's layout like everything
   else. It costs 14px, not a whole 58px column, and it stays visible when
   the panel is collapsed, so a folded-down chain still shows which
-  compressor is working. The held peak sits under the bar as e.g. `6.4 dB`,
+  compressor is working. On a track with a TS_TrackProbe pair it shows the
+  *Measured* reading once the plugin's zero is measured, or *The plugin's
+  own* figure: the drop-down next to the tick in the editor, for every
+  plugin that reports its own (many read 1–3 dB high, by our tests). A
+  gate or expander keeps its own figure (shut on the quiet test signal
+  the probes use, it can't show its zero), and so does a multiband
+  compressor, de-esser or dynamic EQ, whose reduction is in a band, not
+  the whole signal.
+  The held peak sits under the bar as e.g. `6.4 dB`,
   in a smaller face so the bar itself stays thin — stacking the value over
   the unit when the space is too narrow for one line, as in a collapsed
   panel.
@@ -700,6 +712,58 @@ plugin, the pre probe and the modulators; with one there, it's the menu.
   it, and its VU meters read the Trimmer's own meters, 0 VU and ceiling.
   The Standard layout stays the Trimmer's own panel.
 
+## Console setup (Pro)
+
+**View ▸ Console setup…** (or the *TS_ChannelView_ConsoleSetup* action)
+sets up a console plugin you own across the session and keeps it in step:
+**Slate VCC**, **Waves NLS**, **Sonimus** (its A, N, S and T consoles as
+types), **The Analog Molecule Deluxe with The Hot Summer Plus**, and **The
+Analog Molecule with The Hot Summer**. Consoles that aren't installed are
+listed greyed out.
+
+- **Who's who.** A top-level folder is a bus, the tracks inside it are its
+  channels, a top-level track with audio receives is an FX return. The
+  Analog Molecule and The Hot Summer sum on a track named *SUM*, which
+  Apply makes.
+- **The window.** Pick the console and the mix's type; each bus can have
+  its own type (its channels follow it) and its own group, numbered 1 to 8
+  on Apply where the console has groups. *Tracks* takes the whole session
+  or the selected buses. The table shows each track's stage, type, in,
+  group, channel number and gain. What you pick waits for **Apply**
+  (*Not applied* says so); closing the window drops it. Apply places the
+  stages, numbers the channels, routes and sets the types. **Check
+  routing** looks again; a row's note says what's missing, with a button to
+  fix it.
+- **Another console, or None.** Applying a different console replaces the
+  one that's there, after asking; *None* takes every console plugin out
+  of the project, after asking. Leaving The Hot Summer sends its buses back
+  to the master.
+- **Gain staging.** Each channel is brought to the console's level: *Level
+  into it* for the session (RMS, and drums by peak), and a *Gain Target* of
+  its own for any bus or channel. *Gain staging point* is where the gain
+  goes: **Item volume** (every item on the track by the same amount, so
+  their balance stays), the **console's input gain**, or the **Trimmer**.
+  ⟳ stages one track, *Stage bus* a bus's channels, *Gain stage all* the
+  lot. A track with Melodyne first is left alone: render it first.
+- **Waves NLS** can go last on each channel (a summing box) or first
+  (preamp colour): *Channel stage*.
+- **The Analog Molecule and The Hot Summer** have a row of their own: the
+  engine, the crosstalk and The Hot Summer's flavours.
+- **Following the session.** A track added later gets its stage, a track
+  moved to another bus takes that bus's type and group, and with *Hide
+  its plugins* on, the console's plugins stay in their slots and out of
+  channel view's row.
+
+**The console panel.** With *Show on Strip* on, a console panel sits
+before the fader in channel view: the type, **Drive**, *Console in* and
+**A / B** for the whole mix; *This channel* for the track it's showing
+(Sonimus's Fat and its low and high cut, NLS's Mic, the console's noise);
+and a row per bus with its type, in, group, noise and drive. Its title
+follows the bus of the track it's showing, the plugin button opens the
+console's own window, and its outline lights while the console is in. Fold it with
+the button in its header. With The Analog Molecule and The Hot Summer, the
+triangle at its right edge opens The Hot Summer's settings beside it.
+
 ## Macros and modulators
 
 Two panels sit between the Channel panel and the plugins: **Macros** and
@@ -732,6 +796,25 @@ bend or aftertouch, on any channel or one, with the note range, CC number
 or a velocity hold as fits). MIDI passes through untouched. Click a tile's
 name to open its settings; every setting has a small lane button for its
 automation lane.
+
+**MIDI envelopes.** A MIDI modulator's second row of sources sets off an
+envelope with each note in its range: **Envelope** (attack, decay, sustain,
+release), **Env × vel** (the same, its peak the note's velocity) and
+**Duck** (the envelope upside down: it dips on each note and comes back over
+the release, for sidechain-style pumping). Drag the curve's three corners
+(attack; decay and sustain; release) or turn the knobs under it.
+**Retrigger** starts it again on every note; **Legato** only on a note
+played after silence. **Exp curve** makes the decay and release fall away
+rather than run in straight lines. Channel and Low / High set which notes
+trigger it.
+
+**Notes from another track.** *Notes from* at the foot of a MIDI
+modulator takes its notes from any other track instead of this one's own:
+a kick track ducking a bass, say. ChannelView adds a MIDI send (no audio)
+from that track, on a MIDI bus of the modulator's own, and the notes stop
+at ChannelView Modulators, so nothing else on this track plays them.
+*This track's own* takes the send away again, and so does removing the
+modulator.
 
 **Bypass, to compare.** The power button in a tile's name row holds that
 modulator still; the one in the Modulators panel's header holds all of
@@ -1626,8 +1709,11 @@ right-click ▸ *Group looks…*.
   below*, *Bar above* or *Filled*) and the track icons.
 - **Faders & strips:** each group's fader style and colour, strip width
   and background tint (folder parents, VCA leaders, FX returns and the
-  Default), and REAPER's spacer size (needs SWS). They describe tracks,
-  not a window, so every tab shares them.
+  Default), REAPER's spacer size (needs SWS), and **Folder borders**: a
+  bar in a folder's colour down the left of its strip and the right of
+  its last track's, name buttons included, 1 to 8 px, with a pair for
+  each folder inside another. They describe tracks, not a window, so
+  every tab shares them.
 - **Text:** the font for the panels' text, for their headers, and for the
   action bars, each with its size and Bold, Italic and Underline. *Default*
   is ReaImGui's own; headers and action bars can follow the text. Pick a
@@ -1987,6 +2073,11 @@ them up the first time ChannelView shows it.
 | `TS_CV_Switches.lua` | the switch styles for toggles (Pro) |
 | `TS_CV_Light.lua` | the one light and the shadows (Pro) |
 | `TS_CV_VU.lua` | the VU meter a layout can hold (Pro) |
+| `TS_CV_Consoles.lua` | Console setup's consoles: what goes where, gain staging, switching (Pro) |
+| `TS_CV_ConsoleSetup.lua` | the Console setup window (Pro) |
+| `TS_CV_ConsoleDrawer.lua` | the console panel in channel view (Pro) |
+| `TS_CV_ConsoleState.lua` | reading and writing a Sonimus console's saved state (Pro) |
+| `TS_ChannelView_ConsoleSetup.lua` | the action that opens Console setup (Pro) |
 | `TS_CV_KnobParts.lua` | knobs drawn from parts, for the recipes and your own looks |
 | `TS_CV_KnobEditor.lua` | the *Knob look* window (Pro) |
 | `TS_CV_Recipes.lua` | your knob recipes (Pro) |
@@ -2312,7 +2403,11 @@ back to its default on a double-click:
 a plugin's in its own terms (*-3*, *2k*, *250 ms*, *+5 semi*; a number
 with no unit is in the unit it shows now), the channel's volume in dB
 (*-6*, *-inf*) and its pan as *30L*, *15R* or *C*. Enter sets it, Escape
-leaves it.
+leaves it. A dropdown takes a setting by its name, or the start of it
+(*pla* for *Plate A*), or a number, which picks the setting nearest it
+(*-7* on a semitone list). On a dual knob it types into the part under
+the pointer, the inner knob or the ring; on an XY pad, X on its left half
+and Y on its right.
 
 On a two-state button a double-click is the same as two clicks, so the
 first click toggles and the second click's default wins. That is
@@ -2401,7 +2496,8 @@ plugin, with PDC compensation, and the reading would still only be a level
 *difference* that makeup gain and wet/dry quietly corrupt.
 
 So anything beyond self-reported reduction needs probes: the measured
-gain reduction and input/output meters below use a TS_TrackProbe pair,
+gain reduction and input/output meters below use a TS_TrackProbe pair
+(and, by default, so does the meter of a plugin that reports its own),
 and ChannelView only adds one when you press a button that says so. A
 whole track's signal path is Track Analyser's job.
 
@@ -2450,7 +2546,7 @@ two in ten bands. Up to eight plugins per track (four with a probe older
 than TS_TrackProbe 2.3.0, until the project is reopened). Only the tracks
 on screen are measured: the one in channel view, the mixer strips in view,
 and the web companion's. The rest cost nothing until you look at them,
-and their zero is still measured at every stop, so they read right as
+and their zero is still measured while stopped, so they read right as
 soon as they appear. What was changed is written
 on the track (`P_EXT:TS_CV_TAPS`) and taken out exactly when you untick it.
 
@@ -2468,13 +2564,26 @@ only ever added, and the added ones are left empty when you untick. A
 plugin running in parallel with another, or inside a container that does,
 isn't measured, because its own output isn't what the chain passes on.
 
-Its zero, what "no reduction" looks like, is measured each time playback
-stops. The first probe plays a second of pink noise at −60 dBFS and one at
-−50 through the chain while the last probe keeps the track silent. It needs
-REAPER's *Run FX when stopped* (on by default). It's an estimate: a plugin
-at 50% mix reads about half, and after a make-up gain change it's out until
-the next stop. **Measure the zero while stopped** in Setup turns the
-stop-time measurement off, for instrument tracks you play while stopped.
+Its zero, what "no reduction" looks like, is measured while stopped: when
+the plugin is first measured, and again after you touch it. The first probe
+plays a second of pink noise at −60 dBFS and one at −50 through the chain
+while the last probe keeps the track silent. It waits for a second of quiet,
+stops if you play or anything comes in, and isn't done on a track armed to
+record or while ChannelView is learning a plugin. It needs REAPER's *Run FX
+when stopped* (on by default). Until then the zero is learnt from the music,
+which reads low on a compressor that never lets go. A gate or expander is
+shut on the test signal, so its zero is learnt from the music too; once
+it's been seen opening it's known to be a gate, and while nothing comes
+in its reading holds at its closed level rather than falling to 0. A
+plugin at 50% mix reads about half. **Measure the zero while stopped** in
+Setup turns it off.
+
+A plugin's latency needs nothing: REAPER already holds back the channels a
+plugin doesn't use by the latency it reports, so the copies arrive in line.
+A plugin with a sidechain input on channels the track only has because of
+the copies (3/4 on a two-channel track) has that input unplugged while the
+probes are in, so it doesn't key from the silence there; it's plugged back
+when they come out.
 
 ### Input/output meters
 
@@ -2503,8 +2612,10 @@ early, late or in step with its output all come out right.
 
 The audio comes from the probes, so the track needs a TS_TrackProbe pair
 (1.8.0 or newer: reopen the project after updating). A measured plugin is
-already tapped; one that reports its own reduction is tapped for its levels
-while its trace is open, which counts toward the four taps a track can have.
+already tapped, and so is one that reports its own reduction while its
+meter is set to *Measured*; set to *The plugin's own*, it's tapped for its
+levels while its trace is open, which counts toward the eight taps a track
+can have.
 The waveform shown is one track's at a time, the selected one's. With
 nothing to show, the trace says why: *needs TS_TrackProbe* (no pair on the
 track), *outside the probes* (the plugin isn't between them), *in

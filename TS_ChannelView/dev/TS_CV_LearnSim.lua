@@ -177,6 +177,7 @@ reaper = {
   DeleteTrack = function(t) for i, x in ipairs(tracks) do if x == t then table.remove(tracks, i) end end end,
   ValidatePtr2 = function(_, t) for _, x in ipairs(tracks) do if x == t then return true end end return false end,
   gmem_attach = function() end, gmem_read = function(i) return gmem[i] end,
+  gmem_write = function(i, v) gmem[i] = v end,
   time_precise = function() clock = clock + 0.05; return clock end,
   GetPlayState = function() return 0 end,
   GetResourcePath = function() return "/tmp" end,

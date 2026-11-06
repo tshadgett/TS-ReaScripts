@@ -1618,7 +1618,43 @@ local function draw_meters(ctx)
       st.scratch.meter.on = mv
     end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Shows the plugin's own gain reduction on the panel.")
+      ImGui.SetTooltip(ctx, "Shows the plugin's gain reduction on the panel.")
+    end
+    -- which reading: global, as it's how every reporting plugin is read
+    ImGui.SameLine(ctx)
+    local mf = TP.measured_first()
+    ImGui.SetNextItemWidth(ctx, 150)
+    if ImGui.BeginCombo(ctx, "##grreading", mf and "Measured" or "The plugin's own") then
+      if ImGui.Selectable(ctx, "Measured", mf) and not mf then TP.set_measured_first(true) end
+      if ImGui.Selectable(ctx, "The plugin's own", not mf) and mf then TP.set_measured_first(false) end
+      ImGui.EndCombo(ctx)
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "Measured by the track's TS_TrackProbe pair, or the plugin's own figure.\n" ..
+        "For every plugin that reports its own reduction.")
+    end
+    if meter_on and TP.measured_first() and st.track and st.fx then
+      local status = TP.status(st.track, st.fx.guid)
+      if status == "no_probes" then
+        ImGui.TextDisabled(ctx, "No TS_TrackProbe pair here: the plugin's own figure.")
+        ImGui.SameLine(ctx)
+        if ImGui.SmallButton(ctx, "Add probes##grown") then
+          local ok, why = TP.insert_probes(st.track)
+          if not ok then reaper.MB(why, "ChannelView", 0) end
+        end
+      elseif status == "outside" then
+        ImGui.TextDisabled(ctx, "Not between this track's probes: the plugin's own figure.")
+      elseif status == "parallel" then
+        ImGui.TextDisabled(ctx, "Runs in parallel: the plugin's own figure.")
+      elseif TP.zero_on() then
+        local cs = TP.cal_status(st.track, st.fx.guid)
+        if cs and cs ~= 1 and cs ~= 2 then
+          ImGui.TextDisabled(ctx, "The plugin's own figure until the zero is measured.")
+        end
+      else
+        ImGui.TextDisabled(ctx, "The plugin's own figure: measuring the zero is off.")
+      end
     end
   elseif not RQ.is_eq(st.key) then
     -- Not offered for ReaEQ: an EQ has no reduction to measure.
@@ -1688,8 +1724,8 @@ local function draw_meters(ctx)
     if zch then TP.set_zero_on(zv) end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx,
-        "On stop, plays a second of quiet noise to learn \"no reduction\"\n" ..
-        "(needs \"Run FX when stopped\"). Can swallow a note played while stopped.")
+        "While stopped, plays a second of quiet noise to learn \"no reduction\",\n" ..
+        "once per plugin change (needs \"Run FX when stopped\").")
     end
     if st.track and st.fx then
       local cs = TP.cal_status(st.track, st.fx.guid)

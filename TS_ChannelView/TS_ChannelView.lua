@@ -1,9 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 3.9.2
+-- @version 4.0.0
 -- @changelog
---  A toolbar window with its own background draws its buttons and menus
---  on it too. See the CHANGELOG.
+--  Measured gain reduction (TS_TrackProbe 2.5.0; reopen a project after
+--  updating), MIDI envelopes for the modulators, folder borders, typing
+--  a value into more controls, and fixes. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -231,6 +232,7 @@ CH.attach(ImGui); SD.attach(ImGui); RV.attach(ImGui); MX.attach(ImGui); TM.attac
 CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui); ML.attach(ImGui)
 TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui); KE.attach(ImGui)
 if ED.PRO then require("TS_CV_GridEditor").attach(ImGui) end
+if ED.PRO then ED.module("TS_CV_ConsoleSetup", ED.stub()).attach(ImGui) end
 if POP.CMP then POP.CMP.attach(ImGui); P.over_panel = POP.CMP.overlay end
 -- action drawers (global, not per project), and the window that organises
 -- every action bar
@@ -448,6 +450,8 @@ local function rescan(force)
   local now = reaper.time_precise()
   if not force and (now - app.last_scan) < C.RESCAN_INTERVAL then return end
   app.last_scan = now
+  -- a console set up (Pro): new tracks get its stages, moved ones follow their bus
+  if ED.PRO then ED.module("TS_CV_ConsoleDrawer", ED.stub()).follow() end
 
   -- ChannelView Modulators (TS_CV_Mod) has panels of its own, Macros
   -- and Modulators; it isn't a plugin in the row. Nor are the probes,
@@ -467,6 +471,7 @@ local function rescan(force)
       FZ.forget()
       local fz = FZ.state(app.track, U.clean_fx_name)
       if not FZ.busy(app.track) and fz.probes == 0 and TP.complete_pair(app.track) then moved = true end
+      if ED.PRO and ED.module("TS_CV_ConsoleDrawer", ED.stub()).keep_in_place(app.track) then moved = true end
       if TP.keep_in_place(app.track) or moved then
         full = T.collect(app.track)
         app.full_hash = T.hash(full)
@@ -483,6 +488,8 @@ local function rescan(force)
     list = MD.strip(app.track, full)
     if not TP.probes_shown() then list = TP.strip_probes(app.track, list) end
     if POP.CMP then list = POP.CMP.strip(app.track, list) end
+    -- the console's plugins, when its panel stands for them (Pro)
+    if ED.PRO then list = ED.module("TS_CV_ConsoleDrawer", ED.stub()).strip(app.track, list) or list end
     -- a container with knobs on it gets a panel of its own, at its head;
     -- folded to that panel, what's inside it stays out of the row
     local tr, with_panel = app.track, {}
@@ -3740,6 +3747,9 @@ local function control_menu()
   local c = layout.controls and layout.controls[cm.ctl]
   if not c then ImGui.EndPopup(ctx) return end
   local idx = cm.ctl
+  -- from Edit layout (cm.ed): its edits whatever the lock, and nothing on
+  -- the plugin or the editor it's already in
+  local locked = M.locked(layout) and not cm.ed
 
   -- a virtual control (the layout's own): its name, back to where it
   -- starts, and the layout's edits; no parameter to link or automate
@@ -3748,22 +3758,22 @@ local function control_menu()
     ImGui.TextDisabled(ctx, "\u{25C6} " .. U.truncate(nm, 26) .. "  (virtual)")
     ImGui.Separator(ctx)
     if ImGui.MenuItem(ctx, "Back to where it starts") then St.vset(fx.guid, nm, c.virtual.start or 0) end
-    if not M.locked(layout) then
+    if not locked then
       ImGui.SeparatorText(ctx, "Arrange")
       if ImGui.MenuItem(ctx, "Remove from panel") then
         local l = materialise(fx); M.save()
         table.remove(l.controls, idx)
         M.set(key, l); M.save()
       end
-      ImGui.Separator(ctx)
+      if not cm.ed then ImGui.Separator(ctx) end
       if not ED.PRO and ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then E.open(app.track, fx, key, layout, idx) end
-      if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+      if not cm.ed and ED.item(ImGui, ctx, "Edit layout\u{2026}") then
         require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
           { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
           rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
       end
     end
-    plugin_sub(fx)
+    if not cm.ed then plugin_sub(fx) end
     ImGui.EndPopup(ctx)
     return
   end
@@ -3794,20 +3804,20 @@ local function control_menu()
       ImGui.EndMenu(ctx)
     end
     if ImGui.MenuItem(ctx, "Peak lamp", nil, vu.peak ~= false) then app.vu_set(fx, idx, { peak = vu.peak == false }) end
-    if not M.locked(layout) then
+    if not locked then
       ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, "Remove from panel") then
         local l = materialise(fx); M.save()
         table.remove(l.controls, idx)
         M.set(key, l); M.save()
       end
-      if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+      if not cm.ed and ED.item(ImGui, ctx, "Edit layout\u{2026}") then
         require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
           { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
           rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
       end
     end
-    plugin_sub(fx)
+    if not cm.ed then plugin_sub(fx) end
     ImGui.EndPopup(ctx)
     return
   end
@@ -3815,20 +3825,20 @@ local function control_menu()
   -- an act button (a Trimmer's Auto, Listen): no parameter of its own
   if c.type == "act" then
     ImGui.TextDisabled(ctx, (M.ACTS[c.act or ""] or "Button") .. "  \u{00B7}  " .. U.truncate(U.fx_label(fx), 20))
-    if not M.locked(layout) then
+    if not locked then
       ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, "Remove from panel") then
         local l = materialise(fx); M.save()
         table.remove(l.controls, idx)
         M.set(key, l); M.save()
       end
-      if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+      if not cm.ed and ED.item(ImGui, ctx, "Edit layout\u{2026}") then
         require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
           { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
           rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
       end
     end
-    plugin_sub(fx)
+    if not cm.ed then plugin_sub(fx) end
     ImGui.EndPopup(ctx)
     return
   end
@@ -3839,7 +3849,7 @@ local function control_menu()
   local rescan_ok = (c.type == "combo" or c.type == "stepped") and c.param and c.param >= 0
 
   -- a locked layout takes no edits: say so, and offer only what isn't one
-  if M.locked(layout) then
+  if locked then
     ImGui.TextDisabled(ctx, "Layout locked (the padlock at the left of the panel's foot)")
     if rescan_ok then
       ImGui.SeparatorText(ctx, "Control")
@@ -3850,7 +3860,7 @@ local function control_menu()
     automate_items(fx, c)
     container_items(fx, c)
     ImGui.Separator(ctx)
-    plugin_sub(fx)
+    if not cm.ed then plugin_sub(fx) end
     ImGui.EndPopup(ctx)
     return
   end
@@ -4072,16 +4082,16 @@ local function control_menu()
     table.remove(l.controls, idx)
     M.set(key, l); M.save()
   end
-  ImGui.Separator(ctx)
+  if not cm.ed then ImGui.Separator(ctx) end
   if not ED.PRO and ImGui.MenuItem(ctx, "Edit parameters\u{2026}") then
     E.open(app.track, fx, key, layout, idx)
   end
-  if ED.item(ImGui, ctx, "Edit layout\u{2026}") then
+  if not cm.ed and ED.item(ImGui, ctx, "Edit layout\u{2026}") then
     require("TS_CV_GridEditor").open(app.track, fx, key, layout, idx,
       { rows = M.locked(layout) or (P.RACK and P.RACK_ROWS) or app.cv_rows or 2, index = cm.fx, cv_h = app.cv_h,
           rack_w = app.rack_w or tonumber(reaper.GetExtState(C.EXT_SECT, "rack_width")) })
   end
-  plugin_sub(fx)
+  if not cm.ed then plugin_sub(fx) end
   ImGui.EndPopup(ctx)
 end
 
@@ -4577,6 +4587,9 @@ local function menu_bar()
         ImGui.EndMenu(ctx)
       end
       ImGui.Separator(ctx)
+      if ED.PRO and ED.module("TS_CV_ConsoleSetup") and ImGui.MenuItem(ctx, "Console setup\u{2026}") then
+        ED.module("TS_CV_ConsoleSetup").show()
+      end
       if ImGui.MenuItem(ctx, "Visual Options\u{2026}") then app.VO.show(app.vo_tab) end
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Colours, control styles, panels, sizes.")
@@ -6439,9 +6452,12 @@ local function frame()
     local rv_w   = rv_on and RV.width_for(app.track, row_h) or 0
     local sd_w   = sd_on and SD.width_for(app.track, row_h) or 0
     -- the macros and the modulators, pinned beside the fader panel
+    -- (and the console panel before the fader, Pro: counted in with them)
     local mr_w   = (ma_on and MR.width_for("macros", app.track, row_h) or 0)
                    + (mo_on and MR.width_for("mods", app.track, row_h) or 0)
+                   + (ED.PRO and (ED.module("TS_CV_ConsoleDrawer", ED.stub()).panel_w() or 0) or 0)
     local n_gaps = 1 + (ma_on and 1 or 0) + (mo_on and 1 or 0) + (sd_on and 1 or 0) + (rv_on and 1 or 0)
+                   + ((ED.PRO and (ED.module("TS_CV_ConsoleDrawer", ED.stub()).panel_w() or 0) or 0) > 0 and 1 or 0)
     local mid_w  = math.max(80, full_w - ch_w - mr_w - rv_w - sd_w - C.PANEL_GAP * n_gaps)
 
     -- A double-click on a NAME BUTTON renames that track (name_dbl), in
@@ -6510,6 +6526,10 @@ local function frame()
       end
     else
       side_drawers(row_h)
+      if ED.PRO and (ED.module("TS_CV_ConsoleDrawer", ED.stub()).panel_w() or 0) > 0 then
+        ED.module("TS_CV_ConsoleDrawer").draw_panel(ctx, row_h)
+        ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+      end
       CH.draw(ctx, app.track, row_h)
       local ma_req, mo_req = {}, {}
       if ma_on then
@@ -6617,6 +6637,8 @@ local function frame()
   KE.draw(ctx)
   -- View > Visual Options
   app.VO.draw(ctx, app.vo_tab)
+  -- View > Console setup (Pro)
+  ED.module("TS_CV_ConsoleSetup", ED.stub()).draw(ctx)
   -- the grid editor (Edit layout...), and the menu of a control
   -- right-clicked in it
   do
@@ -6626,7 +6648,7 @@ local function frame()
     if m then
       for i, f in ipairs(app.chain or {}) do
         if f.guid == m.guid then
-          app.ctl_menu = { fx = i, ctl = m.idx }
+          app.ctl_menu = { fx = i, ctl = m.idx, ed = true }
           app.open_ctl_menu = true
           break
         end

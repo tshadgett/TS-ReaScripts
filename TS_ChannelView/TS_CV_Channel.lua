@@ -592,7 +592,7 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey, expand, expand
     local nch = W.meter_channels(track)
     local lv, pk = {}, {}
     for i = 1, nch do
-      lv[i] = U.val2db(reaper.Track_GetPeakInfo(track, i - 1))
+      lv[i] = U.val2db(U.track_peak(track, i - 1))
       pk[i] = W.level_peak(idp .. "c" .. i, lv[i], now)
     end
     -- No ladder and no RMS on the collapsed bar: at this width the
@@ -693,7 +693,7 @@ local function volume_knob(ctx, dl, x, w, top, bottom, track, idp, vol, now)
   local tip = {}
   for i = 1, nch do
     local key = idp .. "c" .. i
-    local lv = U.val2db(reaper.Track_GetPeakInfo(track, i - 1))
+    local lv = U.val2db(U.track_peak(track, i - 1))
     local hold = W.level_peak(key, lv, now)
     local rms = W.level_rms(key, lv, now)
     local rh = W.level_peak(key .. "#r", rms, now)
@@ -897,7 +897,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     local lv, hold, rms_live, rms_hold = {}, {}, {}, {}
     for i = 1, nch do
       local key = idp .. "c" .. i
-      lv[i]       = U.val2db(reaper.Track_GetPeakInfo(track, i - 1))
+      lv[i]       = U.val2db(U.track_peak(track, i - 1))
       hold[i]     = W.level_peak(key, lv[i], now)
       rms_live[i] = W.level_rms(key, lv[i], now)
       rms_hold[i] = W.level_peak(key .. "#r", rms_live[i], now)

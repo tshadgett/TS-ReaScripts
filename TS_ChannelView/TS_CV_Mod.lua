@@ -83,7 +83,7 @@ MD.FIELDS = {
   { "floor",  -48,  -80, 0 },
   { "ceil",   0,    -60, 12 },
   { "gate",   0,    0, 1 },
-  { "msrc",   0,    0, 4 },
+  { "msrc",   0,    0, 7 },
   { "mch",    0,    0, 16 },
   { "mcc",    1,    0, 127 },
   { "mlo",    36,   0, 127 },
@@ -117,7 +117,18 @@ MD.CTLS = {
 MD.SHAPES = { "Sine", "Triangle", "Square", "Saw up", "Saw down", "Random" }
 MD.SYNC = { "1/16", "1/8 T", "1/8", "1/8 D", "1/4 T", "1/4", "1/4 D", "1/2 T",
             "1/2", "1/2 D", "1 T", "1", "1 D", "2", "4", "8" }
-MD.MIDI_SRC = { "Velocity", "Note", "CC", "Pitch bend", "Aftertouch" }
+MD.MIDI_SRC = { "Velocity", "Note", "CC", "Pitch bend", "Aftertouch",
+                "Envelope", "Envelope \u{00D7} velocity", "Duck" }
+-- The envelopes a note sets off (MIDI Source 5-7). They keep their
+-- settings in the Follower's fields, which a MIDI modulator doesn't
+-- otherwise use: Attack, Release, Floor as Sustain, Ceiling as Decay,
+-- Gate as Exp curve, and Hold as Legato.
+MD.ENV_FIRST = 5
+function MD.is_env(ms) return (ms or 0) >= MD.ENV_FIRST end
+function MD.sustain_of(floor_db) return math.max(0, math.min(1, (floor_db + 80) / 80)) end
+function MD.floor_of(sustain) return -80 + 80 * math.max(0, math.min(1, sustain)) end
+function MD.decay_of(ceil) local t = math.max(0, math.min(1, (ceil + 60) / 72)); return 2000 * t * t end
+function MD.ceil_of(ms) return -60 + 72 * math.sqrt(math.max(0, math.min(2000, ms)) / 2000) end
 
 MD.COLOURS = { 0xe8a23aff, 0xb07ce8ff, 0x4cc3a8ff, 0xd9604aff, 0x5aa0e0ff, 0xd8c450ff,
                0x9ac46aff, 0xc07aa0ff, 0x6ac4c4ff, 0x7a9ae8ff, 0xe07ab0ff, 0xa0a8b0ff }
@@ -1230,6 +1241,7 @@ function MD.remove(track, src)
     MD.write_macros(track, meta)
     for _, p in ipairs(src.out) do reaper.TrackFX_SetParamNormalized(track, slot, p, 0) end
   else
+    if MD.trigger(track, src.j) then MD.set_trigger(track, slot, src.j, nil) end
     MD.set_field(track, slot, src.j, "type", 0)
     local mods = MD.read_mods(track)
     mods[src.j] = nil
@@ -1245,6 +1257,76 @@ function MD.remove(track, src)
   reaper.PreventUIRefresh(-1)
   reaper.Undo_EndBlock("ChannelView: remove " .. (src.src == "macro" and "macro" or "modulator"), -1)
   MD.invalidate(track)
+end
+
+-- A MIDI modulator's source. Onto an envelope with the Follower's fields
+-- as a new modulator has them, the envelope's own starting settings:
+-- 5 ms attack, 200 ms decay, 60 % sustain, 300 ms release.
+function MD.set_msrc(track, slot, j, ms)
+  local was = math.floor(MD.field(track, slot, j, "msrc") + 0.5)
+  MD.set_field(track, slot, j, "msrc", ms)
+  if MD.is_env(ms) and not MD.is_env(was) then
+    local function at(k) return math.abs(MD.field(track, slot, j, k) - MD.FIELDS[k][2]) < 0.01 end
+    if at("att") and at("rel") and at("floor") and at("ceil") then
+      MD.set_field(track, slot, j, "att", 5)
+      MD.set_field(track, slot, j, "ceil", MD.ceil_of(200))
+      MD.set_field(track, slot, j, "floor", MD.floor_of(0.6))
+      MD.set_field(track, slot, j, "rel", 300)
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- a MIDI modulator's trigger track
+-- ---------------------------------------------------------------------
+-- Another track's notes for modulator j alone: a MIDI send from it, no
+-- audio, onto MIDI bus 8 + j here, where the plugin takes it (bit j-1 of
+-- its Trigger tracks parameter set) and passes it no further, so the
+-- rest of this track's chain never plays those notes.
+MD.TRIG = MD.BYPASS + MD.NO + 1
+function MD.trig_ok(track, slot)
+  return slot ~= nil and (reaper.TrackFX_GetNumParams(track, slot) or 0) > MD.TRIG
+end
+local function trig_bus(j) return 8 + j end
+-- the receive that's modulator j's trigger: its index and its track
+local function trig_recv(track, j)
+  for r = 0, reaper.GetTrackNumSends(track, -1) - 1 do
+    local flags = math.floor(reaper.GetTrackSendInfo_Value(track, -1, r, "I_MIDIFLAGS") or 0)
+    if (reaper.GetTrackSendInfo_Value(track, -1, r, "I_SRCCHAN") or 0) < 0
+       and (flags >> 22) & 0xff == trig_bus(j) then
+      return r, reaper.GetTrackSendInfo_Value(track, -1, r, "P_SRCTRACK")
+    end
+  end
+end
+function MD.trigger(track, j)
+  local _, from = trig_recv(track, j)
+  return from
+end
+-- Takes modulator j's notes from `from` (a track), or back from this
+-- track's own MIDI (nil).
+function MD.set_trigger(track, slot, j, from)
+  if not MD.trig_ok(track, slot) then return false end
+  reaper.Undo_BeginBlock()
+  local r = trig_recv(track, j)
+  while r do
+    reaper.RemoveTrackSend(track, -1, r)
+    r = trig_recv(track, j)
+  end
+  local bits = math.floor((reaper.TrackFX_GetParam(track, slot, MD.TRIG) or 0) + 0.5)
+  local bit = 1 << (j - 1)
+  if from and from ~= track then
+    local sn = reaper.CreateTrackSend(from, track)
+    if sn and sn >= 0 then
+      reaper.SetTrackSendInfo_Value(from, 0, sn, "I_SRCCHAN", -1)
+      reaper.SetTrackSendInfo_Value(from, 0, sn, "I_MIDIFLAGS", trig_bus(j) << 22)
+    end
+    bits = bits | bit
+  else
+    bits = bits & ~bit
+  end
+  reaper.TrackFX_SetParam(track, slot, MD.TRIG, bits)
+  reaper.Undo_EndBlock("ChannelView: modulator's trigger track", -1)
+  return true
 end
 
 -- A follower listening to the sidechain needs the track to carry 3/4.

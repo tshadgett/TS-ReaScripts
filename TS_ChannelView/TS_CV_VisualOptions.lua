@@ -108,12 +108,13 @@ local FIELDS = {
   { "shadow",     100,      "num",  true },
   { "preset",     "Standard", "str", false },
   -- Faders & strips: the groups' fader looks, backgrounds and widths, the
-  -- strip width, REAPER's spacer size
+  -- strip width, REAPER's spacer size, folder borders
   { "g_fd",       nil,      "str",  "g" },
   { "g_bt",       nil,      "str",  "g" },
   { "g_gw",       nil,      "str",  "g" },
   { "g_cw",       nil,      "num",  "g" },
   { "g_sp",       nil,      "num",  "g" },
+  { "g_fb",       nil,      "num",  "g" },     -- folder borders' width, 0 off
 }
 local FIELD = {}
 for _, f in ipairs(FIELDS) do FIELD[f[1]] = f end
@@ -335,8 +336,10 @@ function VO.apply(tab)
 end
 
 -- Visual Options > Text into C.FONTS (TS_CV_Widgets W.push_font): each
--- of text, head and bar { name, size, b, i, u, key }, or nil for ReaImGui's
--- own font at its own size. A taller header font makes the header taller.
+-- of text, head and bar { name, size, b, i, u, key }. Always a size, the
+-- default 13 too: left to ReaImGui's own default it needn't scale with
+-- Windows' display scaling as the others do (at 175 % it came out the
+-- same as 12). A taller header font makes the header taller.
 VO.SIZE_DEFAULT = 13
 VO.SIZES = { t = { 11, 14 }, h = { 11, 18 }, b = { 11, 15 } }
 function VO.apply_fonts(s)
@@ -344,7 +347,6 @@ function VO.apply_fonts(s)
     local lim = VO.SIZES[p]
     local size = math.max(lim[1], math.min(lim[2], math.floor(val(s, p .. "_size") + 0.5)))
     local f = { name = name, size = size, b = val(s, p .. "_b"), i = val(s, p .. "_i"), u = val(s, p .. "_u") }
-    if not f.name and size == VO.SIZE_DEFAULT and not f.b and not f.i and not f.u then return nil end
     f.key = ("%s|%d|%s%s"):format(f.name or "", size, f.b and "b" or "", f.i and "i" or "")
     return f
   end
@@ -403,7 +405,7 @@ local function modified(tab)
   end
   if p.s.g_fd ~= nil or p.s.g_cw ~= nil then
     local g = VO.groups_now()
-    for k, v in pairs(g) do if p.s[k] ~= v then return true end end
+    for k, v in pairs(g) do if p.s[k] ~= nil and p.s[k] ~= v then return true end end
   end
   return false
 end
@@ -462,6 +464,7 @@ function VO.groups_now()
   for k, ext in pairs(GROUP_KEYS) do g[k] = reaper.GetExtState(C.EXT_SECT, ext) end
   g.g_cw = C.CHANNEL_W
   g.g_sp = spacer_get()
+  g.g_fb = C.fold_bw()
   return g
 end
 function VO.set_groups(p)
@@ -474,6 +477,11 @@ function VO.set_groups(p)
     reaper.SetExtState(C.EXT_SECT, "channel_w", tostring(C.CHANNEL_W), true)
   end
   if p.g_sp and p.g_sp ~= spacer_get() then spacer_set(p.g_sp) end
+  if p.g_fb then
+    reaper.SetExtState(C.EXT_SECT, "fold_borders", p.g_fb > 0 and "1" or "0", true)
+    if p.g_fb > 0 then reaper.SetExtState(C.EXT_SECT, "fold_bw", tostring(math.floor(p.g_fb)), true) end
+    C.fold_refresh()
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -852,6 +860,17 @@ local function page_faders(ctx)
     ImGui.EndDisabled(ctx)
     ImGui.SameLine(ctx)
     ImGui.TextDisabled(ctx, "Needs SWS")
+  end
+  row(ctx, "Folder borders")
+  local fon = C.fold_bw() > 0
+  local fch, fv = ST.checkbox(ctx, "##vo_fb", fon)
+  if fch then reaper.SetExtState(C.EXT_SECT, "fold_borders", fv and "1" or "0", true); C.fold_refresh() end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A bar in the folder's colour at each side of its tracks.") end
+  if fon then
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 140)
+    local wch, wv = ST.slider_int(ctx, "##vo_fbw", C.fold_bw(), 1, C.FOLD_BW_MAX, "%d px")
+    if wch then reaper.SetExtState(C.EXT_SECT, "fold_bw", tostring(wv), true); C.fold_refresh() end
   end
 
   section(ctx, "Track faders, widths and backgrounds, by group")

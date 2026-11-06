@@ -493,6 +493,8 @@ local function make(kind)
       reaper.SetOnlyTrackSelected(track)
     end
     reaper.Main_OnCommand(ROUTING_ACTION, 0)
+    -- it closes when it loses focus: ChannelView mustn't take it back
+    require("TS_CV_Focus").leave()
   end
 
   -- { parent/master send, sends out, receives in } -- the same three the

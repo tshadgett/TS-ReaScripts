@@ -283,6 +283,39 @@ function UN.typed_norm(track, addr, p, text)
   return math.max(0, math.min(1, v / 100))
 end
 
+-- A setting typed into a dropdown: where in `list` ({ norm, text, raw }
+-- each, as it shows them) it lands, or nil. Its name, whole; then, typed
+-- as a number, the setting that reads nearest (a bare number in the unit
+-- `now`, the text it shows, is in, as UN.typed_norm); then a name by its
+-- start, then anywhere in it.
+function UN.typed_choice(list, text, now)
+  local t = trim(text):lower()
+  if t == "" or type(list) ~= "table" then return nil end
+  local function named(test)
+    for _, e in ipairs(list) do
+      if test((e.text or ""):lower()) or (e.raw and test(e.raw:lower())) then return e.norm end
+    end
+  end
+  local n = named(function(a) return a == t end)
+  if n then return n end
+  local v, unit = UN.parse(text)
+  if v and t:gsub("\u{2212}", "-"):match("^[%+%-]?%.?%d") then
+    local cv, shown = UN.parse(now or ""), first_number(now or "")
+    if unit == "" and cv and shown and shown ~= 0 and cv ~= 0 then v = v * (cv / shown) end
+    local best, err
+    for _, e in ipairs(list) do
+      local ev = UN.parse(e.raw or e.text or "")
+      if ev then
+        local d = math.abs(ev - v)
+        if not err or d < err then best, err = e.norm, d end
+      end
+    end
+    if best then return best end
+  end
+  return named(function(a) return a:sub(1, #t) == t end)
+      or named(function(a) return a:find(t, 1, true) ~= nil end)
+end
+
 -- A dropdown's whole list, read without moving the plugin: what it would
 -- call each setting (TrackFX_FormatParamValueNormalized) at each of its
 -- steps (`st`, normalised), or at READ_POINTS points along one that has

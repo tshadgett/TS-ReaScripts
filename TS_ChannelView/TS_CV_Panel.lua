@@ -84,6 +84,7 @@ P.canvas_of = canvas_of
 function P.footer_h() return C.HIDE_FOOT and 0 or C.FOOTER_H end
 function P.head_h() return C.HIDE_HEAD and 0 or C.HEADER_H end
 P.hover = {}    -- fx GUID -> { head, foot }: the pointer was over where they go, last frame
+P.type_half = {} -- a dual knob's or XY pad's id -> which half a value is being typed for
 -- A draw-list splitter for a panel (`key`), split into n channels. Kept,
 -- since a new one every frame trips ReaImGui's limit on short-lived
 -- objects; made again when ReaImGui has let it go (unused for a frame) or
@@ -1205,8 +1206,9 @@ function P.visible(controls, track, fx)
   return shown
 end
 
--- A virtual control's colour (TS_CV_Mappings Virt<n>): violet, the
--- canvases' second colour, so it reads as the layout's and not the plugin's
+-- A virtual control's colour (TS_CV_Mappings Virt<n>) when it's given
+-- none of its own: violet, the canvases' second colour, so it reads as
+-- the layout's and not the plugin's
 P.VIRT_COL = 0x8a63e6ff
 
 -- A virtual control: a button, a selector (chips or a dropdown) or a
@@ -1222,13 +1224,13 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
   if ctl.type == "toggle" then
     changed, nv, act = W.toggle(ctx, id, name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", text = shown,
-        on_col = P.VIRT_COL, size = size, style = ctl.style })
+        on_col = W.lit_col(ctl.cap) or P.VIRT_COL, size = size, style = ctl.style })
   elseif ctl.type == "combo" and item.kind == "buttons" then
     local list = {}
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
     changed, nv, act = W.button_row(ctx, id, name, v, list,
       { dir = ctl.buttons, n = #list, w = hx(item.w), h = hy(item.h),
-        tooltip = name .. ": " .. shown, on_col = P.VIRT_COL, style = ctl.style })
+        tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
   elseif ctl.type == "combo" then
     local list = {}
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
@@ -1237,7 +1239,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
       { tooltip = name .. ": " .. shown, steps = list, style = ctl.style })
   else
     changed, nv, act = W.knob(ctx, id, name, v, shown,
-      { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = P.VIRT_COL,
+      { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = W.cap_col(ctl.cap) or P.VIRT_COL,
         style = ctl.style, size = size })
   end
   if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
@@ -3078,6 +3080,17 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             act.double_click = nil
           end
         end
+        -- Ctrl+click: a value typed for the half it was on (P.type_half
+        -- keeps which while the box is open)
+        if act.type_in then P.type_half[id] = act.type_in end
+        local second = P.type_half[id] == "inner" or P.type_half[id] == "y"
+        local typed = W.type_box(ctx, id, act.type_in and true or false,
+          second and name2 or name1, second and shown2 or shown)
+        if typed and (ok2 or not second) then
+          local tn = require("TS_CV_Units").typed_norm(track, fx.addr, second and p2 or p, typed)
+          if tn and second then v2, c2 = rev2 and (1 - tn) or tn, true
+          elseif tn then v1, c1 = rev and (1 - tn) or tn, true end
+        end
         if c2 and ok2 then
           local pv2 = rev2 and (1 - v2) or v2
           if link2 then MD.shift_link(track, link2, pv2 - live2)
@@ -3138,12 +3151,21 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             ink         = W.lit_col(M.choice_col(ctl, said_raw)) or W.lit_col(ctl.cap),
             ink_of      = ctl.ccols and function(sv) return W.lit_col(M.choice_col(ctl, sv.raw or sv.text)) end or nil })
         pending_open[id] = nil
+        local typed = W.type_box(ctx, id, act and act.type_in, label, shown)
         local function read_now()
           local list = P.read_choices(track, fx.addr, p, key)
           readable[rk] = list ~= nil
           return list and M.choice_list(key, p, list, track, fx.addr)
         end
-        if act and act.want_steps then
+        if typed then
+          -- Ctrl+click: a setting by its name or its number; a parameter
+          -- with no list of settings takes it as a knob does
+          local UN = require("TS_CV_Units")
+          local list = by_name and read_now()
+            or M.choice_list(key, p, combo_steps(track, fx.addr, p, key, true) or nil, track, fx.addr)
+          local to = list and UN.typed_choice(list, typed, said_raw) or UN.typed_norm(track, fx.addr, p, typed)
+          if to then nv, changed = to, true end
+        elseif act and act.want_steps then
           -- read it now, and open it next frame
           local list = by_name and read_now()
           if list then

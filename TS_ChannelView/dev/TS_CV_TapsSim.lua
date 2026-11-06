@@ -116,6 +116,7 @@ reaper = {
   GetProjExtState = function(_, ns, k) return 0, projext[ns .. k] or "" end,
   SetProjExtState = function(_, ns, k, v) projext[ns .. k] = v end,
   time_precise = function() return os.clock() + now_t end,
+  GetPlayState = function() return 0 end,
   CountTracks = function() return #project end,
   GetTrack = function(_, i) return project[i + 1] end,
   GetParentTrack = function() return nil end,
@@ -157,7 +158,10 @@ reaper = {
     if f and f.cc and k == "channel_config" then
       local n = tonumber(tostring(v):match("^%s*(%-?%d+)")) or 0
       f.held = (n > 0) and n or nil
-      if not f.held then relayout(f, track.nch) end
+      -- held at another count than the one it took from the track: laid
+      -- out afresh at it; released: following the track again
+      if not f.held then relayout(f, track.nch)
+      elseif f.nout == track.nch and f.held ~= track.nch then relayout(f, f.held) end
       return true
     end
     if not (f and f.kids) then return false end
@@ -201,6 +205,7 @@ reaper = {
   GetMediaTrackInfo_Value = function(tr, k)
     if k == "I_NCHAN" then return tr.nch end
     if k == "IP_TRACKNUMBER" then return 3 end
+    if k == "I_RECARM" then return tr.recarm or 0 end
     return 0
   end,
   -- A plugin marked `follow` takes the track's channel count, as many
@@ -241,6 +246,10 @@ reaper = {
 }
 
 local TP = require("TS_CV_Taps")
+-- (most of what follows is about plugins that don't report their own
+-- reduction, so reporting ones are set to show their own figure here;
+-- measured, the default, is tried at the end)
+reaper.SetExtState("TS_ChannelView", TP.READING_KEY, "own", true)
 TPref = TP
 for _, f in pairs(require("TS_CV_ProbeLink").F) do
   if f.leg and f.leg ~= 1 and f.leg ~= 4 then
@@ -265,7 +274,9 @@ end
 check("first sync changes something", TP.sync(track), true)
 -- Pro-C 2 reports its own GR, so only the LA-2A (addr 2) and the 1176 (addr 3).
 check("two taps",                     F(5).params[TP.P_TAPN], 2)
-check("latency of the first",         F(5).params[TP.P_LAG], 64)
+-- (REAPER holds back the channels a plugin doesn't use by the latency it
+-- reports, so the copies arrive in line: no lag for it)
+check("latency of the first: none",   F(5).params[TP.P_LAG] or 0, 0)
 check("latency of the second",        F(5).params[TP.P_LAG + 1] or 0, 0)
 if NEW then
   -- the pair named in track 3's block: places + 1 (pre at 0, post at 5)
@@ -301,16 +312,32 @@ check("  generation unchanged",       F(5).params[TP.P_GEN], 1)
 TP.set_zero_on(true)
 TP.sync(track)
 check("zero on again: armed",         F(0).params[TP.P_ARM], 1)
+-- a track armed to record: no test noise in the take
+track.recarm = 1
+TP.sync(track)
+check("armed to record: not armed for the zero", F(0).params[TP.P_ARM], 0)
+track.recarm = 0
+TP.sync(track)
+check("disarmed: armed for it again",  F(0).params[TP.P_ARM], 1)
 F(5).params[TP.P_CAL] = 1; F(5).params[TP.P_CAL + 1] = 3
 TP.invalidate()
 check("cal status, tap 1",            TP.cal_status(track, "{C1}"), 1)
 check("cal status, tap 2",            TP.cal_status(track, "{C2}"), 3)
 check("cal status, not tapped",       TP.cal_status(track, "{EQ}"), nil)
 
--- latency changes are picked up without re-routing
+-- a reported latency changing: nothing to do
 F(2).pdc = 128
 check("latency change: no re-route",  TP.sync(track), false)
-check("  but the probe is told",      F(5).params[TP.P_LAG], 128)
+check("  nor a lag",                  F(5).params[TP.P_LAG] or 0, 0)
+-- a latency the trace measured (one the plugin doesn't report): the probe
+-- is told, without re-routing
+TP.set_measured_lag("{C1}", 96)
+check("measured lag: no re-route",    TP.sync(track), false)
+check("  but the probe is told",      F(5).params[TP.P_LAG], 96)
+for k in pairs(TP.measured_lag) do TP.measured_lag[k] = nil end
+reaper.SetExtState("TS_CV_WEB", "lags", "", false)
+now_t = now_t + 1
+TP.sync(track)
 
 -- ---------------------------------------------------------------- lifting
 measure["LA-2A"] = nil; measure["1176"] = nil; measure["Pro-C 2"] = nil
@@ -707,8 +734,8 @@ check("nested: lays",                  TP.sync(track), true)
 local POST, K1, K2 = G("{POST}"), G("{K1}"), G("{K2}")
 check("nested: one tap",               F(POST).params[TP.P_TAPN], 1)
 check("nested: v2 record with its path", track.ext[TP.EXT_KEY],
-      "v2|TOP|{POST}|{T},{PRE}+{EQ}+{X},5,7,32,g,{K1}+{K2}")
-check("nested: latency",               F(POST).params[TP.P_LAG], 32)
+      "v2|TOP|{POST}|{T},{PRE}+{EQ}+{X},5,7,0,g,{K1}+{K2}")
+check("nested: no lag for its latency", F(POST).params[TP.P_LAG] or 0, 0)
 check("nested: EQ writes before L",    outbits(G("{EQ}"), 0), b(1, 5))
 check("nested: X (inside) writes it too", outbits(G("{X}"), 1), b(2, 6))
 check("nested: LA-2A writes after",    outbits(G("{T}"), 0), b(1, 7))
@@ -751,7 +778,7 @@ table.insert(track.fx, 4, moved)        -- after K1, before the 1176
 TP.invalidate()
 check("nested: a move out re-routes",  TP.sync(track), true)
 K1, K2 = G("{K1}"), G("{K2}")
-check("nested: now v1, no path",       track.ext[TP.EXT_KEY], "v1|TOP|{POST}|{T},{PRE}+{EQ}+{K1},5,7,32,g")
+check("nested: now v1, no path",       track.ext[TP.EXT_KEY], "v1|TOP|{POST}|{T},{PRE}+{EQ}+{K1},5,7,0,g")
 check("nested: K2 carries nothing",    outbits(K2, 4) .. "," .. outbits(K2, 6) .. "," .. inbits(K2, 4), "0,0,0")
 check("nested: X no longer writes",    outbits(G("{X}"), 0), b(1))
 check("nested: K1 writes as one plugin", outbits(K1, 0), b(1, 5))
@@ -955,7 +982,11 @@ do
   check("held: a later one, at the next check", TP.sync(track), true)
   local _, q = find("{PQ4}")
   check("held: the later one too",             tostring(q.held), "4")
-  check("held: both recorded",                 track.ext["P_EXT:TS_CV_HOLD"], "TOP|4|{PC3},{PQ4}")
+  -- (held at 4 it has 4 sidechain inputs on 5..8, where the copies are:
+  -- unplugged, and noted to be put back)
+  check("held: both recorded",                 track.ext["P_EXT:TS_CV_HOLD"],
+        "TOP|4|{PC3},{PQ4}|{PQ4}:4:16:0+{PQ4}:5:32:0+{PQ4}:6:64:0+{PQ4}:7:128:0")
+  check("held: its sidechain inputs off the copies", q.pin_in[4][1] .. q.pin_in[5][1] .. q.pin_in[6][1] .. q.pin_in[7][1], "0000")
   check("held: then nothing to do",            TP.sync(track), false)
   -- the probes taken out: the track back to 4, both following it again
   TP.remove_probes(track)
@@ -964,6 +995,50 @@ do
   check("released: following again",          tostring(f2.held), "nil")
   check("released: the record gone",           track.ext["P_EXT:TS_CV_HOLD"], "")
 end
+local measure_was, get_was = measure, package.loaded["TS_CV_Mappings"].get
+-- A plugin with a sidechain on a two-channel track (Waves SSLComp: 4 in,
+-- its sidechain on 3/4, channels the track hasn't got). Widened, the
+-- track has them, silent, and the plugin would key from them: unplugged
+-- while the probes are in, put back when they come out.
+reset()
+do
+  track.nch, track.recv = 2, {}
+  local w = fx("VST3: SSLComp Stereo (Waves)", "{WV}", 4, 2)
+  table.insert(track.fx, 2, w)
+  measure = { ["SSLComp Stereo"] = true }
+  package.loaded["TS_CV_Mappings"].get = function(key) return { measure = measure[key] or nil } end
+  TP.invalidate()
+  TP.sync(track)
+  local function find(g) index(); for a, f in pairs(amap) do if f.guid == g then return a, f end end end
+  local _, f = find("{WV}")
+  check("sidechain: the track grew",            track.nch > 2, true)
+  check("sidechain: measured",                  #TP.parse_record(track.ext[TP.EXT_KEY]).taps, 1)
+  check("sidechain: unplugged",                 f.pin_in[2][1] .. " " .. f.pin_in[3][1], "0 0")
+  check("sidechain: its main inputs kept",      f.pin_in[0][1] .. " " .. f.pin_in[1][1], b(1) .. " " .. b(2))
+  -- (the 1176's sidechain too: 4 in, on 3/4)
+  check("sidechain: noted",                     track.ext["P_EXT:TS_CV_HOLD"], "TOP|2||{C2}:2:4:0+{C2}:3:8:0+{WV}:2:4:0+{WV}:3:8:0")
+  check("sidechain: settles",                   TP.sync(track), false)
+  TP.remove_probes(track)
+  local _, f2 = find("{WV}")
+  check("sidechain out: the track back to 2",   track.nch, 2)
+  check("sidechain out: plugged back in",       f2.pin_in[2][1] .. " " .. f2.pin_in[3][1], b(3) .. " " .. b(4))
+  check("sidechain out: the record gone",       track.ext["P_EXT:TS_CV_HOLD"], "")
+end
+-- A sidechain the track really has (a receive on 3/4, the track at 4):
+-- left alone.
+reset()
+do
+  local w = fx("VST3: SSLComp Stereo (Waves)", "{WV}", 4, 2)
+  table.insert(track.fx, 2, w)
+  measure = { ["SSLComp Stereo"] = true }
+  package.loaded["TS_CV_Mappings"].get = function(key) return { measure = measure[key] or nil } end
+  TP.invalidate()
+  TP.sync(track)
+  local function find(g) index(); for a, f in pairs(amap) do if f.guid == g then return a, f end end end
+  local _, f = find("{WV}")
+  check("real sidechain: kept",                 f.pin_in[2][1] .. " " .. f.pin_in[3][1], b(3) .. " " .. b(4))
+end
+measure, package.loaded["TS_CV_Mappings"].get = measure_was, get_was
 -- ... unless something else now uses the channels above: the receive
 -- moved up to 17/18 while the taps were in
 reset()
@@ -1003,7 +1078,13 @@ local t6 = rec8.taps[6]
 check("eight: tap 6's pins on its copies", ("%d %d"):format(post.pin_in[22][1], post.pin_in[24][1]), ("%d %d"):format(TP.bit(t6.pre), TP.bit(t6.post)))
 check("eight: tap 7's pins unplugged", post.pin_in[26][1] .. " " .. post.pin_in[29][1], "0 0")
 if NEW then
-  check("eight: tap 6's latency apart from 1..4's", gmem[0x100000 + 3 * 128 + 50 + 1], 40)
+  TP.set_measured_lag(t6.guid, 40)
+  TP.sync(track)
+  check("eight: tap 6's lag apart from 1..4's", gmem[0x100000 + 3 * 128 + 50 + 1], 40)
+  for k in pairs(TP.measured_lag) do TP.measured_lag[k] = nil end
+  reaper.SetExtState("TS_CV_WEB", "lags", "", false)
+  now_t = now_t + 1
+  TP.sync(track)
   check("eight: taps in use", gmem[0x100000 + 3 * 128 + 8], 6)
 end
 check("eight: settles", TP.sync(track), false)
@@ -1021,6 +1102,56 @@ do
   TP.invalidate()
   check("lag: and leaves the record", TP.sync(track), false)
   check("lag: still the measured one", TP.parse_record(track.ext[TP.EXT_KEY]).taps[1].lag, 777)
+end
+
+-- ------------------------------------------------- measured first
+-- A plugin that reports its own reduction (Pro-C 2) is measured too when
+-- that's what's shown, and its reading is the measured one once its zero
+-- is measured -- its own figure until then.
+reset()
+measure = { ["LA-2A"] = true, ["1176"] = true }
+package.loaded["TS_CV_Mappings"].get = function(key) return { measure = measure[key] or nil } end
+reaper.SetExtState("TS_ChannelView", TP.READING_KEY, "measured", true)
+TP.invalidate()
+TP.sync(track)
+do
+  local r = TP.parse_record(track.ext[TP.EXT_KEY])
+  local g = {}
+  for _, t in ipairs(r.taps) do g[#g + 1] = t.guid end
+  check("measured first: the reporting one tapped too", table.concat(g, " "), "{C1} {C2} {C3}")
+  check("measured first: its own figure before the zero", TP.measured_for_reporting(track, "{C3}"), nil)
+  F(5).params[TP.P_CAL + 2] = 1
+  F(5).params[TP.P_GR + 2] = 4.5
+  TP.invalidate()
+  check("measured first: measured once the zero is", TP.measured_for_reporting(track, "{C3}"), 4.5)
+  F(5).params[25 + 2] = -150          -- tap 3's input peak: silence
+  -- reporting no reduction while stopped and silent (a compressor): still measured
+  check("measured first: a compressor at rest", TP.measured_for_reporting(track, "{C3}", 0), 4.5)
+  -- reporting 20 dB while stopped and silent: a gate, shut on the silence
+  -- (its zero is its shut level): its own figure, once it's held a moment
+  check("shut: not straight away", TP.measured_for_reporting(track, "{C3}", 20), 4.5)
+  now_t = now_t + 2
+  check("shut: its own figure", TP.measured_for_reporting(track, "{C3}", 20), nil)
+  check("shut: and stays so",   TP.measured_for_reporting(track, "{C3}", 0), nil)
+  F(5).params[TP.P_CAL + 2] = 3
+  TP.invalidate()
+  check("measured first: touched since, its own again", TP.measured_for_reporting(track, "{C3}"), nil)
+  -- a multiband, a de-esser, a gate: their own figure, not tapped for it
+  for _, nm in ipairs({ "VST3: Pro-MB (FabFilter)", "VST3: Pro-DS (FabFilter)", "VST3: Pro-G (FabFilter)", "VST: ReaXcomp (Cockos)" }) do
+    check("keeps its own: " .. nm, TP._keeps_own(track, 0, nil) == false and (function()
+      local f = F(4); local was = f.name; f.name = nm
+      local r = TP._keeps_own(track, 4, nil); f.name = was; return r end)(), true)
+  end
+  check("a compressor doesn't", TP._keeps_own(track, 4, nil), false)
+  check("a Multiband canvas does", TP._keeps_own(track, 4, { canvas = { kind = "multi" } }), true)
+  TP.set_zero_on(false)
+  TP.sync(track)
+  check("measured first, zero off: not tapped", #TP.parse_record(track.ext[TP.EXT_KEY]).taps, 2)
+  TP.set_zero_on(true)
+  TP.set_measured_first(false)
+  TP.sync(track)
+  check("its own: not tapped", #TP.parse_record(track.ext[TP.EXT_KEY]).taps, 2)
+  check("its own: nothing measured to show", TP.measured_for_reporting(track, "{C3}"), nil)
 end
 
 -- ---------------------------------------------------------------- records

@@ -47,6 +47,7 @@ local KCELL_H = 48
 local KR      = 11      -- ...and its radius
 local ADD_H   = 22
 local PILL_H  = 16
+local ENV_CURVE_H = 44  -- a MIDI envelope's curve
 local LANE_W, LANE_H = 13, 11
 
 local EXT = { macros = "macros_collapsed", mods = "mods_collapsed" }
@@ -147,6 +148,13 @@ local function tile_h(track, src)
   if src.kind == "lfo" then
     h = h + 30
     if isopen then h = h + 22 + KCELL_H * 2 end
+  elseif src.kind == "midi" then
+    h = h + 16
+    if isopen then
+      local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
+      h = h + 22 + 20 + KCELL_H * 2 + (MD.trig_ok(track, src.slot) and 22 or 0)
+      if MD.is_env(ms) then h = h + ENV_CURVE_H + 6 + KCELL_H + 22 end
+    end
   else
     h = h + 16
     if isopen then h = h + 22 + KCELL_H * 2 end
@@ -829,6 +837,15 @@ do
   K.mcc = { key = "mcc", label = "CC", tn = tn, fn = fn, def = 1,
             text = function(v) return ("CC %d"):format(math.floor(v + 0.5)) end }
   K.mlo = { key = "mlo", label = "Low", tn = tn, fn = fn, def = 36, text = note_name }
+  -- a MIDI envelope's, kept in the Follower's fields (MD.MIDI_SRC)
+  tn, fn = lin(-80, 0)
+  K.sus = { key = "floor", label = "Sustain", tn = tn, fn = fn, def = MD.floor_of(0.6),
+            text = function(v) return ("%d%%"):format(math.floor(MD.sustain_of(v) * 100 + 0.5)) end }
+  tn, fn = lin(-60, 12)
+  K.dec = { key = "ceil", label = "Decay", tn = tn, fn = fn, def = MD.ceil_of(200),
+            text = function(v) return ("%.0f ms"):format(MD.decay_of(v)) end }
+  K.eatt = { key = "att", label = "Attack", tn = K.att.tn, fn = K.att.fn, def = 5, text = K.att.text }
+  K.erel = { key = "rel", label = "Release", tn = K.rel.tn, fn = K.rel.fn, def = 300, text = K.rel.text }
   K.mhi = { key = "mhi", label = "High", tn = tn, fn = fn, def = 96, text = note_name }
 end
 
@@ -839,6 +856,17 @@ end
 -- colour with a dot at its reach: drag the dot for the amount, Alt-click
 -- it to remove.
 -- ---------------------------------------------------------------------
+
+-- A setting's name in THE MATRIX: an envelope's own, for the Follower
+-- fields a MIDI envelope keeps its settings in
+local ENV_LABEL = { floor = "Sustain", ceil = "Decay", gate = "Exp curve", mhold = "Legato" }
+local function tg_label(track, src, tg)
+  if src.kind == "midi" and ENV_LABEL[tg.key]
+     and MD.is_env(math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)) then
+    return ENV_LABEL[tg.key]
+  end
+  return tg.label
+end
 
 local mx_cache = {}     -- track..j -> { t, slots }
 local mx_slot_items     -- a source's menu items (below, with the tile's menu)
@@ -891,7 +919,7 @@ local function mx_drop(ctx, dl, track, src, key, set_to, hit, draw)
   draw(ok and d.mod.col or (C.COL.warn or 0xe0a040ff), over)
   if over then
     if not ok then ImGui.SetTooltip(ctx, why)
-    else ImGui.SetTooltip(ctx, ("%s moves %s %s"):format(d.mod.name, src.name, MD.MX_TARGETS[MD.MX_CODE[key]].label)) end
+    else ImGui.SetTooltip(ctx, ("%s moves %s %s"):format(d.mod.name, src.name, tg_label(track, src, MD.MX_TARGETS[MD.MX_CODE[key]]))) end
     if ok and ImGui.IsMouseReleased(ctx, ImGui.MouseButton_Left) then
       local tg = MD.MX_TARGETS[MD.MX_CODE[key]]
       if MD.mx_link(track, src, key, d.mod, d.k, set_to) and tg.n and d.mod.kind == "dropdown" then
@@ -1035,7 +1063,7 @@ local function mx_switch(ctx, dl, track, src, key, set_to, x, y, w, h)
   if MD.mx_ok(track, src.slot) and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then ImGui.OpenPopup(ctx, pid) end
   if ImGui.BeginPopup(ctx, pid) then
     local tg = MD.MX_TARGETS[MD.MX_CODE[key]]
-    ImGui.TextDisabled(ctx, tg.label:upper() .. " \u{00B7} MOVED BY")
+    ImGui.TextDisabled(ctx, tg_label(track, src, tg):upper() .. " \u{00B7} MOVED BY")
     local any = false
     for sl = 1, MD.MX_SLOTS do
       local e = mx_slots(track, src)[sl]
@@ -1117,7 +1145,14 @@ local LANES = {
                { "gate", "Gate" }, { "fsrc", "Source" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
   midi = { { "msrc", "Source" }, { "mch", "Channel" }, { "mcc", "CC" }, { "mlo", "Low note" }, { "mhi", "High note" },
            { "mhold", "Hold" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
+  env = { { "msrc", "Source" }, { "att", "Attack" }, { "ceil", "Decay" }, { "floor", "Sustain" }, { "rel", "Release" },
+          { "mhold", "Legato" }, { "gate", "Exp curve" }, { "mch", "Channel" }, { "mlo", "Low note" },
+          { "mhi", "High note" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
 }
+local function lanes_of(track, src)
+  if src.kind == "midi" and MD.is_env(math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)) then return LANES.env end
+  return LANES[src.kind]
+end
 
 local function sub_text(track, src, nlinks)
   local d = nlinks == 0 and "drag \u{25EF} onto a control" or ("drives %d"):format(nlinks)
@@ -1132,6 +1167,7 @@ local function sub_text(track, src, nlinks)
   local ms = math.floor(f("msrc") + 0.5)
   local what = MD.MIDI_SRC[ms + 1] or "MIDI"
   if ms == 2 then what = ("CC %d"):format(math.floor(f("mcc") + 0.5)) end
+  if MD.trigger(track, src.j) then what = what .. " \u{00B7} another track" end
   return what .. " \u{00B7} " .. d
 end
 
@@ -1215,6 +1251,103 @@ local function follower_body(ctx, dl, track, src, x, y, w, isopen)
 end
 
 local MIDI_PILL = { "Vel", "Note", "CC", "Bend", "AT" }
+local ENV_PILL = { "Envelope", "Env \u{00D7} vel", "Duck" }
+
+-- A MIDI envelope's curve: attack, decay, sustain held, release; Duck's
+-- upside down. Its three corners drag (attack's time; decay's time and
+-- the sustain; release's time); the line across is where it is now.
+local ENV_W = { 0.22, 0.28, 0.18, 0.32 }    -- each stage's share at its longest
+local function env_curve(ctx, dl, track, src, ms, x, y, w, h)
+  local f = function(k) return MD.field(track, src.slot, src.j, k) end
+  local att, dec, sus, rel = f("att"), MD.decay_of(f("ceil")), MD.sustain_of(f("floor")), f("rel")
+  local ex, duck = f("gate") >= 0.5, ms == 7
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, 0x121416ff, 3)
+  local top, bot = y + 4, y + h - 4
+  local function py(l) if duck then l = 1 - l end return bot - l * (bot - top) end
+  local wa, wd, ws, wr = w * ENV_W[1], w * ENV_W[2], w * ENV_W[3], w * ENV_W[4]
+  local xa = x + wa * math.sqrt(att / 500)
+  local xd = xa + wd * math.sqrt(dec / 2000)
+  local xs = xd + ws
+  local xr = xs + wr * math.sqrt(rel / 2000)
+  local pts = { { x, py(0) }, { xa, py(1) } }
+  for k = 1, 12 do
+    local t = k / 12
+    local l = ex and (sus + (1 - sus) * math.exp(-6.9 * t)) or (1 - (1 - sus) * t)
+    pts[#pts + 1] = { xa + (xd - xa) * t, py(k == 12 and sus or l) }
+  end
+  pts[#pts + 1] = { xs, py(sus) }
+  for k = 1, 12 do
+    local t = k / 12
+    local l = ex and (sus * math.exp(-6.9 * t)) or (sus * (1 - t))
+    pts[#pts + 1] = { xs + (xr - xs) * t, py(k == 12 and 0 or l) }
+  end
+  for k = 2, #pts do
+    ImGui.DrawList_AddLine(dl, pts[k - 1][1], pts[k - 1][2], pts[k][1], pts[k][2], src.col, 1.6)
+  end
+  -- where it is now: the modulator's level before its depth
+  local depth = f("depth")
+  if depth > 0.001 then
+    local l = math.max(0, math.min(1, MD.value(track, src) / depth))
+    local ly = bot - l * (bot - top)
+    ImGui.DrawList_AddLine(dl, x + 2, ly, x + w - 2, ly, U.with_alpha(src.col, 0x50), 1.0)
+  end
+  -- the corners
+  local nodes = {
+    { "a", xa, py(1), "Attack" }, { "d", xd, py(sus), "Decay and sustain" }, { "r", xr, py(0), "Release" } }
+  for _, n in ipairs(nodes) do
+    local id = ("env%s##%s"):format(n[1], src.guid)
+    ImGui.SetCursorScreenPos(ctx, n[2] - 6, n[3] - 6)
+    W.allow_overlap(ctx)
+    ImGui.InvisibleButton(ctx, id, 12, 12)
+    local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+    if act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+      local mx, my = ImGui.GetMousePos(ctx)
+      local function frac(v) return math.max(0, math.min(1, v)) end
+      if n[1] == "a" then
+        MD.set_field(track, src.slot, src.j, "att", 500 * frac((mx - x) / wa) ^ 2)
+      elseif n[1] == "d" then
+        MD.set_field(track, src.slot, src.j, "ceil", MD.ceil_of(2000 * frac((mx - xa) / wd) ^ 2))
+        local l = frac((bot - my) / (bot - top))
+        MD.set_field(track, src.slot, src.j, "floor", MD.floor_of(duck and 1 - l or l))
+      else
+        MD.set_field(track, src.slot, src.j, "rel", 2000 * frac((mx - xs) / wr) ^ 2)
+      end
+    end
+    ImGui.DrawList_AddCircleFilled(dl, n[2], n[3], (hov or act) and 4 or 3, (hov or act) and C.COL.value or src.col, 12)
+    W.tip(ctx, id, n[4], hov, act)
+  end
+end
+
+-- A MIDI modulator's trigger track: another track's notes instead of this
+-- one's (MD.set_trigger)
+local function trigger_row(ctx, dl, track, src, x, y, w)
+  local from = MD.trigger(track, src.j)
+  local name = "This track's own"
+  if from then
+    local _, nm = reaper.GetSetMediaTrackInfo_String(from, "P_NAME", "", false)
+    local num = math.floor(reaper.GetMediaTrackInfo_Value(from, "IP_TRACKNUMBER") or 0)
+    name = ("%d %s"):format(num, U.trim(nm or ""))
+  end
+  local id = "trig##" .. src.guid
+  if pill(ctx, dl, id, x, y, w, "Notes from: " .. U.truncate(name, 20), from ~= nil, src.col) then
+    ImGui.OpenPopup(ctx, "trigpop##" .. src.guid)
+  end
+  W.tip(ctx, id, "Another track's MIDI, sent here for this modulator alone", ImGui.IsItemHovered(ctx), false)
+  if ImGui.BeginPopup(ctx, "trigpop##" .. src.guid) then
+    if ImGui.Selectable(ctx, "This track's own", from == nil) then MD.set_trigger(track, src.slot, src.j, nil) end
+    ImGui.Separator(ctx)
+    for t = 0, reaper.CountTracks(0) - 1 do
+      local tr = reaper.GetTrack(0, t)
+      if tr ~= track then
+        local _, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+        if ImGui.Selectable(ctx, ("%d %s##trig%d"):format(t + 1, U.trim(nm or ""), t), tr == from) then
+          MD.set_trigger(track, src.slot, src.j, tr)
+        end
+      end
+    end
+    ImGui.EndPopup(ctx)
+  end
+end
 
 local function midi_body(ctx, dl, track, src, x, y, w, isopen)
   level_bar(dl, src, MD.value(track, src), x, y, w)
@@ -1224,29 +1357,76 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
   local pw = (w - 4 * 2) / 5
   for i = 1, 5 do
     if pill(ctx, dl, ("msrc%d##%s"):format(i, src.guid), x + (i - 1) * (pw + 2), y, pw, MIDI_PILL[i], ms == i - 1) then
-      MD.set_field(track, src.slot, src.j, "msrc", i - 1)
+      MD.set_msrc(track, src.slot, src.j, i - 1)
     end
     W.tip(ctx, ("msrc%d##%s"):format(i, src.guid), MD.MIDI_SRC[i], ImGui.IsItemHovered(ctx), false)
   end
+  y = y + 20
+  local ew = (w - 2 * 2) / 3
+  for i = 1, 3 do
+    local v = MD.ENV_FIRST + i - 1
+    if pill(ctx, dl, ("msrc%d##%s"):format(v + 1, src.guid), x + (i - 1) * (ew + 2), y, ew, ENV_PILL[i], ms == v) then
+      MD.set_msrc(track, src.slot, src.j, v)
+    end
+    W.tip(ctx, ("msrc%d##%s"):format(v + 1, src.guid), MD.MIDI_SRC[v + 1], ImGui.IsItemHovered(ctx), false)
+  end
   y = y + 22
-  setting(ctx, dl, track, src, K.mch, x, y)
-  if ms == 1 then
+  if MD.is_env(ms) then
+    env_curve(ctx, dl, track, src, ms, x, y, w, ENV_CURVE_H)
+    y = y + ENV_CURVE_H + 6
+    setting(ctx, dl, track, src, K.eatt, x, y)
+    setting(ctx, dl, track, src, K.dec, x + KCELL_W, y)
+    setting(ctx, dl, track, src, K.sus, x + KCELL_W * 2, y)
+    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.erel, x, y)
+    setting(ctx, dl, track, src, K.depth, x + KCELL_W, y)
+    setting(ctx, dl, track, src, K.smooth, x + KCELL_W * 2, y)
+    y = y + KCELL_H
+    local legato = live_field(track, src, "mhold") >= 0.5
+    local ex = live_field(track, src, "gate") >= 0.5
+    local bw3 = (w - 2 * 2) / 3
+    if pill(ctx, dl, "retrig##" .. src.guid, x, y, bw3, "Retrigger", not legato) and legato then
+      MD.set_field(track, src.slot, src.j, "mhold", 0)
+    end
+    mx_switch(ctx, dl, track, src, "mhold", 0, x, y, bw3, PILL_H)
+    W.tip(ctx, "retrig##" .. src.guid, "Every note starts it again", ImGui.IsItemHovered(ctx), false)
+    if pill(ctx, dl, "legato##" .. src.guid, x + bw3 + 2, y, bw3, "Legato", legato) and not legato then
+      MD.set_field(track, src.slot, src.j, "mhold", 1)
+    end
+    mx_switch(ctx, dl, track, src, "mhold", 1, x + bw3 + 2, y, bw3, PILL_H)
+    W.tip(ctx, "legato##" .. src.guid, "Only a note after silence starts it again", ImGui.IsItemHovered(ctx), false)
+    if pill(ctx, dl, "expc##" .. src.guid, x + (bw3 + 2) * 2, y, bw3, "Exp curve", ex) then
+      MD.set_field(track, src.slot, src.j, "gate", ex and 0 or 1)
+    end
+    mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, PILL_H)
+    W.tip(ctx, "expc##" .. src.guid, "Decay and release fall away exponentially", ImGui.IsItemHovered(ctx), false)
+    y = y + 22
+    setting(ctx, dl, track, src, K.mch, x, y)
     setting(ctx, dl, track, src, K.mlo, x + KCELL_W, y)
     setting(ctx, dl, track, src, K.mhi, x + KCELL_W * 2, y)
-  elseif ms == 2 then
-    setting(ctx, dl, track, src, K.mcc, x + KCELL_W, y)
-  elseif ms == 0 then
-    local hold = live_field(track, src, "mhold") >= 0.5
-    if pill(ctx, dl, "hold##" .. src.guid, x + KCELL_W + 6, y + 14, 46, "Hold", hold) then
-      MD.set_field(track, src.slot, src.j, "mhold", hold and 0 or 1)
+    y = y + KCELL_H
+  else
+    setting(ctx, dl, track, src, K.mch, x, y)
+    if ms == 1 then
+      setting(ctx, dl, track, src, K.mlo, x + KCELL_W, y)
+      setting(ctx, dl, track, src, K.mhi, x + KCELL_W * 2, y)
+    elseif ms == 2 then
+      setting(ctx, dl, track, src, K.mcc, x + KCELL_W, y)
+    elseif ms == 0 then
+      local hold = live_field(track, src, "mhold") >= 0.5
+      if pill(ctx, dl, "hold##" .. src.guid, x + KCELL_W + 6, y + 14, 46, "Hold", hold) then
+        MD.set_field(track, src.slot, src.j, "mhold", hold and 0 or 1)
+      end
+      mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + KCELL_W + 6, y + 14, 46, PILL_H)
+      W.tip(ctx, "hold##" .. src.guid, "Keep the last velocity after note-off",
+        ImGui.IsItemHovered(ctx), false)
     end
-    mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + KCELL_W + 6, y + 14, 46, PILL_H)
-    W.tip(ctx, "hold##" .. src.guid, "Keep the last velocity after note-off",
-      ImGui.IsItemHovered(ctx), false)
+    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.depth, x, y)
+    setting(ctx, dl, track, src, K.smooth, x + KCELL_W, y)
+    y = y + KCELL_H
   end
-  y = y + KCELL_H
-  setting(ctx, dl, track, src, K.depth, x, y)
-  setting(ctx, dl, track, src, K.smooth, x + KCELL_W, y)
+  if MD.trig_ok(track, src.slot) then trigger_row(ctx, dl, track, src, x, y + 2, w) end
 end
 
 -- One source's items (in the tile's menu, or a switch's): a switch's
@@ -1293,7 +1473,7 @@ local function mod_menu(ctx, track, src, s, req)
         MD.toggle_lane(track, src.slot, MD.param(src.j, key))
       end
     end
-    for _, f in ipairs(LANES[src.kind] or {}) do item(f[1], f[2]) end
+    for _, f in ipairs(lanes_of(track, src) or {}) do item(f[1], f[2]) end
     ImGui.Separator(ctx)
     item("out", "Output")
     item("outb", "Output bipolar")
@@ -1314,7 +1494,7 @@ local function mod_menu(ctx, track, src, s, req)
         local name = from and from.name or "?"
         local amt = e.tg.n and "" or ("   " .. mx_amount_text(e.tg.key == "rate"
           and (live_field(track, src, "sync") >= 0.5 and "rsync" or "rhz") or e.tg.key, e.amt))
-        if ImGui.BeginMenu(ctx, ("%s \u{2192} %s%s##mxt%d"):format(name, e.tg.label, amt, sl)) then
+        if ImGui.BeginMenu(ctx, ("%s \u{2192} %s%s##mxt%d"):format(name, tg_label(track, src, e.tg), amt, sl)) then
           mx_slot_items(ctx, track, src, sl, e, from)
           ImGui.EndMenu(ctx)
         end
@@ -1372,7 +1552,7 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
       if e then
         local from = MD.mx_source(track, e.code)
         ImGui.DrawList_AddCircleFilled(dl, dx, y + 10, 3, from and from.col or C.COL.label, 10)
-        names[#names + 1] = (from and from.name or "?") .. " \u{2192} " .. e.tg.label
+        names[#names + 1] = (from and from.name or "?") .. " \u{2192} " .. tg_label(track, src, e.tg)
         dx = dx + 8
       end
     end

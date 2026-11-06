@@ -79,6 +79,32 @@ end
 local function node_of(tr, addr) local p = decode(tr, addr); return p and at(tr, p) end
 
 reaper = {
+  -- sends and receives: a send is one record in its source's sends and
+  -- its destination's receives
+  GetTrackNumSends = function(tr, cat) return cat < 0 and #(tr.recv or {}) or #(tr.sends or {}) end,
+  GetTrackSendInfo_Value = function(tr, cat, i, k)
+    local e = (cat < 0 and tr.recv or tr.sends or {})[i + 1]
+    return e and e[k] or 0
+  end,
+  SetTrackSendInfo_Value = function(tr, cat, i, k, v)
+    local e = (cat < 0 and tr.recv or tr.sends or {})[i + 1]
+    if e then e[k] = v end
+    return e ~= nil
+  end,
+  CreateTrackSend = function(src, dst)
+    local e = { P_SRCTRACK = src, P_DESTTRACK = dst, I_SRCCHAN = 0, I_MIDIFLAGS = 0 }
+    src.sends = src.sends or {}; dst.recv = dst.recv or {}
+    src.sends[#src.sends + 1] = e; dst.recv[#dst.recv + 1] = e
+    return #src.sends - 1
+  end,
+  RemoveTrackSend = function(tr, cat, i)
+    local list = cat < 0 and tr.recv or tr.sends
+    local e = list and table.remove(list, i + 1)
+    if not e then return false end
+    local other = cat < 0 and e.P_SRCTRACK.sends or e.P_DESTTRACK.recv
+    for k, x in ipairs(other or {}) do if x == e then table.remove(other, k) break end end
+    return true
+  end,
   TrackFX_GetCount = function(tr) return #tr.fx end,
   TrackFX_GetNamedConfigParm = function(tr, addr, k)
     local n = node_of(tr, addr)
@@ -560,6 +586,44 @@ do
   MD.set_bypass(TR, slot, 2, false)
   TR.fx[slot + 1].params = 240
   check("bypass: an older plugin hasn't it", tostring(MD.bypass_ok(TR, slot)) .. " " .. tostring(MD.set_bypass(TR, slot, nil, true)), "false false")
+  TR.fx[slot + 1].params = was
+end
+
+-- a MIDI modulator's envelopes and its trigger track
+do
+  local mid = MD.add_mod(TR, "midi", false)
+  local slot = MD.plugin(TR)
+  local src = MD.find(TR, "o" .. (type(mid) == "table" and mid.j or 1)) or MD.scan(TR).mods[#MD.scan(TR).mods]
+  local j = src.j
+  check("envelope: sources 5-7", tostring(MD.is_env(4)) .. tostring(MD.is_env(5)) .. MD.MIDI_SRC[8], "falsetrueDuck")
+  MD.set_msrc(TR, slot, j, 5)
+  check("envelope: its own start", ("%.0f %.0f %.0f %.0f"):format(MD.field(TR, slot, j, "att"),
+    MD.decay_of(MD.field(TR, slot, j, "ceil")), MD.sustain_of(MD.field(TR, slot, j, "floor")) * 100,
+    MD.field(TR, slot, j, "rel")), "5 200 60 300")
+  MD.set_field(TR, slot, j, "rel", 900)
+  MD.set_msrc(TR, slot, j, 0); MD.set_msrc(TR, slot, j, 7)
+  check("envelope: back to one, its settings kept", MD.field(TR, slot, j, "rel"), 900)
+  check("envelope: decay and sustain round trip", ("%.0f %.2f"):format(MD.decay_of(MD.ceil_of(750)),
+    MD.sustain_of(MD.floor_of(0.35))), "750 0.35")
+  local was = TR.fx[slot + 1].params
+  TR.fx[slot + 1].params = 250
+  check("trigger: its parameter", MD.TRIG, 249)
+  local KICK = { fx = {}, ext = {} }
+  MD.set_trigger(TR, slot, j, KICK)
+  local e = (TR.recv or {})[1]
+  check("trigger: a MIDI send, no audio, to its own bus", e and ("%d %d"):format(e.I_SRCCHAN, (e.I_MIDIFLAGS >> 22) & 0xff),
+    ("-1 %d"):format(8 + j))
+  check("trigger: its bit", math.floor(MD.field(TR, slot, j, "type") >= 0 and reaper.TrackFX_GetParam(TR, slot, MD.TRIG)), 1 << (j - 1))
+  check("trigger: found again", MD.trigger(TR, j), KICK)
+  MD.set_trigger(TR, slot, j, KICK)
+  check("trigger: again, still one send", #TR.recv .. " " .. #KICK.sends, "1 1")
+  MD.set_trigger(TR, slot, j, nil)
+  check("trigger: back to its own", #TR.recv .. " " .. #KICK.sends .. " " .. math.floor(reaper.TrackFX_GetParam(TR, slot, MD.TRIG)), "0 0 0")
+  MD.set_trigger(TR, slot, j, KICK)
+  MD.remove(TR, src)
+  check("trigger: gone with its modulator", #TR.recv, 0)
+  TR.fx[slot + 1].params = 240
+  check("trigger: an older plugin hasn't it", MD.set_trigger(TR, slot, j, KICK), false)
   TR.fx[slot + 1].params = was
 end
 

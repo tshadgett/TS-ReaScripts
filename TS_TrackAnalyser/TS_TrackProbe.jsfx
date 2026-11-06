@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.4.0
+version: 2.5.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -58,6 +58,8 @@ author: Tim Shadgett
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
 //   77         which track writes the stereo scope (index + 2; 0 none)
+//   78         moving while ChannelView is learning a plugin: no zero is
+//              measured meanwhile (THE ZERO POINT)
 //
 // THE PROBE BLOCK, at 0x100000 + (track index + 1) * 128.
 //   The scripts write:
@@ -298,10 +300,11 @@ author: Tim Shadgett
 //   going in, dBFS. A third of the cost of the tap's filterbank.
 //
 // THE ZERO POINT: MEASURED WHILE STOPPED
-//   Every time playback stops, the pre probe feeds a quiet test signal
-//   into the chain -- pink noise, one second at -60 dBFS and one at -50 --
-//   and the post probe silences its own output while it does, so nothing
-//   is heard and Track Analyser sees nothing. Quiet enough that no
+//   When a tap has no zero yet, or its plugin has been touched since, the
+//   pre probe feeds a quiet test signal into the chain while stopped --
+//   pink noise, one second at -60 dBFS and one at -50 -- and the post
+//   probe silences its own output while it does, so nothing is heard and
+//   Track Analyser sees nothing. Once per change, not at every stop. Quiet enough that no
 //   compressor set for music is working on it, so what each tap sees then
 //   -- every band's after/before ratio -- is the plugin with NO reduction:
 //   its make-up, its static EQ, its saturation's small-signal gain. That
@@ -316,15 +319,23 @@ author: Tim Shadgett
 //   It waits for a second of silence at both probes first (the music's
 //   end, and the compressor's release, have to clear), stops the moment
 //   playback starts or anything arrives at either probe, and is only done
-//   for a pre probe ChannelView has armed (cal_arm). A run interrupted
-//   keeps the zero there was. The zero survives play and stop: ext_noinit
+//   for a pre probe ChannelView has armed (cal_arm: not on a track armed
+//   to record) and never while gmem[78] moves (ChannelView learning a
+//   plugin). A run interrupted keeps the zero there was, and is tried
+//   again five seconds on. The zero survives play and stop: ext_noinit
 //   is set, so REAPER doesn't re-zero this plugin's memory on every
 //   transport change, which it otherwise does.
 //
 //   tap_calN, read-only: 0 never measured (the music baseline is in use),
 //   1 measured, 2 measured but the plugin was level-dependent at the test
 //   level, 3 measured but the plugin has been touched since -- a make-up
-//   change moves the zero, and the next stop measures it again. A touch
+//   change moves the zero, and it is measured again. 4: shut on the test
+//   signal (cut CAL_SHUT dB or more in every band, or to nothing), so no
+//   zero: the music baseline is in use. 5: that, and seen open on the
+//   music since (GATE_OPEN over its shut level): a gate or expander for
+//   certain. With nothing coming in, a gate's reading holds at its closed
+//   level -- its shut level under the music's baseline -- where any other
+//   plugin's falls to 0. A touch
 //   (tap_rstN) also resets the music baseline. A new routing
 //   (tap_gen bumped by ChannelView) forgets every zero: tap 1 may be a
 //   different plugin now.
@@ -445,6 +456,7 @@ out_pin:right
   // ring (L R pairs, here) and where it's published
   PB_ST = 25; PB_CORR = 122; PB_STM = 123; PB_STS = 124; PB_STCAP = 125;
   CTRL_STTRK = 77;
+  CTRL_NOZERO = 78; // moving: ChannelView is learning a plugin (THE ZERO POINT)
   STH_BASE = 0x340000; STP_BASE = 0x340010; STP_N = 512;
   STR_RING = 1600000;
   // levels per channel (LEVELS PER CHANNEL)
@@ -734,6 +746,8 @@ out_pin:right
   TS_RPOS = 340;                  // where the next sample goes in its ring (THE TEN BANDS, BY FFT)
   TS_LCP = 350;                   // levels per channel: peaks (in L, R, out L, R), then mean squares
   TS_LCR = 354;
+  TS_ZSH = 360; TS_ZSV = 370;     // a shut zero: each band's level when shut on the test signal, valid
+  TS_GATE = 380; TS_GOPEN = 381;  // a gate for certain (THE ZERO POINT), columns seen open
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -793,8 +807,12 @@ out_pin:right
   CAL_LOUD = 0.25;                // -12 dBFS at the post probe: not ours
   CAL_MINCOL = 100;
   CAL_MINBANDS = 5;
+  CAL_SHUT = -10;                 // dB: every band this far down on the test signal: shut on it
+  GATE_OPEN = 6;                  // dB over its shut level in most bands, while playing: open
+  GATE_COLS = 25;                 // columns seen open before it's a gate for certain
   cal_phase = 0; cal_t = 0; cal_quiet = 0; cal_since = 1000000000;
-  cal_was_playing = 0; cal_hb = 0; cal_phb = 0; cal_inpk = 0; cal_ppk = 0;
+  nz_last = gmem[CTRL_NOZERO]; nz_age = 1000000000; cal_held = 0;
+  cal_hb = 0; cal_phb = 0; cal_inpk = 0; cal_ppk = 0;
   cal_post_last = -1; cal_post_age = 1000000000;
   cal_pre_last = -1; cal_pre_age = 1000000000;
   cal_ph = 0; cal_pt = 0; cal_acc = 0; cal_mute = 0; cal_fails = 0;
@@ -1142,7 +1160,7 @@ out_pin:right
 
   // A column's worth of one tap: per-band ratio against its baseline,
   // the median across bands, the meter's ballistics.
-  function tapColumn(t) local(s, bi, pa, pb, pk, gate, r, d, n, j, g, zo) (
+  function tapColumn(t) local(s, bi, pa, pb, pk, gate, r, d, n, j, g, zo, sh, gv, go) (
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
     n = 0;
     // the bands due this column (THE TEN BANDS, BY FFT), staggered
@@ -1171,6 +1189,8 @@ out_pin:right
       bi = 0; loop(4, s[TS_MBG + bi] = max(0, s[TS_MBG + bi] - tap_rel); bi += 1; );
     ) : (
     zo = s[TS_HASCAL] > 0.5;
+    sh = zo && s[TS_CST] == 4 && s[TS_STALE] < 0.5;   // shut on the test signal
+    gv = 0; go = 0;
     bi = 0;
     loop(GRB_N,
       pa = s[TS_PA + bi];
@@ -1193,6 +1213,8 @@ out_pin:right
         // the measured zero where there is one, the music's baseline where not
         d = max(0, ((zo && s[TS_ZV + bi] > 0.5) ? s[TS_ZERO + bi] : s[TS_BS + bi]) - s[TS_SM + bi]);
         s[TS_MBD + bi] = d;
+        // shut on the test signal: open now, by GATE_OPEN or more?
+        (sh && s[TS_ZSV + bi] > 0.5) ? ( gv += 1; s[TS_SM + bi] - s[TS_ZSH + bi] >= GATE_OPEN ? go += 1; );
         // insertion into the sorted scratch
         j = n;
         while (j > 0 && s[TS_SORT + j - 1] > d) (
@@ -1206,9 +1228,35 @@ out_pin:right
     );
     g = n < 1 ? 0 : ((n & 1) ? s[TS_SORT + (n - 1) / 2]
                              : (s[TS_SORT + n / 2 - 1] + s[TS_SORT + n / 2]) * 0.5);
+    // Shut on the test signal and seen open on the music: a gate (or
+    // expander) for certain -- a plugin just turned down never opens.
+    (sh && s[TS_GATE] < 0.5 && gv >= 3 && go * 2 >= gv) ? (
+      s[TS_GOPEN] += 1;
+      s[TS_GOPEN] >= GATE_COLS ? s[TS_GATE] = 1;
+    );
+    // A gate for certain, and nothing coming in: it's shut. Its closed
+    // reading held: how far its shut level sits under the music's
+    // baseline, median across bands.
+    (n < 1 && sh && s[TS_GATE] > 0.5) ? (
+      bi = 0;
+      loop(GRB_N,
+        (s[TS_HB + bi] > 0.5 && s[TS_ZSV + bi] > 0.5) ? (
+          d = max(0, s[TS_BS + bi] - s[TS_ZSH + bi]);
+          j = n;
+          while (j > 0 && s[TS_SORT + j - 1] > d) ( s[TS_SORT + j] = s[TS_SORT + j - 1]; j -= 1; );
+          s[TS_SORT + j] = d;
+          n += 1;
+        );
+        bi += 1;
+      );
+      g = n < 1 ? 0 : ((n & 1) ? s[TS_SORT + (n - 1) / 2]
+                               : (s[TS_SORT + n / 2 - 1] + s[TS_SORT + n / 2]) * 0.5);
+    );
     g = min(g, 60);
     s[TS_LAST] = g;
-    s[TS_DISP] = max(g, s[TS_DISP] - tap_rel);
+    // (a gate for certain: the reading follows it, opening as fast as it
+    // shuts, rather than falling away from closed at the meter's release)
+    (sh && s[TS_GATE] > 0.5) ? s[TS_DISP] = g : s[TS_DISP] = max(g, s[TS_DISP] - tap_rel);
     t == tap_mb - 1 ? tapMB(s);
     );
   );
@@ -1229,19 +1277,23 @@ out_pin:right
   // ratios (a release still finishing, or a gate, only ever pulls a ratio
   // DOWN). Adopted when enough bands had signal; otherwise the old zero
   // stays. Returns 1 when adopted.
-  function calCommit(t) local(s, bi, na, nb, va, vb, za, zb, n, m, j, d) (
+  function calCommit(t) local(s, bi, na, nb, va, vb, za, zb, n, m, j, d, ni, zmax) (
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
     na = s[TS_NA]; nb = s[TS_NB];
-    n = 0; m = 0;
+    n = 0; m = 0; ni = 0; zmax = -1000;
     bi = 0;
     loop(GRB_N,
       va = na >= CAL_MINCOL && s[TS_AA + bi] > 0.000000000001 * na && s[TS_AB + bi] > 0.00000000000001 * na;
       vb = nb >= CAL_MINCOL && s[TS_BA + bi] > 0.000000000001 * nb && s[TS_BB + bi] > 0.00000000000001 * nb;
+      // (the test signal got in, whatever came out)
+      ((na >= CAL_MINCOL && s[TS_AA + bi] > 0.000000000001 * na) ||
+       (nb >= CAL_MINCOL && s[TS_BA + bi] > 0.000000000001 * nb)) ? ni += 1;
       va ? (za = 10 * log10(s[TS_AB + bi] / s[TS_AA + bi]));
       vb ? (zb = 10 * log10(s[TS_BB + bi] / s[TS_BA + bi]));
       (va || vb) ? (
         s[TS_ZT + bi] = (va && vb) ? max(za, zb) : (va ? za : zb);
         s[TS_ZTV + bi] = 1;
+        zmax = max(zmax, s[TS_ZT + bi]);
         n += 1;
         (va && vb) ? (
           d = zb - za;
@@ -1256,11 +1308,29 @@ out_pin:right
       ) : (s[TS_ZTV + bi] = 0);
       bi += 1;
     );
-    n >= CAL_MINBANDS ? (
+    s[TS_GATE] = 0; s[TS_GOPEN] = 0;
+    // Cut hard in every band, or to nothing: shut on the test signal (a
+    // gate, an expander -- or a plugin turned right down). That's no zero:
+    // the music's baseline is used, and its shut level kept, to tell a
+    // gate for certain once it opens (THE ZERO POINT).
+    ((n >= CAL_MINBANDS && zmax < CAL_SHUT) || (n < CAL_MINBANDS && ni >= CAL_MINBANDS)) ? (
+      bi = 0;
+      loop(GRB_N,
+        s[TS_ZV + bi] = 0;
+        s[TS_ZSH + bi] = s[TS_ZTV + bi] > 0.5 ? s[TS_ZT + bi] : -150;
+        s[TS_ZSV + bi] = 1;
+        bi += 1;
+      );
+      s[TS_HASCAL] = 1;
+      s[TS_STALE] = 0;
+      s[TS_CST] = 4;
+      1;
+    ) : n >= CAL_MINBANDS ? (
       bi = 0;
       loop(GRB_N,
         s[TS_ZERO + bi] = s[TS_ZT + bi];
         s[TS_ZV + bi] = s[TS_ZTV + bi];
+        s[TS_ZSV + bi] = 0;
         bi += 1;
       );
       d = m < 1 ? 0 : ((m & 1) ? s[TS_SORT + (m - 1) / 2]
@@ -1274,7 +1344,7 @@ out_pin:right
 
   function calState(t) local(s) (
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
-    s[TS_HASCAL] < 0.5 ? 0 : (s[TS_STALE] > 0.5 ? 3 : s[TS_CST]);
+    s[TS_HASCAL] < 0.5 ? 0 : (s[TS_STALE] > 0.5 ? 3 : (s[TS_CST] == 4 && s[TS_GATE] > 0.5 ? 5 : s[TS_CST]));
   );
 
   function tapReading(t) ( (TAP_BASE + t * TAP_STRIDE + TAP_S)[TS_DISP]; );
@@ -1632,6 +1702,7 @@ out_pin:right
     t = 0;
     loop(TAP_MAX,
       (TAP_BASE + t * TAP_STRIDE + TAP_S)[TS_HASCAL] = 0;
+      (TAP_BASE + t * TAP_STRIDE + TAP_S)[TS_GATE] = 0;
       (TAP_BASE + t * TAP_STRIDE + TAP_S)[TS_STALE] = 0;
       t += 1;
     );
@@ -1646,13 +1717,16 @@ out_pin:right
     cp != cal_post_last ? ( cal_post_last = cp; cal_post_age = 0; ) : cal_post_age += samplesblock;
     // a post probe on this track, measuring taps, with a reader alive
     cal_ready = cal_post_age < srate * 0.25 && gmem[cal_slot + CS_CFG] > 0 && hb_age < srate * 3;
-    cal_play ? cal_was_playing = 1;
+    // something learning a plugin: no run (gmem[78] moving)
+    nz = gmem[CTRL_NOZERO];
+    nz != nz_last ? ( nz_last = nz; nz_age = 0; ) : nz_age += samplesblock;
+    cal_held = nz_age < srate;
     // what arrived in the block just gone, at either probe
     cal_loud = cal_inpk > CAL_QUIET_PRE || gmem[cal_slot + CS_ABORT] > 0;
     (cal_loud || gmem[cal_slot + CS_POSTPK] > CAL_QUIET_POST) ? cal_quiet = 0 : cal_quiet += samplesblock;
     cal_inpk = 0;
     cal_phase > 0 ? (
-      (cal_play || !cal_ready || cal_loud) ? (
+      (cal_play || !cal_ready || cal_loud || cal_held) ? (
         cal_phase = 0; cal_t = 0; cal_since = 0;    // the post throws the run away
       ) : (
         cal_t += samplesblock;
@@ -1666,10 +1740,10 @@ out_pin:right
       );
     ) : (
       cal_since += samplesblock;
-      // after every stop; while stopped, when the post asks, now and then
-      (!cal_play && cal_ready && cal_quiet >= CAL_WAIT * srate &&
-       (cal_was_playing || (gmem[cal_slot + CS_REQ] > 0 && cal_since >= CAL_GAP * srate))) ? (
-        cal_was_playing = 0;
+      // while stopped, when the post asks (a tap with no zero, or touched
+      // since), five seconds after the last try
+      (!cal_play && cal_ready && !cal_held && cal_quiet >= CAL_WAIT * srate &&
+       gmem[cal_slot + CS_REQ] > 0 && cal_since >= CAL_GAP * srate) ? (
         cal_phase = 1; cal_t = 0;
         kb0 = kb1 = kb2 = 0;
       );

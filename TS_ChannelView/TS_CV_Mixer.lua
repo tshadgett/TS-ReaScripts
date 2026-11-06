@@ -82,10 +82,10 @@ function MX.bay_lift(ctx)
   return bay_h
 end
 
--- Set by TS_CV_TrackStrip.request_scroll() when the selection changed
--- from outside this window (the arrange view, the track manager). Read
--- and cleared here, in channel view only -- the mixer doesn't chase a
--- selection made elsewhere, only the name row does.
+-- Set by TS_CV_TrackStrip.request_scroll() when the track ChannelView
+-- shows changed. Read and cleared in MX.draw_row: channel view centres
+-- that track's name button; mixer view scrolls only as far as it takes
+-- to bring the strip into view, so a strip clicked here doesn't move.
 MX.scroll_to_sel = false
 
 -- True when a track in the row has an icon; see MX.tracks().
@@ -150,6 +150,40 @@ function MX.tracks()
       }
     end
   end
+  -- Folder borders (C.fold_bw): each folder's first and last track in
+  -- the row. t.lbars, the folders whose bar goes down its left, outermost
+  -- first; t.rbars, those down its right, innermost first. A folder's
+  -- tracks hidden from the mixer are passed over; its children hidden
+  -- by the folder leave both bars on the parent.
+  if C.fold_bw() > 0 then
+    local at, stack = {}, {}
+    for li, t in ipairs(out) do if t.num > 0 then at[t.num] = li end end
+    local function add(li, side, f)
+      local t = out[li]
+      t[side] = t[side] or {}
+      table.insert(t[side], f)
+    end
+    for k = 1, #depths do
+      local li = at[k]
+      if li then for _, f in ipairs(stack) do f.first = f.first or li; f.last = li end end
+      local d = depths[k] or 0
+      if d > 0 then
+        stack[#stack + 1] = { k = k, col = U.track_colour(reaper.GetTrack(0, k - 1), 0xff), first = li, last = li }
+      elseif d < 0 then
+        for _ = 1, -d do
+          local f = table.remove(stack)
+          if f and f.first then add(f.first, "lbars", f); add(f.last, "rbars", f) end
+        end
+      end
+    end
+    for _, f in ipairs(stack) do if f.first then add(f.first, "lbars", f); add(f.last, "rbars", f) end end
+    -- (closed innermost first: the left ones the other way round)
+    for _, t in ipairs(out) do
+      local l = t.lbars
+      if l then for a = 1, #l // 2 do l[a], l[#l + 1 - a] = l[#l + 1 - a], l[a] end end
+    end
+  end
+
   -- Whether the row needs its icon strip (read at the start of the next
   -- frame, see C.set_icon_row).
   local any = false
@@ -548,6 +582,16 @@ end
 -- Returns the track to open in channel view (the strip's own body was
 -- double-clicked), and the track a name-button double-click wants opened
 -- -- which may be the same track, or nil, independently.
+-- A folder border against a strip or name button (C.fold_bw): painted
+-- over its outline on that side, so the bar and it meet with nothing
+-- between.
+function MX.fold_edges(dl, t, x, y, w, h)
+  if C.fold_bw() <= 0 then return end
+  local lb, rb = t.lbars and t.lbars[#t.lbars], t.rbars and t.rbars[1]
+  if lb then ImGui.DrawList_AddRectFilled(dl, x, y, x + 2, y + h, lb.col or C.COL.header_bg) end
+  if rb then ImGui.DrawList_AddRectFilled(dl, x + w - 2, y, x + w, y + h, rb.col or C.COL.header_bg) end
+end
+
 local function column(ctx, t, avail_h, cur_track, lift)
   local collapsed = t.folded or St.is_collapsed("mx:" .. t.guid)
   local w = MX.col_width(t.guid, t.folded, t.track)
@@ -673,6 +717,7 @@ local function column(ctx, t, avail_h, cur_track, lift)
     if nb_hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
     if nb_dbl then dbl_name = t.track end
     if nb_menu then TM.open_context(t.track) end
+    MX.fold_edges(dl, t, x, y, ww, strip_h + name_gap + C.STRIP_H - 8)
 
     ImGui.EndChild(ctx)
   else
@@ -857,15 +902,25 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
       x_off = x_off + gap
       ImGui.SetCursorPos(ctx, x_off, row_y)
 
-      if i > 1 and t.space then
-        -- And the same hairline down the middle of it. The gap alone
-        -- reads as a gap; the rule says somebody MEANT it. Drawn at a
-        -- half pixel so it lands on one column rather than straddling
-        -- two.
-        local bx, by = ImGui.GetCursorScreenPos(ctx)
-        local rx = math.floor(bx - gap * 0.5) + 0.5
-        ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx),
-          rx, by + 2, rx, by + inner_h - 2, C.COL.panel_border, 1.0)
+      -- folder borders down its left, against the strip: as tall as the
+      -- strip and its name button (just the button in channel view)
+      local bw = C.fold_bw()
+      local bar_h = strips and (inner_h - lift - 4) or (C.STRIP_H - 8)
+      -- (the one against the strip runs on under it by its rounding, so
+      -- its corners there show the bar, not a gap)
+      local function fold_bar(f, left, against)
+        local bx = math.floor(org_x + x_off)
+        local under = against and (math.ceil(C.STRIP_ROUND) + 1) or 0
+        local x1, x2 = bx, bx + bw
+        if left then x2 = x2 + under else x1 = x1 - under end
+        ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx), x1, org_y, x2, org_y + bar_h,
+          f.col or C.COL.header_bg, math.min(C.STRIP_ROUND, bw - 1),
+          left and ImGui.DrawFlags_RoundCornersLeft or ImGui.DrawFlags_RoundCornersRight)
+        x_off = x_off + bw
+      end
+      if bw > 0 and t.lbars then
+        for k, f in ipairs(t.lbars) do fold_bar(f, true, k == #t.lbars) end
+        ImGui.SetCursorPos(ctx, x_off, row_y)
       end
 
       local w = MX.col_width(t.guid, t.folded, t.track)
@@ -873,6 +928,15 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
                            track = t.track, name = track_label(t) }
 
       if strips then
+        if MX.scroll_to_sel and t.track == cur_track then
+          local sx, vw = ImGui.GetScrollX(ctx), ImGui.GetWindowWidth(ctx)
+          if x_off < sx then
+            ImGui.SetScrollX(ctx, x_off)
+          elseif x_off + w > sx + vw then
+            ImGui.SetScrollX(ctx, math.max(0, x_off + w - vw))
+          end
+          MX.scroll_to_sel = false
+        end
         local want, dbl = column(ctx, t, inner_h, cur_track, lift)
         if want then open_it = want end
         if dbl  then dbl_track = dbl end
@@ -884,16 +948,15 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
         -- blank track (C.COL.header_bg, the resolved theme colour), not
         -- a hardcoded guess at it, so a blank track is the same grey in
         -- both views.
+        local nbx, nby = ImGui.GetCursorScreenPos(ctx)
         local hit, dbl, menu = name_button(ctx, track_label(t),
           t.col or C.COL.header_bg, selected, t.guid, w, t)
+        MX.fold_edges(ImGui.GetWindowDrawList(ctx), t, math.floor(nbx), nby, math.floor(nbx + w) - math.floor(nbx), C.STRIP_H - 8)
         if hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
         if dbl then dbl_track = t.track end
         if menu then TM.open_context(t.track) end
         -- Bring a selection made elsewhere (the arrange view, the track
-        -- manager) into view. Mixer view doesn't chase this -- it has
-        -- its own scrollbar to drag, and a strip disappearing off to
-        -- follow a selection made somewhere else is a bigger jump than
-        -- a name button doing the same.
+        -- manager) into view.
         if selected and MX.scroll_to_sel then
           ImGui.SetScrollHereX(ctx, 0.5)
           MX.scroll_to_sel = false
@@ -901,7 +964,12 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
       end
 
       x_off = x_off + w
+      if bw > 0 and t.rbars then
+        for k, f in ipairs(t.rbars) do fold_bar(f, false, k == 1) end
+      end
     end
+    -- the shown track may not be in the row (inside a folded folder)
+    if strips then MX.scroll_to_sel = false end
 
     -- The insert tile, after the last track: as tall as a strip in mixer
     -- view, as tall as a name button in channel view. It inserts after

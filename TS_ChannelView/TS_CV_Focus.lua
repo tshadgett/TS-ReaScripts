@@ -12,7 +12,9 @@
   Not while the keyboard is still wanted here: a text field being typed
   in, a menu or dialog that's open, a drag in progress. Those keep focus
   until they finish, and focus goes back then. Only ever after a click in
-  this window -- nothing here takes focus away from anywhere else.
+  this window -- nothing here takes focus away from anywhere else. Nor
+  after a click that opened one of REAPER's own windows (F.leave): its
+  routing window closes as soon as it loses focus.
 
   Where focus goes back to decides what REAPER's actions work on, as a
   click in REAPER's own windows would: a click that selects a track in
@@ -99,6 +101,12 @@ function F.tracks_next()
   state.tracks = true
 end
 
+-- This click opened a window of REAPER's that keeps the focus (the
+-- routing window): no hand-back for it.
+function F.leave()
+  state.leave = true
+end
+
 -- The hand-back itself, to wherever `s` says.
 function F.hand_back(s)
   local tracks = s.tracks
@@ -132,8 +140,10 @@ function F.update(ctx, ImGui, enabled)
     ImGui.PopupFlags_AnyPopupId | ImGui.PopupFlags_AnyPopupLevel)
   local busy = held or popup or active
   if F.step(state, { clicked = clicked, busy = busy, popup = popup }) then
-    F.hand_back(state)
+    if state.leave then state.tracks = nil
+    else F.hand_back(state) end
   end
+  if not busy then state.leave = nil end
 end
 
 return F

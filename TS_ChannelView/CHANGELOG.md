@@ -1,5 +1,80 @@
 # ChannelView — changelog
 
+## 4.0.0 — measured gain reduction, MIDI envelopes, Console setup
+
+### ChannelView
+
+- **Measured first:** on a track with a TS_TrackProbe pair, a plugin that
+  reports its own gain reduction is measured too, and its meter shows the
+  measured reading once the plugin's zero is measured. Many plugins'
+  own figures read 1–3 dB high. The drop-down next to *Gain reduction
+  meter* in the editor picks *Measured* or *The plugin's own*, for every
+  plugin that reports its own. A gate or expander keeps its own figure
+  (shut on the quiet test signal, it can't show its zero), and so does a
+  multiband compressor, de-esser or dynamic EQ.
+- **TS_TrackProbe 2.5.0:** the zero is measured while stopped when a
+  plugin is first measured and after it's touched, not at every stop, and
+  never on a track armed to record. A measured gate is recognised: its
+  zero comes from the music, and while nothing comes in it shows closed
+  instead of falling to 0. Reopen a project after updating, so the new
+  probe runs.
+- **Fixed:** a measured plugin with latency (a lookahead limiter, a
+  linear-phase EQ) showed gain reduction that wasn't there.
+- **Fixed:** adding probes could stop a plugin with a sidechain input
+  working: Waves SSLComp and API-2500 keyed from the silent channels the
+  probes' copies add. Those inputs are unplugged while the probes are in.
+- Mixer view scrolls to a track selected somewhere else (the arrange
+  view, the track list) when its strip is out of view.
+- **Type a value** on more controls: Ctrl+click (Cmd+click on a Mac) a
+  drop-down to type a setting, by its name or its number (*-7* on a
+  semitone list), and a dual knob or XY pad to type into the part under
+  the pointer (the inner knob or the ring; X on the pad's left half, Y on
+  its right).
+- **Folder borders** (Visual Options ▸ Faders & strips): a bar in a
+  folder's colour down the left of its strip and the right of its last
+  track's, name buttons included, in mixer view and channel view's track
+  row. Nested folders get a pair each. The width is yours, 1–8 px.
+- **MIDI envelopes:** a MIDI modulator's Source can be *Envelope*,
+  *Envelope × velocity* or *Duck*: each note in its range sets off an
+  attack, decay, sustain and release (Duck dips and comes back). Drag
+  the curve's corners or turn the knobs; *Retrigger* or *Legato*, and
+  *Exp curve* for decay and release that fall away. *Notes from* takes
+  another track's notes for that modulator alone, through a MIDI send
+  the rest of this track never plays.
+- No line down the middle of a spacer's gap in mixer view.
+- **Fixed:** with a track soloed, the meters of the tracks the solo
+  silences kept moving. They now read nothing, as REAPER's own do.
+- **Fixed:** the default text size (13) didn't scale with Windows'
+  display scaling the way the other sizes do, so at 175 % it looked the
+  same as 12.
+- **Fixed:** the routing button on the Sends header closed REAPER's
+  routing window as soon as it opened.
+
+### ChannelView Pro
+
+- **Console setup** (View ▸ Console setup), for the console plugins you
+  own: Slate VCC, Waves NLS, Sonimus (A, N, S and T), The Analog Molecule
+  Deluxe with The Hot Summer Plus, and The Analog Molecule with The Hot
+  Summer. It puts the channel and bus plugins on your tracks and buses,
+  groups each bus's channels, gain stages the tracks to the level it
+  wants, and keeps new and moved tracks in step. Picks take effect on
+  Apply. A console panel in the channel view switches its type, drive,
+  in / out and A / B, and each bus's own type, group, noise and drive;
+  The Hot Summer's settings open in a flyout beside it.
+- The web page's mixer and track row show **folder borders** too.
+- The web page's MIDI modulators have the envelope sources and their settings.
+- **Measure** and **Learn** pause the probes' zero measurement while they
+  run, so its test noise isn't in what they measure.
+- **Learn** waits when REAPER's audio stops partway (REAPER in the
+  background with "Close audio device when stopped and application is
+  inactive"), instead of failing, and says so.
+- **Fixed:** virtual controls ignored their lit colour: always violet.
+- The **EQ curve** and **visualiser** components have a Remove button in
+  the layout editor, as the others do.
+- Right-clicking a control in **Edit layout** gives its layout edits even
+  when the layout is locked, and no longer offers the panel's own items
+  (Collapse, Move, Edit layout).
+
 ## 3.9.2 — toolbar colours
 
 ### ChannelView

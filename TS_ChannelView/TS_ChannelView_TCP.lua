@@ -641,7 +641,7 @@ local function draw_row_inner(dl, e, x, w, now)
     local lv, pk = {}, {}
     for i = 1, nch do
       local key = "tcp" .. e.guid .. "c" .. i
-      lv[i] = U.val2db(reaper.Track_GetPeakInfo(tr, i - 1))
+      lv[i] = U.val2db(U.track_peak(tr, i - 1))
       pk[i] = W.level_peak(key, lv[i], now)
     end
     W.level_meter_h(ctx, dl, cl, meter_y, mw, meter_h, lv, pk, nil)

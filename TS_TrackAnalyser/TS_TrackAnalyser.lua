@@ -2,11 +2,12 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.6.1
+-- @version 2.7.0
 -- @changelog
---  TS_TrackProbe 2.4.0: each plugin's left and right levels, and one
---  plugin's stereo picture, for ChannelView; plugins 5 to 8's traces no
---  longer clash with the TS_CV Trimmer. Reopen a project after updating.
+--  TS_TrackProbe 2.5.0: the zero is measured once per plugin change, not
+--  at every stop, and never on a track armed to record. A plugin that
+--  reports its own reduction shows the measured reading when ChannelView
+--  measures it. Reopen a project after updating.
 -- @about
 --  # Track Analyser
 --
@@ -3865,10 +3866,12 @@ local function frame()
         if src.est then
           local z = rigTrack and Strip.tapZero and Strip.tapZero(rigTrack, src.route)
           note = "measured by the post probe -- an estimate"
-            .. ((z == 1 and ", zero measured at the last stop")
+            .. ((z == 1 and ", zero measured")
              or (z == 2 and ", zero measured but level-dependent")
-             or (z == 3 and ", plugin touched since its zero")
-             or ", zero not measured yet: stop playback a moment")
+             or (z == 3 and ", plugin touched since: its zero is measured again once stopped")
+             or (z == 4 and ", shut on the test signal: zero learnt from the music")
+             or (z == 5 and ", a gate: zero learnt from the music, held shut through silence")
+             or ", zero not measured yet: it is once stopped and quiet")
         elseif not src.usable then
           note = "no VST3 reduction readout -- listed, not drawn"
         elseif src.active == false then

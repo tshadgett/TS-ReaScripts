@@ -1400,9 +1400,9 @@ end
 -- opts.snaps -- the plugin's own choices' places (0..1), when they're
 -- known: the knob lands only on those, which matters when a plugin reports
 -- a fine step but names only a few positions along it.
--- Ctrl+click (Cmd+click on a Mac) on a knob or fader asks for a value to
--- be typed (act.type_in) instead of starting a drag; held, it moves
--- nothing until it's let go.
+-- Ctrl+click (Cmd+click on a Mac) on a knob, fader, dual knob or XY pad
+-- asks for a value to be typed (act.type_in) instead of starting a drag;
+-- held, it moves nothing until it's let go.
 local typing_press = {}
 local function type_press(ctx, id, act, active)
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
@@ -1855,9 +1855,13 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
     right_click  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right),
     double_click = (hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left)) and zone() or nil,
   }
+  -- Ctrl+click: a value typed for the knob under the pointer ("inner" or
+  -- "outer" in act.type_in)
+  local typing = type_press(ctx, id, act, active)
+  if act.type_in then act.type_in = zone() end
   local c1, c2 = false, false
   local turning
-  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+  if active and not typing and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
     turning = dual_grab[id] or "outer"
     if turning == "inner" then
       local nv = W.drag_from(ctx, id .. ":in", v2)
@@ -1933,10 +1937,17 @@ function W.xypad(ctx, id, x, y, w, h, vx, vy, label, o)
     right_click  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right),
     double_click = hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
   }
+  -- Ctrl+click: a value typed for X (the pad's left half) or Y (its right),
+  -- "x" or "y" in act.type_in; the dot stays put
+  local typing = type_press(ctx, id, act, active)
+  if act.type_in then
+    local mx = ImGui.GetMousePos(ctx)
+    act.type_in = (mx > x + w * 0.5) and "y" or "x"
+  end
   local cx_, cy_ = false, false
   local shift = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0
   if ImGui.IsItemActivated(ctx) then xy_fine[id] = shift end
-  if active and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) and not act.double_click then
+  if active and not typing and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) and not act.double_click then
     local nx, ny
     if shift then
       local dx, dy = ImGui.GetMouseDelta(ctx)
@@ -2405,7 +2416,12 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   local mx = ImGui.GetMousePos(ctx)
   local zone = (wide and hovered) and ((mx < bx1 + aw) and -1 or (mx > bx2 - aw) and 1 or 0) or 0
 
-  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+  local mods_now = ImGui.GetKeyMods(ctx)
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left)
+     and ((mods_now & ImGui.Mod_Ctrl) ~= 0 or (mods_now & ImGui.Mod_Super) ~= 0) then
+    -- Ctrl+click (Cmd on a Mac): a setting typed in, for the caller
+    act.type_in, act.double_click = true, false
+  elseif ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
     if zone ~= 0 then
       -- an arrow: the previous or next choice, round from the end
       if opts.list_step then act.step, act.wrap = zone, true else bump(zone, true) end

@@ -1,14 +1,16 @@
 # Track Analyser — changelog
 
-## 2.6.1 — TS_TrackProbe 2.4.0
+## 2.7.0 — TS_TrackProbe 2.5.0
 
-- **TS_TrackProbe 2.4.0** also measures each plugin's left and right
-  levels apart, and one plugin's stereo picture (its correlation, mid and
-  side, and a scope), for ChannelView's stereo VU meters and Width
-  visualiser. Reopen a project after updating, so the new probe runs.
-- **Fixed:** with ChannelView's TS_CV Trimmer in the project, the
-  reduction traces of the fifth to eighth measured plugins on a track
-  could be disturbed by the Trimmer's meters (and the other way round).
+- **TS_TrackProbe 2.5.0:** the zero is measured while stopped when a
+  plugin is first measured and after it's touched, not at every stop, and
+  never on a track armed to record; a measured gate shows closed through
+  silence instead of falling to 0. A measured plugin with latency no
+  longer shows reduction that isn't there (with ChannelView 4.0). Reopen
+  a project after updating, so the new probe runs.
+- A plugin that reports its own gain reduction shows the probe's measured
+  reading once its zero is measured, when ChannelView measures it (its
+  meter set to *Measured*, the default). A gate or expander keeps its own.
 
 ## 2.6.0 — new look, TS_TrackProbe 2.3.0
 

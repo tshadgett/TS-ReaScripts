@@ -517,6 +517,24 @@ end
 -- read it again next time (Visual Options has just set it)
 function C.spacer_refresh() spacer_now = nil end
 
+-- Folder borders (Visual Options ▸ Faders & strips): a bar in a folder's
+-- colour down the left of its first track's strip and the right of its
+-- last's, this wide, 0 when off. Read every second, so the web page's
+-- bridge (another script) follows it too.
+C.FOLD_BW_DEFAULT, C.FOLD_BW_MAX = 3, 8
+local fold_now, fold_at = nil, -10
+function C.fold_bw()
+  local t = reaper.time_precise and reaper.time_precise() or 0
+  if fold_now and t - fold_at < 1 then return fold_now end
+  fold_at = t
+  local get = reaper.GetExtState or function() return "" end
+  local w = tonumber(get(C.EXT_SECT, "fold_bw")) or C.FOLD_BW_DEFAULT
+  fold_now = get(C.EXT_SECT, "fold_borders") == "1"
+    and math.max(1, math.min(C.FOLD_BW_MAX, math.floor(w))) or 0
+  return fold_now
+end
+function C.fold_refresh() fold_now = nil end
+
 -- ---------------------------------------------------------------------
 -- The TCP (TS_ChannelView_TCP.lua)
 -- ---------------------------------------------------------------------

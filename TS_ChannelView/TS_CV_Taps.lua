@@ -20,8 +20,12 @@
     * the plugin in front of the measured one also writes its output to
       the first pair -- the "before" copy -- and the measured plugin also
       writes its output to the second, the "after" copy
-    * the post probe's tap pins are pointed at both, told the plugin's
-      latency, and told how many taps are in use
+    * the post probe's tap pins are pointed at both and told how many
+      taps are in use (no delay for the plugin's latency: REAPER already
+      holds back the channels a plugin doesn't use by that much)
+    * a plugin's inputs past its first two lose the channels the track
+      only has because of the copies (a sidechain on 3/4 of a two-channel
+      track would key from them), and get them back when the probes go
 
   INSIDE CONTAINERS. A plugin between the probes is measured however deep
   it sits in containers. The copies use the same channel numbers at every
@@ -54,13 +58,15 @@
   only measures while something keeps gmem[73] moving, which TP.update
   does every frame.
 
-  THE ZERO. Each time playback stops, the pre probe plays a second of
-  quiet pink noise at two levels through the chain while the post probe
-  stays silent, and the taps take what they see as "no reduction" (see
-  THE ZERO POINT in TS_TrackProbe.jsfx). This module arms the pre probe
-  for that (cal_arm) while it has taps to serve, bumps tap_gen when the
-  routing is laid so old zeros are forgotten, and reads tap_calN back.
-  "Measure the zero while stopped" in Setup can turn it off everywhere.
+  THE ZERO. While stopped, for a tap with no zero yet or whose plugin was
+  touched since, the pre probe plays a second of quiet pink noise at two
+  levels through the chain while the post probe stays silent, and the
+  taps take what they see as "no reduction" (see THE ZERO POINT in
+  TS_TrackProbe.jsfx). This module arms the pre probe for that (cal_arm)
+  while it has taps to serve and the track isn't armed to record, bumps
+  tap_gen when the routing is laid so old zeros are forgotten, and reads
+  tap_calN back. "Measure the zero while stopped" in Setup can turn it
+  off everywhere; ChannelView learning a plugin holds it (TS_CV_Learn).
 --]]
 
 local U = require("TS_CV_Util")
@@ -76,12 +82,12 @@ TP.PROBE_NAME = "TS_TrackProbe"
 TP.MAX_TAPS   = 8    -- a probe that takes eight; older ones four
 TP.EXT_KEY    = "P_EXT:TS_CV_TAPS"
 
--- A tapped plugin's delay from input to output, samples, as the trace
--- measured it from the audio (TS_CV_Trace): used for its tap in place of
--- its reported latency. { [guid] = samples }
+-- How far a tapped plugin's output trails the copy of its input, samples,
+-- as the trace measured it from the audio (TS_CV_Trace): a latency it
+-- doesn't report. Its tap holds the input back by that. { [guid] = samples }
 -- Shared through ExtState TS_CV_WEB/lags ("guid=samples,..."): the window
 -- and the web bridge each re-check the routing, and a bridge that only
--- knew the reported latency would put it back every time the window laid
+-- didn't know it would put the tap back to none every time the window laid
 -- the measured one (Track Analyser starting over each time).
 TP.measured_lag = {}
 local lags_read = -10
@@ -139,6 +145,7 @@ TP.FINE_GM = 0x70000   -- its results, + track index * TP.FINE_GSTR (see the pro
 TP.FINE_GSTR = 128
 
 TP.ZERO_KEY = "tap_zero"   -- ExtState, "0" turns the stop-time zero off
+TP.READING_KEY = "gr_reading"   -- ExtState, "own": a reporting plugin shows its own figure
 
 TP.FIRST_CH  = 5    -- 1-based; 1/2 are the signal, 3/4 are sidechains
 TP.MAX_CH    = 64
@@ -420,12 +427,39 @@ end
 -- ReaEQ: an EQ has no reduction, and what the probe would "measure" is its
 -- curve's effect on the programme, which swings with every note. (A
 -- layout carrying Measure=1 for it is ignored.)
+-- Plugins that keep their own figure (when they report one): a gate or
+-- expander, shut on the probes' quiet test signal so it can't show its
+-- zero (the probe finds one that isn't laid out as one: THE ZERO POINT);
+-- and those whose reduction is in a band, not the whole signal -- a
+-- multiband compressor, a de-esser, a dynamic EQ -- where one figure
+-- across the spectrum says too little. By the layout's canvas, else the
+-- plugin's name.
+local OWN_NAMES = { "multiband", "multi%-band", "multi band", "de%-?ess", "pro%-mb", "pro%-ds",
+                    "xcomp", "dynamic eq", "dyn eq", "dyneq", "dynamiceq", "sibil",
+                    "gate", "expander", "pro%-g " }
+local function keeps_own(tr, addr, layout)
+  local cv = layout and layout.canvas
+  local k = cv and cv.kind
+  if k == "multi" or k == "deess" or k == "gate" then return true end
+  if k == "eq" then
+    for _, b in ipairs(cv.bands or {}) do if M.band_dynamic(b) then return true end end
+  end
+  local nm = fx_name(tr, addr):lower()
+  for _, p in ipairs(OWN_NAMES) do if nm:find(p) then return true end end
+  return false
+end
+TP._keeps_own = keeps_own
+
 local function wants_measure(tr, addr)
   local key = St.layout_key(fx_name(tr, addr), fx_guid(tr, addr), tr, addr)
   if RQ.is_eq(key) then return false end
   local layout = M.get(key)
-  if not (layout and (layout.measure == true or (M.has_vu and M.has_vu(layout, "gr")))) then return false end
-  return not TP.native_gr(tr, addr, fx_guid(tr, addr))
+  -- a plugin that reports its own reduction: measured too, when that's
+  -- what's shown (TP.measured_first; it takes the zero measured while stopped)
+  if TP.native_gr(tr, addr, fx_guid(tr, addr)) then
+    return TP.measured_first() and TP.zero_on() and not keeps_own(tr, addr, layout)
+  end
+  return layout ~= nil and (layout.measure == true or (M.has_vu and M.has_vu(layout, "gr")))
 end
 
 -- Whether a plugin's input and output levels are wanted (Levels=1, a VU
@@ -683,19 +717,18 @@ function TP.desired(tr)
     local lvl = not c.parallel
                 and (wants_levels(tr, a) or (not gr and wants_wave(tr, a)))
     if gr or lvl then
-      local ok, pdc = reaper.TrackFX_GetNamedConfigParm(tr, a, "pdc")
       local gs, pg = {}, {}
       for _, w in ipairs(c.writers) do gs[#gs + 1] = fx_guid(tr, w) end
       for _, ca in ipairs(c.path) do pg[#pg + 1] = fx_guid(tr, ca) end
       r.taps[#r.taps + 1] = {
         guid = fx_guid(tr, a), prev = table.concat(gs, "+"),
         addr = a, writers = c.writers, path = c.path, pathg = table.concat(pg, "+"),
-        -- how long the input is held back to sit on the output: as measured
-        -- from the audio when the trace has found it (a plugin's reported
-        -- latency can be wrong: one reporting none but 2048 samples out
-        -- reads as about 9 dB of reduction that isn't there), else as the
-        -- plugin reports
-        lag = TP.lag_of(fx_guid(tr, a)) or math.floor(tonumber(ok and pdc or 0) or 0),
+        -- how long the input is held back to sit on the output. REAPER
+        -- already delays the channels a plugin doesn't use by the latency
+        -- it reports, so the copy arrives in line: none, unless the trace
+        -- has measured otherwise from the audio (a plugin reporting none
+        -- but 2048 samples out reads as about 9 dB that isn't there)
+        lag = TP.lag_of(fx_guid(tr, a)) or 0,
         what = (gr and "g" or "") .. (lvl and "l" or ""),
       }
     end
@@ -845,11 +878,15 @@ local function read_holds(tr)
   local ok, s = reaper.GetSetMediaTrackInfo_String(tr, HOLD_KEY, "", false)
   local t = {}
   for e in ((ok and s) or ""):gmatch("[^;]+") do
-    local key, n0, gs = e:match("^([^|]+)|(%d+)|(.*)$")
+    local key, n0, gs, ps = e:match("^([^|]+)|(%d+)|([^|]*)|?(.*)$")
     if key then
-      local held = {}
+      local held, pins = {}, {}
       for g in gs:gmatch("[^,]+") do held[g] = true end
-      t[key] = { n0 = tonumber(n0), held = held }
+      for g, p, lo, hi in ps:gmatch("([^:+]+):(%d+):(%d+):(%d+)") do
+        pins[g] = pins[g] or {}
+        pins[g][tonumber(p)] = { tonumber(lo), tonumber(hi) }
+      end
+      t[key] = { n0 = tonumber(n0), held = held, pins = pins }
     end
   end
   return t
@@ -861,7 +898,13 @@ local function write_holds(tr, t)
     local gs = {}
     for g in pairs(h.held) do gs[#gs + 1] = g end
     table.sort(gs)
+    local ps = {}
+    for g, pins in pairs(h.pins or {}) do
+      for p, m in pairs(pins) do ps[#ps + 1] = ("%s:%d:%d:%d"):format(g, p, m[1], m[2]) end
+    end
+    table.sort(ps)
     parts[#parts + 1] = key .. "|" .. math.floor(h.n0) .. "|" .. table.concat(gs, ",")
+                        .. (#ps > 0 and ("|" .. table.concat(ps, "+")) or "")
   end
   table.sort(parts)
   reaper.GetSetMediaTrackInfo_String(tr, HOLD_KEY, table.concat(parts, ";"), true)
@@ -893,6 +936,42 @@ local function hold_items(tr, items, h)
   return any
 end
 
+-- Inputs past a level's own channels read nothing there; once the level
+-- is widened they read the new channels -- silence, or a copy. A plugin
+-- with a sidechain then keys from it and stops working (Waves SSLComp
+-- and API-2500 do). So, at a widened level, a plugin's inputs past its
+-- first two lose the channels past h.n0, noted in h.pins to be put back
+-- (h.pins[guid][pin] = { lo, hi } taken off). `dry`: only whether any
+-- would. True when any did.
+local function unplug_past(tr, items, h, dry)
+  local ml, mh = 0, 0
+  for ch = h.n0 + 1, TP.MAX_CH do
+    local bl, bh = TP.bit(ch)
+    ml, mh = ml | bl, mh | bh
+  end
+  local any = false
+  for _, a in ipairs(items) do
+    if not own_plugin(tr, a) and not container_count(tr, a) then
+      local nin = io_size(tr, a)
+      for p = 2, nin - 1 do
+        local lo, hi = get_pin(tr, a, false, p)
+        local rl, rh = lo & ml, hi & mh
+        if rl ~= 0 or rh ~= 0 then
+          any = true
+          if dry then return true end
+          set_pin(tr, a, false, p, lo & ~rl, hi & ~rh)
+          local g = fx_guid(tr, a)
+          h.pins = h.pins or {}
+          h.pins[g] = h.pins[g] or {}
+          local was = h.pins[g][p] or { 0, 0 }
+          h.pins[g][p] = { was[1] | rl, was[2] | rh }
+        end
+      end
+    end
+  end
+  return any
+end
+
 -- A level's channel count (the track's, `caddr` nil, or a container's).
 local function level_nch(tr, caddr)
   if caddr then return nconf(tr, caddr, "container_nch", 2) end
@@ -905,21 +984,28 @@ local function widen(tr, caddr, want)
   if n >= want then return end
   local t = read_holds(tr)
   local key = caddr and fx_guid(tr, caddr) or "TOP"
-  local h = t[key] or { n0 = n, held = {} }
+  local h = t[key] or { n0 = n, held = {}, pins = {} }
   t[key] = h
-  hold_items(tr, level_items(tr, caddr), h)
-  write_holds(tr, t)
+  local items = level_items(tr, caddr)
+  hold_items(tr, items, h)
+  -- before (a plugin takes a sidechain for connected once its channels
+  -- exist, Waves's do) and after (one that can't be held takes the new
+  -- channels as it grows)
+  unplug_past(tr, items, h)
   if caddr then reaper.TrackFX_SetNamedConfigParm(tr, caddr, "container_nch", tostring(want))
   else reaper.SetMediaTrackInfo_Value(tr, "I_NCHAN", want) end
+  unplug_past(tr, items, h)
+  write_holds(tr, t)
 end
 
 -- A plugin added since a level was widened, that follows the count, held
--- too (one undo step, only when there's one). True when it held any.
+-- too, and inputs past the level's channels unplugged (one undo step,
+-- only when there's one). True when it changed any.
 local function keep_held(tr)
   local t = read_holds(tr)
   if not next(t) then return false end
   local map
-  local todo = {}
+  local todo, unplug = {}, {}
   for key, h in pairs(t) do
     local caddr
     if key ~= "TOP" then
@@ -927,14 +1013,21 @@ local function keep_held(tr)
       caddr = map[key]
     end
     if key == "TOP" or caddr then
-      for _, a in ipairs(level_items(tr, caddr)) do
+      local items = level_items(tr, caddr)
+      for _, a in ipairs(items) do
         if not own_plugin(tr, a) and follows_count(tr, a) then todo[#todo + 1] = { a, h } end
       end
+      unplug[#unplug + 1] = { items, h }
     end
   end
-  if #todo == 0 then return false end
+  local any_unplug = false
+  for _, u in ipairs(unplug) do
+    if unplug_past(tr, u[1], u[2], true) then any_unplug = true; break end
+  end
+  if #todo == 0 and not any_unplug then return false end
   reaper.Undo_BeginBlock()
   for _, e in ipairs(todo) do hold_items(tr, { e[1] }, e[2]) end
+  for _, u in ipairs(unplug) do unplug_past(tr, u[1], u[2]) end
   write_holds(tr, t)
   reaper.Undo_EndBlock("ChannelView: keep plugins at the track's channels", -1)
   return true
@@ -966,6 +1059,19 @@ local function release_holds(tr)
         end
         for _, a in ipairs(level_items(tr, caddr)) do
           if h.held[fx_guid(tr, a)] then reaper.TrackFX_SetNamedConfigParm(tr, a, "channel_config", "0") end
+        end
+        -- the inputs unplugged while it was wide, back as they were
+        for g, pins in pairs(h.pins or {}) do
+          local a = map[g]
+          if a then
+            local nin = io_size(tr, a)
+            for p, m in pairs(pins) do
+              if p < nin then
+                local lo, hi = get_pin(tr, a, false, p)
+                set_pin(tr, a, false, p, lo | m[1], hi | m[2])
+              end
+            end
+          end
         end
         t[key] = nil
       end
@@ -1207,7 +1313,7 @@ local function lay(tr, want, lv)
   end
   -- New routing: whatever zeros the probe measured belonged to the old one.
   PL.set(tr, probe, "gen", 1, (math.floor(PL.get(tr, probe, "gen") or 0) + 1) % 1000000)
-  PL.set(tr, lv.items[lv.pre], "arm", 1, TP.zero_on() and 1 or 0)
+  PL.set(tr, lv.items[lv.pre], "arm", 1, TP.zero_wanted(tr) and 1 or 0)
   -- The channels were free when chosen; a plugin that follows the track's
   -- channel count has taken them since the count went up.
   clear_clobbers(tr, lv, want.taps)
@@ -1280,9 +1386,9 @@ function TP.sync(tr)
       changed = true
     end
     if TP.probe_has_levels(tr, probe) then PL.set(tr, probe, "nogr", 1, TP.nogr_mask(want.taps)) end
-    -- The pre probe armed for the zero, or not, as the setting says --
-    -- also arms routing that was laid without it.
-    PL.set(tr, pre, "arm", 1, TP.zero_on() and 1 or 0)
+    -- The pre probe armed for the zero, or not (the setting; a track armed
+    -- to record) -- also arms routing that was laid without it.
+    PL.set(tr, pre, "arm", 1, TP.zero_wanted(tr) and 1 or 0)
     if changed then write_record(tr, rec) end
     return held_new
   end
@@ -2053,24 +2159,80 @@ end
 -- One line on it, for tooltips.
 function TP.cal_text(st)
   if not TP.zero_on() then
-    return "Zero learnt from the music (stop measuring off in Setup)\n" ..
+    return "Zero learnt from the music (measuring it off in Setup)\n" ..
            "A compressor that never lets go reads low."
   end
-  if st == 1 then return "Zero measured at the last stop."
+  if st == 1 then return "Zero measured."
   elseif st == 2 then
-    return "Zero measured at the last stop; plugin was already working\n" ..
+    return "Zero measured; the plugin was already working\n" ..
            "on the test signal, so may read a little low."
   elseif st == 3 then
-    return "Zero measured at the last stop; plugin touched since.\n" ..
-           "Changed make-up or output gain? Stop to re-measure."
+    return "Plugin touched since: its zero is measured\n" ..
+           "again once stopped and quiet."
+  elseif st == 4 then
+    return "Shut on the test signal: zero learnt from the music."
+  elseif st == 5 then
+    return "A gate: zero learnt from the music,\n" ..
+           "its closed reading held through silence."
   end
-  return "Zero not measured yet: measured at each stop\n" ..
+  return "Zero not measured yet: it is once stopped and quiet\n" ..
          "(needs \"Run FX when stopped\"). Until then it may read low."
 end
 
 -- Whether the zero is measured while stopped. On unless turned off.
 function TP.zero_on()
   return reaper.GetExtState("TS_ChannelView", TP.ZERO_KEY) ~= "0"
+end
+
+-- Whether a track's pre probe is armed for the zero: as the setting says,
+-- and never on a track armed to record (its test noise would be in the take).
+function TP.zero_wanted(tr)
+  return TP.zero_on() and (reaper.GetMediaTrackInfo_Value(tr, "I_RECARM") or 0) ~= 1
+end
+
+-- What a plugin that reports its own reduction shows: the measured
+-- reading ("measured", the default) or its own figure ("own").
+function TP.measured_first()
+  return reaper.GetExtState("TS_ChannelView", TP.READING_KEY) ~= "own"
+end
+
+function TP.set_measured_first(on)
+  reaper.SetExtState("TS_ChannelView", TP.READING_KEY, on and "measured" or "own", true)
+  TP.invalidate()
+end
+
+-- A gate or expander reports reduction while stopped and silent: it's
+-- shut on the silence, and so on the test noise too -- the zero measured
+-- then is its shut level, and the measured reading would sit at 0. Such a
+-- plugin shows its own figure. Found once it reports TP.SHUT_DB or more
+-- for TP.SHUT_FOR seconds while stopped, its input under TP.QUIET_DB.
+-- { [guid] = true }, or a time while it's being watched for.
+TP.SHUT_DB, TP.SHUT_FOR, TP.QUIET_DB = 3, 1.5, -70
+local shut = {}
+
+-- The measured reading to show for a plugin that reports its own, or nil
+-- for its own figure: measured first, tapped, its zero measured (not
+-- touched since -- a make-up change would read as reduction), and not a
+-- gate shut on the silence. `own`: its own figure now, positive dB.
+function TP.measured_for_reporting(tr, guid, own)
+  if not tr or not TP.measured_first() then return nil end
+  local i, rd = tap_for(tr, guid, "g")
+  if not i or not rd.probe then return nil end
+  if shut[guid] == true then return nil end
+  if own then
+    local stopped = (reaper.GetPlayState() & 1) == 0
+    local quiet = (PL.get(tr, rd.probe, "inpk", i) or -150) < TP.QUIET_DB
+    if stopped and quiet and own >= TP.SHUT_DB then
+      local now = reaper.time_precise()
+      shut[guid] = shut[guid] or now
+      if now - shut[guid] >= TP.SHUT_FOR then shut[guid] = true; return nil end
+    else
+      shut[guid] = nil
+    end
+  end
+  local cs = TP.cal_status(tr, guid)
+  if cs ~= 1 and cs ~= 2 then return nil end
+  return TP.reading(tr, guid)
 end
 
 function TP.set_zero_on(on)
@@ -2097,8 +2259,7 @@ function TP.track_total(tr)
     for _, fx in ipairs(T.collect(tr)) do
       local nat = T.reports_gr_natively(tr, fx.addr, fx.guid)
       if nat or TP.is_tapped(tr, fx.guid) then
-        src.list[#src.list + 1] = { addr = fx.addr, guid = fx.guid,
-          name = U.fx_label(fx), est = not nat }
+        src.list[#src.list + 1] = { addr = fx.addr, guid = fx.guid, name = U.fx_label(fx) }
       end
     end
     sources[key] = src
@@ -2109,9 +2270,11 @@ function TP.track_total(tr)
   for _, s in ipairs(src.list) do
     local v = T.gain_reduction(tr, s.addr) or 0
     total = total + v
-    if s.est then est = true end
-    parts[#parts + 1] = { name = s.name, db = v, est = s.est,
-                          cal = s.est and TP.cal_status(tr, s.guid) or nil }
+    -- (measured or reported: a reporting plugin's changes with its zero)
+    local e = T.gr_estimated(tr, s.addr, s.guid)
+    if e then est = true end
+    parts[#parts + 1] = { name = s.name, db = v, est = e,
+                          cal = e and TP.cal_status(tr, s.guid) or nil }
   end
   return total, est, parts
 end
@@ -2122,7 +2285,7 @@ end
 
 -- A measured plugin was touched: its make-up or EQ may have moved, so the
 -- probe drops what it learnt from the music, and marks a measured zero as
--- touched-since (it's measured again at the next stop).
+-- touched-since (measured again once stopped and quiet).
 --
 -- On a current probe it goes through gmem, not a parameter, so "Tap 1
 -- relearn" never becomes REAPER's last touched parameter.

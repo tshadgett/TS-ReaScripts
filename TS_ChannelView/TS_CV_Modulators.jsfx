@@ -30,7 +30,15 @@ noindex: true
       13  Follower Floor
       14  Follower Ceiling
       15  Follower Gate
-      16  MIDI Source
+      16  MIDI Source: Velocity, Note, CC, Pitch bend, Aftertouch, and
+          the envelopes a note sets off -- Envelope, Envelope x velocity
+          (its peak the velocity), Duck (the envelope upside down: down
+          from 1 on each note, back over the release). An envelope uses
+          the Follower's Attack and Release, Floor as its Sustain
+          (-80..0 dB is 0..100 %) and Ceiling as its Decay (-60..12 is
+          0..2000 ms on a square scale); Gate On makes its decay and
+          release exponential, and Hold On (legato) starts it again only
+          from no notes held. Low and High note pick the notes it takes.
       17  MIDI Channel
       18  MIDI CC
       19  MIDI Low note
@@ -66,6 +74,9 @@ noindex: true
               bipolar 0.5), so each control it drives sits where it's set.
               Macros carry on.
     240 + n   Modulator n's bypass, the same for that one alone.
+    249       Trigger tracks: modulator n (bit n-1 set) takes its notes
+              only from another track's MIDI send, which arrives on MIDI
+              bus 8 + n and goes no further than this plugin.
 
   The idea of macros and modulators living in the chain, linked by
   REAPER's parameter modulation, comes from Saxmand's FX Modulator
@@ -104,7 +115,7 @@ slider29:m1_rel=200<0,2000,1>-Mod 1 Follower Release
 slider30:m1_floor=-48<-80,0,0.1>-Mod 1 Follower Floor
 slider31:m1_ceil=0<-60,12,0.1>-Mod 1 Follower Ceiling
 slider32:m1_gate=0<0,1,1{Off,On}>-Mod 1 Follower Gate
-slider33:m1_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 1 MIDI Source
+slider33:m1_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 1 MIDI Source
 slider34:m1_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 1 MIDI Channel
 slider35:m1_mcc=1<0,127,1>-Mod 1 MIDI CC
 slider36:m1_mlo=36<0,127,1>-Mod 1 MIDI Low note
@@ -126,7 +137,7 @@ slider51:m2_rel=200<0,2000,1>-Mod 2 Follower Release
 slider52:m2_floor=-48<-80,0,0.1>-Mod 2 Follower Floor
 slider53:m2_ceil=0<-60,12,0.1>-Mod 2 Follower Ceiling
 slider54:m2_gate=0<0,1,1{Off,On}>-Mod 2 Follower Gate
-slider55:m2_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 2 MIDI Source
+slider55:m2_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 2 MIDI Source
 slider56:m2_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 2 MIDI Channel
 slider57:m2_mcc=1<0,127,1>-Mod 2 MIDI CC
 slider58:m2_mlo=36<0,127,1>-Mod 2 MIDI Low note
@@ -148,7 +159,7 @@ slider73:m3_rel=200<0,2000,1>-Mod 3 Follower Release
 slider74:m3_floor=-48<-80,0,0.1>-Mod 3 Follower Floor
 slider75:m3_ceil=0<-60,12,0.1>-Mod 3 Follower Ceiling
 slider76:m3_gate=0<0,1,1{Off,On}>-Mod 3 Follower Gate
-slider77:m3_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 3 MIDI Source
+slider77:m3_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 3 MIDI Source
 slider78:m3_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 3 MIDI Channel
 slider79:m3_mcc=1<0,127,1>-Mod 3 MIDI CC
 slider80:m3_mlo=36<0,127,1>-Mod 3 MIDI Low note
@@ -170,7 +181,7 @@ slider95:m4_rel=200<0,2000,1>-Mod 4 Follower Release
 slider96:m4_floor=-48<-80,0,0.1>-Mod 4 Follower Floor
 slider97:m4_ceil=0<-60,12,0.1>-Mod 4 Follower Ceiling
 slider98:m4_gate=0<0,1,1{Off,On}>-Mod 4 Follower Gate
-slider99:m4_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 4 MIDI Source
+slider99:m4_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 4 MIDI Source
 slider100:m4_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 4 MIDI Channel
 slider101:m4_mcc=1<0,127,1>-Mod 4 MIDI CC
 slider102:m4_mlo=36<0,127,1>-Mod 4 MIDI Low note
@@ -192,7 +203,7 @@ slider117:m5_rel=200<0,2000,1>-Mod 5 Follower Release
 slider118:m5_floor=-48<-80,0,0.1>-Mod 5 Follower Floor
 slider119:m5_ceil=0<-60,12,0.1>-Mod 5 Follower Ceiling
 slider120:m5_gate=0<0,1,1{Off,On}>-Mod 5 Follower Gate
-slider121:m5_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 5 MIDI Source
+slider121:m5_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 5 MIDI Source
 slider122:m5_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 5 MIDI Channel
 slider123:m5_mcc=1<0,127,1>-Mod 5 MIDI CC
 slider124:m5_mlo=36<0,127,1>-Mod 5 MIDI Low note
@@ -214,7 +225,7 @@ slider139:m6_rel=200<0,2000,1>-Mod 6 Follower Release
 slider140:m6_floor=-48<-80,0,0.1>-Mod 6 Follower Floor
 slider141:m6_ceil=0<-60,12,0.1>-Mod 6 Follower Ceiling
 slider142:m6_gate=0<0,1,1{Off,On}>-Mod 6 Follower Gate
-slider143:m6_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 6 MIDI Source
+slider143:m6_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 6 MIDI Source
 slider144:m6_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 6 MIDI Channel
 slider145:m6_mcc=1<0,127,1>-Mod 6 MIDI CC
 slider146:m6_mlo=36<0,127,1>-Mod 6 MIDI Low note
@@ -236,7 +247,7 @@ slider161:m7_rel=200<0,2000,1>-Mod 7 Follower Release
 slider162:m7_floor=-48<-80,0,0.1>-Mod 7 Follower Floor
 slider163:m7_ceil=0<-60,12,0.1>-Mod 7 Follower Ceiling
 slider164:m7_gate=0<0,1,1{Off,On}>-Mod 7 Follower Gate
-slider165:m7_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 7 MIDI Source
+slider165:m7_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 7 MIDI Source
 slider166:m7_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 7 MIDI Channel
 slider167:m7_mcc=1<0,127,1>-Mod 7 MIDI CC
 slider168:m7_mlo=36<0,127,1>-Mod 7 MIDI Low note
@@ -258,7 +269,7 @@ slider183:m8_rel=200<0,2000,1>-Mod 8 Follower Release
 slider184:m8_floor=-48<-80,0,0.1>-Mod 8 Follower Floor
 slider185:m8_ceil=0<-60,12,0.1>-Mod 8 Follower Ceiling
 slider186:m8_gate=0<0,1,1{Off,On}>-Mod 8 Follower Gate
-slider187:m8_msrc=0<0,4,1{Velocity,Note,CC,Pitch bend,Aftertouch}>-Mod 8 MIDI Source
+slider187:m8_msrc=0<0,7,1{Velocity,Note,CC,Pitch bend,Aftertouch,Envelope,Envelope x velocity,Duck}>-Mod 8 MIDI Source
 slider188:m8_mch=0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>-Mod 8 MIDI Channel
 slider189:m8_mcc=1<0,127,1>-Mod 8 MIDI CC
 slider190:m8_mlo=36<0,127,1>-Mod 8 MIDI Low note
@@ -322,6 +333,7 @@ slider246:m5_byp=0<0,1,1{Off,On}>-Mod 5 Bypass
 slider247:m6_byp=0<0,1,1{Off,On}>-Mod 6 Bypass
 slider248:m7_byp=0<0,1,1{Off,On}>-Mod 7 Bypass
 slider249:m8_byp=0<0,1,1{Off,On}>-Mod 8 Bypass
+slider250:trig=0<0,255,1>-Trigger tracks
 
 in_pin:Input L
 in_pin:Input R
@@ -351,6 +363,10 @@ beats[0]=0.25; beats[1]=1/3; beats[2]=0.5; beats[3]=0.75; beats[4]=2/3; beats[5]
 beats[6]=1.5; beats[7]=4/3; beats[8]=2; beats[9]=3; beats[10]=8/3; beats[11]=4;
 beats[12]=6; beats[13]=8; beats[14]=16; beats[15]=32;
 mbuf = 4000;    // MIDI message buffer
+// a MIDI envelope's: stage (0 rest, 1 attack, 2 decay, 3 sustain, 4
+// release), level, peak, notes held, level its release began at
+estg = 3000; elev = 3100; epk = 3200; eheld = 3300; erl = 3400;
+ext_midi_bus = 1;   // a trigger track's notes come on a bus of their own
 nf = 0;
 
 // THE MATRIX: the moved settings, saved to put back (slider, value pairs)
@@ -436,11 +452,263 @@ function mx_restore() local(i) (
   mxn = 0;
 );
 
+// A MIDI envelope's message: a note in lo..hi starts it (legato: only
+// from no notes held) and lets it go when the last is let go; all notes
+// off lets it go.
+function env_midi(j, on, off, st, d1, d2, lo, hi, legato, byvel) (
+  st == 0xB0 && (d1 == 120 || d1 == 123) ? (
+    eheld[j] = 0;
+    estg[j] > 0 && estg[j] < 4 ? ( estg[j] = 4; erl[j] = elev[j]; );
+  ) : (d1 >= min(lo, hi) && d1 <= max(lo, hi)) ? (
+    on ? (
+      eheld[j] += 1;
+      (eheld[j] == 1 || !legato) ? ( epk[j] = byvel ? d2 / 127 : 1; estg[j] = 1; );
+    );
+    off ? (
+      eheld[j] = max(0, eheld[j] - 1);
+      eheld[j] == 0 && estg[j] > 0 && estg[j] < 4 ? ( estg[j] = 4; erl[j] = elev[j]; );
+    );
+  );
+);
+
+// A MIDI envelope's level after this block. `dc` and `fl` are the
+// Ceiling and Floor it keeps its Decay and Sustain in; `ex` exponential.
+function env_step(j, att, dc, fl, rel, ex) local(lv, pk, s, sus, dec, t) (
+  lv = elev[j]; pk = epk[j]; s = estg[j];
+  sus = max(0, min(1, (fl + 80) / 80));
+  t = max(0, min(1, (dc + 60) / 72)); dec = 2000 * t * t;
+  s == 1 ? (
+    att > 0 ? ( lv += pk * dt / (att * 0.001); ) : ( lv = pk; );
+    lv >= pk ? ( lv = pk; s = 2; );
+  );
+  s == 2 ? (
+    t = sus * pk;
+    dec > 0 && lv > t ? (
+      ex ? ( lv = t + (lv - t) * exp(-dt * 6.9 / (dec * 0.001)); )
+         : ( lv = max(t, lv - pk * (1 - sus) * dt / (dec * 0.001)); );
+      lv - t < 0.001 * pk + 0.0000001 ? ( lv = t; s = 3; );
+    ) : ( lv = t; s = 3; );
+  );
+  s == 4 ? (
+    rel > 0 ? (
+      ex ? ( lv *= exp(-dt * 6.9 / (rel * 0.001)); )
+         : ( lv = max(0, lv - max(erl[j], 0.000001) * dt / (rel * 0.001)); );
+      lv < 0.001 ? ( lv = 0; s = 0; );
+    ) : ( lv = 0; s = 0; );
+  );
+  elev[j] = lv; estg[j] = s;
+  lv;
+);
+
 @block
 dt = samplesblock / srate;
 playing = (play_state & 1) == 1;
-nf = 0; nm = 0;
+nf = 0;
 mx_apply_all();           // THE MATRIX: moved settings, for this block
+nm = (m1_type == 3) + (m2_type == 3) + (m3_type == 3) + (m4_type == 3)
+   + (m5_type == 3) + (m6_type == 3) + (m7_type == 3) + (m8_type == 3);
+
+// MIDI: everything passes through; the MIDI modulators read it
+nm > 0 ? (
+  while ((len = midirecv_buf(ofs, mbuf, 65536)) > 0) (
+    // a trigger track's (bus 9-16, a modulator set to take it): read here
+    // and no further; everything else passes through
+    tb = (midi_bus >= 8 && midi_bus <= 15) ? midi_bus - 7 : 0;
+    tb > 0 && !(trig & (2 ^ (tb - 1))) ? tb = 0;
+    tb == 0 ? midisend_buf(ofs, mbuf, len);
+    len <= 3 ? (
+      st = mbuf[0] & 0xF0; ch = (mbuf[0] & 0x0F) + 1;
+      d1 = mbuf[1]; d2 = mbuf[2];
+      on = st == 0x90 && d2 > 0;
+      off = st == 0x80 || (st == 0x90 && d2 == 0);
+
+      m1_type == 3 && ((trig & 1) ? tb == 1 : tb == 0) && (m1_mch < 0.5 || floor(m1_mch + 0.5) == ch) ? (
+        ms = floor(m1_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(0, on, off, st, d1, d2, m1_mlo, m1_mhi, m1_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[0] = d2 / 127; held[0] += 1; );
+          off ? (
+            held[0] = max(0, held[0] - 1);
+            held[0] == 0 && m1_mhold < 0.5 ? mu[0] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[0] = m1_mhi > m1_mlo ? max(0, min(1, (d1 - m1_mlo) / (m1_mhi - m1_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m1_mcc + 0.5) ? mu[0] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[0] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[0] = d1 / 127;
+          st == 0xA0 ? mu[0] = d2 / 127;
+        );
+      );
+
+
+      m2_type == 3 && ((trig & 2) ? tb == 2 : tb == 0) && (m2_mch < 0.5 || floor(m2_mch + 0.5) == ch) ? (
+        ms = floor(m2_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(1, on, off, st, d1, d2, m2_mlo, m2_mhi, m2_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[1] = d2 / 127; held[1] += 1; );
+          off ? (
+            held[1] = max(0, held[1] - 1);
+            held[1] == 0 && m2_mhold < 0.5 ? mu[1] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[1] = m2_mhi > m2_mlo ? max(0, min(1, (d1 - m2_mlo) / (m2_mhi - m2_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m2_mcc + 0.5) ? mu[1] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[1] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[1] = d1 / 127;
+          st == 0xA0 ? mu[1] = d2 / 127;
+        );
+      );
+
+
+      m3_type == 3 && ((trig & 4) ? tb == 3 : tb == 0) && (m3_mch < 0.5 || floor(m3_mch + 0.5) == ch) ? (
+        ms = floor(m3_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(2, on, off, st, d1, d2, m3_mlo, m3_mhi, m3_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[2] = d2 / 127; held[2] += 1; );
+          off ? (
+            held[2] = max(0, held[2] - 1);
+            held[2] == 0 && m3_mhold < 0.5 ? mu[2] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[2] = m3_mhi > m3_mlo ? max(0, min(1, (d1 - m3_mlo) / (m3_mhi - m3_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m3_mcc + 0.5) ? mu[2] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[2] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[2] = d1 / 127;
+          st == 0xA0 ? mu[2] = d2 / 127;
+        );
+      );
+
+
+      m4_type == 3 && ((trig & 8) ? tb == 4 : tb == 0) && (m4_mch < 0.5 || floor(m4_mch + 0.5) == ch) ? (
+        ms = floor(m4_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(3, on, off, st, d1, d2, m4_mlo, m4_mhi, m4_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[3] = d2 / 127; held[3] += 1; );
+          off ? (
+            held[3] = max(0, held[3] - 1);
+            held[3] == 0 && m4_mhold < 0.5 ? mu[3] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[3] = m4_mhi > m4_mlo ? max(0, min(1, (d1 - m4_mlo) / (m4_mhi - m4_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m4_mcc + 0.5) ? mu[3] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[3] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[3] = d1 / 127;
+          st == 0xA0 ? mu[3] = d2 / 127;
+        );
+      );
+
+
+      m5_type == 3 && ((trig & 16) ? tb == 5 : tb == 0) && (m5_mch < 0.5 || floor(m5_mch + 0.5) == ch) ? (
+        ms = floor(m5_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(4, on, off, st, d1, d2, m5_mlo, m5_mhi, m5_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[4] = d2 / 127; held[4] += 1; );
+          off ? (
+            held[4] = max(0, held[4] - 1);
+            held[4] == 0 && m5_mhold < 0.5 ? mu[4] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[4] = m5_mhi > m5_mlo ? max(0, min(1, (d1 - m5_mlo) / (m5_mhi - m5_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m5_mcc + 0.5) ? mu[4] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[4] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[4] = d1 / 127;
+          st == 0xA0 ? mu[4] = d2 / 127;
+        );
+      );
+
+
+      m6_type == 3 && ((trig & 32) ? tb == 6 : tb == 0) && (m6_mch < 0.5 || floor(m6_mch + 0.5) == ch) ? (
+        ms = floor(m6_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(5, on, off, st, d1, d2, m6_mlo, m6_mhi, m6_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[5] = d2 / 127; held[5] += 1; );
+          off ? (
+            held[5] = max(0, held[5] - 1);
+            held[5] == 0 && m6_mhold < 0.5 ? mu[5] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[5] = m6_mhi > m6_mlo ? max(0, min(1, (d1 - m6_mlo) / (m6_mhi - m6_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m6_mcc + 0.5) ? mu[5] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[5] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[5] = d1 / 127;
+          st == 0xA0 ? mu[5] = d2 / 127;
+        );
+      );
+
+
+      m7_type == 3 && ((trig & 64) ? tb == 7 : tb == 0) && (m7_mch < 0.5 || floor(m7_mch + 0.5) == ch) ? (
+        ms = floor(m7_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(6, on, off, st, d1, d2, m7_mlo, m7_mhi, m7_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[6] = d2 / 127; held[6] += 1; );
+          off ? (
+            held[6] = max(0, held[6] - 1);
+            held[6] == 0 && m7_mhold < 0.5 ? mu[6] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[6] = m7_mhi > m7_mlo ? max(0, min(1, (d1 - m7_mlo) / (m7_mhi - m7_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m7_mcc + 0.5) ? mu[6] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[6] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[6] = d1 / 127;
+          st == 0xA0 ? mu[6] = d2 / 127;
+        );
+      );
+
+
+      m8_type == 3 && ((trig & 128) ? tb == 8 : tb == 0) && (m8_mch < 0.5 || floor(m8_mch + 0.5) == ch) ? (
+        ms = floor(m8_msrc + 0.5);
+        ms >= 5 ? (
+          env_midi(7, on, off, st, d1, d2, m8_mlo, m8_mhi, m8_mhold >= 0.5, ms == 6);
+        ) : ms == 0 ? (
+          on ? ( mu[7] = d2 / 127; held[7] += 1; );
+          off ? (
+            held[7] = max(0, held[7] - 1);
+            held[7] == 0 && m8_mhold < 0.5 ? mu[7] = 0;
+          );
+        ) : ms == 1 ? (
+          on ? mu[7] = m8_mhi > m8_mlo ? max(0, min(1, (d1 - m8_mlo) / (m8_mhi - m8_mlo))) : 0;
+        ) : ms == 2 ? (
+          st == 0xB0 && d1 == floor(m8_mcc + 0.5) ? mu[7] = d2 / 127;
+        ) : ms == 3 ? (
+          st == 0xE0 ? mu[7] = (d2 * 128 + d1) / 16383;
+        ) : (
+          st == 0xD0 ? mu[7] = d1 / 127;
+          st == 0xA0 ? mu[7] = d2 / 127;
+        );
+      );
+
+    );
+  );
+);
+
 
 // ---- modulator 1
 m1_type == 1 ? (
@@ -484,8 +752,12 @@ m1_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m1_type == 3 ? (
-  isf[0] = 0; nm += 1;
-  u = mu[0];
+  isf[0] = 0;
+  ms = floor(m1_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(0, m1_att, m1_ceil, m1_floor, m1_rel, m1_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[0];
 ) : (
   isf[0] = 0;
   u = 0;
@@ -544,8 +816,12 @@ m2_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m2_type == 3 ? (
-  isf[1] = 0; nm += 1;
-  u = mu[1];
+  isf[1] = 0;
+  ms = floor(m2_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(1, m2_att, m2_ceil, m2_floor, m2_rel, m2_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[1];
 ) : (
   isf[1] = 0;
   u = 0;
@@ -604,8 +880,12 @@ m3_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m3_type == 3 ? (
-  isf[2] = 0; nm += 1;
-  u = mu[2];
+  isf[2] = 0;
+  ms = floor(m3_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(2, m3_att, m3_ceil, m3_floor, m3_rel, m3_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[2];
 ) : (
   isf[2] = 0;
   u = 0;
@@ -664,8 +944,12 @@ m4_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m4_type == 3 ? (
-  isf[3] = 0; nm += 1;
-  u = mu[3];
+  isf[3] = 0;
+  ms = floor(m4_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(3, m4_att, m4_ceil, m4_floor, m4_rel, m4_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[3];
 ) : (
   isf[3] = 0;
   u = 0;
@@ -724,8 +1008,12 @@ m5_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m5_type == 3 ? (
-  isf[4] = 0; nm += 1;
-  u = mu[4];
+  isf[4] = 0;
+  ms = floor(m5_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(4, m5_att, m5_ceil, m5_floor, m5_rel, m5_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[4];
 ) : (
   isf[4] = 0;
   u = 0;
@@ -784,8 +1072,12 @@ m6_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m6_type == 3 ? (
-  isf[5] = 0; nm += 1;
-  u = mu[5];
+  isf[5] = 0;
+  ms = floor(m6_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(5, m6_att, m6_ceil, m6_floor, m6_rel, m6_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[5];
 ) : (
   isf[5] = 0;
   u = 0;
@@ -844,8 +1136,12 @@ m7_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m7_type == 3 ? (
-  isf[6] = 0; nm += 1;
-  u = mu[6];
+  isf[6] = 0;
+  ms = floor(m7_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(6, m7_att, m7_ceil, m7_floor, m7_rel, m7_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[6];
 ) : (
   isf[6] = 0;
   u = 0;
@@ -904,8 +1200,12 @@ m8_type == 1 ? (
     u = max(0, min(1, u));
   );
 ) : m8_type == 3 ? (
-  isf[7] = 0; nm += 1;
-  u = mu[7];
+  isf[7] = 0;
+  ms = floor(m8_msrc + 0.5);
+  ms >= 5 ? (
+    u = env_step(7, m8_att, m8_ceil, m8_floor, m8_rel, m8_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : u = mu[7];
 ) : (
   isf[7] = 0;
   u = 0;
@@ -921,187 +1221,6 @@ m8_type >= 1 && byp_all < 0.5 && m8_byp < 0.5 ? (
   m8_outb = 0.5;
 );
 
-
-// MIDI: everything passes through; the MIDI modulators read it
-nm > 0 ? (
-  while ((len = midirecv_buf(ofs, mbuf, 65536)) > 0) (
-    midisend_buf(ofs, mbuf, len);
-    len <= 3 ? (
-      st = mbuf[0] & 0xF0; ch = (mbuf[0] & 0x0F) + 1;
-      d1 = mbuf[1]; d2 = mbuf[2];
-      on = st == 0x90 && d2 > 0;
-      off = st == 0x80 || (st == 0x90 && d2 == 0);
-
-      m1_type == 3 && (m1_mch < 0.5 || floor(m1_mch + 0.5) == ch) ? (
-        ms = floor(m1_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[0] = d2 / 127; held[0] += 1; );
-          off ? (
-            held[0] = max(0, held[0] - 1);
-            held[0] == 0 && m1_mhold < 0.5 ? mu[0] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[0] = m1_mhi > m1_mlo ? max(0, min(1, (d1 - m1_mlo) / (m1_mhi - m1_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m1_mcc + 0.5) ? mu[0] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[0] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[0] = d1 / 127;
-          st == 0xA0 ? mu[0] = d2 / 127;
-        );
-      );
-
-
-      m2_type == 3 && (m2_mch < 0.5 || floor(m2_mch + 0.5) == ch) ? (
-        ms = floor(m2_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[1] = d2 / 127; held[1] += 1; );
-          off ? (
-            held[1] = max(0, held[1] - 1);
-            held[1] == 0 && m2_mhold < 0.5 ? mu[1] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[1] = m2_mhi > m2_mlo ? max(0, min(1, (d1 - m2_mlo) / (m2_mhi - m2_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m2_mcc + 0.5) ? mu[1] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[1] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[1] = d1 / 127;
-          st == 0xA0 ? mu[1] = d2 / 127;
-        );
-      );
-
-
-      m3_type == 3 && (m3_mch < 0.5 || floor(m3_mch + 0.5) == ch) ? (
-        ms = floor(m3_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[2] = d2 / 127; held[2] += 1; );
-          off ? (
-            held[2] = max(0, held[2] - 1);
-            held[2] == 0 && m3_mhold < 0.5 ? mu[2] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[2] = m3_mhi > m3_mlo ? max(0, min(1, (d1 - m3_mlo) / (m3_mhi - m3_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m3_mcc + 0.5) ? mu[2] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[2] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[2] = d1 / 127;
-          st == 0xA0 ? mu[2] = d2 / 127;
-        );
-      );
-
-
-      m4_type == 3 && (m4_mch < 0.5 || floor(m4_mch + 0.5) == ch) ? (
-        ms = floor(m4_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[3] = d2 / 127; held[3] += 1; );
-          off ? (
-            held[3] = max(0, held[3] - 1);
-            held[3] == 0 && m4_mhold < 0.5 ? mu[3] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[3] = m4_mhi > m4_mlo ? max(0, min(1, (d1 - m4_mlo) / (m4_mhi - m4_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m4_mcc + 0.5) ? mu[3] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[3] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[3] = d1 / 127;
-          st == 0xA0 ? mu[3] = d2 / 127;
-        );
-      );
-
-
-      m5_type == 3 && (m5_mch < 0.5 || floor(m5_mch + 0.5) == ch) ? (
-        ms = floor(m5_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[4] = d2 / 127; held[4] += 1; );
-          off ? (
-            held[4] = max(0, held[4] - 1);
-            held[4] == 0 && m5_mhold < 0.5 ? mu[4] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[4] = m5_mhi > m5_mlo ? max(0, min(1, (d1 - m5_mlo) / (m5_mhi - m5_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m5_mcc + 0.5) ? mu[4] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[4] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[4] = d1 / 127;
-          st == 0xA0 ? mu[4] = d2 / 127;
-        );
-      );
-
-
-      m6_type == 3 && (m6_mch < 0.5 || floor(m6_mch + 0.5) == ch) ? (
-        ms = floor(m6_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[5] = d2 / 127; held[5] += 1; );
-          off ? (
-            held[5] = max(0, held[5] - 1);
-            held[5] == 0 && m6_mhold < 0.5 ? mu[5] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[5] = m6_mhi > m6_mlo ? max(0, min(1, (d1 - m6_mlo) / (m6_mhi - m6_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m6_mcc + 0.5) ? mu[5] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[5] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[5] = d1 / 127;
-          st == 0xA0 ? mu[5] = d2 / 127;
-        );
-      );
-
-
-      m7_type == 3 && (m7_mch < 0.5 || floor(m7_mch + 0.5) == ch) ? (
-        ms = floor(m7_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[6] = d2 / 127; held[6] += 1; );
-          off ? (
-            held[6] = max(0, held[6] - 1);
-            held[6] == 0 && m7_mhold < 0.5 ? mu[6] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[6] = m7_mhi > m7_mlo ? max(0, min(1, (d1 - m7_mlo) / (m7_mhi - m7_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m7_mcc + 0.5) ? mu[6] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[6] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[6] = d1 / 127;
-          st == 0xA0 ? mu[6] = d2 / 127;
-        );
-      );
-
-
-      m8_type == 3 && (m8_mch < 0.5 || floor(m8_mch + 0.5) == ch) ? (
-        ms = floor(m8_msrc + 0.5);
-        ms == 0 ? (
-          on ? ( mu[7] = d2 / 127; held[7] += 1; );
-          off ? (
-            held[7] = max(0, held[7] - 1);
-            held[7] == 0 && m8_mhold < 0.5 ? mu[7] = 0;
-          );
-        ) : ms == 1 ? (
-          on ? mu[7] = m8_mhi > m8_mlo ? max(0, min(1, (d1 - m8_mlo) / (m8_mhi - m8_mlo))) : 0;
-        ) : ms == 2 ? (
-          st == 0xB0 && d1 == floor(m8_mcc + 0.5) ? mu[7] = d2 / 127;
-        ) : ms == 3 ? (
-          st == 0xE0 ? mu[7] = (d2 * 128 + d1) / 16383;
-        ) : (
-          st == 0xD0 ? mu[7] = d1 / 127;
-          st == 0xA0 ? mu[7] = d2 / 127;
-        );
-      );
-
-    );
-  );
-);
 
 mx_restore();             // the knobs' own values back
 

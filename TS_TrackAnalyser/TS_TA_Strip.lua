@@ -154,8 +154,9 @@ M.TAP_GR_PARAM = 14          -- tap_gr1's slider index, 0-based
 M.TAP_CAL_PARAM = 18         -- tap_cal1's: where that tap's zero stands
 
 -- A tap's zero (THE ZERO POINT in TS_TrackProbe.jsfx): 0 not measured
--- yet, 1 measured at the last stop, 2 measured but the plugin was
--- level-dependent at the test level, 3 measured, plugin touched since.
+-- yet, 1 measured, 2 measured but the plugin was level-dependent at the
+-- test level, 3 measured, plugin touched since, 4 shut on the test
+-- signal (no zero: learnt from the music), 5 that and a gate for certain.
 -- nil when the route isn't a tap.
 function M.tapZero(tr, route)
   if not (route and route.kind == "tap" and route.probe) then return nil end
@@ -187,10 +188,19 @@ function M.tapIndex(tr, fx)
   return nil
 end
 
+-- What ChannelView shows for a plugin that reports its own reduction
+-- (its Setup: Measured, the default, or the plugin's own): followed here.
+function M.measuredFirst()
+  return r.GetExtState("TS_ChannelView", "gr_reading") ~= "own"
+end
+
 function M.reductionRoute(tr, fx)
   local ok, v = r.TrackFX_GetNamedConfigParm(tr, fx, M.GR_KEY)
   if ok and tonumber(v) then
-    return { kind = "named", key = M.GR_KEY, label = M.GR_KEY .. " (dB, direct)" }
+    -- measured as well (ChannelView taps it): the tap, once its zero is in
+    local ti = M.measuredFirst() and M.tapIndex(tr, fx) or nil
+    return { kind = "named", key = M.GR_KEY, tap = ti,
+             label = M.GR_KEY .. (ti and " (dB; measured once its zero is in)" or " (dB, direct)") }
   end
   local ti = M.tapIndex(tr, fx)
   if ti then
@@ -214,7 +224,27 @@ function M.readReduction(tr, fx, route, law)
     local n = ok and tonumber(v)
     if not n then return nil end
     -- Reported as the gain change: negative while reducing.
-    return math.max(0, -n)
+    local own = math.max(0, -n)
+    if route.tap and route.probe and not route.shut then
+      -- reporting reduction while stopped and silent: a gate shut on the
+      -- silence (and on the probe's test noise, so its measured zero is
+      -- its shut level): its own figure, as ChannelView does
+      local inpk = probeValue(tr, route.probe, "inpk", 25, route.tap) or -150
+      if (r.GetPlayState() & 1) == 0 and inpk < -70 and own >= 3 then
+        local now = r.time_precise()
+        route.shut_t = route.shut_t or now
+        if now - route.shut_t >= 1.5 then route.shut = true end
+      else
+        route.shut_t = nil
+      end
+      local z = probeValue(tr, route.probe, "cal", M.TAP_CAL_PARAM, route.tap)
+      z = z and math.floor(z + 0.5)
+      if not route.shut and (z == 1 or z == 2) then
+        local m = probeValue(tr, route.probe, "gr", M.TAP_GR_PARAM, route.tap)
+        if m then return math.max(0, m) end
+      end
+    end
+    return own
   end
   if route.kind == "tap" then
     if not route.probe then return nil end
@@ -277,7 +307,7 @@ function M.reductionSources(tr, chain, preIdx, postIdx)
       end
     elseif seen and not past and not fx.isContainer then
       local route = M.reductionRoute(tr, fx.idx)
-      if route and route.kind == "tap" then route.probe = postIdx end
+      if route and (route.kind == "tap" or route.tap) then route.probe = postIdx end
       if route then
         local p, nm = route.param, route.paramName
         -- A level meter on the same plugin is the reliable staleness test:
