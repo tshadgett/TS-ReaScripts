@@ -1297,9 +1297,15 @@ or following ChannelView's).
   the end), Shift+click back, the wheel along them — with an LED for each
   choice (an API 2500's *Thrust*). Under it in the same menu: *LEDs
   beside* (with the choices' names, or not), *LEDs over it* (the choice's
-  name on the button) or *No LEDs* (the name in the choice's colour), and
-  *Light up to it* to light every LED up to the choice's. Each LED lights
-  in its choice's colour (*Choice colours*), else the button's. Its Style
+  name on the button), *LEDs in a column over it* (their names on their
+  left) or *No LEDs* (the name in the choice's colour); then *Each its own
+  LED*, *Light up to it* (every LED up to the choice's) or *A pattern of
+  LEDs*. Each LED lights in its choice's colour (*Choice colours*), else
+  the button's. A pattern gives the button LEDs of its own, up to eight,
+  each with its name and colour, and each setting lights any of them (a
+  Distressor's *Detector*: HP, Band and Link, two at once for *HP + Link*).
+  It's guessed from the settings' names, and Edit layout sets it: the
+  LEDs, and a lamp for each setting and LED to click. Its Style
   is a button's, or a *Lamp button*, *Round button* or *Jewel lamp*. For 2
   to 16 choices; the editor has the same, and the web page shows it.
 - **Wide dropdowns.** Right-click a dropdown ▸ Look ▸ *Width*: one to

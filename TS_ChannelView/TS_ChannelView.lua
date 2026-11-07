@@ -3972,14 +3972,46 @@ local function control_menu()
             M.set(key, l); M.save()
           end
           ImGui.Indent(ctx, 10)
-          for _, o in ipairs({ { nil, "LEDs beside" }, { "over", "LEDs over it" }, { "none", "No LEDs" } }) do
+          for _, o in ipairs({ { nil, "LEDs beside" }, { "over", "LEDs over it" },
+                               { "column", "LEDs in a column over it" }, { "none", "No LEDs" } }) do
             if ImGui.MenuItem(ctx, o[2] .. "##stepleds", nil, c.leds == o[1]) then put("leds", o[1]) end
           end
-          if c.leds == nil and ImGui.MenuItem(ctx, "Their names", nil, c.ledn ~= false) then
+          if (c.leds == nil or c.leds == "column") and ImGui.MenuItem(ctx, "Their names", nil, c.ledn ~= false) then
             if c.ledn == false then put("ledn", nil) else put("ledn", false) end
           end
-          if c.leds ~= "none" and ImGui.MenuItem(ctx, "Light up to it", nil, c.upto == true) then
-            put("upto", (not c.upto) or nil)
+          if c.leds ~= "none" then
+            ImGui.Separator(ctx)
+            if ImGui.MenuItem(ctx, "Each its own LED", nil, not c.upto and not c.litp) then
+              local l = commit()
+              local lc = l.controls[idx]
+              if lc then lc.upto, lc.litp = nil, nil end
+              M.set(key, l); M.save()
+            end
+            if ImGui.MenuItem(ctx, "Light up to it", nil, c.upto == true and not c.litp) then
+              local l = commit()
+              local lc = l.controls[idx]
+              if lc then lc.upto, lc.litp = true, nil end
+              M.set(key, l); M.save()
+            end
+            if ImGui.MenuItem(ctx, "A pattern of LEDs", nil, c.litp == true) then
+              local l = commit()
+              local lc = l.controls[idx]
+              if lc then
+                lc.upto, lc.litp = nil, true
+                -- none yet: guessed from the choices' names
+                if not lc.pat then
+                  local list = M.choice_list(key, c.param, P.button_choices(app.track, fx.addr, c.param, key, c.nbtn),
+                                             app.track, fx.addr) or {}
+                  local nm = {}
+                  for i, e in ipairs(list) do nm[i] = e.text end
+                  lc.pat = M.step_guess(nm)
+                end
+              end
+              M.set(key, l); M.save()
+            end
+            if ImGui.IsItemHovered(ctx) then
+              ImGui.SetTooltip(ctx, "Its own LEDs, each setting lighting any of them.\nSet them in Edit layout.")
+            end
           end
           ImGui.Unindent(ctx, 10)
         end

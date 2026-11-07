@@ -119,8 +119,10 @@
   Buttons<n> shows dropdown n as buttons -- across, down, a grid, or one
   button that steps through them -- and keeps how many choices it had,
   which is how much room the buttons take. A step button's line goes on:
-  step|<n>|<beside, over or none: its LEDs>|<1/0: the LEDs' names>|<own
-  or upto: which LEDs light>.
+  step|<n>|<beside, over, column or none: its LEDs>|<1/0: the LEDs'
+  names>|<own, upto or pattern: which LEDs light>. A pattern's LEDs are
+  StepLeds<n>=<name>|<colour>;... (a lit colour's name or #rrggbb) and
+  what each choice lights StepLit<n>=<bits>,... (LED 1 the lowest bit).
   Back<n> is control n's own background, an inset or a faceplate, drawn
   over its section's; neighbours with the same one join into one shape.
   Brush<n> turns the brushed grain on (1) or off (0) for control n's
@@ -566,10 +568,83 @@ local function step_of(v)
   local parts = {}
   for f in (U.trim(v or "") .. "|"):gmatch("([^|]*)|") do parts[#parts + 1] = U.trim(f) end
   if parts[1] ~= "step" then return nil end
-  local where = (parts[3] == "over" or parts[3] == "none") and parts[3] or nil
-  return where, parts[4] ~= "0", parts[5] == "upto"
+  local where = (parts[3] == "over" or parts[3] == "none" or parts[3] == "column") and parts[3] or nil
+  return where, parts[4] ~= "0", parts[5] == "upto", parts[5] == "pattern"
 end
 M.step_of = step_of
+-- A step button's own LEDs and what each choice lights (StepLeds<n>,
+-- StepLit<n>): { leds = { { name =, col = }, ... }, lit = { bits, ... } },
+-- or nil.
+M.STEP_LEDS_MAX = 8
+function M.step_pat_of(leds_v, lit_v)
+  local leds = {}
+  for part in (U.trim(leds_v or "") .. ";"):gmatch("([^;]*);") do
+    local nm, col = part:match("^([^|]*)|?(.*)$")
+    nm = U.trim(nm or "")
+    if nm ~= "" or U.trim(col or "") ~= "" then
+      col = U.trim(col or "")
+      leds[#leds + 1] = { name = nm, col = (C.TOGGLE_COL[col] and col) or C.custom_key(col) or nil }
+    end
+    if #leds >= M.STEP_LEDS_MAX then break end
+  end
+  if #leds == 0 then return nil end
+  local lit = {}
+  for b in (U.trim(lit_v or "") .. ","):gmatch("([^,]*),") do
+    lit[#lit + 1] = math.floor(tonumber(U.trim(b)) or 0) & ((1 << #leds) - 1)
+  end
+  return { leds = leds, lit = lit }
+end
+function M.step_pat_lines(pat)
+  if not (pat and pat.leds and #pat.leds > 0) then return nil end
+  local l = {}
+  for i, e in ipairs(pat.leds) do
+    if i > M.STEP_LEDS_MAX then break end
+    l[i] = ((e.name or ""):gsub("[;|\r\n]", " ")) .. "|" .. (e.col or "")
+  end
+  local b = {}
+  for i, v in ipairs(pat.lit or {}) do b[i] = tostring(math.floor(v or 0)) end
+  return table.concat(l, ";"), table.concat(b, ",")
+end
+function M.copy_step_pat(pat)
+  if not pat then return nil end
+  local out = { leds = {}, lit = {} }
+  for i, e in ipairs(pat.leds or {}) do out.leds[i] = { name = e.name, col = e.col } end
+  for i, v in ipairs(pat.lit or {}) do out.lit[i] = v end
+  return out
+end
+-- LEDs and patterns guessed from a step button's choices' names: each
+-- name's parts ("HP + Link", "HP/Link", "HP & Link") an LED of its own, in
+-- the order they first come; "Off" or "None" lights nothing. Nil when
+-- there are none, or more than the LEDs it can have.
+local STEP_GUESS_COLS = { "green", "yellow", "red", "blue", "amber", "white" }
+function M.step_guess(names)
+  local leds, at, lit = {}, {}, {}
+  local function name_parts(t)
+    local out = {}
+    t = (t or ""):gsub("%s+[Aa][Nn][Dd]%s+", "+")
+    for p in (t .. "+"):gmatch("([^+&/,]*)[+&/,]") do
+      p = U.trim(p)
+      local lo = p:lower()
+      if p ~= "" and lo ~= "off" and lo ~= "none" and lo ~= "-" then out[#out + 1] = p end
+    end
+    return out
+  end
+  for i, t in ipairs(names or {}) do
+    local bits = 0
+    for _, p in ipairs(name_parts(t)) do
+      local k = p:lower()
+      if not at[k] then
+        if #leds >= M.STEP_LEDS_MAX then return nil end
+        leds[#leds + 1] = { name = p, col = STEP_GUESS_COLS[(#leds % #STEP_GUESS_COLS) + 1] }
+        at[k] = #leds
+      end
+      bits = bits | (1 << (at[k] - 1))
+    end
+    lit[i] = bits
+  end
+  if #leds == 0 then return nil end
+  return { leds = leds, lit = lit }
+end
 local function nbtn_of(v)
   local n = tonumber(U.trim(v or ""):match("|%s*(%d+)"))
   return (n and n >= 2 and n <= C.BUTTONS_MAX) and n or nil
@@ -2163,10 +2238,12 @@ local function parse_section(sect)
         local cc = controls[#controls]
         cc.size = combo_width_of(sect["Size" .. i])
         if cc.buttons == "step" then
-          local ledn
-          cc.leds, ledn, cc.upto = step_of(sect["Buttons" .. i])
+          local ledn, litp
+          cc.leds, ledn, cc.upto, litp = step_of(sect["Buttons" .. i])
           if ledn == false then cc.ledn = false end
           cc.upto = cc.upto or nil
+          cc.litp = litp or nil
+          cc.pat = M.step_pat_of(sect["StepLeds" .. i], sect["StepLit" .. i])
         end
       end
       -- a second parameter: an XY pad's Y, a concentric knob's inner one
@@ -2342,7 +2419,11 @@ local function serialize(layout)
     if c.buttons and buttons_of(c.buttons) and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
         .. ((c.buttons == "step") and ("|" .. (c.leds or "beside") .. "|" .. (c.ledn == false and "0" or "1")
-                                       .. "|" .. (c.upto and "upto" or "own")) or "")
+                                       .. "|" .. (c.litp and "pattern" or c.upto and "upto" or "own")) or "")
+      if c.buttons == "step" then
+        local a, b = M.step_pat_lines(c.pat)
+        if a then out["StepLeds" .. (i - 1)], out["StepLit" .. (i - 1)] = a, b end
+      end
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
     if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
@@ -3682,7 +3763,7 @@ function M.copy(layout)
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
-                        leds = c.leds, ledn = c.ledn, upto = c.upto,
+                        leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),
                         metal = c.metal, finish = c.finish, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,

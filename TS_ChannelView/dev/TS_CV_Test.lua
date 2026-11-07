@@ -262,6 +262,25 @@ do
   check("step button: 16 over it, as wide as they are", table.concat({ P_.button_span(b) }, "x"), "8x2")
   check("step button: no LEDs, one cell", table.concat({ P_.button_span({ type = "combo", buttons = "step", nbtn = 9, leds = "none" }) }, "x"), "2x2")
   M.remove(k); M.save(); M.reload()
+  -- its own LEDs (a Distressor's Detector): a column over it, a pattern
+  M.set(k, { controls = { { param = 3, type = "combo", buttons = "step", nbtn = 6, leds = "column", litp = true,
+    pat = { leds = { { name = "HP", col = "green" }, { name = "Band", col = "#e0c84a" }, { name = "Link", col = "red" } },
+            lit = { 0, 1, 2, 4, 5, 6 } } } } })
+  M.save(); M.reload()
+  local d = M.get(k).controls[1]
+  check("step pattern: a column, its own LEDs", tostring(d.leds) .. " " .. tostring(d.litp) .. " " .. (d.pat and #d.pat.leds or 0), "column true 3")
+  check("step pattern: names and colours", d.pat.leds[2].name .. " " .. d.pat.leds[2].col .. " " .. d.pat.leds[3].col, "Band #e0c84a red")
+  check("step pattern: what each lights", table.concat(d.pat.lit, ","), "0,1,2,4,5,6")
+  check("step pattern: kept by a copy", table.concat(M.copy(M.get(k)).controls[1].pat.lit, ","), "0,1,2,4,5,6")
+  check("step pattern: three LEDs tall, two cells wide", table.concat({ P_.button_span(d) }, "x"), "4x3")
+  M.remove(k); M.save(); M.reload()
+  local g = M.step_guess({ "Off", "HP", "Band", "Link", "HP + Link", "Band & Link" })
+  local gn = {}
+  for i, e in ipairs(g and g.leds or {}) do gn[i] = e.name end
+  check("step guess: an LED for each part", table.concat(gn, ","), "HP,Band,Link")
+  check("step guess: what each lights", g and table.concat(g.lit, ","), "0,1,2,4,5,6")
+  check("step guess: a plain list, one each", table.concat(M.step_guess({ "Norm", "Med", "Loud" }).lit, ","), "1,2,4")
+  check("step guess: nothing to light", M.step_guess({ "Off", "None" }), nil)
 end
 
 -- The make-up gain control (Makeup=) survives the ini and a copy.
@@ -8719,6 +8738,15 @@ do
     check("step: too short, all button", named(26), false)
     check("step: LEDs over it need more room", named(40, { leds = "over" }), false)
     check("step: no LEDs need less", named(40, { leds = "none" }), true)
+    -- its own LEDs: what the choice lights, in their colours
+    lamps = {}
+    local six = { { norm = 0, text = "Off" }, { norm = 0.2, text = "HP" }, { norm = 0.4, text = "Band" },
+                  { norm = 0.6, text = "Link" }, { norm = 0.8, text = "HP + Link" }, { norm = 1, text = "Band + Link" } }
+    W.button_row("ctx", "##det", "Detector", 0.8, six, { dir = "step", w = 100, h = 100, leds = "column",
+      pattern = { names = { "HP", "Band", "Link" }, cols = { 0x11, 0x22, 0x33 }, bits = { 0, 1, 2, 4, 5, 6 } } })
+    local lit2 = {}
+    for _, c in ipairs(lamps) do if c == 0x11 or c == 0x22 or c == 0x33 then lit2[#lit2 + 1] = c end end
+    check("step pattern: HP + Link lit", table.concat(lit2, ","), "17,51")
   end)
   check("step: draw ran", ok and true or err, true)
 end

@@ -2258,19 +2258,24 @@ end
 -- tooltip of whichever button is under the pointer.
 -- A step button (opts.dir "step"): one button that steps through the
 -- choices -- click for the next, round from the end, Shift+click back,
--- the wheel along them -- with a lamp for each: beside it (opts.leds nil,
--- with their names unless opts.ledn is false), over it ("over", the
--- choice's name on the cap) or none ("none", the name on the cap in its
--- colour). opts.upto: every lamp up to the choice's lights, not just its
--- own. Its face is a button's (W.button_face) or a push-button switch's
--- (lamp, round button, jewel lamp). Drawn under the name the row put up.
+-- the wheel along them -- with lamps: beside it (opts.leds nil, with
+-- their names unless opts.ledn is false), in a row over it ("over", the
+-- choice's name on the cap), in a column over it, names on their left
+-- ("column"), or none ("none", the name on the cap in its colour). A lamp
+-- for each choice, lit for its own (or every one up to it, opts.upto) in
+-- its colour; or the button's own lamps (opts.pattern: names, cols, and
+-- bits, what each choice lights). Its face is a button's (W.button_face)
+-- or a push-button switch's (lamp, round button, jewel lamp). Drawn under
+-- the name the row put up.
 local STEP_SWITCH = { lamp = true, roundbtn = true, jewel = true }
 W.STEP_SWITCH = STEP_SWITCH
--- How tall a step button's place has to be for its name over it: a button
--- 18 px tall at least, its lamps (8 px apart down its side, a row over
--- it) too. Shorter, it's all button, its name in the tooltip.
+-- How tall a step button's place has to be for its name over it, with
+-- `n` lamps: a button 18 px tall at least, its lamps (8 px apart down its
+-- side or over it, a row over it) too. Shorter, it's all button, its name
+-- in the tooltip.
 function W.step_named_h(o, n)
-  local body = (o.leds == "none") and 18 or (o.leds == "over") and 28 or math.max(18, (n or 2) * 8)
+  local body = (o.leds == "none") and 18 or (o.leds == "over") and 28
+    or (o.leds == "column") and ((n or 2) * 8 + 20) or math.max(18, (n or 2) * 8)
   return W.LABEL_H + C.LABEL_GAP + body
 end
 local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cur, opts)
@@ -2290,11 +2295,19 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
 
   local base_col = opts.on_col or C.COL.toggle_on
   local on_cols = opts.on_cols or {}
-  local function col_of(i) return on_cols[i] or base_col end
+  local pat = opts.pattern
+  -- the lamps: how many, each one's name, colour and whether it's lit
+  local m = pat and #pat.names or n
+  local function lamp_name(i) if pat then return pat.names[i] or "" end return choices[i].text or "" end
+  local function lamp_col(i) if pat then return pat.cols[i] or base_col end return on_cols[i] or base_col end
+  local function lamp_lit(i)
+    if pat then return (((pat.bits[cur] or 0) >> (i - 1)) & 1) == 1 end
+    return opts.upto and (i <= cur) or (i == cur)
+  end
   local where = opts.leds
-  local names = where == nil and opts.ledn ~= false
+  local names = (where == nil or where == "column") and opts.ledn ~= false
   local top, bot = opts.no_name and (y + 2) or (y + W.LABEL_H + C.LABEL_GAP), y + ch - 2
-  local cap_text = (where ~= nil or not names) and (choices[cur].text or "") or nil
+  local cap_text = (where == "over" or where == "none" or not names) and (choices[cur].text or "") or nil
 
   -- where the cap and the lamps go: a cap up to 26 px tall, centred in
   -- its room
@@ -2303,31 +2316,39 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
     return l, mid - hh, r, mid + hh
   end
   local bx1, by1, bx2, by2
-  local lamps = {}
+  local lamps, name_left = {}, false
   if where == "over" then
-    local sp = math.min(12, (cw - 8) / math.max(1, n))
-    local lx0 = x + cw * 0.5 - sp * (n - 1) * 0.5
-    for i = 1, n do lamps[i] = { lx0 + (i - 1) * sp, top + 5 } end
+    local sp = math.min(12, (cw - 8) / math.max(1, m))
+    local lx0 = x + cw * 0.5 - sp * (m - 1) * 0.5
+    for i = 1, m do lamps[i] = { lx0 + (i - 1) * sp, top + 5 } end
     bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + 12, bot)
+  elseif where == "column" then
+    -- a column over the cap, names on their left, as on the hardware
+    local sp = math.max(8, math.min(12, (bot - top - 20) / math.max(1, m)))
+    local lx = names and (x + cw - 9) or (x + cw * 0.5)
+    for i = 1, m do lamps[i] = { lx, top + 5 + (i - 1) * sp } end
+    name_left = names
+    bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + m * sp + 2, bot)
   elseif where == "none" then
     bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + 2, bot)
   else
     local capw = names and math.min(34, cw * 0.42) or math.max(20, cw - 22)
-    local sp = math.min(12, (bot - top) / math.max(1, n))
-    local ly0 = (top + bot) * 0.5 - sp * (n - 1) * 0.5
-    for i = 1, n do lamps[i] = { x + 13 + capw, ly0 + (i - 1) * sp } end
+    local sp = math.min(12, (bot - top) / math.max(1, m))
+    local ly0 = (top + bot) * 0.5 - sp * (m - 1) * 0.5
+    for i = 1, m do lamps[i] = { x + 13 + capw, ly0 + (i - 1) * sp } end
     bx1, by1, bx2, by2 = cap_in(x + 4, x + 4 + capw, top, bot)
   end
 
   local mx, my = ImGui.GetMousePos(ctx)
   local hot = hovered and mx >= bx1 and mx <= bx2 and my >= by1 and my <= by2
-  local ink_col = (where == "none") and (on_cols[cur] or nil) or nil
+  local ink_col = (where == "none" and not pat) and (on_cols[cur] or nil) or nil
+  local cap_col = pat and base_col or (on_cols[cur] or base_col)
   if STEP_SWITCH[opts.style or ""] then
-    SW.draw(ctx, dl, opts.style, bx1, by1, bx2, by2, true, col_of(cur), not C.EFFECT_3D,
+    SW.draw(ctx, dl, opts.style, bx1, by1, bx2, by2, true, cap_col, not C.EFFECT_3D,
       cap_text or "", hot, nil)
   else
     if W.FACED[opts.style or ""] then W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 2.0) end
-    local ink, dy, gcol = W.button_face(dl, bx1, by1, bx2, by2, 2.5, false, col_of(cur), opts.style, hot)
+    local ink, dy, gcol = W.button_face(dl, bx1, by1, bx2, by2, 2.5, false, cap_col, opts.style, hot)
     if not ink then
       ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
         hot and C.COL.knob_body_hi or C.COL.toggle_off, 2.5)
@@ -2343,19 +2364,20 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
     end
   end
 
-  -- the lamps, and their names beside them
+  -- the lamps, and their names beside them (or on their left)
   if where ~= "none" then
     if names then W.push_small(ctx) end
     for i, l in ipairs(lamps) do
-      local lit = opts.upto and (i <= cur) or (i == cur)
-      W.lamp(dl, l[1], l[2], lit and col_of(i) or false)
+      local lit = lamp_lit(i)
+      W.lamp(dl, l[1], l[2], lit and lamp_col(i) or false)
       if names then
-        local t = choices[i].text or ""
-        local room = x + cw - (l[1] + 7) - 1
+        local t = lamp_name(i)
+        local room = name_left and (l[1] - 7 - x - 1) or (x + cw - (l[1] + 7) - 1)
         if room > 6 then
           local tw, th = ImGui.CalcTextSize(ctx, t)
           while tw > room and #t > 1 do t = t:sub(1, -2); tw = ImGui.CalcTextSize(ctx, t) end
-          ImGui.DrawList_AddText(dl, l[1] + 7, l[2] - th * 0.5, i == cur and C.COL.header_text or C.COL.label, t)
+          local tx = name_left and (l[1] - 7 - tw) or (l[1] + 7)
+          ImGui.DrawList_AddText(dl, tx, l[2] - th * 0.5, lit and C.COL.header_text or C.COL.label, t)
         end
       end
     end
@@ -2384,7 +2406,8 @@ function W.button_row(ctx, id, label, value, choices, opts)
 
   local cx = x + cw * 0.5
   -- (a step button too short for its name over it: all button)
-  if opts.dir == "step" and ch < W.step_named_h(opts, math.min(#choices, opts.n or #choices)) then
+  if opts.dir == "step" and ch < W.step_named_h(opts, opts.pattern and #opts.pattern.names
+                                                   or math.min(#choices, opts.n or #choices)) then
     opts.no_name, opts.label = true, label
   else
     centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)

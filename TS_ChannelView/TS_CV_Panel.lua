@@ -178,16 +178,28 @@ local function hy(n) local v = n * C.CELL_H / 2; return math.tointeger(v) or v e
 -- small and ordinary. A dropdown shown as buttons (P.button_span) also
 -- answers "buttons" third, so the panel knows to draw it that way; one
 -- whose buttons won't fit the panel's height is an ordinary dropdown.
+-- A step button's own lamps (Lit: Pattern), for W.button_row's
+-- opts.pattern: their names, colours, and what each choice lights.
+function P.step_pattern(ctl)
+  if not (ctl.buttons == "step" and ctl.litp and ctl.pat and #ctl.pat.leds > 0) then return nil end
+  local p = { names = {}, cols = {}, bits = ctl.pat.lit or {} }
+  for i, e in ipairs(ctl.pat.leds) do p.names[i] = e.name or ""; p.cols[i] = W.lit_col(e.col) end
+  return p
+end
 function P.button_span(ctl)
   if ctl.type ~= "combo" or not ctl.buttons or not ctl.nbtn then return nil end
   local n = ctl.nbtn
   if ctl.buttons == "step" then
     -- lamps 12 px apart: down its side (with their names, two cells
-    -- wide), or across its top
+    -- wide), across its top, or in a column over it
+    local m = P.step_pattern(ctl) and #ctl.pat.leds or n
     if ctl.leds == "none" then return 2, 2 end
-    if ctl.leds == "over" then return math.max(2, math.ceil((n * 12 + 8) / (C.CELL_W / 2))), 2 end
-    return (ctl.ledn == false) and 2 or 4,
-      math.max(2, math.ceil((W.LABEL_H + C.LABEL_GAP + n * 12 + 4) / (C.CELL_H / 2)))
+    if ctl.leds == "over" then return math.max(2, math.ceil((m * 12 + 8) / (C.CELL_W / 2))), 2 end
+    local wide = (ctl.ledn == false) and 2 or 4
+    if ctl.leds == "column" then
+      return wide, math.max(2, math.ceil((W.LABEL_H + C.LABEL_GAP + m * 12 + 26) / (C.CELL_H / 2)))
+    end
+    return wide, math.max(2, math.ceil((W.LABEL_H + C.LABEL_GAP + m * 12 + 4) / (C.CELL_H / 2)))
   end
   if ctl.buttons == "across" then return math.max(2, n), 2 end
   if ctl.buttons == "grid" then
@@ -1242,7 +1254,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
     changed, nv, act = W.button_row(ctx, id, name, v, list,
       { dir = ctl.buttons, n = #list, w = hx(item.w), h = hy(item.h),
-        leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto,
+        leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl),
         tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
   elseif ctl.type == "combo" then
     local list = {}
@@ -3184,7 +3196,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         end
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
-            leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto,
+            leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl),
             tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" then
         -- Its list is read from the plugin when it's opened (and kept while

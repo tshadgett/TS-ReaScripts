@@ -841,26 +841,113 @@ draw_entry_body = function(ctx)
     if ST.button(ctx, "Clear##rgclr", "remove") then st.scratch.ranges[p] = nil end
     tip("Back to the plugin's own values.")
   end
-  -- a step button's lamps: where, their names, which light
+  -- a step button's lamps: where, their names, which light; and a
+  -- pattern's own LEDs, with what each choice lights
+  local function step_choice_names(c)
+    if M.is_virtual(c) then return M.vchoices(c) end
+    if not (st.track and st.fx and c.param) then return {} end
+    local P = require("TS_CV_Panel")
+    local list = M.choice_list(st.key, c.param, P.button_choices(st.track, st.fx.addr, c.param, st.key, c.nbtn),
+                               st.track, st.fx.addr) or {}
+    local out = {}
+    for i, e in ipairs(list) do out[i] = e.text or "" end
+    return out
+  end
+  local function led_colour(c, i, e)
+    local W = require("TS_CV_Widgets")
+    local col = W.lit_col(e.col) or C.COL.toggle_on
+    if ImGui.ColorButton(ctx, "Its colour##steplc" .. i, col, ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+      ImGui.OpenPopup(ctx, "##steplcp" .. i)
+    end
+    tip("Its colour")
+    if ImGui.BeginPopup(ctx, "##steplcp" .. i) then
+      for k, cp in ipairs(C.TOGGLE_COLS) do
+        if cp.col then
+          if k > 2 then ImGui.SameLine(ctx, 0, 4) end
+          if ImGui.ColorButton(ctx, cp.label .. "##steplcs" .. i .. cp.key, cp.col, 0, 18, 18) then
+            e.col = cp.key
+            ImGui.CloseCurrentPopup(ctx)
+          end
+        end
+      end
+      local rgb = col >> 8
+      local ch, v = ImGui.ColorPicker3(ctx, "##steplcpk" .. i, rgb, ImGui.ColorEditFlags_NoSidePreview)
+      if ch then e.col = ("#%06x"):format(v & 0xffffff) end
+      ImGui.EndPopup(ctx)
+    end
+  end
   local function step_rows(c)
     if c.buttons ~= "step" then return end
     row_name("LEDs")
-    local wi = (c.leds == "over") and 1 or (c.leds == "none") and 2 or 0
-    for i, o in ipairs({ { nil, "Beside" }, { "over", "Over it" }, { "none", "None" } }) do
+    local opts_w = { { nil, "Beside" }, { "over", "Over it" }, { "column", "Column" }, { "none", "None" } }
+    for i, o in ipairs(opts_w) do
       if i > 1 then ImGui.SameLine(ctx, 0, 2) end
-      if ImGui.RadioButton(ctx, o[2] .. "##stepleds" .. i, wi == i - 1) then c.leds = o[1] end
+      if ImGui.RadioButton(ctx, o[2] .. "##stepleds" .. i, c.leds == o[1]) then c.leds = o[1] end
     end
-    if c.leds == nil then
+    tip("Beside it; a row over it; a column over it, names on their left; none.")
+    if c.leds == nil or c.leds == "column" then
       row_name("LED names")
       local ch, v = ImGui.Checkbox(ctx, "##stepnames", c.ledn ~= false)
       if ch then if v then c.ledn = nil else c.ledn = false end end
     end
-    if c.leds ~= "none" then
-      row_name("Lit")
-      if ImGui.RadioButton(ctx, "Its own##steplit", not c.upto) then c.upto = nil end
-      ImGui.SameLine(ctx, 0, 2)
-      if ImGui.RadioButton(ctx, "Up to it##steplit", c.upto == true) then c.upto = true end
+    if c.leds == "none" then return end
+    row_name("Lit")
+    if ImGui.RadioButton(ctx, "Its own##steplit", not c.upto and not c.litp) then c.upto, c.litp = nil, nil end
+    ImGui.SameLine(ctx, 0, 2)
+    if ImGui.RadioButton(ctx, "Up to it##steplit", c.upto == true and not c.litp) then c.upto, c.litp = true, nil end
+    ImGui.SameLine(ctx, 0, 2)
+    if ImGui.RadioButton(ctx, "Pattern##steplit", c.litp == true) then c.upto, c.litp = nil, true end
+    tip("Pattern: its own LEDs, each setting lighting any of them.")
+    if not c.litp then return end
+
+    local names = step_choice_names(c)
+    c.pat = c.pat or M.step_guess(names) or { leds = { { name = "", col = "green" } }, lit = {} }
+    local pat = c.pat
+    pat.lit = pat.lit or {}
+    row_name("Its LEDs")
+    local drop
+    for i, e in ipairs(pat.leds) do
+      ImGui.SetNextItemWidth(ctx, 90)
+      local ch, v = ImGui.InputText(ctx, "##stepln" .. i, e.name or "")
+      if ch then e.name = v:gsub("[;|\r\n]", " ") end
+      ImGui.SameLine(ctx, 0, 4)
+      led_colour(c, i, e)
+      ImGui.SameLine(ctx, 0, 4)
+      if ST.button(ctx, "\u{00D7}##steplx" .. i, "remove", 22, 0) then drop = i end
+      tip("Take this LED away")
     end
+    if drop then
+      table.remove(pat.leds, drop)
+      for k, m in ipairs(pat.lit) do
+        local low = m & ((1 << (drop - 1)) - 1)
+        pat.lit[k] = low | ((m >> drop) << (drop - 1))
+      end
+    end
+    if #pat.leds < M.STEP_LEDS_MAX and ST.button(ctx, "+ LED##stepladd") then
+      pat.leds[#pat.leds + 1] = { name = "", col = "green" }
+    end
+    row_name("What each setting lights")
+    local W = require("TS_CV_Widgets")
+    local dl = ImGui.GetWindowDrawList(ctx)
+    for k, nm in ipairs(names) do
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.Text(ctx, U.truncate(((nm or ""):gsub("%z", "")), 14))
+      for i, e in ipairs(pat.leds) do
+        ImGui.SameLine(ctx, (i == 1) and 120 or 0, 6)
+        local x, y = ImGui.GetCursorScreenPos(ctx)
+        local on = (((pat.lit[k] or 0) >> (i - 1)) & 1) == 1
+        if ImGui.InvisibleButton(ctx, "##steplt" .. k .. "_" .. i, 16, 16) then
+          for j = #pat.lit + 1, k do pat.lit[j] = 0 end
+          pat.lit[k] = (pat.lit[k] or 0) ~ (1 << (i - 1))
+        end
+        W.lamp(dl, x + 8, y + 8, on and (W.lit_col(e.col) or C.COL.toggle_on) or false)
+        tip((e.name ~= "" and e.name or ("LED " .. i)) .. (on and ": lit" or ": dark"))
+      end
+    end
+    if ST.button(ctx, "Guess from the names##stepguess") then
+      c.pat = M.step_guess(names) or c.pat
+    end
+    tip("An LED for each part of the settings' names (\"HP + Link\": HP and Link).")
   end
   -- how many settings, for a parameter that reports none (Steps<p>)
   local function steps_row(c)
