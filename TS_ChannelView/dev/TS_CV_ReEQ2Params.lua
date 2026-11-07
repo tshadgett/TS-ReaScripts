@@ -1,3 +1,4 @@
+-- @noindex  (test data, not a package: never installed)
 -- ReEQ2's parameters (ReJJ ReEQ2 2.2.0), from its slider list: index,
 -- name, low, high, choices, default. For the tests (TS_CV_Test.lua).
 return {
