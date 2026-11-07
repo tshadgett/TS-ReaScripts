@@ -1853,7 +1853,10 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   A button's Style ▸ **Image...** takes a strip of two frames (Off, then
   On) or a picture for each. Apply it to the one control, its section or
   every one on the panel. Pictures are copied into `Images/` beside your
-  layouts, and the web page shows them too. Exporting layouts leaves them
+  layouts, and the web page shows them too. Every picture you add goes
+  into **Your pictures**, with its settings, for any panel: at the top of
+  the Image... window (right-click one to rename it or take it out), and
+  under your recipes in the Style menu, where one click puts it on. Exporting layouts leaves them
   out unless you tick *Include their pictures*: share only pictures that
   are yours to share.
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,

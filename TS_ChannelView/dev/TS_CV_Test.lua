@@ -8876,6 +8876,37 @@ do
   FN.IMG_DIR = dir0
 end
 
+-- your pictures: each added once, its settings kept up to date, renamed,
+-- taken out, and read back
+do
+  local FN = require("TS_CV_Finish")
+  local dir0 = FN.IMG_DIR
+  local tmpd = (os.tmpname():match("^(.*[/\\])") or "/tmp/") .. "tscv_gal_test/"
+  os.execute("mkdir -p '" .. tmpd .. "'")
+  FN.IMG_DIR = tmpd .. "Images/"
+  os.remove(tmpd .. "TS_ChannelView_Pictures.ini")
+  FN.gallery_reload()
+  local n1 = FN.gallery_put("knob", { file = "ssl_blue.png", kind = "strip", frames = 201, dir = "across", size = 0 })
+  FN.gallery_put("knob", { file = "ssl_blue.png", kind = "strip", frames = 201, dir = "across", size = 1, hi = true })
+  FN.gallery_put("button", { file = "ssl_blue.png", kind = "strip", frames = 2, dir = "down", size = 0 })
+  FN.gallery_put("knob", { file = "api_red.png", kind = "turn", frames = 1, dir = "down", size = 0 })
+  check("gallery: named after its file", n1, "ssl blue")
+  FN.gallery_reload()
+  local k = FN.gallery("knob")
+  check("gallery: once each, kept in the file", #k .. " " .. #FN.gallery("button"), "2 1")
+  check("gallery: its settings brought up to date", tostring(k[1].img.size) .. " " .. tostring(k[1].img.hi), "1 true")
+  check("gallery: renamed", FN.gallery_rename("ssl blue", "SSL blue"), true)
+  check("gallery: not onto another's name", FN.gallery_rename("api red", "SSL blue"), false)
+  FN.gallery_remove("api red")
+  FN.gallery_reload()
+  local names = {}
+  for i, g in ipairs(FN.gallery("knob")) do names[i] = g.name end
+  check("gallery: taken out", table.concat(names, ","), "SSL blue")
+  os.remove(tmpd .. "TS_ChannelView_Pictures.ini")
+  FN.IMG_DIR = dir0
+  FN.gallery_reload()
+end
+
 -- a knob as its picture: a filmstrip's frame for the value, first frame
 -- lowest or highest; one picture turned; a button's Off and On
 do

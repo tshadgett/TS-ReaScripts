@@ -1231,6 +1231,30 @@ local function toggle_colour_menu(fx, key, idx, c)
   end
   if c.type == "toggle" and ED.PRO then
     ImGui.Spacing(ctx)
+    -- your pictures for buttons: one click puts it on this one
+    local FNm = ED.module("TS_CV_Finish")
+    local pics = FNm and FNm.gallery("button") or {}
+    if #pics > 0 then
+      ImGui.TextDisabled(ctx, "Your pictures")
+      local CS = 40
+      for i, g in ipairs(pics) do
+        if (i - 1) % 6 ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+        local x, y = ImGui.GetCursorScreenPos(ctx)
+        if ImGui.Selectable(ctx, "##mybpic_" .. i, c.img ~= nil and c.img.file == g.img.file, KEEP_OPEN, CS, CS) then
+          local l, pk = materialise(fx)
+          M.put_img(l, idx, g.img, "knob")
+          M.set(pk, l); M.save()
+        end
+        if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, g.name) end
+        local img, iw, ih = W.picture(ctx, g.img, g.img.file2 or g.img.file)
+        if img then
+          local own_on = g.img.file2 ~= nil
+          W.draw_frame(dl, img, iw, ih, own_on and { frames = 1 } or g.img, own_on and 0 or math.min(1, (g.img.frames or 1) - 1),
+            x + 3, y + 3, x + CS - 3, y + CS - 3)
+        end
+      end
+      ImGui.Spacing(ctx)
+    end
     if ImGui.Selectable(ctx, "Image...##bstyle_image", c.img ~= nil, 0, 150, 0) then
       KE.open_image({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Button"),
                       img = c.img, button = true,
@@ -1918,6 +1942,24 @@ local function style_menu(fx, key, idx, c)
         end
         if ImGui.IsItemHovered(ctx) then hov_label = r.name end
         W.knob_face(dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, { look = r.look, ctx = ctx })
+      end
+    end
+    -- your pictures (Style > Image...): one click puts it on this knob
+    local FNm = ED.PRO and ED.module("TS_CV_Finish")
+    local pics = (FNm and c.type ~= "dual") and FNm.gallery("knob") or {}
+    if #pics > 0 then
+      ImGui.Spacing(ctx)
+      ImGui.TextDisabled(ctx, "Your pictures")
+      for i, g in ipairs(pics) do
+        if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+        local x, y = ImGui.GetCursorScreenPos(ctx)
+        if ImGui.Selectable(ctx, "##mypic_" .. i, c.img ~= nil and c.img.file == g.img.file, KEEP_OPEN, CS, CS) then
+          local l, pk = materialise(fx)
+          M.put_img(l, idx, g.img, "knob")
+          M.set(pk, l); M.save()
+        end
+        if ImGui.IsItemHovered(ctx) then hov_label = g.name end
+        W.picture_knob(ctx, dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, g.img, false)
       end
     end
     ImGui.Spacing(ctx)
