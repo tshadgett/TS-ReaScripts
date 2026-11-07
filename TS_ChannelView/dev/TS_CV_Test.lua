@@ -8836,6 +8836,44 @@ do
   reaper.JS_LICE_LoadPNG, reaper.JS_LICE_GetPixel, reaper.JS_LICE_DestroyBitmap = saved[1], saved[2], saved[3]
 end
 
+-- a strip longer than ReaImGui takes (10251 x 51, 201 frames) cut into
+-- pieces of whole frames, and a frame drawn from its piece
+do
+  local FN = require("TS_CV_Finish")
+  local dir0 = FN.IMG_DIR
+  FN.IMG_DIR = (os.tmpname():match("^(.*[/\\])") or "/tmp/")
+  local name = "tscv_long_test.png"
+  local f = io.open(FN.pic_path(name), "wb")
+  f:write("\137PNG\r\n\26\n" .. string.pack(">I4", 13) .. "IHDR" .. string.pack(">I4>I4", 10251, 51) .. "rest")
+  f:close()
+  check("long strip: its size from the header", table.concat({ FN.size(name) }, "x"), "10251x51")
+  local made, blits = {}, {}
+  local saved = { reaper.JS_LICE_LoadPNG, reaper.JS_LICE_CreateBitmap, reaper.JS_LICE_Blit, reaper.JS_LICE_DestroyBitmap, reaper.JS_LICE_Clear }
+  reaper.JS_LICE_LoadPNG = function() return "src" end
+  reaper.JS_LICE_CreateBitmap = function(_, w, h) return { w = w, h = h } end
+  reaper.JS_LICE_Blit = function(dst, x, y, src, sx, sy, w, h) blits[#blits + 1] = { sx, w } end
+  reaper.JS_LICE_DestroyBitmap = function() end
+  reaper.JS_LICE_Clear = function() end
+  FN.attach(setmetatable({
+    CreateImage = function() error("image is too big") end,
+    CreateImageFromLICE = function(bm) made[#made + 1] = bm; return { tile = #made, w = bm.w } end,
+    GetFrameCount = function() return 1 end,
+  }, { __index = function() return nil end }))
+  local img, w, h = FN.picture("ctx", name, 201, "across")
+  check("long strip: in pieces of whole frames", type(img) == "table" and #img.tiles .. " " .. img.fpt, "2 160")
+  check("long strip: the pieces", blits[1] and (blits[1][1] .. "+" .. blits[1][2] .. " " .. blits[2][1] .. "+" .. blits[2][2]), "0+8160 8160+2091")
+  local drawn
+  W.attach(setmetatable({ DrawList_AddImage = function(_, im, x1, y1, x2, y2, u0, v0, u1, v1) drawn = { im, u0, u1 } end },
+    { __index = function() return function() end end }))
+  W.draw_frame("dl", img, w, h, { frames = 201, dir = "across" }, 170, 0, 0, 40, 40)
+  check("long strip: frame 171 from the second piece", drawn and (drawn[1].tile .. string.format(" %.4f %.4f", drawn[2], drawn[3])),
+    string.format("2 %.4f %.4f", 510 / 2091, 561 / 2091))
+  reaper.JS_LICE_LoadPNG, reaper.JS_LICE_CreateBitmap, reaper.JS_LICE_Blit, reaper.JS_LICE_DestroyBitmap, reaper.JS_LICE_Clear =
+    saved[1], saved[2], saved[3], saved[4], saved[5]
+  os.remove(FN.pic_path(name))
+  FN.IMG_DIR = dir0
+end
+
 -- a knob as its picture: a filmstrip's frame for the value, first frame
 -- lowest or highest; one picture turned; a button's Off and On
 do

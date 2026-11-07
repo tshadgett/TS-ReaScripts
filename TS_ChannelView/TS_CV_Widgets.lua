@@ -1471,7 +1471,9 @@ function W.picture(ctx, im, file)
   if not im then return nil end
   if W._fn == nil then W._fn = ED.module("TS_CV_Finish") or false end
   if not W._fn then return nil end
-  return W._fn.picture(ctx, file or im.file)
+  -- (a file of its own, a button's On, is one picture)
+  local own = file and file ~= im.file
+  return W._fn.picture(ctx, file or im.file, own and 1 or im.frames, im.dir)
 end
 -- Frame k (from 0) of a strip of im.frames, down or across, fitted into
 -- x1..x2, y1..y2 and centred, its shape kept.
@@ -1479,8 +1481,17 @@ function W.draw_frame(dl, img, iw, ih, im, k, x1, y1, x2, y2, tint)
   local n = math.max(1, im.frames or 1)
   local fw, fh = iw, ih
   local u0, v0, u1, v1 = 0, 0, 1, 1
-  if im.dir == "across" then fw = iw / n; u0, u1 = k / n, (k + 1) / n
-  else fh = ih / n; v0, v1 = k / n, (k + 1) / n end
+  local a, b = k / n, (k + 1) / n
+  if type(img) == "table" then
+    -- a long strip in pieces (TS_CV_Finish.picture): the piece it's in
+    local t = img.tiles[k // img.fpt + 1]
+    if not t then return end
+    a = (math.floor(k * img.fl + 0.5) - t.off) / t.len
+    b = (math.floor((k + 1) * img.fl + 0.5) - t.off) / t.len
+    img = t.img
+  end
+  if im.dir == "across" then fw = iw / n; u0, u1 = a, b
+  else fh = ih / n; v0, v1 = a, b end
   local s = math.min((x2 - x1) / math.max(1, fw), (y2 - y1) / math.max(1, fh))
   local w, h = fw * s * 0.5, fh * s * 0.5
   local cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
@@ -1492,6 +1503,7 @@ end
 function W.picture_knob(ctx, dl, cx, cy, r, v, im, dim)
   local img, iw, ih = W.picture(ctx, im)
   if not img or not iw or iw <= 0 or ih <= 0 then return false end
+  if im.kind == "turn" and type(img) == "table" then return false end
   local S = r * (1 + 0.18 * (im.size or 0))
   local tint = dim and 0xffffff80 or 0xffffffff
   if im.kind == "turn" then
