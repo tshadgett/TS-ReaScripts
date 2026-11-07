@@ -8660,7 +8660,7 @@ end
 -- a step button: a click for the next choice, round from the end;
 -- Shift+click back; the wheel along them; lamps lit as asked
 do
-  local clicked, mods, wheel, lamps = false, 0, 0, {}
+  local clicked, mods, wheel, lamps, texts = false, 0, 0, {}, {}
   local fake = setmetatable({
     GetMouseDelta = function() return 0, 0 end, GetMouseWheel = function() return wheel end,
     GetMousePos = function() return 10, 30 end, GetCursorScreenPos = function() return 0, 0 end,
@@ -8670,6 +8670,7 @@ do
     IsMouseDoubleClicked = function() return false end, IsItemActivated = function() return false end,
     GetKeyMods = function() return mods end, CalcTextSize = function() return 6, 10 end,
     DrawList_AddCircleFilled = function(_, x, y, r, col) if r > 3 and r < 3.5 then lamps[#lamps + 1] = col end end,
+    DrawList_AddText = function(_, x, y, col, t) texts[#texts + 1] = t end,
   }, { __index = function(_, key)
     if key == "MouseButton_Left" then return 0 end
     if key == "MouseButton_Right" then return 1 end
@@ -8707,6 +8708,17 @@ do
     lamps = {}
     press(1, { dir = "step", w = 100, h = 64, leds = "none" })
     check("step: no LEDs, no lamps", #lamps, 0)
+    local function named(h, o)
+      texts = {}
+      o = o or {}; o.dir, o.w, o.h = "step", 100, h
+      press(0.5, o)
+      for _, t in ipairs(texts) do if t == "Thrust" then return true end end
+      return false
+    end
+    check("step: its name over it when there's room", named(64), true)
+    check("step: too short, all button", named(26), false)
+    check("step: LEDs over it need more room", named(40, { leds = "over" }), false)
+    check("step: no LEDs need less", named(40, { leds = "none" }), true)
   end)
   check("step: draw ran", ok and true or err, true)
 end

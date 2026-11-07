@@ -2266,6 +2266,13 @@ end
 -- (lamp, round button, jewel lamp). Drawn under the name the row put up.
 local STEP_SWITCH = { lamp = true, roundbtn = true, jewel = true }
 W.STEP_SWITCH = STEP_SWITCH
+-- How tall a step button's place has to be for its name over it: a button
+-- 18 px tall at least, its lamps (8 px apart down its side, a row over
+-- it) too. Shorter, it's all button, its name in the tooltip.
+function W.step_named_h(o, n)
+  local body = (o.leds == "none") and 18 or (o.leds == "over") and 28 or math.max(18, (n or 2) * 8)
+  return W.LABEL_H + C.LABEL_GAP + body
+end
 local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cur, opts)
   local changed = false
   local to
@@ -2286,7 +2293,7 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
   local function col_of(i) return on_cols[i] or base_col end
   local where = opts.leds
   local names = where == nil and opts.ledn ~= false
-  local top, bot = y + W.LABEL_H + C.LABEL_GAP, y + ch - 2
+  local top, bot = opts.no_name and (y + 2) or (y + W.LABEL_H + C.LABEL_GAP), y + ch - 2
   local cap_text = (where ~= nil or not names) and (choices[cur].text or "") or nil
 
   -- where the cap and the lamps go: a cap up to 26 px tall, centred in
@@ -2355,7 +2362,8 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
     if names then W.pop_small(ctx) end
   end
   if opts.mod then W.mod_corner(dl, bx2, by1, 5, C.COL.toggle_off) end
-  W.tip(ctx, opts.id_tip, opts.tooltip or choices[cur].text, hovered, false)
+  W.tip(ctx, opts.id_tip, opts.no_name and ((opts.label or "") .. ": " .. (choices[cur].text or ""))
+    or opts.tooltip or choices[cur].text, hovered, false)
   return changed, value
 end
 
@@ -2375,7 +2383,12 @@ function W.button_row(ctx, id, label, value, choices, opts)
   local act = { right_click = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right), double_click = false }
 
   local cx = x + cw * 0.5
-  centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  -- (a step button too short for its name over it: all button)
+  if opts.dir == "step" and ch < W.step_named_h(opts, math.min(#choices, opts.n or #choices)) then
+    opts.no_name, opts.label = true, label
+  else
+    centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  end
 
   local n = math.min(#choices, opts.n or #choices)
   if n < 1 then return false, value, act, pressed end
