@@ -1442,6 +1442,11 @@ them). Setting the alias there clears the slot's label, so the new name
 shows on the control you renamed. The editor has the same: *Alias*,
 *Label* and *Live name*.
 
+**Hiding a name.** Right-click ▸ Name ▸ *Show name* (or Edit layout's
+*Hide its name*, for several at once) takes a control's name off the
+panel, and the room it took with it: the control moves up into it. Its
+name shows when you hover it. On the web page too.
+
 A **toggle** says what its state is called: your **state names** if you've
 set them (right-click ▸ Name ▸ State names, or the editor's *State names*
 row), else the plugin's own word for the state, and ON/OFF only when the

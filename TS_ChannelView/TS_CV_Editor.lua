@@ -1490,6 +1490,12 @@ draw_entry_body = function(ctx)
       "Show the plugin's current name for it, not the label or alias.\n" ..
       "Currently: " .. (pname ~= "" and pname or "?"))
   end
+  -- any control's name hidden, the room for it too (a flag bit)
+  if is_param then
+    local nch, nv = ST.checkbox(ctx, "Hide its name", c.noname == true)
+    if nch then c.noname = nv or nil end
+    tip("No name over it, and no room kept for one. Its name shows on hover.")
+  end
 
   -- a button's own words for its two states, for this plugin everywhere
   -- (States<p>), as the right-click's Name > State names

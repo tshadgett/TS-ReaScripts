@@ -2262,6 +2262,7 @@ local function parse_section(sect)
         invert  = (f & 2) ~= 0,
         no_rule = (f & 4) ~= 0,
         live    = (f & 8) ~= 0,
+        noname  = ((f & 128) ~= 0) or nil,
         -- bit 4: the second parameter reversed (an XY pad's Y, a
         -- concentric knob's inner knob); bit 1 reverses the first
         invert2 = ((f & 16) ~= 0 and (t == "xy" or t == "dual")) or nil,
@@ -2453,11 +2454,12 @@ local function serialize(layout)
   for i, c in ipairs(layout.controls or {}) do
     -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
     -- bit 3 live name, bit 4 the second parameter reversed, bits 5-6 the
-    -- value arc.
+    -- value arc, bit 7 its name hidden.
     local flags = (c.bipolar and 1 or 0) | (c.invert and 2 or 0)
                 | (c.no_rule and 4 or 0) | (c.live and 8 or 0)
                 | ((c.invert2 and (c.type == "xy" or c.type == "dual")) and 16 or 0)
                 | ((({ pos = 1, neg = 2, mid = 3 })[c.arc or ""] or 0) << 5)
+                | (c.noname and 128 or 0)
     out["Ctl" .. (i - 1)] = string.format("%d|%s|%d|%s",
       c.param or -1,
       c.type or "knob",
@@ -3942,7 +3944,7 @@ function M.copy(layout)
   end
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
-                        invert = c.invert, no_rule = c.no_rule, live = c.live,
+                        invert = c.invert, no_rule = c.no_rule, live = c.live, noname = c.noname,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),

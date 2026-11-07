@@ -367,7 +367,15 @@ local tip_now = nil    -- the one to paint at the end of the frame
 function W.clear_tips() tips = {} end
 
 -- `hovered` shows it; `active` keeps it up and frozen while dragging.
+-- A control drawn with its name hidden (TS_CV_Panel): the name, for its
+-- tooltip to start with.
+W.tip_name = nil
 function W.tip(ctx, id, text, hovered, active)
+  if W.tip_name and W.tip_name ~= "" and (hovered or active) then
+    local n = W.tip_name
+    if not text or text == "" then text = n
+    elseif text:sub(1, #n + 1) ~= n .. ":" then text = n .. ": " .. text end
+  end
   if not text or text == "" then return end
   if not (hovered or active) then
     if not active then tips[id] = nil end
@@ -1652,9 +1660,11 @@ function W.knob(ctx, id, label, value, formatted, opts)
     -- a picture: only its value arc, if it has one
     if opts.img then outside = opts.img.arc == true end
     if outside then
-      -- (under the name as its font draws it, which can be taller)
-      local _, name_h = ImGui.CalcTextSize(ctx, "Ag")
-      local clear = y + math.max(label_h, name_h or 0) + 3
+      -- (under the name as its font draws it, which can be taller; none
+      -- when it has no name over it)
+      local name_h = 0
+      if label_h > 0 then name_h = select(2, ImGui.CalcTextSize(ctx, "Ag")) or 0 end
+      local clear = y + math.max(label_h, name_h) + ((label_h > 0) and 3 or 1)
       local function reach() return W.mark_reach(dial_r) + (fo.arc and 1.5 or 0.5) end
       local min_r = r * 0.8
       for _ = 1, 24 do

@@ -3345,6 +3345,13 @@ local function name_menu(fx, key, layout, idx, c)
   end
   tip(layout.live and "On for the whole layout (Live parameter names)."
     or "Show the plugin's current name for this parameter.")
+  if ImGui.MenuItem(ctx, "Show name", nil, not c.noname) then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.noname = (not c.noname) or nil end
+    M.set(key, l); M.save()
+  end
+  tip("Off: no name over it, and no room kept for one. Its name shows on hover.")
 
   -- A button's two states can have names of their own, for plugins whose
   -- switches read "0.0"/"1.0" or worse. Hints are what the plugin says.

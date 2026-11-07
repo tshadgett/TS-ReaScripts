@@ -1245,14 +1245,22 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
   local shown = M.vtext(ctl, v)
   local changed, nv, act
   local size = P.item_size(item)
+  -- its name hidden: no room for it, and the name in the tooltip (the
+  -- name it's stored under stays as it is)
+  local shown_name = name
+  local keep_lh, keep_gap = W.LABEL_H, C.LABEL_GAP
+  if ctl.noname and name ~= "" then
+    W.tip_name, shown_name = name, ""
+    W.LABEL_H, C.LABEL_GAP = 0, 0
+  end
   if ctl.type == "toggle" then
-    changed, nv, act = W.toggle(ctx, id, name, v, shown,
+    changed, nv, act = W.toggle(ctx, id, shown_name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", text = shown,
         on_col = W.lit_col(ctl.cap) or P.VIRT_COL, size = size, style = ctl.style, img = ctl.img })
   elseif ctl.type == "combo" and item.kind == "buttons" then
     local list = {}
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
-    changed, nv, act = W.button_row(ctx, id, name, v, list,
+    changed, nv, act = W.button_row(ctx, id, shown_name, v, list,
       { dir = ctl.buttons, n = #list, w = hx(item.w), h = hy(item.h),
         leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl), img = ctl.img,
         tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
@@ -1260,14 +1268,15 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     local list = {}
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
     local n = #list
-    changed, nv, act = W.combo(ctx, id, name, v, shown, (n >= 2) and (1 / (n - 1)) or nil,
+    changed, nv, act = W.combo(ctx, id, shown_name, v, shown, (n >= 2) and (1 / (n - 1)) or nil,
       { tooltip = name .. ": " .. shown, steps = list, style = ctl.style })
   else
-    changed, nv, act = W.knob(ctx, id, name, v, shown,
+    changed, nv, act = W.knob(ctx, id, shown_name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = W.cap_col(ctl.cap) or P.VIRT_COL,
         style = ctl.style, size = size, look = ctl.look, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc),
         img = ctl.img })
   end
+  if ctl.noname then W.LABEL_H, C.LABEL_GAP, W.tip_name = keep_lh, keep_gap, nil end
   if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
   if changed and nv then
     if ctl.type ~= "knob" then nv = M.vnorm(ctl, M.vindex(ctl, nv)) end
@@ -3109,6 +3118,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       if modded then tip = (tip or "") .. "\nModulation on" end
 
       local changed, nv, act
+      -- its name hidden (a flag bit): no room for it, and the name in the
+      -- tooltip
+      local nameless = ctl.noname and label ~= ""
+      local keep_lh, keep_gap, full_label = W.LABEL_H, C.LABEL_GAP, label
+      if nameless then
+        W.tip_name, label = label, ""
+        W.LABEL_H, C.LABEL_GAP = 0, 0
+      end
       if ctl.type == "xy" or ctl.type == "dual" then
         -- two parameters: an XY pad's X and Y, a concentric knob's ring and
         -- inner knob (Dual<n>); one not chosen yet, or out of range, shows ?
@@ -3336,6 +3353,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
+      if nameless then
+        W.LABEL_H, C.LABEL_GAP, W.tip_name = keep_lh, keep_gap, nil
+        label = full_label
+      end
       if act and act.double_click then
         local d = U.param_mid_norm(track, fx.addr, p)
         nv, changed = rev and (1 - d) or d, true

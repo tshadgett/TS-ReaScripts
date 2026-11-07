@@ -334,6 +334,17 @@ do
   M.remove(k); M.save(); M.reload()
 end
 
+-- A control's name hidden (bit 7 of its flags) survives the ini and a copy.
+do
+  local k = "NoNamePlug"
+  M.set(k, { controls = { { param = 1, type = "knob", noname = true }, { param = 2, type = "knob" } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  check("name hidden: kept", tostring(l.controls[1].noname) .. " " .. tostring(l.controls[2].noname), "true nil")
+  check("name hidden: kept by a copy", M.copy(l).controls[1].noname, true)
+  M.remove(k); M.save(); M.reload()
+end
+
 -- The make-up gain control (Makeup=) survives the ini and a copy.
 do
   local k = "MakeupPlug"
@@ -8997,6 +9008,34 @@ do
   end)
   check("picture: draw ran", ok and true or err, true)
   W._fn = had
+end
+
+-- a knob with no name over it sits higher, in the room the name had
+do
+  local circles = {}
+  local fake = setmetatable({
+    GetMouseDelta = function() return 0, 0 end, GetMouseWheel = function() return 0 end,
+    GetMousePos = function() return -100, -100 end, GetCursorScreenPos = function() return 0, 0 end,
+    GetWindowDrawList = function() return "dl" end, InvisibleButton = function() return false end,
+    IsItemActive = function() return false end, IsItemHovered = function() return false end,
+    IsItemClicked = function() return false end, IsMouseDown = function() return false end,
+    IsMouseDoubleClicked = function() return false end, IsItemActivated = function() return false end,
+    GetKeyMods = function() return 0 end, CalcTextSize = function() return 6, 10 end,
+  }, { __index = function(_, key)
+    if key:find("Flags_") or key:find("MouseButton_") or key:find("MouseCursor_") or key:find("^Mod_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake)
+  local ok, err = pcall(function()
+    W.knob("ctx", "##nn1", "Gain", 0.5, "1 dB", { style = "skirted" })
+    local named = W.last_knob.cy
+    local lh, lg = W.LABEL_H, C.LABEL_GAP
+    W.LABEL_H, C.LABEL_GAP = 0, 0
+    W.knob("ctx", "##nn2", "", 0.5, "1 dB", { style = "skirted" })
+    W.LABEL_H, C.LABEL_GAP = lh, lg
+    check("name hidden: the knob sits higher", W.last_knob.cy < named, true)
+  end)
+  check("name hidden: draw ran", ok and true or err, true)
 end
 
 -- a value arc in a colour of its own: drawn in it, through W.knob
