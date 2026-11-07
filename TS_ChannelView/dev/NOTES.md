@@ -857,6 +857,37 @@ mix and six stems:
 - A new tab asks the audio device for whatever its template does; another
   rate can restart the device, and some interfaces then stay closed.
 
+## Make-up gain, followed (TS_TrackProbe 2.5.1)
+
+ChannelView writes each tapped plugin's make-up, in dB, to the probe
+block every frame (tap_mugN at 26..29 / 58..61; a multiband tap's split
+bands at 30..31 / 62..63), and the probe subtracts it from every ratio
+before smoothing, the baseline, the zero and the third-octaves. Each slot
+holds dB + 1000 * a count (0..99), one gmem write, so the value and its
+meaning arrive together:
+
+- Same count, new value: the plugin's make-up moved (the audio moved with
+  it). The value can land a frame after the audio, so the music baseline
+  rolls back to its snapshot from 64–128 ms before (TS_BSB), or is
+  relearnt if it was only learnt since.
+- New count: only what's subtracted changed (ChannelView started, the mark
+  moved, a value stopped parsing as dB). The probe shifts everything it
+  holds by the difference, so the reading doesn't jump. A new multiband
+  split (tap_mb, tap_mbx) counts the same way inside the probe.
+
+The window writes; the web bridge only when the window hasn't for 1.5 s
+(ExtState mug_at), so two copies of the layouts never take turns. A moved
+make-up that's followed isn't a touch (TP.touched with the parameter);
+an older probe (no 126 flag) still gets the touch.
+
+Offline (loose_eel, the probe's own code, with TS_TA_ProbeCalTest's
+synthetic compressor): a measured zero, make-up stepped ±6 dB, ramped
++6 → −6 over 4 s, or −8 under constant compression, written a frame
+late: within 0.05 dB of the true reduction afterwards, where 2.5.0 was
+off by the whole move. The zero learnt from the music, ±6 dB: 0.02 dB.
+A two-band split with the low band's gain dropping 6 dB: −0.2 dB on the
+tap, −0.1 on the band. Every older test reads the same as 2.5.0.
+
 ## Console setup (Pro)
 
 - Each console is a description in TS_CV_Consoles.lua (CO.LIST): its

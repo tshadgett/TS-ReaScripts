@@ -816,6 +816,25 @@ at ChannelView Modulators, so nothing else on this track plays them.
 *This track's own* takes the send away again, and so does removing the
 modulator.
 
+**Audio envelopes.** A Follower sets off the same three envelopes from
+its audio: **Envelope**, **Env × level** (its peak how loud the hit is,
+full at the Ceiling) and **Duck**, in the row under Track / Sidechain
+(click the lit one again to follow the level). It starts when the level
+rises above the **Threshold**, holds at its sustain while the level stays
+above, and lets go when it falls back below. **Retrigger** starts it from
+nothing on every rise; **Legato** carries on from where it is when the
+audio comes back while it's letting go. On *Sidechain*, a kick can fire
+an envelope on a bass.
+
+**Audio from another track.** On *Sidechain*, *Audio from* at the foot of
+a Follower picks the track that feeds this one's sidechain: ChannelView
+adds a pre-fader send (audio only) from it to this track's 3/4. Every
+Follower on Sidechain hears it, and so does a plugin keying from 3/4.
+*This track's sidechain (3/4)* takes the send away again; a sidechain
+send you made yourself is left alone.
+
+A modulator's buttons light in its own colour.
+
 **Bypass, to compare.** The power button in a tile's name row holds that
 modulator still; the one in the Modulators panel's header holds all of
 them. Bypassed, every control a modulator drives sits where it's set, so
@@ -1268,10 +1287,11 @@ or following ChannelView's).
   stack in one cell; *Large* is half again as big. A toggle can be *Small*
   too: a half-height lit push-button with its name on it. A large knob in a
   panel one row tall draws at medium.
-- **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across* or
-  *Buttons down*: one button per choice, the current one lit. For 2 to 8
-  choices; a column too tall for the panel shows as a dropdown. On a grid
-  the buttons fill their place, wider across or taller down.
+- **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across*,
+  *Buttons down* or *Buttons grid*: one button per choice, the current one
+  lit. A grid is as near square as its count allows (16 as 4 × 4, 12 as
+  4 × 3). For 2 to 16 choices; buttons too tall for the panel show as a
+  dropdown. On a grid layout the buttons fill their place.
 - **Wide dropdowns.** Right-click a dropdown ▸ Look ▸ *Width*: one to
   four cells. A wide one has arrows each side that step back and forward
   through its choices (round from the end); click its name for the list.
@@ -2584,6 +2604,16 @@ it's been seen opening it's known to be a gate, and while nothing comes
 in its reading holds at its closed level rather than falling to 0. A
 plugin at 50% mix reads about half. **Measure the zero while stopped** in
 Setup turns it off.
+
+**Make-up gain.** Moving a plugin's make-up gain changes its output as
+reduction would, so the measured reading takes it out, automation
+included, and moving it doesn't count as touching the plugin. Which
+control it is: right-click a knob or fader ▸ **Make-up gain** (one per
+plugin; a pink dot on it in Edit layout, a pink corner on a fader), or a compressor canvas's *Make-up*,
+or a multiband canvas's *Output* and each band's *Gain*. The control has
+to read in dB (*Values* ▸ *Custom range* can give it one). Needs
+TS_TrackProbe 2.5.1 (with ChannelView 4.0.2 and Track Analyser 2.7.1):
+reopen the project after updating.
 
 A plugin's latency needs nothing: REAPER already holds back the channels a
 plugin doesn't use by the latency it reports, so the copies arrive in line.

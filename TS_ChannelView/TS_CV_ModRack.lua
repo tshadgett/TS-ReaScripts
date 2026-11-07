@@ -157,7 +157,11 @@ local function tile_h(track, src)
     end
   else
     h = h + 16
-    if isopen then h = h + 22 + KCELL_H * 2 end
+    if isopen then
+      local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
+      h = h + 22 + 20 + (MD.is_env(ms) and (ENV_CURVE_H + 6 + KCELL_H * 3 + 22) or KCELL_H * 2)
+      if MD.field(track, src.slot, src.j, "fsrc") >= 0.5 then h = h + 22 end
+    end
   end
   return h + 6
 end
@@ -278,8 +282,9 @@ local function pill(ctx, dl, id, x, y, w, text, on, col, h)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, bg, 3)
   W.push_small(ctx)
   local tw, th = ImGui.CalcTextSize(ctx, text)
-  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + (h - th) * 0.5,
-    on and C.COL.icon_on or C.COL.label, text)
+  -- lit in a modulator's own colour: dark ink on a light one
+  local ink = on and (U.is_light(bg) and 0x0d1116ff or C.COL.icon_on) or C.COL.label
+  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + (h - th) * 0.5, ink, text)
   W.pop_small(ctx)
   return pressed
 end
@@ -847,6 +852,14 @@ do
   K.eatt = { key = "att", label = "Attack", tn = K.att.tn, fn = K.att.fn, def = 5, text = K.att.text }
   K.erel = { key = "rel", label = "Release", tn = K.rel.tn, fn = K.rel.fn, def = 300, text = K.rel.text }
   K.mhi = { key = "mhi", label = "High", tn = tn, fn = fn, def = 96, text = note_name }
+  -- a Follower's envelope's (MD.FOLLOW_ENV): Floor its threshold, Decay
+  -- and Sustain in MIDI CC and Low note
+  K.thr = { key = "floor", label = "Threshold", tn = K.floor.tn, fn = K.floor.fn, def = -24, text = K.floor.text }
+  tn, fn = lin(0, 127)
+  K.fdec = { key = "mcc", label = "Decay", tn = tn, fn = fn, def = MD.mcc_of(200),
+             text = function(v) return ("%.0f ms"):format(MD.fdecay_of(v)) end }
+  K.fsus = { key = "mlo", label = "Sustain", tn = tn, fn = fn, def = MD.mlo_of(0.6),
+             text = function(v) return ("%d%%"):format(math.floor(MD.fsus_of(v) * 100 + 0.5)) end }
 end
 
 -- ---------------------------------------------------------------------
@@ -860,11 +873,12 @@ end
 -- A setting's name in THE MATRIX: an envelope's own, for the Follower
 -- fields a MIDI envelope keeps its settings in
 local ENV_LABEL = { floor = "Sustain", ceil = "Decay", gate = "Exp curve", mhold = "Legato" }
+-- a Follower's envelope's: Floor its threshold, Low note its Sustain
+local FENV_LABEL = { floor = "Threshold", mlo = "Sustain", gate = "Exp curve", mhold = "Legato" }
 local function tg_label(track, src, tg)
-  if src.kind == "midi" and ENV_LABEL[tg.key]
-     and MD.is_env(math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)) then
-    return ENV_LABEL[tg.key]
-  end
+  local env = MD.is_env(math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5))
+  if env and src.kind == "midi" and ENV_LABEL[tg.key] then return ENV_LABEL[tg.key] end
+  if env and src.kind == "follower" and FENV_LABEL[tg.key] then return FENV_LABEL[tg.key] end
   return tg.label
 end
 
@@ -1145,12 +1159,17 @@ local LANES = {
                { "gate", "Gate" }, { "fsrc", "Source" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
   midi = { { "msrc", "Source" }, { "mch", "Channel" }, { "mcc", "CC" }, { "mlo", "Low note" }, { "mhi", "High note" },
            { "mhold", "Hold" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
+  fenv = { { "msrc", "Envelope" }, { "att", "Attack" }, { "mcc", "Decay" }, { "mlo", "Sustain" }, { "rel", "Release" },
+           { "floor", "Threshold" }, { "ceil", "Ceiling" }, { "mhold", "Legato" }, { "gate", "Exp curve" },
+           { "fsrc", "Source" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
   env = { { "msrc", "Source" }, { "att", "Attack" }, { "ceil", "Decay" }, { "floor", "Sustain" }, { "rel", "Release" },
           { "mhold", "Legato" }, { "gate", "Exp curve" }, { "mch", "Channel" }, { "mlo", "Low note" },
           { "mhi", "High note" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
 }
 local function lanes_of(track, src)
-  if src.kind == "midi" and MD.is_env(math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)) then return LANES.env end
+  local env = MD.is_env(math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5))
+  if src.kind == "midi" and env then return LANES.env end
+  if src.kind == "follower" and env then return LANES.fenv end
   return LANES[src.kind]
 end
 
@@ -1162,7 +1181,10 @@ local function sub_text(track, src, nlinks)
                  or ("%.2f Hz"):format(f("rhz"))
     return d .. " \u{00B7} " .. rate .. " \u{00B7} " .. (MD.SHAPES[math.floor(f("shape") + 0.5) + 1] or ""):lower()
   elseif src.kind == "follower" then
-    return (f("fsrc") >= 0.5 and "sidechain" or "track") .. (f("gate") >= 0.5 and " gate" or "") .. " \u{00B7} " .. d
+    local ms = math.floor(f("msrc") + 0.5)
+    local how = MD.is_env(ms) and (" " .. (MD.FOLLOW_ENV[ms - MD.ENV_FIRST + 1] or ""):lower())
+      or (f("gate") >= 0.5 and " gate" or "")
+    return (f("fsrc") >= 0.5 and "sidechain" or "track") .. how .. " \u{00B7} " .. d
   end
   local ms = math.floor(f("msrc") + 0.5)
   local what = MD.MIDI_SRC[ms + 1] or "MIDI"
@@ -1205,11 +1227,11 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
   y = y + KCELL_H
   setting(ctx, dl, track, src, K.smooth, x, y)
   local px = x + KCELL_W + 8
-  if pill(ctx, dl, "sync##" .. src.guid, px, y + 8, 46, "Sync", sync) and not sync then
+  if pill(ctx, dl, "sync##" .. src.guid, px, y + 8, 46, "Sync", sync, src.col) and not sync then
     MD.set_field(track, src.slot, src.j, "sync", 1)
   end
   mx_switch(ctx, dl, track, src, "sync", 1, px, y + 8, 46, PILL_H)
-  if pill(ctx, dl, "free##" .. src.guid, px + 50, y + 8, 46, "Free", not sync) and sync then
+  if pill(ctx, dl, "free##" .. src.guid, px + 50, y + 8, 46, "Free", not sync, src.col) and sync then
     MD.set_field(track, src.slot, src.j, "sync", 0)
   end
   mx_switch(ctx, dl, track, src, "sync", 0, px + 50, y + 8, 46, PILL_H)
@@ -1220,36 +1242,6 @@ local function level_bar(dl, src, v, x, y, w)
   ImGui.DrawList_AddRectFilled(dl, x, y + 2, x + w * math.max(0, math.min(1, v)), y + 10, src.col, 2)
 end
 
-local function follower_body(ctx, dl, track, src, x, y, w, isopen)
-  level_bar(dl, src, MD.value(track, src), x, y, w)
-  if not isopen then return end
-  y = y + 16
-  local side = live_field(track, src, "fsrc") >= 0.5
-  local gate = live_field(track, src, "gate") >= 0.5
-  if pill(ctx, dl, "main##" .. src.guid, x, y, 52, "Track", not side) and side then
-    MD.set_field(track, src.slot, src.j, "fsrc", 0)
-  end
-  mx_switch(ctx, dl, track, src, "fsrc", 0, x, y, 52, PILL_H)
-  if pill(ctx, dl, "side##" .. src.guid, x + 55, y, 64, "Sidechain", side) and not side then
-    MD.set_field(track, src.slot, src.j, "fsrc", 1)
-    MD.need_sidechain(track)
-  end
-  mx_switch(ctx, dl, track, src, "fsrc", 1, x + 55, y, 64, PILL_H)
-  if pill(ctx, dl, "gate##" .. src.guid, x + w - 44, y, 44, "Gate", gate) then
-    MD.set_field(track, src.slot, src.j, "gate", gate and 0 or 1)
-  end
-  mx_switch(ctx, dl, track, src, "gate", gate and 0 or 1, x + w - 44, y, 44, PILL_H)
-  W.tip(ctx, "gate##" .. src.guid, "All or nothing at the Floor", ImGui.IsItemHovered(ctx), false)
-  y = y + 22
-  setting(ctx, dl, track, src, K.att, x, y)
-  setting(ctx, dl, track, src, K.rel, x + KCELL_W, y)
-  setting(ctx, dl, track, src, K.depth, x + KCELL_W * 2, y)
-  y = y + KCELL_H
-  setting(ctx, dl, track, src, K.floor, x, y)
-  if not gate then setting(ctx, dl, track, src, K.ceil, x + KCELL_W, y) end
-  setting(ctx, dl, track, src, K.smooth, x + KCELL_W * 2, y)
-end
-
 local MIDI_PILL = { "Vel", "Note", "CC", "Bend", "AT" }
 local ENV_PILL = { "Envelope", "Env \u{00D7} vel", "Duck" }
 
@@ -1257,9 +1249,16 @@ local ENV_PILL = { "Envelope", "Env \u{00D7} vel", "Duck" }
 -- upside down. Its three corners drag (attack's time; decay's time and
 -- the sustain; release's time); the line across is where it is now.
 local ENV_W = { 0.22, 0.28, 0.18, 0.32 }    -- each stage's share at its longest
+-- where an envelope keeps its Decay and Sustain: a MIDI one's in Ceiling
+-- and Floor, a Follower's in MIDI CC and Low note (MD.FOLLOW_ENV)
+local ENV_IO = {
+  midi = { dk = "ceil", sk = "floor", dec = MD.decay_of, dec_to = MD.ceil_of, sus = MD.sustain_of, sus_to = MD.floor_of },
+  follower = { dk = "mcc", sk = "mlo", dec = MD.fdecay_of, dec_to = MD.mcc_of, sus = MD.fsus_of, sus_to = MD.mlo_of },
+}
 local function env_curve(ctx, dl, track, src, ms, x, y, w, h)
   local f = function(k) return MD.field(track, src.slot, src.j, k) end
-  local att, dec, sus, rel = f("att"), MD.decay_of(f("ceil")), MD.sustain_of(f("floor")), f("rel")
+  local io = ENV_IO[src.kind] or ENV_IO.midi
+  local att, dec, sus, rel = f("att"), io.dec(f(io.dk)), io.sus(f(io.sk)), f("rel")
   local ex, duck = f("gate") >= 0.5, ms == 7
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, 0x121416ff, 3)
   local top, bot = y + 4, y + h - 4
@@ -1306,9 +1305,9 @@ local function env_curve(ctx, dl, track, src, ms, x, y, w, h)
       if n[1] == "a" then
         MD.set_field(track, src.slot, src.j, "att", 500 * frac((mx - x) / wa) ^ 2)
       elseif n[1] == "d" then
-        MD.set_field(track, src.slot, src.j, "ceil", MD.ceil_of(2000 * frac((mx - xa) / wd) ^ 2))
+        MD.set_field(track, src.slot, src.j, io.dk, io.dec_to(2000 * frac((mx - xa) / wd) ^ 2))
         local l = frac((bot - my) / (bot - top))
-        MD.set_field(track, src.slot, src.j, "floor", MD.floor_of(duck and 1 - l or l))
+        MD.set_field(track, src.slot, src.j, io.sk, io.sus_to(duck and 1 - l or l))
       else
         MD.set_field(track, src.slot, src.j, "rel", 2000 * frac((mx - xs) / wr) ^ 2)
       end
@@ -1334,19 +1333,126 @@ local function trigger_row(ctx, dl, track, src, x, y, w)
   end
   W.tip(ctx, id, "Another track's MIDI, sent here for this modulator alone", ImGui.IsItemHovered(ctx), false)
   if ImGui.BeginPopup(ctx, "trigpop##" .. src.guid) then
-    if ImGui.Selectable(ctx, "This track's own", from == nil) then MD.set_trigger(track, src.slot, src.j, nil) end
+    if ImGui.MenuItem(ctx, "   This track's own", nil, from == nil) then MD.set_trigger(track, src.slot, src.j, nil) end
     ImGui.Separator(ctx)
-    for t = 0, reaper.CountTracks(0) - 1 do
-      local tr = reaper.GetTrack(0, t)
-      if tr ~= track then
-        local _, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
-        if ImGui.Selectable(ctx, ("%d %s##trig%d"):format(t + 1, U.trim(nm or ""), t), tr == from) then
-          MD.set_trigger(track, src.slot, src.j, tr)
-        end
-      end
-    end
+    -- the tracks as the Receives panel's add menu lists them
+    require("TS_CV_Sends").track_menu_items(ctx, track, from, "trig" .. src.guid,
+      function(tr) MD.set_trigger(track, src.slot, src.j, tr) end)
     ImGui.EndPopup(ctx)
   end
+end
+
+local FENV_PILL = { "Envelope", "Env \u{00D7} level", "Duck" }
+local FENV_TIP = { "An envelope, set off when the level rises above the threshold",
+                   "An envelope, its peak how loud the hit is",
+                   "Dips on each hit, back over the release" }
+
+-- A Follower's sidechain from another track (MD.set_sc_from), shown on
+-- Sidechain only
+local function sc_row(ctx, dl, track, src, x, y, w)
+  local from = MD.sc_from(track)
+  local name = "this track's 3/4"
+  if from then
+    local _, nm = reaper.GetSetMediaTrackInfo_String(from, "P_NAME", "", false)
+    local num = math.floor(reaper.GetMediaTrackInfo_Value(from, "IP_TRACKNUMBER") or 0)
+    name = ("%d %s"):format(num, U.trim(nm or ""))
+  end
+  local id = "scfrom##" .. src.guid
+  if pill(ctx, dl, id, x, y, w, "Audio from: " .. U.truncate(name, 20), from ~= nil, src.col) then
+    ImGui.OpenPopup(ctx, "scpop##" .. src.guid)
+  end
+  W.tip(ctx, id, "Which track feeds the sidechain", ImGui.IsItemHovered(ctx), false)
+  if ImGui.BeginPopup(ctx, "scpop##" .. src.guid) then
+    if ImGui.MenuItem(ctx, "   This track's sidechain (3/4)", nil, from == nil) then MD.set_sc_from(track, nil) end
+    ImGui.Separator(ctx)
+    -- the tracks as the Receives panel's add menu lists them
+    require("TS_CV_Sends").track_menu_items(ctx, track, from, "scf" .. src.guid,
+      function(tr) MD.set_sc_from(track, tr) end)
+    ImGui.EndPopup(ctx)
+  end
+end
+
+local function follower_body(ctx, dl, track, src, x, y, w, isopen)
+  level_bar(dl, src, MD.value(track, src), x, y, w)
+  if not isopen then return end
+  y = y + 16
+  local side = live_field(track, src, "fsrc") >= 0.5
+  local gate = live_field(track, src, "gate") >= 0.5
+  local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
+  local env = MD.is_env(ms)
+  if pill(ctx, dl, "main##" .. src.guid, x, y, 52, "Track", not side, src.col) and side then
+    MD.set_field(track, src.slot, src.j, "fsrc", 0)
+  end
+  mx_switch(ctx, dl, track, src, "fsrc", 0, x, y, 52, PILL_H)
+  if pill(ctx, dl, "side##" .. src.guid, x + 55, y, 64, "Sidechain", side, src.col) and not side then
+    MD.set_field(track, src.slot, src.j, "fsrc", 1)
+    MD.need_sidechain(track)
+  end
+  mx_switch(ctx, dl, track, src, "fsrc", 1, x + 55, y, 64, PILL_H)
+  if not env then
+    if pill(ctx, dl, "gate##" .. src.guid, x + w - 44, y, 44, "Gate", gate, src.col) then
+      MD.set_field(track, src.slot, src.j, "gate", gate and 0 or 1)
+    end
+    mx_switch(ctx, dl, track, src, "gate", gate and 0 or 1, x + w - 44, y, 44, PILL_H)
+    W.tip(ctx, "gate##" .. src.guid, "All or nothing at the Floor", ImGui.IsItemHovered(ctx), false)
+  end
+  y = y + 22
+  -- its envelopes: click one, or the lit one again to follow the level
+  local ew = (w - 2 * 2) / 3
+  for i = 1, 3 do
+    local v = MD.ENV_FIRST + i - 1
+    local id = ("fenv%d##%s"):format(i, src.guid)
+    if pill(ctx, dl, id, x + (i - 1) * (ew + 2), y, ew, FENV_PILL[i], ms == v, src.col) then
+      MD.set_msrc(track, src.slot, src.j, ms == v and 0 or v)
+    end
+    W.tip(ctx, id, FENV_TIP[i], ImGui.IsItemHovered(ctx), false)
+  end
+  y = y + 20
+  if not env then
+    setting(ctx, dl, track, src, K.att, x, y)
+    setting(ctx, dl, track, src, K.rel, x + KCELL_W, y)
+    setting(ctx, dl, track, src, K.depth, x + KCELL_W * 2, y)
+    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.floor, x, y)
+    if not gate then setting(ctx, dl, track, src, K.ceil, x + KCELL_W, y) end
+    setting(ctx, dl, track, src, K.smooth, x + KCELL_W * 2, y)
+    if side then sc_row(ctx, dl, track, src, x, y + KCELL_H + 2, w) end
+    return
+  end
+  env_curve(ctx, dl, track, src, ms, x, y, w, ENV_CURVE_H)
+  y = y + ENV_CURVE_H + 6
+  setting(ctx, dl, track, src, K.eatt, x, y)
+  setting(ctx, dl, track, src, K.fdec, x + KCELL_W, y)
+  setting(ctx, dl, track, src, K.fsus, x + KCELL_W * 2, y)
+  y = y + KCELL_H
+  setting(ctx, dl, track, src, K.erel, x, y)
+  setting(ctx, dl, track, src, K.depth, x + KCELL_W, y)
+  setting(ctx, dl, track, src, K.smooth, x + KCELL_W * 2, y)
+  y = y + KCELL_H
+  setting(ctx, dl, track, src, K.thr, x, y)
+  W.tip(ctx, "floor##" .. src.guid, "It starts when the level rises above this, and lets go when it falls back below",
+    ImGui.IsItemHovered(ctx), false)
+  if ms == MD.ENV_FIRST + 1 then setting(ctx, dl, track, src, K.ceil, x + KCELL_W, y) end
+  y = y + KCELL_H
+  local legato = live_field(track, src, "mhold") >= 0.5
+  local ex = live_field(track, src, "gate") >= 0.5
+  local bw3 = (w - 2 * 2) / 3
+  if pill(ctx, dl, "fretrig##" .. src.guid, x, y, bw3, "Retrigger", not legato, src.col) and legato then
+    MD.set_field(track, src.slot, src.j, "mhold", 0)
+  end
+  mx_switch(ctx, dl, track, src, "mhold", 0, x, y, bw3, PILL_H)
+  W.tip(ctx, "fretrig##" .. src.guid, "Every rise starts it again from nothing", ImGui.IsItemHovered(ctx), false)
+  if pill(ctx, dl, "flegato##" .. src.guid, x + bw3 + 2, y, bw3, "Legato", legato, src.col) and not legato then
+    MD.set_field(track, src.slot, src.j, "mhold", 1)
+  end
+  mx_switch(ctx, dl, track, src, "mhold", 1, x + bw3 + 2, y, bw3, PILL_H)
+  W.tip(ctx, "flegato##" .. src.guid, "A rise while it's letting go carries on from where it is", ImGui.IsItemHovered(ctx), false)
+  if pill(ctx, dl, "fexpc##" .. src.guid, x + (bw3 + 2) * 2, y, bw3, "Exp curve", ex, src.col) then
+    MD.set_field(track, src.slot, src.j, "gate", ex and 0 or 1)
+  end
+  mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, PILL_H)
+  W.tip(ctx, "fexpc##" .. src.guid, "Decay and release fall away exponentially", ImGui.IsItemHovered(ctx), false)
+  if side then sc_row(ctx, dl, track, src, x, y + 22, w) end
 end
 
 local function midi_body(ctx, dl, track, src, x, y, w, isopen)
@@ -1356,7 +1462,7 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
   local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
   local pw = (w - 4 * 2) / 5
   for i = 1, 5 do
-    if pill(ctx, dl, ("msrc%d##%s"):format(i, src.guid), x + (i - 1) * (pw + 2), y, pw, MIDI_PILL[i], ms == i - 1) then
+    if pill(ctx, dl, ("msrc%d##%s"):format(i, src.guid), x + (i - 1) * (pw + 2), y, pw, MIDI_PILL[i], ms == i - 1, src.col) then
       MD.set_msrc(track, src.slot, src.j, i - 1)
     end
     W.tip(ctx, ("msrc%d##%s"):format(i, src.guid), MD.MIDI_SRC[i], ImGui.IsItemHovered(ctx), false)
@@ -1365,7 +1471,7 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
   local ew = (w - 2 * 2) / 3
   for i = 1, 3 do
     local v = MD.ENV_FIRST + i - 1
-    if pill(ctx, dl, ("msrc%d##%s"):format(v + 1, src.guid), x + (i - 1) * (ew + 2), y, ew, ENV_PILL[i], ms == v) then
+    if pill(ctx, dl, ("msrc%d##%s"):format(v + 1, src.guid), x + (i - 1) * (ew + 2), y, ew, ENV_PILL[i], ms == v, src.col) then
       MD.set_msrc(track, src.slot, src.j, v)
     end
     W.tip(ctx, ("msrc%d##%s"):format(v + 1, src.guid), MD.MIDI_SRC[v + 1], ImGui.IsItemHovered(ctx), false)
@@ -1385,17 +1491,17 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
     local legato = live_field(track, src, "mhold") >= 0.5
     local ex = live_field(track, src, "gate") >= 0.5
     local bw3 = (w - 2 * 2) / 3
-    if pill(ctx, dl, "retrig##" .. src.guid, x, y, bw3, "Retrigger", not legato) and legato then
+    if pill(ctx, dl, "retrig##" .. src.guid, x, y, bw3, "Retrigger", not legato, src.col) and legato then
       MD.set_field(track, src.slot, src.j, "mhold", 0)
     end
     mx_switch(ctx, dl, track, src, "mhold", 0, x, y, bw3, PILL_H)
     W.tip(ctx, "retrig##" .. src.guid, "Every note starts it again", ImGui.IsItemHovered(ctx), false)
-    if pill(ctx, dl, "legato##" .. src.guid, x + bw3 + 2, y, bw3, "Legato", legato) and not legato then
+    if pill(ctx, dl, "legato##" .. src.guid, x + bw3 + 2, y, bw3, "Legato", legato, src.col) and not legato then
       MD.set_field(track, src.slot, src.j, "mhold", 1)
     end
     mx_switch(ctx, dl, track, src, "mhold", 1, x + bw3 + 2, y, bw3, PILL_H)
     W.tip(ctx, "legato##" .. src.guid, "Only a note after silence starts it again", ImGui.IsItemHovered(ctx), false)
-    if pill(ctx, dl, "expc##" .. src.guid, x + (bw3 + 2) * 2, y, bw3, "Exp curve", ex) then
+    if pill(ctx, dl, "expc##" .. src.guid, x + (bw3 + 2) * 2, y, bw3, "Exp curve", ex, src.col) then
       MD.set_field(track, src.slot, src.j, "gate", ex and 0 or 1)
     end
     mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, PILL_H)
@@ -1414,7 +1520,7 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
       setting(ctx, dl, track, src, K.mcc, x + KCELL_W, y)
     elseif ms == 0 then
       local hold = live_field(track, src, "mhold") >= 0.5
-      if pill(ctx, dl, "hold##" .. src.guid, x + KCELL_W + 6, y + 14, 46, "Hold", hold) then
+      if pill(ctx, dl, "hold##" .. src.guid, x + KCELL_W + 6, y + 14, 46, "Hold", hold, src.col) then
         MD.set_field(track, src.slot, src.j, "mhold", hold and 0 or 1)
       end
       mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + KCELL_W + 6, y + 14, 46, PILL_H)

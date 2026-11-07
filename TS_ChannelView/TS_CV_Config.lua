@@ -109,9 +109,16 @@ C.SIZE_LIST = { "small", "medium", "large" }
 
 -- A dropdown can show its choices as buttons instead (a control's
 -- right-click menu, Show as): across, one half-cell column per choice,
--- under its name; or down, a column of buttons two to a half-row. Past
--- this many choices it stays a dropdown.
-C.BUTTONS_MAX = 8
+-- under its name; down, a column of buttons two to a half-row; or a grid,
+-- a half-cell per column and two rows to a half-row. Past this many
+-- choices it stays a dropdown.
+C.BUTTONS_MAX = 16
+-- A grid of n buttons: as near square as n allows, columns first (16:
+-- 4 x 4, 12: 4 x 3, 6: 3 x 2). Returns columns, rows.
+function C.button_grid(n)
+  local cols = math.max(1, math.ceil(math.sqrt(n or 1) - 1e-9))
+  return cols, math.ceil((n or 1) / cols)
+end
 
 -- ---------------------------------------------------------------------
 -- Behaviour

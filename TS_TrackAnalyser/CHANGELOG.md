@@ -1,5 +1,12 @@
 # Track Analyser — changelog
 
+## 2.7.1 — TS_TrackProbe 2.5.1
+
+- **TS_TrackProbe 2.5.1:** a measured plugin's make-up gain is taken out
+  of its reading when ChannelView 4.0.2 says which control it is, so
+  moving it (automation included) doesn't read as reduction. Reopen a
+  project after updating, so the new probe runs.
+
 ## 2.7.0 — TS_TrackProbe 2.5.0
 
 - **TS_TrackProbe 2.5.0:** the zero is measured while stopped when a

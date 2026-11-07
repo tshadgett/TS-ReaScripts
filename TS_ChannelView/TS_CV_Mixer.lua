@@ -699,8 +699,23 @@ local function column(ctx, t, avail_h, cur_track, lift)
     -- the strip and every edge weighs the same.
     local lw = selected and 2.0 or 1.0
     local o  = lw * 0.5
-    ImGui.DrawList_AddRect(dl, x + o, y + o, x + ww - o, y + strip_h - o,
-      selected and sel_col or C.COL.panel_border, C.STRIP_ROUND, 0, lw)
+    if selected then
+      ImGui.DrawList_AddRect(dl, x + o, y + o, x + ww - o, y + strip_h - o,
+        sel_col, C.STRIP_ROUND, 0, lw)
+    else
+      -- Not across the top: the coloured header is the strip's top edge,
+      -- and a dark line over it reads as a stripe. Down the sides from
+      -- under the header, and round the foot.
+      local r, x0, x1, y0, y1 = C.STRIP_ROUND, x + o, x + ww - o, y + C.HEADER_H, y + strip_h - o
+      if y1 - r > y0 then
+        ImGui.DrawList_PathClear(dl)
+        ImGui.DrawList_PathLineTo(dl, x0, y0)
+        ImGui.DrawList_PathArcTo(dl, x0 + r, y1 - r, r, math.pi, math.pi * 0.5)
+        ImGui.DrawList_PathArcTo(dl, x1 - r, y1 - r, r, math.pi * 0.5, 0)
+        ImGui.DrawList_PathLineTo(dl, x1, y0)
+        ImGui.DrawList_PathStroke(dl, C.COL.panel_border, 0, lw)
+      end
+    end
     if MX.drag and MX.drag.guid == t.guid then
       ImGui.DrawList_AddRect(dl, x + 1, y + 1, x + ww - 1, y + strip_h - 1,
         C.COL.drop_marker, C.STRIP_ROUND, 0, 2.0)

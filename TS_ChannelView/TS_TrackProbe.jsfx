@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.5.0
+version: 2.5.1
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -73,7 +73,9 @@ author: Tim Shadgett
 //    17  tap_gen      18  cal_arm (pre)      19  tap_nogr
 //    20  tap_mb       21..23  tap_mbx1..3    24  tap_fine
 //    25  tap_st (the stereo tap, 1..8; 0 none)
+//    26..29  tap_mug1..4   30..31  tap_mbmug1..2 (MAKE-UP GAIN, FOLLOWED)
 //    50..53  tap_lag5..8   54..57  tap_rst5..8
+//    58..61  tap_mug5..8   62..63  tap_mbmug3..4
 //   The probes write:
 //    32  the pre probe's block count     33  the post probe's (a probe
 //        that has recognised itself; a script sees a pair come alive)
@@ -90,6 +92,7 @@ author: Tim Shadgett
 //    121  how many plugins this probe can measure (8; nothing from older ones: 4)
 //    122  the stereo tap's correlation   123..124  its mid and side (dBFS, RMS)
 //    125  1: this probe measures stereo (nothing from older ones)
+//    126  1: this probe follows make-up gain (nothing from older ones)
 //   Taps 5..8 sit apart from 1..4 so that a script or probe that knows
 //   only four finds 1..4 where it expects them. The names are those of
 //   the readings; the probe keeps them in TV_* (one per tap).
@@ -299,7 +302,32 @@ author: Tim Shadgett
 //   zero, dB (below 0 is reduction, -999 no signal), [72 + b] the level
 //   going in, dBFS. A third of the cost of the tap's filterbank.
 //
-// THE ZERO POINT: MEASURED WHILE STOPPED
+// MAKE-UP GAIN, FOLLOWED
+//   A plugin's make-up (or output) gain moves every band's after/before
+//   ratio by the same amount, and would read as reduction, or hide it.
+//   ChannelView writes each tap's make-up in dB (tap_mugN) as it is now,
+//   automation included, and the probe takes it out of every ratio before
+//   anything else sees it: the smoothing, the music's baseline, the
+//   measured zero, the third-octaves. So the zero holds through any
+//   make-up change. A multiband tap (tap_mb) also has each of its split
+//   bands' own gain (tap_mbmug1..4), taken out of the filterbank bands
+//   inside it.
+//
+//   Each is written as dB + 1000 * a count (0..99). A make-up that moves
+//   with the count unchanged is the plugin's make-up moving: the audio
+//   moved with it. A new count says only what is taken out changed (the
+//   script started, or another control is the make-up now), not the
+//   audio: what the probe has learnt and measured is moved by the same
+//   amount, so the reading doesn't jump. A new multiband split
+//   (tap_mb, tap_mbx) counts the same way.
+//
+//   The make-up is written at the script's frame rate, so it can arrive a
+//   frame after the audio changed. A ratio climbing in that frame would
+//   lift the music's baseline, which only sinks 0.1 dB/s; so when a tap's
+//   make-up moves, each band's baseline goes back to what it was a
+//   little before (TS_BSB, kept every 32 columns), if that was lower --
+//   or, learnt only since then, is learnt again.
+//
 //   When a tap has no zero yet, or its plugin has been touched since, the
 //   pre probe feeds a quiet test signal into the chain while stopped --
 //   pink noise, one second at -60 dBFS and one at -50 -- and the post
@@ -445,8 +473,15 @@ out_pin:right
   // reduction, its zero's state and its levels (out)
   TV_LAG = 400100; TV_RST = 400110; TV_GR = 400120; TV_CAL = 400130;
   TV_INPK = 400140; TV_OUTPK = 400150; TV_INRMS = 400160; TV_OUTRMS = 400170;
+  // ... and its make-up, dB (in); a multiband tap's split bands' own
+  // (and the count each came with: MAKE-UP GAIN, FOLLOWED)
+  TV_MUG = 400180; MB_MUG = 400190; TV_MK = 400200; MB_MK = 400210;
+  t = 0;
+  loop(4, MB_MUG[t] = MB_MK[t] = 0; t += 1; );
+  mb_seq = 0; mbp_t = mbp_1 = mbp_2 = mbp_3 = 0;
   t = 0;
   loop(8,
+    TV_MUG[t] = TV_MK[t] = 0;
     TV_LAG[t] = TV_RST[t] = TV_GR[t] = TV_CAL[t] = 0;
     TV_INPK[t] = TV_OUTPK[t] = TV_INRMS[t] = TV_OUTRMS[t] = -150;
     t += 1;
@@ -455,6 +490,7 @@ out_pin:right
   // the stereo tap (STEREO, ONE TAP): its sums, its readings, its scope's
   // ring (L R pairs, here) and where it's published
   PB_ST = 25; PB_CORR = 122; PB_STM = 123; PB_STS = 124; PB_STCAP = 125;
+  PB_MUG = 26; PB_MUG2 = 58; PB_MBMUG = 30; PB_MBMUG2 = 62; PB_MUGCAP = 126;
   CTRL_STTRK = 77;
   CTRL_NOZERO = 78; // moving: ChannelView is learning a plugin (THE ZERO POINT)
   STH_BASE = 0x340000; STP_BASE = 0x340010; STP_N = 512;
@@ -748,6 +784,10 @@ out_pin:right
   TS_LCR = 354;
   TS_ZSH = 360; TS_ZSV = 370;     // a shut zero: each band's level when shut on the test signal, valid
   TS_GATE = 380; TS_GOPEN = 381;  // a gate for certain (THE ZERO POINT), columns seen open
+  TS_BSA = 390; TS_BSB = 400;     // each band's baseline, kept every 32 columns: latest, and the one before
+  TS_MO = 410;                    // each band's make-up last column (MAKE-UP GAIN, FOLLOWED)
+  TS_MK = 420; TS_MBS = 421;      // ... the count, and the multiband split's, last seen
+  TS_HBA = 430;                   // each band's columns since its baseline was first learnt
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -820,7 +860,7 @@ out_pin:right
   kb0 = kb1 = kb2 = 0;
 
   // third-octaves for one tap (THIRD-OCTAVE REDUCTION)
-  FN_N = 8192; FN_HOP = 1024; FN_MAXB = 30; FN_FL = 16;
+  FN_N = 8192; FN_HOP = 1024; FN_MAXB = 30; FN_FL = 18;
   FN_A  = 420000;                 // before, a ring of FN_N
   FN_B  = FN_A + FN_N;            // after
   FN_W  = FN_B + FN_N;            // the window
@@ -832,6 +872,7 @@ out_pin:right
   //   0 first bin  1 last bin  2 power before  3 power after (smoothed)
   //   4 ratio dB  5 baseline  6 has baseline  7 peak power before
   //   8 zero  9 zero valid  10..13 the zero's sums (A before/after, B)
+  //   16 the make-up taken out last frame (MAKE-UP GAIN, FOLLOWED)
   //   14 published  15 has signal
   FN_GM = 0x70000; FN_GSTR = 128;
   fn_sr = 0; fn_pos = 0; fn_cnt = 0; fn_nb = 0; fn_tap = -1; fn_seq = 0;
@@ -840,10 +881,27 @@ out_pin:right
   // holding audio from before a change (the "before" delay line cleared
   // when the tap's latency moves -- silence on one side, music on the
   // other) reads as a jump the zero then believes for minutes
-  fn_hold = 0;
+  fn_hold = 0; fn_rebase = 0;
   // how fast the zero learnt from the music climbs to a higher ratio, a
   // frame (the taps' 0.5 would let one odd frame lift it halfway)
   FN_RISE = 0.03;
+
+  // A tap's make-up gain at frequency f, dB (MAKE-UP GAIN, FOLLOWED): its
+  // own, and on the multiband tap, that of the split band f falls in.
+  function mugAt(t, f) local(o, k) (
+    o = t >= 0 ? TV_MUG[t] : 0;
+    t == tap_mb - 1 ? (
+      k = (tap_mbx1 > 0 && f >= tap_mbx1) + (tap_mbx2 > 0 && f >= tap_mbx2) + (tap_mbx3 > 0 && f >= tap_mbx3);
+      o += MB_MUG[k];
+    );
+    o;
+  );
+  // ... at filterbank band bi's centre
+  function mugBand(t, bi) (
+    t == tap_mb - 1
+      ? mugAt(t, GRB_LO * exp(log(min(GRB_HI, srate * 0.45) / GRB_LO) * (bi + 0.5) / GRB_N))
+      : TV_MUG[t];
+  );
 
   function fineSetup() local(i, k, fc, fl, fh, b, lo, hi, j) (
     i = 0; loop(FN_N, FN_W[i] = 0.5 - 0.5 * cos(2 * $pi * i / FN_N); FN_A[i] = 0; FN_B[i] = 0; i += 1; );
@@ -890,15 +948,15 @@ out_pin:right
       b = FN_S + k * FN_FL;
       va = fn_cna >= 8 && b[10] > 0.0000001 * fn_cna && b[11] > 0.000000001 * fn_cna;
       vb = fn_cnb >= 8 && b[12] > 0.0000001 * fn_cnb && b[13] > 0.000000001 * fn_cnb;
-      va ? (za = 10 * log10(b[11] / b[10]));
-      vb ? (zb = 10 * log10(b[13] / b[12]));
+      va ? (za = 10 * log10(b[11] / b[10]) - mugAt(tap_fine - 1, 1000 * 2 ^ ((k - 16) / 3)));
+      vb ? (zb = 10 * log10(b[13] / b[12]) - mugAt(tap_fine - 1, 1000 * 2 ^ ((k - 16) / 3)));
       (va || vb) ? ( b[8] = (va && vb) ? max(za, zb) : (va ? za : zb); b[9] = 1; n += 1; ) : (b[9] = 0);
       k += 1;
     );
     n >= 10 ? (fn_hascal = 1);
   );
 
-  function fineFrame() local(i, j, b, k, pa, pb, r, d, dec, rel, gb, lv) (
+  function fineFrame() local(i, j, b, k, pa, pb, r, d, dec, rel, gb, lv, mo) (
     i = 0;
     loop(FN_N,
       j = fn_pos + i; j >= FN_N ? (j -= FN_N);
@@ -916,6 +974,11 @@ out_pin:right
     k = 0;
     loop(fn_nb,
       b = FN_S + k * FN_FL;
+      // the make-up taken out (MAKE-UP GAIN, FOLLOWED): moved with what's
+      // taken out, everything learnt moves with it
+      mo = mugAt(tap_fine - 1, 1000 * 2 ^ ((k - 16) / 3));
+      fn_rebase ? ( d = mo - b[16]; b[4] -= d; b[5] -= d; b[8] -= d; );
+      b[16] = mo;
       pa = 0; pb = 0; i = b[0];
       loop(b[1] - b[0] + 1,
         pa += sqr(FN_FA[2 * i]) + sqr(FN_FA[2 * i + 1]);
@@ -929,7 +992,7 @@ out_pin:right
         b[2] += (pa - b[2]) * 0.6; b[3] += (pb - b[3]) * 0.6;
         b[7] = max(b[2], b[7] * fn_pkdec);
         (fn_hold <= 0 && b[2] > max(0.001, b[7] * 0.00001) && b[3] > 0.000000000001) ? (
-          r = 10 * log10(b[3] / b[2]);
+          r = 10 * log10(b[3] / b[2]) - mo;
           b[6] < 0.5 ? ( b[4] = r; b[5] = r; b[6] = 1; b[14] = 0; ) : (
             b[4] = r;
             b[4] > b[5] ? (b[5] += (b[4] - b[5]) * FN_RISE) : (b[5] -= dec);
@@ -944,6 +1007,7 @@ out_pin:right
       );
       k += 1;
     );
+    fn_rebase = 0;
     // out to gmem, for this track
     (cal_pl >= 0 && cal_pl < CAL_SLOTS) ? (
       gb = FN_GM + cal_pl * FN_GSTR;
@@ -1160,7 +1224,7 @@ out_pin:right
 
   // A column's worth of one tap: per-band ratio against its baseline,
   // the median across bands, the meter's ballistics.
-  function tapColumn(t) local(s, bi, pa, pb, pk, gate, r, d, n, j, g, zo, sh, gv, go) (
+  function tapColumn(t) local(s, bi, pa, pb, pk, gate, r, d, n, j, g, zo, sh, gv, go, mo, snap, rb, dm) (
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
     n = 0;
     // the bands due this column (THE TEN BANDS, BY FFT), staggered
@@ -1191,8 +1255,32 @@ out_pin:right
     zo = s[TS_HASCAL] > 0.5;
     sh = zo && s[TS_CST] == 4 && s[TS_STALE] < 0.5;   // shut on the test signal
     gv = 0; go = 0;
+    snap = (tap_col & 31) == 0;
+    // what's taken out changed, not the audio (MAKE-UP GAIN, FOLLOWED)
+    rb = TV_MK[t] != s[TS_MK] || mb_seq != s[TS_MBS];
+    s[TS_MK] = TV_MK[t]; s[TS_MBS] = mb_seq;
+    rb && t == tap_fine - 1 ? fn_rebase = 1;
     bi = 0;
     loop(GRB_N,
+      mo = mugBand(t, bi);
+      dm = mo - s[TS_MO + bi];
+      abs(dm) > 0.0001 ? (
+        rb ? (
+          // all of it moved with what's taken out
+          s[TS_SM + bi] -= dm; s[TS_BS + bi] -= dm; s[TS_BSA + bi] -= dm; s[TS_BSB + bi] -= dm;
+          s[TS_ZERO + bi] -= dm; s[TS_ZSH + bi] -= dm;
+        ) : abs(dm) > 0.05 && s[TS_HB + bi] > 0.5 ? (
+          // the make-up moved: the baseline goes back to before a ratio
+          // could have climbed on it, or is learnt again
+          s[TS_HBA + bi] < 64 ? s[TS_HB + bi] = 0 : (
+            s[TS_BS + bi] = min(s[TS_BS + bi], s[TS_BSB + bi]);
+            s[TS_BSA + bi] = min(s[TS_BSA + bi], s[TS_BS + bi]);
+          );
+        );
+        s[TS_MO + bi] = mo;
+      );
+      snap ? ( s[TS_BSB + bi] = s[TS_BSA + bi]; s[TS_BSA + bi] = s[TS_BS + bi]; );
+      s[TS_HB + bi] > 0.5 ? s[TS_HBA + bi] = min(s[TS_HBA + bi] + 1, 100000);
       pa = s[TS_PA + bi];
       pb = s[TS_PB + bi];
       s[TS_MBP + bi] = pa;
@@ -1201,9 +1289,10 @@ out_pin:right
       gate = max(0.000000001, pk * 0.00001);          // -90 dB, and 50 dB under the band's peak
       s[TS_MBD + bi] = -1;
       (s[TS_HOLD] <= 0 && pa > gate && pb > 0.00000000000001) ? (
-        r = 10 * log10(pb / pa);
+        r = 10 * log10(pb / pa) - mo;
         s[TS_HB + bi] < 0.5 ? (
           s[TS_SM + bi] = r; s[TS_BS + bi] = r; s[TS_HB + bi] = 1;
+          s[TS_BSA + bi] = s[TS_BSB + bi] = r; s[TS_HBA + bi] = 0;
         ) : (
           s[TS_SM + bi] += (r - s[TS_SM + bi]) * TAP_SMOOTH;
           s[TS_SM + bi] > s[TS_BS + bi]
@@ -1288,8 +1377,9 @@ out_pin:right
       // (the test signal got in, whatever came out)
       ((na >= CAL_MINCOL && s[TS_AA + bi] > 0.000000000001 * na) ||
        (nb >= CAL_MINCOL && s[TS_BA + bi] > 0.000000000001 * nb)) ? ni += 1;
-      va ? (za = 10 * log10(s[TS_AB + bi] / s[TS_AA + bi]));
-      vb ? (zb = 10 * log10(s[TS_BB + bi] / s[TS_BA + bi]));
+      // (the make-up taken out, as from every ratio: MAKE-UP GAIN, FOLLOWED)
+      va ? (za = 10 * log10(s[TS_AB + bi] / s[TS_AA + bi]) - mugBand(t, bi));
+      vb ? (zb = 10 * log10(s[TS_BB + bi] / s[TS_BA + bi]) - mugBand(t, bi));
       (va || vb) ? (
         s[TS_ZT + bi] = (va && vb) ? max(za, zb) : (va ? za : zb);
         s[TS_ZTV + bi] = 1;
@@ -1422,17 +1512,36 @@ out_pin:right
       loop(TAP_MAX,
         TV_LAG[k] = gmem[pb + pbAt(PB_LAG, PB_LAG2, k)];
         TV_RST[k] = gmem[pb + pbAt(PB_RST, PB_RST2, k)];
+        v = gmem[pb + pbAt(PB_MUG, PB_MUG2, k)];
+        r = floor((v + 500) / 1000);
+        TV_MK[k] = r;
+        TV_MUG[k] = max(-60, min(60, v - 1000 * r));
+        k += 1;
+      );
+      k = 0;
+      loop(4,
+        v = gmem[pb + (k < 2 ? PB_MBMUG + k : PB_MBMUG2 + k - 2)];
+        r = floor((v + 500) / 1000);
+        r != MB_MK[k] ? ( MB_MK[k] = r; mb_seq += 1; );
+        MB_MUG[k] = max(-60, min(60, v - 1000 * r));
         k += 1;
       );
       tap_gen = gmem[pb + PB_GEN];
       tap_nogr = gmem[pb + PB_NOGR];
       tap_mb = gmem[pb + PB_MB];
       tap_mbx1 = gmem[pb + PB_MBX]; tap_mbx2 = gmem[pb + PB_MBX + 1]; tap_mbx3 = gmem[pb + PB_MBX + 2];
+      // a new split: what's taken out changed, not the audio
+      (tap_mb != mbp_t || tap_mbx1 != mbp_1 || tap_mbx2 != mbp_2 || tap_mbx3 != mbp_3) ? (
+        mbp_t = tap_mb; mbp_1 = tap_mbx1; mbp_2 = tap_mbx2; mbp_3 = tap_mbx3;
+        mb_seq += 1;
+      );
       tap_fine = gmem[pb + PB_FINE];
       tap_watch = gmem[pb + PB_WATCH];
       tap_st = gmem[pb + PB_ST];
     ) : (
       tap_n = 0; tap_mb = 0; tap_fine = 0; tap_watch = 0; tap_st = 0;
+      k = 0; loop(TAP_MAX, TV_MUG[k] = 0; k += 1; );
+      k = 0; loop(4, MB_MUG[k] = 0; k += 1; );
     );
     // Track Analyser's spectrum release
     v = gmem[CTRL_REL];
@@ -1460,6 +1569,7 @@ out_pin:right
       gmem[pb + PB_MBL + 2] = tap_mbl3; gmem[pb + PB_MBL + 3] = tap_mbl4;
       gmem[pb + PB_CORR] = stc_corr; gmem[pb + PB_STM] = stc_mdb; gmem[pb + PB_STS] = stc_sdb;
       gmem[pb + PB_STCAP] = 1;
+      gmem[pb + PB_MUGCAP] = 1;
       gmem[pb + PB_RSEQ] += 1;
     );
   );

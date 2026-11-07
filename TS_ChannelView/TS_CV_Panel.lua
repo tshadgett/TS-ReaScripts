@@ -182,6 +182,10 @@ function P.button_span(ctl)
   if ctl.type ~= "combo" or not ctl.buttons or not ctl.nbtn then return nil end
   local n = ctl.nbtn
   if ctl.buttons == "across" then return math.max(2, n), 2 end
+  if ctl.buttons == "grid" then
+    local cols, rows = C.button_grid(n)
+    return math.max(2, cols), math.ceil((rows + 1) / 2)
+  end
   return 2, math.ceil((n + 1) / 2)
 end
 
@@ -3095,7 +3099,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           local pv2 = rev2 and (1 - v2) or v2
           if link2 then MD.shift_link(track, link2, pv2 - live2)
           else reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, pv2) end
-          TP.touched(track, fx.guid)
+          TP.touched(track, fx.guid, p2)
           ML.set_target(track, fx.guid, fx.addr, p2, "cv")
         end
         changed, nv = c1, v1
@@ -3272,8 +3276,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         local pv = rev and (1 - nv) or nv
         if link then MD.shift_link(track, link, pv - raw)
         else reaper.TrackFX_SetParamNormalized(track, fx.addr, p, pv) end
-        -- A measured plugin relearns its zero point when it's changed.
-        TP.touched(track, fx.guid)
+        -- A measured plugin relearns its zero point when it's changed (not
+        -- for its make-up, which the probe follows).
+        TP.touched(track, fx.guid, p)
         -- the MIDI learn bar's "last touched"
         ML.set_target(track, fx.guid, fx.addr, p, "cv")
       end

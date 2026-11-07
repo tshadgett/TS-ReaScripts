@@ -74,6 +74,53 @@ local function is_separator(name)
   return t ~= "" and t:match("^[%-%_%=%~%.%*%s]+$") ~= nil
 end
 
+local function project_tracks(track)
+  local out = {}
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    nm = U.trim(nm)
+    out[#out + 1] = {
+      track = tr,
+      num   = i + 1,
+      name  = (nm ~= "") and nm or ("Track " .. (i + 1)),
+      sep   = is_separator(nm),
+      self  = (tr == track),
+      -- REAPER's own TCP spacer, the "Space" column in the track manager.
+      -- Grouping you set up in the project should survive into this menu
+      -- rather than being flattened out of it.
+      space = (reaper.GetMediaTrackInfo_Value(tr, "I_SPACER") or 0) > 0.5,
+      col   = U.track_colour(tr, 0xff),
+    }
+  end
+  return out
+end
+
+-- The project's tracks as menu items, as the add menus list them: the
+-- number and name with the track's colour swatch, a rule where a
+-- separator track or a spacer is; `self_tr` listed but not to be picked,
+-- `cur` ticked. `pick(track)` on a click; returns true when one was.
+local function track_menu_items(ctx, self_tr, cur, id, pick)
+  local hit, pending_gap, first = false, false, true
+  for _, t in ipairs(project_tracks(self_tr)) do
+    if t.sep then
+      pending_gap = true
+    else
+      if (pending_gap or t.space) and not first then ImGui.Separator(ctx) end
+      pending_gap, first = false, false
+      local label = ("   %d  %s##%s%d"):format(t.num, t.name, id, t.num)
+      local clicked = ImGui.MenuItem(ctx, label, nil, t.track == cur, not t.self)
+      local ix, iy = ImGui.GetItemRectMin(ctx)
+      local _, iy2 = ImGui.GetItemRectMax(ctx)
+      local sw = t.col or C.COL.panel_border
+      if t.self then sw = U.with_alpha(sw, 0x60) end
+      ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx), ix + 2, iy + 2, ix + 9, iy2 - 2, sw, 1.5)
+      if clicked then pick(t.track); hit = true end
+    end
+  end
+  return hit
+end
+
 -- The three modes. A send is MIDI when its audio is off (I_SRCCHAN -1)
 -- and its MIDI isn't (the low five bits of I_MIDIFLAGS are the source
 -- channel: 0 all, 1-16 one, 31 none).
@@ -233,28 +280,6 @@ local function make(kind)
   function SD.open_menu() pending_menu = true end
 
   -- Lists every track except `track` itself, with spacers marked.
-  local function project_tracks(track)
-    local out = {}
-    for i = 0, reaper.CountTracks(0) - 1 do
-      local tr = reaper.GetTrack(0, i)
-      local _, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
-      nm = U.trim(nm)
-      out[#out + 1] = {
-        track = tr,
-        num   = i + 1,
-        name  = (nm ~= "") and nm or ("Track " .. (i + 1)),
-        sep   = is_separator(nm),
-        self  = (tr == track),
-        -- REAPER's own TCP spacer, the "Space" column in the track manager.
-        -- Grouping you set up in the project should survive into this menu
-        -- rather than being flattened out of it.
-        space = (reaper.GetMediaTrackInfo_Value(tr, "I_SPACER") or 0) > 0.5,
-        col   = U.track_colour(tr, 0xff),
-      }
-    end
-    return out
-  end
-
   -- Puts a send into one of the three modes (see the top of this file).
   -- `get`/`set` read and write its fields; `dst` is the receiving track.
   local function apply_mode(get, set, dst, mode)
@@ -336,33 +361,11 @@ local function make(kind)
 
   local function track_items(ctx, track, mode)
     local added = new_track_items(ctx, track, mode)
-    local pending_gap = false
-    local first = true
-    for _, t in ipairs(project_tracks(track)) do
-      if t.sep then
-        pending_gap = true
-      else
-        -- A spacer set on the track itself goes ABOVE it, the way REAPER
-        -- draws it; a spacer track goes where it sits. Never a rule before
-        -- the first entry -- that reads as something missing above it.
-        if (pending_gap or t.space) and not first then ImGui.Separator(ctx) end
-        pending_gap, first = false, false
-
-        local label = ("   %d  %s##%s%d"):format(t.num, t.name, ID, t.num)
-        -- The panel's own track is listed but disabled rather than dropped.
-        -- A number missing from the middle of the list reads as a bug in the
-        -- list, not as "a track can't send to itself".
-        local hit = ImGui.MenuItem(ctx, label, nil, false, not t.self)
-        -- the colour swatch, drawn into the item just laid out
-        local ix, iy = ImGui.GetItemRectMin(ctx)
-        local _, iy2 = ImGui.GetItemRectMax(ctx)
-        local dl = ImGui.GetWindowDrawList(ctx)
-        local sw = t.col or C.COL.panel_border
-        if t.self then sw = U.with_alpha(sw, 0x60) end
-        ImGui.DrawList_AddRectFilled(dl, ix + 2, iy + 2, ix + 9, iy2 - 2, sw, 1.5)
-        if hit and SD.add_send(track, t.track, mode) then added = true end
-      end
-    end
+    -- (the panel's own track is listed but not to be picked: a number
+    -- missing from the middle of the list reads as a bug in it)
+    track_menu_items(ctx, track, nil, ID, function(tr)
+      if SD.add_send(track, tr, mode) then added = true end
+    end)
     return added
   end
 
@@ -778,4 +781,5 @@ end   -- make
 
 local SD = make("send")
 SD.make = make
+SD.track_menu_items = track_menu_items
 return SD

@@ -994,10 +994,10 @@ draw_entry_body = function(ctx)
       tip("Its choices, with | between them.")
       row_name("Shown as")
       ImGui.SetNextItemWidth(ctx, FIELD_W)
-      local cur_b = (c.buttons == "across") and 0 or (c.buttons == "down") and 1 or 2
-      local bch, bi = ImGui.Combo(ctx, "##vshow", cur_b, "Chips across\0Chips down\0Dropdown\0")
+      local cur_b = (c.buttons == "across") and 0 or (c.buttons == "down") and 1 or (c.buttons == "grid") and 2 or 3
+      local bch, bi = ImGui.Combo(ctx, "##vshow", cur_b, "Chips across\0Chips down\0Chips grid\0Dropdown\0")
       if bch then
-        c.buttons = (bi == 0) and "across" or (bi == 1) and "down" or nil
+        c.buttons = (bi == 0) and "across" or (bi == 1) and "down" or (bi == 2) and "grid" or nil
         c.nbtn = c.buttons and math.max(2, #M.vchoices(c)) or nil
       end
     elseif c.type == "knob" then
@@ -1147,10 +1147,10 @@ draw_entry_body = function(ctx)
     row_name("Show as")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     if not ok then ImGui.BeginDisabled(ctx, true) end
-    local cur_b = (c.buttons == "across") and 1 or (c.buttons == "down") and 2 or 0
-    local bch, bi = ImGui.Combo(ctx, "##show", cur_b, "Dropdown\0Buttons across\0Buttons down\0")
+    local cur_b = (c.buttons == "across") and 1 or (c.buttons == "down") and 2 or (c.buttons == "grid") and 3 or 0
+    local bch, bi = ImGui.Combo(ctx, "##show", cur_b, "Dropdown\0Buttons across\0Buttons down\0Buttons grid\0")
     if bch then
-      c.buttons = (bi == 1) and "across" or (bi == 2) and "down" or nil
+      c.buttons = (bi == 1) and "across" or (bi == 2) and "down" or (bi == 3) and "grid" or nil
       c.nbtn = c.buttons and n or nil
     end
     if not ok then ImGui.EndDisabled(ctx) end

@@ -67,6 +67,11 @@
   tap_gen when the routing is laid so old zeros are forgotten, and reads
   tap_calN back. "Measure the zero while stopped" in Setup can turn it
   off everywhere; ChannelView learning a plugin holds it (TS_CV_Learn).
+
+  MAKE-UP GAIN. A plugin's make-up moves its output as reduction would,
+  so each tapped plugin's make-up, in dB, goes to the probe every frame
+  (automation included), which takes it out (MAKE-UP GAIN, FOLLOWED in
+  TS_TrackProbe.jsfx). Moving it then isn't a touch.
 --]]
 
 local U = require("TS_CV_Util")
@@ -2280,6 +2285,191 @@ function TP.track_total(tr)
 end
 
 -- ---------------------------------------------------------------------
+-- make-up gain
+-- ---------------------------------------------------------------------
+
+-- Which control is a plugin's make-up: the layout's own (Makeup=, a
+-- control on it), else a compressor canvas's Makeup role or a multiband
+-- canvas's Output; a multiband canvas's band Gain roles too, for the tap
+-- the probe splits (tap_mb). Each is written as dB + 1000 * a count, the
+-- count moved when what's taken out changes rather than the audio (the
+-- script starting, another control being the make-up): the probe then
+-- moves what it has learnt with it. A control that doesn't read in dB
+-- isn't followed.
+--
+-- The window and the web bridge both run TP.update; the bridge leaves it
+-- to the window while the window is running (ExtState mug_at), so the two
+-- never write different answers turn about.
+TP.MUG_EVERY, TP.MUG_KEY = 1.0, "mug_at"
+local mug = { list = {}, at = -10, k = {}, kb = {}, by_addr = {}, by_guid = {}, said = -10 }
+
+-- A control's value in dB as it reads (through its custom range, if it
+-- has one), or nil when it doesn't read in dB.
+function TP.makeup_db(tr, addr, p, ranges)
+  if not (tr and addr and p and p >= 0) then return nil end
+  local UN = require("TS_CV_Units")
+  local was = U.with_ranges(ranges)
+  local txt = U.fmt_value(tr, addr, p)
+  U.with_ranges(was)
+  local v, unit = UN.parse(txt or "")
+  if unit ~= "db" or not v or v ~= v or math.abs(v) >= 1000 then return nil end
+  return math.max(-60, math.min(60, v))
+end
+
+-- A plugin's make-up controls: { p, bands = { [k] = param }, plan (the
+-- multiband's, TP.mb_plan), ranges, sig, bsig }, or nil.
+function TP.makeup_of(layout, tr, addr)
+  if not layout then return nil end
+  local p
+  if layout.mug then
+    for _, c in ipairs(layout.controls or {}) do
+      if c.param == layout.mug then p = layout.mug; break end
+    end
+  end
+  local cv = layout.canvas
+  local R = (cv and cv.roles) or {}
+  if not p and cv then p = (cv.kind == "comp" and R.Makeup) or (cv.kind == "multi" and R.Output) or nil end
+  local bands, plan, bsig
+  if cv and cv.kind == "multi" then
+    for k = 1, cv.nb or 3 do
+      local bp = R["B" .. k .. "Gain"]
+      if bp then bands = bands or {}; bands[k] = bp end
+    end
+    if bands and tr then
+      plan = TP.mb_plan(tr, addr, cv)
+      local t = {}
+      for k = 1, cv.nb or 3 do
+        if bands[k] then t[#t + 1] = ("%d=%d@%s"):format(k, bands[k], tostring(plan.at[k])) end
+      end
+      bsig = table.concat(t, ",")
+    end
+  end
+  if not p and not bands then return nil end
+  local rg = p and layout.ranges and layout.ranges[p]
+  return { p = p, bands = bands, plan = plan, ranges = layout.ranges,
+           sig = tostring(p) .. "|" .. (rg and M.range_line(rg) or ""), bsig = bsig }
+end
+
+-- A multiband's split bands' gains, dB (four, 0 where none): each of its
+-- bands' Gain, in the split band it's measured in (bands past four on
+-- shared crossovers are measured together in the fourth: their mean).
+local function band_gains(e)
+  local sum, n, out = {}, {}, {}
+  local plan = e.src.plan
+  for k, bp in pairs(e.src.bands or {}) do
+    local j = plan and (plan.at[k] or ((not plan.own and k > 3) and 4 or nil))
+    local v = j and (not plan[k] or plan[k].used ~= false) and TP.makeup_db(e.tr, e.addr, bp, e.src.ranges)
+    if v then sum[j] = (sum[j] or 0) + v; n[j] = (n[j] or 0) + 1 end
+  end
+  for j = 1, 4 do out[j] = n[j] and sum[j] / n[j] or 0 end
+  return out
+end
+
+-- Every tapped plugin's make-up controls, again (once a second).
+local function mug_rebuild()
+  local list, by_addr, by_guid = {}, {}, {}
+  for ti = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, ti)
+    local rec = read_record(tr)
+    local lv = rec and find_level(tr, nil)
+    local probe = lv and lv.items[lv.post]
+    if probe and fx_guid(tr, probe) == rec.probe and not PL.is_legacy(tr, probe) then
+      local gm
+      for i, t in ipairs(rec.taps) do
+        if (t.what or "g"):find("g", 1, true) then
+          gm = gm or guid_map(tr)
+          local addr = gm[t.guid]
+          if addr then
+            local layout = M.get(St.layout_key(fx_name(tr, addr), t.guid, tr, addr))
+            local e = { tr = tr, probe = probe, i = i, guid = t.guid, addr = addr,
+                        src = TP.makeup_of(layout, tr, addr) }
+            list[#list + 1] = e
+            by_addr[tostring(tr) .. ":" .. addr] = e
+            by_guid[t.guid] = e
+          end
+        end
+      end
+    end
+  end
+  mug.list, mug.by_addr, mug.by_guid = list, by_addr, by_guid
+end
+
+-- A count that says what's taken out changed: one on from the probe's.
+local function next_count(v) return (math.floor(((v or 0) + 500) / 1000) + 1) % 100 end
+
+local function mug_tick(now, web)
+  if web then
+    local t = tonumber(reaper.GetExtState("TS_ChannelView", TP.MUG_KEY))
+    if t and now - t < 1.5 and now >= t then return end
+  elseif now - mug.said > 0.5 then
+    mug.said = now
+    reaper.SetExtState("TS_ChannelView", TP.MUG_KEY, ("%.3f"):format(now), false)
+  end
+  local fresh = now - mug.at >= TP.MUG_EVERY
+  if fresh then mug.at = now; mug_rebuild() end
+  local probes = {}
+  for _, e in ipairs(mug.list) do
+    if reaper.ValidatePtr(e.tr, "MediaTrack*") then
+      local v, sig = 0, "none"
+      local d = e.src and e.src.p and TP.makeup_db(e.tr, e.addr, e.src.p, e.src.ranges)
+      if d then v, sig = d, e.src.sig end
+      sig = sig .. "|" .. e.i
+      local st = mug.k[e.guid]
+      if not st or st.sig ~= sig then
+        st = { sig = sig, k = next_count(PL.get(e.tr, e.probe, "mug", e.i)) }
+        mug.k[e.guid] = st
+      end
+      PL.set(e.tr, e.probe, "mug", e.i, v + 1000 * st.k)
+      e.fset = d and { [e.src.p] = true } or nil
+      local pk = tostring(e.tr)
+      local pr = probes[pk]
+      if not pr then
+        pr = { e = e, used = {}, mb = math.floor((PL.get(e.tr, e.probe, "mb") or 0) + 0.5) }
+        probes[pk] = pr
+      end
+      pr.used[e.i] = true
+      if pr.mb == e.i then pr.owner = e end
+    end
+  end
+  for pk, pr in pairs(probes) do
+    local tr, probe = pr.e.tr, pr.e.probe
+    -- slots no tap uses: nothing taken out
+    for i = 1, fresh and TP.capacity(tr, probe) or 0 do
+      if not pr.used[i] then
+        local cur = PL.get(tr, probe, "mug", i) or 0
+        local k = math.floor((cur + 500) / 1000)
+        if cur - 1000 * k ~= 0 then PL.set(tr, probe, "mug", i, 1000 * k) end
+      end
+    end
+    -- the split bands' own gains, from the plugin the probe splits
+    local o = pr.owner
+    local g = (o and o.src and o.src.bands) and band_gains(o) or { 0, 0, 0, 0 }
+    local bsig = (o and o.src and o.src.bsig) and (o.guid .. "|" .. o.src.bsig) or "none"
+    local st = mug.kb[pk]
+    if not st or st.sig ~= bsig then
+      st = { sig = bsig, k = next_count(PL.get(tr, probe, "mbmug", 1)) }
+      mug.kb[pk] = st
+    end
+    for j = 1, 4 do PL.set(tr, probe, "mbmug", j, g[j] + 1000 * st.k) end
+    if o and o.src and o.src.bands then
+      o.fset = o.fset or {}
+      for _, bp in pairs(o.src.bands) do o.fset[bp] = true end
+    end
+  end
+end
+
+-- Whether moving this control of a plugin is its make-up moving, which the
+-- probe follows (and so not a touch).
+function TP.makeup_followed(tr, guid, p)
+  local e = guid and mug.by_guid[guid]
+  return (e and e.tr == tr and p and e.fset and e.fset[p]
+          and (PL.get(tr, e.probe, "mug_cap") or 0) >= 0.5) and true or false
+end
+
+-- Forget which controls are the make-up (a layout changed).
+function TP.makeup_changed() mug.at = -10 end
+
+-- ---------------------------------------------------------------------
 -- relearning
 -- ---------------------------------------------------------------------
 
@@ -2288,9 +2478,11 @@ end
 -- touched-since (measured again once stopped and quiet).
 --
 -- On a current probe it goes through gmem, not a parameter, so "Tap 1
--- relearn" never becomes REAPER's last touched parameter.
+-- relearn" never becomes REAPER's last touched parameter. `p`, the control
+-- moved: its make-up, followed (TP.makeup_followed), isn't a touch.
 local last_touch = nil
-function TP.touched(tr, guid)
+function TP.touched(tr, guid, p)
+  if p and TP.makeup_followed(tr, guid, p) then return end
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return end
   PL.set(tr, rd.probe, "rst", i, (math.floor(PL.get(tr, rd.probe, "rst", i) or 0) + 1) % 1000000)
@@ -2305,7 +2497,7 @@ local function poll_touched()
   last_touch = k
   if first then return end
   local tr = (trn == 0) and reaper.GetMasterTrack(0) or reaper.GetTrack(0, trn - 1)
-  if tr then TP.touched(tr, fx_guid(tr, fxn)) end
+  if tr then TP.touched(tr, fx_guid(tr, fxn), parm) end
 end
 
 -- ---------------------------------------------------------------------
@@ -2352,8 +2544,9 @@ end
 -- touched plugins, and re-checks one track's routing -- round robin, each
 -- track at most once a second -- so a big project costs a little every
 -- frame rather than a lot at once.
-function TP.update(now)
+function TP.update(now, web)
   now = now or reaper.time_precise()
+  web = web or false          -- (the web bridge's: see make-up gain)
   TP.fine_tidy(now)
   if now >= any_until then
     TP.active = anything_to_do()
@@ -2387,6 +2580,7 @@ function TP.update(now)
     end
   end
   poll_touched()
+  mug_tick(now, web)
   -- tracks that moved: their names follow (TS_CV_ProbeLink), and their
   -- taps' settings are written again where they are now
   local moved = PL.tick()
@@ -2413,6 +2607,7 @@ end
 -- Forget cached answers (a layout changed: re-check everything now).
 function TP.invalidate()
   next_at, readers, native, sources = {}, {}, {}, {}
+  mug.at = -10
   levels_ok = {}
   order_cache = {}
   has_cache = {}

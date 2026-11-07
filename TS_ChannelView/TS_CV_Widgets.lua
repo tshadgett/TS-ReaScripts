@@ -2219,7 +2219,8 @@ end
 -- A dropdown shown as buttons: one per choice, the current one lit, like
 -- the VCA / FET / OPT row on a hardware compressor. `choices` is the
 -- panel's list, { norm, text } each; `opts`:
---   dir      "across" (a row under the name) or "down" (a column)
+--   dir      "across" (a row under the name), "down" (a column) or "grid"
+--            (rows, as near square as the count allows: C.button_grid)
 --   n        how many buttons the cell was given room for
 --   w, h     the cell, in pixels
 --   on_col   the lit colour (C.TOGGLE_COLS), nil for the theme's
@@ -2258,7 +2259,16 @@ function W.button_row(ctx, id, label, value, choices, opts)
   -- each button's rect
   local top = y + W.LABEL_H + C.LABEL_GAP
   local rects = {}
-  if opts.dir == "down" then
+  if opts.dir == "grid" then
+    local cols, nr = C.button_grid(n)
+    local bw = (cw - 4 - (cols - 1) * 2) / cols
+    local bh = math.max(12, math.floor((y + ch - top - 2 - (nr - 1) * 2) / nr))
+    for i = 1, n do
+      local col, row = (i - 1) % cols, (i - 1) // cols
+      local l, t = x + 2 + col * (bw + 2), top + row * (bh + 2)
+      rects[i] = { l, t, l + bw, t + bh }
+    end
+  elseif opts.dir == "down" then
     -- taller as the cell grows, as a row's grow wider
     local bh = math.max(14, math.floor((y + ch - top - 2 - (n - 1) * 2) / n))
     for i = 1, n do

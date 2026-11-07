@@ -1154,6 +1154,84 @@ do
   check("its own: nothing measured to show", TP.measured_for_reporting(track, "{C3}"), nil)
 end
 
+-- ------------------------------------------------- make-up gain
+-- Which control is a plugin's make-up, and what goes to the probe: its dB
+-- + 1000 * a count, the count moved when what's taken out changes rather
+-- than the audio. (The block: a probe with no parameters.)
+do
+  local s = TP.makeup_of({ controls = {}, canvas = { kind = "multi", nb = 3, roles = { Output = 20, B1Gain = 5, B3Gain = 9 } } })
+  check("make-up: a multiband's Output", s.p, 20)
+  check("make-up:   and its bands' Gain", s.bands[1] .. "," .. s.bands[3], "5,9")
+  check("make-up: a mark wins over the role", TP.makeup_of({ mug = 4, controls = { { param = 4 } },
+        canvas = { kind = "comp", roles = { Makeup = 7 } } }).p, 4)
+  check("make-up: a mark on no control: the role", TP.makeup_of({ mug = 4, controls = {},
+        canvas = { kind = "comp", roles = { Makeup = 7 } } }).p, 7)
+  check("make-up: none", TP.makeup_of({ controls = {} }), nil)
+end
+if NEW then
+  reset()
+  measure = { ["LA-2A"] = true, ["1176"] = true }
+  reaper.SetExtState("TS_ChannelView", TP.READING_KEY, "own", true)
+  local Ms = package.loaded["TS_CV_Mappings"]
+  local mk = { ["LA-2A"] = 7 }
+  local cvs = {}
+  Ms.get = function(key)
+    return { measure = measure[key] or nil, mug = mk[key], canvas = cvs[key],
+             controls = mk[key] and { { param = mk[key] } } or {} }
+  end
+  Ms.range_line = Ms.range_line or function() return "" end
+  local text = { ["{C1}"] = "+3.0 dB" }
+  reaper.TrackFX_GetFormattedParamValue = function(tr, a, p)
+    local f = F(a); return true, (f and p == 7 and text[f.guid]) or "0.50"
+  end
+  reaper.TrackFX_GetParamNormalized = function() return 0.5 end
+  TP.invalidate(); TP.sync(track)
+  local B = 0x100000 + 3 * 128
+  local function slot(i) return gmem[B + (i <= 4 and 25 + i or 53 + i)] or 0 end
+  local function rst() return gmem[B + 13] or 0 end
+  -- a slot: its dB and its count
+  local function at(i) local v = slot(i); local k = math.floor((v + 500) / 1000); return v - 1000 * k, k end
+  local k0 = select(2, at(1))
+  TP.update()
+  local v, k = at(1)
+  check("make-up: written in dB", v, 3)
+  check("make-up:   with a new count", k, (k0 + 1) % 100)
+  check("make-up: none: nothing taken out", (at(2)), 0)
+  text["{C1}"] = "-2.5 dB"; TP.update()
+  check("make-up: moved, the same count", select(2, at(1)) == k and (at(1)) == -2.5, true)
+  gmem[B + 126] = 1                         -- the probe follows make-up
+  local r0 = rst()
+  TP.touched(track, "{C1}", 7)
+  check("make-up: moving it isn't a touch", rst(), r0)
+  TP.touched(track, "{C1}", 3)
+  check("make-up: moving anything else is", rst() ~= r0, true)
+  local function next_one(name, want)
+    TP.update()
+    local v2, k2 = at(1)
+    check(name, v2 == want and k2 == (k + 1) % 100, true)
+    k = k2
+  end
+  text["{C1}"] = "5.0"
+  next_one("make-up: not in dB: nothing taken out, a new count", 0)
+  r0 = rst(); TP.touched(track, "{C1}", 7)
+  check("make-up:   and moving it is a touch", rst() ~= r0, true)
+  text["{C1}"] = "+1.0 dB"
+  next_one("make-up: in dB again: a new count", 1)
+  mk["LA-2A"] = nil; TP.makeup_changed()
+  next_one("make-up: unmarked: nothing, a new count", 0)
+  cvs["LA-2A"] = { kind = "comp", roles = { Makeup = 7 } }
+  text["{C1}"] = "+4.0 dB"; TP.makeup_changed()
+  next_one("make-up: a compressor canvas's Makeup", 4)
+  text["{C1}"] = "+6.0 dB"; TP.update(nil, true)
+  check("make-up: the web bridge leaves it to the window", (at(1)), 4)
+  TP.update()
+  check("make-up: the window writes it", (at(1)), 6)
+  check("make-up: no multiband split: its bands' gains 0", (gmem[B + 30] or 0) % 1000, 0)
+  gmem[B + 126] = 0
+  r0 = rst(); TP.touched(track, "{C1}", 7)
+  check("make-up: an older probe: moving it is a touch", rst() ~= r0, true)
+end
+
 -- ---------------------------------------------------------------- records
 check("v2 round trip", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")),
       "v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")

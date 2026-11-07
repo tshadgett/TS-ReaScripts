@@ -1,5 +1,40 @@
 # ChannelView — changelog
 
+## 4.0.2 — make-up gain, button grids, audio envelopes
+
+### ChannelView
+
+- **Buttons grid:** a dropdown can show its choices as a grid of buttons
+  (right-click ▸ Show as ▸ *Buttons grid*), as near square as the count
+  allows: 16 as 4 × 4, 12 as 4 × 3. On the web page too.
+- Buttons across, down and grid take up to **16 choices** (8 before).
+- **Audio envelopes:** a Follower sets off an Envelope, Envelope × level
+  or Duck from its audio, starting when the level rises above a threshold
+  and letting go when it falls back below, with the same curve, knobs and
+  Retrigger / Legato / Exp curve as the MIDI envelopes. On the web page
+  too. Reopen a project after updating, so its Modulators plugin runs the
+  new code.
+- **Audio from:** on Sidechain, a Follower picks the track that feeds
+  it, as a MIDI modulator's *Notes from* does: a pre-fader send to this
+  track's 3/4. Both list the tracks as the Receives panel's add menu
+  does, with their colours.
+- A modulator's buttons light in its own colour.
+- **Fixed:** a dark line across the top of a mixer strip's coloured
+  header.
+
+- **Measured gain reduction follows make-up gain:** moving a plugin's
+  make-up, automation included, no longer reads as reduction (or hides
+  it), and isn't a touch, so the measured reading carries on. Right-click
+  a knob or fader ▸ *Make-up gain* says which control it is; it has to
+  read in dB. **TS_TrackProbe 2.5.1** comes with it: reopen the project
+  after updating.
+
+### ChannelView Pro
+
+- A compressor canvas's *Make-up*, and a multiband canvas's *Output* and
+  band *Gain*, count as make-up gain without a tick. In Edit layout the
+  make-up control has a pink dot (a pink corner on a fader).
+
 ## 4.0.1 — ReEQ2
 
 ### ChannelView

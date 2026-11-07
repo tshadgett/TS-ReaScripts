@@ -30,6 +30,8 @@ noindex: true
       13  Follower Floor
       14  Follower Ceiling
       15  Follower Gate
+          A Follower's MIDI Source (16) 5-7 makes it an envelope the
+          audio sets off instead (THE FOLLOWER'S ENVELOPES, below).
       16  MIDI Source: Velocity, Note, CC, Pitch bend, Aftertouch, and
           the envelopes a note sets off -- Envelope, Envelope x velocity
           (its peak the velocity), Duck (the envelope upside down: down
@@ -77,6 +79,17 @@ noindex: true
     249       Trigger tracks: modulator n (bit n-1 set) takes its notes
               only from another track's MIDI send, which arrives on MIDI
               bus 8 + n and goes no further than this plugin.
+
+  THE FOLLOWER'S ENVELOPES. A Follower whose MIDI Source is 5, 6 or 7
+  is an Envelope, Envelope x level (its peak how far the loudest of the
+  hit went past the Floor, full at the Ceiling) or Duck, set off by its
+  audio instead of notes: it starts when the level rises above the
+  Floor (its threshold) and is let go when it falls 3 dB under it. The
+  level is read fast (1 ms up, 30 ms down) whatever Attack and Release
+  say, which are the envelope's. Decay is in MIDI CC (0..127, square to
+  2000 ms) and Sustain in Low note (0..127 is 0..100 %); Gate On is the
+  exponential curve. Hold On (legato): a rise while it's still letting go
+  carries on from where it is; off, every rise starts it from nothing.
 
   The idea of macros and modulators living in the chain, linked by
   REAPER's parameter modulation, comes from Saxmand's FX Modulator
@@ -471,12 +484,10 @@ function env_midi(j, on, off, st, d1, d2, lo, hi, legato, byvel) (
   );
 );
 
-// A MIDI envelope's level after this block. `dc` and `fl` are the
-// Ceiling and Floor it keeps its Decay and Sustain in; `ex` exponential.
-function env_step(j, att, dc, fl, rel, ex) local(lv, pk, s, sus, dec, t) (
+// An envelope's level after this block: attack and release in ms, decay
+// in ms, sustain 0..1, `ex` exponential.
+function env_run(j, att, dec, sus, rel, ex) local(lv, pk, s, t) (
   lv = elev[j]; pk = epk[j]; s = estg[j];
-  sus = max(0, min(1, (fl + 80) / 80));
-  t = max(0, min(1, (dc + 60) / 72)); dec = 2000 * t * t;
   s == 1 ? (
     att > 0 ? ( lv += pk * dt / (att * 0.001); ) : ( lv = pk; );
     lv >= pk ? ( lv = pk; s = 2; );
@@ -500,8 +511,39 @@ function env_step(j, att, dc, fl, rel, ex) local(lv, pk, s, sus, dec, t) (
   lv;
 );
 
+// A MIDI envelope's level after this block. `dc` and `fl` are the
+// Ceiling and Floor it keeps its Decay and Sustain in; `ex` exponential.
+function env_step(j, att, dc, fl, rel, ex) local(t) (
+  t = max(0, min(1, (dc + 60) / 72));
+  env_run(j, att, 2000 * t * t, max(0, min(1, (fl + 80) / 80)), rel, ex);
+);
+
+// A Follower's envelope (THE FOLLOWER'S ENVELOPES), set off by its level
+// `db`: above `thr` starts it, 3 dB under lets it go. `legato`: a rise
+// while letting go carries on from where it is. `bylev`: its peak how
+// far the loudest of the hit went past `thr`, full at `ceil`.
+function env_audio(j, db, thr, ceil, legato, bylev) local(l) (
+  l = bylev ? (ceil > thr ? max(0.02, min(1, (db - thr) / (ceil - thr))) : 1) : 1;
+  eheld[j] < 0.5 ? (
+    db > thr ? (
+      eheld[j] = 1;
+      !legato ? elev[j] = 0;
+      epk[j] = l; estg[j] = 1;
+    );
+  ) : (
+    // the loudest of it, while it rises
+    bylev && estg[j] == 1 && l > epk[j] ? epk[j] = l;
+    db < thr - 3 ? (
+      eheld[j] = 0;
+      estg[j] > 0 && estg[j] < 4 ? ( estg[j] = 4; erl[j] = elev[j]; );
+    );
+  );
+);
+
 @block
 dt = samplesblock / srate;
+// a Follower envelope's level detector: 1 ms up, 30 ms down
+ga_fast = 1 - exp(-1 / (0.001 * srate)); gr_fast = 1 - exp(-1 / (0.03 * srate));
 playing = (play_state & 1) == 1;
 nf = 0;
 mx_apply_all();           // THE MATRIX: moved settings, for this block
@@ -742,10 +784,15 @@ m1_type == 1 ? (
 ) : m1_type == 2 ? (
   isf[0] = 1; nf += 1;
   fsrc[0] = m1_fsrc >= 0.5;
-  ga[0] = m1_att > 0 ? 1 - exp(-1 / (m1_att * 0.001 * srate)) : 1;
-  gr[0] = m1_rel > 0 ? 1 - exp(-1 / (m1_rel * 0.001 * srate)) : 1;
+  ms = floor(m1_msrc + 0.5);
+  ga[0] = ms >= 5 ? ga_fast : m1_att > 0 ? 1 - exp(-1 / (m1_att * 0.001 * srate)) : 1;
+  gr[0] = ms >= 5 ? gr_fast : m1_rel > 0 ? 1 - exp(-1 / (m1_rel * 0.001 * srate)) : 1;
   db = env[0] > 0.0000001 ? 20 * log10(env[0]) : -140;
-  m1_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(0, db, m1_floor, m1_ceil, m1_mhold >= 0.5, ms == 6);
+    u = env_run(0, m1_att, 2000 * sqr(max(0, min(1, m1_mcc / 127))), max(0, min(1, m1_mlo / 127)), m1_rel, m1_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m1_gate >= 0.5 ? (
     u = db > m1_floor ? 1 : 0;
   ) : (
     u = m1_ceil > m1_floor ? (db - m1_floor) / (m1_ceil - m1_floor) : (db > m1_floor ? 1 : 0);
@@ -806,10 +853,15 @@ m2_type == 1 ? (
 ) : m2_type == 2 ? (
   isf[1] = 1; nf += 1;
   fsrc[1] = m2_fsrc >= 0.5;
-  ga[1] = m2_att > 0 ? 1 - exp(-1 / (m2_att * 0.001 * srate)) : 1;
-  gr[1] = m2_rel > 0 ? 1 - exp(-1 / (m2_rel * 0.001 * srate)) : 1;
+  ms = floor(m2_msrc + 0.5);
+  ga[1] = ms >= 5 ? ga_fast : m2_att > 0 ? 1 - exp(-1 / (m2_att * 0.001 * srate)) : 1;
+  gr[1] = ms >= 5 ? gr_fast : m2_rel > 0 ? 1 - exp(-1 / (m2_rel * 0.001 * srate)) : 1;
   db = env[1] > 0.0000001 ? 20 * log10(env[1]) : -140;
-  m2_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(1, db, m2_floor, m2_ceil, m2_mhold >= 0.5, ms == 6);
+    u = env_run(1, m2_att, 2000 * sqr(max(0, min(1, m2_mcc / 127))), max(0, min(1, m2_mlo / 127)), m2_rel, m2_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m2_gate >= 0.5 ? (
     u = db > m2_floor ? 1 : 0;
   ) : (
     u = m2_ceil > m2_floor ? (db - m2_floor) / (m2_ceil - m2_floor) : (db > m2_floor ? 1 : 0);
@@ -870,10 +922,15 @@ m3_type == 1 ? (
 ) : m3_type == 2 ? (
   isf[2] = 1; nf += 1;
   fsrc[2] = m3_fsrc >= 0.5;
-  ga[2] = m3_att > 0 ? 1 - exp(-1 / (m3_att * 0.001 * srate)) : 1;
-  gr[2] = m3_rel > 0 ? 1 - exp(-1 / (m3_rel * 0.001 * srate)) : 1;
+  ms = floor(m3_msrc + 0.5);
+  ga[2] = ms >= 5 ? ga_fast : m3_att > 0 ? 1 - exp(-1 / (m3_att * 0.001 * srate)) : 1;
+  gr[2] = ms >= 5 ? gr_fast : m3_rel > 0 ? 1 - exp(-1 / (m3_rel * 0.001 * srate)) : 1;
   db = env[2] > 0.0000001 ? 20 * log10(env[2]) : -140;
-  m3_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(2, db, m3_floor, m3_ceil, m3_mhold >= 0.5, ms == 6);
+    u = env_run(2, m3_att, 2000 * sqr(max(0, min(1, m3_mcc / 127))), max(0, min(1, m3_mlo / 127)), m3_rel, m3_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m3_gate >= 0.5 ? (
     u = db > m3_floor ? 1 : 0;
   ) : (
     u = m3_ceil > m3_floor ? (db - m3_floor) / (m3_ceil - m3_floor) : (db > m3_floor ? 1 : 0);
@@ -934,10 +991,15 @@ m4_type == 1 ? (
 ) : m4_type == 2 ? (
   isf[3] = 1; nf += 1;
   fsrc[3] = m4_fsrc >= 0.5;
-  ga[3] = m4_att > 0 ? 1 - exp(-1 / (m4_att * 0.001 * srate)) : 1;
-  gr[3] = m4_rel > 0 ? 1 - exp(-1 / (m4_rel * 0.001 * srate)) : 1;
+  ms = floor(m4_msrc + 0.5);
+  ga[3] = ms >= 5 ? ga_fast : m4_att > 0 ? 1 - exp(-1 / (m4_att * 0.001 * srate)) : 1;
+  gr[3] = ms >= 5 ? gr_fast : m4_rel > 0 ? 1 - exp(-1 / (m4_rel * 0.001 * srate)) : 1;
   db = env[3] > 0.0000001 ? 20 * log10(env[3]) : -140;
-  m4_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(3, db, m4_floor, m4_ceil, m4_mhold >= 0.5, ms == 6);
+    u = env_run(3, m4_att, 2000 * sqr(max(0, min(1, m4_mcc / 127))), max(0, min(1, m4_mlo / 127)), m4_rel, m4_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m4_gate >= 0.5 ? (
     u = db > m4_floor ? 1 : 0;
   ) : (
     u = m4_ceil > m4_floor ? (db - m4_floor) / (m4_ceil - m4_floor) : (db > m4_floor ? 1 : 0);
@@ -998,10 +1060,15 @@ m5_type == 1 ? (
 ) : m5_type == 2 ? (
   isf[4] = 1; nf += 1;
   fsrc[4] = m5_fsrc >= 0.5;
-  ga[4] = m5_att > 0 ? 1 - exp(-1 / (m5_att * 0.001 * srate)) : 1;
-  gr[4] = m5_rel > 0 ? 1 - exp(-1 / (m5_rel * 0.001 * srate)) : 1;
+  ms = floor(m5_msrc + 0.5);
+  ga[4] = ms >= 5 ? ga_fast : m5_att > 0 ? 1 - exp(-1 / (m5_att * 0.001 * srate)) : 1;
+  gr[4] = ms >= 5 ? gr_fast : m5_rel > 0 ? 1 - exp(-1 / (m5_rel * 0.001 * srate)) : 1;
   db = env[4] > 0.0000001 ? 20 * log10(env[4]) : -140;
-  m5_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(4, db, m5_floor, m5_ceil, m5_mhold >= 0.5, ms == 6);
+    u = env_run(4, m5_att, 2000 * sqr(max(0, min(1, m5_mcc / 127))), max(0, min(1, m5_mlo / 127)), m5_rel, m5_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m5_gate >= 0.5 ? (
     u = db > m5_floor ? 1 : 0;
   ) : (
     u = m5_ceil > m5_floor ? (db - m5_floor) / (m5_ceil - m5_floor) : (db > m5_floor ? 1 : 0);
@@ -1062,10 +1129,15 @@ m6_type == 1 ? (
 ) : m6_type == 2 ? (
   isf[5] = 1; nf += 1;
   fsrc[5] = m6_fsrc >= 0.5;
-  ga[5] = m6_att > 0 ? 1 - exp(-1 / (m6_att * 0.001 * srate)) : 1;
-  gr[5] = m6_rel > 0 ? 1 - exp(-1 / (m6_rel * 0.001 * srate)) : 1;
+  ms = floor(m6_msrc + 0.5);
+  ga[5] = ms >= 5 ? ga_fast : m6_att > 0 ? 1 - exp(-1 / (m6_att * 0.001 * srate)) : 1;
+  gr[5] = ms >= 5 ? gr_fast : m6_rel > 0 ? 1 - exp(-1 / (m6_rel * 0.001 * srate)) : 1;
   db = env[5] > 0.0000001 ? 20 * log10(env[5]) : -140;
-  m6_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(5, db, m6_floor, m6_ceil, m6_mhold >= 0.5, ms == 6);
+    u = env_run(5, m6_att, 2000 * sqr(max(0, min(1, m6_mcc / 127))), max(0, min(1, m6_mlo / 127)), m6_rel, m6_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m6_gate >= 0.5 ? (
     u = db > m6_floor ? 1 : 0;
   ) : (
     u = m6_ceil > m6_floor ? (db - m6_floor) / (m6_ceil - m6_floor) : (db > m6_floor ? 1 : 0);
@@ -1126,10 +1198,15 @@ m7_type == 1 ? (
 ) : m7_type == 2 ? (
   isf[6] = 1; nf += 1;
   fsrc[6] = m7_fsrc >= 0.5;
-  ga[6] = m7_att > 0 ? 1 - exp(-1 / (m7_att * 0.001 * srate)) : 1;
-  gr[6] = m7_rel > 0 ? 1 - exp(-1 / (m7_rel * 0.001 * srate)) : 1;
+  ms = floor(m7_msrc + 0.5);
+  ga[6] = ms >= 5 ? ga_fast : m7_att > 0 ? 1 - exp(-1 / (m7_att * 0.001 * srate)) : 1;
+  gr[6] = ms >= 5 ? gr_fast : m7_rel > 0 ? 1 - exp(-1 / (m7_rel * 0.001 * srate)) : 1;
   db = env[6] > 0.0000001 ? 20 * log10(env[6]) : -140;
-  m7_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(6, db, m7_floor, m7_ceil, m7_mhold >= 0.5, ms == 6);
+    u = env_run(6, m7_att, 2000 * sqr(max(0, min(1, m7_mcc / 127))), max(0, min(1, m7_mlo / 127)), m7_rel, m7_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m7_gate >= 0.5 ? (
     u = db > m7_floor ? 1 : 0;
   ) : (
     u = m7_ceil > m7_floor ? (db - m7_floor) / (m7_ceil - m7_floor) : (db > m7_floor ? 1 : 0);
@@ -1190,10 +1267,15 @@ m8_type == 1 ? (
 ) : m8_type == 2 ? (
   isf[7] = 1; nf += 1;
   fsrc[7] = m8_fsrc >= 0.5;
-  ga[7] = m8_att > 0 ? 1 - exp(-1 / (m8_att * 0.001 * srate)) : 1;
-  gr[7] = m8_rel > 0 ? 1 - exp(-1 / (m8_rel * 0.001 * srate)) : 1;
+  ms = floor(m8_msrc + 0.5);
+  ga[7] = ms >= 5 ? ga_fast : m8_att > 0 ? 1 - exp(-1 / (m8_att * 0.001 * srate)) : 1;
+  gr[7] = ms >= 5 ? gr_fast : m8_rel > 0 ? 1 - exp(-1 / (m8_rel * 0.001 * srate)) : 1;
   db = env[7] > 0.0000001 ? 20 * log10(env[7]) : -140;
-  m8_gate >= 0.5 ? (
+  ms >= 5 ? (
+    env_audio(7, db, m8_floor, m8_ceil, m8_mhold >= 0.5, ms == 6);
+    u = env_run(7, m8_att, 2000 * sqr(max(0, min(1, m8_mcc / 127))), max(0, min(1, m8_mlo / 127)), m8_rel, m8_gate >= 0.5);
+    ms == 7 ? u = 1 - u;
+  ) : m8_gate >= 0.5 ? (
     u = db > m8_floor ? 1 : 0;
   ) : (
     u = m8_ceil > m8_floor ? (db - m8_floor) / (m8_ceil - m8_floor) : (db > m8_floor ? 1 : 0);

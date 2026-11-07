@@ -63,6 +63,9 @@ PL.F = {
   mbx      = { off = 21, leg = 42, n = 3 },
   fine     = { off = 24, leg = 49 },
   st       = { off = 25 },                -- the stereo tap (new probe only, 2.4.0+)
+  -- make-up gain, dB + 1000 * a count (2.5.1+: MAKE-UP GAIN, FOLLOWED)
+  mug      = { off = 26, n = 4, off2 = 58 },
+  mbmug    = { off = 30, n = 2, off2 = 62 },  -- a multiband tap's split bands'
   ack_pre  = { off = 32 },
   ack_post = { off = 33 },
   gr       = { off = 64, leg = 14, n = 4, off2 = 97 },
@@ -77,6 +80,7 @@ PL.F = {
   st_mid   = { off = 123 },
   st_side  = { off = 124 },
   st_cap   = { off = 125 },               -- 1: the probe measures stereo
+  mug_cap  = { off = 126 },               -- 1: the probe follows make-up gain
 }
 -- A field's place in the block: the i-th (0-based) of it, taps 5..8 apart
 local function at(f, i)
@@ -231,7 +235,8 @@ function PL.tick()
       local b = PL.BASE + (m.from + 1) * PL.STRIDE
       write_names(b, 0, 0)
       for k = PL.F.pub_pre.off, PL.F.fine.off do wr(b + k, 0) end
-      for k = PL.F.lag.off2, PL.F.rst.off2 + 3 do wr(b + k, 0) end
+      for k = PL.F.mug.off, PL.F.mbmug.off + 1 do wr(b + k, 0) end
+      for k = PL.F.lag.off2, PL.F.mbmug.off2 + 1 do wr(b + k, 0) end
     end
   end
   for _, e in pairs(named) do

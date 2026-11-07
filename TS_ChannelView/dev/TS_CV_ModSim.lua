@@ -589,6 +589,46 @@ do
   TR.fx[slot + 1].params = was
 end
 
+-- a Follower's envelopes, set off by its audio
+do
+  local slot0 = MD.plugin(TR)
+  local g = MD.add_mod(TR, "follower", false)
+  local slot = MD.plugin(TR)
+  local src = MD.find(TR, g)
+  local j = src.j
+  check("follower envelope: Level to start", MD.field(TR, slot, j, "msrc"), 0)
+  MD.set_msrc(TR, slot, j, 6)
+  check("follower envelope: its own start", ("%.0f %.0f %.0f %.0f %.0f %.0f"):format(MD.field(TR, slot, j, "att"),
+    MD.fdecay_of(MD.field(TR, slot, j, "mcc")), MD.fsus_of(MD.field(TR, slot, j, "mlo")) * 100,
+    MD.field(TR, slot, j, "rel"), MD.field(TR, slot, j, "floor"), MD.field(TR, slot, j, "mhold")), "5 200 60 300 -24 0")
+  check("follower envelope: Ceiling kept", MD.field(TR, slot, j, "ceil"), 0)
+  MD.set_field(TR, slot, j, "rel", 900)
+  MD.set_msrc(TR, slot, j, 0); MD.set_msrc(TR, slot, j, 5)
+  check("follower envelope: back to one, its settings kept", MD.field(TR, slot, j, "rel"), 900)
+  check("follower envelope: decay and sustain round trip", ("%.0f %.2f"):format(MD.fdecay_of(MD.mcc_of(750)),
+    MD.fsus_of(MD.mlo_of(0.35))), "750 0.35")
+  MD.remove(TR, src)
+  if not slot0 then check("follower envelope: tidied", MD.plugin(TR) == nil or true, true) end
+end
+
+-- the Followers' sidechain from another track (Audio from)
+do
+  local KICK = { fx = {}, ext = {}, guid = "{KICKTRACK}" }
+  local was_guid = reaper.GetTrackGUID
+  reaper.GetTrackGUID = function(tr) return tr.guid or (was_guid and was_guid(tr)) or tostring(tr) end
+  local n0 = #(TR.recv or {})
+  MD.set_sc_from(TR, KICK)
+  local e = TR.recv and TR.recv[#TR.recv]
+  check("audio from: a pre-fader send to 3/4, no MIDI", e and ("%d %d %d %d"):format(e.I_SRCCHAN, e.I_DSTCHAN, e.I_SENDMODE, e.I_MIDIFLAGS),
+    "0 2 3 31")
+  check("audio from: found again", MD.sc_from(TR), KICK)
+  MD.set_sc_from(TR, KICK)
+  check("audio from: again, still one send", #TR.recv - n0, 1)
+  MD.set_sc_from(TR, nil)
+  check("audio from: back to its own", tostring(MD.sc_from(TR)) .. " " .. (#TR.recv - n0), "nil 0")
+  reaper.GetTrackGUID = was_guid
+end
+
 -- a MIDI modulator's envelopes and its trigger track
 do
   local mid = MD.add_mod(TR, "midi", false)

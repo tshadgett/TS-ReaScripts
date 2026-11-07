@@ -227,6 +227,29 @@ do
   M.remove(k); M.save(); M.reload()
 end
 
+-- A dropdown shown as a grid of buttons (Buttons<n>=grid|16) survives the ini.
+do
+  local k = "GridPlug"
+  M.set(k, { controls = { { param = 3, type = "combo", buttons = "grid", nbtn = 16 } } })
+  M.save(); M.reload()
+  local c = M.get(k).controls[1]
+  check("round-trip buttons grid", tostring(c.buttons) .. " " .. tostring(c.nbtn), "grid 16")
+  M.remove(k); M.save(); M.reload()
+end
+
+-- The make-up gain control (Makeup=) survives the ini and a copy.
+do
+  local k = "MakeupPlug"
+  M.set(k, { measure = true, mug = 7, controls = { { param = 7, type = "knob" } } })
+  M.save(); M.reload()
+  check("round-trip make-up gain",       M.get(k).mug, 7)
+  check("copy keeps the make-up gain",   M.copy(M.get(k)).mug, 7)
+  M.set(k, { measure = true, controls = { { param = 7, type = "knob" } } })
+  M.save(); M.reload()
+  check("none: none",                    M.get(k).mug, nil)
+  M.remove(k); M.save(); M.reload()
+end
+
 -- Type names may contain underscores (e.g. half_gap); the ini line
 -- parser must accept those, not just plain letters. This has to
 -- round-trip through an actual save+reload, since M.set/M.get never
@@ -5380,6 +5403,14 @@ do
   check("buttons: four across", (pos({ B("across", 4), S"medium" }, 2)), "0,0/4x2 29,64/2x2 w116")
   check("buttons: four down", (pos({ B("down", 4) }, 2)), "0,0/2x3 w58")
   check("buttons: down too tall", (pos({ B("down", 8) }, 2)), "0,0/2x2 w58")
+  -- a grid: as near square as the count allows, a half-cell per column,
+  -- two rows to a half-row
+  check("buttons: grid shapes", table.concat({ select(1, C.button_grid(16)), select(2, C.button_grid(16)),
+    select(1, C.button_grid(12)), select(2, C.button_grid(12)), select(1, C.button_grid(6)), select(2, C.button_grid(6)),
+    select(1, C.button_grid(10)), select(2, C.button_grid(10)) }, " "), "4 4 4 3 3 2 4 3")
+  check("buttons: sixteen in a grid", (pos({ B("grid", 16) }, 2)), "0,0/4x3 w116")
+  check("buttons: nine in a grid", (pos({ B("grid", 9) }, 2)), "0,0/3x2 w87")
+  check("buttons: up to sixteen", C.BUTTONS_MAX, 16)
   local lay = P.layout({ B("across", 3) }, 2)
   check("buttons: the layout says so", lay.items[1].kind, "buttons")
   check("buttons: not on a knob", (pos({ { type = "knob", buttons = "across", nbtn = 4 } }, 2)), "0,0/2x2 w58")

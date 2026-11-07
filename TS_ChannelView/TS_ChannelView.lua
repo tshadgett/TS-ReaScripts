@@ -1,8 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.0.1
+-- @version 4.0.2
 -- @changelog
---  ReEQ2 reads in its own units; EQ canvases take up to 24 bands. See the
+--  Measured gain reduction follows make-up gain; buttons grid, up to 16
+--  choices; audio envelopes and Audio from in the Follower. See the
 --  CHANGELOG.
 -- @license MIT
 -- @provides
@@ -3906,7 +3907,7 @@ local function control_menu()
           n = st and (math.floor(1 / st + 0.5) + 1) or nil
         end
         local ok = n and n >= 2 and n <= C.BUTTONS_MAX
-        for _, d in ipairs({ { "across", "Buttons across" }, { "down", "Buttons down" } }) do
+        for _, d in ipairs({ { "across", "Buttons across" }, { "down", "Buttons down" }, { "grid", "Buttons grid" } }) do
           if ImGui.MenuItem(ctx, d[2], nil, c.type == "combo" and c.buttons == d[1], ok and true or false) then
             local l = commit()
             local lc = l.controls[idx]
@@ -3914,7 +3915,7 @@ local function control_menu()
             M.set(key, l); M.save()
           end
           if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-            ImGui.SetTooltip(ctx, ok and ("One button per choice (%d)."):format(n)
+            ImGui.SetTooltip(ctx, ok and ("One button per choice (%d)%s."):format(n, d[1] == "grid" and ", in rows" or "")
               or ("Needs 2 to %d choices."):format(C.BUTTONS_MAX))
           end
         end
@@ -3993,6 +3994,24 @@ local function control_menu()
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, o[3]) end
     end
     ImGui.EndMenu(ctx)
+  end
+
+  -- the plugin's make-up gain: the measured reduction follows it (TS_CV_Taps)
+  if (c.type == "knob" or c.type == "stepped" or c.type == "fader" or c.type == nil)
+     and c.param and c.param >= 0 then
+    local on = layout.mug == c.param
+    local db = TP.makeup_db(app.track, fx.addr, c.param, layout.ranges)
+    if ImGui.MenuItem(ctx, "Make-up gain", nil, on, on or db ~= nil) then
+      local l = commit()
+      l.mug = (not on) and c.param or nil
+      M.set(key, l); M.save()
+      TP.makeup_changed()
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, not (db or on) and "Needs a value in dB: Values \u{25B8} Custom range can give it one."
+        or TP.is_tapped(app.track, fx.guid) and "Measured gain reduction follows this control, automation included."
+        or "Measured gain reduction follows this control, automation included,\nonce the probes measure this plugin.")
+    end
   end
 
   if ED.menu(ImGui, ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then

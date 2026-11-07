@@ -2,12 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.7.0
+-- @version 2.7.1
 -- @changelog
---  TS_TrackProbe 2.5.0: the zero is measured once per plugin change, not
---  at every stop, and never on a track armed to record. A plugin that
---  reports its own reduction shows the measured reading when ChannelView
---  measures it. Reopen a project after updating.
+--  TS_TrackProbe 2.5.1: a measured plugin's make-up gain is taken out of
+--  its reading when ChannelView 4.0.2 says which control it is. Reopen a
+--  project after updating.
 -- @about
 --  # Track Analyser
 --

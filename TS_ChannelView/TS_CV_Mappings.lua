@@ -80,6 +80,12 @@
   LEVELS (Levels=1) puts input and output meters on the plugin's panel,
   from the same before-and-after copies: any plugin, reporting or not.
 
+  MAKE-UP GAIN (Makeup=<param>) names the control that is the plugin's
+  make-up gain, read in dB: the measured gain reduction takes it out, so
+  moving it (automation included) doesn't read as reduction. Without it,
+  a compressor canvas's Makeup role, and a multiband canvas's Output and
+  band Gain roles, are used. See TS_CV_Taps.lua (MAKE-UP GAIN).
+
   LIVE names are for plugins that rename their own parameters as you use
   them -- Softube Console 1 and Flow name their macros after whatever is
   loaded into them. A saved label or alias would freeze whatever the name
@@ -548,7 +554,7 @@ M.shape_line = shape_line
 -- asking the plugin. Anything else is the ordinary dropdown.
 local function buttons_of(v)
   local d = U.trim(v or ""):match("^(%a+)")
-  return (d == "across" or d == "down") and d or nil
+  return (d == "across" or d == "down" or d == "grid") and d or nil
 end
 local function nbtn_of(v)
   local n = tonumber(U.trim(v or ""):match("|%s*(%d+)"))
@@ -2029,6 +2035,7 @@ local function parse_section(sect)
            own_h = (not sect.Canvas) and size_px(sect.CanvasH, 100, 1200) or nil,
            live = (U.trim(sect.Live or "") == "1") or nil,
            measure = (U.trim(sect.Measure or "") == "1") or nil,
+           mug = tonumber(U.trim(sect.Makeup or "")),
            levels = (U.trim(sect.Levels or "") == "1") or nil,
            plate = C.plate_key(U.trim(sect.Plate or "")),
            brush = brush_of(sect.Brush),
@@ -2070,6 +2077,7 @@ local function serialize(layout)
   local out = {}
   if layout.live then out.Live = "1" end
   if layout.measure then out.Measure = "1" end
+  if layout.mug then out.Makeup = tostring(math.floor(layout.mug)) end
   if layout.levels then out.Levels = "1" end
   if C.plate_key(layout.plate) then out.Plate = C.plate_key(layout.plate) end
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
@@ -2170,7 +2178,7 @@ local function serialize(layout)
     elseif sk == "ten" or c.scale_ink then
       out["Scale" .. (i - 1)] = (sk or "values") .. (c.scale_ink and "|cap" or "")
     end
-    if c.buttons and (c.buttons == "across" or c.buttons == "down") and c.nbtn then
+    if c.buttons and buttons_of(c.buttons) and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
@@ -3491,7 +3499,7 @@ end
 -- Deep copy, so the editor can work on a scratch layout and discard it.
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
-                measure = layout.measure, levels = layout.levels,
+                measure = layout.measure, levels = layout.levels, mug = layout.mug,
                 own_w = layout.own_w, own_h = layout.own_h,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
                 lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)),

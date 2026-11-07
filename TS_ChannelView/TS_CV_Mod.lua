@@ -129,6 +129,14 @@ function MD.sustain_of(floor_db) return math.max(0, math.min(1, (floor_db + 80) 
 function MD.floor_of(sustain) return -80 + 80 * math.max(0, math.min(1, sustain)) end
 function MD.decay_of(ceil) local t = math.max(0, math.min(1, (ceil + 60) / 72)); return 2000 * t * t end
 function MD.ceil_of(ms) return -60 + 72 * math.sqrt(math.max(0, math.min(2000, ms)) / 2000) end
+-- A Follower's envelopes (MIDI Source 5-7, set off by its audio): Floor is
+-- their threshold and Ceiling Envelope x level's top, so Decay is kept in
+-- MIDI CC (0..127, square to 2000 ms) and Sustain in Low note (0..127).
+MD.FOLLOW_ENV = { "Envelope", "Envelope \u{00D7} level", "Duck" }
+function MD.fdecay_of(mcc) local t = math.max(0, math.min(1, (mcc or 0) / 127)); return 2000 * t * t end
+function MD.mcc_of(ms) return 127 * math.sqrt(math.max(0, math.min(2000, ms)) / 2000) end
+function MD.fsus_of(mlo) return math.max(0, math.min(1, (mlo or 0) / 127)) end
+function MD.mlo_of(sus) return 127 * math.max(0, math.min(1, sus)) end
 
 MD.COLOURS = { 0xe8a23aff, 0xb07ce8ff, 0x4cc3a8ff, 0xd9604aff, 0x5aa0e0ff, 0xd8c450ff,
                0x9ac46aff, 0xc07aa0ff, 0x6ac4c4ff, 0x7a9ae8ff, 0xe07ab0ff, 0xa0a8b0ff }
@@ -1259,14 +1267,30 @@ function MD.remove(track, src)
   MD.invalidate(track)
 end
 
--- A MIDI modulator's source. Onto an envelope with the Follower's fields
--- as a new modulator has them, the envelope's own starting settings:
--- 5 ms attack, 200 ms decay, 60 % sustain, 300 ms release.
+-- A MIDI modulator's source, or a Follower's envelope (0: following the
+-- level). Onto an envelope with the fields as a new modulator has them,
+-- the envelope's own starting settings: 5 ms attack, 200 ms decay, 60 %
+-- sustain, 300 ms release (a Follower's: and a -24 dB threshold, each
+-- rise starting it again).
 function MD.set_msrc(track, slot, j, ms)
   local was = math.floor(MD.field(track, slot, j, "msrc") + 0.5)
   MD.set_field(track, slot, j, "msrc", ms)
+  local function at(k) return math.abs(MD.field(track, slot, j, k) - MD.FIELDS[k][2]) < 0.01 end
+  local follower = math.floor(MD.field(track, slot, j, "type") + 0.5) == KIND_TYPE.follower
+  if follower then
+    if MD.is_env(ms) and not MD.is_env(was) and at("mcc") and at("mlo") then
+      if at("att") and at("rel") then
+        MD.set_field(track, slot, j, "att", 5)
+        MD.set_field(track, slot, j, "rel", 300)
+      end
+      if at("floor") then MD.set_field(track, slot, j, "floor", -24) end
+      MD.set_field(track, slot, j, "mcc", MD.mcc_of(200))
+      MD.set_field(track, slot, j, "mlo", MD.mlo_of(0.6))
+      MD.set_field(track, slot, j, "mhold", 0)
+    end
+    return
+  end
   if MD.is_env(ms) and not MD.is_env(was) then
-    local function at(k) return math.abs(MD.field(track, slot, j, k) - MD.FIELDS[k][2]) < 0.01 end
     if at("att") and at("rel") and at("floor") and at("ceil") then
       MD.set_field(track, slot, j, "att", 5)
       MD.set_field(track, slot, j, "ceil", MD.ceil_of(200))
@@ -1334,6 +1358,51 @@ function MD.need_sidechain(track)
   if (reaper.GetMediaTrackInfo_Value(track, "I_NCHAN") or 2) < 4 then
     reaper.SetMediaTrackInfo_Value(track, "I_NCHAN", 4)
   end
+end
+
+-- The Followers' sidechain from another track (Audio from): a pre-fader
+-- audio send, no MIDI, into this track's 3/4, which every Follower on
+-- Sidechain (and any plugin keying from 3/4) hears. The send ChannelView
+-- made is known by its source, kept on this track (MD.EXT_SC); a
+-- sidechain you made yourself is left alone.
+MD.EXT_SC = "P_EXT:TS_CV_SC_FROM"
+local function sc_recv(track)
+  local ok, g = reaper.GetSetMediaTrackInfo_String(track, MD.EXT_SC, "", false)
+  if not ok or g == "" then return nil end
+  for r = 0, reaper.GetTrackNumSends(track, -1) - 1 do
+    local from = reaper.GetTrackSendInfo_Value(track, -1, r, "P_SRCTRACK")
+    if from and reaper.GetTrackGUID(from) == g
+       and (reaper.GetTrackSendInfo_Value(track, -1, r, "I_DSTCHAN") or 0) == 2 then
+      return r, from
+    end
+  end
+end
+function MD.sc_from(track)
+  local _, from = sc_recv(track)
+  return from
+end
+-- The sidechain from `from` (a track), or back to this track's own 3/4 (nil).
+function MD.set_sc_from(track, from)
+  reaper.Undo_BeginBlock()
+  local r = sc_recv(track)
+  while r do
+    reaper.RemoveTrackSend(track, -1, r)
+    r = sc_recv(track)
+  end
+  if from and from ~= track then
+    MD.need_sidechain(track)
+    local sn = reaper.CreateTrackSend(from, track)
+    if sn and sn >= 0 then
+      reaper.SetTrackSendInfo_Value(from, 0, sn, "I_SRCCHAN", 0)
+      reaper.SetTrackSendInfo_Value(from, 0, sn, "I_DSTCHAN", 2)
+      reaper.SetTrackSendInfo_Value(from, 0, sn, "I_SENDMODE", 3)     -- pre-fader
+      reaper.SetTrackSendInfo_Value(from, 0, sn, "I_MIDIFLAGS", 31)   -- no MIDI
+    end
+    reaper.GetSetMediaTrackInfo_String(track, MD.EXT_SC, reaper.GetTrackGUID(from), true)
+  else
+    reaper.GetSetMediaTrackInfo_String(track, MD.EXT_SC, "", true)
+  end
+  reaper.Undo_EndBlock("ChannelView: Followers' sidechain", -1)
 end
 
 -- ---------------------------------------------------------------------
