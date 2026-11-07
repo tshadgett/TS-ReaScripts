@@ -1902,7 +1902,14 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Bright*, *Satin*, *Tolex*, *Leather*, *Wood*, *Crinkle*, *Enamel*,
   *Hammertone* or *Checker plate*, each in the faceplate's colour; the
   **Metallic flake** (a fine flake and sheen, like metallic paint) goes
-  over any of them.
+  over any of them. **Picture...** (in the Faceplate menu, a section's and a
+  background's) puts a picture of your own on it instead: **Stretch**ed
+  over it, **Fill**ing it (cut to its shape), **Tile**d at its own size,
+  or with its **Edges kept** (the corners and edges as they are, the
+  middle stretched, for a rack panel with screws at any size). The labels
+  on it take their ink from the picture's colour. Your surface pictures
+  are kept in Your pictures too. (On the web page, Edges kept is
+  stretched.)
 - **The plugin's own colours** (Windows, with js_ReaScriptAPI). Every
   colour menu — faceplate, section, background, knob and fader caps, lit
   colours — has a **From the plugin** row: the eyedropper reads the

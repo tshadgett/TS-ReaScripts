@@ -8919,6 +8919,55 @@ do
   FN.gallery_reload()
 end
 
+-- a faceplate's, a section's or a background's own picture: kept as its
+-- Finish line, drawn stretched, filling, tiled or with its edges kept
+do
+  local FN = require("TS_CV_Finish")
+  check("surface: read and written", M.surface_key(M.surface_of("img:wood grain.png|tile|24")), "img:wood grain.png|tile|24")
+  check("surface: a path is no name", M.surface_of("img:C:/x.png|tile"), nil)
+  check("surface: a Finish line", M.finish_of("img:rack.png|edges|12"), "img:rack.png|edges|12")
+  check("surface: unknown fill, stretched", M.surface_of("img:a.png|wobble").fill, "stretch")
+  local k = "SurfPlug"
+  M.set(k, { plate = "#3a3b3d", finish = "img:rack.png|edges|12",
+    controls = { { param = 1, type = "knob", back = "#202020", finish = "img:wood.png|tile|16" } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  check("surface: faceplate and background kept", l.finish .. " / " .. tostring(l.controls[1].finish), "img:rack.png|edges|12 / img:wood.png|tile|16")
+  M.remove(k); M.save(); M.reload()
+  local drawn = {}
+  FN.attach(setmetatable({
+    DrawList_AddImage = function(_, im, x1, y1, x2, y2, u0, v0, u1, v1) drawn[#drawn + 1] = { x1, y1, x2, y2, u0, v0, u1, v1 } end,
+  }, { __index = function() return nil end }))
+  local real = FN.picture
+  FN.picture = function() return "img", 100, 50 end
+  drawn = {}
+  -- stretched: the band from y 50 to 75 of a 0..200 x 0..100 box
+  FN.surface("ctx", "dl", "img:p.png|stretch|0", 0, 50, 200, 75, 0, 0, { 0, 0, 200, 100 })
+  check("surface: stretched, the band's part", drawn[1] and string.format("%.2f %.2f", drawn[1][6], drawn[1][8]), "0.50 0.75")
+  drawn = {}
+  FN.surface("ctx", "dl", "img:p.png|tile|0", 0, 0, 250, 120, 0, 0)
+  check("surface: tiled at its own size", #drawn, 9)
+  check("surface: the last tile cut", drawn[9] and string.format("%.0f %.2f", drawn[9][3], drawn[9][7]), "250 0.50")
+  drawn = {}
+  FN.surface("ctx", "dl", "img:p.png|edges|10", 0, 0, 300, 400, 0, 0)
+  check("surface: edges kept, nine pieces", #drawn, 9)
+  check("surface: a corner as it is", drawn[1] and string.format("%.0f %.0f %.2f %.2f", drawn[1][3], drawn[1][4], drawn[1][7], drawn[1][8]), "10 10 0.10 0.20")
+  drawn = {}
+  FN.surface("ctx", "dl", "img:p.png|crop|0", 0, 0, 100, 100, 0, 0)
+  check("surface: filling, cut to it", drawn[1] and string.format("%.2f %.2f", drawn[1][5], drawn[1][7]), "0.25 0.75")
+  FN.picture = real
+  -- its colour, on average, for the ink on it
+  local saved = { reaper.JS_LICE_LoadPNG, reaper.JS_LICE_GetPixel, reaper.JS_LICE_GetWidth, reaper.JS_LICE_GetHeight, reaper.JS_LICE_DestroyBitmap }
+  reaper.JS_LICE_LoadPNG = function() return "bm" end
+  reaper.JS_LICE_GetWidth = function() return 64 end
+  reaper.JS_LICE_GetHeight = function() return 64 end
+  reaper.JS_LICE_DestroyBitmap = function() end
+  reaper.JS_LICE_GetPixel = function(_, x) return x < 32 and 0xff000000 or 0xffffffff end
+  check("surface: its colour on average", FN.average("p.png"), "#808080")
+  reaper.JS_LICE_LoadPNG, reaper.JS_LICE_GetPixel, reaper.JS_LICE_GetWidth, reaper.JS_LICE_GetHeight, reaper.JS_LICE_DestroyBitmap =
+    saved[1], saved[2], saved[3], saved[4], saved[5]
+end
+
 -- a knob as its picture: a filmstrip's frame for the value, first frame
 -- lowest or highest; one picture turned; a button's Off and On
 do

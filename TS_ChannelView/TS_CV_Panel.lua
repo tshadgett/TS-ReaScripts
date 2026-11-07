@@ -2229,6 +2229,8 @@ end
 -- back to the drawn grain when there are no images (an older ReaImGui).
 local function finish_rect(ctx, dl, key, bg, x1, y1, x2, y2, ox, oy, box)
   if not key or not FN then return end
+  -- a picture of your own (img:...)
+  if key:sub(1, 4) == "img:" then FN.surface(ctx, dl, key, x1, y1, x2, y2, ox, oy, box) return end
   if FN.image(ctx, key) then
     FN.rect(ctx, dl, key, x1, y1, x2, y2, ox, oy, box)
   elseif key == "brushed" then
@@ -2405,7 +2407,7 @@ local function flake_shape(ctx, dl, gx0, gy0, loops, light, finish, bg, r)
         if finish then
           -- Bright and Satin reflect once across the whole shape
           local box
-          if C.FINISH[finish] and C.FINISH[finish].stretch then
+          if (C.FINISH[finish] and C.FINISH[finish].stretch) or finish:sub(1, 4) == "img:" then
             local bx1, by1, bx2, by2 = math.huge, math.huge, -math.huge, -math.huge
             for j = 1, #loops[1], 2 do
               bx1 = math.min(bx1, loops[1][j]); bx2 = math.max(bx2, loops[1][j])

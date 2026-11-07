@@ -1163,6 +1163,25 @@ local function plate_menu(fx, key, layout)
     ImGui.SetTooltip(ctx, plate and "Metallic flake over the finish."
       or "Choose a faceplate first.")
   end
+  -- a picture of your own over it, in place of a finish
+  if ED.PRO then
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx, "Picture...##plate_pic", nil, M.surface_of(layout.finish) ~= nil) then
+      KE.open_surface({ title = fx.name or "", what = "Faceplate", key = layout.finish,
+        apply = function(k, col)
+          local l, pk = materialise(fx)
+          if k then
+            l.finish, l.brush = k, nil
+            -- its colour, on average: the ink on it follows
+            l.plate = col or l.plate or "#5a5c60"
+          elseif M.surface_of(l.finish) then
+            l.finish = nil
+          end
+          M.set(pk, l); M.save()
+        end })
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A picture of your own for the faceplate.") end
+  end
 end
 
 -- The knobs and faders a style can be copied between: a stepped knob is a
@@ -1446,6 +1465,21 @@ local function back_menu(fx, key, idx, c)
   brush_tick(fx, key, idx, c, bkind, bpl, "back_brush")
   corners_combo(fx, key, idx, c, bkind, "back_corners")
   ImGui.EndDisabled(ctx)
+  -- a picture of your own behind it
+  if ED.PRO and ImGui.Selectable(ctx, "Picture...##back_pic", M.surface_of(c.finish) ~= nil, 0, 170, 0) then
+    KE.open_surface({ title = fx.name or "", what = "Background", key = c.finish,
+      apply = function(k, col)
+        local l, pk = materialise(fx)
+        local lc = l.controls[idx]
+        if lc and k then
+          lc.finish, lc.brush = k, nil
+          lc.back = col or ((lc.back and lc.back ~= "inset") and lc.back) or "#5a5c60"
+        elseif lc and M.surface_of(lc.finish) then
+          lc.finish = nil
+        end
+        M.set(pk, l); M.save()
+      end })
+  end
   ImGui.Spacing(ctx)
   ImGui.TextWrapped(ctx, "Controls side by side or above each other with the same background join into one shape, across a divider too.")
 end
@@ -1504,6 +1538,21 @@ local function section_menu(fx, key, idx, c)
   brush_tick(fx, key, idx, c, skind, spl, "sec_brush")
   corners_combo(fx, key, idx, c, skind, "sec_corners")
   ImGui.EndDisabled(ctx)
+  -- a picture of your own for the section
+  if ED.PRO and ImGui.Selectable(ctx, "Picture...##sec_pic", M.surface_of(c.finish) ~= nil, 0, 170, 0) then
+    KE.open_surface({ title = fx.name or "", what = "Section", key = c.finish,
+      apply = function(k, col)
+        local l, pk = materialise(fx)
+        local lc = l.controls[idx]
+        if lc and k then
+          lc.finish, lc.brush = k, nil
+          lc.style, lc.cap = "plate", col or ((lc.style == "plate") and lc.cap) or "#5a5c60"
+        elseif lc and M.surface_of(lc.finish) then
+          lc.finish = nil
+        end
+        M.set(pk, l); M.save()
+      end })
+  end
 end
 
 -- An XY pad's or a concentric knob's look: the colour (the pad's dot, the

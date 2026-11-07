@@ -816,9 +816,28 @@ function M.part_metal(kind, metal)
   return (kind ~= nil and metal == true) or false
 end
 
--- A Finish line's key, or nil when it names none we know.
+-- A surface's own picture, in place of a finish (Pro): its Finish line is
+-- img:<file>|<stretch, crop, tile or edges>|<the edges kept, px>. The file
+-- is a name in the Images folder.
+M.SURFACE_FILLS = { stretch = true, crop = true, tile = true, edges = true }
+function M.surface_of(v)
+  if type(v) ~= "string" or v:sub(1, 4) ~= "img:" then return nil end
+  local file, fill, edge = v:sub(5):match("^([^|]*)|?([^|]*)|?([^|]*)$")
+  file = U.trim(file or "")
+  if file == "" or file:find("[/\\]") then return nil end
+  return { file = file, fill = M.SURFACE_FILLS[fill] and fill or "stretch",
+           edge = math.max(0, math.min(512, math.floor(tonumber(edge) or 16))) }
+end
+function M.surface_key(s)
+  if not (s and s.file) then return nil end
+  return "img:" .. s.file .. "|" .. (s.fill or "stretch") .. "|" .. math.floor(s.edge or 16)
+end
+
+-- A Finish line's key (a finish, or a surface's picture), or nil when it
+-- names none we know.
 local function finish_of(v)
   v = U.trim(v or "")
+  if M.surface_of(v) then return M.surface_key(M.surface_of(v)) end
   return C.FINISH[v] and v or nil
 end
 M.finish_of = finish_of
@@ -3673,6 +3692,10 @@ function M.raw_images(t)
       for _, f in ipairs({ im and im.file, im and im.file2 }) do
         if f and not seen[f] then seen[f] = true; out[#out + 1] = f end
       end
+    elseif k:match("^Finish%d*$") then
+      -- a faceplate's, a section's or a background's own picture
+      local sf = M.surface_of(v)
+      if sf and not seen[sf.file] then seen[sf.file] = true; out[#out + 1] = sf.file end
     end
   end
   table.sort(out)
@@ -3699,7 +3722,9 @@ function M.export(file, keys, read_img)
           end
         end
       else
-        for kk in pairs(sections[k]) do if kk:match("^Img%d+$") then t[kk] = nil end end
+        for kk, vv in pairs(sections[k]) do
+          if kk:match("^Img%d+$") or (kk:match("^Finish%d*$") and M.surface_of(vv)) then t[kk] = nil end
+        end
       end
       data[k] = t; order[#order + 1] = k
     end
@@ -3779,6 +3804,10 @@ function M.import(entries, store_img)
               if im.file2 then im.file2 = renamed[im.file2] or im.file2 end
               raw[k] = M.img_line(im)
             end
+          elseif k:match("^Finish%d*$") and M.surface_of(v) then
+            local sf = M.surface_of(v)
+            sf.file = renamed[sf.file] or sf.file
+            raw[k] = M.surface_key(sf)
           end
         end
         e.raw = raw
