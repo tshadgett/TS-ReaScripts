@@ -3182,7 +3182,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.toggle(ctx, id, label, value, st,
           { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
             text = said or ((size == "small") and label or nil),
-            on_col = lit, size = size, style = ctl.style, mod = modded })
+            on_col = lit, size = size, style = ctl.style, mod = modded, img = ctl.img })
       elseif ctl.type == "combo" and item.kind == "buttons" then
         -- its choices as buttons: the plugin's own names (button_choices),
         -- or yours
@@ -3322,14 +3322,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = st, snaps = snaps, mod = modded, ring = ring, lamp = P.lamp(track, fx, layout, p),
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look,
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look, img = ctl.img,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
-            lamp = P.lamp(track, fx, layout, p),
+            lamp = P.lamp(track, fx, layout, p), img = ctl.img,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 

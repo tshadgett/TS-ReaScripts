@@ -576,6 +576,67 @@ M.step_of = step_of
 -- StepLit<n>): { leds = { { name =, col = }, ... }, lit = { bits, ... } },
 -- or nil.
 M.STEP_LEDS_MAX = 8
+
+-- A knob's or a button's own picture (Img<n>, Pro):
+-- <file>|<strip or turn>|<frames>|<down or across>|<lo or hi: the first
+-- frame>|<-1, 0 or 1: smaller, fits, larger>|<a, n, r: the value arc,
+-- the numbers and the modulation ring drawn over it>|<a button's On file>.
+-- The file is a name in the Images folder beside the layouts. A strip is
+-- a filmstrip, a frame for each position (a button's: Off, then On); a
+-- turning picture turns with the value.
+function M.img_of(v)
+  local parts = {}
+  for f in (U.trim(v or "") .. "|"):gmatch("([^|]*)|") do parts[#parts + 1] = U.trim(f) end
+  local file = parts[1]
+  if not file or file == "" or file:find("[/\\]") then return nil end
+  local flags = parts[7] or ""
+  local im = { file = file, kind = (parts[2] == "turn") and "turn" or "strip",
+                frames = math.max(1, math.min(1024, math.floor(tonumber(parts[3]) or 1))),
+                dir = (parts[4] == "across") and "across" or "down", hi = parts[5] == "hi",
+                size = ({ ["-1"] = -1, ["1"] = 1 })[parts[6] or ""] or 0 }
+  -- what's drawn over it: the value arc, the numbers, the modulation ring
+  im.arc, im.ring = flags:find("a") ~= nil, flags:find("r") ~= nil
+  im["nums"] = flags:find("n") ~= nil
+  if parts[8] and parts[8] ~= "" and not parts[8]:find("[/\\]") then im.file2 = parts[8] end
+  return im
+end
+function M.img_line(im)
+  if not (im and im.file and im.file ~= "") then return nil end
+  return table.concat({ im.file, im.kind or "strip", tostring(math.floor(im.frames or 1)), im.dir or "down",
+    im.hi and "hi" or "lo", tostring(im.size or 0),
+    (im.arc and "a" or "") .. (im.nums and "n" or "") .. (im.ring and "r" or ""), im.file2 or "" }, "|")
+end
+function M.copy_img(im)
+  if not im then return nil end
+  local o = {}
+  for k, v in pairs(im) do o[k] = v end
+  return o
+end
+-- A picture (or none, img nil) onto control idx of a layout, its section
+-- (the controls between the dividers either side) or the whole panel: the
+-- same kind only -- knobs (stepped ones too) or buttons.
+function M.put_img(layout, idx, img, scope)
+  local ctl = layout.controls or {}
+  local first = ctl[idx]
+  if not first then return end
+  local button = first.type == "toggle"
+  local function put(c)
+    if not c then return end
+    local ok = button and c.type == "toggle" or (not button and (c.type == "knob" or c.type == "stepped" or c.type == nil))
+    if ok and (c.param or -1) >= 0 or (ok and M.is_virtual(c)) then c.img = M.copy_img(img) end
+  end
+  if scope == "section" then
+    local function edge(c) return c.type == "divider" or c.type == "page" end
+    local a, b = idx, idx
+    while a > 1 and not edge(ctl[a - 1]) do a = a - 1 end
+    while b < #ctl and not edge(ctl[b + 1]) do b = b + 1 end
+    for i = a, b do put(ctl[i]) end
+  elseif scope == "panel" then
+    for _, c in ipairs(ctl) do put(c) end
+  else
+    put(first)
+  end
+end
 function M.step_pat_of(leds_v, lit_v)
   local leds = {}
   for part in (U.trim(leds_v or "") .. ";"):gmatch("([^;]*);") do
@@ -2197,6 +2258,7 @@ local function parse_section(sect)
         finish  = finish_of(sect["Finish" .. i]),
         corners = corners_of(sect["Corners" .. i]),
         look    = (t == "knob" or t == "stepped" or t == "dual") and KP.decode(sect["Look" .. i]) or nil,
+        img     = (t == "knob" or t == "stepped" or t == "toggle") and M.img_of(sect["Img" .. i]) or nil,
         -- a concentric knob's inner knob: its recipe, or its own look
         style2  = (t == "dual") and inner_of(sect["Inner" .. i]) or nil,
         look2   = (t == "dual") and KP.decode(sect["Look2" .. i]) or nil,
@@ -2426,6 +2488,9 @@ local function serialize(layout)
       end
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
+    if c.img and (c.type == "knob" or c.type == "stepped" or c.type == "toggle" or c.type == nil) then
+      out["Img" .. (i - 1)] = M.img_line(c.img)
+    end
     if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
     if c.type == "vu" then out["Vu" .. (i - 1)] = M.vu_line(c.vu) end
     if c.type == "act" and M.ACTS[c.act or ""] then out["Act" .. (i - 1)] = c.act end
@@ -3595,13 +3660,55 @@ local function n_controls(t)
 end
 function M.count_controls(key) return sections[key] and n_controls(sections[key]) or 0 end
 
--- Writes the chosen layouts to `file`. Returns ok, err.
-function M.export(file, keys)
+-- The pictures a raw layout's controls use (Img<n>), by name.
+local IMG_SECT = "TS_CV_Image "
+function M.raw_images(t)
+  local out, seen = {}, {}
+  for k, v in pairs(t or {}) do
+    if k:match("^Img%d+$") then
+      local im = M.img_of(v)
+      for _, f in ipairs({ im and im.file, im and im.file2 }) do
+        if f and not seen[f] then seen[f] = true; out[#out + 1] = f end
+      end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+function M.layout_images(key) return M.raw_images(sections[key]) end
+
+-- Writes the chosen layouts to `file`. Their pictures go with them when
+-- `read_img(name)` is given (the file's bytes, or nil), each in a section
+-- of its own; without it the pictures are left out, and the controls show
+-- their ordinary looks. Returns ok, err.
+function M.export(file, keys, read_img)
   local data, order = {}, {}
+  local pics, pic_order = {}, {}
   for _, k in ipairs(keys) do
-    if sections[k] then data[k] = raw_copy(sections[k]); order[#order + 1] = k end
+    if sections[k] then
+      local t = raw_copy(sections[k])
+      if read_img then
+        for _, f in ipairs(M.raw_images(t)) do
+          if not pics[f] then
+            local d = read_img(f)
+            if d then pics[f] = d; pic_order[#pic_order + 1] = f end
+          end
+        end
+      else
+        for kk in pairs(sections[k]) do if kk:match("^Img%d+$") then t[kk] = nil end end
+      end
+      data[k] = t; order[#order + 1] = k
+    end
   end
   if #order == 0 then return false, "No layouts chosen." end
+  for _, f in ipairs(pic_order) do
+    local b = U.b64e(pics[f])
+    local sect, n = {}, 0
+    for i = 1, #b, 4000 do n = n + 1; sect["Data" .. n] = b:sub(i, i + 3999) end
+    data[IMG_SECT .. f] = sect
+    order[#order + 1] = IMG_SECT .. f
+  end
   return U.write_ini(file, data, order, EXPORT_HEADER)
 end
 
@@ -3628,15 +3735,52 @@ function M.read_shared(file)
     end
   end
   if #out == 0 then return nil, "There are no ChannelView layouts in that file." end
+  -- the pictures that came with them
+  local pics = {}
+  for _, k in ipairs(order) do
+    local name = k:sub(1, #IMG_SECT) == IMG_SECT and k:sub(#IMG_SECT + 1) or nil
+    if name and name ~= "" and not name:find("[/\\]") then
+      local parts, n = {}, 1
+      while data[k]["Data" .. n] do parts[n] = data[k]["Data" .. n]; n = n + 1 end
+      if #parts > 0 then pics[name] = U.b64d(table.concat(parts)) end
+    end
+  end
+  for _, e in ipairs(out) do
+    e.pics = {}
+    for _, f in ipairs(M.raw_images(e.raw)) do if pics[f] then e.pics[f] = pics[f] end end
+  end
   return out
 end
 
 -- Brings the chosen entries (from M.read_shared) into the library,
 -- replacing any of the same name. The caller saves; the save keeps the
--- library as it was as the .bak.
-function M.import(entries)
+-- library as it was as the .bak. Pictures that came with them are kept by
+-- `store_img(name, bytes)` (the name it's kept under, or nil), and the
+-- layouts follow a picture given another name.
+function M.import(entries, store_img)
   local n = 0
   for _, e in ipairs(entries) do
+    if store_img and e.pics and next(e.pics) then
+      local renamed = {}
+      for f, d in pairs(e.pics) do
+        local got = store_img(f, d)
+        if got and got ~= f then renamed[f] = got end
+      end
+      if next(renamed) then
+        local raw = raw_copy(e.raw)
+        for k, v in pairs(raw) do
+          if k:match("^Img%d+$") then
+            local im = M.img_of(v)
+            if im then
+              im.file = renamed[im.file] or im.file
+              if im.file2 then im.file2 = renamed[im.file2] or im.file2 end
+              raw[k] = M.img_line(im)
+            end
+          end
+        end
+        e.raw = raw
+      end
+    end
     -- a locked layout takes no edits, and an import is one
     if sections[e.key] and lock_of(sections[e.key].Lock) and raw_text(sections[e.key]) ~= raw_text(e.raw) then
       goto continue
@@ -3679,7 +3823,7 @@ function M.look_of(c)
   return { fam = M.look_family(c), type = c.type, style = c.style, cap = c.cap, size = c.size,
            scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc, back = c.back, brush = c.brush, metal = c.metal,
            finish = c.finish, corners = c.corners, look = KP.copy(c.look),
-           style2 = c.style2, look2 = KP.copy(c.look2),
+           style2 = c.style2, look2 = KP.copy(c.look2), img = M.copy_img(c.img),
            dir = c.dir, len = c.len, thin = c.thin }
 end
 
@@ -3729,6 +3873,8 @@ function M.paste_look(o, s)
       -- its own look, built from parts (on a concentric knob, the outer's),
       -- and a concentric knob's inner one from another concentric knob
       o.look = KP.copy(s.look)
+      -- a picture goes to a knob (not a concentric one)
+      o.img = (o.type ~= "dual") and M.copy_img(s.img) or nil
       if o.type == "dual" and s.type == "dual" then o.style2, o.look2 = s.style2, KP.copy(s.look2) end
       -- a concentric knob comes medium or large
       if not (o.type == "dual" and s.size == "small") then o.size = s.size end
@@ -3739,6 +3885,7 @@ function M.paste_look(o, s)
       o.dir, o.len, o.thin = s.dir, s.len, s.thin
     elseif o.type == "toggle" and s.type == "toggle" then
       o.size = s.size
+      o.img = M.copy_img(s.img)
     end
   end
   -- a hardware switch is a toggle's alone: a button row stays flat
@@ -3764,6 +3911,7 @@ function M.copy(layout)
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),
+                        img = M.copy_img(c.img),
                         metal = c.metal, finish = c.finish, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,

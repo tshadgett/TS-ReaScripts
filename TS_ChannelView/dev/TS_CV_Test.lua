@@ -283,6 +283,57 @@ do
   check("step guess: nothing to light", M.step_guess({ "Off", "None" }), nil)
 end
 
+-- A knob's or a button's own picture (Img<n>) survives the ini, a copy and
+-- Copy / Paste style; it goes on one control, a section or the panel.
+do
+  local k = "PicPlug"
+  M.set(k, { controls = {
+    { param = 1, type = "knob", img = { file = "api 550.png", kind = "strip", frames = 128, dir = "down", hi = true, size = 1,
+                                        arc = true, nums = true } },
+    { param = 2, type = "toggle", img = { file = "btn off.png", kind = "strip", frames = 1, dir = "down", size = 0,
+                                          file2 = "btn on.png" } },
+    { param = 3, type = "knob" }, { param = -1, type = "divider" }, { param = 4, type = "knob" } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  local a, b = l.controls[1].img, l.controls[2].img
+  check("picture: a filmstrip's settings", table.concat({ a.file, a.kind, a.frames, a.dir, tostring(a.hi), a.size,
+    tostring(a.arc), tostring(a.nums), tostring(a.ring) }, " "), "api 550.png strip 128 down true 1 true true false")
+  check("picture: a button's On file", b.file .. " / " .. tostring(b.file2), "btn off.png / btn on.png")
+  check("picture: kept by a copy", M.copy(l).controls[1].img.file, "api 550.png")
+  check("picture: a path is no name", M.img_of("C:/x/y.png|strip|1"), nil)
+  local s2 = M.look_of(l.controls[1])
+  local o = { param = 9, type = "knob" }
+  M.paste_look(o, s2)
+  check("picture: pasted onto a knob", o.img and o.img.file, "api 550.png")
+  local t = { param = 9, type = "toggle" }
+  M.paste_look(t, s2)
+  check("picture: a knob's not onto a button", t.img, nil)
+  M.put_img(l, 3, a, "section")
+  check("picture: its section", tostring(l.controls[1].img and l.controls[1].img.file) .. " " .. tostring(l.controls[3].img and l.controls[3].img.file)
+    .. " " .. tostring(l.controls[5].img), "api 550.png api 550.png nil")
+  M.put_img(l, 3, nil, "panel")
+  check("picture: off every knob, the button's kept", tostring(l.controls[1].img) .. " " .. tostring(l.controls[2].img ~= nil), "nil true")
+  M.remove(k); M.save(); M.reload()
+  -- shared: left out unless asked for; carried in the file when they are,
+  -- and a picture kept under another name is followed
+  M.set(k, { controls = { { param = 1, type = "knob", img = { file = "k.png", kind = "strip", frames = 3, dir = "down", size = 0 } } } })
+  local bin = string.char(137, 80, 78, 71, 0, 1, 2, 255, 254) .. ("x"):rep(9000)
+  check("b64: round trip", U.b64d(U.b64e(bin)) == bin, true)
+  local tmp = os.tmpname()
+  M.export(tmp, { k })
+  local e1 = M.read_shared(tmp)
+  check("shared: pictures left out", e1 and e1[1].raw.Img0, nil)
+  M.export(tmp, { k }, function(name) return name == "k.png" and bin or nil end)
+  local e2 = M.read_shared(tmp)
+  check("shared: the picture carried", e2 and e2[1].pics["k.png"] == bin, true)
+  local stored
+  M.remove(k)
+  M.import(e2, function(name, d) stored = d; return "k 2.png" end)
+  check("shared: kept, and followed under its new name", tostring(stored == bin) .. " " .. M.get(k).controls[1].img.file, "true k 2.png")
+  os.remove(tmp)
+  M.remove(k); M.save(); M.reload()
+end
+
 -- The make-up gain control (Makeup=) survives the ini and a copy.
 do
   local k = "MakeupPlug"
@@ -8749,6 +8800,61 @@ do
     check("step pattern: HP + Link lit", table.concat(lit2, ","), "17,51")
   end)
   check("step: draw ran", ok and true or err, true)
+end
+
+-- a filmstrip's frames counted from the gaps between its pictures, when it
+-- can be read (js_ReaScriptAPI); square frames otherwise
+do
+  local FN = require("TS_CV_Finish")
+  local saved = { reaper.JS_LICE_LoadPNG, reaper.JS_LICE_GetPixel, reaper.JS_LICE_DestroyBitmap }
+  -- 128 frames 20.125 px tall in a 20 x 2576 strip, a clear row between,
+  -- and a stray pixel or two inside
+  reaper.JS_LICE_LoadPNG = function() return "bm" end
+  reaper.JS_LICE_DestroyBitmap = function() end
+  reaper.JS_LICE_GetPixel = function(_, x, y)
+    local f = y / 20.125
+    local inside = (f - math.floor(f)) * 20.125
+    if inside < 1.0 or inside > 19.0 then return 0 end
+    return 0xff000000
+  end
+  check("frames: counted from the gaps", FN.frames("strip.png", 20, 2576, "down"), 128)
+  reaper.JS_LICE_GetPixel = function() return 0xff000000 end
+  check("frames: no gaps, square frames", FN.frames("strip.png", 20, 2576, "down"), 129)
+  reaper.JS_LICE_LoadPNG = nil
+  check("frames: unreadable, square frames", FN.frames("strip.png", 64, 640, "down"), 10)
+  check("frames: across", FN.frames("strip.jpg", 640, 64, "across"), 10)
+  reaper.JS_LICE_LoadPNG, reaper.JS_LICE_GetPixel, reaper.JS_LICE_DestroyBitmap = saved[1], saved[2], saved[3]
+end
+
+-- a knob as its picture: a filmstrip's frame for the value, first frame
+-- lowest or highest; one picture turned; a button's Off and On
+do
+  local images = {}
+  local fake = setmetatable({
+    DrawList_AddImage = function(_, img, x1, y1, x2, y2, u0, v0, u1, v1) images[#images + 1] = { img, x1, y1, x2, y2, u0, v0, u1, v1 } end,
+    DrawList_AddImageQuad = function(_, img, ...) images[#images + 1] = { img, "quad", ... } end,
+  }, { __index = function() return function() end end })
+  W.attach(fake)
+  local had = W._fn
+  W._fn = { picture = function(_, name) if name == "none.png" then return nil end return name, 20, 2576 end }
+  local ok, err = pcall(function()
+    local im = { file = "strip.png", kind = "strip", frames = 128, dir = "down" }
+    images = {}
+    W.picture_knob("ctx", "dl", 50, 50, 17, 1, im, false)
+    local e = images[1]
+    check("picture: the last frame for the top", e and string.format("%.4f %.4f", e[7], e[9]), string.format("%.4f %.4f", 127 / 128, 1))
+    check("picture: a frame's shape kept (20 x 20.125)", e and string.format("%.2f", (e[5] - e[3]) / (e[4] - e[2])), "1.01")
+    images = {}
+    im.hi = true
+    W.picture_knob("ctx", "dl", 50, 50, 17, 1, im, false)
+    check("picture: first frame highest", images[1] and images[1][7], 0)
+    images = {}
+    W.picture_knob("ctx", "dl", 50, 50, 17, 0.5, { file = "one.png", kind = "turn" }, false)
+    check("picture: one that turns", images[1] and images[1][2], "quad")
+    check("picture: none to be had", W.picture_knob("ctx", "dl", 50, 50, 17, 0.5, { file = "none.png" }, false), false)
+  end)
+  check("picture: draw ran", ok and true or err, true)
+  W._fn = had
 end
 
 -- a value arc in a colour of its own: drawn in it, through W.knob

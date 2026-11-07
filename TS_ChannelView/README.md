@@ -1842,6 +1842,20 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   *Slim* (a fine groove and a small cap, filled to the value in its
   colour — made for rows of narrow faders), *Dot* (a dot on a line,
   filled up to it) and *Ball* (a lit ball in a slot sunk into the panel).
+- **Your own pictures.** Style ▸ **Image...** gives a knob a picture of
+  your own: a **filmstrip** (a frame for each position, as KnobMan and
+  WebKnobMan export them, running down or across) or one picture that
+  **turns** with the value. ChannelView counts the frames from the gaps
+  between them (with js_ReaScriptAPI), or from square frames; set
+  *Frames* yourself if it's wrong. *First frame*: the lowest position or
+  the highest. *Size*: smaller, fitting the dial, or larger. The value
+  arc, the numbers round it and the modulation ring can be drawn over it.
+  A button's Style ▸ **Image...** takes a strip of two frames (Off, then
+  On) or a picture for each. Apply it to the one control, its section or
+  every one on the panel. Pictures are copied into `Images/` beside your
+  layouts, and the web page shows them too. Exporting layouts leaves them
+  out unless you tick *Include their pictures*: share only pictures that
+  are yours to share.
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,
   Silver, Stone, Black, White, Brown and Gold. *Apply to every knob on this panel* copies one
   control's look to the rest. **Copy style** (right-click any control)

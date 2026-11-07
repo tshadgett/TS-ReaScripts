@@ -17,6 +17,7 @@
 local U = require("TS_CV_Util")
 local ST = require("TS_CV_Style")
 local M = require("TS_CV_Mappings")
+local ED = require("TS_CV_Edition")
 
 local ImGui
 local LS = {}
@@ -175,6 +176,20 @@ function LS.draw(ctx, busy)
 
   local picked = {}
   for _, e in ipairs(d.list) do if e.pick and can(e) then picked[#picked + 1] = e end end
+  -- pictures of their own (Pro): left out unless you say they can go
+  local FN = ED.module("TS_CV_Finish")
+  if d.mode == "export" and FN then
+    local any = false
+    for _, e in ipairs(picked) do if #M.layout_images(e.key) > 0 then any = true break end end
+    if any then
+      ImGui.Spacing(ctx)
+      local ch, v = ST.checkbox(ctx, "Include their pictures##shimg", d.imgs == true)
+      if ch then d.imgs = v end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Only pictures that are yours to share.\nLeft out, those controls show their usual look.")
+      end
+    end
+  end
   ImGui.Spacing(ctx)
   local label = (d.mode == "import") and ("Import %d###shgo") or ("Export %d\u{2026}###shgo")
   if ST.button(ctx, label:format(#picked), "main", 120, nil, { dim = #picked == 0 }) then
@@ -185,7 +200,7 @@ function LS.draw(ctx, busy)
       local file = ask_save(name)
       if file then
         remember_dir(file)
-        local ok, err = M.export(file, keys)
+        local ok, err = M.export(file, keys, (d.imgs and FN) and FN.read or nil)
         if ok then
           msg(("Exported %d layout%s to\n%s"):format(#keys, #keys == 1 and "" or "s", file))
           close()
@@ -203,7 +218,7 @@ function LS.draw(ctx, busy)
       elseif replacing == 0 or reaper.MB(("Replace %d of your layouts with the ones from this file?\n\n" ..
           "Your library as it was is kept as TS_ChannelView_Mappings.bak.ini."):format(replacing),
           "ChannelView", 1) == 1 then
-        local n = M.import(picked)
+        local n = M.import(picked, FN and function(name, bytes) return (FN.store(name, bytes)) end or nil)
         local ok, err = M.save()
         if not ok then msg("Imported, but the library couldn't be saved:\n" .. tostring(err)) end
         changed = n > 0

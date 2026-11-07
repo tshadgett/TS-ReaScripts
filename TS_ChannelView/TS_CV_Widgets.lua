@@ -24,7 +24,7 @@ local W   = {}
 -- Standard draws a plugin's controls plainly: the default Arc knob, the
 -- Flat button, no colours or looks of their own (those are Pro:
 -- TS_CV_Edition). The options a control is drawn with, so.
-local PLAIN = { style = true, look = true, cap = true, on_col = true, arc = true,
+local PLAIN = { style = true, look = true, cap = true, on_col = true, arc = true, img = true,
                 style2 = true, look2 = true, cap2 = true, on_cols = true, ink = true, ink_of = true }
 local function plain(o)
   if ED.PRO or not o then return o end
@@ -1465,6 +1465,55 @@ function W.lamp(dl, x, y, col)
   end
 end
 
+-- A knob's or a button's own picture (opts.img, Pro; TS_CV_Finish loads
+-- it): the image, its width and height, or nil.
+function W.picture(ctx, im, file)
+  if not im then return nil end
+  if W._fn == nil then W._fn = ED.module("TS_CV_Finish") or false end
+  if not W._fn then return nil end
+  return W._fn.picture(ctx, file or im.file)
+end
+-- Frame k (from 0) of a strip of im.frames, down or across, fitted into
+-- x1..x2, y1..y2 and centred, its shape kept.
+function W.draw_frame(dl, img, iw, ih, im, k, x1, y1, x2, y2, tint)
+  local n = math.max(1, im.frames or 1)
+  local fw, fh = iw, ih
+  local u0, v0, u1, v1 = 0, 0, 1, 1
+  if im.dir == "across" then fw = iw / n; u0, u1 = k / n, (k + 1) / n
+  else fh = ih / n; v0, v1 = k / n, (k + 1) / n end
+  local s = math.min((x2 - x1) / math.max(1, fw), (y2 - y1) / math.max(1, fh))
+  local w, h = fw * s * 0.5, fh * s * 0.5
+  local cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
+  ImGui.DrawList_AddImage(dl, img, cx - w, cy - h, cx + w, cy + h, u0, v0, u1, v1, tint or 0xffffffff)
+end
+-- A knob drawn as its picture, the dial's size (Smaller, Fits, Larger): a
+-- filmstrip's frame for the value, or one picture turned with it (upright
+-- at the middle of its travel). False when the picture can't be had.
+function W.picture_knob(ctx, dl, cx, cy, r, v, im, dim)
+  local img, iw, ih = W.picture(ctx, im)
+  if not img or not iw or iw <= 0 or ih <= 0 then return false end
+  local S = r * (1 + 0.18 * (im.size or 0))
+  local tint = dim and 0xffffff80 or 0xffffffff
+  if im.kind == "turn" then
+    local a = (v - 0.5) * A_SPAN
+    local s = math.min(2 * S / iw, 2 * S / ih)
+    local hw, hh = iw * s * 0.5, ih * s * 0.5
+    local ca, sa = math.cos(a), math.sin(a)
+    local function p(dx, dy) return cx + dx * ca - dy * sa, cy + dx * sa + dy * ca end
+    local x1, y1 = p(-hw, -hh)
+    local x2, y2 = p(hw, -hh)
+    local x3, y3 = p(hw, hh)
+    local x4, y4 = p(-hw, hh)
+    ImGui.DrawList_AddImageQuad(dl, img, x1, y1, x2, y2, x3, y3, x4, y4, 0, 0, 1, 0, 1, 1, 0, 1, tint)
+  else
+    local n = math.max(1, im.frames or 1)
+    local k = math.floor(math.max(0, math.min(1, v)) * (n - 1) + 0.5)
+    if im.hi then k = n - 1 - k end
+    W.draw_frame(dl, img, iw, ih, im, k, cx - S, cy - S, cx + S, cy + S, tint)
+  end
+  return true
+end
+
 function W.knob(ctx, id, label, value, formatted, opts)
   opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -1532,6 +1581,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local cx = x + cw * 0.5
   local cy
   local sc = (not small) and opts.scale and opts.scale.marks and #opts.scale.marks > 0
+             and not (opts.img and not opts.img.nums)
              and opts.scale or nil
   local large = opts.size == "large"
   local show_value = C.SHOW_VALUES and not small and (large or not sc)
@@ -1566,6 +1616,8 @@ function W.knob(ctx, id, label, value, formatted, opts)
     local fo = defaulted(opts, "knob")
     local st = C.KNOB_STYLE_ALIAS[fo.style] or fo.style or "arc"
     local outside = fo.look ~= nil or (C.KNOB_STYLE[st] ~= nil and st ~= "arc" and st ~= "minimal" and st ~= "studio")
+    -- a picture: only its value arc, if it has one
+    if opts.img then outside = opts.img.arc == true end
     if outside then
       -- (under the name as its font draws it, which can be taller)
       local _, name_h = ImGui.CalcTextSize(ctx, "Ag")
@@ -1599,13 +1651,20 @@ function W.knob(ctx, id, label, value, formatted, opts)
     W.lamp(dl, cx + lw * 0.5 - (ltw or 0) * 0.5 - 5, y + (lth or 13) * 0.5 + (small and -1 or 0), opts.lamp)
   end
 
-  W.knob_face(dl, cx, cy, dial_r, value, {
-    style = opts.style, cap = opts.cap, bipolar = opts.bipolar, arc = opts.arc, arc_col = opts.arc_col, ctx = ctx, look = opts.look,
-    dim = opts.dim, hot = hovered or active, marks = sc and sc.marks })
+  local pic = opts.img and W.picture_knob(ctx, dl, cx, cy, dial_r, value, opts.img, opts.dim)
+  if pic then
+    if opts.img.arc then
+      value_arc(dl, cx, cy, dial_r, value, opts.arc or (opts.bipolar and "mid" or "pos"), opts.dim, opts.arc_col)
+    end
+  else
+    W.knob_face(dl, cx, cy, dial_r, value, {
+      style = opts.style, cap = opts.cap, bipolar = opts.bipolar, arc = opts.arc, arc_col = opts.arc_col, ctx = ctx, look = opts.look,
+      dim = opts.dim, hot = hovered or active, marks = sc and sc.marks })
+  end
   if opts.mod then
     W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap, opts.look))
   end
-  if opts.ring then W.mod_ring(dl, cx, cy, dial_r, opts.ring) end
+  if opts.ring and not (pic and not opts.img.ring) then W.mod_ring(dl, cx, cy, dial_r, opts.ring) end
   -- where the dial is, for whoever draws to it (the rack's hover lines)
   W.last_knob = { cx = cx, cy = cy, r = dial_r }
 
@@ -2186,6 +2245,26 @@ function W.toggle(ctx, id, label, value, formatted, opts)
 
   if not small then
     centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
+  end
+
+  -- its own picture: Off and On, two frames of a strip or two files
+  if opts.img then
+    local im = opts.img
+    local file = (on and im.file2) or im.file
+    local img, iw, ih = W.picture(ctx, im, file)
+    if img and iw and iw > 0 and ih > 0 then
+      local one = file ~= im.file
+      local k = (not one and on) and math.min(1, (im.frames or 1) - 1) or 0
+      local py1 = small and (y + 2) or (y + label_h + C.LABEL_GAP)
+      local py2 = small and (y + ch - 2) or (py1 + C.KNOB_D)
+      local grow = 1 + 0.18 * (im.size or 0)
+      local m = (py2 - py1) * (grow - 1) * 0.5
+      W.draw_frame(dl, img, iw, ih, one and { frames = 1 } or im, k, x + 3 - m, py1 - m, x + cw - 3 + m, py2 + m,
+        hovered and 0xffffffff or 0xf2f2f2ff)
+      if opts.mod then W.mod_corner(dl, x + cw - 6, py1, 5, on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off) end
+      W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
+      return changed, value, act, pressed
+    end
   end
 
   local txt = opts.text or (on and "ON" or "OFF")

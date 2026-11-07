@@ -281,6 +281,40 @@ end
 
 -- Returns { [section] = { [key] = value } }, plus an ordered list of
 -- section names so a rewrite keeps the file's existing order.
+-- Base64, for pictures carried in a text file.
+do
+  local A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  local D = {}
+  for i = 1, 64 do D[A:byte(i)] = i - 1 end
+  function U.b64e(s)
+    local out, n = {}, #s
+    for i = 1, n, 3 do
+      local a, b, c = s:byte(i, i + 2)
+      local v = (a << 16) | ((b or 0) << 8) | (c or 0)
+      out[#out + 1] = A:sub((v >> 18) + 1, (v >> 18) + 1) .. A:sub(((v >> 12) & 63) + 1, ((v >> 12) & 63) + 1)
+        .. (b and A:sub(((v >> 6) & 63) + 1, ((v >> 6) & 63) + 1) or "=")
+        .. (c and A:sub((v & 63) + 1, (v & 63) + 1) or "=")
+    end
+    return table.concat(out)
+  end
+  function U.b64d(s)
+    s = s:gsub("[^%w%+/=]", "")
+    local out = {}
+    for i = 1, #s, 4 do
+      local q = { s:byte(i, i + 3) }
+      local v, pad = 0, 0
+      for j = 1, 4 do
+        local ch = q[j]
+        if ch == nil or ch == 61 then pad = pad + 1; v = v << 6
+        else v = (v << 6) | (D[ch] or 0) end
+      end
+      local bytes = string.char((v >> 16) & 255, (v >> 8) & 255, v & 255)
+      out[#out + 1] = bytes:sub(1, 3 - pad)
+    end
+    return table.concat(out)
+  end
+end
+
 function U.read_ini(path)
   local data, order = {}, {}
   local f = io.open(path, "r")

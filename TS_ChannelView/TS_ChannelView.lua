@@ -1229,6 +1229,19 @@ local function toggle_colour_menu(fx, key, idx, c)
       end
     end
   end
+  if c.type == "toggle" and ED.PRO then
+    ImGui.Spacing(ctx)
+    if ImGui.Selectable(ctx, "Image...##bstyle_image", c.img ~= nil, 0, 150, 0) then
+      KE.open_image({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Button"),
+                      img = c.img, button = true,
+                      apply = function(im, scope)
+                        local l, pk = materialise(fx)
+                        M.put_img(l, idx, im, scope)
+                        M.set(pk, l); M.save()
+                      end })
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Pictures of your own for Off and On.") end
+  end
   ImGui.Spacing(ctx)
   -- a pill rocker doesn't light: its colour is its cap's (TS_CV_Switches)
   local body_col = c.style == "rocker"
@@ -1921,6 +1934,16 @@ local function style_menu(fx, key, idx, c)
                 apply = function(look, scope) apply_look(fx, idx, look, scope) end })
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Build this knob from parts.") end
+    if c.type ~= "dual" and ImGui.Selectable(ctx, "Image...##style_image", c.img ~= nil, 0, 150, 0) then
+      KE.open_image({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Knob"),
+                      img = c.img,
+                      apply = function(im, scope)
+                        local l, pk = materialise(fx)
+                        M.put_img(l, idx, im, scope)
+                        M.set(pk, l); M.save()
+                      end })
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A picture of your own: a filmstrip, or one that turns.") end
     ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff,
       "Style: " .. (hov_label or (now_def and now_def.label) or (c.look and "Your own look") or "Default"))
   else
