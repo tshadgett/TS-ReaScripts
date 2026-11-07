@@ -1248,7 +1248,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
   if ctl.type == "toggle" then
     changed, nv, act = W.toggle(ctx, id, name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", text = shown,
-        on_col = W.lit_col(ctl.cap) or P.VIRT_COL, size = size, style = ctl.style })
+        on_col = W.lit_col(ctl.cap) or P.VIRT_COL, size = size, style = ctl.style, img = ctl.img })
   elseif ctl.type == "combo" and item.kind == "buttons" then
     local list = {}
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
@@ -1265,7 +1265,8 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
   else
     changed, nv, act = W.knob(ctx, id, name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = W.cap_col(ctl.cap) or P.VIRT_COL,
-        style = ctl.style, size = size })
+        style = ctl.style, size = size, look = ctl.look, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc),
+        img = ctl.img })
   end
   if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
   if changed and nv then
