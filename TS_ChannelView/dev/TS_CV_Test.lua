@@ -8829,6 +8829,8 @@ do
     return 0xff3a4a6a
   end
   check("frames: a JPEG on white, across", FN.frames("strip.jpg", 8000, 39, "across"), 201)
+  reaper.JS_LICE_LoadJPG = function() error("not read") end
+  check("frames: a whole number of squares, not read", FN.frames("strip.jpg", 10251, 51, "across"), 201)
   reaper.JS_LICE_LoadJPG = nil
   reaper.JS_LICE_LoadPNG = nil
   check("frames: unreadable, square frames", FN.frames("strip.png", 64, 640, "down"), 10)
