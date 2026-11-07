@@ -1465,6 +1465,27 @@ function W.lamp(dl, x, y, col)
   end
 end
 
+-- A heading that folds what's under it away (a long list in a menu: the
+-- styles, your recipes, your pictures): true while it's open. Each is
+-- remembered by `key`, open to start. `flags`: the Selectable's (a menu's
+-- stay-open flag).
+W.folds = {}
+function W.fold_head(ctx, key, label, flags)
+  local v = W.folds[key]
+  if v == nil then
+    v = reaper.GetExtState("TS_ChannelView", "fold_" .. key) ~= "0"
+    W.folds[key] = v
+  end
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.COL.header_dim)
+  if ImGui.Selectable(ctx, (v and "\u{25BE}  " or "\u{25B8}  ") .. label .. "##fold_" .. key, false, flags or 0) then
+    v = not v
+    W.folds[key] = v
+    reaper.SetExtState("TS_ChannelView", "fold_" .. key, v and "1" or "0", true)
+  end
+  ImGui.PopStyleColor(ctx)
+  return v
+end
+
 -- A knob's or a button's own picture (opts.img, Pro; TS_CV_Finish loads
 -- it): the image, its width and height, or nil.
 function W.picture(ctx, im, file)
@@ -2432,19 +2453,37 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
 
   local mx, my = ImGui.GetMousePos(ctx)
   local hot = hovered and mx >= bx1 and mx <= bx2 and my >= by1 and my <= by2
-  local ink_col = (where == "none" and not pat) and (on_cols[cur] or nil) or nil
+  -- lit while it's held down, as a momentary button is
+  local held = ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)
+  local ink_col = (where == "none" and not pat and not held) and (on_cols[cur] or nil) or nil
   local cap_col = pat and base_col or (on_cols[cur] or base_col)
-  if STEP_SWITCH[opts.style or ""] then
-    SW.draw(ctx, dl, opts.style, bx1, by1, bx2, by2, true, cap_col, not C.EFFECT_3D,
+  -- its own pictures: Off, and On while held
+  local pic_img, piw, pih
+  if opts.img then
+    local file = (held and opts.img.file2) or opts.img.file
+    pic_img, piw, pih = W.picture(ctx, opts.img, file)
+    if pic_img and piw and piw > 0 and pih > 0 then
+      local own = file ~= opts.img.file
+      local k = (not own and held) and math.min(1, (opts.img.frames or 1) - 1) or 0
+      local g = (by2 - by1) * 0.18 * (opts.img.size or 0) * 0.5
+      W.draw_frame(dl, pic_img, piw, pih, own and { frames = 1 } or opts.img, k, bx1 - g, by1 - g, bx2 + g, by2 + g)
+    else
+      pic_img = nil
+    end
+  end
+  if pic_img then
+    -- (the picture is the whole cap)
+  elseif STEP_SWITCH[opts.style or ""] then
+    SW.draw(ctx, dl, opts.style, bx1, by1, bx2, by2, held, cap_col, not C.EFFECT_3D,
       cap_text or "", hot, nil)
   else
     if W.FACED[opts.style or ""] then W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 2.0) end
-    local ink, dy, gcol = W.button_face(dl, bx1, by1, bx2, by2, 2.5, false, cap_col, opts.style, hot)
+    local ink, dy, gcol = W.button_face(dl, bx1, by1, bx2, by2, 2.5, held, cap_col, opts.style, hot)
     if not ink then
       ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
-        hot and C.COL.knob_body_hi or C.COL.toggle_off, 2.5)
+        held and cap_col or (hot and C.COL.knob_body_hi or C.COL.toggle_off), 2.5)
       ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 2.5, 0, 1.0)
-      ink, dy = C.COL.toggle_text, 0
+      ink, dy = held and (U.is_light(cap_col) and 0x0d1116ff or 0xf4f4f2ff) or C.COL.toggle_text, 0
     end
     if cap_text and cap_text ~= "" then
       W.push_small(ctx)

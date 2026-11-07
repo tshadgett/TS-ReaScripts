@@ -1186,9 +1186,8 @@ local function toggle_colour_menu(fx, key, idx, c)
     M.set(key, l); M.save()
   end
   -- the face: flat, or one of the lit ones (W.button_face), each shown lit
-  -- in this button's colour
-  ImGui.TextDisabled(ctx, "Style")
-  do
+  -- in this button's colour (the list folds away)
+  if W.fold_head(ctx, "button_styles", "Styles", KEEP_OPEN) then
     -- (a switch's style is lit in its own row below, not Flat's)
     local cur = (c.style and (C.BUTTON_STYLE[c.style] or C.SWITCH[c.style])) and c.style or nil
     local lit = W.lit_col(c.cap) or C.COL.toggle_on
@@ -1229,13 +1228,12 @@ local function toggle_colour_menu(fx, key, idx, c)
       end
     end
   end
-  if c.type == "toggle" and ED.PRO then
+  if (c.type == "toggle" or (c.type == "combo" and c.buttons == "step")) and ED.PRO then
     ImGui.Spacing(ctx)
     -- your pictures for buttons: one click puts it on this one
     local FNm = ED.module("TS_CV_Finish")
     local pics = FNm and FNm.gallery("button") or {}
-    if #pics > 0 then
-      ImGui.TextDisabled(ctx, "Your pictures")
+    if #pics > 0 and W.fold_head(ctx, "button_pictures", "Your pictures", KEEP_OPEN) then
       local CS = 40
       for i, g in ipairs(pics) do
         if (i - 1) % 6 ~= 0 then ImGui.SameLine(ctx, 0, 2) end
@@ -1918,22 +1916,26 @@ local function style_menu(fx, key, idx, c)
     local title_x, title_y = ImGui.GetCursorScreenPos(ctx)
     ImGui.Dummy(ctx, 10, th)
     local COLS, CS = 6, 40
-    for i, st in ipairs(list) do
-      if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
-      local x, y = ImGui.GetCursorScreenPos(ctx)
-      if ImGui.Selectable(ctx, "##style_" .. st.key, st.key == cur and not c.look, KEEP_OPEN, CS, CS) then
-        set({ style = st.key, look = false })
+    -- (each list folds away: they grow long)
+    if W.fold_head(ctx, "knob_styles", "Styles", KEEP_OPEN) then
+      for i, st in ipairs(list) do
+        if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
+        local x, y = ImGui.GetCursorScreenPos(ctx)
+        if ImGui.Selectable(ctx, "##style_" .. st.key, st.key == cur and not c.look, KEEP_OPEN, CS, CS) then
+          set({ style = st.key, look = false })
+        end
+        if ImGui.IsItemHovered(ctx) then hov_label = st.label end
+        local r = CS * 0.5 - 6     -- the scale ticks sit outside this
+        W.knob_face(dl, x + CS * 0.5, y + CS * 0.5, r, 0.62,
+          { style = st.key, cap = W.cap_col(c.cap), ctx = ctx })
       end
-      if ImGui.IsItemHovered(ctx) then hov_label = st.label end
-      local r = CS * 0.5 - 6     -- the scale ticks sit outside this
-      W.knob_face(dl, x + CS * 0.5, y + CS * 0.5, r, 0.62,
-        { style = st.key, cap = W.cap_col(c.cap), ctx = ctx })
     end
     -- your recipes: looks you've saved from Customise...
     local mine = RCP.list()
     if #mine > 0 then
       ImGui.Spacing(ctx)
-      ImGui.TextDisabled(ctx, "Your recipes")
+    end
+    if #mine > 0 and W.fold_head(ctx, "knob_recipes", "Your recipes", KEEP_OPEN) then
       for i, r in ipairs(mine) do
         if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
         local x, y = ImGui.GetCursorScreenPos(ctx)
@@ -1949,7 +1951,8 @@ local function style_menu(fx, key, idx, c)
     local pics = (FNm and c.type ~= "dual") and FNm.gallery("knob") or {}
     if #pics > 0 then
       ImGui.Spacing(ctx)
-      ImGui.TextDisabled(ctx, "Your pictures")
+    end
+    if #pics > 0 and W.fold_head(ctx, "knob_pictures", "Your pictures", KEEP_OPEN) then
       for i, g in ipairs(pics) do
         if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
         local x, y = ImGui.GetCursorScreenPos(ctx)

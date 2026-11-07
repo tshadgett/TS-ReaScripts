@@ -8902,6 +8902,18 @@ do
   local names = {}
   for i, g in ipairs(FN.gallery("knob")) do names[i] = g.name end
   check("gallery: taken out", table.concat(names, ","), "SSL blue")
+  check("gallery: made a button's", FN.gallery_kind("SSL blue", "button") and #FN.gallery("knob") .. "/" .. #FN.gallery("button"), "0/2")
+  -- started from the folder: a button's where a layout puts it on a button
+  os.remove(tmpd .. "TS_ChannelView_Pictures.ini")
+  local ef = reaper.EnumerateFiles
+  reaper.EnumerateFiles = function(_, i) return ({ "dist button.png", "ssl_blue.png", "notes.txt" })[i + 1] end
+  M.set("GalSeed", { controls = { { param = 5, type = "toggle", label = "More",
+    img = { file = "dist button.png", kind = "strip", frames = 2, dir = "across", size = 0 } } } })
+  FN.gallery_reload()
+  check("gallery: started from the folder, buttons as buttons", #FN.gallery("knob") .. " " .. #FN.gallery("button") .. " "
+    .. (FN.gallery("button")[1] or {}).name, "1 1 dist button")
+  M.remove("GalSeed")
+  reaper.EnumerateFiles = ef
   os.remove(tmpd .. "TS_ChannelView_Pictures.ini")
   FN.IMG_DIR = dir0
   FN.gallery_reload()

@@ -1306,7 +1306,9 @@ or following ChannelView's).
   Distressor's *Detector*: HP, Band and Link, two at once for *HP + Link*).
   It's guessed from the settings' names, and Edit layout sets it: the
   LEDs, and a lamp for each setting and LED to click. Its Style
-  is a button's, or a *Lamp button*, *Round button* or *Jewel lamp*. For 2
+  is a button's, or a *Lamp button*, *Round button* or *Jewel lamp*, or
+  pictures of your own (Style ▸ *Image...*: Off, and On); it lights, or
+  shows On, while it's held down, as a momentary button does. For 2
   to 16 choices; the editor has the same, and the web page shows it.
 - **Wide dropdowns.** Right-click a dropdown ▸ Look ▸ *Width*: one to
   four cells. A wide one has arrows each side that step back and forward
@@ -1856,7 +1858,10 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   layouts, and the web page shows them too. Every picture you add goes
   into **Your pictures**, with its settings, for any panel: at the top of
   the Image... window (right-click one to rename it or take it out), and
-  under your recipes in the Style menu, where one click puts it on. Exporting layouts leaves them
+  under your recipes in the Style menu, where one click puts it on. A
+  knob's pictures and a button's are kept apart (right-click one to move
+  it). The Style menu's lists (the styles, your recipes, your pictures)
+  each fold away under their heading. Exporting layouts leaves them
   out unless you tick *Include their pictures*: share only pictures that
   are yours to share.
 - **Cap colours:** Accent, Red, Orange, Yellow, Green, Blue, Grey, Cream,

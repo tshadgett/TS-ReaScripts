@@ -619,10 +619,12 @@ function M.put_img(layout, idx, img, scope)
   local ctl = layout.controls or {}
   local first = ctl[idx]
   if not first then return end
-  local button = first.type == "toggle"
+  -- (a button: a toggle, or a step button)
+  local function is_button(c) return c.type == "toggle" or (c.type == "combo" and c.buttons == "step") end
+  local button = is_button(first)
   local function put(c)
     if not c then return end
-    local ok = button and c.type == "toggle" or (not button and (c.type == "knob" or c.type == "stepped" or c.type == nil))
+    local ok = button and is_button(c) or (not button and (c.type == "knob" or c.type == "stepped" or c.type == nil))
     if ok and (c.param or -1) >= 0 or (ok and M.is_virtual(c)) then c.img = M.copy_img(img) end
   end
   if scope == "section" then
@@ -2258,7 +2260,7 @@ local function parse_section(sect)
         finish  = finish_of(sect["Finish" .. i]),
         corners = corners_of(sect["Corners" .. i]),
         look    = (t == "knob" or t == "stepped" or t == "dual") and KP.decode(sect["Look" .. i]) or nil,
-        img     = (t == "knob" or t == "stepped" or t == "toggle") and M.img_of(sect["Img" .. i]) or nil,
+        img     = (t == "knob" or t == "stepped" or t == "toggle" or t == "combo") and M.img_of(sect["Img" .. i]) or nil,
         -- a concentric knob's inner knob: its recipe, or its own look
         style2  = (t == "dual") and inner_of(sect["Inner" .. i]) or nil,
         look2   = (t == "dual") and KP.decode(sect["Look2" .. i]) or nil,
@@ -2488,7 +2490,8 @@ local function serialize(layout)
       end
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
-    if c.img and (c.type == "knob" or c.type == "stepped" or c.type == "toggle" or c.type == nil) then
+    if c.img and (c.type == "knob" or c.type == "stepped" or c.type == "toggle" or c.type == nil
+                  or (c.type == "combo" and c.buttons == "step")) then
       out["Img" .. (i - 1)] = M.img_line(c.img)
     end
     if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
@@ -3820,7 +3823,7 @@ function M.look_family(c)
 end
 
 function M.look_of(c)
-  return { fam = M.look_family(c), type = c.type, style = c.style, cap = c.cap, size = c.size,
+  return { fam = M.look_family(c), type = c.type, buttons = c.buttons, style = c.style, cap = c.cap, size = c.size,
            scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc, back = c.back, brush = c.brush, metal = c.metal,
            finish = c.finish, corners = c.corners, look = KP.copy(c.look),
            style2 = c.style2, look2 = KP.copy(c.look2), img = M.copy_img(c.img),
@@ -3887,6 +3890,9 @@ function M.paste_look(o, s)
       o.size = s.size
       o.img = M.copy_img(s.img)
     end
+    -- a button's pictures go to a button: a toggle or a step button
+    local function btn(c) return c.type == "toggle" or (c.type == "combo" and c.buttons == "step") end
+    if btn(o) and btn(s) then o.img = M.copy_img(s.img) end
   end
   -- a hardware switch is a toggle's alone: a button row stays flat
   if o.type ~= "toggle" and o.style and C.SWITCH[o.style] then o.style = nil end
