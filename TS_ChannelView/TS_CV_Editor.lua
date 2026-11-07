@@ -841,6 +841,55 @@ draw_entry_body = function(ctx)
     if ST.button(ctx, "Clear##rgclr", "remove") then st.scratch.ranges[p] = nil end
     tip("Back to the plugin's own values.")
   end
+  -- a step button's lamps: where, their names, which light
+  local function step_rows(c)
+    if c.buttons ~= "step" then return end
+    row_name("LEDs")
+    local wi = (c.leds == "over") and 1 or (c.leds == "none") and 2 or 0
+    for i, o in ipairs({ { nil, "Beside" }, { "over", "Over it" }, { "none", "None" } }) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 2) end
+      if ImGui.RadioButton(ctx, o[2] .. "##stepleds" .. i, wi == i - 1) then c.leds = o[1] end
+    end
+    if c.leds == nil then
+      row_name("LED names")
+      local ch, v = ImGui.Checkbox(ctx, "##stepnames", c.ledn ~= false)
+      if ch then if v then c.ledn = nil else c.ledn = false end end
+    end
+    if c.leds ~= "none" then
+      row_name("Lit")
+      if ImGui.RadioButton(ctx, "Its own##steplit", not c.upto) then c.upto = nil end
+      ImGui.SameLine(ctx, 0, 2)
+      if ImGui.RadioButton(ctx, "Up to it##steplit", c.upto == true) then c.upto = true end
+    end
+  end
+  -- how many settings, for a parameter that reports none (Steps<p>)
+  local function steps_row(c)
+    local p = c.param
+    if not p or p < 0 or st.multi or not (st.track and st.fx) then return end
+    local P = require("TS_CV_Panel")
+    if P.own_step(st.track, st.fx.addr, p, st.key) then return end
+    row_name("Steps")
+    local cur = st.scratch.steps and st.scratch.steps[p] or 0
+    ImGui.SetNextItemWidth(ctx, 100)
+    local ch, v = ImGui.InputInt(ctx, "##steps", cur)
+    if ch then
+      if v == 1 then v = (cur == 0) and 2 or 0 end
+      v = (v >= 2) and math.min(64, v) or nil
+      st.scratch.steps = st.scratch.steps or {}
+      st.scratch.steps[p] = v
+      if c.buttons and v then c.nbtn = v end
+    end
+    tip("How many settings it has, for a plugin that doesn't say. 0: none.")
+    local dn = cur == 0 and P.detect_steps(st.track, st.fx.addr, p, st.key)
+    if dn then
+      ImGui.SameLine(ctx, 0, 4)
+      if ST.button(ctx, ("Use %d##steps_use"):format(dn)) then
+        st.scratch.steps = st.scratch.steps or {}
+        st.scratch.steps[p] = dn
+      end
+      tip("What the plugin's readout shows along its range.")
+    end
+  end
   -- a control without a scale of numbers: the plugin's own values, or yours
   local function values_row(p)
     -- (not for several at once: a range is the parameter's)
@@ -994,12 +1043,14 @@ draw_entry_body = function(ctx)
       tip("Its choices, with | between them.")
       row_name("Shown as")
       ImGui.SetNextItemWidth(ctx, FIELD_W)
-      local cur_b = (c.buttons == "across") and 0 or (c.buttons == "down") and 1 or (c.buttons == "grid") and 2 or 3
-      local bch, bi = ImGui.Combo(ctx, "##vshow", cur_b, "Chips across\0Chips down\0Chips grid\0Dropdown\0")
+      local cur_b = (c.buttons == "across") and 0 or (c.buttons == "down") and 1 or (c.buttons == "grid") and 2
+        or (c.buttons == "step") and 4 or 3
+      local bch, bi = ImGui.Combo(ctx, "##vshow", cur_b, "Chips across\0Chips down\0Chips grid\0Dropdown\0Step button\0")
       if bch then
-        c.buttons = (bi == 0) and "across" or (bi == 1) and "down" or (bi == 2) and "grid" or nil
+        c.buttons = (bi == 0) and "across" or (bi == 1) and "down" or (bi == 2) and "grid" or (bi == 4) and "step" or nil
         c.nbtn = c.buttons and math.max(2, #M.vchoices(c)) or nil
       end
+      step_rows(c)
     elseif c.type == "knob" then
       if not st.grid then  -- (on a grid: the size of its place)
         row_name("Size")
@@ -1125,6 +1176,7 @@ draw_entry_body = function(ctx)
     tip("Numbers round the dial: its values, or 0 to 10.\n" ..
       "Not on small knobs.")
     values_row(c.param)
+    if c.type == "stepped" then steps_row(c) end
   elseif c.type == "toggle" then
     if not st.grid then  -- (on a grid: the size of its place)
       row_name("Size")
@@ -1136,26 +1188,33 @@ draw_entry_body = function(ctx)
   elseif c.type == "combo" and c.param and st.track and st.fx then
     -- a dropdown can show its choices as buttons instead (2 to C.BUTTONS_MAX)
     local P = require("TS_CV_Panel")
-    local n
+    local n, found
     local list = P.combo_steps(st.track, st.fx.addr, c.param, st.key)
     if type(list) == "table" then n = #list
     else
       local sn = P.step_norm(st.track, st.fx.addr, c.param, st.key)
-      n = sn and (math.floor(1 / sn + 0.5) + 1) or nil
+      local mine = st.scratch.steps and st.scratch.steps[c.param]
+      n = (sn and (math.floor(1 / sn + 0.5) + 1)) or mine
+      -- none reported: read off the plugin's text along its range
+      if not n then n = P.detect_steps(st.track, st.fx.addr, c.param, st.key); found = n end
     end
     local ok = n and n >= 2 and n <= C.BUTTONS_MAX
     row_name("Show as")
     ImGui.SetNextItemWidth(ctx, FIELD_W)
     if not ok then ImGui.BeginDisabled(ctx, true) end
-    local cur_b = (c.buttons == "across") and 1 or (c.buttons == "down") and 2 or (c.buttons == "grid") and 3 or 0
-    local bch, bi = ImGui.Combo(ctx, "##show", cur_b, "Dropdown\0Buttons across\0Buttons down\0Buttons grid\0")
+    local cur_b = (c.buttons == "across") and 1 or (c.buttons == "down") and 2 or (c.buttons == "grid") and 3
+      or (c.buttons == "step") and 4 or 0
+    local bch, bi = ImGui.Combo(ctx, "##show", cur_b, "Dropdown\0Buttons across\0Buttons down\0Buttons grid\0Step button\0")
     if bch then
-      c.buttons = (bi == 1) and "across" or (bi == 2) and "down" or (bi == 3) and "grid" or nil
+      c.buttons = (bi == 1) and "across" or (bi == 2) and "down" or (bi == 3) and "grid" or (bi == 4) and "step" or nil
       c.nbtn = c.buttons and n or nil
+      if c.buttons and found then st.scratch.steps = st.scratch.steps or {}; st.scratch.steps[c.param] = n end
     end
     if not ok then ImGui.EndDisabled(ctx) end
-    tip(ok and "Show the choices as buttons, the current one lit."
-      or ("Only for 2 to %d choices."):format(C.BUTTONS_MAX))
+    tip(ok and "Show the choices as buttons, the current one lit,\nor one button that steps through them."
+      or ("Only for 2 to %d choices (Steps, below)."):format(C.BUTTONS_MAX))
+    step_rows(c)
+    steps_row(c)
     if not c.buttons and not st.grid then  -- (on a grid: the width of its place)
       row_name("Width")
       ImGui.SetNextItemWidth(ctx, FIELD_W)

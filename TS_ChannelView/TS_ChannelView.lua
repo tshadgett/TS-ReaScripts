@@ -1210,20 +1210,22 @@ local function toggle_colour_menu(fx, key, idx, c)
       end
     end
     -- a toggle can be a hardware switch instead, each shown on, in the
-    -- same list
-    if c.type == "toggle" then
+    -- same list (a step button a push-button one)
+    if c.type == "toggle" or (c.type == "combo" and c.buttons == "step") then
       local sh = 30
       for _, sw in ipairs(C.SWITCH_STYLES) do
-        local x, y = ImGui.GetCursorScreenPos(ctx)
-        if ImGui.Selectable(ctx, "         " .. sw.label .. "##bstyle_" .. sw.key, sw.key == cur,
-            KEEP_OPEN, 150, sh) then
-          local l = materialise(fx)
-          local lc = l.controls[idx]
-          if lc then lc.style = sw.key end
-          M.set(key, l); M.save()
+        if c.type == "toggle" or W.STEP_SWITCH[sw.key] then
+          local x, y = ImGui.GetCursorScreenPos(ctx)
+          if ImGui.Selectable(ctx, "         " .. sw.label .. "##bstyle_" .. sw.key, sw.key == cur,
+              KEEP_OPEN, 150, sh) then
+            local l = materialise(fx)
+            local lc = l.controls[idx]
+            if lc then lc.style = sw.key end
+            M.set(key, l); M.save()
+          end
+          SWI.draw(ctx, dl, sw.key, x + 2, y + 1, x + 34, y + sh - 1, true, lit, not C.EFFECT_3D, "ON", false,
+            W.lit_col(c.cap))
         end
-        SWI.draw(ctx, dl, sw.key, x + 2, y + 1, x + 34, y + sh - 1, true, lit, not C.EFFECT_3D, "ON", false,
-          W.lit_col(c.cap))
       end
     end
   end
@@ -3437,6 +3439,39 @@ local function values_menu(fx, key, layout, idx, c)
     ImGui.EndDisabled(ctx)
     ImGui.Separator(ctx)
   end
+  -- how many settings, for a parameter that reports no steps (Steps<p>)
+  if not P.own_step(app.track, fx.addr, p, key) then
+    local cur = layout.steps and layout.steps[p] or 0
+    local function put(n)
+      local l = materialise(fx)
+      if n then l.steps = l.steps or {}; l.steps[p] = n
+      elseif l.steps then l.steps[p] = nil; if not next(l.steps) then l.steps = nil end end
+      -- buttons follow the count
+      for _, lc in ipairs(l.controls or {}) do
+        if lc.param == p and lc.buttons then lc.nbtn = n or lc.nbtn end
+      end
+      M.set(key, l); M.save()
+    end
+    ImGui.TextDisabled(ctx, "Steps")
+    ImGui.SetNextItemWidth(ctx, 90)
+    local ch, v = ImGui.InputInt(ctx, "##steps", cur)
+    if ch then
+      if v == 1 then v = (cur == 0) and 2 or 0 end
+      put((v >= 2) and math.min(64, v) or nil)
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "How many settings it has, for a plugin that doesn't say. 0: none.")
+    end
+    local dn = cur == 0 and P.detect_steps(app.track, fx.addr, p, key)
+    if dn then
+      ImGui.SameLine(ctx, 0, 6)
+      if ImGui.SmallButton(ctx, ("Use %d##steps_use"):format(dn)) then put(dn) end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "What the plugin's readout shows along its range.") end
+    end
+    ImGui.Separator(ctx)
+  end
+  -- (a dropdown's values are its settings)
+  if c.type == "combo" then return end
   ImGui.TextDisabled(ctx, "What it reads as")
   if ImGui.MenuItem(ctx, "The plugin's own", nil, rg == nil) and rg then
     store(nil); app.rng_for = nil
@@ -3886,6 +3921,11 @@ local function control_menu()
         local was = lc.type
         lc.type = t
         lc.buttons, lc.nbtn = nil, nil
+        -- a list of settings it doesn't report steps for: its count kept
+        if (t == "combo" or t == "stepped") and c.param and not P.step_norm(app.track, fx.addr, c.param, key) then
+          local dn = P.detect_steps(app.track, fx.addr, c.param, key)
+          if dn then l.steps = l.steps or {}; l.steps[c.param] = dn end
+        end
         -- sizes don't carry between an XY pad and anything else, and a
         -- concentric knob is never small
         if (t == "xy") ~= (was == "xy") or (t == "dual" and lc.size == "small") then lc.size = nil end
@@ -3898,25 +3938,50 @@ local function control_menu()
       end
       -- right after Dropdown: its choices as a row, or a column, of buttons
       if t == "combo" then
-        local n
+        local n, found
         local list = c.param and P.combo_steps(app.track, fx.addr, c.param, key)
         if type(list) == "table" then n = #list
         else
           local st = c.param and P.step_norm(app.track, fx.addr, c.param, key)
           n = st and (math.floor(1 / st + 0.5) + 1) or nil
+          -- none reported: read off the plugin's text along its range
+          if not n and c.param then n = P.detect_steps(app.track, fx.addr, c.param, key); found = n end
         end
         local ok = n and n >= 2 and n <= C.BUTTONS_MAX
-        for _, d in ipairs({ { "across", "Buttons across" }, { "down", "Buttons down" }, { "grid", "Buttons grid" } }) do
+        for _, d in ipairs({ { "across", "Buttons across" }, { "down", "Buttons down" }, { "grid", "Buttons grid" },
+                             { "step", "Step button" } }) do
           if ImGui.MenuItem(ctx, d[2], nil, c.type == "combo" and c.buttons == d[1], ok and true or false) then
             local l = commit()
             local lc = l.controls[idx]
             lc.type, lc.buttons, lc.nbtn = "combo", d[1], n
+            if found then l.steps = l.steps or {}; l.steps[c.param] = n end
             M.set(key, l); M.save()
           end
           if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-            ImGui.SetTooltip(ctx, ok and ("One button per choice (%d)%s."):format(n, d[1] == "grid" and ", in rows" or "")
-              or ("Needs 2 to %d choices."):format(C.BUTTONS_MAX))
+            ImGui.SetTooltip(ctx, not ok and ("Needs 2 to %d choices (Values \u{25B8} Steps)."):format(C.BUTTONS_MAX)
+              or d[1] == "step" and "One button: click for the next choice, Shift+click back."
+              or ("One button per choice (%d)%s."):format(n, d[1] == "grid" and ", in rows" or ""))
           end
+        end
+        -- a step button's lamps
+        if c.type == "combo" and c.buttons == "step" then
+          local function put(f, v)
+            local l = commit()
+            local lc = l.controls[idx]
+            if lc then lc[f] = v end
+            M.set(key, l); M.save()
+          end
+          ImGui.Indent(ctx, 10)
+          for _, o in ipairs({ { nil, "LEDs beside" }, { "over", "LEDs over it" }, { "none", "No LEDs" } }) do
+            if ImGui.MenuItem(ctx, o[2] .. "##stepleds", nil, c.leds == o[1]) then put("leds", o[1]) end
+          end
+          if c.leds == nil and ImGui.MenuItem(ctx, "Their names", nil, c.ledn ~= false) then
+            if c.ledn == false then put("ledn", nil) else put("ledn", false) end
+          end
+          if c.leds ~= "none" and ImGui.MenuItem(ctx, "Light up to it", nil, c.upto == true) then
+            put("upto", (not c.upto) or nil)
+          end
+          ImGui.Unindent(ctx, 10)
         end
       end
     end
@@ -3941,7 +4006,7 @@ local function control_menu()
   end
 
   local has_values = (c.type == "knob" or c.type == "stepped" or c.type == "fader" or c.type == "dual"
-                      or c.type == nil) and c.param and c.param >= 0
+                      or c.type == "combo" or c.type == nil) and c.param and c.param >= 0
   if has_values and ImGui.BeginMenu(ctx, "Values") then
     values_menu(fx, key, layout, idx, c)
     ImGui.EndMenu(ctx)

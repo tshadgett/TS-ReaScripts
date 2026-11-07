@@ -116,8 +116,11 @@
   makes knob n small or large (C.SIZES in TS_CV_Config.lua); with no Size
   line it is the ordinary size, and an older ChannelView ignores the line.
   On a dropdown, Size<n>=2, 3 or 4 is how many cells wide it is.
-  Buttons<n> shows dropdown n as buttons -- across or down -- and keeps
-  how many choices it had, which is how much room the buttons take.
+  Buttons<n> shows dropdown n as buttons -- across, down, a grid, or one
+  button that steps through them -- and keeps how many choices it had,
+  which is how much room the buttons take. A step button's line goes on:
+  step|<n>|<beside, over or none: its LEDs>|<1/0: the LEDs' names>|<own
+  or upto: which LEDs light>.
   Back<n> is control n's own background, an inset or a faceplate, drawn
   over its section's; neighbours with the same one join into one shape.
   Brush<n> turns the brushed grain on (1) or off (0) for control n's
@@ -555,8 +558,18 @@ M.shape_line = shape_line
 -- asking the plugin. Anything else is the ordinary dropdown.
 local function buttons_of(v)
   local d = U.trim(v or ""):match("^(%a+)")
-  return (d == "across" or d == "down" or d == "grid") and d or nil
+  return (d == "across" or d == "down" or d == "grid" or d == "step") and d or nil
 end
+-- a step button's LEDs: where (nil beside, "over", "none"), whether their
+-- names show, and whether every LED up to the choice's lights
+local function step_of(v)
+  local parts = {}
+  for f in (U.trim(v or "") .. "|"):gmatch("([^|]*)|") do parts[#parts + 1] = U.trim(f) end
+  if parts[1] ~= "step" then return nil end
+  local where = (parts[3] == "over" or parts[3] == "none") and parts[3] or nil
+  return where, parts[4] ~= "0", parts[5] == "upto"
+end
+M.step_of = step_of
 local function nbtn_of(v)
   local n = tonumber(U.trim(v or ""):match("|%s*(%d+)"))
   return (n and n >= 2 and n <= C.BUTTONS_MAX) and n or nil
@@ -2020,6 +2033,7 @@ end
 local function parse_section(sect)
   local controls, aliases, states, ranges = {}, {}, {}, {}
   local choice_names, choice_by, choice_ctx = {}, {}, {}
+  local steps = {}
   local meter = nil
   if sect.Meter then
     local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
@@ -2038,6 +2052,9 @@ local function parse_section(sect)
     end
     local rp = k:match("^Range(%d+)$")
     if rp then ranges[tonumber(rp)] = M.range_of_line(v) end
+    local np = k:match("^Steps(%d+)$")
+    local nv = np and tonumber(v)
+    if nv and nv >= 2 and nv <= 64 then steps[tonumber(np)] = math.floor(nv) end
     local cp = k:match("^Choices(%d+)$")
     if cp then
       local map = M.choices_of_line(v)
@@ -2142,7 +2159,16 @@ local function parse_section(sect)
         local cc = controls[#controls]
         cc.dir, cc.len, cc.thin = shape_of(sect["Shape" .. i])
       end
-      if t == "combo" then controls[#controls].size = combo_width_of(sect["Size" .. i]) end
+      if t == "combo" then
+        local cc = controls[#controls]
+        cc.size = combo_width_of(sect["Size" .. i])
+        if cc.buttons == "step" then
+          local ledn
+          cc.leds, ledn, cc.upto = step_of(sect["Buttons" .. i])
+          if ledn == false then cc.ledn = false end
+          cc.upto = cc.upto or nil
+        end
+      end
       -- a second parameter: an XY pad's Y, a concentric knob's inner one
       if t == "xy" or t == "dual" then
         local cc = controls[#controls]
@@ -2158,6 +2184,7 @@ local function parse_section(sect)
   local grid = grid_of(sect.Grid)
   controls.grid = grid
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
+           steps = next(steps) and steps or nil,
            choice_names = next(choice_names) and choice_names or nil,
            choice_by = next(choice_by) and choice_by or nil,
            choice_ctx = next(choice_ctx) and choice_ctx or nil,
@@ -2244,6 +2271,7 @@ local function serialize(layout)
     local line = M.range_line(rg)
     if line then out["Range" .. p] = line end
   end
+  for p, n in pairs(layout.steps or {}) do out["Steps" .. p] = tostring(n) end
   for p, map in pairs(layout.choice_names or {}) do
     local line = M.choices_line(map)
     if line then out["Choices" .. p] = line end
@@ -2313,6 +2341,8 @@ local function serialize(layout)
     end
     if c.buttons and buttons_of(c.buttons) and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
+        .. ((c.buttons == "step") and ("|" .. (c.leds or "beside") .. "|" .. (c.ledn == false and "0" or "1")
+                                       .. "|" .. (c.upto and "upto" or "own")) or "")
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
     if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
@@ -3277,6 +3307,12 @@ function M.get_range(key, param)
   local l = M.get(key)
   return l and l.ranges and l.ranges[param] or nil
 end
+-- How many settings you've said a parameter has (Steps<p>): one that
+-- reports no steps of its own.
+function M.get_steps(key, param)
+  local l = key and M.get(key)
+  return l and l.steps and l.steps[param] or nil
+end
 
 -- What a toggle shows for the plugin's own value `raw` (0..1, before any
 -- reverse): the state's name if one is set, else the plugin's text `shown`.
@@ -3646,6 +3682,7 @@ function M.copy(layout)
                         invert = c.invert, no_rule = c.no_rule, live = c.live,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
+                        leds = c.leds, ledn = c.ledn, upto = c.upto,
                         metal = c.metal, finish = c.finish, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
@@ -3691,6 +3728,10 @@ function M.copy(layout)
   if layout.ranges then
     out.ranges = {}
     for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve } end
+  end
+  if layout.steps then
+    out.steps = {}
+    for p, n in pairs(layout.steps) do out.steps[p] = n end
   end
   return out
 end

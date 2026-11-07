@@ -238,6 +238,32 @@ do
   M.remove(k); M.save(); M.reload()
 end
 
+-- A step button (Buttons<n>=step|n|leds|names|lit) and a count of steps
+-- (Steps<p>) survive the ini and a copy.
+do
+  local k = "StepPlug"
+  M.set(k, { steps = { [4] = 16 }, controls = {
+    { param = 3, type = "combo", buttons = "step", nbtn = 3 },
+    { param = 4, type = "combo", buttons = "step", nbtn = 16, leds = "over", upto = true },
+    { param = 5, type = "combo", buttons = "step", nbtn = 4, ledn = false } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  local a, b, c = l.controls[1], l.controls[2], l.controls[3]
+  check("step button: beside, named, its own", table.concat({ a.buttons, a.nbtn, tostring(a.leds), tostring(a.ledn), tostring(a.upto) }, " "),
+    "step 3 nil nil nil")
+  check("step button: over, up to it", table.concat({ b.buttons, b.nbtn, tostring(b.leds), tostring(b.upto) }, " "), "step 16 over true")
+  check("step button: no names", tostring(c.ledn), "false")
+  check("steps: kept in the ini", l.steps and l.steps[4], 16)
+  local cp = M.copy(l)
+  check("step button: kept by a copy", tostring(cp.controls[2].leds) .. " " .. tostring(cp.controls[2].upto) .. " " .. tostring(cp.controls[3].ledn),
+    "over true false")
+  local P_ = require("TS_CV_Panel")
+  check("step button: beside with names, two cells, as tall as its lamps", table.concat({ P_.button_span(a) }, "x"), "4x2")
+  check("step button: 16 over it, as wide as they are", table.concat({ P_.button_span(b) }, "x"), "8x2")
+  check("step button: no LEDs, one cell", table.concat({ P_.button_span({ type = "combo", buttons = "step", nbtn = 9, leds = "none" }) }, "x"), "2x2")
+  M.remove(k); M.save(); M.reload()
+end
+
 -- The make-up gain control (Makeup=) survives the ini and a copy.
 do
   local k = "MakeupPlug"
@@ -2394,6 +2420,47 @@ do
   check("width: two to four only", tostring(M_.combo_width_of("5")) .. tostring(M_.combo_width_of("1")), "nilnil")
   local w, h = P.cell_size({ type = "combo", size = "4" }, 8)
   check("width: four cells take eight half-cells", w .. "x" .. h, "8x2")
+end
+
+-- a parameter that reports no steps: its settings read off its text
+-- (Stepic's pattern), or a count you set (Steps<p>)
+do
+  local P = require("TS_CV_Panel")
+  local M_ = require("TS_CV_Mappings")
+  local saved = {}
+  for _, k in ipairs({ "TrackFX_GetParameterStepSizes", "TrackFX_FormatParamValueNormalized", "TrackFX_SetParamNormalized" }) do saved[k] = reaper[k] end
+  local sets = 0
+  reaper.TrackFX_SetParamNormalized = function() sets = sets + 1 end
+  reaper.TrackFX_GetParameterStepSizes = function() return false end
+  local mode = "floor"
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, v)
+    if mode == "floor" then return true, tostring(math.min(15, math.floor(v * 16)) + 1) end
+    if mode == "round" then return true, ({ "Off", "Low", "Mid", "High", "Max" })[math.floor(v * 4 + 0.5) + 1] end
+    if mode == "db" then return true, ("%.1f dB"):format(v * 12) end
+    if mode == "back" then return true, (v < 0.3 or v > 0.7) and "A" or "B" end
+    return true, "Hall"
+  end
+  P.clear_caches()
+  check("steps read: Stepic's 16 patterns", P.detect_steps("tr", 0, 1, "StepT"), 16)
+  mode = "round"
+  check("steps read: rounded to the nearest", P.detect_steps("tr", 0, 2, "StepT"), 5)
+  mode = "db"
+  check("steps read: a continuous readout is none", P.detect_steps("tr", 0, 3, "StepT"), nil)
+  mode = "back"
+  check("steps read: a reading come back is none", P.detect_steps("tr", 0, 4, "StepT"), nil)
+  mode = "same"
+  check("steps read: one reading everywhere is none", P.detect_steps("tr", 0, 5, "StepT"), nil)
+  check("steps read: nothing moved", sets, 0)
+  -- your count
+  check("steps: none of its own, none set", P.step_norm("tr", 0, 1, "StepT"), false)
+  M_.set("StepT", { controls = {}, steps = { [1] = 16 } })
+  check("steps: your count", P.step_norm("tr", 0, 1, "StepT"), 1 / 15)
+  check("steps: kept by a copy", M_.copy(M_.get("StepT")).steps[1], 16)
+  M_.set("StepT", { controls = {} })
+  check("steps: cleared", P.step_norm("tr", 0, 1, "StepT"), false)
+  M_.remove("StepT")
+  for k, v in pairs(saved) do reaper[k] = v end
+  P.clear_caches()
 end
 
 -- scan budgeting and the on-disk cache of stepped choices
@@ -8588,6 +8655,60 @@ do
   end)
   check("stepped: drag sim ran", ok and true or err, true)
   reaper.new_array = had
+end
+
+-- a step button: a click for the next choice, round from the end;
+-- Shift+click back; the wheel along them; lamps lit as asked
+do
+  local clicked, mods, wheel, lamps = false, 0, 0, {}
+  local fake = setmetatable({
+    GetMouseDelta = function() return 0, 0 end, GetMouseWheel = function() return wheel end,
+    GetMousePos = function() return 10, 30 end, GetCursorScreenPos = function() return 0, 0 end,
+    GetWindowDrawList = function() return "dl" end, InvisibleButton = function() return clicked end,
+    IsItemActive = function() return false end, IsItemHovered = function() return true end,
+    IsItemClicked = function(_, b) return clicked and b == 0 end, IsMouseDown = function() return false end,
+    IsMouseDoubleClicked = function() return false end, IsItemActivated = function() return false end,
+    GetKeyMods = function() return mods end, CalcTextSize = function() return 6, 10 end,
+    DrawList_AddCircleFilled = function(_, x, y, r, col) if r > 3 and r < 3.5 then lamps[#lamps + 1] = col end end,
+  }, { __index = function(_, key)
+    if key == "MouseButton_Left" then return 0 end
+    if key == "MouseButton_Right" then return 1 end
+    if key == "Mod_Shift" then return 2 end
+    if key:find("Flags_") or key:find("MouseCursor_") or key:find("^Mod_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake)
+  local list = { { norm = 0, text = "Norm" }, { norm = 0.5, text = "Med" }, { norm = 1, text = "Loud" } }
+  local ok, err = pcall(function()
+    local function press(v, o) return W.button_row("ctx", "##st", "Thrust", v, list, o or { dir = "step", w = 100, h = 64 }) end
+    clicked = true
+    local ch, nv = press(0.5)
+    check("step: click, the next", ch and nv, 1)
+    ch, nv = press(1)
+    check("step: round from the end", ch and nv, 0)
+    mods = 2
+    ch, nv = press(0)
+    check("step: Shift+click back, round", ch and nv, 1)
+    mods, clicked, wheel = 0, false, -1
+    W.begin_frame()
+    ch, nv = press(0.5)
+    check("step: the wheel down one", ch and nv, 0)
+    wheel = 0
+    lamps = {}
+    press(0.5, { dir = "step", w = 100, h = 64, on_cols = { 0x11, 0x22, 0x33 } })
+    local lit = 0
+    for _, c in ipairs(lamps) do if c == 0x11 or c == 0x22 or c == 0x33 then lit = lit + 1 end end
+    check("step: its own lamp lit", lit, 1)
+    lamps = {}
+    press(1, { dir = "step", w = 100, h = 64, upto = true, on_cols = { 0x11, 0x22, 0x33 } })
+    lit = 0
+    for _, c in ipairs(lamps) do if c == 0x11 or c == 0x22 or c == 0x33 then lit = lit + 1 end end
+    check("step: up to it, every lamp", lit, 3)
+    lamps = {}
+    press(1, { dir = "step", w = 100, h = 64, leds = "none" })
+    check("step: no LEDs, no lamps", #lamps, 0)
+  end)
+  check("step: draw ran", ok and true or err, true)
 end
 
 -- a value arc in a colour of its own: drawn in it, through W.knob

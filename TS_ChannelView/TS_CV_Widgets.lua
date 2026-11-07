@@ -1547,16 +1547,42 @@ function W.knob(ctx, id, label, value, formatted, opts)
   -- line), and any number that then won't fit in the cell -- into the
   -- name above, past the sides -- is left out, its tick staying.
   local dial_r = r
-  local num_top, num_bot
+  local num_top, num_bot, num_th
   if sc then
     W.push_small(ctx)
     local _, th = ImGui.CalcTextSize(ctx, "0")
     W.pop_small(ctx)
-    num_top = y + label_h - 1
+    num_top, num_th = y + label_h - 1, th
     num_bot = y + ch - (show_value and 13 or 0)
     local r1 = W.mark_reach(r)
     cy = num_bot - (r1 * 0.7072 + 1 + th)
     cy = math.max(cy, y + label_h + C.LABEL_GAP + r)
+  end
+  -- What stands out past the dial (a value arc, a scale's ticks) is kept
+  -- clear of the name: the dial moves down into the room under it, and is
+  -- drawn a little smaller only where there's none. (An Arc, Minimal or
+  -- Studio face is all inside its dial.)
+  if not small then
+    local fo = defaulted(opts, "knob")
+    local st = C.KNOB_STYLE_ALIAS[fo.style] or fo.style or "arc"
+    local outside = fo.look ~= nil or (C.KNOB_STYLE[st] ~= nil and st ~= "arc" and st ~= "minimal" and st ~= "studio")
+    if outside then
+      -- (under the name as its font draws it, which can be taller)
+      local _, name_h = ImGui.CalcTextSize(ctx, "Ag")
+      local clear = y + math.max(label_h, name_h or 0) + 3
+      local function reach() return W.mark_reach(dial_r) + (fo.arc and 1.5 or 0.5) end
+      local min_r = r * 0.8
+      for _ = 1, 24 do
+        if sc then
+          cy = math.max(num_bot - (W.mark_reach(dial_r) * 0.7072 + 1 + num_th), y + label_h + C.LABEL_GAP + dial_r)
+        else
+          local lim = y + ch - dial_r - (show_value and 12 or 1)
+          cy = math.max(cy, math.min(clear + reach(), lim))
+        end
+        if cy - reach() >= clear - 0.01 or dial_r <= min_r then break end
+        dial_r = dial_r - 0.5
+      end
+    end
   end
 
   -- a lamp before the name (opts.lamp: its colour, or false for dark)
@@ -1621,7 +1647,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   -- off its bottom edge (a large knob with numbers keeps it at the foot)
   if show_value then
     W.push_small(ctx)
-    local vy = sc and (y + ch - 13) or (cy + r + 1)
+    local vy = sc and (y + ch - 13) or (cy + dial_r + 1)
     centred_text(ctx, dl, cx, vy, formatted or "", C.COL.value, cw - 2)
     W.pop_small(ctx)
   end
@@ -2230,9 +2256,114 @@ end
 -- returns changed, value, act -- the value being the clicked choice's.
 -- Labels are in the small type, shortened to fit; the full one is in the
 -- tooltip of whichever button is under the pointer.
+-- A step button (opts.dir "step"): one button that steps through the
+-- choices -- click for the next, round from the end, Shift+click back,
+-- the wheel along them -- with a lamp for each: beside it (opts.leds nil,
+-- with their names unless opts.ledn is false), over it ("over", the
+-- choice's name on the cap) or none ("none", the name on the cap in its
+-- colour). opts.upto: every lamp up to the choice's lights, not just its
+-- own. Its face is a button's (W.button_face) or a push-button switch's
+-- (lamp, round button, jewel lamp). Drawn under the name the row put up.
+local STEP_SWITCH = { lamp = true, roundbtn = true, jewel = true }
+W.STEP_SWITCH = STEP_SWITCH
+local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cur, opts)
+  local changed = false
+  local to
+  if hovered and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+    local back = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0
+    to = (cur - 1 + (back and -1 or 1)) % n + 1
+  elseif hovered and not W.wheel_taken() then
+    local wv = W.control_wheel(ctx)
+    if wv ~= 0 then
+      W.take_wheel()
+      to = math.max(1, math.min(n, cur + (wv > 0 and 1 or -1)))
+    end
+  end
+  if to and to ~= cur then cur, value, changed = to, choices[to].norm, true end
+
+  local base_col = opts.on_col or C.COL.toggle_on
+  local on_cols = opts.on_cols or {}
+  local function col_of(i) return on_cols[i] or base_col end
+  local where = opts.leds
+  local names = where == nil and opts.ledn ~= false
+  local top, bot = y + W.LABEL_H + C.LABEL_GAP, y + ch - 2
+  local cap_text = (where ~= nil or not names) and (choices[cur].text or "") or nil
+
+  -- where the cap and the lamps go: a cap up to 26 px tall, centred in
+  -- its room
+  local function cap_in(l, r, t, b)
+    local mid, hh = (t + b) * 0.5, math.min(26, b - t) * 0.5
+    return l, mid - hh, r, mid + hh
+  end
+  local bx1, by1, bx2, by2
+  local lamps = {}
+  if where == "over" then
+    local sp = math.min(12, (cw - 8) / math.max(1, n))
+    local lx0 = x + cw * 0.5 - sp * (n - 1) * 0.5
+    for i = 1, n do lamps[i] = { lx0 + (i - 1) * sp, top + 5 } end
+    bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + 12, bot)
+  elseif where == "none" then
+    bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + 2, bot)
+  else
+    local capw = names and math.min(34, cw * 0.42) or math.max(20, cw - 22)
+    local sp = math.min(12, (bot - top) / math.max(1, n))
+    local ly0 = (top + bot) * 0.5 - sp * (n - 1) * 0.5
+    for i = 1, n do lamps[i] = { x + 13 + capw, ly0 + (i - 1) * sp } end
+    bx1, by1, bx2, by2 = cap_in(x + 4, x + 4 + capw, top, bot)
+  end
+
+  local mx, my = ImGui.GetMousePos(ctx)
+  local hot = hovered and mx >= bx1 and mx <= bx2 and my >= by1 and my <= by2
+  local ink_col = (where == "none") and (on_cols[cur] or nil) or nil
+  if STEP_SWITCH[opts.style or ""] then
+    SW.draw(ctx, dl, opts.style, bx1, by1, bx2, by2, true, col_of(cur), not C.EFFECT_3D,
+      cap_text or "", hot, nil)
+  else
+    if W.FACED[opts.style or ""] then W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 2.0) end
+    local ink, dy, gcol = W.button_face(dl, bx1, by1, bx2, by2, 2.5, false, col_of(cur), opts.style, hot)
+    if not ink then
+      ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
+        hot and C.COL.knob_body_hi or C.COL.toggle_off, 2.5)
+      ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 2.5, 0, 1.0)
+      ink, dy = C.COL.toggle_text, 0
+    end
+    if cap_text and cap_text ~= "" then
+      W.push_small(ctx)
+      local _, th = ImGui.CalcTextSize(ctx, cap_text)
+      glow_text(ctx, dl, (bx1 + bx2) * 0.5, (by1 + by2) * 0.5 - th * 0.5 + (dy or 0), cap_text,
+        ink_col or ink, (not ink_col) and gcol or nil, bx2 - bx1 - 4)
+      W.pop_small(ctx)
+    end
+  end
+
+  -- the lamps, and their names beside them
+  if where ~= "none" then
+    if names then W.push_small(ctx) end
+    for i, l in ipairs(lamps) do
+      local lit = opts.upto and (i <= cur) or (i == cur)
+      W.lamp(dl, l[1], l[2], lit and col_of(i) or false)
+      if names then
+        local t = choices[i].text or ""
+        local room = x + cw - (l[1] + 7) - 1
+        if room > 6 then
+          local tw, th = ImGui.CalcTextSize(ctx, t)
+          while tw > room and #t > 1 do t = t:sub(1, -2); tw = ImGui.CalcTextSize(ctx, t) end
+          ImGui.DrawList_AddText(dl, l[1] + 7, l[2] - th * 0.5, i == cur and C.COL.header_text or C.COL.label, t)
+        end
+      end
+    end
+    if names then W.pop_small(ctx) end
+  end
+  if opts.mod then W.mod_corner(dl, bx2, by1, 5, C.COL.toggle_off) end
+  W.tip(ctx, opts.id_tip, opts.tooltip or choices[cur].text, hovered, false)
+  return changed, value
+end
+
 function W.button_row(ctx, id, label, value, choices, opts)
   opts = defaulted(plain(opts or {}), "button")
-  if SW.is(opts.style) then opts.style = nil end     -- (a switch can't be a row)
+  if SW.is(opts.style) and not (opts.dir == "step" and STEP_SWITCH[opts.style]) then
+    opts.style = nil     -- (a switch can't be a row)
+  end
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local cw, ch = opts.w or C.CELL_W, opts.h or C.CELL_H
@@ -2254,6 +2385,13 @@ function W.button_row(ctx, id, label, value, choices, opts)
   for i = 1, n do
     local d = math.abs((choices[i].norm or 0) - value)
     if d < best then cur, best = i, d end
+  end
+
+  if opts.dir == "step" then
+    opts.id_tip = id
+    local changed
+    changed, value = step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cur, opts)
+    return changed, value, act, pressed
   end
 
   -- each button's rect

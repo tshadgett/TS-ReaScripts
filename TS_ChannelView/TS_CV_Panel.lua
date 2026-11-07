@@ -181,6 +181,14 @@ local function hy(n) local v = n * C.CELL_H / 2; return math.tointeger(v) or v e
 function P.button_span(ctl)
   if ctl.type ~= "combo" or not ctl.buttons or not ctl.nbtn then return nil end
   local n = ctl.nbtn
+  if ctl.buttons == "step" then
+    -- lamps 12 px apart: down its side (with their names, two cells
+    -- wide), or across its top
+    if ctl.leds == "none" then return 2, 2 end
+    if ctl.leds == "over" then return math.max(2, math.ceil((n * 12 + 8) / (C.CELL_W / 2))), 2 end
+    return (ctl.ledn == false) and 2 or 4,
+      math.max(2, math.ceil((W.LABEL_H + C.LABEL_GAP + n * 12 + 4) / (C.CELL_H / 2)))
+  end
   if ctl.buttons == "across" then return math.max(2, n), 2 end
   if ctl.buttons == "grid" then
     local cols, rows = C.button_grid(n)
@@ -1234,6 +1242,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
     changed, nv, act = W.button_row(ctx, id, name, v, list,
       { dir = ctl.buttons, n = #list, w = hx(item.w), h = hy(item.h),
+        leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto,
         tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
   elseif ctl.type == "combo" then
     local list = {}
@@ -1338,7 +1347,9 @@ end
 
 -- ---------------------------------------------------------------------
 -- per-parameter step size, cached: TrackFX_GetParameterStepSizes is cheap
--- but not free, and it never changes for a given plugin instance.
+-- but not free, and it never changes for a given plugin instance. A
+-- parameter that reports none can have a count of its own in the layout
+-- (Steps<p>, Values > Steps).
 -- ---------------------------------------------------------------------
 
 local step_cache  = {}
@@ -1346,7 +1357,7 @@ local steps_cache = {}
 
 function P.clear_caches() step_cache = {}; steps_cache = {} end
 
-local function step_norm(track, addr, param, key)
+local function own_step(track, addr, param, key)
   local ck = key .. ":" .. param
   local v = step_cache[ck]
   if v ~= nil then return v end
@@ -1362,7 +1373,51 @@ local function step_norm(track, addr, param, key)
   step_cache[ck] = out
   return out
 end
+P.own_step = own_step
+local function step_norm(track, addr, param, key)
+  local out = own_step(track, addr, param, key)
+  if out then return out end
+  local n = M.get_steps(key, param)
+  return n and 1 / (n - 1) or false
+end
 P.step_norm = step_norm      -- exposed for TS_CV_Test.lua
+
+-- A parameter that reports no steps but reads as a short list (Stepic's
+-- pattern, 1 to 16): how many settings, when the plugin's text along its
+-- range changes that many times and each of as many even positions reads
+-- as its own. Asks what each point would read as; moves nothing.
+local detect_cache = {}
+function P.detect_steps(track, addr, param, key)
+  if not reaper.TrackFX_FormatParamValueNormalized then return nil end
+  local ck = key .. ":" .. param
+  local now = reaper.time_precise()
+  local hit = detect_cache[ck]
+  if hit and now < hit.t then return hit.n end
+  local function read(v)
+    local ok, s = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+    s = ok and s and s:match("^%s*(.-)%s*$") or ""
+    return s ~= "" and s or nil
+  end
+  local N, runs, seen, last = 256, {}, {}, nil
+  for i = 0, N do
+    local s = read(i / N)
+    if not s then runs = nil break end
+    if s ~= last then
+      -- back to a reading seen before: not a list of settings
+      if seen[s] or #runs >= 64 then runs = nil break end
+      seen[s], last = true, s
+      runs[#runs + 1] = s
+    end
+  end
+  local n = runs and #runs >= 2 and #runs or nil
+  if n then
+    for k = 0, n - 1 do
+      if read(k / (n - 1)) ~= runs[k + 1] then n = nil break end
+    end
+  end
+  detect_cache[ck] = { t = now + 5, n = n }
+  return n
+end
 
 -- A knob's numbered scale (Scale<n>): where its numbers go and what they
 -- say, for W.knob's opts.scale. The plugin is asked what each mark's value
@@ -1442,11 +1497,11 @@ function P.begin_frame() scan_budget = C.SCAN_BUDGET; Tr.begin_frame() end
 -- still applies, because that one is about not writing a lane full of
 -- garbage rather than about audibility.
 local function combo_steps(track, addr, param, key, force)
-  local ck = key .. ":" .. param
+  local st = step_norm(track, addr, param, key)
+  -- (by its step: a count of your own changes the list)
+  local ck = key .. ":" .. param .. ":" .. tostring(st)
   local c = steps_cache[ck]
   if c ~= nil then return c end
-
-  local st = step_norm(track, addr, param, key)
   if not st then steps_cache[ck] = false; return false end
 
   local n = math.floor(1 / st + 0.5) + 1
@@ -1580,7 +1635,10 @@ end
 -- Drops both caches for one parameter so it is swept again -- the fix for
 -- a plugin that has been updated and renamed its positions.
 function P.rescan_choices(key, param)
-  steps_cache[key .. ":" .. param] = nil
+  local pre = key .. ":" .. param .. ":"
+  for k in pairs(steps_cache) do
+    if k:sub(1, #pre) == pre then steps_cache[k] = nil end
+  end
   step_cache[key .. ":" .. param]  = nil
   SC.forget(key, param)
   SC.save()
@@ -3126,6 +3184,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         end
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
+            leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto,
             tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" then
         -- Its list is read from the plugin when it's opened (and kept while

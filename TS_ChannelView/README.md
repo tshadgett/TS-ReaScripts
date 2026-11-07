@@ -1292,6 +1292,16 @@ or following ChannelView's).
   lit. A grid is as near square as its count allows (16 as 4 × 4, 12 as
   4 × 3). For 2 to 16 choices; buttons too tall for the panel show as a
   dropdown. On a grid layout the buttons fill their place.
+- **Step button.** Right-click a dropdown ▸ Show as ▸ *Step button*: one
+  button that steps through the choices — click for the next (round from
+  the end), Shift+click back, the wheel along them — with an LED for each
+  choice (an API 2500's *Thrust*). Under it in the same menu: *LEDs
+  beside* (with the choices' names, or not), *LEDs over it* (the choice's
+  name on the button) or *No LEDs* (the name in the choice's colour), and
+  *Light up to it* to light every LED up to the choice's. Each LED lights
+  in its choice's colour (*Choice colours*), else the button's. Its Style
+  is a button's, or a *Lamp button*, *Round button* or *Jewel lamp*. For 2
+  to 16 choices; the editor has the same, and the web page shows it.
 - **Wide dropdowns.** Right-click a dropdown ▸ Look ▸ *Width*: one to
   four cells. A wide one has arrows each side that step back and forward
   through its choices (round from the end); click its name for the list.
@@ -2403,6 +2413,13 @@ with its bank) is always the current one. A plugin that only names the
 setting it's on (Valhalla's) is moved through its range once, as above,
 and put back; its dropdowns then step one setting at a time and open
 their list.
+
+Some plugins don't say a parameter has steps, though it does (Stepic's
+pattern number). Where the plugin's readout along its range is a short
+list (1 to 16, say), *Show as* ▸ *Dropdown*, *Stepped knob* or the button
+rows find it and keep the count; otherwise right-click ▸ *Values* ▸
+**Steps** sets it yourself (the editor has a *Steps* row too), each setting
+an even step along its range.
 
 A **stepped knob** (Show as ▸ *Stepped knob*) turns like a knob but lands
 only on the parameter's positions — the plugin's own choices once they've
