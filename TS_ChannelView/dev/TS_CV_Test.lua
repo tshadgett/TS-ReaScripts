@@ -8820,6 +8820,16 @@ do
   check("frames: counted from the gaps", FN.frames("strip.png", 20, 2576, "down"), 128)
   reaper.JS_LICE_GetPixel = function() return 0xff000000 end
   check("frames: no gaps, square frames", FN.frames("strip.png", 20, 2576, "down"), 129)
+  -- a JPEG on white, across: 201 frames 39.8 px wide in 8000 x 39
+  reaper.JS_LICE_LoadJPG = function() return "bm" end
+  reaper.JS_LICE_GetPixel = function(_, x, y)
+    local f = x / (8000 / 201)
+    local inside = (f - math.floor(f)) * (8000 / 201)
+    if inside < 4 or inside > 35 then return 0xfffffffd end
+    return 0xff3a4a6a
+  end
+  check("frames: a JPEG on white, across", FN.frames("strip.jpg", 8000, 39, "across"), 201)
+  reaper.JS_LICE_LoadJPG = nil
   reaper.JS_LICE_LoadPNG = nil
   check("frames: unreadable, square frames", FN.frames("strip.png", 64, 640, "down"), 10)
   check("frames: across", FN.frames("strip.jpg", 640, 64, "across"), 10)
