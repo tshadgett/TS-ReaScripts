@@ -2285,6 +2285,124 @@ function TP.track_total(tr)
 end
 
 -- ---------------------------------------------------------------------
+-- a track's spectrum
+-- ---------------------------------------------------------------------
+
+-- The spectrum behind an EQ canvas: this track's post probe writes it for
+-- as long as something asks (TS_TrackProbe 2.6.0, A SPECTRUM PER TRACK),
+-- each track at its own place, so channel view, the rack and pop-outs
+-- can each show their own. With an older probe, Track Analyser's
+-- spectrum, but only while it shows this very track.
+-- Returns { db = { ... }, n, lo, hi } (dB per band, lowest and highest
+-- frequency), or nil while there's nothing live. Asked for each frame
+-- it's drawn; the answer is kept for the frame.
+TP.SPEC_BASE, TP.SPEC_STRIDE, TP.SPEC_TRACKS = 0x3A0000, 272, 4096
+TP.TA_POST = 0x20000
+local spec_seen, spec_frame, spec_probe, spec_tick = {}, {}, {}, 0
+function TP.spectrum(tr)
+  if not tr then return nil end
+  local now = reaper.time_precise()
+  local key = tostring(tr)
+  local f = spec_frame[key]
+  if f and now - f.t < 0.012 then return f.s end
+  if not TP._spec_gm then reaper.gmem_attach(TP.GMEM_NS); TP._spec_gm = true end
+  local idx = PL.track_index(tr)
+  -- where its post probe is: looked for twice a second, not every frame
+  local pc = spec_probe[key]
+  if not pc or now - pc.t > 0.5 then
+    local lv = find_level(tr, nil)
+    pc = { t = now, fx = lv and lv.items[lv.post] }
+    spec_probe[key] = pc
+  end
+  local probe = pc.fx
+  local out
+  if idx and probe and idx + 1 < TP.SPEC_TRACKS then
+    -- asked for: the probe's field 127 kept moving
+    spec_tick = (spec_tick + 1) % 1000000
+    PL.set(tr, probe, "cv_spec", 1, spec_tick + 1)
+    local b = TP.SPEC_BASE + (idx + 1) * TP.SPEC_STRIDE
+    local seq = reaper.gmem_read(b)
+    local s = spec_seen[key]
+    if not s or s.seq ~= seq then s = { seq = seq, t = now }; spec_seen[key] = s end
+    local n = math.floor(reaper.gmem_read(b + 1))
+    if seq > 0 and now - s.t < 1.0 and n >= 2 and reaper.gmem_read(b + 5) == idx + 2 then
+      s.own = now   -- (a probe that writes its own: it can listen too)
+      out = { n = n, lo = reaper.gmem_read(b + 2), hi = reaper.gmem_read(b + 3), db = {} }
+      for i = 1, n do out.db[i] = reaper.gmem_read(b + 15 + i) end
+    elseif not PL.is_legacy(tr, probe) and (PL.get(tr, probe, "pub_post") or 0) >= 0.5 then
+      -- an older probe: Track Analyser's, while it shows this track
+      local P = TP.TA_POST
+      local tseq = reaper.gmem_read(P)
+      local t = spec_seen.ta
+      if not t or t.seq ~= tseq then t = { seq = tseq, t = now }; spec_seen.ta = t end
+      n = math.floor(reaper.gmem_read(P + 16))
+      if reaper.gmem_read(P + 11) == 1 and now - t.t < 1.0 and n >= 2 then
+        out = { n = n, lo = reaper.gmem_read(P + 17), hi = reaper.gmem_read(P + 18), db = {} }
+        for i = 1, n do out.db[i] = reaper.gmem_read(P + 16384 + (i - 1) * 4) end
+      end
+    end
+  end
+  spec_frame[key] = { t = now, s = out }
+  return out
+end
+
+-- Listening to a band (TS_TrackProbe 2.6.0, LISTENING TO A BAND): the
+-- track's output about `hz` alone (kind 0, of Q `q`), below it (1) or
+-- above it (2), for as long as this is called each frame; TP.listen(tr)
+-- lets go at once. False when the track's probe can't (none, or older).
+local lsn_tick = 0
+function TP.can_listen(tr)
+  if not tr then return false end
+  local s = spec_seen[tostring(tr)]
+  return s ~= nil and s.own ~= nil and reaper.time_precise() - s.own < 1.0
+end
+function TP.listen(tr, hz, q, kind)
+  local idx = tr and PL.track_index(tr)
+  if not idx or idx + 1 >= TP.SPEC_TRACKS then return false end
+  if not TP._spec_gm then reaper.gmem_attach(TP.GMEM_NS); TP._spec_gm = true end
+  local b = TP.SPEC_BASE + (idx + 1) * TP.SPEC_STRIDE
+  if not hz then reaper.gmem_write(b + 6, 0); return true end
+  if not TP.can_listen(tr) then return false end
+  reaper.gmem_write(b + 6, hz)
+  reaper.gmem_write(b + 7, q or 1)
+  reaper.gmem_write(b + 9, kind or 0)
+  lsn_tick = lsn_tick % 1000000 + 1
+  reaper.gmem_write(b + 8, lsn_tick)
+  return true
+end
+
+-- A band held to listen to from elsewhere (the web page): `band()` gives
+-- hz, q, kind each time it's asked; `sw(on)`, when given, is the band's
+-- own Solo instead. Kept while TP.listen_hold keeps coming with its key,
+-- let go a third of a second after it stops (TP.listen_tick, each cycle)
+-- or at once by TP.listen_release.
+local web_held = nil
+local function held_stop()
+  if not web_held then return end
+  if web_held.sw then web_held.sw(false) else TP.listen(web_held.tr) end
+  web_held = nil
+end
+function TP.listen_hold(key, tr, band, sw)
+  if web_held and web_held.key ~= key then held_stop() end
+  if not web_held then
+    web_held = { key = key, tr = tr, band = band, sw = sw }
+    if sw then sw(true) end
+  end
+  web_held.t = reaper.time_precise()
+end
+function TP.listen_release(key)
+  if web_held and (key == nil or web_held.key == key) then held_stop() end
+end
+function TP.listen_tick()
+  if not web_held then return end
+  if reaper.time_precise() - web_held.t > 0.35 then held_stop() return end
+  if not web_held.sw then
+    local hz, q, kind = web_held.band()
+    if hz then TP.listen(web_held.tr, hz, q, kind) end
+  end
+end
+
+-- ---------------------------------------------------------------------
 -- make-up gain
 -- ---------------------------------------------------------------------
 

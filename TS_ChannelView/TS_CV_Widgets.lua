@@ -2362,7 +2362,7 @@ function W.combo_raised(style) return style == "raised" or W.FACED[style or ""] 
 -- opts.ink: the colour its text shows in (the current choice's own, or the
 -- control's); opts.ink_of(entry): a list entry's colour, or nil.
 local combo_find = {}     -- a list's search box text, by its popup
-local COMBO_ROWS = 14     -- rows shown before the list scrolls
+local COMBO_ROWS = 48     -- rows shown before the list scrolls (as many as fit, below)
 local COMBO_SEARCH = 12   -- more choices than this: a search box on top
 function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   opts = defaulted(plain(opts or {}), "combo")
@@ -2451,12 +2451,21 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
     end
   end
 
-  -- the list: as wide as the box at least, scrolling past COMBO_ROWS, with
-  -- a search box on top when it's long; the current one in view
+  -- the list: as wide as the box at least, all of it where the screen
+  -- has room (scrolling past COMBO_ROWS, or what fits), with a search box
+  -- on top when it's long; the current one in view
   local list = steps or {}
-  local rows = math.min(#list, COMBO_ROWS) + ((#list > COMBO_SEARCH) and 2 or 0)
-  ImGui.SetNextWindowSizeConstraints(ctx, bx2 - bx1, 0, math.max(bx2 - bx1, 520),
-    rows * ImGui.GetTextLineHeightWithSpacing(ctx) + 16)
+  local lh = ImGui.GetTextLineHeightWithSpacing(ctx)
+  local pad_y = 8
+  if ImGui.GetStyleVar then
+    local ok, _, py = pcall(ImGui.GetStyleVar, ctx, ImGui.StyleVar_WindowPadding)
+    if ok and py then pad_y = py end
+  end
+  local list_h = math.min(#list, COMBO_ROWS) * lh + 2 * pad_y + 2
+    + ((#list > COMBO_SEARCH) and ImGui.GetFrameHeightWithSpacing(ctx) or 0)
+  local vp = ImGui.GetMainViewport and ImGui.GetMainViewport(ctx)
+  if vp then list_h = math.min(list_h, select(2, ImGui.Viewport_GetWorkSize(vp)) * 0.85) end
+  ImGui.SetNextWindowSizeConstraints(ctx, bx2 - bx1, 0, math.max(bx2 - bx1, 520), list_h)
   if ImGui.BeginPopup(ctx, pop) then
     local appearing = ImGui.IsWindowAppearing(ctx)
     local q = ""

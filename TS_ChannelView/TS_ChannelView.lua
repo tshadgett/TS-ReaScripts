@@ -1,10 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.0.2
+-- @version 4.0.3
 -- @changelog
---  Measured gain reduction follows make-up gain; buttons grid, up to 16
---  choices; audio envelopes and Audio from in the Follower. See the
---  CHANGELOG.
+--  Dropdowns open to their whole list; TS_TrackProbe 2.6.0 (the track's
+--  spectrum and band listening for the EQ canvases). See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -1308,7 +1307,7 @@ local function brush_tick(fx, key, idx, c, kind, pl, id)
   local f_now = C.FINISH[fin] or C.FINISH.plain
   ST.caption(ctx, "Finish")
   ImGui.SetNextItemWidth(ctx, 120)
-  if ImGui.BeginCombo(ctx, "##Finish" .. id, f_now.label) then
+  if ImGui.BeginCombo(ctx, "##Finish" .. id, f_now.label, ImGui.ComboFlags_HeightLargest) then
     local dflt = M.part_brushed(kind, pl, nil) and "brushed" or "plain"
     for _, f in ipairs(C.FINISHES) do
       if ImGui.Selectable(ctx, f.label .. "##" .. id .. "_" .. f.key, fin == f.key) and kind then
@@ -1350,7 +1349,7 @@ local function corners_combo(fx, key, idx, c, kind, id)
   for _, o in ipairs(CORNER_CHOICES) do if o[1] == now then label = o[2] end end
   ST.caption(ctx, "Corners")
   ImGui.SetNextItemWidth(ctx, 120)
-  if ImGui.BeginCombo(ctx, "##Corners" .. id, label) then
+  if ImGui.BeginCombo(ctx, "##Corners" .. id, label, ImGui.ComboFlags_HeightLargest) then
     for _, o in ipairs(CORNER_CHOICES) do
       if ImGui.Selectable(ctx, o[2] .. "##" .. id .. "_" .. (o[1] or "square"), now == o[1]) and kind then
         local l = materialise(fx)

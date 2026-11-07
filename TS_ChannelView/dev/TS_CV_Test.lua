@@ -16,6 +16,7 @@ local VALUES = {}
 for i = 1, #PARAMS do VALUES[i-1] = 0.5 end
 
 reaper = {
+  gmem_attach = function() end, gmem_read = function() return 0 end, gmem_write = function() end,
   TrackFX_GetNumParams        = function() return #PARAMS end,
   TrackFX_GetParamName        = function(_,_,i) return true, PARAMS[i+1] or "" end,
   TrackFX_GetParamNormalized  = function(_,_,i) return VALUES[i] end,
@@ -2370,6 +2371,19 @@ do
   check("step: next by its name", P.step_choice(list, "002 Program", 0, 1, false) == list[3].norm, true)
   check("step: arrows go round", P.step_choice(list, "120 Program", 1, 1, true) == list[1].norm, true)
   check("step: the wheel stops at the end", P.step_choice(list, "120 Program", 1, 1, false) == list[120].norm, true)
+  -- 128 steps, only some named (Cenozoix's Style): the named ones
+  reaper.TrackFX_GetParameterStepSizes = function() return true, 1 / 127 end
+  local STY = { [0] = "Brit VCA", [5] = "Drum", [9] = "Bus", [20] = "Vocal" }
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, _, v)
+    return true, STY[math.floor(v * 127 + 0.5)] or ""
+  end
+  P.clear_caches()
+  local sl = P.read_choices("tr", 0, 6, "Styles")
+  local names = {}
+  for i, e in ipairs(sl or {}) do names[i] = e.text end
+  check("read by name: settings with no name left out", table.concat(names, ","), "Brit VCA,Drum,Bus,Vocal")
+  check("read by name:   each at its own step", sl and math.floor(sl[2].norm * 127 + 0.5), 5)
+  reaper.TrackFX_GetParameterStepSizes = function() return false end
   -- a plugin that can only name the setting it's on: not readable
   reaper.TrackFX_FormatParamValueNormalized = function() return true, "Hall" end
   check("read by name: one name everywhere is no list", P.read_choices("tr", 0, 7, "Big"), nil)
@@ -7407,6 +7421,27 @@ do
   check("mapeq: kirchhoff tone", (ME.type_of_name("Tone Low")), "ls")
   check("mapeq: kirchhoff valve left to measuring", (ME.type_of_name("VT Boost")), nil)
   check("mapeq: kirchhoff slope", ME.order_of_text("12.0dB/oct %"), 2)
+  -- a long shape list grouped by model (Kirchhoff-EQ's Type)
+  local KN = { "Low Pass", "High Pass", "Band Pass", "Bell", "Low Shelf", "High Shelf", "Notch", "Tilt Shelf",
+    "Flat Tilt", "Flat Top", "Sword", "E HP", "E LS", "E Low Bell", "E LMF", "E HMF", "E High Bell", "E HS", "E LP",
+    "G HP", "G LS", "G LMF", "G HMF", "G HS", "G LP", "BritN HP", "BritN LS", "BritN Bell", "BritN HS",
+    "250 LS", "250 Bell", "250 HS", "VT HP", "VT LP", "VT LS", "VT Boost", "VT Atten", "VT LMF", "VT HMF",
+    "Tone Low", "Tone High", "Wall LP", "Wall HP", "Allpass L", "Allpass H", "Blue Low", "Blue High" }
+  local function shs_of(names)
+    local out = {}
+    for i, t in ipairs(names) do local ty, o = ME.type_of_name(t); out[i] = { s = i, text = t, type = ty, order = o } end
+    return out
+  end
+  local gk = ME.shape_groups(shs_of(KN))
+  local names, n = {}, 0
+  for i, g in ipairs(gk or {}) do names[i] = g.name .. ":" .. #g.items; n = n + #g.items end
+  check("shape groups: Kirchhoff by model", table.concat(names, " "),
+    "Standard:11 E:8 G:6 BritN:4 250:3 VT:7 Tone:2 Wall:2 Allpass:2 Blue:2")
+  check("shape groups: every setting once", n, #KN)
+  check("shape groups: named without the model", gk and gk[2].items[4].label, "LMF  \u{00B7}  Bell")
+  check("shape groups: Pro-Q's ten stay one list", ME.shape_groups(shs_of({ "Bell", "Low Shelf", "Low Cut", "High Shelf",
+    "High Cut", "Notch", "Band Pass", "Tilt Shelf", "Flat Tilt", "All Pass" })), nil)
+  check("shape groups: a short list stays one", ME.shape_groups(shs_of({ "E HP", "E LS", "Bell" })), nil)
   check("mapeq: slope 24", ME.order_of_text("24 dB/oct"), 4)
   check("mapeq: slope 96", ME.order_of_text("96 dB/oct"), 16)
   check("mapeq: slope brick", ME.order_of_text("Brickwall"), ME.BRICK)
@@ -7579,6 +7614,12 @@ do
   M.remove("TestGate :: Gate"); M.remove("TestLim :: Limiter"); M.remove("TestGate2 :: Gate"); M.save()
   check("canvas names", M.CANVAS_NAMES.gate .. "/" .. M.CANVAS_NAMES.limit, "Gate/Limiter")
   local CS = require("TS_CV_CanvasSetup")
+  -- guessing again keeps what was learned of a band on the same controls
+  local kl = CS.keep_learned({ { name = "Lows", freq = 2, gain = 3, learn = "L1", learn_sig = "2,3,-,-,-" },
+                               { name = "Gone", freq = 9, gain = 10, learn = "L9", learn_sig = "9,10,-,-,-" } },
+                             { { name = "Band 1", freq = 2, gain = 3, solo = 6 }, { name = "Band 2", freq = 12, gain = 13 } })
+  check("guess again: learning kept", ("%s %s %s %s"):format(kl[1].name, tostring(kl[1].learn), kl[1].solo, tostring(kl[2].learn)),
+    "Lows L1 6 nil")
   local g = CS.guess({ "Threshold", "Hysteresis", "Range", "Attack", "Hold", "Release", "Sidechain HPF" }, "gate")
   check("guess gate: kind", g.kind, "gate")
   check("guess gate: roles", ("%s %s %s %s %s %s"):format(g.roles.Threshold, g.roles.Hysteresis, g.roles.Range,
@@ -8171,7 +8212,16 @@ do
   check("dyn guess: the band's own On isn't its dynamics'", g[1] and ("%s %s %s %s"):format(g[1].freq, tostring(g[1].on),
     g[1].dyn and g[1].dyn.range, g[1].dyn and g[1].dyn.on), "0 nil 3 4")
   check("dyn guess: threshold", g[1] and g[1].dyn and g[1].dyn.thr, 5)
+  -- numbered bands: the first 16 of a plugin's 32
+  local many = {}
+  for k = 1, 32 do many[#many + 1] = "Band" .. k .. " Freq."; many[#many + 1] = "Band" .. k .. " Gain" end
+  local gm = ME.guess(many)
+  check("guess: 16 of 32 numbered bands", #gm .. " " .. gm[16].name .. " " .. gm[16].freq, "16 Band 16 30")
   check("dyn guess: a plain band stays plain", g[2] and ("%s %s"):format(g[2].on, tostring(g[2].dyn)), "8 nil")
+  local gs = ME.guess({ "Band 1 Used", "Band 1 Enabled", "Band 1 Frequency", "Band 1 Gain", "Band 1 Q", "Band 1 Shape",
+                        "Band 1 Solo", "Band 1 Side Chain Audition", "Band 1 Stereo Placement" })
+  check("guess: Pro-Q's band Solo", gs[1] and ("%s %s"):format(tostring(gs[1].solo), tostring(gs[1].on)), "6 1")
+  check("guess: its Stereo placement", gs[1] and gs[1].stereo, 8)
   local g2 = ME.guess({ "Low Mid Freq", "Low Mid Gain", "Low Mid Thresh", "Low Mid Ratio", "Low Mid Attack", "Low Mid Release",
                         "Low Mid Auto Threshold" })
   check("dyn guess: worded", g2[1] and g2[1].dyn and ("%s %s %s %s"):format(g2[1].dyn.thr, g2[1].dyn.ratio, g2[1].dyn.atk,
@@ -9232,6 +9282,20 @@ do
   check("model: an older line as it was", out.Canvas .. " " .. tostring(cv.model), "eq|5 nil")
   check("model: in what learning is checked against", M_.band_sig({ freq = 1 }, 10), "1,-,-,-,-,m10")
   check("model: not without", M_.band_sig({ freq = 1 }), "1,-,-,-,-")
+  -- a band's Solo control: after the slope, "-" in the slope's place without one
+  cv = M_.canvas_of({ Canvas = "eq", Band1 = "Low|1|0|-|2|-|-|22", Band2 = "Hi|3|4|-|-|-|9|23", Band3 = "Mid|5|6|-|-|-|10" })
+  check("solo: read", ("%s %s %s %s %s"):format(cv.bands[1].solo, tostring(cv.bands[1].slope), cv.bands[2].solo,
+    cv.bands[2].slope, tostring(cv.bands[3].solo)), "22 nil 23 9 nil")
+  out = {}; M_.canvas_lines(cv, out)
+  check("solo: written", out.Band1 .. " " .. out.Band2 .. " " .. out.Band3, "Low|1|0|-|2|-|-|22 Hi|3|4|-|-|-|9|23 Mid|5|6|-|-|-|10")
+  check("solo: not in what learning is checked against", M_.band_sig(cv.bands[1]), "1,0,-,2,-")
+  check("solo: a copy keeps it", M_.copy({ canvas = cv, controls = {} }).canvas.bands[2].solo, 23)
+  -- its Stereo placement control after the solo
+  cv = M_.canvas_of({ Canvas = "eq", Band1 = "Low|1|0|-|2|-|-|-|31", Band2 = "Hi|3|4|-|-|-|9|23|32" })
+  check("stereo: read", ("%s %s %s"):format(cv.bands[1].stereo, tostring(cv.bands[1].solo), cv.bands[2].stereo), "31 nil 32")
+  out = {}; M_.canvas_lines(cv, out)
+  check("stereo: written", out.Band1 .. " " .. out.Band2, "Low|1|0|-|2|-|-|-|31 Hi|3|4|-|-|-|9|23|32")
+  check("stereo: a copy keeps it", M_.copy({ canvas = cv, controls = {} }).canvas.bands[1].stereo, 31)
   -- guessed by name
   check("model: guessed", ME.guess_model({ "Low Freq", "EQ Model", "Out" }, {}), 1)
   check("model: not a band's type", ME.guess_model({ "Band 1 Type", "Phase Mode" }, {}), nil)
@@ -11621,6 +11685,273 @@ do
     end
   end
   check("ReEQ2: every recipe drawn as it draws it (worst dB off < 0.01)", worst < 0.01, true)
+end
+
+-- A spectrum grab's peaks (TS_CV_EQPanel): local highs that stand 6 dB
+-- clear within 12 bands, louder than -70 dB, the loudest first, none
+-- within 8 bands of a louder one.
+do
+  local EQP = require("TS_CV_EQPanel")
+  local db = {}
+  for i = 1, 256 do db[i] = -40 - i * 0.05 end
+  local function bump(c, h) for i = c - 4, c + 4 do db[i] = db[i] + h * (1 - math.abs(i - c) / 5) end end
+  bump(40, 12); bump(44, 10); bump(120, 8); bump(200, 3)
+  db[230] = -75; db[229] = -90; db[231] = -90
+  local s = { n = 256, lo = 20, hi = 20000, db = db }
+  local pk = EQP.util.spec_peaks(s)
+  local where = {}
+  for i, p in ipairs(pk) do where[i] = math.floor(p.i + 0.5) end
+  check("spectrum peaks: the loudest, none too near, none small or quiet", table.concat(where, ","), "40,120")
+  check("spectrum peaks: at the band's frequency",
+        math.abs(pk[1].freq - 20 * 1000 ^ ((pk[1].i - 0.5) / 256)) < 1e-6, true)
+  local flat = {}
+  for i = 1, 256 do flat[i] = -30 end
+  check("spectrum peaks: a flat spectrum has none", #EQP.util.spec_peaks({ n = 256, lo = 20, hi = 20000, db = flat }), 0)
+end
+
+-- The spectrum grab (TS_CV_EQPanel): the pointer still on the spectrum's
+-- line for a second shows the held outline and its peak nodes; a node
+-- dragged up or down and let go makes a bell at its frequency.
+do
+  local EQP = require("TS_CV_EQPanel")
+  local CC = require("TS_CV_Config")
+  local RQx = require("TS_CV_ReaEQ")
+  local db = {}
+  for i = 1, 256 do db[i] = -40 end
+  for i = 145, 153 do db[i] = -40 + 14 * (1 - math.abs(i - 149) / 5) end
+  local spec = { n = 256, lo = 20, hi = 20000, db = db }
+  local had_tp = package.loaded["TS_CV_Taps"]
+  package.loaded["TS_CV_Taps"] = { spectrum = function() return spec end }
+  local m = { x = 0, y = 0, down = false, hov = true, act = false }
+  local drawn = 0
+  local fake = setmetatable({
+    IsItemHovered = function() return m.hov end,
+    IsItemActivated = function() return m.act end,
+    IsMouseDown = function() return m.down end,
+    GetMousePos = function() return m.x, m.y end,
+    CalcTextSize = function() return 10, 10 end,
+    DrawList_AddCircle = function() drawn = drawn + 1 end,
+    DrawList_AddCircleFilled = function() drawn = drawn + 1 end,
+    MouseButton_Left = 0, MouseCursor_Hand = 1, MouseCursor_ResizeNS = 2,
+  }, { __index = function() return function() end end })
+  EQP.attach(fake)
+  local clock = 100
+  local saved_tp, saved_sr = reaper.time_precise, reaper.GetSetProjectInfo
+  reaper.time_precise = function() return clock end
+  reaper.GetSetProjectInfo = function() return 48000 end
+  local gx0, gy0, gw, gh = 0, 0, 400, 160
+  local st, added = {}, nil
+  local function frame() return EQP.util.grab(fake, "dl", st, {}, gx0, gy0, gw, gh, function(f, g) added = { f, g } end) end
+  -- frames 50 ms apart for `secs`
+  local function wait(secs) for _ = 1, math.floor(secs / 0.05 + 0.5) do clock = clock + 0.05; frame() end end
+  -- the peak's place on the canvas
+  local pf = 20 * 1000 ^ ((149 - 0.5) / 256)
+  local px = EQP.util.x_of(pf, gx0, gw)
+  local py = gy0 + gh - ((-26) + 80) / 80 * gh
+  -- off the line: nothing, however long
+  m.x, m.y = px - 60, gy0 + 10
+  for _ = 1, 30 do clock = clock + 0.05; frame() end
+  check("grab: off the spectrum's line: no outline", st.grab and st.grab.shown or false, false)
+  -- on the line (at -40 dB, away from the peak), still for a second
+  m.x, m.y = px - 80, gy0 + gh - 40 / 80 * gh
+  frame()
+  wait(0.5)
+  check("grab: on the line, half a second: not yet", st.grab.shown or false, false)
+  db[149] = -20                              -- louder for a moment: held
+  -- the line under the pointer jumping with the music doesn't restart it
+  local at = math.floor(256 * math.log((RQx.frac_to_freq(m.x / gw, CC.EQ_FREQ_LO, CC.EQ_FREQ_HI)) / 20) / math.log(1000) + 0.5)
+  for k = at - 2, at + 2 do db[k] = -20 end
+  wait(0.05)
+  for k = at - 2, at + 2 do db[k] = -55 end
+  wait(0.05)
+  for k = at - 2, at + 2 do db[k] = -40 end
+  db[149] = -26
+  wait(0.25)
+  check("grab: a second: the outline", st.grab.shown, true)
+  check("grab:   fading in", st.grab.a > 0 and st.grab.a < 1, true)
+  wait(0.3)
+  check("grab:   faded in", st.grab.a, 1)
+  check("grab: the hold keeps the loudest", st.grab.spec.db[149], -20)
+  -- (the place the line jumped to under the pointer is held too: a peak)
+  check("grab: peak nodes", #st.grab.peaks, 2)
+  local node
+  for _, q in ipairs(st.grab.peaks) do if math.abs(q.freq - pf) < pf * 0.03 then node = q end end
+  check("grab: one at the peak", node ~= nil, true)
+  -- to the node and press
+  py = gy0 + gh - ((-20) + 80) / 80 * gh
+  m.x, m.y = node.x, py
+  clock = clock + 0.05; frame()
+  m.down, m.act = true, true
+  clock = clock + 0.05; frame()
+  m.act = false
+  check("grab: pressed on a node: dragging", st.grab.drag ~= nil, true)
+  m.y = py - gh * 0.25                        -- up a quarter: half the range
+  m.x = m.x + 50                              -- across doesn't move it
+  clock = clock + 0.05; frame()
+  m.down = false
+  clock = clock + 0.05; frame()
+  check("grab: let go: a bell at the peak", added and math.abs(added[1] - pf) < pf * 0.03, true)
+  check("grab:   its gain from the drag", added and math.floor(added[2] * 10 + 0.5) / 10, CC.EQ_GAIN_RANGE / 2)
+  check("grab:   and the outline fades out", st.grab and st.grab.done, true)
+  wait(0.4)
+  check("grab:   and goes", st.grab and st.grab.shown or false, false)
+  -- shown, then well away from it: gone
+  added = nil
+  m.x, m.y = px - 80, gy0 + gh - 40 / 80 * gh
+  frame(); wait(0.9)
+  check("grab: shown again", st.grab and st.grab.shown, true)
+  m.y = gy0 + 5; wait(0.3)
+  m.x, m.y = px - 80, gy0 + gh - 40 / 80 * gh; wait(0.1)
+  check("grab: away and back in under half a second: stays", st.grab and st.grab.a, 1)
+  m.y = gy0 + 5; wait(0.3)
+  check("grab: away a moment: still there", st.grab and st.grab.shown, true)
+  wait(0.4)
+  check("grab: away: fading out", st.grab and st.grab.a < 1, true)
+  wait(0.3)
+  check("grab: moved well away: gone", st.grab and st.grab.shown or false, false)
+  -- off the canvas (onto a band's node): gone
+  frame(); m.x, m.y = px - 80, gy0 + gh - 40 / 80 * gh
+  frame(); wait(1.1)
+  m.hov = false; wait(0.1)
+  check("grab: onto a band or off the canvas: not at once", st.grab ~= nil, true)
+  wait(1.0)
+  check("grab: onto a band or off the canvas: gone", st.grab, nil)
+  check("grab: nothing added without a drag", added, nil)
+  -- a band alone (EQP.util.solo): the headphone button by a hovered node
+  local heard, can = {}, true
+  package.loaded["TS_CV_Taps"] = { spectrum = function() return spec end, can_listen = function() return can end,
+    listen = function(_, hz, q, kind) heard[#heard + 1] = hz and ("%d %.1f %d"):format(hz, q, kind) or "off" end }
+  local sst, swv = {}, {}
+  rawset(fake, "IsItemActive", function() return m.down end)
+  local function sframe(withsw)
+    EQP.util.solo(fake, "dl", sst, {}, "u", gx0, gy0, gw, gh, function(k)
+      if k ~= 2 then return nil end
+      return { x = 200, y = 80, f = 1000, q = 2, kind = 0, col = 0xffffffff,
+               sw = withsw and function(on) swv[#swv + 1] = tostring(on) end or nil }
+    end)
+  end
+  m.hov, m.act, m.down = false, false, false
+  sframe(true)
+  check("solo: no band hovered: nothing", #swv + #heard, 0)
+  sst.solo_k, sst.solo_t = 2, clock
+  m.hov, m.act, m.down = true, true, true
+  clock = clock + 0.05; sframe(true)
+  m.act = false; clock = clock + 0.05; sframe(true)
+  check("solo: held: the band's Solo on", table.concat(swv, ","), "true")
+  m.down = false; m.hov = false; clock = clock + 0.05; sframe(true)
+  check("solo: let go: off", table.concat(swv, ","), "true,false")
+  sst.solo_t = clock; m.hov, m.act, m.down = true, true, true
+  clock = clock + 0.05; sframe(false)
+  m.act = false; clock = clock + 0.05; sframe(false)
+  check("solo: no Solo: the probe listens, each frame", table.concat(heard, ","), "1000 2.0 0,1000 2.0 0")
+  m.down = false; clock = clock + 0.05; sframe(false)
+  check("solo:   let go", heard[#heard], "off")
+  heard = {}; can = false
+  sst.solo_t = clock; m.act, m.down = true, true
+  clock = clock + 0.05; sframe(false)
+  m.act, m.down = false, false; clock = clock + 0.05; sframe(false)
+  check("solo: no probes: nothing heard", #heard, 0)
+  clock = clock + 1; m.hov = false; sframe(false)
+  reaper.time_precise, reaper.GetSetProjectInfo = saved_tp, saved_sr
+  package.loaded["TS_CV_Taps"] = had_tp
+end
+
+-- Plugins whose canvases come ready (M.KNOWN): Pro-Q 3 and 4,
+-- Kirchhoff-EQ by their names; Pro-C 2 and 3, Cenozoix by their roles'.
+do
+  local ME = require("TS_CV_MapEQ")
+  local Mk = require("TS_CV_Mappings")
+  local function proq4()
+    local n = {}
+    local F = { "Used", "Enabled", "Frequency", "Gain", "Q", "Shape", "Slope", "Stereo Placement", "Speakers",
+      "Dynamic Range", "Dynamics Enabled", "Dynamics Auto", "Threshold", "Attack", "Release", "External Side Chain",
+      "Side Chain Filtering", "Side Chain Low Frequency", "Side Chain High Frequency", "Side Chain Audition",
+      "Spectral Enabled", "Spectral Density", "Solo" }
+    for k = 1, 24 do for _, f in ipairs(F) do n[#n + 1] = ("Band %d %s"):format(k, f) end end
+    return n
+  end
+  local function proq3()
+    local n = {}
+    local F = { "Used", "Enabled", "Frequency", "Gain", "Dynamic Range", "Dynamics Enabled", "Threshold", "Q",
+      "Shape", "Slope", "Stereo Placement", "Speakers", "Solo" }
+    for k = 1, 24 do for _, f in ipairs(F) do n[#n + 1] = ("Band %d %s"):format(k, f) end end
+    return n
+  end
+  local function kirch()
+    local n = { "Bypass", "Invert Phase", "Master Vol.", "Gain Scale", "Enable Auto Gain", "Pan" }
+    local F = { "Used", "Enabled", "Type", "Slope", "Freq.", "Gain", "Q", "Stereo Placement", "Speakers Type",
+      "Pan/Width", "Dyn. On", "Dyn. Threshold", "Dyn. Below Ratio", "Dyn. Below Range", "Dyn. Above Ratio",
+      "Dyn. Above Range", "Dyn. Attack", "Dyn. Release", "Dyn. Onsets Mix", "Dyn. Rela. Mix",
+      "Dyn. Det. Use SideChain", "Dyn. Rela. Use SideChain", "Det. Free Mode On", "Dyn. Det. Freq.", "Dyn. Det. Q",
+      "Rela. Free Mode On", "Dyn. Rela. Freq.", "Dyn. Rela. Q" }
+    for k = 1, 32 do for _, f in ipairs(F) do n[#n + 1] = ("Band%d %s"):format(k, f) end end
+    return n
+  end
+  local q4 = ME.builtin(proq4())
+  local b2 = q4 and q4.bands[2]
+  check("known: Pro-Q 4 by its names, 16 bands", q4 and #q4.bands, 16)
+  check("known: Pro-Q 4 band 2", b2 and ("%d %d %d %d %d %d %d"):format(b2.on, b2.freq, b2.gain, b2.q, b2.shape, b2.slope, b2.solo),
+    "24 25 26 27 28 29 45")
+  check("known: Pro-Q 4 band 2's stereo placement", b2 and b2.stereo, 30)
+  check("known: Pro-Q 4 band 2's dynamics", b2 and ("%d %d %d %d %d"):format(b2.dyn.thr, b2.dyn.range, b2.dyn.atk, b2.dyn.rel, b2.dyn.on),
+    "35 32 36 37 33")
+  check("known: Pro-Q 4 learned, nothing to do", q4 and Mk.canvas_todo(q4), nil)
+  local L4 = ME.decode(q4.bands[1].learn)
+  check("known: Pro-Q 4's learning reads", L4 and L4.D and #L4.H, 10)
+  local kq = ME.builtin(kirch())
+  local k1 = kq and kq.bands[1]
+  check("known: Kirchhoff-EQ band 1", k1 and ("%d %d %d %d %d %d %s"):format(k1.on, k1.freq, k1.gain, k1.q, k1.shape, k1.slope,
+    tostring(k1.solo)), "7 10 11 12 8 9 nil")
+  check("known: Kirchhoff-EQ's dynamics", k1 and ("%d|%d|%d|%d|%d|%d"):format(k1.dyn.thr, k1.dyn.range, k1.dyn.ratio,
+    k1.dyn.atk, k1.dyn.rel, k1.dyn.on), "17|19|18|22|23|16")
+  check("known: Kirchhoff-EQ learned, 16 bands", kq and (#kq.bands .. " " .. tostring(Mk.canvas_todo(kq))), "16 nil")
+  local LK = ME.decode(k1.learn)
+  check("known: Kirchhoff's learning reads, its 47 types", LK and #LK.H, 47)
+  local q3 = ME.builtin(proq3())
+  local p1 = q3 and q3.bands[1]
+  check("known: Pro-Q 3 band 1", p1 and ("%d %d %d %d %d %d %d | %d %d %d"):format(p1.on, p1.freq, p1.gain, p1.q, p1.shape,
+    p1.slope, p1.solo, p1.dyn.thr, p1.dyn.range, p1.dyn.on), "1 2 3 7 8 9 12 | 6 4 5")
+  check("known: Pro-Q 3 learned, its 9 shapes", q3 and Mk.canvas_todo(q3) == nil and #ME.decode(p1.learn).H, 9)
+  check("known: another plugin's names: nothing", ME.builtin({ "Gain", "Frequency" }), nil)
+  check("known: keys", ("%s %s %s %s %s"):format(Mk.known_id("Pro-Q 4"), Mk.known_id("Pro-Q 4 :: EQ"),
+    Mk.known_id("TBTECH Kirchhoff-EQ"), Mk.known_id("TBTECH Cenozoix Compressor"), tostring(Mk.known_id("Pro-Q 44"))),
+    "proq4 proq4 kirchhoff cenozoix nil")
+  -- compressors
+  local cn = {}
+  for p = 0, 102 do cn[p + 1] = "x" end
+  for p, nm in pairs({ [18] = "Input Gain", [19] = "Threshold", [20] = "Ratio", [21] = "Knee", [23] = "Att Time",
+                       [24] = "Rel Time", [26] = "Hold", [34] = "Output Gain", [35] = "Dry Mix" }) do cn[p + 1] = nm end
+  local cz, cid = Mk.known_comp(cn)
+  check("known: Cenozoix's roles", cz and ("%s %d %d %d %s"):format(cid, cz.roles.Threshold, cz.roles.Makeup, cz.roles.Mix,
+    tostring(cz.rev.Mix)), "cenozoix 19 34 35 true")
+  check("known: Cenozoix measured", cz and ("%d %d %d"):format(cz.thr_cal.p, #cz.thr_cal.pts, cz.atk_cal.p), "19 4 23")
+  cn[20] = "Something else"
+  check("known: a name that doesn't match: nothing", Mk.known_comp(cn), nil)
+  -- a layout made before: what's known goes in where it's missing
+  local l = { controls = {}, canvas = { kind = "comp", roles = { Threshold = 1, Attack = 7 }, rev = {} } }
+  Mk.known_learned("Pro-C 3 :: Compressor", l)
+  check("known: an older Pro-C 3 layout gets its threshold measured", l.canvas.thr_cal and l.canvas.thr_cal.pts[1][2], -52.99)
+  local le = { controls = {}, canvas = { kind = "eq", bands = { { name = "B", freq = 2, gain = 3, q = 4 }, { name = "C" } } } }
+  Mk.known_learned("Pro-Q 4 :: EQ", le)
+  check("known: an older Pro-Q 4 band gets the learning", Mk.band_learned(le.canvas.bands[1], nil) and le.canvas.bands[2].learn == nil, true)
+  -- a plugin's default layout starts with its canvas (Pro)
+  local E = require("TS_CV_Edition")
+  local had_pro, gn, gp = E.PRO, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName
+  E.PRO = true
+  local now = kirch()
+  reaper.TrackFX_GetNumParams = function() return #now end
+  reaper.TrackFX_GetParamName = function(_, _, p) return true, now[p + 1] end
+  local d = Mk.known_default("TBTECH Kirchhoff-EQ", {}, 0, { controls = { { param = 0 } } })
+  check("known default: Kirchhoff-EQ's canvas, alone", d.canvas and (d.canvas.kind .. " " .. #d.canvas.bands .. " " .. #d.controls), "eq 16 0")
+  now = cn; cn[20] = "Threshold"
+  d = Mk.known_default("TBTECH Cenozoix Compressor", {}, 0, { controls = { { param = 19 }, { param = 6 } } })
+  check("known default: Cenozoix's canvas, its other controls beside it", d.canvas and (d.canvas.kind .. " " .. #d.controls .. " " .. d.controls[1].param), "comp 1 6")
+  now = proq3()
+  d = Mk.known_default("Pro-Q 3", {}, 0, { controls = {} })
+  check("known default: Pro-Q 3's canvas", d.canvas and #d.canvas.bands, 16)
+  d = Mk.known_default("Pro-Q 4 :: Mine", {}, 0, { controls = {} })
+  check("known default: not another layout of theirs", d.canvas, nil)
+  E.PRO, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = had_pro, gn, gp
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

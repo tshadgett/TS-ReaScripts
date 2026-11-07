@@ -1569,8 +1569,9 @@ button, or *Set up the … canvas…* in Edit Parameters brings it back.
 Canvases show no text readouts of what they measure: they draw it.
 
 **An EQ layout** has up to 24 bands. Name each band's controls — frequency,
-gain, Q, a shape switch, an On switch; any can be left out — or **Guess**
-them from the parameters' names. Drag a band's colour swatch up or down to
+gain, Q, a shape switch, an On switch, its Solo and its Stereo placement;
+any can be left out — or **Guess** them from the parameters' names (it
+looks for 16 bands, and keeps what's been learned). Drag a band's colour swatch up or down to
 move it in the list; **Sort** puts the bands in the plugin's own order. A plugin's controls don't say what shape a
 band is, so ChannelView **learns** it: it puts a copy of the plugin on a
 hidden track between a pair of its own measuring plugins
@@ -1586,18 +1587,44 @@ ready once every band is learned; change a band's controls and it learns
 that band again.
 On the canvas, drag a node across for frequency (a switch snaps to its
 settings) and up or down for gain; the wheel turns Q; double-click takes
-the band out (flat, or off). Right-click a node for its shapes and its On
-switch, or Alt+wheel to step the shape. The nodes say what the plugin's
-own controls read. Where nodes sit together, band 1 is on top. A plugin
-with more band slots than bands in use (Pro-Q's *Used*) leaves an unused
-band off the canvas until you move it, which takes it into use;
-double-clicking a node takes it back out.
+the band out (flat, or off). Right-click a node for its shapes (a long
+list comes in groups, by model), its slope, its stereo placement and its
+On switch, or Alt+wheel to step the shape. The nodes say what the plugin's
+own controls read. Where nodes sit together, band 1 is on top. A band
+that isn't in use (Pro-Q's *Used* off) has no node. Over empty canvas a
+faint band shows what a double-click there adds, its shape by where it is
+(a high-pass at the bottom, then a low shelf, a bell, a high shelf, a
+low-pass at the top); double-click puts it in the next free band.
+
+**The spectrum.** An EQ canvas, ReaEQ's included, draws the track's
+spectrum behind its curve, from the track's TS_TrackProbe (2.6.0): the
+probe that measured gain reduction, input/output meters or Track Analyser
+put there. Rest the pointer on the spectrum's line for a moment and it
+holds, as a thick outline of the loudest it's been since you stopped, with
+nodes on its peaks. Drag from a peak for a new bell there (up boosts, down
+cuts); once you let go it's a band like any other. Move away and the
+outline fades.
+
+**Listening to a band.** Hover a band's node for a headphone button beside
+it, and hold it to hear that band alone. A plugin with a solo of its own
+for each band (Pro-Q 3 and 4) uses it; on any other, ReaEQ included, the
+track's probe plays only the band's part of the sound.
+
+**Stereo placement.** A band whose Stereo control is mapped has a letter
+by its node — L, R, M or S, none for stereo; click it for the next, or
+right-click ▸ *Stereo*. The main curve is the stereo bands'; each
+placement in use has its own curve, in its own colour.
 
 **ReEQ2** needs no learning: *Guess* (or a new EQ canvas) maps all 16 of
 its bands from ReEQ2's own formulas, its frequency, Q and slopes, its
 dynamics, and each of its 14 types drawn as ReEQ2 builds it. Its *Mode*
 works as in ReEQ2: *Off* takes a band out, *Disabled* turns it off. Its
 knobs read in Hz, Q, dB and dB/oct everywhere, without a layout too.
+
+**Ready to use.** Pro-Q 3 and 4, Kirchhoff-EQ and ReEQ2 come with their EQ
+canvas mapped and learned, and Pro-C 2, Pro-C 3 and Cenozoix Compressor
+with their compressor canvas mapped and measured. A plugin of these with
+no layout of its own opens on it.
 
 Bands can be any shape: bell, shelves, cuts at any slope up to 96 dB/oct
 and brickwall, notch, band pass, tilt shelf, flat tilt, flat top, sword and
@@ -1623,7 +1650,8 @@ Learning holds the dynamics off; the canvas draws each dynamic band's
 reach, with its range node to drag, and the picked band's level going in
 against its threshold. *DYN* on a band that isn't dynamic yet makes it
 dynamic, with a range of −3 dB to start; on one that is, it turns its
-dynamics on and off.
+dynamics on and off. Click a dynamic band's node for its dynamics
+controls; click empty canvas to put them away.
 
 **A compressor layout** maps roles to the plugin's controls: Threshold,
 Input, Ratio, Knee, Attack, Hold, Release, Make-up and Mix, each optional.
@@ -2213,8 +2241,8 @@ script into the action list.
 
 - Gain-reduction meters and traces need **TS_TrackProbe** on the track, as
   on the desktop.
-- The spectrum behind the ReaEQ canvas comes from **Track Analyser** while
-  it's running. Without it the canvas has no backdrop.
+- The spectrum behind an EQ canvas comes from the track's **TS_TrackProbe**
+  (2.6.0), as on the desktop. Without one the canvas has no backdrop.
 - Choices made on the page — collapsed panels, open traces and their
   windows, the mixer's height, whether the navigator and Actions bar show,
   which Macros and Modulators panels are open — are kept by the browser,
@@ -2249,6 +2277,12 @@ script into the action list.
   Modulated controls carry the same marks as on the desktop.
 - **ReaEQ:** drag a node for frequency and gain, double-tap empty space to
   add a band, tap a node to select it and set its type and Q underneath.
+- **EQ canvases** (ReaEQ's and the layouts'): touch and hold the spectrum
+  for its held outline and peak nodes, and drag from a peak for a new
+  bell. While a finger is down on empty space a faint band shows what a
+  double-tap adds there. A band's stereo letter steps its placement when
+  tapped, and its strip has a picker for it; each placement in use has its
+  own curve. Hold the headphone button in a band's strip to hear it alone.
 - **ReaComp:** the same canvas as on the desktop — drag the threshold line,
   the knee grips, the curve's end for ratio and the envelope's nodes; tap
   the Detector tab for the drawer.

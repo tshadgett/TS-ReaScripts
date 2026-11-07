@@ -1232,6 +1232,66 @@ if NEW then
   check("make-up: an older probe: moving it is a touch", rst() ~= r0, true)
 end
 
+-- ---------------------------------------------------------------- spectrum
+if NEW then
+  reset(); TP.invalidate(); TP.sync(track)
+  local B = 0x100000 + 3 * 128
+  local S = TP.SPEC_BASE + 3 * TP.SPEC_STRIDE
+  check("spectrum: none before the probe writes one", TP.spectrum(track), nil)
+  local h1 = gmem[B + 127]
+  check("spectrum: asked for (field 127)", h1 ~= nil and h1 ~= 0, true)
+  now_t = now_t + 0.05
+  TP.spectrum(track)
+  check("spectrum: asked for again: 127 moves", gmem[B + 127] ~= h1, true)
+  gmem[S] = 1; gmem[S + 1] = 4; gmem[S + 2] = 20; gmem[S + 3] = 20000; gmem[S + 5] = 4
+  for i = 0, 3 do gmem[S + 16 + i] = -10 * (i + 1) end
+  now_t = now_t + 0.05
+  local s = TP.spectrum(track)
+  check("spectrum: this track's", s and (s.n .. " " .. s.lo .. " " .. s.hi .. " " .. s.db[1] .. " " .. s.db[4]), "4 20 20000 -10 -40")
+  gmem[S + 5] = 5; now_t = now_t + 0.05
+  check("spectrum: another track's place: none", TP.spectrum(track), nil)
+  gmem[S + 5] = 4; now_t = now_t + 2
+  check("spectrum: not moving for a second: none", TP.spectrum(track), nil)
+  gmem[S] = 2; now_t = now_t + 0.05
+  check("spectrum: moving again", TP.spectrum(track) ~= nil, true)
+  -- an older probe: Track Analyser's, only while it shows this track
+  gmem[S] = 0
+  for i = 0, 15 do gmem[0x20000 + i] = 0 end
+  gmem[0x20000] = 7; gmem[0x20000 + 11] = 1; gmem[0x20000 + 16] = 2
+  gmem[0x20000 + 17] = 20; gmem[0x20000 + 18] = 20000
+  gmem[0x20000 + 16384] = -12; gmem[0x20000 + 16388] = -24
+  gmem[B + 3] = 0; now_t = now_t + 2
+  check("spectrum: Track Analyser's, another track shown: none", TP.spectrum(track), nil)
+  gmem[B + 3] = 1; gmem[0x20000] = 8; now_t = now_t + 0.05
+  s = TP.spectrum(track)
+  check("spectrum: Track Analyser's, this track shown", s and (s.n .. " " .. s.db[1] .. " " .. s.db[2]), "2 -12 -24")
+  gmem[B + 3] = 0
+  -- listening to a band: only through a probe that writes its own spectrum
+  gmem[S] = 0; now_t = now_t + 2; TP.spectrum(track)
+  check("listen: an older probe can't", TP.listen(track, 1000, 2, 0), false)
+  gmem[S] = 5; gmem[S + 5] = 4; now_t = now_t + 0.05; TP.spectrum(track)
+  check("listen: this one can", TP.listen(track, 1000, 2, 1), true)
+  local c1 = gmem[S + 8]
+  check("listen: what's heard", ("%s %s %s"):format(gmem[S + 6], gmem[S + 7], gmem[S + 9]), "1000 2 1")
+  TP.listen(track, 1000, 2, 1)
+  check("listen: moving while held", gmem[S + 8] ~= c1, true)
+  TP.listen(track)
+  check("listen: let go", gmem[S + 6], 0)
+  -- held from the web page: kept while it keeps coming, let go after
+  gmem[S] = 6; now_t = now_t + 0.05; TP.spectrum(track)
+  TP.listen_hold("a", track, function() return 2000, 1.5, 0 end)
+  TP.listen_tick()
+  check("listen hold: heard", gmem[S + 6], 2000)
+  now_t = now_t + 0.2; TP.listen_hold("a", track, function() return 2000, 1.5, 0 end); TP.listen_tick()
+  check("listen hold: kept while it comes", gmem[S + 6], 2000)
+  now_t = now_t + 0.5; TP.listen_tick()
+  check("listen hold: let go when it stops", gmem[S + 6], 0)
+  local sw = {}
+  TP.listen_hold("b", track, nil, function(on) sw[#sw + 1] = tostring(on) end)
+  TP.listen_release("b")
+  check("listen hold: the band's own Solo, on and off", table.concat(sw, ","), "true,false")
+end
+
 -- ---------------------------------------------------------------- records
 check("v2 round trip", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")),
       "v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")

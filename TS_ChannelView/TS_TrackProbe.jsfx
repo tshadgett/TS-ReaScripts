@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.5.1
+version: 2.6.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -54,6 +54,10 @@ author: Tim Shadgett
 //   0x340000   one tap's stereo scope (STEREO, ONE TAP)
 //   0x350000   each tap's levels per channel, + (track index + 1) * 64
 //              (LEVELS PER CHANNEL)
+//   0x3A0000   each track's spectrum for ChannelView, + (track index + 1)
+//              * 272 (A SPECTRUM PER TRACK)
+//   0x4C0000   where a probe that isn't publishing writes its block, so
+//              it never lands on the one Track Analyser reads
 //   73         tap heartbeat, bumped by any reader
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
@@ -93,6 +97,9 @@ author: Tim Shadgett
 //    122  the stereo tap's correlation   123..124  its mid and side (dBFS, RMS)
 //    125  1: this probe measures stereo (nothing from older ones)
 //    126  1: this probe follows make-up gain (nothing from older ones)
+//   The scripts write:
+//    127  moving while ChannelView shows this track's spectrum (A
+//         SPECTRUM PER TRACK)
 //   Taps 5..8 sit apart from 1..4 so that a script or probe that knows
 //   only four finds 1..4 where it expects them. The names are those of
 //   the readings; the probe keeps them in TV_* (one per tap).
@@ -302,6 +309,31 @@ author: Tim Shadgett
 //   zero, dB (below 0 is reduction, -999 no signal), [72 + b] the level
 //   going in, dBFS. A third of the cost of the tap's filterbank.
 //
+// A SPECTRUM PER TRACK
+//   Track Analyser's spectrum is one track's at a time (Publish), in the
+//   PRE / POST blocks. ChannelView shows spectra behind its EQ canvases
+//   on any track it has on screen at once: channel view, the rack, its
+//   pop-outs. While block field 127 keeps moving (written by whatever
+//   draws that track's EQ canvas), the post probe runs its spectrum and
+//   writes it at 0x3A0000 + (track index + 1) * 272: [0] a count that
+//   moves with every frame, [1] bands (256), [2] lowest and [3] highest
+//   frequency, [4] FFT size, [5] the track index + 2 (who wrote it), and
+//   from [16] each band's level, dB, as Track Analyser's band field 0.
+//   Tracks to index 4094. A second without field 127 moving and it stops.
+//
+//   A probe running its spectrum for the Visualizer or for ChannelView,
+//   but not for Track Analyser, writes its own block at 0x4C0000 rather
+//   than over the PRE / POST block Track Analyser is reading.
+//
+// LISTENING TO A BAND
+//   The same place, written by ChannelView: [6] a frequency (Hz), [7] a
+//   Q, [8] a count that moves while someone listens, [9] what's heard:
+//   0 the band about the frequency (a band-pass, two sections, of that
+//   Q), 1 below it (a low-pass), 2 above it (a high-pass). While [8]
+//   moves and [6] is above 0, the post probe's output is that alone,
+//   faded in and out over 10 ms; a quarter of a second without [8]
+//   moving and it lets go. Its own analysis is of the audio before.
+//
 // MAKE-UP GAIN, FOLLOWED
 //   A plugin's make-up (or output) gain moves every band's after/before
 //   ratio by the same amount, and would read as reduction, or hide it.
@@ -491,6 +523,13 @@ out_pin:right
   // ring (L R pairs, here) and where it's published
   PB_ST = 25; PB_CORR = 122; PB_STM = 123; PB_STS = 124; PB_STCAP = 125;
   PB_MUG = 26; PB_MUG2 = 58; PB_MBMUG = 30; PB_MBMUG2 = 62; PB_MUGCAP = 126;
+  // A SPECTRUM PER TRACK
+  PB_CVSPEC = 127; CVS_BASE = 0x3A0000; CVS_STRIDE = 272; CVS_TRACKS = 4096; CVS_OFF_BAND = 16;
+  SINK_BASE = 0x4C0000;
+  cvs_v = cvs_last = 0; cvs_age = 1000000000; cvs_seq = 0; cv_active = 0;
+  lsn_hb = lsn_last = 0; lsn_age = 1000000000; lsn_on = 0; lsn_mix = 0;
+  lsn_f = lsn_q = lsn_k = -1;
+  lsn_l1 = lsn_l2 = lsn_l3 = lsn_l4 = lsn_r1 = lsn_r2 = lsn_r3 = lsn_r4 = 0;
   CTRL_STTRK = 77;
   CTRL_NOZERO = 78; // moving: ChannelView is learning a plugin (THE ZERO POINT)
   STH_BASE = 0x340000; STP_BASE = 0x340010; STP_N = 512;
@@ -1538,7 +1577,9 @@ out_pin:right
       tap_fine = gmem[pb + PB_FINE];
       tap_watch = gmem[pb + PB_WATCH];
       tap_st = gmem[pb + PB_ST];
+      cvs_v = gmem[pb + PB_CVSPEC];
     ) : (
+      cvs_v = cvs_last;
       tap_n = 0; tap_mb = 0; tap_fine = 0; tap_watch = 0; tap_st = 0;
       k = 0; loop(TAP_MAX, TV_MUG[k] = 0; k += 1; );
       k = 0; loop(4, MB_MUG[k] = 0; k += 1; );
@@ -1577,7 +1618,40 @@ out_pin:right
 @block
 
   readControl();
-  base = role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
+  // (not publishing for Track Analyser: a block of its own, A SPECTRUM
+  // PER TRACK)
+  base = publish < 0.5 ? SINK_BASE : role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
+  // ChannelView wants this track's spectrum while field 127 moves
+  cvs_v != cvs_last ? ( cvs_last = cvs_v; cvs_age = 0; ) : cvs_age += samplesblock;
+  cv_active = role == 1 && cvs_last != 0 && cvs_age < srate && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
+  cbase = CVS_BASE + (pl_tr + 1) * CVS_STRIDE;
+  // ChannelView listening to a band (LISTENING TO A BAND)
+  lsn_ok = role == 1 && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
+  lsn_hb = lsn_ok ? gmem[cbase + 8] : 0;
+  lsn_hb != lsn_last ? ( lsn_last = lsn_hb; lsn_age = 0; ) : lsn_age += samplesblock;
+  lsn_on = lsn_ok && lsn_last != 0 && lsn_age < srate * 0.25 && gmem[cbase + 6] > 0;
+  lsn_on ? (
+    lsn_nf = max(10, min(gmem[cbase + 6], srate * 0.45));
+    lsn_nq = max(0.1, min(gmem[cbase + 7], 40));
+    lsn_nk = gmem[cbase + 9];
+    (lsn_nf != lsn_f || lsn_nq != lsn_q || lsn_nk != lsn_k) ? (
+      lsn_f = lsn_nf; lsn_q = lsn_nq; lsn_k = lsn_nk;
+      lsn_w = 2 * $pi * lsn_f / srate; lsn_c = cos(lsn_w);
+      lsn_k == 0 ? (
+        lsn_al = sin(lsn_w) / (2 * lsn_q);
+        lsn_b0 = lsn_al; lsn_b1 = 0; lsn_b2 = -lsn_al;
+      ) : (
+        lsn_al = sin(lsn_w) / (2 * 0.7071);
+        lsn_k == 1 ? ( lsn_b0 = (1 - lsn_c) / 2; lsn_b1 = 1 - lsn_c; )
+                   : ( lsn_b0 = (1 + lsn_c) / 2; lsn_b1 = -(1 + lsn_c); );
+        lsn_b2 = lsn_b0;
+      );
+      lsn_a0 = 1 + lsn_al;
+      lsn_b0 /= lsn_a0; lsn_b1 /= lsn_a0; lsn_b2 /= lsn_a0;
+      lsn_a1 = -2 * lsn_c / lsn_a0; lsn_a2 = (1 - lsn_al) / lsn_a0;
+    );
+  );
+  lsn_inc = 1 / (0.01 * srate);
 
   // vis_slot is a real 0..15 claim only while TS_Visualizer is watching
   // this instance; -1 means "not right now". Like Track Analyser's own
@@ -1589,7 +1663,7 @@ out_pin:right
   // Visualizer watches several tracks at once, where Track Analyser's
   // Publish arms one pair at a time, driven by panel selection. The
   // Visualizer path does not touch Publish and is not touched by it.
-  active = role >= 0 && (publish >= 0.5 || vis_active);
+  active = role >= 0 && (publish >= 0.5 || vis_active || cv_active);
 
   active ? (
     // What size does the panel want? Fall back to something sane if it has
@@ -1651,6 +1725,11 @@ out_pin:right
     // instance's own PRE/POST/CMP block above -- Track Analyser's panel
     // reads that block and must never see a value change because a
     // different tool claimed a slot.
+    cv_active ? (
+      gmem[cbase + 1] = BANDS; gmem[cbase + 2] = BAND_LO;
+      gmem[cbase + 3] = BAND_HI; gmem[cbase + 4] = fftsz;
+      gmem[cbase + 5] = pl_tr + 2;
+    );
     vis_active ? (
       vbase = VIS_SLOT_BASE + vis_slot * VIS_SLOT_STRIDE;
       vis_slot != vis_slotn ? (
@@ -2082,6 +2161,7 @@ out_pin:right
         // layout directly, so band bi means the same frequency range on
         // both sides of the bridge.
         vis_active ? gmem[vbase + VIS_OFF_BAND + bi] = dmax;
+        cv_active ? gmem[cbase + CVS_OFF_BAND + bi] = dmax;
         // Whether this band has a value at all. With the left edge held
         // from bin 1 the only bands that fail this are the ones above
         // Nyquist, where a floor is the truth. A band with no value is
@@ -2167,6 +2247,7 @@ out_pin:right
       seq += 1;
       gmem[base + H_SEQ] = seq;
       vis_active ? ( vis_seq += 1; gmem[vbase + VIS_H_SEQ] = vis_seq; );
+      cv_active ? ( cvs_seq += 1; gmem[cbase] = cvs_seq; );
 
       memcpy(BUF_ACC, BUF_ACC + hop, hop);
       fill = hop;
@@ -2254,6 +2335,19 @@ out_pin:right
         tw_n += 1; gmem[TW_HDR + 5] = tw_n;
       );
     );
+  );
+
+  // Listening to a band: the output that alone, faded in and out (two
+  // sections, transposed direct form II, each channel)
+  (lsn_on || lsn_mix > 0) ? (
+    lsn_mix = lsn_on ? min(1, lsn_mix + lsn_inc) : max(0, lsn_mix - lsn_inc);
+    lsn_y = lsn_b0 * spl0 + lsn_l1; lsn_l1 = lsn_b1 * spl0 - lsn_a1 * lsn_y + lsn_l2; lsn_l2 = lsn_b2 * spl0 - lsn_a2 * lsn_y;
+    lsn_z = lsn_b0 * lsn_y + lsn_l3; lsn_l3 = lsn_b1 * lsn_y - lsn_a1 * lsn_z + lsn_l4; lsn_l4 = lsn_b2 * lsn_y - lsn_a2 * lsn_z;
+    spl0 += (lsn_z - spl0) * lsn_mix;
+    lsn_y = lsn_b0 * spl1 + lsn_r1; lsn_r1 = lsn_b1 * spl1 - lsn_a1 * lsn_y + lsn_r2; lsn_r2 = lsn_b2 * spl1 - lsn_a2 * lsn_y;
+    lsn_z = lsn_b0 * lsn_y + lsn_r3; lsn_r3 = lsn_b1 * lsn_y - lsn_a1 * lsn_z + lsn_r4; lsn_r4 = lsn_b2 * lsn_y - lsn_a2 * lsn_z;
+    spl1 += (lsn_z - spl1) * lsn_mix;
+    lsn_mix <= 0 ? ( lsn_l1 = lsn_l2 = lsn_l3 = lsn_l4 = lsn_r1 = lsn_r2 = lsn_r3 = lsn_r4 = 0; );
   );
 
   // The pre probe, while the zero is measured: the input is looked at

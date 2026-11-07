@@ -397,7 +397,7 @@ local function bar_settings(ctx, bar)
   flow(ctx, "place", 14)
   ST.cap(ctx, "Place")
   ImGui.SetNextItemWidth(ctx, 190)
-  if ImGui.BeginCombo(ctx, "##aeplace", DR.SIDE_NAME[d.side]) then
+  if ImGui.BeginCombo(ctx, "##aeplace", DR.SIDE_NAME[d.side], ImGui.ComboFlags_HeightLargest) then
     for _, p in ipairs(DR.PLACES) do
       local label = DR.SIDE_NAME[p]
       local e = DR.SINGLE[p] and DR.at(p)
@@ -436,7 +436,7 @@ local function bar_settings(ctx, bar)
     local cur = d.size or DR.SIZE_DEF
     local cur_name = cur .. " px"
     for _, z in ipairs(DR.SIZES) do if z[2] == cur then cur_name = z[1] end end
-    if ImGui.BeginCombo(ctx, "##aesize", cur_name) then
+    if ImGui.BeginCombo(ctx, "##aesize", cur_name, ImGui.ComboFlags_HeightLargest) then
       for _, z in ipairs(DR.SIZES) do
         if ImGui.Selectable(ctx, z[1] .. "##aesz" .. z[2], cur == z[2]) then d.size = z[2]; DR.save() end
       end
@@ -487,7 +487,7 @@ local function bar_settings(ctx, bar)
       local cur = d[f[1]] or ""
       local cur_name = f[3][1][2]
       for _, m in ipairs(f[3]) do if m[1] == cur then cur_name = m[2] end end
-      if ImGui.BeginCombo(ctx, "##ae" .. f[1], cur_name) then
+      if ImGui.BeginCombo(ctx, "##ae" .. f[1], cur_name, ImGui.ComboFlags_HeightLargest) then
         for _, m in ipairs(f[3]) do
           if ImGui.Selectable(ctx, m[2] .. "##ae" .. f[1] .. m[1], cur == m[1]) then d[f[1]] = m[1]; DR.save() end
         end
@@ -503,7 +503,7 @@ local function bar_settings(ctx, bar)
     ImGui.SetNextItemWidth(ctx, 110)
     local cur_name = "Floating"
     for _, k in ipairs(DR.DOCKS) do if k[2] == (d.dock or 0) then cur_name = k[1] end end
-    if ImGui.BeginCombo(ctx, "##aedock", cur_name) then
+    if ImGui.BeginCombo(ctx, "##aedock", cur_name, ImGui.ComboFlags_HeightLargest) then
       for _, k in ipairs(DR.DOCKS) do
         if ImGui.Selectable(ctx, k[1] .. "##aedk" .. k[2], (d.dock or 0) == k[2]) then d.dock, d.dock_req = k[2], k[2]; DR.save() end
       end
@@ -570,7 +570,7 @@ local function item_props(ctx, tb, web)
         local b = DR.by_id(sw)
         cur = b and DR.name_of(b) or ("Bar " .. sw .. " (removed)")
       end
-      if ImGui.BeginCombo(ctx, "##aeswitch", cur) then
+      if ImGui.BeginCombo(ctx, "##aeswitch", cur, ImGui.ComboFlags_HeightLargest) then
         if ImGui.Selectable(ctx, "A menu of every bar##aeswm", sw == "menu") then
           it.cmd = TB.switch_cmd(nil); tb.save()
         end
@@ -780,7 +780,7 @@ local function vendor_settings(ctx, k, v)
   if ch then v.init = (txt:gsub("[;|]", "")):sub(1, 5); changed = true end
   ImGui.TableNextColumn(ctx)
   ImGui.SetNextItemWidth(ctx, -1)
-  if ImGui.BeginCombo(ctx, "##aevl" .. k, VN.LOOK_NAMES[v.look] or VN.LOOK_NAMES.none) then
+  if ImGui.BeginCombo(ctx, "##aevl" .. k, VN.LOOK_NAMES[v.look] or VN.LOOK_NAMES.none, ImGui.ComboFlags_HeightLargest) then
     for _, l in ipairs(VN.LOOKS) do
       if ImGui.Selectable(ctx, VN.LOOK_NAMES[l], v.look == l) then v.look = l; changed = true end
     end

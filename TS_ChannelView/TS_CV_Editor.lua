@@ -663,7 +663,7 @@ local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row, m
       if on[k] then names[#names + 1] = ((e.text or tostring(k)):gsub("%z", "")) end
     end
     ImGui.SetNextItemWidth(ctx, val_w)
-    if ImGui.BeginCombo(ctx, id .. "v", table.concat(names, ", ")) then
+    if ImGui.BeginCombo(ctx, id .. "v", table.concat(names, ", "), ImGui.ComboFlags_HeightLargest) then
       for k, e in ipairs(list) do
         if ImGui.Checkbox(ctx, ((e.text or tostring(k)):gsub("%z", "")) .. "##" .. k, on[k] or false) then
           local was = on[k]
@@ -1458,7 +1458,7 @@ local function draw_layout_row(ctx, track)
   ST.cap(ctx, "Layout")
   ImGui.SetNextItemWidth(ctx, 180)
   local dflt = M.default_variant(base)
-  if ImGui.BeginCombo(ctx, "##edlayout", cur or "Standard") then
+  if ImGui.BeginCombo(ctx, "##edlayout", cur or "Standard", ImGui.ComboFlags_HeightLargest) then
     local list = { { name = nil, label = "Standard" .. (dflt == nil and "  (default)" or "") } }
     for _, nm in ipairs(M.variants(base)) do
       list[#list + 1] = { name = nm, label = nm .. (dflt == nm and "  (default)" or "") }
@@ -1624,7 +1624,7 @@ local function draw_meters(ctx)
     ImGui.SameLine(ctx)
     local mf = TP.measured_first()
     ImGui.SetNextItemWidth(ctx, 150)
-    if ImGui.BeginCombo(ctx, "##grreading", mf and "Measured" or "The plugin's own") then
+    if ImGui.BeginCombo(ctx, "##grreading", mf and "Measured" or "The plugin's own", ImGui.ComboFlags_HeightLargest) then
       if ImGui.Selectable(ctx, "Measured", mf) and not mf then TP.set_measured_first(true) end
       if ImGui.Selectable(ctx, "The plugin's own", not mf) and mf then TP.set_measured_first(false) end
       ImGui.EndCombo(ctx)

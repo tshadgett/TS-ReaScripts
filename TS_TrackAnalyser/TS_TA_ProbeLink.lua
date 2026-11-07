@@ -81,6 +81,7 @@ PL.F = {
   st_side  = { off = 124 },
   st_cap   = { off = 125 },               -- 1: the probe measures stereo
   mug_cap  = { off = 126 },               -- 1: the probe follows make-up gain
+  cv_spec  = { off = 127 },               -- moving: ChannelView shows its spectrum (2.6.0+)
 }
 -- A field's place in the block: the i-th (0-based) of it, taps 5..8 apart
 local function at(f, i)

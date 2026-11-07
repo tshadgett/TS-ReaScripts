@@ -1,5 +1,42 @@
 # ChannelView — changelog
 
+## 4.0.3 — EQ canvases: spectrum grab, band listen, stereo placement
+
+### ChannelView
+
+- **Dropdowns open to their whole list**, as far as the screen allows.
+- A stepped control with only some of its settings named (Cenozoix's
+  *Style*) lists the named ones.
+- **TS_TrackProbe 2.6.0** comes with it: the track's own spectrum, and a
+  band of it to listen to, for the EQ canvases. Reopen a project after
+  updating, so the new probe runs.
+
+### ChannelView Pro
+
+- **The track's spectrum** behind every EQ canvas, ReaEQ's included, from
+  the track's probe. Rest the pointer on its line and it holds, with
+  nodes on its peaks: drag from one for a new bell there.
+- **Listen to a band:** hover a node for a headphone button, and hold it
+  to hear that band alone. Pro-Q 3 and 4 use their own solo; any other EQ
+  is listened to through the track's probe.
+- **Stereo placement:** a band's letter (L, R, M or S) by its node steps it
+  when clicked, and right-click ▸ *Stereo* picks it. Each placement in use
+  has its own curve.
+- **Double-click empty canvas** on any EQ layout adds a band in the next
+  free slot, its shape by where it is, with a faint preview first. A band
+  not in use has no node.
+- **Ready to use:** Pro-Q 3 and 4, Kirchhoff-EQ and ReEQ2 open on an EQ
+  canvas already learned, and Pro-C 2, Pro-C 3 and Cenozoix Compressor on
+  a compressor canvas already measured, when they have no layout of their
+  own.
+- A long list of shapes (Kirchhoff-EQ's) comes in groups, by model.
+- *Guess from names* looks for 16 bands, maps Solo and Stereo (new columns
+  in the setup) and keeps what's been learned.
+- A dynamic band's dynamics controls show when its node is clicked.
+- **Web page:** the spectrum on its EQ canvases, held by touch and hold;
+  double-tap adds a band, with a faint preview; stereo letters, a
+  placement picker and curves; a headphone button in a band's strip.
+
 ## 4.0.2 — make-up gain, button grids, audio envelopes
 
 ### ChannelView

@@ -891,7 +891,7 @@ local function page_faders(ctx)
       ImGui.TableNextColumn(ctx)
       ImGui.SetNextItemWidth(ctx, 120)
       if ImGui.BeginCombo(ctx, "##vo_fs" .. c.key,
-          d.style and style_label(C.FADER_STYLES, d.style, "Flat") or (c.key == "default" and "Plain" or "As Default")) then
+          d.style and style_label(C.FADER_STYLES, d.style, "Flat") or (c.key == "default" and "Plain" or "As Default"), ImGui.ComboFlags_HeightLargest) then
         if ImGui.Selectable(ctx, (c.key == "default") and "Plain" or "As Default", d.style == nil) then
           TO.set_fader_default(c.key, "style", nil, true)
         end
@@ -957,7 +957,7 @@ local function font_row(ctx, tab, s, p, first)
   row(ctx, "Font")
   local cur = s[p .. "_font"]
   ImGui.SetNextItemWidth(ctx, 200)
-  if ImGui.BeginCombo(ctx, "##vo_ff" .. p, cur or first) then
+  if ImGui.BeginCombo(ctx, "##vo_ff" .. p, cur or first, ImGui.ComboFlags_HeightLargest) then
     if ImGui.Selectable(ctx, first, cur == nil) then set(tab, p .. "_font", nil); other_name[p] = nil end
     ImGui.Separator(ctx)
     for _, n in ipairs(FONT_LIST) do
@@ -1056,7 +1056,7 @@ local function preset_bar(ctx, tab)
   end
   ImGui.SameLine(ctx, 0, 2)
   ImGui.SetNextItemWidth(ctx, 220)
-  if ImGui.BeginCombo(ctx, "##vo_plist", cur .. (modified(tab) and " *" or "")) then
+  if ImGui.BeginCombo(ctx, "##vo_plist", cur .. (modified(tab) and " *" or ""), ImGui.ComboFlags_HeightLargest) then
     ImGui.TextDisabled(ctx, "Built in")
     for _, p in ipairs(VO.BUILTIN) do
       if ImGui.Selectable(ctx, p.name, p.name == cur) then apply_preset(tab, p.name) end

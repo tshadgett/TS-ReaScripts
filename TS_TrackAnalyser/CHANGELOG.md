@@ -1,5 +1,11 @@
 # Track Analyser — changelog
 
+## 2.7.2 — TS_TrackProbe 2.6.0
+
+- **TS_TrackProbe 2.6.0:** each track's probe can send its own spectrum
+  and can play one band of the track, for ChannelView 4.0.3's EQ canvases.
+  Reopen a project after updating, so the new probe runs.
+
 ## 2.7.1 — TS_TrackProbe 2.5.1
 
 - **TS_TrackProbe 2.5.1:** a measured plugin's make-up gain is taken out

@@ -888,6 +888,145 @@ off by the whole move. The zero learnt from the music, ±6 dB: 0.02 dB.
 A two-band split with the low band's gain dropping 6 dB: −0.2 dB on the
 tap, −0.1 on the band. Every older test reads the same as 2.5.0.
 
+## A spectrum per track, and the spectrum grab (TS_TrackProbe 2.6.0)
+
+Every EQ canvas (ReaEQ, mapped, the role canvases) draws the track's own
+spectrum, TP.spectrum(tr). Each call (once per track per frame) moves
+field 127 of the track's probe block; while it moved within the last
+second, the post probe runs its spectrum and writes it at 0x3A0000 +
+(track index + 1) * 272: [0] a count moving with every frame, [1] bands,
+[2] lowest and [3] highest frequency, [4] FFT size, [5] track index + 2,
+[16..] dB per band. TP.spectrum takes it only while [5] is this track and
+[0] moved in the last second, so the channel view, the rack and pop-outs
+each see their own track. A probe driven only by ChannelView or the
+Visualizer writes its Track Analyser block to a sink (0x4C0000), so it
+can't overwrite the track Track Analyser is showing. With an older probe:
+Track Analyser's POST spectrum, but only while it publishes this track
+(pub_post on its block).
+
+The grab (EQP.util.grab, called after a canvas's background button):
+the pointer on the spectrum's line for 0.8 s shows the hold: anywhere
+from 12 px below the live line to 12 px above the loudest it has been
+since the pointer got there (the live line jumps with the music, so the
+live line alone would keep restarting the wait). The hold is that
+loudest, still building, drawn as a thick outline with a fill fading to
+the foot, the live spectrum dimmed under it. Its peaks get nodes (local
+highs above −70 dB standing 6 dB clear of the lowest point within 12
+bands either side, the loudest 8, none within 8 bands of a louder one,
+refined between bands by a parabola). Pressing within 10 px of a node
+drags it: gain only, from the press point, ±EQ_GAIN_RANGE over half the
+canvas. Let go at 0.5 dB or more: ReaEQ adds a bell there (add_node,
+with the gain and Q corrected as for a double-click); a mapped canvas
+takes its first band not in use, else the first turned off by its own
+switch, that has frequency and gain and can be a bell (put_bell: into
+use, a bell shape, frequency, gain, on; one undo point). None free:
+"every band is in use", and nothing changes. The hold fades in over
+0.2 s, and fades out over 0.35 s once the pointer has been away for half
+a second: 60 px outside the span from the live line to the outline (no
+node near), off the canvas or on a band's node. Back within the half
+second, it stays; back while it fades, it fades in again. After a grab
+it fades out at once and isn't shown again until it's waited for again. While it shows, the double-click preview is
+hidden; a double-click still adds a band.
+
+A dynamic EQ's panel on a mapped canvas (draw_dyn_box) shows only for
+the band last clicked (ps.dopen: a press and release within 3 px on a
+dynamic band's node); a click on that node again or on empty canvas
+hides it. The panel takes its whole area as an item, so a click on it
+isn't one on the canvas and the grab doesn't wake under it.
+
+Offline (loose_eel, the probe's code, a 1 kHz tone): the per-track place
+carries its peak at 1014 Hz, with Track Analyser's block untouched unless
+published; the tap tests read the same as 2.5.1.
+
+## A band alone: Solo, or the probe's listen
+
+Every EQ canvas (EQP.util.solo; ReaEQ's and the mapped ones, small
+curves too). A mapped EQ band's Solo control (Band<k>'s 8th field;
+guessed from "... Solo", Pro-Q 3 and 4) or, without one (ReaEQ,
+Kirchhoff-EQ), the track's post probe: a hovered band shows a headphone
+button 22 px above its node (below, near
+the top), for 0.6 s after the pointer leaves the node or the button.
+Held, it soloes: the band's Solo switched on until it's let go, or
+TP.listen each frame (TS_TrackProbe 2.6.0, LISTENING TO A BAND: [6..9]
+of the track's place at 0x3A0000; the probe lets go a quarter of a
+second after the count stops). What's heard without a Solo: two
+band-pass sections at the band's frequency and Q (at least 0.5), or
+below the frequency for a low cut or low shelf, above it for a high cut
+or high shelf; the canvas shades it. The listen is offered only where
+the probe writes its own spectrum (TP.can_listen), i.e. a 2.6.0 probe
+while the canvas is drawn. Kirchhoff-EQ has no Solo (its paramdump: 28
+controls a band, none a solo), so it listens through the probe.
+
+Guess from names keeps the learning of a band on the same frequency and
+gain controls (CS.keep_learned): its learning signature leaves Slope and
+Solo out, so adding them doesn't ask for learning again. A first guess
+takes 16 numbered bands (ME.GUESS_BANDS).
+
+Offline (loose_eel, the probe's code, 100 Hz + 5 kHz at 0.5 each): the
+band about 5 kHz, Q 2: 0.000 / 0.500; about 100 Hz: 0.500 / 0.000;
+below 1 kHz: 0.500 / 0.001; above it: 0.000 / 0.499; the count stopped:
+both 0.500 again.
+
+## A new band on a mapped EQ canvas
+
+As on ReaEQ's: hovering empty canvas shows a faint band of the shape a
+double-click adds there (RQ.infer_type by frequency: low cut, low shelf,
+bell, high shelf, high cut; a cut at 0 dB, the rest at the pointer's
+gain). A double-click puts it in the next free band (free_band: not in
+use, else off by its own switch; one with that very type among its
+shapes first, else its family; frequency, and gain unless it's a cut),
+one undo point. None free: "every band is in use". A spectrum grab takes
+a bell the same way.
+
+## The EQ canvases on the web page
+
+- Both canvases (ReaEQ's, a mapped EQ's) draw the track's own spectrum
+  (vals.sp, from TP.spectrum: the bridge keeps it asked for while an EQ
+  canvas is shown). vals.ls: a band can be heard through the probe.
+- Spectrum grab by touch (specGrab): hold an empty spot still (12 px)
+  for half a second; the spectrum held, the loudest since, with peak
+  nodes; it stays after the finger lifts. Drag from a node: gain from
+  where it's touched; let go at 0.5 dB or more: mqadd|guid|hz|db|bell (a
+  mapped EQ) or eqadd|guid|hz|db|2 (ReaEQ). A tap elsewhere or 8 s
+  untouched hides it.
+- Double-tap empty canvas: mqadd with the family for where it is (the
+  bridge: ME.infer_fam, ME.free_band, ME.put_band; "Every band is in
+  use" when none is free), or ReaEQ's eqadd. A faint band of that type
+  shows while the finger is down.
+- Stereo placement: each band's pl (l, r, m, s) and sti; the layout's
+  st (the settings' names). A tag on the node's left (a tap: mqst to the
+  next setting), a picker in the strip, a curve per placement as on the
+  desktop.
+- Solo: a headphone button in the strip (a band with its own Solo, or
+  vals.ls). Held, it sends mqsolo|guid|band|1 (eqsolo|guid|type|index|1
+  for ReaEQ) every 120 ms, 0 on letting go; the bridge's TP.listen_hold
+  switches the band's Solo on, or listens through the probe each cycle
+  (TP.listen_tick), and lets go 0.35 s after the messages stop.
+
+## Stereo placement of EQ bands
+
+A band's Stereo placement control (Band<k>'s 9th field; guessed from
+"... Stereo Placement": Pro-Q 3 and 4, Kirchhoff-EQ, also in the known
+plugins' bands) is read by name each frame: Left, Right, Mid, Side, or
+anything else (Stereo) for none. A placed band shows its letter in a
+tag on its node's left (a stereo one a faint "St" while the node or tag
+is hovered); a click steps it round the control's settings
+(ME.live_positions), and the right-click menu lists them. With any band
+placed, the curve is the stereo bands' alone, and each placement in use
+has a curve of its own in its colour (PLACE_COL: left, right, mid,
+side): the stereo bands plus its own.
+
+## Long shape lists, by model
+
+ME.shape_groups groups a band's shapes when there are 8 or more and two
+or more start with the same word that isn't a shape word (Low, High,
+Flat, Band, Tilt, All, Bell...): Kirchhoff-EQ's 47 types come out as
+Standard (the unprefixed ones, first), E, G, BritN, 250, VT, Tone, Wall,
+Allpass and Blue. Pro-Q's ten stay one list. The node's right-click menu
+shows a submenu per group, the one in use naming its shape; the web page
+gets each setting's group (shg) and its name without the model, and its
+picker uses an optgroup per group.
+
 ## Console setup (Pro)
 
 - Each console is a description in TS_CV_Consoles.lua (CO.LIST): its
@@ -996,3 +1135,29 @@ tap, −0.1 on the band. Every older test reads the same as 2.5.0.
   Off.
 - Learn runs inside the layout's ranges (CanvasSetup round LN.step), so a
   plugin given custom ranges in Hz, dB and Q learns the quick way.
+
+## Plugins ChannelView knows: ready canvases (M.KNOWN)
+
+- M.KNOWN lists the plugins whose canvas comes ready, by the layout key's
+  plugin (`base`, or `find` in it): ReEQ2, Pro-Q 3 and 4, Kirchhoff-EQ
+  (EQ); Pro-C 2 and 3, Cenozoix Compressor (compressor).
+- A plugin with no layout of its own gets its canvas in its generated
+  default (M.known_default, Pro): an EQ's alone, a compressor's with the
+  plugin's other controls beside it. An EQ only once its learning is
+  known.
+- EQ bands by name (TS_CV_MapEQ KNOWN_EQ): the first 16 bands, each field
+  the band's name start plus the rest ("Band 1 " + "Frequency"; Kirchhoff
+  "Band1 " + "Freq."), and the plugin told apart by a name only it has.
+  Each carries the plugin's Learn line, taken once from learning a band
+  (every band alike): Pro-Q 3's and 4's, and Kirchhoff-EQ's 47 types with
+  their measured shapes (its latest learning, 7 Nov).
+- Compressors by parameter number, each role's name checked
+  (M.known_comp), with ThrCal / AtkCal / RelCal from measuring once:
+  Pro-C 2's and 3's threshold, attack and release; Cenozoix's threshold
+  and attack (the Compressor 2 layout's, its Dry Mix reversed).
+- M.known_learned gives a layout of theirs made before what it lacks: an
+  EQ band on frequency and gain not learned gets the learning; a
+  compressor whose threshold or attack is on the same control gets its
+  measuring. Canvas setup's guesses come from the same (CS.guess, and
+  Guess from names keeps a band's own learning only when the guess has
+  none).

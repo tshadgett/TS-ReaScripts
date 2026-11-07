@@ -232,7 +232,8 @@
   columns beside it.
       Canvas=eq|<all bands' On param, or ->
       Canvas=comp | multi|<bands> | gate | limit | deess | delay | reverb | env | mod | sat
-      Band<k>=<name>|<freq>|<gain>|<Q>|<shape switch>|<On>[|<slope>]   (k 1..8, - for none)
+      Band<k>=<name>|<freq>|<gain>|<Q>|<shape switch>|<On>[|<slope>][|<solo>][|<stereo>]
+          (- for none; a later one keeps an earlier one's place with -)
       Learn<k>=<what was learned about band k, see TS_CV_MapEQ>
       Dyn<k>=<threshold>|<range>|<ratio>|<attack>|<release>|<dynamics On>[|<reversed>]
           band k's dynamics (a dynamic EQ), each a param or -; reversed
@@ -915,10 +916,10 @@ M.CANVAS_NAMES = { sat = "Saturation", eq = "EQ", comp = "Compressor", gate = "G
                    multi = "Multiband" }
 M.CANVAS_ORDER = { "eq", "comp", "multi", "gate", "limit", "deess", "sat", "delay", "reverb", "env", "mod" }
 local BAND_FIELDS = { "freq", "gain", "q", "shape", "on" }
--- (a band's Slope control comes after them: written only when mapped, and
--- not part of what its learning is checked against -- the slope is read
--- live)
-M.BAND_FIELDS = { "freq", "gain", "q", "shape", "on", "slope" }
+-- (a band's Slope, Solo and Stereo placement controls come after them:
+-- written only when mapped, and not part of what its learning is checked
+-- against -- the slope is read live)
+M.BAND_FIELDS = { "freq", "gain", "q", "shape", "on", "slope", "solo", "stereo" }
 -- a dynamic EQ band's dynamics (b.dyn), in the order Dyn<k> keeps them
 M.DYN_FIELDS = { "thr", "range", "ratio", "atk", "rel", "on" }
 M.DYN_NAMES = { thr = "Threshold", range = "Range", ratio = "Ratio", atk = "Attack", rel = "Release", on = "Dynamics On" }
@@ -969,6 +970,8 @@ function M.canvas_of(sect)
         local b = { name = U.trim(f[1] or "") }
         for i, key in ipairs(BAND_FIELDS) do b[key] = pnum(f[i + 1]) end
         b.slope = pnum(f[#BAND_FIELDS + 2])
+        b.solo = pnum(f[#BAND_FIELDS + 3])
+        b.stereo = pnum(f[#BAND_FIELDS + 4])
         local l = sect["Learn" .. k]
         if l and l ~= "" then
           local sig, data = l:match("^([^~]*)~(.*)$")
@@ -1156,7 +1159,9 @@ function M.canvas_lines(cv, out)
       if k > M.MAX_BANDS then break end
       local f = { ((b.name or ""):gsub("[|\r\n]", " ")) }
       for i, key in ipairs(BAND_FIELDS) do f[i + 1] = b[key] and tostring(b[key]) or "-" end
-      if b.slope then f[#f + 1] = tostring(b.slope) end
+      if b.slope or b.solo or b.stereo then f[#f + 1] = b.slope and tostring(b.slope) or "-" end
+      if b.solo or b.stereo then f[#f + 1] = b.solo and tostring(b.solo) or "-" end
+      if b.stereo then f[#f + 1] = tostring(b.stereo) end
       out["Band" .. k] = table.concat(f, "|")
       if b.learn and b.learn_sig then out["Learn" .. k] = b.learn_sig .. "~" .. b.learn end
       if b.dyn then
@@ -1222,7 +1227,7 @@ function M.copy_canvas(cv)
     out.bands = {}
     for i, b in ipairs(cv.bands) do
       out.bands[i] = { name = b.name, freq = b.freq, gain = b.gain, q = b.q, shape = b.shape,
-                       on = b.on, slope = b.slope, learn = b.learn, learn_sig = b.learn_sig }
+                       on = b.on, slope = b.slope, solo = b.solo, stereo = b.stereo, learn = b.learn, learn_sig = b.learn_sig }
       if b.dyn then
         local d = { rev = {} }
         for _, key in ipairs(M.DYN_FIELDS) do d[key] = b.dyn[key] end
@@ -1858,13 +1863,141 @@ function M.known_of(key)
   return nil
 end
 
+-- Plugins whose canvas ChannelView knows, ready with nothing to learn or
+-- measure: their EQ bands (TS_CV_MapEQ ME.builtin), or a compressor's
+-- roles, each checked against the parameter's name, and what measuring
+-- found once (ThrCal, AtkCal: see the canvas lines above). By the
+-- layout key's plugin: `base` its whole name, or `find` in it.
+local KNOWN = {
+  { id = "reeq2", find = "reeq2", eq = true },
+  { id = "proq4", base = "Pro-Q 4", eq = true },
+  { id = "proq3", base = "Pro-Q 3", eq = true },
+  { id = "kirchhoff", find = "kirchhoff-eq", eq = true },
+  { id = "proc3", base = "Pro-C 3", comp = {
+      roles = { Threshold = { 1, "Threshold" }, Ratio = { 4, "Ratio" }, Knee = { 5, "Knee" },
+                Attack = { 7, "Attack" }, Release = { 8, "Release" }, Hold = { 11, "Hold" },
+                Makeup = { 15, "Wet Gain" }, Mix = { 88, "Mix" }, Input = { 89, "Input Level" } },
+      thr_cal = { p = 1, pts = { { -54, -52.99 }, { -39, -37.99 }, { -24, -22.99 }, { -9, -8.125 } } },
+      atk_cal = { p = 7, pts = { { 0, 0.295 }, { 0.25, 2.395 }, { 0.5, 15.86 }, { 0.75, 37.76 }, { 1, 43.64 } } },
+      rel_cal = { p = 8, pts = { { 0, 30.99 }, { 0.25, 77.79 }, { 0.5, 212 }, { 0.75, 487.1 }, { 1, 1474 } } } } },
+  { id = "proc2", base = "Pro-C 2", comp = {
+      roles = { Threshold = { 1, "Threshold" }, Ratio = { 2, "Ratio" }, Knee = { 3, "Knee" },
+                Attack = { 5, "Attack" }, Release = { 6, "Release" }, Hold = { 9, "Hold" },
+                Makeup = { 10, "Wet Gain" }, Mix = { 34, "Mix" }, Input = { 35, "Input Level" } },
+      thr_cal = { p = 1, pts = { { -54, -55.73 }, { -39, -42.45 }, { -24, -27.45 }, { -9, -12.45 } } },
+      atk_cal = { p = 5, pts = { { 0, 0.3196 }, { 0.25, 2.649 }, { 0.5, 18.22 }, { 0.75, 48.54 }, { 1, 85.26 } } },
+      rel_cal = { p = 6, pts = { { 0, 30.11 }, { 0.25, 75.59 }, { 0.5, 206.9 }, { 0.75, 478.3 }, { 1, 1453 } } } } },
+  { id = "cenozoix", find = "cenozoix compressor", comp = {
+      roles = { Input = { 18, "Input Gain" }, Threshold = { 19, "Threshold" }, Ratio = { 20, "Ratio" },
+                Knee = { 21, "Knee" }, Attack = { 23, "Att Time" }, Release = { 24, "Rel Time" },
+                Hold = { 26, "Hold" }, Makeup = { 34, "Output Gain" }, Mix = { 35, "Dry Mix" } },
+      rev = { Mix = true },   -- its Dry Mix: 0 is all compressed
+      thr_cal = { p = 19, pts = { { -47, -47.48 }, { -31.26, -31.82 }, { -18.44, -19.22 }, { -6.84, -8.4 } } },
+      atk_cal = { p = 23, pts = { { 0, 0.2467 }, { 0.25, 4.658 }, { 0.5, 23.38 }, { 0.75, 63.48 }, { 1, 134.7 } } } } },
+}
+M.KNOWN = KNOWN
+
+function M.known_id(key)
+  local base = M.split_variant and select(1, M.split_variant(key or "")) or (key or "")
+  local low = base:lower()
+  for _, k in ipairs(KNOWN) do
+    if (k.base and base == k.base) or (k.find and low:find(k.find, 1, true)) then return k.id, k end
+  end
+  return nil
+end
+
+local function copy_cal(c)
+  if not c then return nil end
+  local pts = {}
+  for i, q in ipairs(c.pts) do pts[i] = { q[1], q[2] } end
+  return { p = c.p, n = c.n, pts = pts }
+end
+
+-- A known compressor's canvas from its parameters' names (`names[p + 1]`
+-- is parameter p's), every role's name checked; nil if they don't match.
+function M.known_comp(names, id)
+  for _, k in ipairs(KNOWN) do
+    if k.comp and (not id or k.id == id) then
+      local roles, ok = {}, true
+      for r, pn in pairs(k.comp.roles) do
+        if names[pn[1] + 1] ~= pn[2] then ok = false break end
+        roles[r] = pn[1]
+      end
+      if ok then
+        local rev = {}
+        for r, v in pairs(k.comp.rev or {}) do rev[r] = v end
+        return { kind = "comp", roles = roles, rev = rev, thr_cal = copy_cal(k.comp.thr_cal),
+                 atk_cal = copy_cal(k.comp.atk_cal), rel_cal = copy_cal(k.comp.rel_cal) }, k.id
+      end
+    end
+  end
+  return nil
+end
+
+-- A known plugin's default layout starts with its canvas, ready (Pro;
+-- an EQ only once its learning is known): an EQ's alone, a compressor's
+-- with the plugin's other controls beside it.
+function M.known_default(key, track, addr, layout)
+  local id, k = M.known_id(key)
+  if not (id and layout and not layout.canvas) then return layout end
+  if select(2, M.split_variant(key)) then return layout end
+  if not require("TS_CV_Edition").PRO then return layout end
+  local names = {}
+  for p = 0, (reaper.TrackFX_GetNumParams(track, addr) or 0) - 1 do
+    local _, nm = reaper.TrackFX_GetParamName(track, addr, p, "")
+    names[p + 1] = nm or ""
+  end
+  if k.eq then
+    local ok, ME = pcall(require, "TS_CV_MapEQ")
+    local cv = ok and ME.builtin(names, id)
+    if not cv or M.canvas_todo(cv) then return layout end
+    layout.canvas, layout.controls = cv, {}
+  else
+    local cv = M.known_comp(names, id)
+    if not cv then return layout end
+    layout.canvas = cv
+    local taken, keep = {}, {}
+    for _, p in pairs(cv.roles) do taken[p] = true end
+    for _, c in ipairs(layout.controls or {}) do if not taken[c.param] then keep[#keep + 1] = c end end
+    layout.controls = keep
+  end
+  return layout
+end
+
+-- A known plugin's canvas (M.KNOWN) given what's known of it where it
+-- lacks it: an EQ band on frequency and gain controls not learned gets
+-- the plugin's learning (every band of it alike); a compressor's
+-- threshold and attack, measured on the same controls, their measuring.
+function M.known_learned(key, layout)
+  local id, k = M.known_id(key)
+  local cv = id and layout and layout.canvas
+  if not cv then return layout end
+  if cv.kind == "eq" and k.eq then
+    local ok, ME = pcall(require, "TS_CV_MapEQ")
+    local learn = ok and ME.known_learn and ME.known_learn(id)
+    if learn then
+      for _, b in ipairs(cv.bands or {}) do
+        if b.freq and b.gain and not M.band_learned(b, cv.model) then
+          b.learn, b.learn_sig = learn, M.band_sig(b, cv.model)
+        end
+      end
+    end
+  elseif cv.kind == "comp" and k.comp then
+    for f, role in pairs({ thr_cal = "Threshold", atk_cal = "Attack", rel_cal = "Release" }) do
+      local c = k.comp[f]
+      if c and not cv[f] and cv.roles and cv.roles[role] == c.p then cv[f] = copy_cal(c) end
+    end
+  end
+  return layout
+end
+
 -- A layout with the ranges a known plugin's parameters have, where it
 -- has none of its own for them; and its EQ canvas's bands that are the
 -- plugin's own (mapped as TS_CV_MapEQ ME.builtin maps them) with what
 -- ChannelView knows of their shapes now. Returns the layout.
 function M.known_ranges(key, layout)
   local kp = layout and M.known_of(key)
-  if not kp then return layout end
+  if not kp then return M.known_learned(key, layout) end
   layout.ranges = layout.ranges or {}
   for p, r in pairs(kp.ranges()) do
     if not layout.ranges[p] then layout.ranges[p] = r end
@@ -2720,6 +2853,7 @@ function M.get_or_default(key, track, addr, cache_id)
     else d = M.build_default(track, addr) end
     -- ReaGate's, ReaLimit's, ReaXcomp's and ReaSynth's start with a canvas
     if RB.DEFAULT_CANVAS[kind or ""] then d = RB.default_canvas(track, addr, cache_id, kind, d) end
+    d = M.known_default(key, track, addr, d)
     d = M.known_ranges(key, d)
     def_cache[id] = d
   end

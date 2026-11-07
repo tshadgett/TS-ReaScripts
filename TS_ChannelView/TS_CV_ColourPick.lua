@@ -109,7 +109,7 @@ function CP.palette(ctx, s, id)
   local pals, width = s.pals, CP.width()
   local cur = pals[s.pal]
   ImGui.SetNextItemWidth(ctx, width)
-  if ImGui.BeginCombo(ctx, "##pal" .. id, cur and cur.name or "") then
+  if ImGui.BeginCombo(ctx, "##pal" .. id, cur and cur.name or "", ImGui.ComboFlags_HeightLargest) then
     for i, p in ipairs(pals) do
       if ImGui.Selectable(ctx, ("%s  (%d)##pal%s%d"):format(p.name, #p.colours, id, i), i == s.pal) then
         s.pal = i

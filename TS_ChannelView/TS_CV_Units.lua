@@ -340,9 +340,14 @@ function UN.read_choices(track, addr, param, st)
     local v = stepped and math.min(1, k * st) or k / (count - 1)
     local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
     t = ok and trim(t or "") or ""
-    if t == "" then return nil end
-    if first == nil then first = t elseif t ~= first then differ = true end
-    if t == run_t then run_b = v else flush(); run_t, run_a, run_b = t, v, v end
+    if t == "" then
+      -- a setting with no name (Cenozoix's Style names some of its 128):
+      -- none of the list, and it ends the run before it
+      flush(); run_t = nil
+    else
+      if first == nil then first = t elseif t ~= first then differ = true end
+      if t == run_t then run_b = v else flush(); run_t, run_a, run_b = t, v, v end
+    end
   end
   flush()
   if not differ or #out < 2 then

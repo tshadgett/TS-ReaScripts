@@ -382,7 +382,7 @@ local function draw_save(ctx)
   sv.name = nm
   ST.caption(ctx, "Folder")
   ImGui.SetNextItemWidth(ctx, 240)
-  if ImGui.BeginCombo(ctx, "##cnfolder", sv.folder == "" and "FXChains" or sv.folder) then
+  if ImGui.BeginCombo(ctx, "##cnfolder", sv.folder == "" and "FXChains" or sv.folder, ImGui.ComboFlags_HeightLargest) then
     for _, f in ipairs(sv.folders or { "" }) do
       if ImGui.Selectable(ctx, (f == "" and "FXChains" or f) .. "##cnf" .. f, f == sv.folder) then sv.folder = f end
     end

@@ -506,7 +506,7 @@ function ML.draw(ctx, w)
     -- the mode, and what the control looks like
     ImGui.SetCursorScreenPos(ctx, x, ry + 2)
     ImGui.SetNextItemWidth(ctx, 210)
-    if ImGui.BeginCombo(ctx, "##mlmode", mode_name(st.mode)) then
+    if ImGui.BeginCombo(ctx, "##mlmode", mode_name(st.mode), ImGui.ComboFlags_HeightLargest) then
       for _, e in ipairs(ML.MODES) do
         if ImGui.Selectable(ctx, e[2], st.mode == e[1]) then st.mode, st.picked = e[1], true end
       end

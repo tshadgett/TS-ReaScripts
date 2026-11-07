@@ -2,11 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.7.1
+-- @version 2.7.2
 -- @changelog
---  TS_TrackProbe 2.5.1: a measured plugin's make-up gain is taken out of
---  its reading when ChannelView 4.0.2 says which control it is. Reopen a
---  project after updating.
+--  TS_TrackProbe 2.6.0: each track's probe can send its own spectrum and
+--  play one band of the track, for ChannelView 4.0.3. Reopen a project
+--  after updating.
 -- @about
 --  # Track Analyser
 --

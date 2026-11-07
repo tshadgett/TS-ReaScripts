@@ -1774,7 +1774,7 @@ function TB.vendor_look(ctx, it, id, as_menu)
   local cur = choices[1][2]
   for _, c in ipairs(choices) do if c[1] and c[1] == it.vo then cur = c[2] end end
   ImGui.SetNextItemWidth(ctx, -1)
-  if ImGui.BeginCombo(ctx, "##" .. id, cur) then
+  if ImGui.BeginCombo(ctx, "##" .. id, cur, ImGui.ComboFlags_HeightLargest) then
     for n, c in ipairs(choices) do
       if ImGui.Selectable(ctx, c[2] .. "##" .. id .. n, it.vo == c[1]) then pick(c) end
     end
@@ -1801,7 +1801,7 @@ function TB.chain_mode(ctx, it, id, as_menu)
   local cur = choices[1][2]
   for _, c in ipairs(choices) do if c[1] and c[1] == it.cm then cur = c[2] end end
   ImGui.SetNextItemWidth(ctx, -1)
-  if ImGui.BeginCombo(ctx, "##" .. id, cur) then
+  if ImGui.BeginCombo(ctx, "##" .. id, cur, ImGui.ComboFlags_HeightLargest) then
     for n, c in ipairs(choices) do
       if ImGui.Selectable(ctx, c[2] .. "##" .. id .. n, it.cm == c[1]) then pick(c) end
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, tips[n]) end
