@@ -105,5 +105,53 @@ check("controls drawn plainly", tostring(o.style) .. tostring(o.cap) .. tostring
 check("no canvas", P.canvas_of({ canvas = { kind = "eq" } }), nil)
 check("ReaEQ an ordinary plugin", P.own_eq("ReaEQ"), false)
 
+-- a grid panel drawn whole, with no Pro to call: words, a picture, a step
+-- button and a section with a picture of its own (they draw plainly)
+local function fakeimgui()
+  local num = { CalcTextSize = function(_, t) return #(t or "") * 6, 13 end, GetFontSize = function() return 13 end,
+    GetCursorScreenPos = function() return 0, 0 end, GetContentRegionAvail = function() return 600, 400 end,
+    GetWindowPos = function() return 0, 0 end, GetWindowSize = function() return 600, 400 end,
+    GetMousePos = function() return -1, -1 end, GetFrameHeight = function() return 20 end,
+    BeginChild = function() return true end, Begin = function() return true, true end,
+    GetFrameCount = function() return 1 end, GetTime = function() return 0 end,
+    GetItemRectMin = function() return 0, 0 end, GetItemRectMax = function() return 10, 10 end,
+    GetMouseDelta = function() return 0, 0 end, GetMouseWheel = function() return 0, 0 end, GetKeyMods = function() return 0 end,
+    GetStyleVar = function() return 4, 4 end, GetScrollY = function() return 0 end, GetScrollMaxY = function() return 0 end,
+    GetWindowDrawList = function() return "dl" end, GetForegroundDrawList = function() return "dl" end,
+    GetTextLineHeight = function() return 13 end, GetCursorPosX = function() return 0 end, GetCursorPosY = function() return 0 end,
+    GetMouseClickedPos = function() return 0, 0 end, GetDisplaySize = function() return 1600, 900 end,
+    GetMainViewport = function() return "vp" end, Viewport_GetPos = function() return 0, 0 end, Viewport_GetSize = function() return 1600, 900 end,
+    Viewport_GetWorkPos = function() return 0, 0 end, Viewport_GetWorkSize = function() return 1600, 900 end }
+  return setmetatable(num, { __index = function(_, k)
+    if type(k) == "string" and k:match("^%u%a*_%u") and not k:match("^DrawList_") and not k:match("^Viewport_") then return 1 end
+    return function() return false end
+  end })
+end
+local fake = fakeimgui()
+local mods = { "TS_CV_Panel", "TS_CV_Widgets", "TS_CV_Switches" }
+for _, n in ipairs(mods) do local ok, m = pcall(require, n); if ok and m and m.attach then pcall(m.attach, fake) end end
+require("TS_CV_Widgets").attach(fake)
+P.attach(fake)
+reaper.TrackFX_GetNumParams = function() return 8 end
+reaper.TrackFX_GetParamNormalized = function() return 0.5 end
+reaper.TrackFX_GetParamEx = function() return 0.5, 0, 1, 0.5 end
+reaper.TrackFX_GetFormattedParamValue = function() return true, "0.5" end
+reaper.TrackFX_GetParamName = function(_, _, p) return true, "P" .. p end
+reaper.TrackFX_GetEnabled = function() return true end
+reaper.TrackFX_GetFXName = function() return true, "VST: Some Comp (Vendor)" end
+reaper.ValidatePtr2 = function() return true end
+reaper.ValidatePtr = function() return true end
+local M = require("TS_CV_Mappings")
+local lay2 = { controls = {
+  { type = "knob", param = 0, label = "Gain", at = { c = 0, r = 0, w = 4, h = 4 } },
+  { type = "text", param = -1, label = "HELLO", at = { c = 4, r = 0, w = 8, h = 2 } },
+  { type = "image", param = -1, label = "", pic = { file = "x.png", fill = "fit", op = 100, rr = 0 }, at = { c = 4, r = 2, w = 8, h = 2 } },
+  { type = "combo", param = 1, label = "Mode", buttons = "step", nbtn = 3, at = { c = 12, r = 0, w = 4, h = 4 } },
+  { type = "section", param = -1, finish = "img:foo.png|edges|16", at = { c = 0, r = 0, w = 16, h = 4 } } },
+  grid = { cols = 16, rows = 4 } }
+local fx = { addr = 0, guid = "{std}", name = "VST: Some Comp (Vendor)" }
+local ok, err = pcall(P.draw, "ctx", "tr", fx, lay2, "Some Comp", 300, 1, false)
+check("Standard: a grid panel drawn (text, image, step button)", ok and "ok" or tostring(err):sub(1, 200), "ok")
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

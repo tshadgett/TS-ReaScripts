@@ -1,5 +1,16 @@
 # ChannelView — changelog
 
+## 4.1.2 — fixes
+
+### ChannelView
+
+- Without Pro, 4.1.1 stopped on an error as it drew a panel. Fixed.
+
+### ChannelView Pro
+
+- 4.1.1 drew faceplates, sections and backgrounds without their finish
+  (brushed, wood, leather and the rest). Fixed.
+
 ## 4.1.1 — images on panels
 
 ### ChannelView Pro

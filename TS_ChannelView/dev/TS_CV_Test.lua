@@ -12489,15 +12489,17 @@ do
   FN.attach(fake)
   FN.picture = function() return "img", 200, 100 end
   local ok, err = pcall(function()
-    FN.image("ctx", "dl", { file = "x.png", fill = "fit", op = 50, rr = 6 }, 0, 0, 100, 100)
-    FN.image("ctx", "dl", { file = "x.png", fill = "tile", op = 100 }, 0, 0, 450, 100)
-    FN.image("ctx", "dl", { file = "x.png", fill = "edges", edge = 10, op = 100 }, 0, 0, 300, 300)
+    FN.draw_pic("ctx", "dl", { file = "x.png", fill = "fit", op = 50, rr = 6 }, 0, 0, 100, 100)
+    FN.draw_pic("ctx", "dl", { file = "x.png", fill = "tile", op = 100 }, 0, 0, 450, 100)
+    FN.draw_pic("ctx", "dl", { file = "x.png", fill = "edges", edge = 10, op = 100 }, 0, 0, 300, 300)
   end)
   FN.picture = had_p
   check("image draw: ran", ok and "ok" or tostring(err), "ok")
   local d1 = drawn[1] or {}
   check("image draw: fitted, half opacity, rounded", ("%s %g %g %d %d"):format(d1[1] or "", d1[3] or 0, d1[5] or 0, d1[6] or 0, d1[7] or 0), "r 25 75 128 6")
   check("image draw: tiles and nine pieces", #drawn - 1, 3 + 9)
+  -- (the finishes' own image, by its key, is a different thing: kept)
+  check("image draw: the finishes' FN.image kept", FN.image ~= FN.draw_pic and type(FN.image), "function")
 end
 
 -- a GR meter's figures (Visual Options' Meter scales): three or four

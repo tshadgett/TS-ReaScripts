@@ -2932,9 +2932,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   end
 
   -- a grid's pictures (image controls, Pro), behind the controls
-  if FN.image then
+  if FN and FN.draw_pic then
     for _, im in ipairs(lay.images or {}) do
-      FN.image(ctx, dl, im.by.pic, gx0 + im.x, gy0 + im.y, gx0 + im.x + im.w, gy0 + im.y + im.h)
+      FN.draw_pic(ctx, dl, im.by.pic, gx0 + im.x, gy0 + im.y, gx0 + im.x + im.w, gy0 + im.y + im.h)
     end
   end
 
@@ -3020,9 +3020,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       P.draw_text_item(ctx, dl, gx0, gy0, { x = item.x, y = item.y, w = hx(item.w), h = hy(item.h), by = ctl })
 
     elseif ctl.type == "image" then
-      if FN.image then
+      if FN and FN.draw_pic then
         local ix, iy = gx0 + item.x, gy0 + item.y
-        FN.image(ctx, dl, ctl.pic, ix, iy, ix + hx(item.w), iy + hy(item.h))
+        FN.draw_pic(ctx, dl, ctl.pic, ix, iy, ix + hx(item.w), iy + hy(item.h))
       end
 
     elseif ctl.type == "vis" then

@@ -1,9 +1,8 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.1.1
+-- @version 4.1.2
 -- @changelog
---  Moves with ChannelView Pro 4.1.1 (image items on panels). See the
---  CHANGELOG.
+--  Fixed: without Pro, 4.1.1 stopped on an error drawing a panel.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
