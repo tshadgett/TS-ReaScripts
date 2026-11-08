@@ -8914,6 +8914,30 @@ do
   for i, g in ipairs(FN.gallery("knob")) do names[i] = g.name end
   check("gallery: taken out", table.concat(names, ","), "SSL blue")
   check("gallery: made a button's", FN.gallery_kind("SSL blue", "button") and #FN.gallery("knob") .. "/" .. #FN.gallery("button"), "0/2")
+  -- moved, within its kind
+  FN.gallery_put("knob", { file = "a.png", kind = "turn", frames = 1, dir = "down", size = 0 })
+  FN.gallery_put("knob", { file = "b.png", kind = "turn", frames = 1, dir = "down", size = 0 })
+  FN.gallery_put("knob", { file = "c.png", kind = "turn", frames = 1, dir = "down", size = 0 })
+  FN.gallery_move("knob", 3, 1)
+  FN.gallery_reload()
+  local order = {}
+  for i, g in ipairs(FN.gallery("knob")) do order[i] = g.name end
+  check("gallery: moved, and kept so", table.concat(order, ","), "c,a,b")
+  for _, n in ipairs({ "a", "b", "c" }) do FN.gallery_remove(n) end
+  -- your recipes: renamed, moved
+  local RC = require("TS_CV_Recipes")
+  RC.init(tmpd)
+  os.remove(tmpd .. "TS_ChannelView_Recipes.ini")
+  RC.init(tmpd)
+  RC.put("One", { col = 1 }); RC.put("Two", { col = 2 }); RC.put("Three", { col = 3 })
+  check("recipes: renamed", RC.rename("Two", "Second"), true)
+  check("recipes: not onto another's name", RC.rename("One", "Three"), false)
+  RC.move(3, 1)
+  RC.init(tmpd)
+  local rn = {}
+  for i, r in ipairs(RC.list()) do rn[i] = r.name end
+  check("recipes: moved, and kept so", table.concat(rn, ","), "Three,One,Second")
+  os.remove(tmpd .. "TS_ChannelView_Recipes.ini")
   -- started from the folder: a button's where a layout puts it on a button
   os.remove(tmpd .. "TS_ChannelView_Pictures.ini")
   local ef = reaper.EnumerateFiles

@@ -1269,6 +1269,8 @@ local function toggle_colour_menu(fx, key, idx, c)
             x + 3, y + 3, x + CS - 3, y + CS - 3)
         end
         -- (over the picture)
+        local from = W.tile_drag(ctx, "pic_button", i, g.name)
+        if from then app.tile_move = { "button", from, i } end
         local on_x, x_hit = W.tile_x(ctx, dl, x, y, CS)
         if x_hit then
           if reaper.MB(("Remove the picture \"%s\"?\n\nControls using it keep it."):format(g.name),
@@ -1278,6 +1280,12 @@ local function toggle_colour_menu(fx, key, idx, c)
           M.put_img(l, idx, g.img, "knob")
           M.set(pk, l); M.save()
         end
+        W.tile_rename(ctx, "pic_button" .. i, g.name, function(new) return FNm.gallery_rename(g.name, new) end)
+      end
+      if app.tile_move then
+        local mv = app.tile_move
+        app.tile_move = nil
+        FNm.gallery_move(mv[1], mv[2], mv[3])
       end
       ImGui.Spacing(ctx)
     end
@@ -2003,7 +2011,10 @@ local function style_menu(fx, key, idx, c)
         local picked = ImGui.Selectable(ctx, "##myrecipe_" .. i, false, KEEP_OPEN, CS, CS)
         if ImGui.IsItemHovered(ctx) then hov_label = r.name end
         W.knob_face(dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, { look = r.look, ctx = ctx })
-        -- an x in its corner takes it away, once you've said so
+        -- drag one onto another to move it there; an x in its corner takes
+        -- it away, once you've said so; right-click to rename it
+        local from = W.tile_drag(ctx, "recipe", i, r.name)
+        if from then app.tile_move = { "recipe", from, i } end
         local on_x, x_hit = W.tile_x(ctx, dl, x, y, CS)
         if x_hit then
           if reaper.MB(("Remove the recipe \"%s\"?\n\nKnobs wearing it keep their look."):format(r.name),
@@ -2011,6 +2022,7 @@ local function style_menu(fx, key, idx, c)
         elseif picked and not on_x then
           set({ look = KPm.copy(r.look), cap = false })
         end
+        W.tile_rename(ctx, "recipe" .. i, r.name, function(new) return RCP.rename(r.name, new) end)
       end
     end
     -- your pictures (Style > Image...): one click puts it on this knob
@@ -2026,6 +2038,8 @@ local function style_menu(fx, key, idx, c)
         local picked = ImGui.Selectable(ctx, "##mypic_" .. i, c.img ~= nil and c.img.file == g.img.file, KEEP_OPEN, CS, CS)
         if ImGui.IsItemHovered(ctx) then hov_label = g.name end
         W.picture_knob(ctx, dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, g.img, false)
+        local from = W.tile_drag(ctx, "pic_knob", i, g.name)
+        if from then app.tile_move = { "knob", from, i } end
         local on_x, x_hit = W.tile_x(ctx, dl, x, y, CS)
         if x_hit then
           if reaper.MB(("Remove the picture \"%s\"?\n\nControls using it keep it."):format(g.name),
@@ -2035,7 +2049,15 @@ local function style_menu(fx, key, idx, c)
           M.put_img(l, idx, g.img, "knob")
           M.set(pk, l); M.save()
         end
+        W.tile_rename(ctx, "pic_knob" .. i, g.name, function(new) return FNm.gallery_rename(g.name, new) end)
       end
+    end
+    -- a tile dragged onto another: moved there (once the lists are drawn)
+    if app.tile_move then
+      local mv = app.tile_move
+      app.tile_move = nil
+      if mv[1] == "recipe" then RCP.move(mv[2], mv[3])
+      elseif FNm then FNm.gallery_move(mv[1], mv[2], mv[3]) end
     end
     ImGui.Spacing(ctx)
     if ImGui.Selectable(ctx, "Customise...##style_custom", false, 0, 150, 0) then

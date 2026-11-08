@@ -1490,6 +1490,50 @@ function W.tile_x(ctx, dl, x, y, size)
   return over, over and ImGui.IsMouseReleased(ctx, ImGui.MouseButton_Left)
 end
 
+-- Dragging a tile (a recipe, a picture) onto another of its `group` to
+-- move it there. Call just after the tile's own item, as its i-th. Returns
+-- the place of the tile dropped on this one, or nil.
+function W.tile_drag(ctx, group, i, name)
+  local kind = "CVTILE_" .. group
+  if ImGui.BeginDragDropSource(ctx, 0) then
+    ImGui.SetDragDropPayload(ctx, kind, tostring(i))
+    ImGui.Text(ctx, name or "")
+    ImGui.EndDragDropSource(ctx)
+  end
+  local from
+  if ImGui.BeginDragDropTarget(ctx) then
+    local ok, payload = ImGui.AcceptDragDropPayload(ctx, kind)
+    if ok then from = tonumber(payload) end
+    ImGui.EndDragDropTarget(ctx)
+  end
+  return from
+end
+
+-- Renaming a tile on a right-click: call just after its item. `rename(new)`
+-- gives true when it took; `extra(ctx)`, more for the popup under it. One
+-- popup at a time, by its id.
+local renaming = nil
+function W.tile_rename(ctx, id, name, rename, extra)
+  extra = extra or nil
+  if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+    renaming = { id = id, buf = name, rename = rename, extra = extra }
+    ImGui.OpenPopup(ctx, "##tile_rename_" .. id)
+  end
+  if renaming and renaming.id == id and ImGui.BeginPopup(ctx, "##tile_rename_" .. id) then
+    ImGui.SetNextItemWidth(ctx, 170)
+    if ImGui.IsWindowAppearing(ctx) then ImGui.SetKeyboardFocusHere(ctx) end
+    local ch, v = ImGui.InputText(ctx, "##tile_rename_buf", renaming.buf)
+    if ch then renaming.buf = v end
+    local enter = ImGui.IsItemDeactivated(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Enter)
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Rename##tile_rename_go") or enter then
+      if renaming.rename(renaming.buf) then ImGui.CloseCurrentPopup(ctx) end
+    end
+    if renaming.extra then renaming.extra(ctx) end
+    ImGui.EndPopup(ctx)
+  end
+end
+
 -- A heading that folds what's under it away (a long list in a menu: the
 -- styles, your recipes, your pictures): true while it's open. Each is
 -- remembered by `key`, open to start. `flags`: the Selectable's (a menu's
