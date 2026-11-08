@@ -1086,7 +1086,9 @@ end
 local function plate_menu(fx, key, layout)
   local cur = layout.plate or "theme"
   local dl = ImGui.GetWindowDrawList(ctx)
-  for _, pl in ipairs(C.PLATES) do
+  -- (the list folds away, as the others do)
+  local shown = W.fold_head(ctx, "plate_colours", "Faceplates", KEEP_OPEN)
+  for _, pl in ipairs(shown and C.PLATES or {}) do
     local x, y = ImGui.GetCursorScreenPos(ctx)
     if ImGui.Selectable(ctx, "      " .. pl.label .. "##plate_" .. pl.key,
         pl.key == cur, KEEP_OPEN, 150, 0) then
@@ -1166,19 +1168,20 @@ local function plate_menu(fx, key, layout)
   -- a picture of your own over it, in place of a finish
   if ED.PRO then
     ImGui.Separator(ctx)
+    local function put_pic(k, col)
+      local l, pk = materialise(fx)
+      if k then
+        l.finish, l.brush = k, nil
+        -- its colour, on average: the ink on it follows
+        l.plate = col or l.plate or "#5a5c60"
+      elseif M.surface_of(l.finish) then
+        l.finish = nil
+      end
+      M.set(pk, l); M.save()
+    end
+    KE.surface_tiles(ctx, "plate", layout.finish, put_pic, KEEP_OPEN)
     if ImGui.MenuItem(ctx, "Picture...##plate_pic", nil, M.surface_of(layout.finish) ~= nil) then
-      KE.open_surface({ title = fx.name or "", what = "Faceplate", key = layout.finish,
-        apply = function(k, col)
-          local l, pk = materialise(fx)
-          if k then
-            l.finish, l.brush = k, nil
-            -- its colour, on average: the ink on it follows
-            l.plate = col or l.plate or "#5a5c60"
-          elseif M.surface_of(l.finish) then
-            l.finish = nil
-          end
-          M.set(pk, l); M.save()
-        end })
+      KE.open_surface({ title = fx.name or "", what = "Faceplate", key = layout.finish, apply = put_pic })
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A picture of your own for the faceplate.") end
   end
@@ -1442,7 +1445,8 @@ local function back_menu(fx, key, idx, c)
   if ImGui.Selectable(ctx, "None##back_none", now == "none", KEEP_OPEN, 170, 0) then set(nil) end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "No background of its own.") end
   if ImGui.Selectable(ctx, "Inset##back_inset", now == "inset", KEEP_OPEN, 170, 0) then set("inset") end
-  for _, pl in ipairs(C.PLATES) do
+  local shown = W.fold_head(ctx, "back_colours", "Faceplates", KEEP_OPEN)
+  for _, pl in ipairs(shown and C.PLATES or {}) do
     if pl.bg then
       local x, y = ImGui.GetCursorScreenPos(ctx)
       if ImGui.Selectable(ctx, "      " .. pl.label .. "##back_" .. pl.key, now == pl.key, KEEP_OPEN, 170, 0) then
@@ -1472,19 +1476,20 @@ local function back_menu(fx, key, idx, c)
   corners_combo(fx, key, idx, c, bkind, "back_corners")
   ImGui.EndDisabled(ctx)
   -- a picture of your own behind it
+  local function put_pic(k, col)
+    local l, pk = materialise(fx)
+    local lc = l.controls[idx]
+    if lc and k then
+      lc.finish, lc.brush = k, nil
+      lc.back = col or ((lc.back and lc.back ~= "inset") and lc.back) or "#5a5c60"
+    elseif lc and M.surface_of(lc.finish) then
+      lc.finish = nil
+    end
+    M.set(pk, l); M.save()
+  end
+  if ED.PRO then KE.surface_tiles(ctx, "back", c.finish, put_pic, KEEP_OPEN) end
   if ED.PRO and ImGui.Selectable(ctx, "Picture...##back_pic", M.surface_of(c.finish) ~= nil, 0, 170, 0) then
-    KE.open_surface({ title = fx.name or "", what = "Background", key = c.finish,
-      apply = function(k, col)
-        local l, pk = materialise(fx)
-        local lc = l.controls[idx]
-        if lc and k then
-          lc.finish, lc.brush = k, nil
-          lc.back = col or ((lc.back and lc.back ~= "inset") and lc.back) or "#5a5c60"
-        elseif lc and M.surface_of(lc.finish) then
-          lc.finish = nil
-        end
-        M.set(pk, l); M.save()
-      end })
+    KE.open_surface({ title = fx.name or "", what = "Background", key = c.finish, apply = put_pic })
   end
   ImGui.Spacing(ctx)
   ImGui.TextWrapped(ctx, "Controls side by side or above each other with the same background join into one shape, across a divider too.")
@@ -1508,8 +1513,8 @@ local function section_menu(fx, key, idx, c)
     ImGui.SetTooltip(ctx, "Recessed panel up to the next divider.")
   end
   ImGui.Spacing(ctx)
-  ImGui.TextDisabled(ctx, "On a faceplate of their own")
-  for _, pl in ipairs(C.PLATES) do
+  local shown = W.fold_head(ctx, "sec_colours", "On a faceplate of their own", KEEP_OPEN)
+  for _, pl in ipairs(shown and C.PLATES or {}) do
     if pl.bg then
       local x, y = ImGui.GetCursorScreenPos(ctx)
       if ImGui.Selectable(ctx, "      " .. pl.label .. "##sec_" .. pl.key, now == pl.key, KEEP_OPEN, 170, 0) then
@@ -1545,19 +1550,20 @@ local function section_menu(fx, key, idx, c)
   corners_combo(fx, key, idx, c, skind, "sec_corners")
   ImGui.EndDisabled(ctx)
   -- a picture of your own for the section
+  local function put_pic(k, col)
+    local l, pk = materialise(fx)
+    local lc = l.controls[idx]
+    if lc and k then
+      lc.finish, lc.brush = k, nil
+      lc.style, lc.cap = "plate", col or ((lc.style == "plate") and lc.cap) or "#5a5c60"
+    elseif lc and M.surface_of(lc.finish) then
+      lc.finish = nil
+    end
+    M.set(pk, l); M.save()
+  end
+  if ED.PRO then KE.surface_tiles(ctx, "sec", c.finish, put_pic, KEEP_OPEN) end
   if ED.PRO and ImGui.Selectable(ctx, "Picture...##sec_pic", M.surface_of(c.finish) ~= nil, 0, 170, 0) then
-    KE.open_surface({ title = fx.name or "", what = "Section", key = c.finish,
-      apply = function(k, col)
-        local l, pk = materialise(fx)
-        local lc = l.controls[idx]
-        if lc and k then
-          lc.finish, lc.brush = k, nil
-          lc.style, lc.cap = "plate", col or ((lc.style == "plate") and lc.cap) or "#5a5c60"
-        elseif lc and M.surface_of(lc.finish) then
-          lc.finish = nil
-        end
-        M.set(pk, l); M.save()
-      end })
+    KE.open_surface({ title = fx.name or "", what = "Section", key = c.finish, apply = put_pic })
   end
 end
 

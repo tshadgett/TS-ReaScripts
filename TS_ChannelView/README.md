@@ -1915,7 +1915,8 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   or with its **Edges kept** (the corners and edges as they are, the
   middle stretched, for a rack panel with screws at any size). The labels
   on it take their ink from the picture's colour. Your surface pictures
-  are kept in Your pictures too. (On the web page, Edges kept is
+  are kept in Your pictures, shown in those menus too: one click puts one
+  on. The menus' lists of faceplates and pictures fold away. (On the web page, Edges kept is
   stretched.)
 - **The plugin's own colours** (Windows, with js_ReaScriptAPI). Every
   colour menu — faceplate, section, background, knob and fader caps, lit
