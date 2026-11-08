@@ -1224,6 +1224,12 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   *Underline*, *Strikethrough*, *All caps*), **Letter spacing**, its
   place along its room and its colour. Text going up is always in
   capitals and takes the font and size only.
+- **Image** is a picture of your own anywhere on the grid, behind the
+  controls: a logo, a badge, a panel graphic. On the right: **Your
+  pictures** (one click puts one on, with its settings; drag to move,
+  right-click to rename, the x takes it away) or **Browse...**; how it
+  fills its place (**Fit**, **Stretch**, **Fill**, **Tile** or **Edges**
+  kept), **Opacity** and **Rounded corners**. The web page shows it too.
 - **Visualisers** draw a part of a canvas in a place on the grid, from a
   few of the plugin's controls, on the panel's colour (*Colours ▸
   Background* gives one its own). Dropped on the grid, one finds its

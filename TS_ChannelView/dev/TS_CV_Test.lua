@@ -607,6 +607,21 @@ do
   check("text: up when taller than wide", lt.texts[2].h > lt.texts[2].w, true)
   check("combo: half a cell tall is short", tostring(lt.items[1].short) .. " " .. tostring(lt.items[2].short), "true nil")
   M.remove("GridText"); M.save(); M.reload()
+  -- a picture on the grid (an image item): its line, read back, copied,
+  -- laid out as a picture and not a control
+  M.set("GridPic", { grid = { cols = 16, rows = 8 }, controls = {
+    { param = -1, type = "image", label = "", pic = { file = "logo.png", fill = "edges", edge = 12, op = 60, rr = 4 },
+      at = { c = 0, r = 0, w = 8, h = 4 } },
+    { param = 3, type = "knob", label = "Gain", at = { c = 8, r = 0, w = 4, h = 4 } } } })
+  M.save(); M.reload()
+  local gp = M.get("GridPic").controls
+  check("image: read back", gp[1].type .. " " .. tostring(M.pic_line(gp[1].pic)), "image logo.png|edges|12|60|4")
+  check("image: copied", M.pic_line(M.copy({ controls = gp }).controls[1].pic), "logo.png|edges|12|60|4")
+  check("image: its file among the layout's pictures", table.concat(M.layout_images("GridPic"), ","), "logo.png")
+  check("image: a bad line, the defaults", M.pic_line(M.pic_of("a.png|odd|x|5|99")), "a.png|fit|16|10|64")
+  local li = P.layout(gp, ph(2))
+  check("image: a picture, not a control", #li.images .. " " .. #li.items, "1 1")
+  M.remove("GridPic"); M.save(); M.reload()
   check("grid file: a line any way", M.at_line(gb.controls[4].at), "0,8,8,-8")
   check("grid file: a line's colour, a faceplate's", gb.controls[4].edge, "cream")
   check("grid file: drawn in it", P.layout(gb.controls, ph(2)).segs[2].col, C.PLATE.cream.bg)
@@ -12460,6 +12475,29 @@ do
   d = Mk.known_default("Pro-Q 4 :: Mine", {}, 0, { controls = {} })
   check("known default: not another layout of theirs", d.canvas, nil)
   E.PRO, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = had_pro, gn, gp
+end
+
+-- an image item drawn: fitted (its shape kept), its opacity, rounded
+do
+  local FN = require("TS_CV_Finish")
+  local drawn = {}
+  local fake = setmetatable({
+    DrawList_AddImageRounded = function(_, img, x1, y1, x2, y2, u0, v0, u1, v1, col, rr) drawn[#drawn + 1] = { "r", x1, y1, x2, y2, col & 0xff, rr } end,
+    DrawList_AddImage = function(_, img, x1, y1, x2, y2, u0, v0, u1, v1, col) drawn[#drawn + 1] = { "i", x1, y1, x2, y2, col & 0xff } end,
+  }, { __index = function() return function() end end })
+  local had_p = FN.picture
+  FN.attach(fake)
+  FN.picture = function() return "img", 200, 100 end
+  local ok, err = pcall(function()
+    FN.image("ctx", "dl", { file = "x.png", fill = "fit", op = 50, rr = 6 }, 0, 0, 100, 100)
+    FN.image("ctx", "dl", { file = "x.png", fill = "tile", op = 100 }, 0, 0, 450, 100)
+    FN.image("ctx", "dl", { file = "x.png", fill = "edges", edge = 10, op = 100 }, 0, 0, 300, 300)
+  end)
+  FN.picture = had_p
+  check("image draw: ran", ok and "ok" or tostring(err), "ok")
+  local d1 = drawn[1] or {}
+  check("image draw: fitted, half opacity, rounded", ("%s %g %g %d %d"):format(d1[1] or "", d1[3] or 0, d1[5] or 0, d1[6] or 0, d1[7] or 0), "r 25 75 128 6")
+  check("image draw: tiles and nine pieces", #drawn - 1, 3 + 9)
 end
 
 -- a GR meter's figures (Visual Options' Meter scales): three or four

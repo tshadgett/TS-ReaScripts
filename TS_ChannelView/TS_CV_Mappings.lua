@@ -173,6 +173,9 @@
   own (left out), panel, or #RRGGBB; buttons the switch's style (a button style; left
   out: flat); stereo st (two meters, left and right; left out: one); hide
   (no In / Out / GR buttons).
+  An "image" control (Ctl<n>=-1|image|0|) is a picture anywhere on the
+  grid, behind the controls, Pic<n>=<file>|<fit, stretch, crop, tile or
+  edges>|<edges kept, px>|<opacity %>|<corners, px>.
   A "text" control (Ctl<n>=-1|text|0|<its words>)
   is words anywhere on the grid, across or (taller than wide) up, sized
   by Size<n> (small, large), coloured by Edge<n>, placed by Align<n>
@@ -381,7 +384,7 @@ end
 local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
                      fader = true, blank = true, divider = true, half_gap = true,
                      xy = true, dual = true, page = true, section = true, text = true, curve = true,
-                     vu = true, vis = true, act = true }
+                     vu = true, vis = true, act = true, image = true }
 -- What an "act" control does (Act<n>): the Trimmer's Auto and Listen.
 M.ACTS = { trim_auto = "Auto", trim_listen = "Listen" }
 
@@ -852,6 +855,28 @@ end
 -- img:<file>|<stretch, crop, tile or edges>|<the edges kept, px>. The file
 -- is a name in the Images folder.
 M.SURFACE_FILLS = { stretch = true, crop = true, tile = true, edges = true }
+
+-- An image item's picture (Pic<n>, Pro): <file>|<fit, stretch, crop, tile
+-- or edges>|<the edges kept, px>|<opacity, 10 to 100>|<its corners'
+-- rounding, px>: { file, fill, edge, op, rr }, or nil. The file is a name
+-- in the Images folder.
+M.PIC_FILLS = { fit = true, stretch = true, crop = true, tile = true, edges = true }
+function M.pic_of(v)
+  if type(v) ~= "string" then return nil end
+  local file, fill, edge, op, rr = v:match("^([^|]*)|?([^|]*)|?([^|]*)|?([^|]*)|?([^|]*)$")
+  file = U.trim(file or "")
+  if file == "" or file:find("[/\\]") then return nil end
+  return { file = file, fill = M.PIC_FILLS[fill] and fill or "fit",
+           edge = math.max(0, math.min(512, math.floor(tonumber(edge) or 16))),
+           op = math.max(10, math.min(100, math.floor(tonumber(op) or 100))),
+           rr = math.max(0, math.min(64, math.floor(tonumber(rr) or 0))) }
+end
+function M.pic_line(p)
+  if not (p and p.file and p.file ~= "") then return nil end
+  return ("%s|%s|%d|%d|%d"):format(p.file, p.fill or "fit", math.floor(p.edge or 16), math.floor(p.op or 100),
+    math.floor(p.rr or 0))
+end
+function M.pic_copy(p) return M.pic_of(M.pic_line(p)) end
 function M.surface_of(v)
   if type(v) ~= "string" or v:sub(1, 4) ~= "img:" then return nil end
   local file, fill, edge = v:sub(5):match("^([^|]*)|?([^|]*)|?([^|]*)$")
@@ -2328,6 +2353,8 @@ local function parse_section(sect)
         -- a text's place along its room (Align<n>=left|right; centred without)
         align   = (t == "text") and ({ left = "left", right = "right" })[U.trim(sect["Align" .. i] or "")] or nil,
         font    = (t == "text") and M.text_font_of(sect["TextFont" .. i]) or nil,
+        -- an image item's picture (Pic<n>)
+        pic     = (t == "image") and M.pic_of(sect["Pic" .. i]) or nil,
         -- a dropdown's colour per choice (ChoiceCol<n>=<plugin's text>=<colour>|...)
         ccols   = (t == "combo") and M.choice_cols_of(sect["ChoiceCol" .. i]) or nil,
         virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i], sect["VAct" .. i]) or nil,
@@ -2556,6 +2583,7 @@ local function serialize(layout)
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
     if c.type == "text" and M.text_font_line(c.font) then out["TextFont" .. (i - 1)] = M.text_font_line(c.font) end
+    if c.type == "image" and M.pic_line(c.pic) then out["Pic" .. (i - 1)] = M.pic_line(c.pic) end
     if c.type == "combo" and c.ccols then
       local line = M.choice_cols_line(c.ccols)
       if line then out["ChoiceCol" .. (i - 1)] = line end
@@ -3732,6 +3760,10 @@ function M.raw_images(t)
       -- a faceplate's, a section's or a background's own picture
       local sf = M.surface_of(v)
       if sf and not seen[sf.file] then seen[sf.file] = true; out[#out + 1] = sf.file end
+    elseif k:match("^Pic%d+$") then
+      -- an image item's
+      local pc = M.pic_of(v)
+      if pc and not seen[pc.file] then seen[pc.file] = true; out[#out + 1] = pc.file end
     end
   end
   table.sort(out)
@@ -3759,7 +3791,7 @@ function M.export(file, keys, read_img)
         end
       else
         for kk, vv in pairs(sections[k]) do
-          if kk:match("^Img%d+$") or (kk:match("^Finish%d*$") and M.surface_of(vv)) then t[kk] = nil end
+          if kk:match("^Img%d+$") or kk:match("^Pic%d+$") or (kk:match("^Finish%d*$") and M.surface_of(vv)) then t[kk] = nil end
         end
       end
       data[k] = t; order[#order + 1] = k
@@ -3844,6 +3876,10 @@ function M.import(entries, store_img)
             local sf = M.surface_of(v)
             sf.file = renamed[sf.file] or sf.file
             raw[k] = M.surface_key(sf)
+          elseif k:match("^Pic%d+$") and M.pic_of(v) then
+            local pc = M.pic_of(v)
+            pc.file = renamed[pc.file] or pc.file
+            raw[k] = M.pic_line(pc)
           end
         end
         e.raw = raw
@@ -3987,7 +4023,7 @@ function M.copy(layout)
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
-                        invert2 = c.invert2, edge = c.edge, align = c.align, font = M.text_font_copy(c.font), lamp = c.lamp,
+                        invert2 = c.invert2, edge = c.edge, align = c.align, font = M.text_font_copy(c.font), pic = M.pic_copy(c.pic), lamp = c.lamp,
                         vu = M.vu_copy(c.vu), vis = M.copy_canvas(c.vis), act = c.act,
                         ccols = c.ccols and M.choice_cols_of(M.choice_cols_line(c.ccols)) or nil,
                         at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,

@@ -262,12 +262,12 @@ function P.cell_size(ctl, half_rows)
   end
   -- words and an EQ curve: the room a grid gave them, or else a curve
   -- four cells by two, words as wide as they are
-  if ctl.type == "curve" or ctl.type == "text" then
+  if ctl.type == "curve" or ctl.type == "text" or ctl.type == "image" then
     local a, w, h = ctl.at
     if a then
       w, h = math.max(2, math.ceil(a.w / 2)), math.max(1, math.ceil(a.h / 2))
-    elseif ctl.type == "curve" then
-      w, h = 8, 4
+    elseif ctl.type == "curve" or ctl.type == "image" then
+      w, h = (ctl.type == "image") and 4 or 8, (ctl.type == "image") and 2 or 4
     else
       w, h = math.max(2, math.ceil((#(ctl.label or "") * 7 + 8) / hx(1))), (ctl.size == "large") and 2 or 1
     end
@@ -676,7 +676,7 @@ local function grid_room(panel_h)
 end
 
 local function new_out()
-  return { items = {}, rules = {}, segs = {}, sections = {}, gaps = {}, spacers = {}, texts = {}, curves = {} }
+  return { items = {}, rules = {}, segs = {}, sections = {}, gaps = {}, spacers = {}, texts = {}, curves = {}, images = {} }
 end
 
 -- Puts control `ctl` at c, r, w by h quarter cells (dx, dy pixels on):
@@ -698,6 +698,10 @@ local function put(out, ctl, c, r, w, h, dx, dy)
   end
   if t == "text" then
     out.texts[#out.texts + 1] = { x = x, y = y, w = qx(w), h = qy(h), by = ctl }
+    return
+  end
+  if t == "image" then
+    out.images[#out.images + 1] = { x = x, y = y, w = qx(w), h = qy(h), by = ctl }
     return
   end
   if t == "curve" then
@@ -2927,6 +2931,13 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     if edge then ImGui.DrawList_AddRect(dl, x1 + 0.5, y1 + 0.5, x2 - 0.5, y2 - 0.5, edge, r, 0, 1.0) end
   end
 
+  -- a grid's pictures (image controls, Pro), behind the controls
+  if FN.image then
+    for _, im in ipairs(lay.images or {}) do
+      FN.image(ctx, dl, im.by.pic, gx0 + im.x, gy0 + im.y, gx0 + im.x + im.w, gy0 + im.y + im.h)
+    end
+  end
+
   -- Dividers first, so a control's hit area is never shadowed by a rule.
   -- (an across fader running over one cuts it: lay.rule_cuts)
   for ri, rx in ipairs(lay.rules) do
@@ -3007,6 +3018,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
     elseif ctl.type == "text" then
       P.draw_text_item(ctx, dl, gx0, gy0, { x = item.x, y = item.y, w = hx(item.w), h = hy(item.h), by = ctl })
+
+    elseif ctl.type == "image" then
+      if FN.image then
+        local ix, iy = gx0 + item.x, gy0 + item.y
+        FN.image(ctx, dl, ctl.pic, ix, iy, ix + hx(item.w), iy + hy(item.h))
+      end
 
     elseif ctl.type == "vis" then
       -- a visualiser (Pro): its own roles drawn in its place
