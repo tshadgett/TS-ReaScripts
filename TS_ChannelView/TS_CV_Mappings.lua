@@ -386,9 +386,9 @@ local VALID_TYPE = { knob = true, toggle = true, combo = true, stepped = true,
 M.ACTS = { trim_auto = "Auto", trim_listen = "Listen" }
 
 -- A VU meter's settings (Vu<n>=<shows>|<look>|<0 VU dBFS>|<peak lamp>|
--- <face>|<buttons>|<stereo>|<hide>): shows "in", "out" or "gr"; look "classic",
--- "dark", "analogue", "amber", "warm" or "bar"; 0 VU at `ref` dBFS; the peak lamp on or
--- off; its face its look's own (empty), the panel's ("panel": none of its
+-- <face>|<buttons>|<stereo>|<hide>): shows "in", "out" or "gr"; look
+-- "classic", "dark", "analogue", "amber", "warm" or "bar"; 0 VU at `ref`
+-- dBFS; the peak lamp on or off; its face its look's own (empty), the panel's ("panel": none of its
 -- own), or a colour (#RRGGBB: `face` the number); its In / Out / GR
 -- buttons' style (C.BUTTON_STYLES; empty: flat); stereo "st" (two meters,
 -- left and right) or empty (one); "hide": no In / Out / GR buttons under it.
@@ -594,7 +594,7 @@ local function buttons_of(v)
   local d = U.trim(v or ""):match("^(%a+)")
   return (d == "across" or d == "down" or d == "grid" or d == "step") and d or nil
 end
--- a step button's LEDs: where (nil beside, "over", "none"), whether their
+-- a step button's LEDs: where (nil beside, "over", "column", "none"), whether their
 -- names show, and whether every LED up to the choice's lights
 local function step_of(v)
   local parts = {}
@@ -866,7 +866,7 @@ function M.surface_key(s)
 end
 
 -- A Finish line's key (a finish, or a surface's picture), or nil when it
--- names none we know.
+-- names none known.
 local function finish_of(v)
   v = U.trim(v or "")
   if M.surface_of(v) then return M.surface_key(M.surface_of(v)) end

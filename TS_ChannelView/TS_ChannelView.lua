@@ -1,9 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.0.3
+-- @version 4.1.0
 -- @changelog
---  Dropdowns open to their whole list; TS_TrackProbe 2.6.0 (the track's
---  spectrum and band listening for the EQ canvases). See the CHANGELOG.
+--  Step button with LEDs (beside, over, a column, a pattern of its own);
+--  steps for parameters that report none; hide a control's name. See the
+--  CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

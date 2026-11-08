@@ -1,5 +1,49 @@
 # ChannelView — changelog
 
+## 4.1.0 — your own pictures, step buttons, text fonts
+
+### ChannelView
+
+- **Step button:** Show as ▸ *Step button* makes a dropdown one button
+  that steps through its choices (click, Shift+click back, the wheel),
+  with an LED for each: beside it (named or not), over it, in a column
+  over it, or none. Each its own LED, every one up to it, or **a pattern
+  of LEDs** of its own (up to eight, named and coloured), each setting
+  lighting any of them, as a Distressor's *Detector*; guessed from the
+  settings' names and set in Edit layout. It lights while held. A row of
+  them in a column lines up whatever their LED count.
+- **Steps** for a parameter that reports none, read off the plugin's
+  readout (Stepic's pattern) when you choose a dropdown, stepped knob or
+  buttons, or set under Values ▸ *Steps*.
+- **Hide a control's name** and the room it takes: right-click ▸ Name ▸
+  *Show name*, or Edit layout's *Hide its name*. The name shows on hover.
+- A knob's value arc or scale ticks stay clear of its name.
+
+### ChannelView Pro
+
+- **Your own pictures on knobs and buttons:** Style ▸ *Image...* takes a
+  filmstrip (KnobMan, WebKnobMan; frames counted for you) or a picture
+  that turns; a button's Off and On, a step button's too. On a layout's
+  own controls as well. Strips of any length.
+- **Pictures on faceplates, sections and backgrounds:** stretched,
+  filling, tiled, or with the edges kept; labels take their ink from the
+  picture.
+- **Your pictures:** every picture you add, with its settings, in the
+  Image... window and the Style, Faceplate, section and background menus:
+  one click puts one on. Drag one onto another to move it, right-click to
+  rename it, the x in its corner to take it away. Your recipes work the
+  same way. The menus' long lists fold away.
+- Exported layouts carry their pictures when *Include their pictures* is
+  ticked.
+- **VU meter:** *Amber* and *Warm white* looks, lit from behind.
+- **Text items:** a font, size in px, bold, italic, underline,
+  strikethrough, all caps and letter spacing.
+- **Visual Options ▸ Panels ▸ Meter scales:** figures on the GR and In /
+  Out meters, as on the fader meters.
+- **Web page:** VU meters, pictures, step buttons, hidden names, text
+  fonts and surface pictures, as on the desktop; the steps you set; the
+  EQ canvas's band bar scrolls and answers touch properly.
+
 ## 4.0.3 — EQ canvases: spectrum grab, band listen, stereo placement
 
 ### ChannelView
