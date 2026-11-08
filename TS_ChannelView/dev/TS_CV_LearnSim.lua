@@ -369,13 +369,21 @@ do
     [0] = { name = "Focus On", list = { "Off", "On" } },
     { name = "Focus Band Type", fn = function(n) return MODES[mode_of(n)].name, mode_of(n) end, now_only = true },
     { name = "Focus Amount", lo = 0, hi = 100, unit = "%" },
+    { name = "Reverb On", list = { "Off", "On" } },
+    { name = "EQ On", list = { "Off", "On" } },
   }
-  NP = 3
+  NP = 5
+  -- (its reverb on: a burst of something else in every measurement)
   truth = function(vals)
-    if (vals[0] or 0) < 0.5 then return {} end
+    local out = {}
+    if (vals[3] or 0) >= 0.5 then
+      out[#out + 1] = { type = "bell", f = 200 * 2 ^ (math.random() * 6), g = (math.random() - 0.5) * 8, q = 1.5 }
+    end
+    if (vals[0] or 0) < 0.5 or (vals[4] or 1) < 0.5 then return out end
     local m = MODES[mode_of(vals[1] or 0.5)]
     local a = vals[2] or 0
-    return { { type = m.type, f = m.f, g = m.g * a, q = m.q } }
+    out[#out + 1] = { type = m.type, f = m.f, g = m.g * a, q = m.q }
+    return out
   end
   -- (the type control: whatever's asked, where it is now)
   local fmt_was, fmtpv = reaper.TrackFX_FormatParamValueNormalized, reaper.TrackFX_GetFormattedParamValue
@@ -387,8 +395,8 @@ do
   reaper.TrackFX_GetFXGUID = function(t, fx) return tostring(t) .. ":" .. fx end
   tracks = {}
   local user = newtrack("Vox"); tracks[1] = user
-  user.fx[1] = { kind = "eq", vals = { [0] = 1, [1] = 0.5, [2] = 0.35 } }
-  local layout = { controls = {}, aliases = {}, canvas = { kind = "eq",
+  user.fx[1] = { kind = "eq", vals = { [0] = 1, [1] = 0.5, [2] = 0.35, [3] = 1, [4] = 1 } }
+  local layout = { controls = {}, aliases = {}, canvas = { kind = "eq", all_on = 4,
     bands = { { name = "Focus", gain = 2, shape = 1, on = 0 } } } }
   M.set("Vocal Studio :: EQ", layout)
   local job = LN.start(user, 0, "Vocal Studio :: EQ", layout)
@@ -404,7 +412,8 @@ do
   local shs = ME.shapes(user, 0, layout.canvas.bands[1])
   check("focus: modes by name", shs and (shs[1].text .. "," .. shs[2].text .. "," .. shs[3].text), "Air,Edge,Presence")
   check("focus: left on Edge", user.fx[1].vals[1], 0.5)
-  local w = worst(user, layout, { { [1] = 0.5, [2] = 0.35 }, { [1] = 0, [2] = 1 }, { [1] = 1, [2] = 0.6 } })
+  check("focus: its reverb off on the copy only, yours left on", user.fx[1].vals[3], 1)
+  local w = worst(user, layout, { { [1] = 0.5, [2] = 0.35, [3] = 0 }, { [1] = 0, [2] = 1, [3] = 0 }, { [1] = 1, [2] = 0.6, [3] = 0 } })
   checkf(("focus: curve within 1 dB (%.2f)"):format(w), function() return w < 1 end)
   local r = ME.read_band(user, 0, layout.canvas.bands[1])
   checkf("focus: its amount read as gain", function() return r and r.g and r.g > 2 and r.g < 4 end)
