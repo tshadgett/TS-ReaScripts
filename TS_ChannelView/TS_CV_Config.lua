@@ -239,6 +239,8 @@ C.GRV_W       = 220       -- the gain-reduction trace, when a meter is opened ou
 C.GRV_WINDOWS = { "1b", "2b", "4b", "8b", "1s", "2s", "4s" }
 C.GRV_DEFAULT = "4b"
 C.IO_BAR_W    = 8         -- the bar itself
+C.IO_BAR_W_SCALE = 20     -- ... with its figures on it (Visual Options' Meter scales)
+C.METER_W_SCALE  = 18     -- a GR meter's bar with its figures
 C.METER_FONT  = 10        -- point size for the readout
 -- "left" or "right" edge of the panel body. Right, so a panel reads the way
 -- the audio flows: input meter, controls, gain reduction, output meter.

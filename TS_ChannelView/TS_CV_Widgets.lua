@@ -3923,6 +3923,18 @@ end
 
 -- Returns the bar's rectangle -- x, y, width, height -- so the panel's
 -- gain-reduction trace can sit flush against it and end where it ends.
+-- The figures on a gain-reduction meter of range `max_db`: a round step
+-- giving three or four of them, the range's end among them.
+function W.gr_marks(max_db)
+  local step = 20
+  for _, s in ipairs({ 1, 2, 3, 6, 10, 12, 15, 20 }) do
+    if max_db / s <= 4 then step = s; break end
+  end
+  local out = {}
+  for g = step, max_db + 0.001, step do out[#out + 1] = math.floor(g + 0.5) end
+  return out
+end
+
 function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
   max_db = (max_db and max_db > 0) and max_db or 12
   est = est or false
@@ -3945,7 +3957,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
   local text_h  = (stacked and line_h * 2 or line_h) + 2
 
   local bar_h = h - text_h
-  local bw    = math.min(C.METER_W, col_w)
+  local bw    = math.min(C.METER_SCALES and C.METER_W_SCALE or C.METER_W, col_w)
   local bx    = x + (col_w - bw) * 0.5
   local w     = bw
 
@@ -3969,6 +3981,20 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
     local wide = (i == 4)
     ImGui.DrawList_AddLine(dl, x + (wide and 1 or w - 6), ty,
       x + w - 1, ty, C.COL.knob_ring, 1.0)
+  end
+
+  -- its figures over the bar (Visual Options' Meter scales), dark over
+  -- the lit part, light over the rest
+  if C.METER_SCALES then
+    for _, g in ipairs(W.gr_marks(max_db)) do
+      local ty = inner_y + inner_h * (g / max_db)
+      if ty > y + 6 and ty < y + bar_h - 5 then
+        local s = tostring(g)
+        local tw, th = ImGui.CalcTextSize(ctx, s)
+        ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, ty - th * 0.5,
+          ((gr_db or 0) >= g) and C.COL.meter_ink_lit or C.COL.meter_ink, s)
+      end
+    end
   end
 
   -- peak hold
@@ -4022,6 +4048,17 @@ function W.gr_meter_h(ctx, dl, x, y, w, h, gr_db, peak_db, max_db, est, dim)
     local full = (i == 4)
     ImGui.DrawList_AddLine(dl, tx, full and (y + 1) or (y + h - 4), tx, y + h - 1, C.COL.knob_ring, 1.0)
   end
+  if C.METER_SCALES and h >= 11 then
+    for _, g in ipairs(W.gr_marks(max_db)) do
+      local tx = ix1 - iw * (g / max_db)
+      local s = tostring(g)
+      local sw, sh = ImGui.CalcTextSize(ctx, s)
+      if tx - sw * 0.5 > bx + 2 and tx + sw * 0.5 < bx + bw - 2 then
+        ImGui.DrawList_AddText(dl, tx - sw * 0.5, y + (h - sh) * 0.5,
+          ((gr_db or 0) >= g) and C.COL.meter_ink_lit or C.COL.meter_ink, s)
+      end
+    end
+  end
   if peak_db and peak_db > 0.05 then
     local px = ix1 - iw * math.max(0, math.min(1, peak_db / max_db))
     ImGui.DrawList_AddLine(dl, px, y + 1, px, y + h - 1, C.COL.knob_pointer, 1.5)
@@ -4043,9 +4080,10 @@ function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol)
   if meter_font then ImGui.PushFont(ctx, meter_font, C.METER_FONT); pushed = true end
   local _, line_h = ImGui.CalcTextSize(ctx, "0")
   local bar_h = h - (line_h + 2)
-  local bw = math.min(C.IO_BAR_W, w)
+  -- (wider with its figures on it, Visual Options' Meter scales)
+  local bw = math.min(C.METER_SCALES and C.IO_BAR_W_SCALE or C.IO_BAR_W, w)
   W.level_meter(ctx, dl, x + (w - bw) * 0.5, y, bw, bar_h, { pk },
-    W.level_peak(key, pk, now), nil, rms)
+    W.level_peak(key, pk, now), C.METER_SCALES or nil, rms)
   local tw = ImGui.CalcTextSize(ctx, readout)
   ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + bar_h + 1, rcol or C.COL.header_dim, readout)
   if pushed then ImGui.PopFont(ctx) end

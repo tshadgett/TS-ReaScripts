@@ -83,6 +83,7 @@ local FIELDS = {
   { "power",      "icon",   "str",  true },
   { "hide_head",  false,    "bool", true },
   { "hide_foot",  false,    "bool", true },
+  { "mscale",     false,    "bool", true },     -- figures on the GR and In / Out meters
   { "trackcol",   "stripe", "str",  true },
   { "icons",      false,    "bool", true },
   { "cell_w",     C.CELL_W_DEFAULT, "num", true },
@@ -323,6 +324,7 @@ function VO.apply(tab)
   C.TRACK_COL = pro and val(s, "trackcol") or "stripe"
   C.HIDE_HEAD = pro and val(s, "hide_head") or false
   C.HIDE_FOOT = pro and val(s, "hide_foot") or false
+  C.METER_SCALES = pro and val(s, "mscale") or false
   C.TRACK_ICONS = val(s, "icons")
   C.TCP_ICONS   = C.TRACK_ICONS
   C.set_cell_w(val(s, "cell_w"))
@@ -774,6 +776,9 @@ local function page_panels(ctx, tab, s)
   local fch, fv = ST.checkbox(ctx, "Foot##vo_hf", val(s, "hide_foot"))
   if fch then set(tab, "hide_foot", fv) end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Shown while the pointer is over the panel.") end
+  row(ctx, "Meter scales")
+  local mch, mv = ST.checkbox(ctx, "On the GR and In / Out meters##vo_ms", val(s, "mscale"))
+  if mch then set(tab, "mscale", mv) end
   if not ED.PRO then ImGui.EndDisabled(ctx) end
 end
 

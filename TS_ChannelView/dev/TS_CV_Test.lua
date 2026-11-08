@@ -12462,6 +12462,32 @@ do
   E.PRO, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = had_pro, gn, gp
 end
 
+-- a GR meter's figures (Visual Options' Meter scales): three or four
+-- round ones, the range's end among them
+check("gr figures: 12", table.concat(W.gr_marks(12), ","), "3,6,9,12")
+check("gr figures: 18", table.concat(W.gr_marks(18), ","), "6,12,18")
+check("gr figures: 60", table.concat(W.gr_marks(60), ","), "15,30,45,60")
+do
+  local texts = {}
+  local fake = setmetatable({
+    CalcTextSize = function(_, t) return #t * 6, 10 end,
+    DrawList_AddText = function(_, x, y, col, t) texts[#texts + 1] = t end,
+  }, { __index = function() return function() end end })
+  W.attach(fake)
+  C.METER_SCALES = true
+  local ok, err = pcall(function()
+    W.gr_meter("ctx", "dl", 0, 0, 40, 200, 7, 7, 12, false, false)
+    W.gr_meter_h("ctx", "dl", 0, 0, 300, 14, 7, 7, 12, false, false)
+    W.io_bar("ctx", "dl", 0, 0, 28, 200, "t_io", -9, -14, "-9.0")
+  end)
+  C.METER_SCALES = nil
+  check("meter scales: drawn", ok and "ok" or tostring(err), "ok")
+  local have = {}
+  for _, t in ipairs(texts) do have[t] = (have[t] or 0) + 1 end
+  check("meter scales: GR figures, both ways", tostring(have["6"]) .. " " .. tostring(have["9"]), "2 2")
+  check("meter scales: In / Out figures", tostring(have["-12"] ~= nil), "true")
+end
+
 -- pictures on the web page: names it can serve, a big strip in pieces
 do
   local FN = require("TS_CV_Finish")

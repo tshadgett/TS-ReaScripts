@@ -1788,7 +1788,9 @@ right-click ▸ *Group looks…*.
   with *Customise…*, its colour and a value arc), button, dropdown and
   plugin fader — what a control with no style of its own draws as.
 - **Panels (Pro):** corner rounding, the power switch (an icon or a
-  lamp), and the header and foot hidden until the pointer is over them.
+  lamp), the header and foot hidden until the pointer is over them, and
+  **Meter scales**: figures on the GR and In / Out meters, as on the
+  fader meters (the web page's GR meters too).
 - **Track buttons:** the track's colour on its name button (Pro: *Bar
   below*, *Bar above* or *Filled*) and the track icons.
 - **Faders & strips:** each group's fader style and colour, strip width
