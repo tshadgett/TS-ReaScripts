@@ -1862,8 +1862,10 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   every one on the panel. Pictures are copied into `Images/` beside your
   layouts, and the web page shows them too. Every picture you add goes
   into **Your pictures**, with its settings, for any panel: at the top of
-  the Image... window (right-click one to rename it or take it out), and
-  under your recipes in the Style menu, where one click puts it on. A
+  the Image... window (right-click one to rename it), and under your
+  recipes in the Style menu, where one click puts it on. The x in a
+  picture's or a recipe's corner takes it away (it asks first); controls
+  using it keep it, and a picture's file goes once nothing uses it. A
   knob's pictures and a button's are kept apart (right-click one to move
   it). The Style menu's lists (the styles, your recipes, your pictures)
   each fold away under their heading. Exporting layouts leaves them

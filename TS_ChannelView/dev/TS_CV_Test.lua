@@ -8925,6 +8925,23 @@ do
     .. (FN.gallery("button")[1] or {}).name, "1 1 dist button")
   M.remove("GalSeed")
   reaper.EnumerateFiles = ef
+  -- taken out: its file goes when nothing uses it, stays when a layout does
+  os.remove(tmpd .. "TS_ChannelView_Pictures.ini")
+  FN.gallery_reload()
+  os.execute("mkdir -p '" .. FN.IMG_DIR .. "'")
+  for _, f in ipairs({ "free.png", "used.png" }) do local h = io.open(FN.IMG_DIR .. f, "wb"); h:write("x"); h:close() end
+  local www0 = FN.www_dir
+  FN.www_dir = function() return tmpd .. "www/" end
+  FN.gallery_put("knob", { file = "free.png", kind = "turn", frames = 1, dir = "down", size = 0 })
+  FN.gallery_put("knob", { file = "used.png", kind = "turn", frames = 1, dir = "down", size = 0 })
+  M.set("GalUse", { controls = { { param = 1, type = "knob", img = { file = "used.png", kind = "turn", frames = 1, dir = "down", size = 0 } } } })
+  local _, gone1 = FN.gallery_remove("free")
+  local _, gone2 = FN.gallery_remove("used")
+  check("gallery: an unused file goes, a used one stays", tostring(gone1) .. " " .. tostring(gone2) .. " "
+    .. tostring(io.open(FN.IMG_DIR .. "free.png") == nil) .. " " .. tostring(io.open(FN.IMG_DIR .. "used.png") ~= nil), "true false true true")
+  M.remove("GalUse")
+  os.remove(FN.IMG_DIR .. "used.png")
+  FN.www_dir = www0
   os.remove(tmpd .. "TS_ChannelView_Pictures.ini")
   FN.IMG_DIR = dir0
   FN.gallery_reload()

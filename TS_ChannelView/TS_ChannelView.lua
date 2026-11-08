@@ -1257,17 +1257,23 @@ local function toggle_colour_menu(fx, key, idx, c)
       for i, g in ipairs(pics) do
         if (i - 1) % 6 ~= 0 then ImGui.SameLine(ctx, 0, 2) end
         local x, y = ImGui.GetCursorScreenPos(ctx)
-        if ImGui.Selectable(ctx, "##mybpic_" .. i, c.img ~= nil and c.img.file == g.img.file, KEEP_OPEN, CS, CS) then
-          local l, pk = materialise(fx)
-          M.put_img(l, idx, g.img, "knob")
-          M.set(pk, l); M.save()
-        end
+        local picked = ImGui.Selectable(ctx, "##mybpic_" .. i, c.img ~= nil and c.img.file == g.img.file, KEEP_OPEN, CS, CS)
         if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, g.name) end
         local img, iw, ih = W.picture(ctx, g.img, g.img.file2 or g.img.file)
         if img then
           local own_on = g.img.file2 ~= nil
           W.draw_frame(dl, img, iw, ih, own_on and { frames = 1 } or g.img, own_on and 0 or math.min(1, (g.img.frames or 1) - 1),
             x + 3, y + 3, x + CS - 3, y + CS - 3)
+        end
+        -- (over the picture)
+        local on_x, x_hit = W.tile_x(ctx, dl, x, y, CS)
+        if x_hit then
+          if reaper.MB(("Remove the picture \"%s\"?\n\nControls using it keep it."):format(g.name),
+              "ChannelView", 4) == 6 then FNm.gallery_remove(g.name) end
+        elseif picked and not on_x then
+          local l, pk = materialise(fx)
+          M.put_img(l, idx, g.img, "knob")
+          M.set(pk, l); M.save()
         end
       end
       ImGui.Spacing(ctx)
@@ -1988,11 +1994,17 @@ local function style_menu(fx, key, idx, c)
       for i, r in ipairs(mine) do
         if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
         local x, y = ImGui.GetCursorScreenPos(ctx)
-        if ImGui.Selectable(ctx, "##myrecipe_" .. i, false, KEEP_OPEN, CS, CS) then
-          set({ look = KPm.copy(r.look), cap = false })
-        end
+        local picked = ImGui.Selectable(ctx, "##myrecipe_" .. i, false, KEEP_OPEN, CS, CS)
         if ImGui.IsItemHovered(ctx) then hov_label = r.name end
         W.knob_face(dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, { look = r.look, ctx = ctx })
+        -- an x in its corner takes it away, once you've said so
+        local on_x, x_hit = W.tile_x(ctx, dl, x, y, CS)
+        if x_hit then
+          if reaper.MB(("Remove the recipe \"%s\"?\n\nKnobs wearing it keep their look."):format(r.name),
+              "ChannelView", 4) == 6 then RCP.remove(r.name) end
+        elseif picked and not on_x then
+          set({ look = KPm.copy(r.look), cap = false })
+        end
       end
     end
     -- your pictures (Style > Image...): one click puts it on this knob
@@ -2005,13 +2017,18 @@ local function style_menu(fx, key, idx, c)
       for i, g in ipairs(pics) do
         if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
         local x, y = ImGui.GetCursorScreenPos(ctx)
-        if ImGui.Selectable(ctx, "##mypic_" .. i, c.img ~= nil and c.img.file == g.img.file, KEEP_OPEN, CS, CS) then
+        local picked = ImGui.Selectable(ctx, "##mypic_" .. i, c.img ~= nil and c.img.file == g.img.file, KEEP_OPEN, CS, CS)
+        if ImGui.IsItemHovered(ctx) then hov_label = g.name end
+        W.picture_knob(ctx, dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, g.img, false)
+        local on_x, x_hit = W.tile_x(ctx, dl, x, y, CS)
+        if x_hit then
+          if reaper.MB(("Remove the picture \"%s\"?\n\nControls using it keep it."):format(g.name),
+              "ChannelView", 4) == 6 then FNm.gallery_remove(g.name) end
+        elseif picked and not on_x then
           local l, pk = materialise(fx)
           M.put_img(l, idx, g.img, "knob")
           M.set(pk, l); M.save()
         end
-        if ImGui.IsItemHovered(ctx) then hov_label = g.name end
-        W.picture_knob(ctx, dl, x + CS * 0.5, y + CS * 0.5, CS * 0.5 - 6, 0.62, g.img, false)
       end
     end
     ImGui.Spacing(ctx)

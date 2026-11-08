@@ -1473,6 +1473,23 @@ function W.lamp(dl, x, y, col)
   end
 end
 
+-- A small x in the top-right corner of a tile (a recipe, a picture) while
+-- the tile is hovered, to take it away. Call just after the tile's own
+-- item, at its top-left x, y and size. Returns `over` (the pointer on the
+-- x: the tile's own click is to be ignored) and `clicked`.
+function W.tile_x(ctx, dl, x, y, size)
+  if not ImGui.IsItemHovered(ctx) then return false, false end
+  local r = 6
+  local cx, cy = x + size - r - 1, y + r + 1
+  local mx, my = ImGui.GetMousePos(ctx)
+  local over = (mx - cx) ^ 2 + (my - cy) ^ 2 <= (r + 1) ^ 2
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, r, over and 0xc0392bff or 0x000000b0, 12)
+  local d = r * 0.45
+  ImGui.DrawList_AddLine(dl, cx - d, cy - d, cx + d, cy + d, 0xffffffff, 1.5)
+  ImGui.DrawList_AddLine(dl, cx - d, cy + d, cx + d, cy - d, 0xffffffff, 1.5)
+  return over, over and ImGui.IsMouseReleased(ctx, ImGui.MouseButton_Left)
+end
+
 -- A heading that folds what's under it away (a long list in a menu: the
 -- styles, your recipes, your pictures): true while it's open. Each is
 -- remembered by `key`, open to start. `flags`: the Selectable's (a menu's
