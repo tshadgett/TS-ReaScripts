@@ -1,5 +1,18 @@
 # ChannelView — changelog
 
+## 4.1.1 — images on panels
+
+### ChannelView Pro
+
+- **Image items:** Edit layout ▸ Add ▸ *Image* puts a picture of your own
+  anywhere on the grid, behind the controls: a logo, a badge, a panel
+  graphic. Fit, stretch, fill, tile or with its edges kept; opacity and
+  rounded corners. Kept in Your pictures, carried in exported layouts
+  with *Include their pictures*, and on the web page too.
+- **Web page:** a large knob with numbers sits at the foot of its place,
+  as on the desktop, so with its name hidden its numbers no longer run
+  into text above it.
+
 ## 4.1.0 — your own pictures, step buttons, text fonts
 
 ### ChannelView

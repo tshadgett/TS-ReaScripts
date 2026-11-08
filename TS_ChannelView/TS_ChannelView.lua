@@ -1,9 +1,8 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.1.0
+-- @version 4.1.1
 -- @changelog
---  Step button with LEDs (beside, over, a column, a pattern of its own);
---  steps for parameters that report none; hide a control's name. See the
+--  Moves with ChannelView Pro 4.1.1 (image items on panels). See the
 --  CHANGELOG.
 -- @license MIT
 -- @provides
