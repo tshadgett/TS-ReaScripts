@@ -355,6 +355,65 @@ do
 end
 
 -- ---------------------------------------------------------------------
+-- Vocal Studio's Focus: a band with no frequency or Q of its own, an
+-- amount (0 to 100 %) and three modes (Air, Edge, Presence) whose type
+-- control only says where it is now. Each mode learned with its own
+-- centre; the names read by moving it; up to full amount
+-- ---------------------------------------------------------------------
+do
+  local MODES = { { name = "Air", type = "hs", f = 10000, g = 8, q = 0.7 },
+                  { name = "Edge", type = "bell", f = 4200, g = 6, q = 0.6 },
+                  { name = "Presence", type = "bell", f = 2800, g = 5, q = 0.9 } }
+  local function mode_of(n) return (n < 0.25) and 1 or (n > 0.75) and 3 or 2 end
+  P = {
+    [0] = { name = "Focus On", list = { "Off", "On" } },
+    { name = "Focus Band Type", fn = function(n) return MODES[mode_of(n)].name, mode_of(n) end, now_only = true },
+    { name = "Focus Amount", lo = 0, hi = 100, unit = "%" },
+  }
+  NP = 3
+  truth = function(vals)
+    if (vals[0] or 0) < 0.5 then return {} end
+    local m = MODES[mode_of(vals[1] or 0.5)]
+    local a = vals[2] or 0
+    return { { type = m.type, f = m.f, g = m.g * a, q = m.q } }
+  end
+  -- (the type control: whatever's asked, where it is now)
+  local fmt_was, fmtpv = reaper.TrackFX_FormatParamValueNormalized, reaper.TrackFX_GetFormattedParamValue
+  reaper.TrackFX_FormatParamValueNormalized = function(t, fx, p, n)
+    if P[p] and P[p].now_only and t and t.fx then return true, (fmt(p, t.fx[fx + 1].vals[p] or 0.5)) end
+    return fmt_was(t, fx, p, n)
+  end
+  local guid_was = reaper.TrackFX_GetFXGUID
+  reaper.TrackFX_GetFXGUID = function(t, fx) return tostring(t) .. ":" .. fx end
+  tracks = {}
+  local user = newtrack("Vox"); tracks[1] = user
+  user.fx[1] = { kind = "eq", vals = { [0] = 1, [1] = 0.5, [2] = 0.35 } }
+  local layout = { controls = {}, aliases = {}, canvas = { kind = "eq",
+    bands = { { name = "Focus", gain = 2, shape = 1, on = 0 } } } }
+  M.set("Vocal Studio :: EQ", layout)
+  local job = LN.start(user, 0, "Vocal Studio :: EQ", layout)
+  run(job)
+  check("focus: learned", job.state, "done")
+  local L = ME.decode(layout.canvas.bands[1].learn)
+  check("focus: its three modes", L and L.H and #L.H, 3)
+  checkf("focus: Air a high shelf, Edge and Presence bells", function()
+    return L.shapes[1].type == "hs" and L.shapes[2].type == "bell" and L.shapes[3].type == "bell" end)
+  checkf("focus: each mode its own centre", function()
+    local e, pr = L.shapes[2].F[1][2], L.shapes[3].F[1][2]
+    return e > 3600 and e < 4900 and pr > 2300 and pr < 3300 end)
+  local shs = ME.shapes(user, 0, layout.canvas.bands[1])
+  check("focus: modes by name", shs and (shs[1].text .. "," .. shs[2].text .. "," .. shs[3].text), "Air,Edge,Presence")
+  check("focus: left on Edge", user.fx[1].vals[1], 0.5)
+  local w = worst(user, layout, { { [1] = 0.5, [2] = 0.35 }, { [1] = 0, [2] = 1 }, { [1] = 1, [2] = 0.6 } })
+  checkf(("focus: curve within 1 dB (%.2f)"):format(w), function() return w < 1 end)
+  local r = ME.read_band(user, 0, layout.canvas.bands[1])
+  checkf("focus: its amount read as gain", function() return r and r.g and r.g > 2 and r.g < 4 end)
+  reaper.TrackFX_FormatParamValueNormalized = fmt_was
+  reaper.TrackFX_GetFXGUID = guid_was
+  M.remove("Vocal Studio :: EQ")
+end
+
+-- ---------------------------------------------------------------------
 -- a parametric EQ that reports its values
 -- ---------------------------------------------------------------------
 do

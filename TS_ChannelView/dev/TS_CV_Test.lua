@@ -8390,6 +8390,20 @@ do
   for k = 1, 32 do many[#many + 1] = "Band" .. k .. " Freq."; many[#many + 1] = "Band" .. k .. " Gain" end
   local gm = ME.guess(many)
   check("guess: 16 of 32 numbered bands", #gm .. " " .. gm[16].name .. " " .. gm[16].freq, "16 Band 16 30")
+  -- Vocal Studio: worded cuts, numbered bands between them, and its Focus
+  -- (an amount, a type and a switch: no frequency of its own)
+  local vs = { "Bypass", "EQ High Pass Frequency", "EQ HP Slope", "EQ HP On", "EQ Low Pass Frequency", "EQ LP Slope", "EQ LP On",
+    "Gate On", "Gate Threshold", "Input Sensitivity", "De-esser On", "De-esser Amount", "Drive On", "Drive Mode", "Drive",
+    "Compressor On", "Compressor Amount", "Compressor Type", "EQ On", "EQ Amount" }
+  for k = 1, 5 do for _, w in ipairs({ "Frequency", "Q", "Gain", "On" }) do vs[#vs + 1] = ("EQ %d %s"):format(k, w) end end
+  for _, w in ipairs({ "Focus On", "Focus Band Type", "Focus Amount", "FX On", "FX Amount" }) do vs[#vs + 1] = w end
+  local gv = ME.guess(vs)
+  local got = {}
+  for i, b in ipairs(gv) do got[i] = ("%s:%s/%s/%s/%s/%s"):format(b.name, tostring(b.freq), tostring(b.gain), tostring(b.q),
+    tostring(b.shape or b.slope), tostring(b.on)) end
+  check("guess: Vocal Studio's bands", table.concat(got, " "),
+    "Low cut:1/nil/nil/2/3 Band 1:20/22/21/nil/23 Band 2:24/26/25/nil/27 Band 3:28/30/29/nil/31 Band 4:32/34/33/nil/35 "
+    .. "Band 5:36/38/37/nil/39 High cut:4/nil/nil/5/6 Focus:nil/42/nil/41/40")
   check("dyn guess: a plain band stays plain", g[2] and ("%s %s"):format(g[2].on, tostring(g[2].dyn)), "8 nil")
   local gs = ME.guess({ "Band 1 Used", "Band 1 Enabled", "Band 1 Frequency", "Band 1 Gain", "Band 1 Q", "Band 1 Shape",
                         "Band 1 Solo", "Band 1 Side Chain Audition", "Band 1 Stereo Placement" })
@@ -12475,6 +12489,35 @@ do
   d = Mk.known_default("Pro-Q 4 :: Mine", {}, 0, { controls = {} })
   check("known default: not another layout of theirs", d.canvas, nil)
   E.PRO, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = had_pro, gn, gp
+end
+
+-- a shape switch on a plugin that only says where it is now (Vocal
+-- Studio's Focus): its settings' names read by moving it, not all "Edge"
+do
+  local ME = require("TS_CV_MapEQ")
+  local names = { [0] = "Air", [0.5] = "Edge", [1] = "Presence" }
+  local now = 0.5
+  local had = {}
+  for _, k in ipairs({ "TrackFX_FormatParamValueNormalized", "TrackFX_GetFormattedParamValue", "TrackFX_SetParamNormalized",
+                       "TrackFX_GetParamNormalized", "TrackFX_GetFXGUID", "GetPlayState", "GetTrackAutomationMode",
+                       "TrackFX_GetParamName", "GetMediaTrackInfo_Value" }) do had[k] = reaper[k] end
+  reaper.TrackFX_GetParamName = function() return true, "Focus Band Type" end
+  reaper.GetMediaTrackInfo_Value = function() return 0 end
+  reaper.TrackFX_FormatParamValueNormalized = function() return true, names[now] end
+  reaper.TrackFX_GetFormattedParamValue = function() return true, names[now] end
+  reaper.TrackFX_SetParamNormalized = function(_, _, _, v) now = (v < 0.25) and 0 or (v > 0.75) and 1 or 0.5 end
+  reaper.TrackFX_GetParamNormalized = function() return now end
+  reaper.TrackFX_GetFXGUID = function() return "{vs-focus}" end
+  reaper.GetPlayState = function() return 0 end
+  reaper.GetTrackAutomationMode = function() return 0 end
+  local L = ME.encode({ H = { 0, 0.5, 1 }, shapes = { { type = "hs", F = { { 0, 9000 } } }, { type = "bell", F = { { 0, 4200 } } },
+    { type = "bell", F = { { 0, 3000 } } } } })
+  local ok, shs = pcall(ME.shapes, "tr", 0, { shape = 41, gain = 42, on = 40, learn = L })
+  local got = {}
+  if ok and shs then for i, sh in ipairs(shs) do got[i] = sh.text end end
+  check("focus: its modes by name, read by moving it", ok and table.concat(got, ",") or tostring(shs), "Air,Edge,Presence")
+  check("focus: left where it was", now, 0.5)
+  for k, v in pairs(had) do reaper[k] = v end
 end
 
 -- an image item drawn: fitted (its shape kept), its opacity, rounded
