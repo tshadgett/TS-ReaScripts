@@ -1266,7 +1266,8 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   The meters, Threshold, Frequency range and Width are measured by the
   TS_TrackProbe pair (Width and the stereo VU need TS_TrackProbe 2.4.0:
   reopen a project after updating); choosing one offers to add the pair.
-  On the web page a visualiser or VU meter shows as a gap.
+  The web page shows VU meters too, its In / Out / GR buttons changing
+  them in ChannelView as well; a visualiser shows there as a gap.
 - **Canvas colours.** With nothing selected, a canvas layout has its own
   colours: the curve (the threshold and their handles), the fill under it
   (the curve's until you set it), the highlight (a compressor's input
@@ -1922,8 +1923,8 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   middle stretched, for a rack panel with screws at any size). The labels
   on it take their ink from the picture's colour. Your surface pictures
   are kept in Your pictures, shown in those menus too: one click puts one
-  on. The menus' lists of faceplates and pictures fold away. (On the web page, Edges kept is
-  stretched.)
+  on. The menus' lists of faceplates and pictures fold away. (On the web
+  page a control's own background with Edges kept is stretched.)
 - **The plugin's own colours** (Windows, with js_ReaScriptAPI). Every
   colour menu — faceplate, section, background, knob and fader caps, lit
   colours — has a **From the plugin** row: the eyedropper reads the

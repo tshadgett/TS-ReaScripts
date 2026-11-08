@@ -8762,6 +8762,7 @@ do
     GetKeyMods = function() return mods end, CalcTextSize = function() return 6, 10 end,
     DrawList_AddCircleFilled = function(_, x, y, r, col) if r > 3 and r < 3.5 then lamps[#lamps + 1] = col end end,
     DrawList_AddText = function(_, x, y, col, t) texts[#texts + 1] = t end,
+    DrawList_AddRect = function(_, x1, y1, x2, y2) lamps.rect = { y1, y2 } end,
   }, { __index = function(_, key)
     if key == "MouseButton_Left" then return 0 end
     if key == "MouseButton_Right" then return 1 end
@@ -8819,6 +8820,14 @@ do
     local lit2 = {}
     for _, c in ipairs(lamps) do if c == 0x11 or c == 0x22 or c == 0x33 then lit2[#lit2 + 1] = c end end
     check("step pattern: HP + Link lit", table.concat(lit2, ","), "17,51")
+    -- in a column, the cap at the foot and the same size, two lamps or three
+    local function cap_at(l)
+      lamps = {}
+      W.button_row("ctx", "##col", "Tone", 0, l, { dir = "step", w = 80, h = 110, leds = "column" })
+      return lamps.rect and ("%g-%g"):format(lamps.rect[1], lamps.rect[2]) or "none"
+    end
+    local two = { { norm = 0, text = "Old" }, { norm = 1, text = "New" } }
+    check("step column: lines up, two lamps or three", cap_at(two), cap_at(list))
   end)
   check("step: draw ran", ok and true or err, true)
 end
@@ -12451,6 +12460,22 @@ do
   d = Mk.known_default("Pro-Q 4 :: Mine", {}, 0, { controls = {} })
   check("known default: not another layout of theirs", d.canvas, nil)
   E.PRO, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = had_pro, gn, gp
+end
+
+-- pictures on the web page: names it can serve, a big strip in pieces
+do
+  local FN = require("TS_CV_Finish")
+  check("www: a name with spaces served", FN.www_name("small grey off.png"), "small_grey_off.png")
+  local had = FN.www
+  FN.www = function(name, frames)
+    if frames == 128 then return "big.png", { { file = "big-p1.png", n = 21 }, { file = "big-p2.png", n = 107 } } end
+    return FN.www_name(name)
+  end
+  local a = FN.www_img({ file = "dist button.png", file2 = "dist button on.png", kind = "strip", frames = 1, dir = "across", size = 0 })
+  check("www: a button's files", a.f .. " " .. a.f2 .. " " .. tostring(a.t), "/TS_CV_Images/dist_button.png /TS_CV_Images/dist_button_on.png nil")
+  local k = FN.www_img({ file = "big.png", kind = "strip", frames = 128, dir = "down", size = 0 })
+  check("www: a big strip, its pieces", k.f .. " " .. #k.t .. " " .. k.t[2].u .. " " .. k.t[2].n, "/TS_CV_Images/big-p1.png 2 /TS_CV_Images/big-p2.png 107")
+  FN.www = had
 end
 
 -- a text control in its own font: spaced a letter at a time, struck through

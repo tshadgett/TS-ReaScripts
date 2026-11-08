@@ -2506,12 +2506,15 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
     for i = 1, m do lamps[i] = { lx0 + (i - 1) * sp, top + 5 } end
     bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + 12, bot)
   elseif where == "column" then
-    -- a column over the cap, names on their left, as on the hardware
-    local sp = math.max(8, math.min(12, (bot - top - 20) / math.max(1, m)))
+    -- a column over the cap, names on their left, as on the hardware; the
+    -- cap at the foot, the same size whatever the count, so a row of them
+    -- lines up
+    local caph = math.min(26, math.max(14, bot - top - m * 8 - 2))
+    local sp = math.max(8, math.min(12, (bot - caph - 2 - top) / math.max(1, m)))
     local lx = names and (x + cw - 9) or (x + cw * 0.5)
     for i = 1, m do lamps[i] = { lx, top + 5 + (i - 1) * sp } end
     name_left = names
-    bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + m * sp + 2, bot)
+    bx1, by1, bx2, by2 = x + 4, bot - caph, x + cw - 4, bot
   elseif where == "none" then
     bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + 2, bot)
   else
