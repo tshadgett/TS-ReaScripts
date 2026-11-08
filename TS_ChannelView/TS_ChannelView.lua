@@ -3991,7 +3991,8 @@ local function control_menu()
     end
     ImGui.Separator(ctx)
     if ImGui.BeginMenu(ctx, "Look") then
-      for _, o in ipairs({ { "classic", "Classic" }, { "dark", "Dark" }, { "analogue", "Analogue" }, { "bar", "Bar" } }) do
+      for _, o in ipairs({ { "classic", "Classic" }, { "dark", "Dark" }, { "analogue", "Analogue" },
+        { "amber", "Amber" }, { "warm", "Warm white" }, { "bar", "Bar" } }) do
         if ImGui.MenuItem(ctx, o[2], nil, vu.look == o[1]) then app.vu_set(fx, idx, { look = o[1] }) end
       end
       ImGui.EndMenu(ctx)

@@ -1253,7 +1253,8 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
     Out move as a VU does, with 0 VU at -18 dBFS (or -24 to -12); GR runs
     across the whole scale, 0 at the far right. Looks: *Classic* (a cream
     face), *Dark* (black, an amber needle), *Analogue* (lit from behind,
-    under glass) or *Bar*. **Face**: its look's own, the panel's, or a
+    under glass), *Amber* and *Warm white* (an orange or a cream face lit
+    from behind) or *Bar*. **Face**: its look's own, the panel's, or a
     colour. **Buttons**: the In / Out / GR buttons' style, or *Hide
     buttons*. **Stereo**: two meters, left and right (GR stays one). A
     peak lamp lights at -1 dBFS.

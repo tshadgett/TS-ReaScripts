@@ -1256,6 +1256,10 @@ do
     local ll, ld = VUm._look_of({ look = "dark", face = 0xeeeeee }), VUm._look_of({ look = "classic", face = 0x101010 })
     check("vu face: the panel's, none of its own", ("%x %s"):format(lp.face, tostring(lp.outline ~= nil)), "0 true")
     check("vu face: ink to read on it", ("%x %x"):format(ll.ink, ld.ink), "2b2620ff d8daddff")
+    local la, lw = VUm._look_of({ look = "amber" }), VUm._look_of({ look = "warm", face = 0x202020 })
+    check("vu amber: lit, its own shade", tostring(la.lamp ~= nil) .. " " .. ("%x"):format(la.dim), "true 46160000")
+    check("vu warm white on a colour: no lamp or shade", tostring(lw.lamp) .. " " .. tostring(lw.dim), "nil nil")
+    check("vu looks: amber and warm kept", M.vu_of("in|amber|-18|1").look .. " " .. M.vu_of("in|warm|-18|1").look, "amber warm")
   end
 end
 check("rows at h=120", P.rows_for(120), 1)

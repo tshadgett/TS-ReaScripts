@@ -169,8 +169,8 @@
   Trimmer's Auto and Listen).
   A "vu" control (Ctl<n>=-1|vu|0|) is a VU meter, Vu<n>=<shows>|<look>|
   <0 VU in dBFS>|<peak lamp 1/0>|<face>|<buttons>|<stereo>: shows in, out
-  or gr; look classic, dark, analogue or bar; face its look's own (left
-  out), panel, or #RRGGBB; buttons the switch's style (a button style; left
+  or gr; look classic, dark, analogue, amber, warm or bar; face its look's
+  own (left out), panel, or #RRGGBB; buttons the switch's style (a button style; left
   out: flat); stereo st (two meters, left and right; left out: one); hide
   (no In / Out / GR buttons).
   A "text" control (Ctl<n>=-1|text|0|<its words>)
@@ -385,17 +385,17 @@ M.ACTS = { trim_auto = "Auto", trim_listen = "Listen" }
 
 -- A VU meter's settings (Vu<n>=<shows>|<look>|<0 VU dBFS>|<peak lamp>|
 -- <face>|<buttons>|<stereo>|<hide>): shows "in", "out" or "gr"; look "classic",
--- "dark", "analogue" or "bar"; 0 VU at `ref` dBFS; the peak lamp on or
+-- "dark", "analogue", "amber", "warm" or "bar"; 0 VU at `ref` dBFS; the peak lamp on or
 -- off; its face its look's own (empty), the panel's ("panel": none of its
 -- own), or a colour (#RRGGBB: `face` the number); its In / Out / GR
 -- buttons' style (C.BUTTON_STYLES; empty: flat); stereo "st" (two meters,
 -- left and right) or empty (one); "hide": no In / Out / GR buttons under it.
 -- Trailing empty fields are left off.
 M.VU_SHOWS = { "in", "out", "gr" }
-M.VU_LOOKS = { "classic", "dark", "analogue", "bar" }
+M.VU_LOOKS = { "classic", "dark", "analogue", "amber", "warm", "bar" }
 M.VU_REFS = { -24, -20, -18, -14, -12 }
 local VU_SHOW_OK = { ["in"] = true, out = true, gr = true }
-local VU_LOOK_OK = { classic = true, dark = true, analogue = true, bar = true }
+local VU_LOOK_OK = { classic = true, dark = true, analogue = true, amber = true, warm = true, bar = true }
 function M.vu_default() return { src = "in", look = "classic", ref = -18, peak = true } end
 function M.vu_of(v)
   local d = M.vu_default()
