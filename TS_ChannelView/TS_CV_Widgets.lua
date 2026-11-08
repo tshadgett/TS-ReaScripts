@@ -912,8 +912,9 @@ local function face_arc(dl, cx, cy, r, v, o)
     arc(dl, cx, cy, r - 2, A_MIN, a, fill_col, 3.0)
   end
 
-  -- pointer
-  local px1, py1 = cx + math.cos(a) * (r * 0.30), cy + math.sin(a) * (r * 0.30)
+  -- pointer (shorter with the value inside)
+  local p0 = o.short and 0.62 or 0.30
+  local px1, py1 = cx + math.cos(a) * (r * p0), cy + math.sin(a) * (r * p0)
   local px2, py2 = cx + math.cos(a) * (r - 5),    cy + math.sin(a) * (r - 5)
   ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, C.COL.knob_pointer, 2.0)
   ImGui.DrawList_AddCircle(dl, cx, cy, r, C.COL.knob_ring, 32, 1.0)
@@ -1616,6 +1617,43 @@ function W.picture_knob(ctx, dl, cx, cy, r, v, im, dim)
   return true
 end
 
+-- A value as it's drawn inside a knob: its number without its units (a
+-- kilo kept as k, a side as L or R), anything else as it reads.
+local UNIT_WORDS = { dB = true, Hz = true, kHz = true, ms = true, s = true, ["%"] = true }
+function W.unitless(s)
+  s = U.trim(s or "")
+  local num, rest = s:match("^([%+%-]?%d[%d%.,]*)%s*(.*)$")
+  if not num then num, rest = s:match("^([%+%-]?%.%d+)%s*(.*)$") end
+  if not num then
+    local word, unit = s:match("^(.-)%s+(%S+)$")
+    if word and UNIT_WORDS[unit] then return word end
+    return s
+  end
+  if rest == "" then return num end
+  if rest:match("^[LRC]$") or rest == "x" then return num .. rest end
+  if rest:match("^k%a") then return num .. "k" end
+  if rest:match("^[%a%%\194\176\194\181/]+$") then return num end
+  return s
+end
+
+-- The value in a knob's middle, cut to the dial's width, its ink by the
+-- dial's colour (`back`; none for a picture, which gets white on a shadow).
+-- `wide`: how many radii it may take across (1.7). Returns how tall it was.
+function W.inner_value(ctx, dl, cx, cy, r, text, back, dim, wide)
+  text = W.unitless(text)
+  if text == "" then return 0 end
+  W.push_small(ctx)
+  local _, th = ImGui.CalcTextSize(ctx, "0")
+  local ink, shadow = 0xf2f3f5ff, 0x000000c0
+  if back and U.is_light(back) then ink, shadow = 0x16181bff, 0xffffff50 end
+  if dim then ink, shadow = U.with_alpha(ink, 0x80), U.with_alpha(shadow, 0x40) end
+  local y = math.floor(cy - th * 0.5 + 0.5)
+  centred_text(ctx, dl, cx + 1, y + 1, text, shadow, r * (wide or 1.7))
+  centred_text(ctx, dl, cx, y, text, ink, r * (wide or 1.7))
+  W.pop_small(ctx)
+  return th
+end
+
 function W.knob(ctx, id, label, value, formatted, opts)
   opts = plain(opts or {})
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -1686,7 +1724,8 @@ function W.knob(ctx, id, label, value, formatted, opts)
              and not (opts.img and not opts.img.nums)
              and opts.scale or nil
   local large = opts.size == "large"
-  local show_value = C.SHOW_VALUES and not small and (large or not sc)
+  local vin = opts.vin and not small
+  local show_value = C.SHOW_VALUES and not small and (large or not sc) and not vin
   if small then
     -- under the name, its scale ticks just clearing it
     cy = y + ch - r - 2
@@ -1763,10 +1802,15 @@ function W.knob(ctx, id, label, value, formatted, opts)
   else
     W.knob_face(dl, cx, cy, dial_r, value, {
       style = opts.style, cap = opts.cap, bipolar = opts.bipolar, arc = opts.arc, arc_col = opts.arc_col, ctx = ctx, look = opts.look,
-      dim = opts.dim, hot = hovered or active, marks = sc and sc.marks })
+      dim = opts.dim, hot = hovered or active, marks = sc and sc.marks, short = vin })
   end
+  local vth = vin and W.inner_value(ctx, dl, cx, cy, dial_r, formatted,
+    (not pic) and knob_centre_col(opts.style, opts.cap, opts.look) or nil, opts.dim) or 0
   if opts.mod then
-    W.mod_dot(dl, cx, cy, math.max(2.0, dial_r * 0.14), knob_centre_col(opts.style, opts.cap, opts.look))
+    -- (under the value, when it's inside)
+    local dr = math.max(2.0, dial_r * 0.14)
+    local dy = (vth > 0) and math.min(vth * 0.5 + dr + 1, dial_r * 0.6) or 0
+    W.mod_dot(dl, cx, cy + dy, (vth > 0) and math.min(dr, 2.5) or dr, knob_centre_col(opts.style, opts.cap, opts.look))
   end
   if opts.ring and not (pic and not opts.img.ring) then W.mod_ring(dl, cx, cy, dial_r, opts.ring) end
   -- where the dial is, for whoever draws to it (the rack's hover lines)
@@ -2078,7 +2122,17 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
     style = o.style, style2 = o.style2, look = o.look, look2 = o.look2, ctx = ctx })
   -- where it is, for a link's rings: the ring's radius and the inner knob's
   W.last_knob = { cx = cx, cy = cy, r = r, ri = ri, dual = true }
-  if show_value then
+  -- its value inside: the inner knob's in its middle, the ring's under it
+  if o.vin then
+    -- (the inner knob is small: its value may reach over its edge)
+    W.inner_value(ctx, dl, cx, cy, ri, o.shown2, knob_centre_col(o.style2 or o.style, o.cap, o.look2 or o.look), o.dim,
+      math.max(2.2, r * 1.5 / ri))
+  end
+  if show_value and o.vin then
+    W.push_small(ctx)
+    centred_text(ctx, dl, cx, cy + r + 1, o.shown1 or "", C.COL.value, cw - 2)
+    W.pop_small(ctx)
+  elseif show_value then
     W.push_small(ctx)
     pair_text(ctx, dl, cx, cy + r + 1, o.shown1 or "", o.shown2 or "",
       (turning == "outer" and 1) or (turning == "inner" and 2) or nil, cw - 2,

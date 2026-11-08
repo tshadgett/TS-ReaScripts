@@ -1496,6 +1496,11 @@ draw_entry_body = function(ctx)
     if nch then c.noname = nv or nil end
     tip("No name over it, and no room kept for one. Its name shows on hover.")
   end
+  if is_param and (c.type == nil or c.type == "knob" or c.type == "stepped" or c.type == "dual") then
+    local ich, iv = ST.checkbox(ctx, "Value inside the knob", c.vin == true)
+    if ich then c.vin = iv or nil end
+    tip("Its value in the knob's middle, without units, and no value line under it.")
+  end
 
   -- a button's own words for its two states, for this plugin everywhere
   -- (States<p>), as the right-click's Name > State names

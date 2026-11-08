@@ -1278,7 +1278,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     changed, nv, act = W.knob(ctx, id, shown_name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = W.cap_col(ctl.cap) or P.VIRT_COL,
         style = ctl.style, size = size, look = ctl.look, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc),
-        img = ctl.img })
+        img = ctl.img, vin = ctl.vin })
   end
   if ctl.noname then W.LABEL_H, C.LABEL_GAP, W.tip_name = keep_lh, keep_gap, nil end
   if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
@@ -3181,7 +3181,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             { size = (P.item_size(item) == "large") and "large" or nil, cap = W.cap_col(ctl.cap),
               dim = not T.get_enabled(track, fx.addr), mod1 = modded, mod2 = mod2,
               shown1 = shown, shown2 = shown2, tip = tip2,
-              style = ctl.style, style2 = ctl.style2, look = ctl.look, look2 = ctl.look2 })
+              style = ctl.style, style2 = ctl.style2, look = ctl.look, look2 = ctl.look2, vin = ctl.vin })
           -- a double-click puts back the one under the pointer: the inner
           -- knob's here, the ring's below
           if act.double_click == "inner" then
@@ -3359,14 +3359,14 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = st, snaps = snaps, mod = modded, ring = ring, lamp = P.lamp(track, fx, layout, p),
-            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look, img = ctl.img,
+            style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look, img = ctl.img, vin = ctl.vin,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
         changed, nv, act = W.knob(ctx, id, label, value, shown,
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
-            lamp = P.lamp(track, fx, layout, p), img = ctl.img,
+            lamp = P.lamp(track, fx, layout, p), img = ctl.img, vin = ctl.vin,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 

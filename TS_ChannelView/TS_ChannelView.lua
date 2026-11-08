@@ -3396,6 +3396,15 @@ local function name_menu(fx, key, layout, idx, c)
     M.set(key, l); M.save()
   end
   tip("Off: no name over it, and no room kept for one. Its name shows on hover.")
+  if c.type == nil or c.type == "knob" or c.type == "stepped" or c.type == "dual" then
+    if ImGui.MenuItem(ctx, "Value inside the knob", nil, c.vin == true) then
+      local l = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then lc.vin = (not c.vin) or nil end
+      M.set(key, l); M.save()
+    end
+    tip("Its value in the knob's middle, without units, and no value line under it.")
+  end
 
   -- A button's two states can have names of their own, for plugins whose
   -- switches read "0.0"/"1.0" or worse. Hints are what the plugin says.

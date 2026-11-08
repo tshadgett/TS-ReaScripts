@@ -12609,5 +12609,45 @@ do
   check("text font: whole, underlined", table.concat(texts, ",") .. " " .. lines, "Comp 1")
 end
 
+-- a value inside the knob: its number without its units, the flag kept
+do
+  for _, c in ipairs({ { "12.5 ms", "12.5" }, { "-3.0 dB", "-3.0" }, { "1.20 kHz", "1.20k" }, { "50%", "50" },
+                       { "4.0:1", "4.0:1" }, { "20 L", "20L" }, { "Off", "Off" }, { "-inf dB", "-inf" },
+                       { "2x", "2x" }, { "12 ms (fast)", "12 ms (fast)" }, { "", "" } }) do
+    check("value inside: " .. c[1], W.unitless(c[1]), c[2])
+  end
+  local k = "VinPlug"
+  M.set(k, { controls = { { param = 1, type = "knob", vin = true }, { param = 2, type = "dual", param2 = 3, vin = true }, { param = 4, type = "knob" } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  check("value inside: kept", tostring(l.controls[1].vin) .. " " .. tostring(l.controls[2].vin) .. " " .. tostring(l.controls[3].vin), "true true nil")
+  check("value inside: kept by a copy", M.copy(l).controls[1].vin, true)
+  M.remove(k); M.save(); M.reload()
+  local texts = {}
+  local fake = setmetatable({
+    GetCursorScreenPos = function() return 0, 0 end,
+    CalcTextSize = function(_, t) return #(t or "") * 6, 11 end,
+    DrawList_AddText = function(_, _, _, _, t) texts[#texts + 1] = t end,
+    InvisibleButton = function() return false end, IsItemHovered = function() return false end,
+    IsItemActive = function() return false end, IsItemClicked = function() return false end,
+    IsMouseDown = function() return false end, GetMouseDelta = function() return 0, 0 end,
+    GetKeyMods = function() return 0 end, GetMousePos = function() return 0, 0 end,
+    GetFontSize = function() return 13 end, IsMouseDoubleClicked = function() return false end,
+  }, { __index = function(_, key)
+    if key:match("^%u%a+_") and not key:match("^DrawList_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake)
+  local ok, err = pcall(W.knob, "ctx", "##vin", "Attack", 0.4, "12.5 ms", { vin = true })
+  check("value inside: drawn", ok and "ok" or tostring(err), "ok")
+  local seen = table.concat(texts, ",")
+  check("value inside: in the knob, not under it", (seen:find("12.5,12.5", 1, true) and "in" or seen) .. " " .. tostring(seen:find("ms", 1, true)), "in nil")
+  texts = {}
+  ok, err = pcall(W.dual_knob, "ctx", "##vin2", "Freq", 0.4, 0.6, { vin = true, shown1 = "1.2 kHz", shown2 = "+3.0 dB" })
+  check("value inside: a concentric knob drawn", ok and "ok" or tostring(err), "ok")
+  seen = table.concat(texts, ",")
+  check("value inside: the inner's inside, the ring's under", (seen:find("+3.0,+3.0", 1, true) and "in" or seen) .. " " .. (seen:find("1.2 kHz", 1, true) and "under" or "-"), "in under")
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

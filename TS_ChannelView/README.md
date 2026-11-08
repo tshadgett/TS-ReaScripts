@@ -1459,6 +1459,13 @@ shows on the control you renamed. The editor has the same: *Alias*,
 panel, and the room it took with it: the control moves up into it. Its
 name shows when you hover it. On the web page too.
 
+**Value inside the knob.** Right-click ▸ Name ▸ *Value inside the knob*
+(or Edit layout's checkbox of that name) shows a knob's value in its
+middle, without its units, and drops the value line under it, so the
+knob takes less room. Hover it for the full value. It works on knobs,
+stepped knobs, picture knobs and concentric knobs (the inner knob's value
+inside, the ring's under it), and on the web page.
+
 A **toggle** says what its state is called: your **state names** if you've
 set them (right-click ▸ Name ▸ State names, or the editor's *State names*
 row), else the plugin's own word for the state, and ON/OFF only when the
