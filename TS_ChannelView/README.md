@@ -1218,8 +1218,12 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   named. With several selected, a control's right-click has **Paste
   style to the selected** (after *Copy style* on any control).
 - **Text** is words anywhere on the grid, over anything: across, or up
-  when its place is taller than wide. On the right: what it says, *Small*,
-  *Normal* or *Large*, its place along its room and its colour.
+  when its place is taller than wide. On the right: what it says, its
+  **Font** (the panel's text font, one from the list, or *Other…* to type
+  any installed font), **Size** in px, **Style** (*Bold*, *Italic*,
+  *Underline*, *Strikethrough*, *All caps*), **Letter spacing**, its
+  place along its room and its colour. Text going up is always in
+  capitals and takes the font and size only.
 - **Visualisers** draw a part of a canvas in a place on the grid, from a
   few of the plugin's controls, on the panel's colour (*Colours ▸
   Background* gives one its own). Dropped on the grid, one finds its

@@ -202,6 +202,16 @@ C.ROT_FONT  = "Arial"     -- the LICE side has no access to ImGui's font
 C.ROT_UP    = true        -- reading bottom-to-top, the way a book spine
                           -- does everywhere except the United States
 
+-- The fonts offered by name (Visual Options, a text control's Font); any
+-- other is typed in.
+do
+  local os_ = (reaper and reaper.GetOS and reaper.GetOS() or ""):lower()
+  C.FONT_LIST = (os_:find("osx") or os_:find("mac"))
+    and { "Helvetica Neue", "Arial", "Avenir Next", "Futura", "Gill Sans", "Georgia", "Menlo" }
+    or { "Segoe UI", "Arial", "Verdana", "Tahoma", "Calibri", "Georgia", "Consolas" }
+  C.FONT_GENERIC = { "sans-serif", "serif", "monospace" }
+end
+
 -- Collapsed panels: a narrow vertical bar carrying the name, bypass and
 -- float only. Wide enough for the icons plus stacked capitals, and wide
 -- enough for the meter's stacked readout ("12.4" over "dB") when a

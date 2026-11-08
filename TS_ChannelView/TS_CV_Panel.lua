@@ -3885,14 +3885,25 @@ end
 
 -- A text control (TS_CV_Mappings "text"): its words in its
 -- place, across, or up when the place is taller than wide; Size small or
--- large, its colour (Edge), left / centred / right along its room.
+-- large (or its font's px), its colour (Edge), left / centred / right
+-- along its room. Its font (TextFont): a name (else the panels' text
+-- font), bold, italic, underlined, struck through, in capitals, its
+-- letters spaced; up, the font, size and capitals only.
 local TEXT_PX = { small = 11, large = 18 }
+P.TEXT_PX = TEXT_PX
 function P.draw_text_item(ctx, dl, ox, oy, t)
   local c = t.by
   local txt = c.label or ""
   if txt == "" then return end
+  local f = c.font or {}
+  if f.caps then txt = txt:upper() end
   local col = C.edge_rgba(c.edge) or C.COL.label
   local x0, y0 = ox + t.x, oy + t.y
+  local base = ImGui.GetFontSize(ctx)
+  local px = f.px or TEXT_PX[c.size] or base
+  local tf = C.FONTS and C.FONTS.text
+  local font = W.font_of(ctx, { name = f.name or (tf and tf.name), b = f.b, i = f.i })
+  ImGui.PushFont(ctx, font, px)
   ImGui.DrawList_PushClipRect(dl, x0, y0, x0 + t.w, y0 + t.h, true)
   if t.h > t.w then
     -- up: reads from the bottom; "left" is its start (the bottom)
@@ -3902,15 +3913,45 @@ function P.draw_text_item(ctx, dl, ox, oy, t)
     if c.align == "left" then y = y0 + t.h - len - 2 elseif c.align == "right" then y = y0 + 2 end
     W.vertical_text(ctx, dl, x0 + t.w * 0.5, y, txt, col, t.h - 4)
   else
-    local base = ImGui.GetFontSize(ctx)
-    local px = TEXT_PX[c.size] or base
-    local tw, th = ImGui.CalcTextSize(ctx, txt)
-    tw, th = tw * px / base, th * px / base
+    -- (spaced: a letter at a time)
+    local sp = f.sp or 0
+    local chars, tw = {}, 0
+    local _, th = ImGui.CalcTextSize(ctx, txt)
+    if sp > 0 then
+      for _, cp in utf8.codes(txt) do
+        local ch = utf8.char(cp)
+        local cw = ImGui.CalcTextSize(ctx, ch)
+        chars[#chars + 1] = { ch, cw }
+        tw = tw + cw
+      end
+      tw = tw + sp * math.max(0, #chars - 1)
+    else
+      tw = ImGui.CalcTextSize(ctx, txt)
+    end
     local x = x0 + (t.w - tw) * 0.5
     if c.align == "left" then x = x0 + 2 elseif c.align == "right" then x = x0 + t.w - tw - 2 end
-    ImGui.DrawList_AddTextEx(dl, nil, px, x, y0 + (t.h - th) * 0.5, col, txt)
+    local y = y0 + (t.h - th) * 0.5
+    if sp > 0 then
+      local cx = x
+      for _, ch in ipairs(chars) do
+        ImGui.DrawList_AddTextEx(dl, font, px, cx, y, col, ch[1])
+        cx = cx + ch[2] + sp
+      end
+    else
+      ImGui.DrawList_AddTextEx(dl, font, px, x, y, col, txt)
+    end
+    local lw = math.max(1, px / 14)
+    if f.u then
+      local ly = math.floor(y + th - px * 0.08) + 0.5
+      ImGui.DrawList_AddLine(dl, x, ly, x + tw, ly, col, lw)
+    end
+    if f.s then
+      local ly = math.floor(y + th * 0.55) + 0.5
+      ImGui.DrawList_AddLine(dl, x, ly, x + tw, ly, col, lw)
+    end
   end
   ImGui.DrawList_PopClipRect(dl)
+  ImGui.PopFont(ctx)
 end
 
 -- Whether a canvas layout's controls are folded away (in the rack:

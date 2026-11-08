@@ -947,11 +947,7 @@ local function page_faders(ctx)
 end
 
 -- the fonts offered by name (any other: Other...)
-local OS = (reaper.GetOS and reaper.GetOS() or ""):lower()
-local FONT_LIST = (OS:find("osx") or OS:find("mac"))
-  and { "Helvetica Neue", "Arial", "Avenir Next", "Futura", "Gill Sans", "Menlo" }
-  or { "Segoe UI", "Arial", "Verdana", "Tahoma", "Calibri", "Consolas" }
-local GENERIC = { "sans-serif", "serif", "monospace" }
+local FONT_LIST, GENERIC = C.FONT_LIST, C.FONT_GENERIC
 local other_name = {}     -- section -> the name being typed in Other...
 local function font_row(ctx, tab, s, p, first)
   row(ctx, "Font")

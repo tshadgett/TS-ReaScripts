@@ -586,6 +586,7 @@ do
   -- words anywhere on the grid, and a short dropdown
   M.set("GridText", { grid = { cols = 16, rows = 8 }, controls = {
     { param = -1, type = "text", label = "COMPRESSOR", size = "large", align = "left", edge = "#d0a060",
+      font = { name = "Georgia", px = 20, b = true, s = true, caps = true, sp = 2 },
       at = { c = 0, r = 0, w = 12, h = 2 } },
     { param = -1, type = "text", label = "INPUT", at = { c = 14, r = 0, w = 2, h = 8 } },
     { param = 3, type = "combo", label = "Mode", at = { c = 0, r = 2, w = 8, h = 2 } },
@@ -596,6 +597,11 @@ do
         "text COMPRESSOR large left #d0a060")
   check("text: centred and normal without lines", tostring(gt[2].align) .. " " .. tostring(gt[2].size), "nil nil")
   check("text: copied", M.copy({ controls = gt }).controls[1].align, "left")
+  check("text: its font read back", M.text_font_line(gt[1].font), "Georgia|20|bsc|2")
+  check("text: its font copied", M.text_font_line(M.copy({ controls = gt }).controls[1].font), "Georgia|20|bsc|2")
+  check("text: no font, no line", tostring(gt[2].font) .. " " .. tostring(M.text_font_line({})), "nil nil")
+  check("text font: the panel's font, italic only", M.text_font_line(M.text_font_of("|0|i")), "|0|i")
+  check("text font: size clamped, bad spacing dropped", M.text_font_line(M.text_font_of("Arial|90||x")), "Arial|48")
   local lt = P.layout(gt, ph(2))
   check("text: drawn as words, not controls", #lt.texts .. " " .. #lt.items, "2 2")
   check("text: up when taller than wide", lt.texts[2].h > lt.texts[2].w, true)
@@ -12445,6 +12451,28 @@ do
   d = Mk.known_default("Pro-Q 4 :: Mine", {}, 0, { controls = {} })
   check("known default: not another layout of theirs", d.canvas, nil)
   E.PRO, reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = had_pro, gn, gp
+end
+
+-- a text control in its own font: spaced a letter at a time, struck through
+do
+  local texts, lines, pushed = {}, 0, {}
+  local fake = setmetatable({
+    GetFontSize = function() return 13 end,
+    CalcTextSize = function(_, t) return #t * 7, 13 end,
+    PushFont = function(_, f, px) pushed[#pushed + 1] = { f, px } end,
+    DrawList_AddTextEx = function(_, _, _, _, _, _, t) texts[#texts + 1] = t end,
+    DrawList_AddLine = function() lines = lines + 1 end,
+  }, { __index = function() return function() end end })
+  P.attach(fake); W.attach(fake)
+  local by = { type = "text", label = "Comp", font = { px = 20, s = true, caps = true, sp = 2 } }
+  local ok, err = pcall(P.draw_text_item, "ctx", "dl", 0, 0, { x = 0, y = 0, w = 200, h = 30, by = by })
+  check("text font: drawn", ok and "ok" or tostring(err), "ok")
+  check("text font: capitals, a letter at a time", table.concat(texts, ","), "C,O,M,P")
+  check("text font: its size, struck through", (pushed[1] and pushed[1][2] or 0) .. " " .. lines, "20 1")
+  texts, lines = {}, 0
+  by.font = { u = true }
+  pcall(P.draw_text_item, "ctx", "dl", 0, 0, { x = 0, y = 0, w = 200, h = 30, by = by })
+  check("text font: whole, underlined", table.concat(texts, ",") .. " " .. lines, "Comp 1")
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

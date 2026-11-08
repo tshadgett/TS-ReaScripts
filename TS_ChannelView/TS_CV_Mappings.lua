@@ -176,7 +176,9 @@
   A "text" control (Ctl<n>=-1|text|0|<its words>)
   is words anywhere on the grid, across or (taller than wide) up, sized
   by Size<n> (small, large), coloured by Edge<n>, placed by Align<n>
-  (left or right; centred without). A "section" control (Ctl<n>=-1|section|0|) is a
+  (left or right; centred without), its font TextFont<n>=<name>|<px>|
+  <b i u s c: bold, italic, underline, struck through, capitals>|<letter
+  spacing px> (name empty: the panels' text font; px 0: by Size<n>). A "section" control (Ctl<n>=-1|section|0|) is a
   group, a rectangle round the controls on it, styled with the same
   lines as a divider's section (Style<n> inset or plate|<faceplate>,
   Brush, Finish, Metal, Corners) or with none, and Edge<n> for an outline
@@ -413,6 +415,36 @@ function M.vu_of(v)
   if bs and bs:match("^%a+$") and bs ~= "flat" then d.bstyle = bs end
   return d
 end
+-- A text control's font (TextFont<n>=<name>|<px>|<flags>|<spacing>):
+-- { name, px, b, i, u, s, caps, sp }, nil when it has none of its own.
+M.TEXT_PX_MIN, M.TEXT_PX_MAX, M.TEXT_SP_MAX = 8, 48, 12
+function M.text_font_of(v)
+  v = U.trim(v or "")
+  if v == "" then return nil end
+  local name, px, fl, sp = v:match("^([^|]*)|?([^|]*)|?([^|]*)|?([^|]*)$")
+  if not name then return nil end
+  name = U.trim(name)
+  px = tonumber(px)
+  px = px and px > 0 and math.max(M.TEXT_PX_MIN, math.min(M.TEXT_PX_MAX, math.floor(px + 0.5))) or nil
+  sp = tonumber(sp)
+  sp = sp and sp > 0 and math.min(M.TEXT_SP_MAX, sp) or nil
+  fl = fl or ""
+  local f = { name = name ~= "" and name or nil, px = px, sp = sp,
+              b = fl:find("b", 1, true) and true or nil, i = fl:find("i", 1, true) and true or nil,
+              u = fl:find("u", 1, true) and true or nil, s = fl:find("s", 1, true) and true or nil,
+              caps = fl:find("c", 1, true) and true or nil }
+  return next(f) and f or nil
+end
+function M.text_font_line(f)
+  if not f then return nil end
+  local fl = (f.b and "b" or "") .. (f.i and "i" or "") .. (f.u and "u" or "") .. (f.s and "s" or "") .. (f.caps and "c" or "")
+  local name = (f.name or ""):gsub("[|\r\n]", " ")
+  if name == "" and not f.px and fl == "" and not f.sp then return nil end
+  local line = ("%s|%d|%s|%s"):format(name, f.px or 0, fl, f.sp and ("%g"):format(f.sp) or "")
+  return (line:gsub("|+$", ""))
+end
+function M.text_font_copy(f) return M.text_font_of(M.text_font_line(f)) end
+
 function M.vu_line(vu)
   vu = vu or M.vu_default()
   local more = { (vu.face == "panel") and "panel" or (type(vu.face) == "number" and ("#%06X"):format(vu.face & 0xffffff)) or "",
@@ -2295,6 +2327,7 @@ local function parse_section(sect)
         edge    = (t == "section" or t == "divider" or t == "text") and C.plate_key(U.trim(sect["Edge" .. i] or "")) or nil,
         -- a text's place along its room (Align<n>=left|right; centred without)
         align   = (t == "text") and ({ left = "left", right = "right" })[U.trim(sect["Align" .. i] or "")] or nil,
+        font    = (t == "text") and M.text_font_of(sect["TextFont" .. i]) or nil,
         -- a dropdown's colour per choice (ChoiceCol<n>=<plugin's text>=<colour>|...)
         ccols   = (t == "combo") and M.choice_cols_of(sect["ChoiceCol" .. i]) or nil,
         virtual = (tonumber(p) or 0) < 0 and M.virt_of(sect["Virt" .. i], sect["VAct" .. i]) or nil,
@@ -2522,6 +2555,7 @@ local function serialize(layout)
     if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
+    if c.type == "text" and M.text_font_line(c.font) then out["TextFont" .. (i - 1)] = M.text_font_line(c.font) end
     if c.type == "combo" and c.ccols then
       local line = M.choice_cols_line(c.ccols)
       if line then out["ChoiceCol" .. (i - 1)] = line end
@@ -3953,7 +3987,7 @@ function M.copy(layout)
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
-                        invert2 = c.invert2, edge = c.edge, align = c.align, lamp = c.lamp,
+                        invert2 = c.invert2, edge = c.edge, align = c.align, font = M.text_font_copy(c.font), lamp = c.lamp,
                         vu = M.vu_copy(c.vu), vis = M.copy_canvas(c.vis), act = c.act,
                         ccols = c.ccols and M.choice_cols_of(M.choice_cols_line(c.ccols)) or nil,
                         at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,
