@@ -38,10 +38,11 @@ local ImGui
 
 local TITLE       = "Add plugin"
 local RECENT_KEY  = "recent_fx"
+local FAV_KEY     = "fav_fx"
 local RECENT_MAX  = 10
 local ROW_H       = 18
 
--- One active filter at a time: kind is "", "folder", "cat" or "dev".
+-- One active filter at a time: kind is "", "fav", "folder", "cat" or "dev".
 local NO_DEV = "\1none"         -- the bucket for plugins REAPER can't attribute
 
 local st = {
@@ -51,7 +52,7 @@ local st = {
   track     = nil,     -- the track to insert on, when not the caller's
   input     = false,   -- into the input (monitoring) FX chain instead
   query     = "",
-  kind      = "",          -- "", "folder", "cat", "dev"
+  kind      = "",          -- "", "fav", "folder", "cat", "dev"
   val       = nil,         -- folder id, or category/developer name
   fkey      = "",          -- cached "kind\0val", to spot changes
   last_q    = nil,
@@ -197,8 +198,30 @@ installed = function()
   return all_fx
 end
 
+-- Your favourites (the star on a plugin's row): its idents, kept in
+-- ExtState, one a line. They lead every list and every search.
+local fav_cache, fav_raw = {}, nil
+function B.favourites()
+  local raw = reaper.GetExtState(C.EXT_SECT, FAV_KEY)
+  if raw ~= fav_raw then
+    fav_raw, fav_cache = raw, {}
+    for id in raw:gmatch("[^\n]+") do fav_cache[id] = true end
+  end
+  return fav_cache
+end
+function B.is_fav(ident) return B.favourites()[ident] == true end
+function B.set_fav(ident, on)
+  local set, out = B.favourites(), {}
+  for id in pairs(set) do if id ~= ident then out[#out + 1] = id end end
+  if on then out[#out + 1] = ident end
+  table.sort(out)
+  reaper.SetExtState(C.EXT_SECT, FAV_KEY, table.concat(out, "\n"), true)
+  st.last_q = nil        -- the list again, with it moved
+end
+
 local function filter_label()
   if st.kind == "" then return "All plugins" end
+  if st.kind == "fav" then return "\u{2605} Favourites" end
   if st.kind == "folder" then
     for _, f in ipairs(folds or {}) do
       if f.id == st.val then return "\u{1F5C0} " .. f.name end
@@ -212,6 +235,7 @@ end
 
 local function in_filter(entry)
   if st.kind == "" then return true end
+  if st.kind == "fav" then return B.is_fav(entry.ident) end
   if st.kind == "folder" then
     return entry.folders ~= nil and entry.folders[st.val] == true
   end
@@ -250,11 +274,13 @@ end
 -- name (format, name and vendor), but forgivingly -- "proq", "pq4" and
 -- "saturm" all work -- and the best fit comes first. A recently used
 -- plugin gets a nudge up the list.
-local RECENT_BONUS = 15
+-- A favourite leads whatever it matches.
+local RECENT_BONUS, FAV_BONUS = 15, 100000
 local function recent_bonus()
   local set = {}
   for _, id in ipairs(recents()) do set[id] = true end
-  return function(e) return set[e.ident] and RECENT_BONUS or 0 end
+  local fav = B.favourites()
+  return function(e) return (set[e.ident] and RECENT_BONUS or 0) + (fav[e.ident] and FAV_BONUS or 0) end
 end
 
 local function rebuild()
@@ -264,27 +290,35 @@ local function rebuild()
   -- Recents only lead when nothing is being narrowed. Once you've picked a
   -- developer you're browsing THEM, and a recents block from elsewhere on
   -- top of that list is just noise.
+  local fav = B.favourites()
   if q == "" and st.kind == "" then
+    -- your favourites, then the recent ones, then everything
     local by_ident = {}
     for _, e in ipairs(list) do by_ident[e.ident] = e end
     local out = {}
+    for _, e in ipairs(list) do if fav[e.ident] then out[#out + 1] = e end end
+    local n_fav = #out
     for _, id in ipairs(recents()) do
       if by_ident[id] then out[#out + 1] = by_ident[id] end
     end
-    local n_recent = #out
+    local n_recent = #out - n_fav
     for _, e in ipairs(list) do out[#out + 1] = e end
-    st.results, st.n_recent = out, n_recent
+    st.results, st.n_recent, st.n_fav = out, n_recent, n_fav
   else
     local out
     if q == "" then
+      -- (favourites first here too)
       out = {}
       for _, e in ipairs(list) do
-        if in_filter(e) then out[#out + 1] = e end
+        if in_filter(e) and fav[e.ident] then out[#out + 1] = e end
+      end
+      for _, e in ipairs(list) do
+        if in_filter(e) and not fav[e.ident] then out[#out + 1] = e end
       end
     else
       out = SR.search(list, q, in_filter, recent_bonus())
     end
-    st.results, st.n_recent = out, 0
+    st.results, st.n_recent, st.n_fav = out, 0, 0
   end
 
   st.last_q, st.last_v = st.query, st.fkey
@@ -393,6 +427,7 @@ local msearch = { query = "", sel = 1, scroll = false }
 local BADGE_W    = 36    -- the swatch itself
 local BADGE_LEFT = 4     -- margin from the item's left edge
 local BADGE_GAP  = 7     -- clear air before the plugin name
+local STAR_W     = 16    -- the favourite star, just right of the chip
 
 -- How many spaces reserve the badge's room. Measured rather than
 -- hardcoded: the label font is proportional and the space width moves
@@ -401,7 +436,63 @@ local BADGE_GAP  = 7     -- clear air before the plugin name
 local function badge_pad(ctx)
   local sw = ImGui.CalcTextSize(ctx, " ")
   if not sw or sw <= 0 then return "          " end
-  return (" "):rep(math.ceil((BADGE_LEFT + BADGE_W + BADGE_GAP) / sw))
+  return (" "):rep(math.ceil((BADGE_LEFT + BADGE_W + STAR_W + BADGE_GAP) / sw))
+end
+
+-- A five-pointed star centred at cx, cy, r across: filled, or its outline.
+local function star(dl, cx, cy, r, col, filled)
+  local pts = {}
+  for k = 0, 9 do
+    local a = -math.pi / 2 + k * math.pi / 5
+    local rr = (k % 2 == 0) and r or r * 0.45
+    pts[#pts + 1] = { cx + math.cos(a) * rr, cy + math.sin(a) * rr }
+  end
+  if filled then
+    for k = 1, 10, 2 do
+      local p1, p2, p3 = pts[k], pts[(k % 10) + 1], pts[((k - 2) % 10) + 1]
+      ImGui.DrawList_AddTriangleFilled(dl, cx, cy, p1[1], p1[2], p2[1], p2[2], col)
+      ImGui.DrawList_AddTriangleFilled(dl, cx, cy, p3[1], p3[2], p1[1], p1[2], col)
+    end
+  else
+    for k = 1, 10 do
+      local p1, p2 = pts[k], pts[(k % 10) + 1]
+      ImGui.DrawList_AddLine(dl, p1[1], p1[2], p2[1], p2[2], col, 1.0)
+    end
+  end
+end
+local FAV_COL = 0xf2c14eff
+
+-- The star beside the last row's chip: a favourite's filled. `click`:
+-- clickable (a button over the row; the row took overlap), and a click
+-- turns it on or off. Returns true on that click.
+local function fav_star(ctx, dl, e, click, id, rect)
+  local x, y, y2
+  if rect then x, y, y2 = rect[1], rect[2], rect[3]
+  else
+    x, y = ImGui.GetItemRectMin(ctx)
+    y2 = select(2, ImGui.GetItemRectMax(ctx))
+  end
+  local on = B.is_fav(e.ident)
+  local sx = x + BADGE_LEFT + BADGE_W + 2
+  local cy = (y + y2) * 0.5
+  local hov = false
+  if click then
+    local keep_x, keep_y = ImGui.GetCursorScreenPos(ctx)
+    ImGui.SetCursorScreenPos(ctx, sx, y)
+    if ImGui.InvisibleButton(ctx, "##fav" .. tostring(id), STAR_W, math.max(1, y2 - y)) then
+      B.set_fav(e.ident, not on)
+      on = not on
+      ImGui.SetCursorScreenPos(ctx, keep_x, keep_y)
+      return true
+    end
+    hov = ImGui.IsItemHovered(ctx)
+    if hov then ImGui.SetTooltip(ctx, on and "Favourite: click to take it off" or "Make it a favourite") end
+    ImGui.SetCursorScreenPos(ctx, keep_x, keep_y)
+  end
+  if on or hov or click then
+    star(dl, sx + STAR_W * 0.5, cy, 5.5, on and FAV_COL or (hov and C.COL.header_text or ((C.COL.header_dim & 0xFFFFFF00) | 0x70)), on)
+  end
+  return false
 end
 
 local function badge(ctx, dl, fmt)
@@ -610,6 +701,7 @@ local function plugin_items(ctx, track, list)
     end
     if active_multi then ImGui.PopItemFlag(ctx) end
     badge(ctx, dl, e.fmt)
+    fav_star(ctx, dl, e, false)
     preview(ctx, e)
     if ImGui.BeginPopupContextItem(ctx, "##fxctx" .. i) then
       ImGui.TextDisabled(ctx, e.short)
@@ -672,6 +764,15 @@ local function items(ctx, track)
     for _, id in ipairs(recents()) do
       if by_ident[id] then rec[#rec + 1] = by_ident[id] end
     end
+  end
+  local favs = {}
+  do
+    local fav = B.favourites()
+    for _, e in ipairs(installed()) do if fav[e.ident] then favs[#favs + 1] = e end end
+  end
+  if #favs > 0 and ImGui.BeginMenu(ctx, "Favourites") then
+    plugin_items(ctx, track, favs)
+    ImGui.EndMenu(ctx)
   end
   if #rec > 0 and ImGui.BeginMenu(ctx, "Recent") then
     plugin_items(ctx, track, rec)
@@ -866,6 +967,7 @@ local function results_list(ctx, track, found, m)
       end
       if active_multi then ImGui.PopItemFlag(ctx) end
       badge(ctx, dl, e.fmt)
+      fav_star(ctx, dl, e, false)
       preview(ctx, e)
       if ImGui.BeginPopupContextItem(ctx, "##fxqctx" .. i) then
         ImGui.TextDisabled(ctx, e.short)
@@ -1055,6 +1157,15 @@ function B._draw(ctx, track)
         set_filter("", nil)
         ImGui.CloseCurrentPopup(ctx)
       end
+      do
+        local n = 0
+        for _ in pairs(B.favourites()) do n = n + 1 end
+        if ImGui.Selectable(ctx, ("\u{2605} Favourites  (%d)"):format(n), st.kind == "fav",
+            n > 0 and 0 or ImGui.SelectableFlags_Disabled) then
+          set_filter("fav", nil)
+          ImGui.CloseCurrentPopup(ctx)
+        end
+      end
 
       local function folder_item(f)
         local lbl = ("%s  (%d)##fo%d"):format(f.name, f.count, f.id)
@@ -1166,9 +1277,14 @@ function B._draw(ctx, track)
 
     if ImGui.BeginChild(ctx, "list", 0, -30, 0) then
       for i, e in ipairs(st.results) do
-        if st.n_recent and st.n_recent > 0 then
-          if i == 1 then ImGui.TextDisabled(ctx, "Recent") end
-          if i == st.n_recent + 1 then
+        local nf, nr = st.n_fav or 0, st.n_recent or 0
+        if nf + nr > 0 then
+          if nf > 0 and i == 1 then ImGui.TextDisabled(ctx, "Favourites") end
+          if nr > 0 and i == nf + 1 then
+            if nf > 0 then ImGui.Spacing(ctx) end
+            ImGui.TextDisabled(ctx, "Recent")
+          end
+          if i == nf + nr + 1 then
             ImGui.Spacing(ctx)
             ImGui.TextDisabled(ctx, "All plugins")
           end
@@ -1177,6 +1293,8 @@ function B._draw(ctx, track)
         local label = badge_pad(ctx) .. e.short
         if e.dev then label = label .. "   \u{00B7} " .. e.dev end
         local ticked = st.pick and not st.single and chosen_has(e)
+        -- (the star over its row takes its own clicks)
+        if ImGui.SetNextItemAllowOverlap then ImGui.SetNextItemAllowOverlap(ctx) end
         if ImGui.Selectable(ctx, (ticked and "\u{2713} " or "") .. label .. "##fx" .. i,
             st.sel == i or ticked ~= nil) then
           st.sel = i
@@ -1186,6 +1304,8 @@ function B._draw(ctx, track)
           end
         end
         badge(ctx, ImGui.GetWindowDrawList(ctx), e.fmt)
+        local rx, ry = ImGui.GetItemRectMin(ctx)
+        local row = { rx, ry, select(2, ImGui.GetItemRectMax(ctx)) }
         preview(ctx, e)
         -- right-click a result: the rest of that developer, or its folders
         if ImGui.BeginPopupContextItem(ctx, "##fxdctx" .. i) then
@@ -1207,6 +1327,9 @@ function B._draw(ctx, track)
           ImGui.SetScrollHereY(ctx, 0.5)
           st.scroll = false
         end
+        -- the star last: the row's own hover, menu and double-click above
+        -- are the row's, not the star's
+        fav_star(ctx, ImGui.GetWindowDrawList(ctx), e, true, i, row)
       end
       ImGui.EndChild(ctx)
     end

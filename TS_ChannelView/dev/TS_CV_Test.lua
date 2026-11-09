@@ -12809,5 +12809,26 @@ do
   check("bar scroll: a column too", (ok and "ok" or tostring(err)) .. " " .. children, "ok 1")
 end
 
+-- favourites (the star on a plugin's row): kept, taken off, and leading
+-- a search whatever it matches
+do
+  local Brw = require("TS_CV_Browser")
+  local store = {}
+  local gx, sx = reaper.GetExtState, reaper.SetExtState
+  reaper.GetExtState = function(sec, k) return store[sec .. "/" .. k] or "" end
+  reaper.SetExtState = function(sec, k, v) store[sec .. "/" .. k] = v end
+  Brw.set_fav("VST3: Pro-Q 4 (FabFilter)", true)
+  Brw.set_fav("JS: Saturation", true)
+  check("favourites: kept", tostring(Brw.is_fav("JS: Saturation")) .. " " .. tostring(Brw.is_fav("ReaEQ")), "true false")
+  Brw.set_fav("JS: Saturation", false)
+  check("favourites: one taken off", tostring(Brw.is_fav("JS: Saturation")) .. " " .. tostring(Brw.is_fav("VST3: Pro-Q 4 (FabFilter)")), "false true")
+  local SR0 = require("TS_CV_Search")
+  local list = { { name = "VST: Pro-Q (FabFilter)", short = "Pro-Q", ident = "a" }, { name = "VST3: Pro-Q 4 (FabFilter)", short = "Pro-Q 4", ident = "VST3: Pro-Q 4 (FabFilter)" } }
+  local fav = Brw.favourites()
+  local found = SR0.search(list, "pro q", nil, function(e) return fav[e.ident] and 100000 or 0 end)
+  check("favourites: lead a search", found[1] and found[1].short, "Pro-Q 4")
+  reaper.GetExtState, reaper.SetExtState = gx, sx
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

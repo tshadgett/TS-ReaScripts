@@ -586,6 +586,11 @@ outline would have nothing to stand against.
   entries a plugin installed in more than one format produces — they
   otherwise have identical names.
 
+  **Favourites**: click the ☆ beside a plugin's format to make it a
+  favourite (★); click again to take it off. Favourites come first in the
+  list and in searches, have their own *Favourites* submenu and filter, and
+  the web page's plugin picker shows the same stars.
+
   A plugin you've taken out of its developer in REAPER's FX browser
   (right-click ▸ *Remove from developer*) is left out of the menu and the
   search too, so one gesture hides it everywhere; one already on a track
