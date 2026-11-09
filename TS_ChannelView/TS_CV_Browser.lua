@@ -696,12 +696,14 @@ local function plugin_items(ctx, track, list)
   local pad = badge_pad(ctx)
   for i, e in ipairs(list or {}) do
     if active_multi then ImGui.PushItemFlag(ctx, ImGui.ItemFlags_AutoClosePopups, false) end
+    if ImGui.SetNextItemAllowOverlap then ImGui.SetNextItemAllowOverlap(ctx) end
     if ImGui.MenuItem(ctx, ("%s%s##m%d"):format(pad, e.short, i), nil, picked(e)) then
       if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
     end
     if active_multi then ImGui.PopItemFlag(ctx) end
     badge(ctx, dl, e.fmt)
-    fav_star(ctx, dl, e, false)
+    local rx, ry = ImGui.GetItemRectMin(ctx)
+    local row = { rx, ry, select(2, ImGui.GetItemRectMax(ctx)) }
     preview(ctx, e)
     if ImGui.BeginPopupContextItem(ctx, "##fxctx" .. i) then
       ImGui.TextDisabled(ctx, e.short)
@@ -709,6 +711,7 @@ local function plugin_items(ctx, track, list)
       folder_actions(ctx, e)
       ImGui.EndPopup(ctx)
     end
+    fav_star(ctx, dl, e, true, "m" .. i, row)
   end
 end
 
@@ -962,12 +965,14 @@ local function results_list(ctx, track, found, m)
     local dl = ImGui.GetWindowDrawList(ctx)
     for i, e in ipairs(found) do
       if active_multi then ImGui.PushItemFlag(ctx, ImGui.ItemFlags_AutoClosePopups, false) end
+      if ImGui.SetNextItemAllowOverlap then ImGui.SetNextItemAllowOverlap(ctx) end
       if ImGui.Selectable(ctx, ("%s%s##q%d"):format(pad, e.short, i), m.sel == i or picked(e)) then
         if insert(cur.track or track, e, cur.insert_at, cur.input) then inserted_now = true end
       end
       if active_multi then ImGui.PopItemFlag(ctx) end
       badge(ctx, dl, e.fmt)
-      fav_star(ctx, dl, e, false)
+      local rx, ry = ImGui.GetItemRectMin(ctx)
+      local row = { rx, ry, select(2, ImGui.GetItemRectMax(ctx)) }
       preview(ctx, e)
       if ImGui.BeginPopupContextItem(ctx, "##fxqctx" .. i) then
         ImGui.TextDisabled(ctx, e.short)
@@ -979,6 +984,7 @@ local function results_list(ctx, track, found, m)
         ImGui.SetScrollHereY(ctx, 0.5)
         m.scroll = false
       end
+      fav_star(ctx, dl, e, true, "q" .. i, row)
     end
     ImGui.EndChild(ctx)
   end
