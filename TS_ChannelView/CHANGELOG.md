@@ -1,5 +1,38 @@
 # ChannelView — changelog
 
+## 4.1.3 — value inside the knob, picture shadows
+
+### ChannelView
+
+- **Value inside the knob:** right-click a knob ▸ Name ▸ *Value inside the
+  knob* (or Edit layout's checkbox of that name) shows its value in the
+  middle of the knob, without units, and drops the value line under it.
+  Hover it for the full value. Knobs, stepped knobs and concentric knobs
+  (the inner knob's value inside, the ring's under it).
+- **Sends folded away:** the routing button and its three lamps still
+  show, under the unfold button, or beside it on a bar.
+
+### ChannelView Pro
+
+- Value inside the knob works on picture knobs, and on the web page.
+- **Picture shadows:** Image... ▸ *Shadow*: None, Normal or Tall, cast by
+  the picture's own shape. Knobs, buttons and step buttons; the web page
+  too.
+- **Brushed finish redrawn:** fine brushed-aluminium lines with faint
+  longer streaks.
+- **Finish strength:** Faceplate ▸ Finish ▸ *Strength*, and the same in a
+  section's or a background's settings: 0 to 200 %, for any finish. The
+  web page too.
+- **EQ canvases:** a band with no frequency of its own (Vocal Studio's
+  Focus) is a diamond that moves up and down only. Its modes' names are
+  read even from a plugin that only reports the one it's on. *Guess from
+  names* finds numbered bands between named cuts, the cuts' slopes and a
+  focus band. *Learn* switches the plugin's other sections (gate,
+  compressor, delay, reverb) off on the copy it measures.
+- Fixed: choosing a style for a knob or button with a picture kept the
+  picture. Any style, recipe, Customise... or Reset to default now takes
+  it off.
+
 ## 4.1.2 — fixes
 
 ### ChannelView

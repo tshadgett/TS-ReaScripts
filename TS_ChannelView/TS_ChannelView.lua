@@ -1,8 +1,9 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.1.2
+-- @version 4.1.3
 -- @changelog
---  Fixed: without Pro, 4.1.1 stopped on an error drawing a panel.
+--  Value inside the knob; the routing button stays on Sends folded away.
+--  Moves with ChannelView Pro 4.1.3. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
