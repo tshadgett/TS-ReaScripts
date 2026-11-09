@@ -1777,8 +1777,8 @@ function W.knob(ctx, id, label, value, formatted, opts)
     local fo = defaulted(opts, "knob")
     local st = C.KNOB_STYLE_ALIAS[fo.style] or fo.style or "arc"
     local outside = fo.look ~= nil or (C.KNOB_STYLE[st] ~= nil and st ~= "arc" and st ~= "minimal" and st ~= "studio")
-    -- a picture: only its value arc, if it has one
-    if opts.img then outside = opts.img.arc == true end
+    -- a picture: only its value arc, if it has one (its own, or the knob's)
+    if opts.img then outside = opts.img.arc == true or opts.arc ~= nil end
     if outside then
       -- (under the name as its font draws it, which can be taller; none
       -- when it has no name over it)
@@ -1816,7 +1816,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
 
   local pic = opts.img and W.picture_knob(ctx, dl, cx, cy, dial_r, value, opts.img, opts.dim)
   if pic then
-    if opts.img.arc then
+    if opts.img.arc or opts.arc then
       value_arc(dl, cx, cy, dial_r, value, opts.arc or (opts.bipolar and "mid" or "pos"), opts.dim, opts.arc_col)
     end
   else
