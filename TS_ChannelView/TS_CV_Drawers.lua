@@ -872,7 +872,7 @@ end
 -- A top or bottom drawer's height at width w: as many rows as its
 -- buttons need, up to three (one when it scrolls).
 local function bar_h(ctx, d, w)
-  local bh = size_of(d.size)
+  local bh = math.floor(size_of(d.size) * (C.UI or 1) + 0.5)   -- (at the overall size)
   local rh = d.tb.row_h(bh)      -- a tile's height when it shows tiles
   local rows = d.scroll and 1 or math.min(3, d.tb.rows_needed(ctx, w - name_w(ctx, d) - PAD * 2, bh))
   return rows * rh + (rows - 1) * C.TB_GAP + PAD * 2

@@ -35,20 +35,21 @@ local ImGui
 local MR = {}
 function MR.attach(imgui) ImGui = imgui end
 
--- sizes
-local GAP     = 6
-MR.CELL_W     = 80      -- a macro's cell
-MR.CELL_H     = 86
-MR.TILE_W     = 180     -- a modulator's tile
-local HEAD    = 18      -- a tile's name row
-local SUB     = 13      -- its "drives 3" line
-local KCELL_W = 56      -- a knob in a tile: its cell
-local KCELL_H = 48
-local KR      = 11      -- ...and its radius
-local ADD_H   = 22
-local PILL_H  = 16
-local ENV_CURVE_H = 44  -- a MIDI envelope's curve
-local LANE_W, LANE_H = 13, 11
+-- sizes, at 100% (Z: at the overall size, C.UI)
+local SIZE = {
+  GAP = 6,
+  CELL_W = 80, CELL_H = 86,   -- a macro's cell
+  TILE_W = 180,               -- a modulator's tile
+  HEAD = 18,                  -- a tile's name row
+  SUB = 13,                   -- its "drives 3" line
+  KCELL_W = 56, KCELL_H = 48, -- a knob in a tile: its cell
+  KR = 11,                    -- ...and its radius
+  ADD_H = 22, PILL_H = 16,
+  ENV_CURVE_H = 44,           -- a MIDI envelope's curve
+  LANE_W = 13, LANE_H = 11,
+}
+local Z = setmetatable({}, { __index = function(_, k) local v = SIZE[k]; return v and C.S(v) end })
+MR.SIZE = Z
 
 local EXT = { macros = "macros_collapsed", mods = "mods_collapsed" }
 
@@ -112,31 +113,31 @@ local function room_of(panel_h)
   return math.max(60, panel_h - C.HEADER_H - C.FOOTER_H - C.PANEL_PAD * 2)
 end
 
-local GROUP_W = MR.CELL_W * 2 + GAP
+local GROUP_W = Z.CELL_W * 2 + Z.GAP
 
 -- Macro cells, two to a row (an XY pad takes a row), down then into the
 -- next pair of columns. { src, x, y, w, h } from the grid's top-left, the
 -- number of column pairs, and where the add tile goes.
 local function place_macros(macros, room, with_add)
   local out, gx, y, col, groups = {}, 0, 0, 0, 1
-  local function newrow() y = y + MR.CELL_H + GAP; col = 0 end
+  local function newrow() y = y + Z.CELL_H + Z.GAP; col = 0 end
   for _, src in ipairs(macros) do
     -- an XY pad: both columns and two rows, so the pad can be square
     local wide = src.kind == "xy"
-    local ch = wide and (MR.CELL_H * 2 + GAP) or MR.CELL_H
+    local ch = wide and (Z.CELL_H * 2 + Z.GAP) or Z.CELL_H
     if wide and col == 1 then newrow() end
     if y > 0 and y + ch > room and col == 0 then
-      gx, y, groups = gx + GROUP_W + GAP, 0, groups + 1
+      gx, y, groups = gx + GROUP_W + Z.GAP, 0, groups + 1
     end
-    local w = wide and GROUP_W or MR.CELL_W
-    out[#out + 1] = { src = src, x = gx + col * (MR.CELL_W + GAP), y = y, w = w, h = ch }
-    if wide then y = y + ch + GAP; col = 0
+    local w = wide and GROUP_W or Z.CELL_W
+    out[#out + 1] = { src = src, x = gx + col * (Z.CELL_W + Z.GAP), y = y, w = w, h = ch }
+    if wide then y = y + ch + Z.GAP; col = 0
     elseif col == 1 then newrow() else col = 1 end
   end
   local add
   if with_add then
     if col == 1 then newrow() end
-    if y > 0 and y + ADD_H > room then gx, y, groups = gx + GROUP_W + GAP, 0, groups + 1 end
+    if y > 0 and y + Z.ADD_H > room then gx, y, groups = gx + GROUP_W + Z.GAP, 0, groups + 1 end
     add = { x = gx, y = y }
   end
   return out, groups, add
@@ -144,22 +145,22 @@ end
 
 local function tile_h(track, src)
   local isopen = open[tostring(track) .. src.guid]
-  local h = HEAD + SUB
+  local h = Z.HEAD + Z.SUB
   if src.kind == "lfo" then
     h = h + 30
-    if isopen then h = h + 22 + KCELL_H * 2 end
+    if isopen then h = h + 22 + Z.KCELL_H * 2 end
   elseif src.kind == "midi" then
     h = h + 16
     if isopen then
       local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
-      h = h + 22 + 20 + KCELL_H * 2 + (MD.trig_ok(track, src.slot) and 22 or 0)
-      if MD.is_env(ms) then h = h + ENV_CURVE_H + 6 + KCELL_H + 22 end
+      h = h + 22 + 20 + Z.KCELL_H * 2 + (MD.trig_ok(track, src.slot) and 22 or 0)
+      if MD.is_env(ms) then h = h + Z.ENV_CURVE_H + 6 + Z.KCELL_H + 22 end
     end
   else
     h = h + 16
     if isopen then
       local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
-      h = h + 22 + 20 + (MD.is_env(ms) and (ENV_CURVE_H + 6 + KCELL_H * 3 + 22) or KCELL_H * 2)
+      h = h + 22 + 20 + (MD.is_env(ms) and (Z.ENV_CURVE_H + 6 + Z.KCELL_H * 3 + 22) or Z.KCELL_H * 2)
       if MD.field(track, src.slot, src.j, "fsrc") >= 0.5 then h = h + 22 end
     end
   end
@@ -170,13 +171,13 @@ local function place_mods(track, mods, room, with_add)
   local out, x, y, cols = {}, 0, 0, 1
   for _, src in ipairs(mods) do
     local h = tile_h(track, src)
-    if y > 0 and y + h > room then x, y, cols = x + MR.TILE_W + GAP, 0, cols + 1 end
+    if y > 0 and y + h > room then x, y, cols = x + Z.TILE_W + Z.GAP, 0, cols + 1 end
     out[#out + 1] = { src = src, x = x, y = y, h = h }
-    y = y + h + GAP
+    y = y + h + Z.GAP
   end
   local add
   if with_add then
-    if y > 0 and y + ADD_H > room then x, y, cols = x + MR.TILE_W + GAP, 0, cols + 1 end
+    if y > 0 and y + Z.ADD_H > room then x, y, cols = x + Z.TILE_W + Z.GAP, 0, cols + 1 end
     add = { x = x, y = y }
   end
   return out, cols, add
@@ -190,10 +191,10 @@ local function natural_w(which, track, panel_h)
   local s = MD.scan(track)
   if which == "macros" then
     local _, groups = place_macros(s.macros, room_of(panel_h), not macros_full(track))
-    return groups * GROUP_W + (groups - 1) * GAP + C.PANEL_PAD * 2
+    return groups * GROUP_W + (groups - 1) * Z.GAP + C.PANEL_PAD * 2
   end
   local _, cols = place_mods(track, s.mods, room_of(panel_h), not mods_full(s))
-  return cols * MR.TILE_W + (cols - 1) * GAP + C.PANEL_PAD * 2
+  return cols * Z.TILE_W + (cols - 1) * Z.GAP + C.PANEL_PAD * 2
 end
 
 function MR.width_for(which, track, panel_h)
@@ -210,17 +211,17 @@ function MR.strip_h(which, track, w)
   local s = MD.scan(track)
   local rows = {}
   if which == "macros" then
-    local tall = MR.CELL_H
+    local tall = Z.CELL_H
     for _, src in ipairs(s.macros) do
-      if src.kind == "xy" then tall = MR.CELL_H * 2 + GAP end
+      if src.kind == "xy" then tall = Z.CELL_H * 2 + Z.GAP end
     end
-    if #s.macros == 0 then rows[1] = ADD_H end   -- just the add tile
+    if #s.macros == 0 then rows[1] = Z.ADD_H end   -- just the add tile
     for n = 1, 8 do
-      local room = n * (MR.CELL_H + GAP) - GAP
+      local room = n * (Z.CELL_H + Z.GAP) - Z.GAP
       if room >= tall then rows[#rows + 1] = room end
     end
   else
-    local tall = ADD_H
+    local tall = Z.ADD_H
     for _, src in ipairs(s.mods) do tall = math.max(tall, tile_h(track, src)) end
     for k = 0, 40 do rows[#rows + 1] = tall + k * 20 end
   end
@@ -242,7 +243,7 @@ end
 local function tknob(ctx, dl, id, x, y, v, label, text, def, col)
   ImGui.SetCursorScreenPos(ctx, x, y)
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, id, KCELL_W, KCELL_H)
+  ImGui.InvisibleButton(ctx, id, Z.KCELL_W, Z.KCELL_H)
   local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
   local changed, nv = false, v
   if act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
@@ -259,22 +260,22 @@ local function tknob(ctx, dl, id, x, y, v, label, text, def, col)
     end
     if def and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then nv, changed = def, true end
   end
-  local cx, cy = x + KCELL_W * 0.5, y + 11 + KR + 1
+  local cx, cy = x + Z.KCELL_W * 0.5, y + 11 + Z.KR + 1
   W.push_small(ctx)
   if label and label ~= "" then
     local tw = ImGui.CalcTextSize(ctx, label)
     ImGui.DrawList_AddText(dl, cx - tw * 0.5, y, C.COL.label, label)
   end
-  W.knob_face(dl, cx, cy, KR, nv, { hot = hov or act, cap = col })
+  W.knob_face(dl, cx, cy, Z.KR, nv, { hot = hov or act, cap = col })
   local vw = ImGui.CalcTextSize(ctx, text or "")
-  ImGui.DrawList_AddText(dl, cx - vw * 0.5, cy + KR + 2, C.COL.value, text or "")
+  ImGui.DrawList_AddText(dl, cx - vw * 0.5, cy + Z.KR + 2, C.COL.value, text or "")
   W.pop_small(ctx)
   return changed, nv
 end
 
 -- A small push-button; returns pressed.
 local function pill(ctx, dl, id, x, y, w, text, on, col, h)
-  h = h or PILL_H
+  h = h or Z.PILL_H
   ImGui.SetCursorScreenPos(ctx, x, y)
   local pressed = ImGui.InvisibleButton(ctx, id, w, h)
   local hov = ImGui.IsItemHovered(ctx)
@@ -294,7 +295,7 @@ end
 local function lane_button(ctx, dl, id, x, y, track, slot, param, col, what)
   ImGui.SetCursorScreenPos(ctx, x - 2, y - 2)
   W.allow_overlap(ctx)
-  local pressed = ImGui.InvisibleButton(ctx, id, LANE_W + 4, LANE_H + 4,
+  local pressed = ImGui.InvisibleButton(ctx, id, Z.LANE_W + 4, Z.LANE_H + 4,
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hov = ImGui.IsItemHovered(ctx)
   local rclick = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
@@ -302,7 +303,7 @@ local function lane_button(ctx, dl, id, x, y, track, slot, param, col, what)
   local lane = MD.lane(track, slot, param)
   local ink
   if lane and lane.auto then
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + LANE_W, y + LANE_H, col, 2)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + Z.LANE_W, y + Z.LANE_H, col, 2)
     ink = 0x15171aff
   else
     -- shown: its colour; there but hidden: its colour, faint; none: grey
@@ -310,7 +311,7 @@ local function lane_button(ctx, dl, id, x, y, track, slot, param, col, what)
                  or (hov and C.COL.label or 0x4a4f57ff)
     ink = lane and (lane.shown and C.COL.value or U.with_alpha(col, 0xa0))
           or (hov and C.COL.label or C.COL.header_dim)
-    ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + LANE_W - 0.5, y + LANE_H - 0.5, edge, 2, 0, 1)
+    ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + Z.LANE_W - 0.5, y + Z.LANE_H - 0.5, edge, 2, 0, 1)
   end
   -- a little envelope
   local px = { 2, 8, 5, 4, 8, 7, 11, 3 }
@@ -689,7 +690,7 @@ local function draw_macro(ctx, dl, track, src, s, x, y, w, h, req)
   local links = s.by_mod[src.guid] or {}
   if src.kind == "xy" then
     lane_button(ctx, dl, "mlx##" .. src.guid, x + 5, y + 5, track, src.slot, src.out[1], src.col, src.name .. " X")
-    lane_button(ctx, dl, "mly##" .. src.guid, x + 5 + LANE_W + 3, y + 5, track, src.slot, src.out[2], src.col, src.name .. " Y")
+    lane_button(ctx, dl, "mly##" .. src.guid, x + 5 + Z.LANE_W + 3, y + 5, track, src.slot, src.out[2], src.col, src.name .. " Y")
     W.push_small(ctx)
     ImGui.DrawList_AddText(dl, x + w - 41, y + 3, C.COL.header_dim, "X")
     ImGui.DrawList_AddText(dl, x + w - 22, y + 3, C.COL.header_dim, "Y")
@@ -995,10 +996,10 @@ end
 
 -- The rings and their handles on a moved knob.
 local function mx_rings(ctx, dl, track, src, d, base, list, live, x, y)
-  local cx, cy = x + KCELL_W * 0.5, y + 11 + KR + 1
+  local cx, cy = x + Z.KCELL_W * 0.5, y + 11 + Z.KR + 1
   for i, m in ipairs(list) do
     local col = m.from and m.from.col or C.COL.label
-    local r = KR + (i - 1) * 4
+    local r = Z.KR + (i - 1) * 4
     local to = math.max(0, math.min(1, m.to))
     local ends = (i == 1) and { base, to } or { to }
     local hot_end
@@ -1140,14 +1141,14 @@ local function setting(ctx, dl, track, src, d, x, y)
     if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
       ImGui.OpenPopup(ctx, "mxk##" .. src.guid .. d.key)
     end
-    local cx, cy = x + KCELL_W * 0.5, y + 11 + KR + 1
+    local cx, cy = x + Z.KCELL_W * 0.5, y + 11 + Z.KR + 1
     mx_drop(ctx, dl, track, src, d.key, nil,
-      function(mx, my) return (mx - cx) ^ 2 + (my - cy) ^ 2 <= (KR + 10) ^ 2 end,
-      function(col, over) ImGui.DrawList_AddCircle(dl, cx, cy, KR + 8, U.with_alpha(col, over and 0xff or 0x48), 24, over and 2.0 or 1.0) end)
+      function(mx, my) return (mx - cx) ^ 2 + (my - cy) ^ 2 <= (Z.KR + 10) ^ 2 end,
+      function(col, over) ImGui.DrawList_AddCircle(dl, cx, cy, Z.KR + 8, U.with_alpha(col, over and 0xff or 0x48), 24, over and 2.0 or 1.0) end)
     if #list > 0 then mx_rings(ctx, dl, track, src, d, base, list, live, x, y) end
     mx_knob_menu(ctx, track, src, d)
   end
-  lane_button(ctx, dl, "lane" .. d.key .. "##" .. src.guid, x + KCELL_W - LANE_W - 1, y + 13,
+  lane_button(ctx, dl, "lane" .. d.key .. "##" .. src.guid, x + Z.KCELL_W - Z.LANE_W - 1, y + 13,
     track, src.slot, MD.param(src.j, d.key), src.col, src.name .. " " .. d.label)
 end
 
@@ -1222,19 +1223,19 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
   y = y + 22
   local sync = live_field(track, src, "sync") >= 0.5
   setting(ctx, dl, track, src, sync and K.rsync or K.rhz, x, y)
-  setting(ctx, dl, track, src, K.depth, x + KCELL_W, y)
-  setting(ctx, dl, track, src, K.phase, x + KCELL_W * 2, y)
-  y = y + KCELL_H
+  setting(ctx, dl, track, src, K.depth, x + Z.KCELL_W, y)
+  setting(ctx, dl, track, src, K.phase, x + Z.KCELL_W * 2, y)
+  y = y + Z.KCELL_H
   setting(ctx, dl, track, src, K.smooth, x, y)
-  local px = x + KCELL_W + 8
+  local px = x + Z.KCELL_W + 8
   if pill(ctx, dl, "sync##" .. src.guid, px, y + 8, 46, "Sync", sync, src.col) and not sync then
     MD.set_field(track, src.slot, src.j, "sync", 1)
   end
-  mx_switch(ctx, dl, track, src, "sync", 1, px, y + 8, 46, PILL_H)
+  mx_switch(ctx, dl, track, src, "sync", 1, px, y + 8, 46, Z.PILL_H)
   if pill(ctx, dl, "free##" .. src.guid, px + 50, y + 8, 46, "Free", not sync, src.col) and sync then
     MD.set_field(track, src.slot, src.j, "sync", 0)
   end
-  mx_switch(ctx, dl, track, src, "sync", 0, px + 50, y + 8, 46, PILL_H)
+  mx_switch(ctx, dl, track, src, "sync", 0, px + 50, y + 8, 46, Z.PILL_H)
 end
 
 local function level_bar(dl, src, v, x, y, w)
@@ -1383,17 +1384,17 @@ local function follower_body(ctx, dl, track, src, x, y, w, isopen)
   if pill(ctx, dl, "main##" .. src.guid, x, y, 52, "Track", not side, src.col) and side then
     MD.set_field(track, src.slot, src.j, "fsrc", 0)
   end
-  mx_switch(ctx, dl, track, src, "fsrc", 0, x, y, 52, PILL_H)
+  mx_switch(ctx, dl, track, src, "fsrc", 0, x, y, 52, Z.PILL_H)
   if pill(ctx, dl, "side##" .. src.guid, x + 55, y, 64, "Sidechain", side, src.col) and not side then
     MD.set_field(track, src.slot, src.j, "fsrc", 1)
     MD.need_sidechain(track)
   end
-  mx_switch(ctx, dl, track, src, "fsrc", 1, x + 55, y, 64, PILL_H)
+  mx_switch(ctx, dl, track, src, "fsrc", 1, x + 55, y, 64, Z.PILL_H)
   if not env then
     if pill(ctx, dl, "gate##" .. src.guid, x + w - 44, y, 44, "Gate", gate, src.col) then
       MD.set_field(track, src.slot, src.j, "gate", gate and 0 or 1)
     end
-    mx_switch(ctx, dl, track, src, "gate", gate and 0 or 1, x + w - 44, y, 44, PILL_H)
+    mx_switch(ctx, dl, track, src, "gate", gate and 0 or 1, x + w - 44, y, 44, Z.PILL_H)
     W.tip(ctx, "gate##" .. src.guid, "All or nothing at the Floor", ImGui.IsItemHovered(ctx), false)
   end
   y = y + 22
@@ -1410,47 +1411,47 @@ local function follower_body(ctx, dl, track, src, x, y, w, isopen)
   y = y + 20
   if not env then
     setting(ctx, dl, track, src, K.att, x, y)
-    setting(ctx, dl, track, src, K.rel, x + KCELL_W, y)
-    setting(ctx, dl, track, src, K.depth, x + KCELL_W * 2, y)
-    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.rel, x + Z.KCELL_W, y)
+    setting(ctx, dl, track, src, K.depth, x + Z.KCELL_W * 2, y)
+    y = y + Z.KCELL_H
     setting(ctx, dl, track, src, K.floor, x, y)
-    if not gate then setting(ctx, dl, track, src, K.ceil, x + KCELL_W, y) end
-    setting(ctx, dl, track, src, K.smooth, x + KCELL_W * 2, y)
-    if side then sc_row(ctx, dl, track, src, x, y + KCELL_H + 2, w) end
+    if not gate then setting(ctx, dl, track, src, K.ceil, x + Z.KCELL_W, y) end
+    setting(ctx, dl, track, src, K.smooth, x + Z.KCELL_W * 2, y)
+    if side then sc_row(ctx, dl, track, src, x, y + Z.KCELL_H + 2, w) end
     return
   end
-  env_curve(ctx, dl, track, src, ms, x, y, w, ENV_CURVE_H)
-  y = y + ENV_CURVE_H + 6
+  env_curve(ctx, dl, track, src, ms, x, y, w, Z.ENV_CURVE_H)
+  y = y + Z.ENV_CURVE_H + 6
   setting(ctx, dl, track, src, K.eatt, x, y)
-  setting(ctx, dl, track, src, K.fdec, x + KCELL_W, y)
-  setting(ctx, dl, track, src, K.fsus, x + KCELL_W * 2, y)
-  y = y + KCELL_H
+  setting(ctx, dl, track, src, K.fdec, x + Z.KCELL_W, y)
+  setting(ctx, dl, track, src, K.fsus, x + Z.KCELL_W * 2, y)
+  y = y + Z.KCELL_H
   setting(ctx, dl, track, src, K.erel, x, y)
-  setting(ctx, dl, track, src, K.depth, x + KCELL_W, y)
-  setting(ctx, dl, track, src, K.smooth, x + KCELL_W * 2, y)
-  y = y + KCELL_H
+  setting(ctx, dl, track, src, K.depth, x + Z.KCELL_W, y)
+  setting(ctx, dl, track, src, K.smooth, x + Z.KCELL_W * 2, y)
+  y = y + Z.KCELL_H
   setting(ctx, dl, track, src, K.thr, x, y)
   W.tip(ctx, "floor##" .. src.guid, "It starts when the level rises above this, and lets go when it falls back below",
     ImGui.IsItemHovered(ctx), false)
-  if ms == MD.ENV_FIRST + 1 then setting(ctx, dl, track, src, K.ceil, x + KCELL_W, y) end
-  y = y + KCELL_H
+  if ms == MD.ENV_FIRST + 1 then setting(ctx, dl, track, src, K.ceil, x + Z.KCELL_W, y) end
+  y = y + Z.KCELL_H
   local legato = live_field(track, src, "mhold") >= 0.5
   local ex = live_field(track, src, "gate") >= 0.5
   local bw3 = (w - 2 * 2) / 3
   if pill(ctx, dl, "fretrig##" .. src.guid, x, y, bw3, "Retrigger", not legato, src.col) and legato then
     MD.set_field(track, src.slot, src.j, "mhold", 0)
   end
-  mx_switch(ctx, dl, track, src, "mhold", 0, x, y, bw3, PILL_H)
+  mx_switch(ctx, dl, track, src, "mhold", 0, x, y, bw3, Z.PILL_H)
   W.tip(ctx, "fretrig##" .. src.guid, "Every rise starts it again from nothing", ImGui.IsItemHovered(ctx), false)
   if pill(ctx, dl, "flegato##" .. src.guid, x + bw3 + 2, y, bw3, "Legato", legato, src.col) and not legato then
     MD.set_field(track, src.slot, src.j, "mhold", 1)
   end
-  mx_switch(ctx, dl, track, src, "mhold", 1, x + bw3 + 2, y, bw3, PILL_H)
+  mx_switch(ctx, dl, track, src, "mhold", 1, x + bw3 + 2, y, bw3, Z.PILL_H)
   W.tip(ctx, "flegato##" .. src.guid, "A rise while it's letting go carries on from where it is", ImGui.IsItemHovered(ctx), false)
   if pill(ctx, dl, "fexpc##" .. src.guid, x + (bw3 + 2) * 2, y, bw3, "Exp curve", ex, src.col) then
     MD.set_field(track, src.slot, src.j, "gate", ex and 0 or 1)
   end
-  mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, PILL_H)
+  mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, Z.PILL_H)
   W.tip(ctx, "fexpc##" .. src.guid, "Decay and release fall away exponentially", ImGui.IsItemHovered(ctx), false)
   if side then sc_row(ctx, dl, track, src, x, y + 22, w) end
 end
@@ -1478,59 +1479,59 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
   end
   y = y + 22
   if MD.is_env(ms) then
-    env_curve(ctx, dl, track, src, ms, x, y, w, ENV_CURVE_H)
-    y = y + ENV_CURVE_H + 6
+    env_curve(ctx, dl, track, src, ms, x, y, w, Z.ENV_CURVE_H)
+    y = y + Z.ENV_CURVE_H + 6
     setting(ctx, dl, track, src, K.eatt, x, y)
-    setting(ctx, dl, track, src, K.dec, x + KCELL_W, y)
-    setting(ctx, dl, track, src, K.sus, x + KCELL_W * 2, y)
-    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.dec, x + Z.KCELL_W, y)
+    setting(ctx, dl, track, src, K.sus, x + Z.KCELL_W * 2, y)
+    y = y + Z.KCELL_H
     setting(ctx, dl, track, src, K.erel, x, y)
-    setting(ctx, dl, track, src, K.depth, x + KCELL_W, y)
-    setting(ctx, dl, track, src, K.smooth, x + KCELL_W * 2, y)
-    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.depth, x + Z.KCELL_W, y)
+    setting(ctx, dl, track, src, K.smooth, x + Z.KCELL_W * 2, y)
+    y = y + Z.KCELL_H
     local legato = live_field(track, src, "mhold") >= 0.5
     local ex = live_field(track, src, "gate") >= 0.5
     local bw3 = (w - 2 * 2) / 3
     if pill(ctx, dl, "retrig##" .. src.guid, x, y, bw3, "Retrigger", not legato, src.col) and legato then
       MD.set_field(track, src.slot, src.j, "mhold", 0)
     end
-    mx_switch(ctx, dl, track, src, "mhold", 0, x, y, bw3, PILL_H)
+    mx_switch(ctx, dl, track, src, "mhold", 0, x, y, bw3, Z.PILL_H)
     W.tip(ctx, "retrig##" .. src.guid, "Every note starts it again", ImGui.IsItemHovered(ctx), false)
     if pill(ctx, dl, "legato##" .. src.guid, x + bw3 + 2, y, bw3, "Legato", legato, src.col) and not legato then
       MD.set_field(track, src.slot, src.j, "mhold", 1)
     end
-    mx_switch(ctx, dl, track, src, "mhold", 1, x + bw3 + 2, y, bw3, PILL_H)
+    mx_switch(ctx, dl, track, src, "mhold", 1, x + bw3 + 2, y, bw3, Z.PILL_H)
     W.tip(ctx, "legato##" .. src.guid, "Only a note after silence starts it again", ImGui.IsItemHovered(ctx), false)
     if pill(ctx, dl, "expc##" .. src.guid, x + (bw3 + 2) * 2, y, bw3, "Exp curve", ex, src.col) then
       MD.set_field(track, src.slot, src.j, "gate", ex and 0 or 1)
     end
-    mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, PILL_H)
+    mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, Z.PILL_H)
     W.tip(ctx, "expc##" .. src.guid, "Decay and release fall away exponentially", ImGui.IsItemHovered(ctx), false)
     y = y + 22
     setting(ctx, dl, track, src, K.mch, x, y)
-    setting(ctx, dl, track, src, K.mlo, x + KCELL_W, y)
-    setting(ctx, dl, track, src, K.mhi, x + KCELL_W * 2, y)
-    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.mlo, x + Z.KCELL_W, y)
+    setting(ctx, dl, track, src, K.mhi, x + Z.KCELL_W * 2, y)
+    y = y + Z.KCELL_H
   else
     setting(ctx, dl, track, src, K.mch, x, y)
     if ms == 1 then
-      setting(ctx, dl, track, src, K.mlo, x + KCELL_W, y)
-      setting(ctx, dl, track, src, K.mhi, x + KCELL_W * 2, y)
+      setting(ctx, dl, track, src, K.mlo, x + Z.KCELL_W, y)
+      setting(ctx, dl, track, src, K.mhi, x + Z.KCELL_W * 2, y)
     elseif ms == 2 then
-      setting(ctx, dl, track, src, K.mcc, x + KCELL_W, y)
+      setting(ctx, dl, track, src, K.mcc, x + Z.KCELL_W, y)
     elseif ms == 0 then
       local hold = live_field(track, src, "mhold") >= 0.5
-      if pill(ctx, dl, "hold##" .. src.guid, x + KCELL_W + 6, y + 14, 46, "Hold", hold, src.col) then
+      if pill(ctx, dl, "hold##" .. src.guid, x + Z.KCELL_W + 6, y + 14, 46, "Hold", hold, src.col) then
         MD.set_field(track, src.slot, src.j, "mhold", hold and 0 or 1)
       end
-      mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + KCELL_W + 6, y + 14, 46, PILL_H)
+      mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + Z.KCELL_W + 6, y + 14, 46, Z.PILL_H)
       W.tip(ctx, "hold##" .. src.guid, "Keep the last velocity after note-off",
         ImGui.IsItemHovered(ctx), false)
     end
-    y = y + KCELL_H
+    y = y + Z.KCELL_H
     setting(ctx, dl, track, src, K.depth, x, y)
-    setting(ctx, dl, track, src, K.smooth, x + KCELL_W, y)
-    y = y + KCELL_H
+    setting(ctx, dl, track, src, K.smooth, x + Z.KCELL_W, y)
+    y = y + Z.KCELL_H
   end
   if MD.trig_ok(track, src.slot) then trigger_row(ctx, dl, track, src, x, y + 2, w) end
 end
@@ -1613,7 +1614,7 @@ local function mod_menu(ctx, track, src, s, req)
 end
 
 local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
-  local w = MR.TILE_W
+  local w = Z.TILE_W
   local key = tostring(track) .. src.guid
   local isopen = open[key]
   sample(key, MD.value(track, src))
@@ -1627,7 +1628,7 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   local held = own_byp or MD.bypassed(track, src.slot)
   ImGui.SetCursorScreenPos(ctx, x, y)
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, "name##" .. src.guid, w - 42, HEAD,
+  ImGui.InvisibleButton(ctx, "name##" .. src.guid, w - 42, Z.HEAD,
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then open[key] = not isopen or nil end
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
@@ -1672,10 +1673,10 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   local links = s.by_mod[src.guid] or {}
   W.push_small(ctx)
   local sub = held and ("bypassed \u{00B7} " .. sub_text(track, src, #links)) or sub_text(track, src, #links)
-  ImGui.DrawList_AddText(dl, x + 8, y + HEAD - 1, held and C.COL.bypass_on or C.COL.header_dim, U.truncate(sub, 34))
+  ImGui.DrawList_AddText(dl, x + 8, y + Z.HEAD - 1, held and C.COL.bypass_on or C.COL.header_dim, U.truncate(sub, 34))
   W.pop_small(ctx)
   link_handle(ctx, dl, src, 1, x + w - 12, y + 9, 5.5)
-  local bx, by, bw = x + 6, y + HEAD + SUB + 2, w - 12
+  local bx, by, bw = x + 6, y + Z.HEAD + Z.SUB + 2, w - 12
   if src.kind == "lfo" then lfo_body(ctx, dl, track, src, key, bx, by, bw, isopen)
   elseif src.kind == "follower" then follower_body(ctx, dl, track, src, bx, by, bw, isopen)
   else midi_body(ctx, dl, track, src, bx, by, bw, isopen) end
@@ -1806,7 +1807,7 @@ function MR.draw_macros(ctx, track, avail_h)
     end
     if add then
       ImGui.SetCursorScreenPos(ctx, gx + add.x, gy + add.y)
-      if W.dashed_plus(ctx, "macroadd_foot", GROUP_W, ADD_H, "Add a macro") then
+      if W.dashed_plus(ctx, "macroadd_foot", GROUP_W, Z.ADD_H, "Add a macro") then
         ImGui.OpenPopup(ctx, "macroadd")
       end
     end
@@ -1848,7 +1849,7 @@ function MR.draw_mods(ctx, track, avail_h)
     end
     if add then
       ImGui.SetCursorScreenPos(ctx, gx + add.x, gy + add.y)
-      if W.dashed_plus(ctx, "modadd_foot", MR.TILE_W, ADD_H, "Add a modulator") then
+      if W.dashed_plus(ctx, "modadd_foot", Z.TILE_W, Z.ADD_H, "Add a modulator") then
         ImGui.OpenPopup(ctx, "modadd")
       end
     end

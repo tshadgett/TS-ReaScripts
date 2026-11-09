@@ -85,7 +85,7 @@ TB.DEFAULTS = DEFAULTS
 TB.key, TB.tag = key, tag
 -- The button size (height; an icon button is square). A bar can ask for
 -- its own (TS_CV_Drawers' Size).
-TB.btn = C.TB_BTN
+TB.btn = 24              -- at 100%: drawn at the overall size (C.UI)
 -- Where the buttons sit: across "l", "c" or "r", up and down "t", "c" or
 -- "b"; "-" is the usual place (left; a row centred, a column at the top).
 TB.halign, TB.valign = "-", "-"
@@ -746,7 +746,7 @@ local function tile_w(bh) return math.floor(tile_h(bh) * 1.45 + 0.5) end
 
 -- A row's height: a tile's while the bar shows tiles and has one.
 function TB.row_h(bh)
-  bh = bh or TB.btn
+  bh = bh or math.floor(TB.btn * (C.UI or 1) + 0.5)
   if TB.pmode ~= "T" then return bh end
   for _, it in ipairs(TB.items) do
     if pic_of(it) then return tile_h(bh) end
@@ -1250,7 +1250,7 @@ end
 
 -- How many rows a horizontal bar w wide needs for every button.
 function TB.rows_needed(ctx, w, bh)
-  bh = bh or TB.btn
+  bh = bh or math.floor(TB.btn * (C.UI or 1) + 0.5)
   local cx, rows = 4, 1
   for _, it in ipairs(TB.items) do
     local bw = item_width(ctx, it, bh)
@@ -1358,7 +1358,7 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
   TB.poll()
   dir = dir or "down"
   local dl = ImGui.GetWindowDrawList(ctx)
-  local bh = TB.btn
+  local bh = math.floor(TB.btn * (C.UI or 1) + 0.5)   -- (at the overall size)
   local res = { menu = false, overflow = {} }
   -- (a little short of the usual least height still draws its buttons,
   -- smaller: a bar squeezed by a pixel shouldn't go blank)
@@ -1480,7 +1480,7 @@ function TB.draw_v(ctx, x, y, w, h, dir)
   loads_left = 8
   TB.poll()
   local dl = ImGui.GetWindowDrawList(ctx)
-  local bh = TB.btn
+  local bh = math.floor(TB.btn * (C.UI or 1) + 0.5)   -- (at the overall size)
   ImGui.SetCursorScreenPos(ctx, x, y)
   W.allow_overlap(ctx)
   ImGui.InvisibleButton(ctx, ID .. "bg", math.max(1, w), math.max(1, h))
@@ -2119,7 +2119,7 @@ local function pop_menu(ctx)
   -- the bar's buttons, as tall (TB.menu_entries)
   local it = st.pop_item
   if ImGui.BeginPopup(ctx, ID .. POP) then
-    menu_large = it and it.large and (st.pop_bh or TB.btn) or nil
+    menu_large = it and it.large and (st.pop_bh or math.floor(TB.btn * (C.UI or 1) + 0.5)) or nil
     if it and TB.switch_of(it) == "menu" then TB.switch_entries(ctx)
     elseif it then TB.menu_entries(ctx, it.items or {}, "p") end
     menu_large = nil
