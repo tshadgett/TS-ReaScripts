@@ -2382,8 +2382,9 @@ script into the action list.
   a slider at the top of every plugin's ⋯ sheet and container's sheet.
 - **Gain reduction:** tap a meter to open its trace; tap the trace for its
   window.
-- **Mixer:** drag the bar labelled MIXER up (closed, half or full), or tap
-  it. Press M, S or R and drag along the row to set a run of tracks at once.
+- **Mixer:** drag the bar labelled MIXER to any height (right down closes
+  it, right up fills the page); the height is remembered on that device.
+  Tap the bar to close it, and again to open it at that height. Press M, S or R and drag along the row to set a run of tracks at once.
   Touching one of several selected tracks moves them all, as in REAPER. Tap
   a strip's empty space to select its track; double-tap it (or its name
   button) to collapse it to a narrow strip, and again to open it.
@@ -2405,6 +2406,11 @@ script into the action list.
   press and drag to move it, × removes it. Menus, toolbar switches and
   ChannelView's icons from the desktop's Organise actions show here, and
   the bar reloads when it's changed there.
+- **Keys** (with a keyboard): Space play / stop, R record, L loop, Home and
+  End the start and end, ← → the previous and next marker, ↑ ↓ the previous
+  and next track, M and S mute and solo it, Ctrl+Z undo, Ctrl+Shift+Z redo,
+  X the mixer open or closed, and ? lists them. They do nothing while you
+  type in a box.
 - **Macros and modulators:** their panels come first in the row when the
   track has any, folded until you open them. Macros play here — knobs,
   buttons, faders, dropdowns and XY pads — and a modulator's tile opens to
