@@ -12649,5 +12649,41 @@ do
   check("value inside: the inner's inside, the ring's under", (seen:find("+3.0,+3.0", 1, true) and "in" or seen) .. " " .. (seen:find("1.2 kHz", 1, true) and "under" or "-"), "in under")
 end
 
+-- Sends folded (to the side or to a bar): its routing button still there;
+-- none on Receives
+do
+  local SD = require "TS_CV_Sends"
+  local RX = SD.make("receive")
+  local ids = {}
+  local fake = setmetatable({
+    GetCursorPos = function() return 0, 0 end, GetCursorScreenPos = function() return 0, 0 end,
+    GetWindowPos = function() return 0, 0 end, GetWindowSize = function() return 30, 200 end,
+    BeginChild = function() return true end, CalcTextSize = function(_, t) return #(t or "") * 6, 11 end,
+    InvisibleButton = function(_, id) ids[#ids + 1] = id; return false end,
+    IsItemHovered = function() return false end, IsItemActive = function() return false end,
+    IsItemClicked = function() return false end, Button = function(_, id) ids[#ids + 1] = id; return false end,
+  }, { __index = function(_, key)
+    if key:match("^%u%a+_") and not key:match("^DrawList_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake); SD.attach(fake); RX.attach(fake)
+  local was_c, was_s = SD.is_collapsed, SD.STRIP_W
+  SD.is_collapsed = function() return true end
+  RX.is_collapsed = function() return true end
+  local function routed(sd)
+    ids = {}
+    local ok, err = pcall(sd.draw, "ctx", 1, 200)
+    if not ok then return tostring(err) end
+    for _, id in ipairs(ids) do if tostring(id):find("route", 1, true) then return "route" end end
+    return "none"
+  end
+  check("sends folded aside: routing button", routed(SD), "route")
+  SD.STRIP_W = 220
+  check("sends folded to a bar: routing button", routed(SD), "route")
+  SD.STRIP_W = was_s
+  check("receives folded: no routing button", routed(RX), "none")
+  SD.is_collapsed = was_c
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

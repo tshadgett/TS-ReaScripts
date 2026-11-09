@@ -518,6 +518,19 @@ local function make(kind)
   -- drawing
   -- ---------------------------------------------------------------------
 
+  -- the routing button, its lamps lit for what the track has; it opens
+  -- REAPER's routing window
+  local function route_button(ctx, track, btn)
+    local leds = SD.route_leds(track)
+    if W.route_button(ctx, ID .. "route", btn, btn, leds,
+        ("Routing and I/O\n%s\n%s\n%s")
+        :format(leds[1] and "Parent/master send" or "No parent/master send",
+                leds[2] and "Sends to tracks"  or "No sends",
+                leds[3] and "Has receives" or "No receives")) then
+      SD.open_routing(track)
+    end
+  end
+
   function SD.draw(ctx, track, avail_h)
     local collapsed = SD.is_collapsed()
     local sends = collapsed and {} or SD.collect(track)
@@ -543,6 +556,10 @@ local function make(kind)
         local label = title_of(track) .. (n > 0 and (" · " .. n) or "")
         local _, th = ImGui.CalcTextSize(ctx, label)
         ImGui.DrawList_AddText(dl, x + 6, y + (wh - th) * 0.5, C.COL.header_dim, label)
+        if not RECV then
+          ImGui.SetCursorScreenPos(ctx, x + ww - btn * 2 - 9, y + (wh - btn) * 0.5)
+          route_button(ctx, track, btn)
+        end
         ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + (wh - btn) * 0.5)
         if W.icon_button(ctx, ID .. "exp", "expand", btn, false,
             "Expand " .. K.title:lower()) then
@@ -555,9 +572,16 @@ local function make(kind)
             "Expand " .. K.title:lower()) then
           toggle()
         end
+        -- the routing lamps, under it
+        local ty = y + 4 + btn + 6
+        if not RECV then
+          ImGui.SetCursorScreenPos(ctx, x + (ww - btn) * 0.5, y + 4 + btn + 6)
+          route_button(ctx, track, btn)
+          ty = ty + btn + 6
+        end
         local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
-        W.vertical_text(ctx, dl, x + ww * 0.5, y + 4 + btn + 6,
-          title_of(track):upper() .. " " .. n, C.COL.header_dim, wh - btn - 16)
+        W.vertical_text(ctx, dl, x + ww * 0.5, ty,
+          title_of(track):upper() .. " " .. n, C.COL.header_dim, wh - (ty - y) - 6)
       else
         -- header
         ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + C.HEADER_H, C.COL.header_bg, C.PANEL_RR,
@@ -576,15 +600,8 @@ local function make(kind)
         -- lamps report what the panels cannot: the parent send, and
         -- whether anything is arriving from elsewhere.
         if not RECV then
-          local leds = SD.route_leds(track)
           ImGui.SetCursorScreenPos(ctx, x + ww - btn * 2 - 9, y + 3)
-          if W.route_button(ctx, ID .. "route", btn, btn, leds,
-              ("Routing and I/O\n%s\n%s\n%s")
-              :format(leds[1] and "Parent/master send" or "No parent/master send",
-                      leds[2] and "Sends to tracks"  or "No sends",
-                      leds[3] and "Has receives" or "No receives")) then
-            SD.open_routing(track)
-          end
+          route_button(ctx, track, btn)
         end
 
         ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + 3)

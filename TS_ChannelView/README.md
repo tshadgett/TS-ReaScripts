@@ -386,7 +386,8 @@ outline would have nothing to stand against.
   stronger one, so the same green would read as "on, but more".
 * A **routing button** on the Sends header — opens REAPER's routing and
   I/O window for the track, with the same three lamps as its mixer button:
-  parent/master send, sends out, receives in. An unlit lamp is drawn
+  parent/master send, sends out, receives in. It stays there when Sends
+  is folded away. An unlit lamp is drawn
   rather than omitted, because three slots that are always there say
   *which* one is missing, where two lines and a space only say "two of
   something". There is no API that takes a track, only an action for the
