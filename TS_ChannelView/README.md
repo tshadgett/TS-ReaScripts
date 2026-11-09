@@ -2424,7 +2424,8 @@ script into the action list.
   and next track, M and S mute and solo it, Ctrl+Z undo, Ctrl+Shift+Z redo,
   X the mixer open or closed, and ? lists them. They do nothing while you
   type in a box.
-- **Macros and modulators:** their panels come first in the row (Show
+- **Macros and modulators:** their panels sit beside the fader strip,
+  staying put while the plugins scroll (Show
   hides them), folded until you open them. Macros play here — knobs,
   buttons, faders, dropdowns and XY pads — and a modulator's tile opens to
   its settings. Controls they drive follow them and show their range or
