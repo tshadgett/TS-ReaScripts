@@ -622,6 +622,15 @@ do
   local li = P.layout(gp, ph(2))
   check("image: a picture, not a control", #li.images .. " " .. #li.items, "1 1")
   M.remove("GridPic"); M.save(); M.reload()
+  -- a layout of nothing but a picture is a layout (MaXyM: BlueARP)
+  M.set("PicOnly", { grid = { cols = 16, rows = 8 }, controls = {
+    { param = -1, type = "image", label = "", pic = { file = "logo.png" }, at = { c = 0, r = 0, w = 8, h = 4 } } } })
+  M.save(); M.reload()
+  local po = M.get("PicOnly")
+  local listed = false
+  for _, k in ipairs(M.keys()) do if k == "PicOnly" then listed = true end end
+  check("image only: kept", (po and #po.controls or 0) .. " " .. tostring(listed), "1 true")
+  M.remove("PicOnly"); M.save(); M.reload()
   check("grid file: a line any way", M.at_line(gb.controls[4].at), "0,8,8,-8")
   check("grid file: a line's colour, a faceplate's", gb.controls[4].edge, "cream")
   check("grid file: drawn in it", P.layout(gb.controls, ph(2)).segs[2].col, C.PLATE.cream.bg)

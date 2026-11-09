@@ -6018,10 +6018,12 @@ local function panel_row(row_h, row_w)
       app.drop_gap = drop
       if drop then
         local dl = ImGui.GetWindowDrawList(ctx)
-        local wy = select(2, ImGui.GetWindowPos(ctx))
+        local rx, wy = ImGui.GetWindowPos(ctx)
         local wh = select(2, ImGui.GetWindowSize(ctx))
-        ImGui.DrawList_AddRectFilled(dl, drop.x - 1.5, wy + 2,
-          drop.x + 1.5, wy + wh - 2, drop.into and C.COL.brk_container or C.COL.drop_marker, 1.0)
+        -- (before the first panel: inside the row's left edge, not clipped)
+        local dx = math.max(drop.x, rx + 2)
+        ImGui.DrawList_AddRectFilled(dl, dx - 1.5, wy + 2,
+          dx + 1.5, wy + wh - 2, drop.into and C.COL.brk_container or C.COL.drop_marker, 1.0)
         if drop.into then
           ImGui.SetTooltip(ctx, "Into " .. box_label(drop.into))
         end
