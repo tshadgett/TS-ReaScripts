@@ -1880,7 +1880,8 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   the highest. *Size*: smaller, fitting the dial, or larger. The value
   arc, the numbers round it and the modulation ring can be drawn over it.
   A button's Style ▸ **Image...** takes a strip of two frames (Off, then
-  On) or a picture for each. Apply it to the one control, its section or
+  On) or a picture for each. *Shadow*: none (for pictures with their own),
+  normal or tall, cast by the picture's own shape. Apply it to the one control, its section or
   every one on the panel. Pictures are copied into `Images/` beside your
   layouts, and the web page shows them too. Every picture you add goes
   into **Your pictures**, with its settings, for any panel: at the top of

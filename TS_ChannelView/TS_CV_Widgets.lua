@@ -1588,6 +1588,17 @@ function W.draw_frame(dl, img, iw, ih, im, k, x1, y1, x2, y2, tint)
   local cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
   ImGui.DrawList_AddImage(dl, img, cx - w, cy - h, cx + w, cy + h, u0, v0, u1, v1, tint or 0xffffffff)
 end
+-- A picture's shadow (im.shadow "normal" or "tall"), cast by its own
+-- shape, so a clear margin round it casts nothing: draw(dx, dy, grow,
+-- tint) draws it moved and grown, tinted black. `h`: its half-size.
+function W.picture_shadow(im, h, draw)
+  local lift = (im.shadow == "tall" and 1.7) or (im.shadow == "normal" and 1) or nil
+  if not lift or W.hw <= 0 or not LT.drop then return end
+  local layers, ca = LT.drop(h, W.hw, lift)
+  for _, l in ipairs(layers) do draw(l[1], l[2], l[3], l[4]) end
+  if ca > 0 and LT.UX then draw(-LT.UX * 0.5, -LT.UY * 0.5, 0.4, ca) end
+end
+
 -- A knob drawn as its picture, the dial's size (Smaller, Fits, Larger): a
 -- filmstrip's frame for the value, or one picture turned with it (upright
 -- at the middle of its travel). False when the picture can't be had.
@@ -1603,15 +1614,24 @@ function W.picture_knob(ctx, dl, cx, cy, r, v, im, dim)
     local hw, hh = iw * s * 0.5, ih * s * 0.5
     local ca, sa = math.cos(a), math.sin(a)
     local function p(dx, dy) return cx + dx * ca - dy * sa, cy + dx * sa + dy * ca end
-    local x1, y1 = p(-hw, -hh)
-    local x2, y2 = p(hw, -hh)
-    local x3, y3 = p(hw, hh)
-    local x4, y4 = p(-hw, hh)
-    ImGui.DrawList_AddImageQuad(dl, img, x1, y1, x2, y2, x3, y3, x4, y4, 0, 0, 1, 0, 1, 1, 0, 1, tint)
+    local function quad(dx, dy, g, col)
+      local f = (S + g) / S
+      local function q(px, py) return cx + (px - cx) * f + dx, cy + (py - cy) * f + dy end
+      local a1, b1 = q(p(-hw, -hh))
+      local a2, b2 = q(p(hw, -hh))
+      local a3, b3 = q(p(hw, hh))
+      local a4, b4 = q(p(-hw, hh))
+      ImGui.DrawList_AddImageQuad(dl, img, a1, b1, a2, b2, a3, b3, a4, b4, 0, 0, 1, 0, 1, 1, 0, 1, col)
+    end
+    W.picture_shadow(im, S, quad)
+    quad(0, 0, 0, tint)
   else
     local n = math.max(1, im.frames or 1)
     local k = math.floor(math.max(0, math.min(1, v)) * (n - 1) + 0.5)
     if im.hi then k = n - 1 - k end
+    W.picture_shadow(im, S, function(dx, dy, g, col)
+      W.draw_frame(dl, img, iw, ih, im, k, cx - S + dx - g, cy - S + dy - g, cx + S + dx + g, cy + S + dy + g, col)
+    end)
     W.draw_frame(dl, img, iw, ih, im, k, cx - S, cy - S, cx + S, cy + S, tint)
   end
   return true
@@ -2417,8 +2437,12 @@ function W.toggle(ctx, id, label, value, formatted, opts)
       local py2 = small and (y + ch - 2) or (py1 + C.KNOB_D)
       local grow = 1 + 0.18 * (im.size or 0)
       local m = (py2 - py1) * (grow - 1) * 0.5
-      W.draw_frame(dl, img, iw, ih, one and { frames = 1 } or im, k, x + 3 - m, py1 - m, x + cw - 3 + m, py2 + m,
-        hovered and 0xffffffff or 0xf2f2f2ff)
+      local fim = one and { frames = 1 } or im
+      local bx1, by1, bx2, by2 = x + 3 - m, py1 - m, x + cw - 3 + m, py2 + m
+      W.picture_shadow(im, math.min(bx2 - bx1, by2 - by1) * 0.5, function(dx, dy, g, col)
+        W.draw_frame(dl, img, iw, ih, fim, k, bx1 + dx - g, by1 + dy - g, bx2 + dx + g, by2 + dy + g, col)
+      end)
+      W.draw_frame(dl, img, iw, ih, fim, k, bx1, by1, bx2, by2, hovered and 0xffffffff or 0xf2f2f2ff)
       if opts.mod then W.mod_corner(dl, x + cw - 6, py1, 5, on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off) end
       W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
       return changed, value, act, pressed
@@ -2594,7 +2618,11 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
       local own = file ~= opts.img.file
       local k = (not own and held) and math.min(1, (opts.img.frames or 1) - 1) or 0
       local g = (by2 - by1) * 0.18 * (opts.img.size or 0) * 0.5
-      W.draw_frame(dl, pic_img, piw, pih, own and { frames = 1 } or opts.img, k, bx1 - g, by1 - g, bx2 + g, by2 + g)
+      local fim = own and { frames = 1 } or opts.img
+      W.picture_shadow(opts.img, math.min(bx2 - bx1, by2 - by1) * 0.5 + g, function(dx, dy, gg, col)
+        W.draw_frame(dl, pic_img, piw, pih, fim, k, bx1 - g + dx - gg, by1 - g + dy - gg, bx2 + g + dx + gg, by2 + g + dy + gg, col)
+      end)
+      W.draw_frame(dl, pic_img, piw, pih, fim, k, bx1 - g, by1 - g, bx2 + g, by2 + g)
     else
       pic_img = nil
     end

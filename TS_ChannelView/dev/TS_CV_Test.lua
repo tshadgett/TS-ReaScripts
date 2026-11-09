@@ -12685,5 +12685,54 @@ do
   SD.is_collapsed = was_c
 end
 
+-- a picture's shadow: kept in its line, cast by its shape (drawn moved and
+-- tinted), further when tall, none when off or with no 3D
+do
+  for _, sh in ipairs({ "normal", "tall" }) do
+    local im = M.img_of(M.img_line({ file = "k.png", kind = "strip", frames = 64, dir = "down", size = 0, nums = true, shadow = sh }))
+    check("picture shadow: kept, " .. sh, tostring(im.shadow) .. " " .. tostring(im.nums), sh .. " true")
+  end
+  check("picture shadow: none kept as none", tostring(M.img_of(M.img_line({ file = "k.png" })).shadow), "nil")
+  local FN = require("TS_CV_Finish")
+  check("picture shadow: for the web", FN.www_img and (function()
+    local had = FN.www; FN.www = function(f) return f end
+    local w = FN.www_img({ file = "k.png", kind = "strip", frames = 1, size = 0, shadow = "tall" })
+    FN.www = had
+    return w.sh end)() or "no FN", 2)
+  local was = W.hw
+  W.hw = 1
+  local function cast(sh)
+    local n, far = 0, 0
+    W.picture_shadow({ shadow = sh }, 20, function(dx, dy, g, col)
+      n = n + 1; far = math.max(far, math.sqrt(dx * dx + dy * dy))
+      if (col & 0xffffff00) ~= 0 then n = -999 end
+    end)
+    return n, far
+  end
+  local n1, f1 = cast("normal")
+  local n2, f2 = cast("tall")
+  local n0 = cast(nil)
+  check("picture shadow: drawn, black, further when tall", (n1 > 1 and "drawn" or n1) .. " " .. tostring(f2 > f1) .. " " .. n0, "drawn true 0")
+  -- a knob's picture: its shadow drawn under it, the picture last, untinted
+  local tints = {}
+  local fake = setmetatable({
+    DrawList_AddImage = function(_, _, _, _, _, _, _, _, _, _, col) tints[#tints + 1] = col end,
+    DrawList_AddImageQuad = function(...) tints[#tints + 1] = select(19, ...) end,
+  }, { __index = function() return function() end end })
+  W.attach(fake)
+  local had = W.picture
+  W.picture = function() return "img", 128, 128 end
+  W.picture_knob("ctx", "dl", 50, 50, 17, 0.5, { kind = "strip", frames = 1, size = 0, shadow = "normal" })
+  local last = tints[#tints]
+  check("picture shadow: under a filmstrip knob", (#tints > 2 and "under" or #tints) .. " " .. string.format("%08x", last or 0), "under ffffffff")
+  tints = {}
+  W.picture_knob("ctx", "dl", 50, 50, 17, 0.5, { kind = "turn", size = 0, shadow = "tall" })
+  check("picture shadow: under a turning knob", (#tints > 2 and "under" or #tints) .. " " .. string.format("%08x", tints[#tints] or 0), "under ffffffff")
+  W.picture = had
+  W.hw = 0
+  check("picture shadow: none with no 3D", (cast("normal")), 0)
+  W.hw = was
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

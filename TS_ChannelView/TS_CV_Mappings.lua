@@ -615,7 +615,8 @@ M.STEP_LEDS_MAX = 8
 -- A knob's or a button's own picture (Img<n>, Pro):
 -- <file>|<strip or turn>|<frames>|<down or across>|<lo or hi: the first
 -- frame>|<-1, 0 or 1: smaller, fits, larger>|<a, n, r: the value arc,
--- the numbers and the modulation ring drawn over it>|<a button's On file>.
+-- the numbers and the modulation ring drawn over it; s or t: its shadow,
+-- normal or tall>|<a button's On file>.
 -- The file is a name in the Images folder beside the layouts. A strip is
 -- a filmstrip, a frame for each position (a button's: Off, then On); a
 -- turning picture turns with the value.
@@ -632,6 +633,7 @@ function M.img_of(v)
   -- what's drawn over it: the value arc, the numbers, the modulation ring
   im.arc, im.ring = flags:find("a") ~= nil, flags:find("r") ~= nil
   im["nums"] = flags:find("n") ~= nil
+  im.shadow = (flags:find("t") and "tall") or (flags:find("s") and "normal") or nil
   if parts[8] and parts[8] ~= "" and not parts[8]:find("[/\\]") then im.file2 = parts[8] end
   return im
 end
@@ -639,7 +641,8 @@ function M.img_line(im)
   if not (im and im.file and im.file ~= "") then return nil end
   return table.concat({ im.file, im.kind or "strip", tostring(math.floor(im.frames or 1)), im.dir or "down",
     im.hi and "hi" or "lo", tostring(im.size or 0),
-    (im.arc and "a" or "") .. (im.nums and "n" or "") .. (im.ring and "r" or ""), im.file2 or "" }, "|")
+    (im.arc and "a" or "") .. (im.nums and "n" or "") .. (im.ring and "r" or "")
+      .. ((im.shadow == "tall" and "t") or (im.shadow == "normal" and "s") or ""), im.file2 or "" }, "|")
 end
 function M.copy_img(im)
   if not im then return nil end
