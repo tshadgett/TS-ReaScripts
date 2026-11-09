@@ -3233,7 +3233,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- your names for its two states, when you've given them
         local st = M.state_text(key, p, raw, shown)
         local lit = W.lit_col(ctl.cap)
+        -- (on a grid any width: its own size, not its place's)
         local size = P.item_size(item)
+        if lay.grid then size = (ctl.size == "small" or item.h <= 1) and "small" or nil end
         local said = M.button_text(key, p, raw, shown)
         changed, nv, act = W.toggle(ctx, id, label, value, st,
           { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
