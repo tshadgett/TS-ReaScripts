@@ -2344,8 +2344,8 @@ script into the action list.
   the fader freezes the track, or up to one of its plugins, or unfreezes
   it, as the desktop's button does.
 - **Show:** the button with the columns icon, beside the Actions button,
-  shows or hides the macros, modulators, sends and receives on this
-  device.
+  shows or hides the console, macros, modulators, sends and receives on
+  this device.
 - **Looks:** finishes, corners, switches, knob recipes, your own knob
   looks and concentric pairs draw as on the desktop. Visual Options' *Web*
   tab (or ChannelView's, while it follows it) sets its colours, default
@@ -2417,6 +2417,14 @@ script into the action list.
   its settings. Controls they drive follow them and show their range or
   swing, as on the desktop. Adding and removing, linking, ranges, names,
   colours and lanes are done on the desktop.
+- **Console:** with a console set up in the project (Console setup), its
+  panel comes first in the row, folded until you open it, as on the
+  desktop: the mix's type, Drive, *Console in*, A / B (hold it to hear the
+  mix without the console), this channel's own switches, and a row for
+  each bus (its level, type, in or out, group, noise, and its own drive or
+  Fat). With TAMD + THS, The Hot Summer's controls are under the buses. Its
+  plugins stay out of the row, as on the desktop. Setting it up is done on
+  the desktop.
 
 ## While REAPER is busy
 
