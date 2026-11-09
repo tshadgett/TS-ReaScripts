@@ -2417,12 +2417,13 @@ script into the action list.
   and next track, M and S mute and solo it, Ctrl+Z undo, Ctrl+Shift+Z redo,
   X the mixer open or closed, and ? lists them. They do nothing while you
   type in a box.
-- **Macros and modulators:** their panels come first in the row when the
-  track has any, folded until you open them. Macros play here — knobs,
+- **Macros and modulators:** their panels come first in the row (Show
+  hides them), folded until you open them. Macros play here — knobs,
   buttons, faders, dropdowns and XY pads — and a modulator's tile opens to
   its settings. Controls they drive follow them and show their range or
-  swing, as on the desktop. Adding and removing, linking, ranges, names,
-  colours and lanes are done on the desktop.
+  swing, as on the desktop. The + tile adds a macro or a modulator;
+  removing, linking, ranges, names, colours and lanes are done on the
+  desktop.
 - **Console:** with a console set up in the project (Console setup), its
   panel comes first in the row, folded until you open it, as on the
   desktop: the mix's type, Drive, *Console in*, A / B (hold it to hear the

@@ -469,6 +469,13 @@ local function bar_settings(ctx, bar)
   ST.done(ctx)
   if cpick then d.cstyle = cpick; DR.save() end
   measure(ctx, "cstyle")
+  -- too long for its place: more rows, or one that scrolls
+  flow(ctx, "scroll", 14)
+  ST.cap(ctx, "When it's too long")
+  local spick = ST.seg(ctx, "##aesc", { { "Extend", "e" }, { "Scroll", "s" } }, d.scroll and "s" or "e")
+  ST.done(ctx)
+  if spick then d.scroll = (spick == "s") or nil; DR.save() end
+  measure(ctx, "scroll")
   if d.side ~= "web" and W.thumbs() then
     flow(ctx, "pics", 14)
     ST.cap(ctx, "Plugin pictures")
