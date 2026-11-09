@@ -1390,9 +1390,8 @@ end
 -- opts      : { bipolar, arc, tooltip, dim, step_norm, snaps, style, cap, size, scale }
 --             style/cap: the face (see W.knob_face); nil is the theme's arc
 --             size: "small" or "large" (C.SIZES), nil for the ordinary
---             cell. A small knob is its name in small type over a small
---             dial, its value in the tooltip; a large one is the same cell
---             grown.
+--             cell. A small knob is a small dial alone, its name and
+--             value in the tooltip; a large one is the same cell grown.
 --             scale: a numbered scale round the dial, { marks = {0..1},
 --             labels = {text}, ink = colour or nil } -- the dial shrinks
 --             to make room for the numbers; a medium knob's value moves
@@ -1747,8 +1746,8 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local vin = opts.vin and not small
   local show_value = C.SHOW_VALUES and not small and (large or not sc) and not vin
   if small then
-    -- under the name, its scale ticks just clearing it
-    cy = y + ch - r - 2
+    -- no name (in the tooltip, with the value): the middle of its place
+    cy = y + ch * 0.5
   else
     local room = ch - label_h - C.LABEL_GAP - (show_value and 14 or 0)
     cy = y + label_h + C.LABEL_GAP + room * 0.5
@@ -1804,9 +1803,9 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local lw = (opts.lamp ~= nil) and 9 or 0
   local lth, ltw
   if small then
-    W.push_small(ctx)
-    lth, ltw = centred_text(ctx, dl, cx + lw * 0.5, y - 1, label or "", C.COL.label, cw - 2 - lw, true)
-    W.pop_small(ctx)
+    -- (no name: the lamp at the dial's top left)
+    if lw > 0 then W.lamp(dl, cx - r - 2, cy - r + 2, opts.lamp) end
+    lw = 0
   else
     lth, ltw = centred_text(ctx, dl, cx + lw * 0.5, y, label or "", C.COL.label, cw - 2 - lw, true)
   end
