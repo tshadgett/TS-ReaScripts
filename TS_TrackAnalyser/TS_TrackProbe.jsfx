@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.6.0
+version: 2.6.1
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -382,9 +382,13 @@ author: Tim Shadgett
 //   for a pre probe ChannelView has armed (cal_arm: not on a track armed
 //   to record) and never while gmem[78] moves (ChannelView learning a
 //   plugin). A run interrupted keeps the zero there was, and is tried
-//   again five seconds on. The zero survives play and stop: ext_noinit
-//   is set, so REAPER doesn't re-zero this plugin's memory on every
-//   transport change, which it otherwise does.
+//   again five seconds on; three tries that don't finish, and it waits
+//   for play. At the post probe, "anything arriving" is a peak over
+//   -12 dBFS that's also well over what the test signal should reach
+//   there (a chain with a lot of gain lifts the noise itself that far).
+//   The zero survives play and stop: ext_noinit is set, so REAPER
+//   doesn't re-zero this plugin's memory on every transport change,
+//   which it otherwise does.
 //
 //   tap_calN, read-only: 0 never measured (the music baseline is in use),
 //   1 measured, 2 measured but the plugin was level-dependent at the test
@@ -894,7 +898,7 @@ out_pin:right
   cal_hb = 0; cal_phb = 0; cal_inpk = 0; cal_ppk = 0;
   cal_post_last = -1; cal_post_age = 1000000000;
   cal_pre_last = -1; cal_pre_age = 1000000000;
-  cal_ph = 0; cal_pt = 0; cal_acc = 0; cal_mute = 0; cal_fails = 0;
+  cal_ph = 0; cal_pt = 0; cal_acc = 0; cal_mute = 0; cal_fails = 0; cal_p1 = 0;
   cal_gen_last = -1; cal_slot = -1;
   kb0 = kb1 = kb2 = 0;
 
@@ -1957,8 +1961,12 @@ out_pin:right
     cp != cal_pre_last ? ( cal_pre_last = cp; cal_pre_age = 0; ) : cal_pre_age += samplesblock;
     ph = (cal_pre_age < srate * 0.25 && !cal_play) ? gmem[cal_slot + CS_PHASE] : 0;
     // something real at the post probe mid-run (an instrument played while
-    // stopped): stop, and let it be heard
-    gmem[cal_slot + CS_ABORT] = (cal_ph > 0 && cal_ppk > CAL_LOUD) ? 1 : 0;
+    // stopped): stop, and let it be heard. Loud, and well over what the
+    // first level's settled peak says the second should reach (10 dB up):
+    // a chain with a lot of gain lifts the test noise itself past CAL_LOUD.
+    (cal_ph == 1 && cal_pt >= CAL_SETTLE * srate) ? cal_p1 = max(cal_p1, cal_ppk);
+    cal_lim = (cal_ph >= 2 && cal_p1 > 0) ? max(CAL_LOUD, cal_p1 * 3.1623 * 4) : CAL_LOUD;
+    gmem[cal_slot + CS_ABORT] = (cal_ph > 0 && cal_ppk > cal_lim) ? 1 : 0;
     gmem[cal_slot + CS_ABORT] > 0 ? ph = 0;
     cal_ppk = 0;
     ph != cal_ph ? (
@@ -1968,7 +1976,10 @@ out_pin:right
         tap_fine >= 1 ? (fineCalCommit());
         cal_ok > 0 ? (cal_fails = 0) : (cal_fails += 1);
       );
-      ph == 1 ? ( calClear(); fineCalClear(); );
+      // a run thrown away while stopped counts as a try too: after three
+      // it waits for play
+      ((cal_ph == 1 || cal_ph == 2) && ph == 0 && !cal_play) ? cal_fails += 1;
+      ph == 1 ? ( calClear(); fineCalClear(); cal_p1 = 0; );
       cal_ph = ph; cal_pt = 0;
     ) : cal_pt += samplesblock;
     cal_mute = ph > 0;
