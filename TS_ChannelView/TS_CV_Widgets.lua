@@ -4044,7 +4044,7 @@ function W.gr_marks(max_db)
   return out
 end
 
-function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
+function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, side)
   max_db = (max_db and max_db > 0) and max_db or 12
   est = est or false
 
@@ -4067,7 +4067,8 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim)
 
   local bar_h = h - text_h
   local bw    = math.min(C.METER_SCALES and C.METER_W_SCALE or C.METER_W, col_w)
-  local bx    = x + (col_w - bw) * 0.5
+  -- (`side`: against that edge of its column, beside the output meter)
+  local bx    = (side == "l") and (x + 1) or (side == "r") and (x + col_w - bw - 1) or (x + (col_w - bw) * 0.5)
   local w     = bw
 
   ImGui.DrawList_AddRectFilled(dl, bx, y, bx + w, y + bar_h, C.COL.knob_body, 2.0)
@@ -4183,7 +4184,9 @@ end
 -- output (right of it), so the panel reads in the direction the audio goes.
 -- A slim bar with the held peak, and a readout under it: `readout` is the
 -- text, `rcol` its colour. `pk`, `rms` in dBFS; `key` holds the peak.
-function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol)
+-- `side`: "l" or "r", the bar against that edge of its column (the
+-- panel's), else centred; its readout centred under the column.
+function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol, side)
   local now = reaper.time_precise()
   local pushed = false
   if meter_font then ImGui.PushFont(ctx, meter_font, C.METER_FONT); pushed = true end
@@ -4191,7 +4194,8 @@ function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol)
   local bar_h = h - (line_h + 2)
   -- (wider with its figures on it, Visual Options' Meter scales)
   local bw = math.min(C.METER_SCALES and C.IO_BAR_W_SCALE or C.IO_BAR_W, w)
-  W.level_meter(ctx, dl, x + (w - bw) * 0.5, y, bw, bar_h, { pk },
+  local bx = (side == "l") and (x + 1) or (side == "r") and (x + w - bw - 1) or (x + (w - bw) * 0.5)
+  W.level_meter(ctx, dl, bx, y, bw, bar_h, { pk },
     W.level_peak(key, pk, now), C.METER_SCALES or nil, rms)
   local tw = ImGui.CalcTextSize(ctx, readout)
   ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + bar_h + 1, rcol or C.COL.header_dim, readout)

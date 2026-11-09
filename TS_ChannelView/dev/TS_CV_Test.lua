@@ -1739,8 +1739,10 @@ local function fits(text, px, font_px)
 end
 check("bar stays thin",             C.METER_W <= 14, true)
 check("column still under a cell",  C.METER_COL_W < C.CELL_W, true)
-check("readout fits the column",    fits("12.4 dB", C.METER_COL_W, C.METER_FONT), true)
-check("widest the ladder can make",  fits("60.0 dB", C.METER_COL_W, C.METER_FONT), true)
+-- (narrow: the value over its unit, stacked)
+check("readout fits the column",    fits("12.4", C.METER_COL_W, C.METER_FONT), true)
+check("widest the ladder can make",  fits("60.0", C.METER_COL_W, C.METER_FONT), true)
+check("an io readout fits its column and its padding", fits("+12.3", C.IO_COL_W + C.PANEL_PAD, C.METER_FONT), true)
 check("one line would not fit the bar",
       fits("12.4 dB", C.METER_W, C.METER_FONT), false)
 check("stacked value fits collapsed",

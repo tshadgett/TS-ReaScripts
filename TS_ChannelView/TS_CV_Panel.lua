@@ -1843,7 +1843,8 @@ local function draw_meter(ctx, dl, x, y, w, h, track, fx, meter, tw_, req)
   local peak, range = W.gr_state(fx.guid, gr, now, meter.range)
   local est = T.gr_estimated(track, fx.addr, fx.guid)
   local zst = est and TP.cal_status(track, fx.guid) or nil
-  local bx, by, bw, bh = W.gr_meter(ctx, dl, x, y, w, h, gr, peak, range, est, zst == 0)
+  local bx, by, bw, bh = W.gr_meter(ctx, dl, x, y, w, h, gr, peak, range, est, zst == 0,
+    C.METER_SIDE == "right" and "r" or "l")
   -- The trace sits flush against the bar and ends where the bar ends, over
   -- the room P.width set aside beside the meter's column.
   if tw_ and tw_ > 0 and bx then
@@ -1908,8 +1909,8 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
   local tip
   if lv.old then
     -- A probe from an older version, still running: nothing to read.
-    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", -150, nil, "?")
-    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", -150, nil, "?")
+    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", -150, nil, "?", nil, "l")
+    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", -150, nil, "?", nil, "r")
     tip = "Older probe: no levels.\n" ..
           "Reopen the project to update it."
   else
@@ -1918,8 +1919,8 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
     local out_rms = byp and -150 or lv.out_rms
     local in_hold = W.level_peak(key .. "i", lv.in_pk, reaper.time_precise())
     local itxt, otxt, ocol = W.io_readouts(lv, byp, in_hold)
-    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", lv.in_pk, lv.in_rms, itxt, C.COL.header_dim)
-    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", out_pk, out_rms, otxt, ocol)
+    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", lv.in_pk, lv.in_rms, itxt, C.COL.header_dim, "l")
+    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", out_pk, out_rms, otxt, ocol, "r")
     local function f(v) return (v and v > -149) and ("%.1f"):format(v) or "-inf" end
     tip = ("Input   peak %s   RMS %s dBFS\nOutput  peak %s   RMS %s dBFS\n%s")
       :format(f(lv.in_pk), f(lv.in_rms), f(not byp and lv.out_pk or nil), f(not byp and lv.out_rms or nil),

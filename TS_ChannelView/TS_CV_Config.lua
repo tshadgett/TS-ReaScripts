@@ -231,10 +231,10 @@ C.COLLAPSED_W = 30
 -- The column is sized so the widest readout the ladder can produce --
 -- "60.0 dB" -- fits on one line, and the whole column is still well
 -- under a cell.
-C.METER_W     = 14        -- the bar
+C.METER_W     = 8         -- the bar (as wide as the input and output meters')
 C.GR_BAR_H    = 10        -- the rack's: lying across the top of a panel
-C.METER_COL_W = 40        -- bar plus the room its readout needs
-C.IO_COL_W    = 28        -- a plugin's input or output meter, with its readout
+C.METER_COL_W = 26        -- bar plus the room its readout needs (stacked, "6.4" over "dB")
+C.IO_COL_W    = 24        -- a plugin's input or output meter, with its readout
 C.GRV_W       = 220       -- the gain-reduction trace, when a meter is opened out
 -- Its window: beats (tempo-locked, like Track Analyser's) or seconds.
 C.GRV_WINDOWS = { "1b", "2b", "4b", "8b", "1s", "2s", "4s" }
