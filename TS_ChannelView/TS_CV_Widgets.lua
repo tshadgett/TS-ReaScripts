@@ -2395,7 +2395,8 @@ function W.toggle(ctx, id, label, value, formatted, opts)
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
   local small = opts.size == "small"
-  local cw, ch = C.CELL_W, small and (C.CELL_H // 2) or C.CELL_H
+  -- (opts.w: a grid's place, any width; else a cell)
+  local cw, ch = opts.w or C.CELL_W, small and (C.CELL_H // 2) or C.CELL_H
 
   W.allow_overlap(ctx)
   local pressed = ImGui.InvisibleButton(ctx, id, cw, ch,
@@ -2483,7 +2484,11 @@ function W.toggle(ctx, id, label, value, formatted, opts)
     ink, dy = on and ((opts.on_col and not U.is_light(opts.on_col)) and 0xf4f4f2ff or 0x0d1116ff)
               or C.COL.toggle_text, 0
   end
-  glow_text(ctx, dl, cx, (by1 + by2) * 0.5 - th * 0.5 + dy, txt, ink, gcol, bx2 - bx1 - 4)
+  -- (in the small type a row of buttons uses, so the two match)
+  W.push_small(ctx)
+  local _, sth = ImGui.CalcTextSize(ctx, txt)
+  glow_text(ctx, dl, cx, (by1 + by2) * 0.5 - sth * 0.5 + dy, txt, ink, gcol, bx2 - bx1 - 4)
+  W.pop_small(ctx)
   if opts.mod then
     W.mod_corner(dl, bx2, by1, 5, on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off)
   end

@@ -621,6 +621,11 @@ do
     { param = 5, type = "combo", label = "Range", buttons = "across", nbtn = 3, at = { c = 0, r = 2, w = 8, h = 4 } } }, ph(2))
   check("buttons half a cell tall: no name, as a dropdown", tostring(lb.items[1].short) .. " " .. tostring(lb.items[2].short) .. " " .. tostring(lb.items[3].short),
     "true nil nil")
+  local lw = P.layout({ grid = { cols = 16, rows = 8 },
+    { param = 4, type = "toggle", label = "On", at = { c = 2, r = 0, w = 2, h = 4 } },
+    { param = 5, type = "toggle", label = "Wide", at = { c = 4, r = 0, w = 8, h = 4 } } }, ph(2))
+  check("button: as wide as its place, half a cell or more", table.concat({ lw.items[1].w, lw.items[1].x, lw.items[2].w }, " "),
+    "1 " .. P.qx(2) .. " 4")
   check("three quarters: name and box, from the top", table.concat({ l3.items[1].h, l3.items[1].y, l3.items[2].h, l3.items[2].y, l3.items[3].h }, " "),
     "1.5 0 1.5 0 2")
   M.remove("GridText"); M.save(); M.reload()

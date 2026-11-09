@@ -726,7 +726,9 @@ local function put(out, ctl, c, r, w, h, dx, dy)
     -- dropdown's box; a step button decides for itself)
     if h <= 2 and ctl.buttons ~= "step" then it.short = true end
   elseif not STRETCH[kind] then
-    if t ~= "combo" then it.x = x + half(qx(w) - hx(nw)); it.w = nw end
+    -- (a dropdown or a button as wide as its place)
+    if t == "toggle" and not ctl.img then it.w = half(w)
+    elseif t ~= "combo" then it.x = x + half(qx(w) - hx(nw)); it.w = nw end
     -- a dropdown in a place half a cell tall: short, its box without its name
     if t == "combo" and h <= 2 then nh, it.short = 1, true end
     -- three quarters of a cell: a dropdown or a button, its name and its
@@ -3235,7 +3237,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         local said = M.button_text(key, p, raw, shown)
         changed, nv, act = W.toggle(ctx, id, label, value, st,
           { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
-            text = said or ((size == "small") and label or nil),
+            text = said or ((size == "small") and label or nil), w = (lay.grid and not ctl.img) and hx(item.w) or nil,
             on_col = lit, size = size, style = ctl.style, mod = modded, img = ctl.img })
       elseif ctl.type == "combo" and item.kind == "buttons" then
         -- its choices as buttons: the plugin's own names (button_choices),
