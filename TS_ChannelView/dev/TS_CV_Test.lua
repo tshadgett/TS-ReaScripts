@@ -235,6 +235,13 @@ do
   M.save(); M.reload()
   local c = M.get(k).controls[1]
   check("round-trip buttons grid", tostring(c.buttons) .. " " .. tostring(c.nbtn), "grid 16")
+  -- the gap between them, and Reverse (every button lit but the current)
+  M.set(k, { controls = { { param = 3, type = "combo", buttons = "grid", nbtn = 8, bgap = 6, invert = true },
+                          { param = 4, type = "combo", buttons = "across", nbtn = 3 } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  check("buttons: gap and reverse kept", tostring(l.controls[1].bgap) .. " " .. tostring(l.controls[1].invert)
+    .. " " .. tostring(l.controls[2].bgap) .. " " .. tostring(M.copy(l).controls[1].bgap), "6 true nil 6")
   M.remove(k); M.save(); M.reload()
 end
 
@@ -8942,6 +8949,23 @@ do
     ch3, nv3 = press(0)
     check("step, with its button: anywhere else, the next", ch3 and nv3, 0.5)
     mpx, mpy, clicked = 10, 30, false
+    -- a row's gap, and Reverse
+    local fills = {}
+    fake.DrawList_AddRectFilled = function(_, x1, y1, x2, y2, col) fills[#fills + 1] = { x1, x2, col } end
+    local function row(o)
+      fills = {}
+      o.dir, o.w, o.h, o.on_col = "across", 100, 64, 0x11
+      W.button_row("ctx", "##gap", "Mode", 0.5, list, o)
+      local lit = 0
+      for _, f in ipairs(fills) do if f[3] == 0x11 then lit = lit + 1 end end
+      return fills[2] and math.floor(fills[2][1] - fills[1][2] + 0.5) or -1, lit
+    end
+    check("buttons across: the usual gap", (row({})), 1)
+    check("buttons across: a gap of 6", (row({ gap = 6 })), 6)
+    check("buttons across: none", (row({ gap = 0 })), 0)
+    check("buttons: one lit", select(2, row({})), 1)
+    check("buttons reversed: all lit but the current", select(2, row({ rev = true })), 2)
+    fake.DrawList_AddRectFilled = nil
   end)
   check("step: draw ran", ok and true or err, true)
 end

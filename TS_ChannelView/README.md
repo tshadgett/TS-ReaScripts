@@ -1316,7 +1316,9 @@ or following ChannelView's).
   *Buttons down* or *Buttons grid*: one button per choice, the current one
   lit. A grid is as near square as its count allows (16 as 4 × 4, 12 as
   4 × 3). For 2 to 16 choices; buttons too tall for the panel show as a
-  dropdown. On a grid layout the buttons fill their place.
+  dropdown. On a grid layout the buttons fill their place. Under them in
+  the same menu, *Gap between buttons*: none, 2 px (the usual), 4, 6 or
+  8. Right-click ▸ *Reverse* lights every button but the current one.
 - **Step button.** Right-click a dropdown ▸ Show as ▸ *Step button*: one
   button that steps through the choices — click for the next (round from
   the end), Shift+click back, the wheel along them — with an LED for each

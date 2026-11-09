@@ -877,6 +877,16 @@ draw_entry_body = function(ctx)
     end
   end
   local function step_rows(c)
+    if c.buttons and c.buttons ~= "step" then
+      row_name("Gap")
+      for i, g in ipairs({ 0, 2, 4, 6, 8 }) do
+        if i > 1 then ImGui.SameLine(ctx, 0, 2) end
+        if ImGui.RadioButton(ctx, (g == 0 and "None" or tostring(g)) .. "##bgap" .. i, (c.bgap or 2) == g) then
+          c.bgap = (g ~= 2) and g or nil
+        end
+      end
+      tip("Between the buttons, in pixels.")
+    end
     if c.buttons ~= "step" then return end
     row_name("LEDs")
     local opts_w = { { nil, "Beside" }, { "over", "Over it" }, { "column", "Column" }, { "none", "None" } }
@@ -1474,6 +1484,11 @@ draw_entry_body = function(ctx)
       local rch, rv = ST.checkbox(ctx, "Reverse", c.invert and true or false)
       if rch then c.invert = rv or nil end
       tip(rev_tip)
+    elseif c.type == "combo" and c.buttons and c.buttons ~= "step" then
+      gap()
+      local rch, rv = ST.checkbox(ctx, "Reverse", c.invert and true or false)
+      if rch then c.invert = rv or nil end
+      tip("Light every button but the current one.")
     elseif two then
       local a, b = (c.type == "xy") and "X" or "ring", (c.type == "xy") and "Y" or "inner"
       gap()

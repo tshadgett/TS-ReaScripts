@@ -4130,6 +4130,7 @@ local function control_menu()
         local was = lc.type
         lc.type = t
         lc.buttons, lc.nbtn = nil, nil
+        if (t == "combo") ~= (was == "combo") then lc.invert = nil end
         -- a list of settings it doesn't report steps for: its count kept
         if (t == "combo" or t == "stepped") and c.param and not P.step_norm(app.track, fx.addr, c.param, key) then
           local dn = P.detect_steps(app.track, fx.addr, c.param, key)
@@ -4162,6 +4163,7 @@ local function control_menu()
           if ImGui.MenuItem(ctx, d[2], nil, c.type == "combo" and c.buttons == d[1], ok and true or false) then
             local l = commit()
             local lc = l.controls[idx]
+            if lc.type ~= "combo" then lc.invert = nil end
             lc.type, lc.buttons, lc.nbtn = "combo", d[1], n
             if found then l.steps = l.steps or {}; l.steps[c.param] = n end
             M.set(key, l); M.save()
@@ -4171,6 +4173,22 @@ local function control_menu()
               or d[1] == "step" and "One button: click for the next choice, Shift+click back."
               or ("One button per choice (%d)%s."):format(n, d[1] == "grid" and ", in rows" or ""))
           end
+        end
+        -- the gap between a row's, a column's or a grid's buttons
+        if c.type == "combo" and c.buttons and c.buttons ~= "step" then
+          ImGui.Indent(ctx, 10)
+          if ImGui.BeginMenu(ctx, "Gap between buttons") then
+            for _, g in ipairs({ 0, 2, 4, 6, 8 }) do
+              if ImGui.MenuItem(ctx, g == 0 and "None" or (g .. " px"), nil, (c.bgap or 2) == g) then
+                local l = commit()
+                local lc = l.controls[idx]
+                if lc then lc.bgap = (g ~= 2) and g or nil end
+                M.set(key, l); M.save()
+              end
+            end
+            ImGui.EndMenu(ctx)
+          end
+          ImGui.Unindent(ctx, 10)
         end
         -- a step button's lamps
         if c.type == "combo" and c.buttons == "step" then
@@ -4265,7 +4283,8 @@ local function control_menu()
   end
   -- reverse: knobs, buttons, and both halves of a two-parameter control
   -- (a dropdown's entries are positions in the plugin's own scale)
-  if c.type == "knob" or c.type == "toggle" or c.type == "stepped" or c.type == nil then
+  local brow = c.type == "combo" and c.buttons and c.buttons ~= "step"
+  if c.type == "knob" or c.type == "toggle" or c.type == "stepped" or c.type == nil or brow then
     if ImGui.MenuItem(ctx, "Reverse", nil, c.invert and true or false) then flip("invert") end
   elseif M.has_second(c) then
     local a, b = (c.type == "xy") and "X" or "ring", (c.type == "xy") and "Y" or "inner knob"
@@ -4274,6 +4293,8 @@ local function control_menu()
   end
   if ImGui.IsItemHovered(ctx) and (c.type ~= "combo" and c.type ~= "fader") then
     ImGui.SetTooltip(ctx, "Flip the direction on screen only.")
+  elseif brow and ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Light every button but the current one.")
   end
 
   -- a lamp before its name, from the plugin's gain reduction (TS_CV_Panel

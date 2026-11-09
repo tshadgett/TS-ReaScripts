@@ -1276,7 +1276,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     changed, nv, act = W.button_row(ctx, id, shown_name, v, list,
       { dir = ctl.buttons, n = #list, w = hx(item.w), h = hy(item.h),
         leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl), img = ctl.img,
-        nobtn = ctl.nobtn, tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
+        nobtn = ctl.nobtn, gap = ctl.bgap, rev = ctl.invert, tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
   elseif ctl.type == "combo" then
     local list = {}
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
@@ -3254,7 +3254,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
             leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl), img = ctl.img,
-            nobtn = ctl.nobtn, short = item.short, tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
+            nobtn = ctl.nobtn, gap = ctl.bgap, rev = ctl.invert, short = item.short, tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" then
         -- Its list is read from the plugin when it's opened (and kept while
         -- it's open), or when an arrow or the wheel steps it; a plugin that

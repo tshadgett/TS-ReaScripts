@@ -2518,6 +2518,8 @@ end
 --   on_col   the lit colour (C.TOGGLE_COLS), nil for the theme's
 --   on_cols  a lit colour per choice (by its place), in place of on_col
 --   style    the buttons' face (W.button_face), nil for flat
+--   gap      px between the buttons (at 100%), nil for the usual
+--   rev      every button lit but the current one
 --   tooltip
 -- returns changed, value, act -- the value being the clicked choice's.
 -- Labels are in the small type, shortened to fit; the full one is in the
@@ -2750,29 +2752,31 @@ function W.button_row(ctx, id, label, value, choices, opts)
   local rects = {}
   if opts.dir == "grid" then
     local cols, nr = C.button_grid(n)
-    local M = C.CTL_MARGIN
-    local bw = (cw - 2 * M - (cols - 1) * 2) / cols
-    local bh = math.max(12, math.floor((y + ch - top - 2 - (nr - 1) * 2) / nr))
+    local M, g = C.CTL_MARGIN, opts.gap and C.S(opts.gap) or 2
+    local bw = (cw - 2 * M - (cols - 1) * g) / cols
+    local bh = math.max(12, math.floor((y + ch - top - 2 - (nr - 1) * g) / nr))
     for i = 1, n do
       local col, row = (i - 1) % cols, (i - 1) // cols
-      local l, t = x + M + col * (bw + 2), top + row * (bh + 2)
+      local l, t = x + M + col * (bw + g), top + row * (bh + g)
       rects[i] = { l, t, l + bw, t + bh }
     end
   elseif opts.dir == "down" then
     -- taller as the cell grows, as a row's grow wider
-    local bh = math.max(14, math.floor((y + ch - top - 2 - (n - 1) * 2) / n))
+    local g = opts.gap and C.S(opts.gap) or 2
+    local bh = math.max(14, math.floor((y + ch - top - 2 - (n - 1) * g) / n))
     for i = 1, n do
-      local by = top + (i - 1) * (bh + 2)
+      local by = top + (i - 1) * (bh + g)
       rects[i] = { x + C.CTL_MARGIN, by, x + cw - C.CTL_MARGIN, by + bh }
     end
   else
     local bx0, bx1 = x + C.CTL_MARGIN, x + cw - C.CTL_MARGIN
-    local bw = (bx1 - bx0 - (n - 1)) / n
+    local g = opts.gap and C.S(opts.gap) or 1
+    local bw = (bx1 - bx0 - (n - 1) * g) / n
     -- as tall as a button (W.toggle's), where there's room
     local by1 = top + 1
     local bh = math.max(14, math.min(C.KNOB_D - C.S(8), y + ch - by1 - 1))
     for i = 1, n do
-      local l = bx0 + (i - 1) * (bw + 1)
+      local l = bx0 + (i - 1) * (bw + g)
       rects[i] = { l, by1, l + bw, by1 + bh }
     end
   end
@@ -2795,7 +2799,7 @@ function W.button_row(ctx, id, label, value, choices, opts)
   end
   W.push_small(ctx)
   for i, r in ipairs(rects) do
-    local lit = (i == cur)
+    local lit = (i == cur) ~= (opts.rev and true or false)
     local on_col = on_cols[i] or base_col
     local on_ink = U.is_light(on_col) and 0x0d1116ff or 0xf4f4f2ff
     local ink, dy, gcol = W.button_face(dl, r[1], r[2], r[3], r[4], 2.0, lit, on_col,
@@ -2820,7 +2824,7 @@ function W.button_row(ctx, id, label, value, choices, opts)
       if r[2] < rects[best][2] - 0.5 or (math.abs(r[2] - rects[best][2]) <= 0.5 and r[3] > rects[best][3]) then best = i end
     end
     local r = rects[best]
-    W.mod_corner(dl, r[3], r[2], 5, best == cur and (on_cols[cur] or base_col) or C.COL.toggle_off)
+    W.mod_corner(dl, r[3], r[2], 5, (best == cur) ~= (opts.rev and true or false) and (on_cols[best] or base_col) or C.COL.toggle_off)
   end
 
   W.tip(ctx, id, under and ((opts.short and label and label ~= "") and (label .. ": " .. choices[under].text) or choices[under].text)
