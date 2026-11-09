@@ -147,24 +147,24 @@ local function tile_h(track, src)
   local isopen = open[tostring(track) .. src.guid]
   local h = Z.HEAD + Z.SUB
   if src.kind == "lfo" then
-    h = h + 30
-    if isopen then h = h + 22 + Z.KCELL_H * 2 end
+    h = h + C.S(30)
+    if isopen then h = h + C.S(22) + Z.KCELL_H * 2 end
   elseif src.kind == "midi" then
-    h = h + 16
+    h = h + C.S(16)
     if isopen then
       local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
-      h = h + 22 + 20 + Z.KCELL_H * 2 + (MD.trig_ok(track, src.slot) and 22 or 0)
+      h = h + C.S(22) + 20 + Z.KCELL_H * 2 + (MD.trig_ok(track, src.slot) and 22 or 0)
       if MD.is_env(ms) then h = h + Z.ENV_CURVE_H + 6 + Z.KCELL_H + 22 end
     end
   else
-    h = h + 16
+    h = h + C.S(16)
     if isopen then
       local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
-      h = h + 22 + 20 + (MD.is_env(ms) and (Z.ENV_CURVE_H + 6 + Z.KCELL_H * 3 + 22) or Z.KCELL_H * 2)
-      if MD.field(track, src.slot, src.j, "fsrc") >= 0.5 then h = h + 22 end
+      h = h + C.S(22) + 20 + (MD.is_env(ms) and (Z.ENV_CURVE_H + 6 + Z.KCELL_H * 3 + 22) or Z.KCELL_H * 2)
+      if MD.field(track, src.slot, src.j, "fsrc") >= 0.5 then h = h + C.S(22) end
     end
   end
-  return h + 6
+  return h + C.S(6)
 end
 
 local function place_mods(track, mods, room, with_add)
@@ -260,7 +260,7 @@ local function tknob(ctx, dl, id, x, y, v, label, text, def, col)
     end
     if def and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then nv, changed = def, true end
   end
-  local cx, cy = x + Z.KCELL_W * 0.5, y + 11 + Z.KR + 1
+  local cx, cy = x + Z.KCELL_W * 0.5, y + C.S(11) + Z.KR + 1
   W.push_small(ctx)
   if label and label ~= "" then
     local tw = ImGui.CalcTextSize(ctx, label)
@@ -293,7 +293,7 @@ end
 -- The lane button: makes / shows / hides a parameter's automation lane.
 -- Lit (filled in `col`) while the parameter has automation.
 local function lane_button(ctx, dl, id, x, y, track, slot, param, col, what)
-  ImGui.SetCursorScreenPos(ctx, x - 2, y - 2)
+  ImGui.SetCursorScreenPos(ctx, x - C.S(2), y - C.S(2))
   W.allow_overlap(ctx)
   local pressed = ImGui.InvisibleButton(ctx, id, Z.LANE_W + 4, Z.LANE_H + 4,
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
@@ -372,13 +372,13 @@ local function colour_menu(ctx, track, src)
   for i, c in ipairs(MD.COLOURS) do
     if i > 1 and (i - 1) % 6 ~= 0 then ImGui.SameLine(ctx, 0, 3) end
     local x, y = ImGui.GetCursorScreenPos(ctx)
-    if ImGui.InvisibleButton(ctx, ("col%d##%s"):format(i, src.guid), 18, 18) then
+    if ImGui.InvisibleButton(ctx, ("col%d##%s"):format(i, src.guid), C.S(18), 18) then
       MD.set_colour(track, src, c)
       ImGui.CloseCurrentPopup(ctx)
     end
     local dl = ImGui.GetWindowDrawList(ctx)
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + 18, y + 18, c, 3)
-    if c == src.col then ImGui.DrawList_AddRect(dl, x - 1, y - 1, x + 19, y + 19, 0xffffffff, 3, 0, 1.5) end
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + C.S(18), y + C.S(18), c, 3)
+    if c == src.col then ImGui.DrawList_AddRect(dl, x - C.S(1), y - C.S(1), x + C.S(19), y + C.S(19), 0xffffffff, 3, 0, 1.5) end
   end
   ImGui.EndMenu(ctx)
 end
@@ -518,11 +518,11 @@ end
 local function macro_knob(ctx, dl, track, src, x, y, w)
   local v = MD.value(track, src, 1)
   local id = "mk##" .. src.guid
-  local kw = 44
+  local kw = C.S(44)
   local kx = x + (w - kw) * 0.5
   ImGui.SetCursorScreenPos(ctx, kx, y)
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, id, kw, 40, ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  ImGui.InvisibleButton(ctx, id, kw, C.S(40), ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
   local nv = v
   if act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
@@ -539,19 +539,19 @@ local function macro_knob(ctx, dl, track, src, x, y, w)
     if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then nv = 0 end
   end
   if nv ~= v then MD.set_macro(track, src, 1, nv) end
-  W.knob_face(dl, x + w * 0.5, y + 18, 15, nv, { hot = hov or act, cap = src.col })
+  W.knob_face(dl, x + w * 0.5, y + C.S(18), C.S(15), nv, { hot = hov or act, cap = src.col })
   W.push_small(ctx)
   local t = ("%d%%"):format(math.floor(nv * 100 + 0.5))
   local tw = ImGui.CalcTextSize(ctx, t)
-  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + 40, C.COL.value, t)
+  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + C.S(40), C.COL.value, t)
   W.pop_small(ctx)
   return ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
 end
 
 local function macro_button(ctx, dl, track, src, x, y, w)
   local on = MD.value(track, src, 1) >= 0.5
-  local bw = 56
-  if pill(ctx, dl, "mb##" .. src.guid, x + (w - bw) * 0.5, y + 10, bw, on and "On" or "Off", on, src.col, 22) then
+  local bw = C.S(56)
+  if pill(ctx, dl, "mb##" .. src.guid, x + (w - bw) * 0.5, y + C.S(10), bw, on and "On" or "Off", on, src.col, 22) then
     MD.set_macro(track, src, 1, on and 0 or 1)
   end
   return false
@@ -559,11 +559,11 @@ end
 
 local function macro_fader(ctx, dl, track, src, x, y, w)
   local v = MD.value(track, src, 1)
-  local fx0, fx1 = x + 8, x + w - 8
+  local fx0, fx1 = x + C.S(8), x + w - C.S(8)
   local id = "mf##" .. src.guid
-  ImGui.SetCursorScreenPos(ctx, fx0 - 6, y + 8)
+  ImGui.SetCursorScreenPos(ctx, fx0 - 6, y + C.S(8))
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, id, fx1 - fx0 + 12, 24, ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  ImGui.InvisibleButton(ctx, id, fx1 - fx0 + 12, C.S(24), ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
   local nv = v
   if act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
@@ -582,15 +582,15 @@ local function macro_fader(ctx, dl, track, src, x, y, w)
     if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then nv = 0 end
   end
   if nv ~= v then MD.set_macro(track, src, 1, nv) end
-  local ty = y + 20
-  ImGui.DrawList_AddRectFilled(dl, fx0, ty - 3, fx1, ty + 3, C.COL.toggle_off, 3)
-  ImGui.DrawList_AddRectFilled(dl, fx0, ty - 3, fx0 + (fx1 - fx0) * nv, ty + 3, U.with_alpha(src.col, 0x90), 3)
+  local ty = y + C.S(20)
+  ImGui.DrawList_AddRectFilled(dl, fx0, ty - C.S(3), fx1, ty + C.S(3), C.COL.toggle_off, 3)
+  ImGui.DrawList_AddRectFilled(dl, fx0, ty - C.S(3), fx0 + (fx1 - fx0) * nv, ty + C.S(3), U.with_alpha(src.col, 0x90), 3)
   local cx = fx0 + (fx1 - fx0) * nv
-  ImGui.DrawList_AddRectFilled(dl, cx - 6, ty - 8, cx + 6, ty + 8, (hov or act) and 0xffffffff or 0xd8dbe0ff, 2)
+  ImGui.DrawList_AddRectFilled(dl, cx - C.S(6), ty - C.S(8), cx + C.S(6), ty + C.S(8), (hov or act) and 0xffffffff or 0xd8dbe0ff, 2)
   W.push_small(ctx)
   local t = ("%d%%"):format(math.floor(nv * 100 + 0.5))
   local tw = ImGui.CalcTextSize(ctx, t)
-  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + 40, C.COL.value, t)
+  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + C.S(40), C.COL.value, t)
   W.pop_small(ctx)
   return ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
 end
@@ -598,11 +598,11 @@ end
 local function macro_dropdown(ctx, dl, track, src, x, y, w)
   local n = #src.choices
   local c = MD.choice_of(MD.value(track, src, 1), n)
-  local bx0, bx1, by = x + 6, x + w - 6, y + 12
+  local bx0, bx1, by = x + C.S(6), x + w - C.S(6), y + C.S(12)
   local id = "md##" .. src.guid
   ImGui.SetCursorScreenPos(ctx, bx0, by)
   W.allow_overlap(ctx)
-  local pressed = ImGui.InvisibleButton(ctx, id, bx1 - bx0, 20,
+  local pressed = ImGui.InvisibleButton(ctx, id, bx1 - bx0, C.S(20),
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hov = ImGui.IsItemHovered(ctx)
   local rc = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
@@ -616,18 +616,18 @@ local function macro_dropdown(ctx, dl, track, src, x, y, w)
     end
   end
   if pressed then ImGui.OpenPopup(ctx, "mddl##" .. src.guid) end
-  ImGui.DrawList_AddRectFilled(dl, bx0, by, bx1, by + 20, hov and C.COL.knob_body_hi or C.COL.toggle_off, 3)
+  ImGui.DrawList_AddRectFilled(dl, bx0, by, bx1, by + C.S(20), hov and C.COL.knob_body_hi or C.COL.toggle_off, 3)
   W.push_small(ctx)
   local t = U.truncate(src.choices[c] or "", 10)
   local _, th = ImGui.CalcTextSize(ctx, t)
   ImGui.DrawList_AddText(dl, bx0 + 6, by + (20 - th) * 0.5, C.COL.value, t)
   W.pop_small(ctx)
-  local ax, ay = bx1 - 10, by + 8
+  local ax, ay = bx1 - 10, by + C.S(8)
   ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay, ax + 3, ay, ax, ay + 4, C.COL.label)
   W.push_small(ctx)
   local cnt = ("%d of %d"):format(c, n)
   local cw = ImGui.CalcTextSize(ctx, cnt)
-  ImGui.DrawList_AddText(dl, x + (w - cw) * 0.5, y + 40, C.COL.header_dim, cnt)
+  ImGui.DrawList_AddText(dl, x + (w - cw) * 0.5, y + C.S(40), C.COL.header_dim, cnt)
   W.pop_small(ctx)
   if ImGui.BeginPopup(ctx, "mddl##" .. src.guid) then
     for k, name in ipairs(src.choices) do
@@ -643,7 +643,7 @@ end
 local function macro_xy(ctx, dl, track, src, x, y, w, h)
   local vx, vy = MD.value(track, src, 1), MD.value(track, src, 2)
   -- square: the same distance for both axes
-  local side = math.max(20, math.min(w - 12, h))
+  local side = math.max(20, math.min(w - C.S(12), h))
   local px0, py0 = x + (w - side) * 0.5, y + (h - side) * 0.5
   local px1, py1 = px0 + side, py0 + side
   local id = "mxy##" .. src.guid
@@ -681,39 +681,39 @@ local function draw_macro(ctx, dl, track, src, s, x, y, w, h, req)
   -- the top: name (right-click for the menu), lane button, ◯
   ImGui.SetCursorScreenPos(ctx, x, y)
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, "mname##" .. src.guid, w, 18, ImGui.ButtonFlags_MouseButtonRight)
+  ImGui.InvisibleButton(ctx, "mname##" .. src.guid, w, C.S(18), ImGui.ButtonFlags_MouseButtonRight)
   local menu = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right)
   W.tip(ctx, "mname##" .. src.guid, "Right-click: rename, colour, change, remove", ImGui.IsItemHovered(ctx), false)
   local nm = U.truncate(src.name, src.kind == "xy" and 18 or 8)
   local tw = ImGui.CalcTextSize(ctx, nm)
-  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + 3, src.col, nm)
+  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + C.S(3), src.col, nm)
   local links = s.by_mod[src.guid] or {}
   if src.kind == "xy" then
-    lane_button(ctx, dl, "mlx##" .. src.guid, x + 5, y + 5, track, src.slot, src.out[1], src.col, src.name .. " X")
-    lane_button(ctx, dl, "mly##" .. src.guid, x + 5 + Z.LANE_W + 3, y + 5, track, src.slot, src.out[2], src.col, src.name .. " Y")
+    lane_button(ctx, dl, "mlx##" .. src.guid, x + C.S(5), y + C.S(5), track, src.slot, src.out[1], src.col, src.name .. " X")
+    lane_button(ctx, dl, "mly##" .. src.guid, x + C.S(5) + Z.LANE_W + 3, y + C.S(5), track, src.slot, src.out[2], src.col, src.name .. " Y")
     W.push_small(ctx)
-    ImGui.DrawList_AddText(dl, x + w - 41, y + 3, C.COL.header_dim, "X")
-    ImGui.DrawList_AddText(dl, x + w - 22, y + 3, C.COL.header_dim, "Y")
+    ImGui.DrawList_AddText(dl, x + w - C.S(41), y + C.S(3), C.COL.header_dim, "X")
+    ImGui.DrawList_AddText(dl, x + w - C.S(22), y + C.S(3), C.COL.header_dim, "Y")
     W.pop_small(ctx)
-    link_handle(ctx, dl, src, 1, x + w - 29, y + 10, 5, "X")
-    link_handle(ctx, dl, src, 2, x + w - 10, y + 10, 5, "Y")
+    link_handle(ctx, dl, src, 1, x + w - C.S(29), y + C.S(10), C.S(5), "X")
+    link_handle(ctx, dl, src, 2, x + w - C.S(10), y + C.S(10), C.S(5), "Y")
   else
-    lane_button(ctx, dl, "ml##" .. src.guid, x + 5, y + 5, track, src.slot, src.out[1], src.col, src.name)
-    link_handle(ctx, dl, src, 1, x + w - 10, y + 10, 5)
+    lane_button(ctx, dl, "ml##" .. src.guid, x + C.S(5), y + C.S(5), track, src.slot, src.out[1], src.col, src.name)
+    link_handle(ctx, dl, src, 1, x + w - C.S(10), y + C.S(10), C.S(5))
   end
   -- what it drives, small, under the name
   W.push_small(ctx)
   local sub = #links == 0 and "" or ("drives %d"):format(#links)
   local sw = ImGui.CalcTextSize(ctx, sub)
-  ImGui.DrawList_AddText(dl, x + (w - sw) * 0.5, y + h - 13, C.COL.header_dim, sub)
+  ImGui.DrawList_AddText(dl, x + (w - sw) * 0.5, y + h - C.S(13), C.COL.header_dim, sub)
   W.pop_small(ctx)
   -- the control
-  local bx, by, bw = x, y + 22, w
+  local bx, by, bw = x, y + C.S(22), w
   local rc
   if src.kind == "button" then rc = macro_button(ctx, dl, track, src, bx, by, bw)
   elseif src.kind == "fader" then rc = macro_fader(ctx, dl, track, src, bx, by, bw)
   elseif src.kind == "dropdown" then rc = macro_dropdown(ctx, dl, track, src, bx, by, bw)
-  elseif src.kind == "xy" then rc = macro_xy(ctx, dl, track, src, bx, by, bw, h - 22 - 16)
+  elseif src.kind == "xy" then rc = macro_xy(ctx, dl, track, src, bx, by, bw, h - C.S(22) - 16)
   else rc = macro_knob(ctx, dl, track, src, bx, by, bw) end
   if menu or rc then
     rename_buf[src.guid] = src.name
@@ -769,8 +769,8 @@ local function draw_history(dl, key, col, x, y, w, h)
   local hs = hist[key]
   if not hs or #hs < 2 then return end
   local now = reaper.time_precise()
-  local function px_of(t) return x + w - 2 - (w - 4) * (now - t) / HIST_SEC end
-  local function py_of(v) return y + h - 2 - (h - 4) * math.max(0, math.min(1, v)) end
+  local function px_of(t) return x + w - C.S(2) - (w - C.S(4)) * (now - t) / HIST_SEC end
+  local function py_of(v) return y + h - C.S(2) - (h - C.S(4)) * math.max(0, math.min(1, v)) end
   ImGui.DrawList_PushClipRect(dl, x, y, x + w, y + h, true)
   local px, py
   for i = 1, #hs do
@@ -996,7 +996,7 @@ end
 
 -- The rings and their handles on a moved knob.
 local function mx_rings(ctx, dl, track, src, d, base, list, live, x, y)
-  local cx, cy = x + Z.KCELL_W * 0.5, y + 11 + Z.KR + 1
+  local cx, cy = x + Z.KCELL_W * 0.5, y + C.S(11) + Z.KR + 1
   for i, m in ipairs(list) do
     local col = m.from and m.from.col or C.COL.label
     local r = Z.KR + (i - 1) * 4
@@ -1007,9 +1007,9 @@ local function mx_rings(ctx, dl, track, src, d, base, list, live, x, y)
       local which = (i == 1 and ei == 1) and 1 or 2       -- 1: the setting, 2: this source's reach
       local id = ("mxe%d%d##%s%s"):format(m.sl, which, src.guid, d.key)
       local hx, hy = W.ring_point(cx, cy, r, ev)
-      ImGui.SetCursorScreenPos(ctx, hx - 6, hy - 6)
+      ImGui.SetCursorScreenPos(ctx, hx - C.S(6), hy - C.S(6))
       W.allow_overlap(ctx)
-      ImGui.InvisibleButton(ctx, id, 12, 12)
+      ImGui.InvisibleButton(ctx, id, C.S(12), 12)
       local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
       if hov or act then hot_end = ei; ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_Hand) end
       if hov and which == 2 and ImGui.IsMouseClicked(ctx, ImGui.MouseButton_Left)
@@ -1096,7 +1096,7 @@ local function mx_switch(ctx, dl, track, src, key, set_to, x, y, w, h)
   end
   mx_drop(ctx, dl, track, src, key, set_to,
     function(mx, my) return mx >= x and mx < x + w and my >= y and my < y + h end,
-    function(col, over) ImGui.DrawList_AddRect(dl, x - 1, y - 1, x + w + 1, y + h + 1, col, 3, 0, over and 2.0 or 1.0) end)
+    function(col, over) ImGui.DrawList_AddRect(dl, x - C.S(1), y - C.S(1), x + w + C.S(1), y + h + C.S(1), col, 3, 0, over and 2.0 or 1.0) end)
   local code = MD.MX_CODE[key]
   local n = 0
   for _, e in pairs(mx_slots(track, src)) do
@@ -1105,7 +1105,7 @@ local function mx_switch(ctx, dl, track, src, key, set_to, x, y, w, h)
       for _, set in pairs(map) do
         if set == set_to then
           local from = MD.mx_source(track, e.code)
-          ImGui.DrawList_AddCircleFilled(dl, x + w - 3 - n * 6, y + 3, 2.4, from and from.col or C.COL.label, 8)
+          ImGui.DrawList_AddCircleFilled(dl, x + w - C.S(3) - n * 6, y + C.S(3), 2.4, from and from.col or C.COL.label, 8)
           n = n + 1
         end
       end
@@ -1141,14 +1141,14 @@ local function setting(ctx, dl, track, src, d, x, y)
     if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
       ImGui.OpenPopup(ctx, "mxk##" .. src.guid .. d.key)
     end
-    local cx, cy = x + Z.KCELL_W * 0.5, y + 11 + Z.KR + 1
+    local cx, cy = x + Z.KCELL_W * 0.5, y + C.S(11) + Z.KR + 1
     mx_drop(ctx, dl, track, src, d.key, nil,
       function(mx, my) return (mx - cx) ^ 2 + (my - cy) ^ 2 <= (Z.KR + 10) ^ 2 end,
       function(col, over) ImGui.DrawList_AddCircle(dl, cx, cy, Z.KR + 8, U.with_alpha(col, over and 0xff or 0x48), 24, over and 2.0 or 1.0) end)
     if #list > 0 then mx_rings(ctx, dl, track, src, d, base, list, live, x, y) end
     mx_knob_menu(ctx, track, src, d)
   end
-  lane_button(ctx, dl, "lane" .. d.key .. "##" .. src.guid, x + Z.KCELL_W - Z.LANE_W - 1, y + 13,
+  lane_button(ctx, dl, "lane" .. d.key .. "##" .. src.guid, x + Z.KCELL_W - Z.LANE_W - 1, y + C.S(13),
     track, src.slot, MD.param(src.j, d.key), src.col, src.name .. " " .. d.label)
 end
 
@@ -1197,11 +1197,11 @@ end
 local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
   draw_history(dl, key, src.col, x, y, w, 26)
   if not isopen then return end
-  y = y + 30
+  y = y + C.S(30)
   local shape = math.floor(live_field(track, src, "shape") + 0.5)
   local bw = (w - 5 * 2) / 6
   for i = 1, 6 do
-    local bx = x + (i - 1) * (bw + 2)
+    local bx = x + (i - 1) * (bw + C.S(2))
     ImGui.SetCursorScreenPos(ctx, bx, y)
     if ImGui.InvisibleButton(ctx, ("shape%d##%s"):format(i, src.guid), bw, 18) then
       MD.set_field(track, src.slot, src.j, "shape", i - 1)
@@ -1210,17 +1210,17 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
     W.tip(ctx, ("shape%d##%s"):format(i, src.guid), MD.SHAPES[i], hov, false)
     mx_switch(ctx, dl, track, src, "shape", i - 1, bx, y, bw, 18)
     local on = (shape == i - 1)
-    ImGui.DrawList_AddRectFilled(dl, bx, y, bx + bw, y + 18,
+    ImGui.DrawList_AddRectFilled(dl, bx, y, bx + bw, y + C.S(18),
       on and C.COL.accent or (hov and C.COL.knob_body_hi or C.COL.toggle_off), 3)
     local f, px, py = SHAPE_FN[i], nil, nil
     for st = 0, 12 do
       local t = st / 12
-      local xx, yy = bx + 3 + (bw - 6) * t, y + 9 - f(t) * 5.5
+      local xx, yy = bx + C.S(3) + (bw - C.S(6)) * t, y + C.S(9) - f(t) * 5.5
       if px then ImGui.DrawList_AddLine(dl, px, py, xx, yy, on and C.COL.icon_on or C.COL.label, 1.2) end
       px, py = xx, yy
     end
   end
-  y = y + 22
+  y = y + C.S(22)
   local sync = live_field(track, src, "sync") >= 0.5
   setting(ctx, dl, track, src, sync and K.rsync or K.rhz, x, y)
   setting(ctx, dl, track, src, K.depth, x + Z.KCELL_W, y)
@@ -1228,19 +1228,19 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
   y = y + Z.KCELL_H
   setting(ctx, dl, track, src, K.smooth, x, y)
   local px = x + Z.KCELL_W + 8
-  if pill(ctx, dl, "sync##" .. src.guid, px, y + 8, 46, "Sync", sync, src.col) and not sync then
+  if pill(ctx, dl, "sync##" .. src.guid, px, y + C.S(8), 46, "Sync", sync, src.col) and not sync then
     MD.set_field(track, src.slot, src.j, "sync", 1)
   end
-  mx_switch(ctx, dl, track, src, "sync", 1, px, y + 8, 46, Z.PILL_H)
-  if pill(ctx, dl, "free##" .. src.guid, px + 50, y + 8, 46, "Free", not sync, src.col) and sync then
+  mx_switch(ctx, dl, track, src, "sync", 1, px, y + C.S(8), C.S(46), Z.PILL_H)
+  if pill(ctx, dl, "free##" .. src.guid, px + C.S(50), y + C.S(8), 46, "Free", not sync, src.col) and sync then
     MD.set_field(track, src.slot, src.j, "sync", 0)
   end
-  mx_switch(ctx, dl, track, src, "sync", 0, px + 50, y + 8, 46, Z.PILL_H)
+  mx_switch(ctx, dl, track, src, "sync", 0, px + C.S(50), y + C.S(8), C.S(46), Z.PILL_H)
 end
 
 local function level_bar(dl, src, v, x, y, w)
-  ImGui.DrawList_AddRectFilled(dl, x, y + 2, x + w, y + 10, 0x121416ff, 2)
-  ImGui.DrawList_AddRectFilled(dl, x, y + 2, x + w * math.max(0, math.min(1, v)), y + 10, src.col, 2)
+  ImGui.DrawList_AddRectFilled(dl, x, y + C.S(2), x + w, y + C.S(10), 0x121416ff, 2)
+  ImGui.DrawList_AddRectFilled(dl, x, y + C.S(2), x + w * math.max(0, math.min(1, v)), y + C.S(10), src.col, 2)
 end
 
 local MIDI_PILL = { "Vel", "Note", "CC", "Bend", "AT" }
@@ -1262,7 +1262,7 @@ local function env_curve(ctx, dl, track, src, ms, x, y, w, h)
   local att, dec, sus, rel = f("att"), io.dec(f(io.dk)), io.sus(f(io.sk)), f("rel")
   local ex, duck = f("gate") >= 0.5, ms == 7
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, 0x121416ff, 3)
-  local top, bot = y + 4, y + h - 4
+  local top, bot = y + C.S(4), y + h - C.S(4)
   local function py(l) if duck then l = 1 - l end return bot - l * (bot - top) end
   local wa, wd, ws, wr = w * ENV_W[1], w * ENV_W[2], w * ENV_W[3], w * ENV_W[4]
   local xa = x + wa * math.sqrt(att / 500)
@@ -1289,7 +1289,7 @@ local function env_curve(ctx, dl, track, src, ms, x, y, w, h)
   if depth > 0.001 then
     local l = math.max(0, math.min(1, MD.value(track, src) / depth))
     local ly = bot - l * (bot - top)
-    ImGui.DrawList_AddLine(dl, x + 2, ly, x + w - 2, ly, U.with_alpha(src.col, 0x50), 1.0)
+    ImGui.DrawList_AddLine(dl, x + C.S(2), ly, x + w - C.S(2), ly, U.with_alpha(src.col, 0x50), 1.0)
   end
   -- the corners
   local nodes = {
@@ -1298,7 +1298,7 @@ local function env_curve(ctx, dl, track, src, ms, x, y, w, h)
     local id = ("env%s##%s"):format(n[1], src.guid)
     ImGui.SetCursorScreenPos(ctx, n[2] - 6, n[3] - 6)
     W.allow_overlap(ctx)
-    ImGui.InvisibleButton(ctx, id, 12, 12)
+    ImGui.InvisibleButton(ctx, id, C.S(12), 12)
     local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
     if act and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
       local mx, my = ImGui.GetMousePos(ctx)
@@ -1376,7 +1376,7 @@ end
 local function follower_body(ctx, dl, track, src, x, y, w, isopen)
   level_bar(dl, src, MD.value(track, src), x, y, w)
   if not isopen then return end
-  y = y + 16
+  y = y + C.S(16)
   local side = live_field(track, src, "fsrc") >= 0.5
   local gate = live_field(track, src, "gate") >= 0.5
   local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
@@ -1384,20 +1384,20 @@ local function follower_body(ctx, dl, track, src, x, y, w, isopen)
   if pill(ctx, dl, "main##" .. src.guid, x, y, 52, "Track", not side, src.col) and side then
     MD.set_field(track, src.slot, src.j, "fsrc", 0)
   end
-  mx_switch(ctx, dl, track, src, "fsrc", 0, x, y, 52, Z.PILL_H)
-  if pill(ctx, dl, "side##" .. src.guid, x + 55, y, 64, "Sidechain", side, src.col) and not side then
+  mx_switch(ctx, dl, track, src, "fsrc", 0, x, y, C.S(52), Z.PILL_H)
+  if pill(ctx, dl, "side##" .. src.guid, x + C.S(55), y, 64, "Sidechain", side, src.col) and not side then
     MD.set_field(track, src.slot, src.j, "fsrc", 1)
     MD.need_sidechain(track)
   end
-  mx_switch(ctx, dl, track, src, "fsrc", 1, x + 55, y, 64, Z.PILL_H)
+  mx_switch(ctx, dl, track, src, "fsrc", 1, x + C.S(55), y, C.S(64), Z.PILL_H)
   if not env then
-    if pill(ctx, dl, "gate##" .. src.guid, x + w - 44, y, 44, "Gate", gate, src.col) then
+    if pill(ctx, dl, "gate##" .. src.guid, x + w - C.S(44), y, 44, "Gate", gate, src.col) then
       MD.set_field(track, src.slot, src.j, "gate", gate and 0 or 1)
     end
-    mx_switch(ctx, dl, track, src, "gate", gate and 0 or 1, x + w - 44, y, 44, Z.PILL_H)
+    mx_switch(ctx, dl, track, src, "gate", gate and 0 or 1, x + w - C.S(44), y, C.S(44), Z.PILL_H)
     W.tip(ctx, "gate##" .. src.guid, "All or nothing at the Floor", ImGui.IsItemHovered(ctx), false)
   end
-  y = y + 22
+  y = y + C.S(22)
   -- its envelopes: click one, or the lit one again to follow the level
   local ew = (w - 2 * 2) / 3
   for i = 1, 3 do
@@ -1408,7 +1408,7 @@ local function follower_body(ctx, dl, track, src, x, y, w, isopen)
     end
     W.tip(ctx, id, FENV_TIP[i], ImGui.IsItemHovered(ctx), false)
   end
-  y = y + 20
+  y = y + C.S(20)
   if not env then
     setting(ctx, dl, track, src, K.att, x, y)
     setting(ctx, dl, track, src, K.rel, x + Z.KCELL_W, y)
@@ -1453,13 +1453,13 @@ local function follower_body(ctx, dl, track, src, x, y, w, isopen)
   end
   mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, Z.PILL_H)
   W.tip(ctx, "fexpc##" .. src.guid, "Decay and release fall away exponentially", ImGui.IsItemHovered(ctx), false)
-  if side then sc_row(ctx, dl, track, src, x, y + 22, w) end
+  if side then sc_row(ctx, dl, track, src, x, y + C.S(22), w) end
 end
 
 local function midi_body(ctx, dl, track, src, x, y, w, isopen)
   level_bar(dl, src, MD.value(track, src), x, y, w)
   if not isopen then return end
-  y = y + 16
+  y = y + C.S(16)
   local ms = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
   local pw = (w - 4 * 2) / 5
   for i = 1, 5 do
@@ -1468,7 +1468,7 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
     end
     W.tip(ctx, ("msrc%d##%s"):format(i, src.guid), MD.MIDI_SRC[i], ImGui.IsItemHovered(ctx), false)
   end
-  y = y + 20
+  y = y + C.S(20)
   local ew = (w - 2 * 2) / 3
   for i = 1, 3 do
     local v = MD.ENV_FIRST + i - 1
@@ -1477,7 +1477,7 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
     end
     W.tip(ctx, ("msrc%d##%s"):format(v + 1, src.guid), MD.MIDI_SRC[v + 1], ImGui.IsItemHovered(ctx), false)
   end
-  y = y + 22
+  y = y + C.S(22)
   if MD.is_env(ms) then
     env_curve(ctx, dl, track, src, ms, x, y, w, Z.ENV_CURVE_H)
     y = y + Z.ENV_CURVE_H + 6
@@ -1507,7 +1507,7 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
     end
     mx_switch(ctx, dl, track, src, "gate", ex and 0 or 1, x + (bw3 + 2) * 2, y, bw3, Z.PILL_H)
     W.tip(ctx, "expc##" .. src.guid, "Decay and release fall away exponentially", ImGui.IsItemHovered(ctx), false)
-    y = y + 22
+    y = y + C.S(22)
     setting(ctx, dl, track, src, K.mch, x, y)
     setting(ctx, dl, track, src, K.mlo, x + Z.KCELL_W, y)
     setting(ctx, dl, track, src, K.mhi, x + Z.KCELL_W * 2, y)
@@ -1521,10 +1521,10 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
       setting(ctx, dl, track, src, K.mcc, x + Z.KCELL_W, y)
     elseif ms == 0 then
       local hold = live_field(track, src, "mhold") >= 0.5
-      if pill(ctx, dl, "hold##" .. src.guid, x + Z.KCELL_W + 6, y + 14, 46, "Hold", hold, src.col) then
+      if pill(ctx, dl, "hold##" .. src.guid, x + Z.KCELL_W + 6, y + C.S(14), 46, "Hold", hold, src.col) then
         MD.set_field(track, src.slot, src.j, "mhold", hold and 0 or 1)
       end
-      mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + Z.KCELL_W + 6, y + 14, 46, Z.PILL_H)
+      mx_switch(ctx, dl, track, src, "mhold", hold and 0 or 1, x + Z.KCELL_W + 6, y + C.S(14), C.S(46), Z.PILL_H)
       W.tip(ctx, "hold##" .. src.guid, "Keep the last velocity after note-off",
         ImGui.IsItemHovered(ctx), false)
     end
@@ -1533,7 +1533,7 @@ local function midi_body(ctx, dl, track, src, x, y, w, isopen)
     setting(ctx, dl, track, src, K.smooth, x + Z.KCELL_W, y)
     y = y + Z.KCELL_H
   end
-  if MD.trig_ok(track, src.slot) then trigger_row(ctx, dl, track, src, x, y + 2, w) end
+  if MD.trig_ok(track, src.slot) then trigger_row(ctx, dl, track, src, x, y + C.S(2), w) end
 end
 
 -- One source's items (in the tile's menu, or a switch's): a switch's
@@ -1622,13 +1622,13 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   local lit = MR.ctl_hover_prev and MR.ctl_hover_prev.guid == src.guid
   ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + w - 0.5, y + h - 0.5,
     (isopen or lit) and src.col or C.COL.panel_border, 4, 0, lit and 2.0 or 1.0)
-  ImGui.DrawList_AddRectFilled(dl, x + 6, y + 6, x + 14, y + 14, src.col, 2)
+  ImGui.DrawList_AddRectFilled(dl, x + C.S(6), y + C.S(6), x + C.S(14), y + C.S(14), src.col, 2)
   -- held at rest: this one bypassed, or all of them
   local own_byp = MD.bypassed(track, src.slot, src.j)
   local held = own_byp or MD.bypassed(track, src.slot)
   ImGui.SetCursorScreenPos(ctx, x, y)
   W.allow_overlap(ctx)
-  ImGui.InvisibleButton(ctx, "name##" .. src.guid, w - 42, Z.HEAD,
+  ImGui.InvisibleButton(ctx, "name##" .. src.guid, w - C.S(42), Z.HEAD,
     ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then open[key] = not isopen or nil end
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
@@ -1638,9 +1638,9 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   W.tip(ctx, "name##" .. src.guid, isopen and "Click: close\nRight-click: more"
     or "Click: settings\nRight-click: lanes, rename, colour, remove", ImGui.IsItemHovered(ctx), false)
   local nm = U.truncate(src.name, 18)
-  ImGui.DrawList_AddText(dl, x + 19, y + 3, held and C.COL.header_dim or C.COL.header_text, nm)
+  ImGui.DrawList_AddText(dl, x + C.S(19), y + C.S(3), held and C.COL.header_dim or C.COL.header_text, nm)
   if MD.bypass_ok(track, src.slot) then
-    ImGui.SetCursorScreenPos(ctx, x + w - 38, y + 2)
+    ImGui.SetCursorScreenPos(ctx, x + w - C.S(38), y + C.S(2))
     if W.icon_button(ctx, "byp##" .. src.guid, "power", C.ICON_SIZE, own_byp,
         own_byp and "Bypassed: the controls it drives sit where they're set\nClick: move them again"
         or (held and "All the modulators are bypassed (the panel's header)"
@@ -1652,20 +1652,20 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   -- a dot for each source moving it (THE MATRIX)
   do
     local slots = MD.mx_ok(track, src.slot) and mx_slots(track, src) or {}
-    local dx = x + 19 + ImGui.CalcTextSize(ctx, nm) + 7
+    local dx = x + C.S(19) + ImGui.CalcTextSize(ctx, nm) + 7
     local names = {}
     for sl = 1, MD.MX_SLOTS do
       local e = slots[sl]
       if e then
         local from = MD.mx_source(track, e.code)
-        ImGui.DrawList_AddCircleFilled(dl, dx, y + 10, 3, from and from.col or C.COL.label, 10)
+        ImGui.DrawList_AddCircleFilled(dl, dx, y + C.S(10), 3, from and from.col or C.COL.label, 10)
         names[#names + 1] = (from and from.name or "?") .. " \u{2192} " .. tg_label(track, src, e.tg)
         dx = dx + 8
       end
     end
     if #names > 0 then
       local mx, my = ImGui.GetMousePos(ctx)
-      if mx >= dx - 8 * #names - 4 and mx < dx and my >= y + 4 and my < y + 16 then
+      if mx >= dx - 8 * #names - 4 and mx < dx and my >= y + C.S(4) and my < y + C.S(16) then
         ImGui.SetTooltip(ctx, "Moved by\n" .. table.concat(names, "\n"))
       end
     end
@@ -1673,10 +1673,10 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   local links = s.by_mod[src.guid] or {}
   W.push_small(ctx)
   local sub = held and ("bypassed \u{00B7} " .. sub_text(track, src, #links)) or sub_text(track, src, #links)
-  ImGui.DrawList_AddText(dl, x + 8, y + Z.HEAD - 1, held and C.COL.bypass_on or C.COL.header_dim, U.truncate(sub, 34))
+  ImGui.DrawList_AddText(dl, x + C.S(8), y + Z.HEAD - 1, held and C.COL.bypass_on or C.COL.header_dim, U.truncate(sub, 34))
   W.pop_small(ctx)
-  link_handle(ctx, dl, src, 1, x + w - 12, y + 9, 5.5)
-  local bx, by, bw = x + 6, y + Z.HEAD + Z.SUB + 2, w - 12
+  link_handle(ctx, dl, src, 1, x + w - C.S(12), y + C.S(9), C.S(5.5))
+  local bx, by, bw = x + C.S(6), y + Z.HEAD + Z.SUB + 2, w - C.S(12)
   if src.kind == "lfo" then lfo_body(ctx, dl, track, src, key, bx, by, bw, isopen)
   elseif src.kind == "follower" then follower_body(ctx, dl, track, src, bx, by, bw, isopen)
   else midi_body(ctx, dl, track, src, bx, by, bw, isopen) end
@@ -1722,20 +1722,20 @@ local function slim(ctx, dl, which, x, y, ww, wh, n)
     ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_bg, C.PANEL_RR)
     local label = TITLE[which] .. (n > 0 and (" · " .. n) or "")
     local _, th = ImGui.CalcTextSize(ctx, label)
-    ImGui.DrawList_AddText(dl, x + 6, y + (wh - th) * 0.5, C.COL.header_dim, label)
+    ImGui.DrawList_AddText(dl, x + C.S(6), y + (wh - th) * 0.5, C.COL.header_dim, label)
     ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + (wh - btn) * 0.5)
     if W.icon_button(ctx, which .. "exp", "expand", btn, false, "Show the " .. TITLE[which]:lower()) then
       set_collapsed(which, false)
     end
-    MR.bar_at[which] = { x + 12, y + wh * 0.5 }
+    MR.bar_at[which] = { x + C.S(12), y + wh * 0.5 }
     return
   end
-  ImGui.SetCursorScreenPos(ctx, x + (ww - btn) * 0.5, y + 4)
+  ImGui.SetCursorScreenPos(ctx, x + (ww - btn) * 0.5, y + C.S(4))
   if W.icon_button(ctx, which .. "exp", "expand", btn, false, "Show the " .. TITLE[which]:lower()) then
     set_collapsed(which, false)
   end
   local label = TITLE[which]:upper() .. (n > 0 and (" " .. n) or "")
-  W.vertical_text(ctx, dl, x + ww * 0.5, y + 4 + btn + 6, label, C.COL.header_dim, wh - btn - 16)
+  W.vertical_text(ctx, dl, x + ww * 0.5, y + C.S(4) + btn + 6, label, C.COL.header_dim, wh - btn - 16)
   MR.bar_at[which] = { x + ww * 0.5, y + wh * 0.4 }
 end
 
@@ -1747,16 +1747,16 @@ local function frame_of(ctx, dl, which, x, y, ww, wh, foot, extra)
   ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + ww, y + C.HEADER_H, C.COL.panel_border, 1.0)
   ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)  -- (its edge over the header)
   local _, th = ImGui.CalcTextSize(ctx, TITLE[which])
-  ImGui.DrawList_AddText(dl, x + 6, y + (C.HEADER_H - th) * 0.5, C.COL.header_text, TITLE[which])
-  ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + 3)
+  ImGui.DrawList_AddText(dl, x + C.S(6), y + (C.HEADER_H - th) * 0.5, C.COL.header_text, TITLE[which])
+  ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + C.S(3))
   if W.icon_button(ctx, which .. "col", "collapse", btn, false, "Fold the " .. TITLE[which]:lower() .. " away") then
     set_collapsed(which, true)
   end
-  if extra then extra(x + ww - 2 * btn - 7, y + 3) end
+  if extra then extra(x + ww - 2 * btn - 7, y + C.S(3)) end
   -- the foot, as every panel's: how many are in use, centred
   local fh = C.FOOTER_H
   local fy = y + wh - fh
-  ImGui.DrawList_AddRectFilled(dl, x + 1, fy, x + ww - 1, y + wh - 1, C.COL.header_bg, C.PANEL_RR,
+  ImGui.DrawList_AddRectFilled(dl, x + C.S(1), fy, x + ww - 1, y + wh - 1, C.COL.header_bg, C.PANEL_RR,
     ImGui.DrawFlags_RoundCornersBottom)
   ImGui.DrawList_AddLine(dl, x, fy, x + ww, fy, C.COL.panel_border, 1.0)
   W.push_small(ctx)
