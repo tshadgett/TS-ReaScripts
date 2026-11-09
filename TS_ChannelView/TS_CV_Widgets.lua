@@ -2418,7 +2418,8 @@ function W.toggle(ctx, id, label, value, formatted, opts)
   local label_h = W.LABEL_H
   local bx1, by1 = x + C.CTL_MARGIN, y + label_h + C.LABEL_GAP + 1
   local bx2, by2 = x + cw - C.CTL_MARGIN, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
-  if small then by1, by2 = y + 5, y + ch - 5 end
+  -- small: as a row of buttons half a cell tall (W.button_row's short)
+  if small then by1 = y + 3; by2 = by1 + math.min(C.KNOB_D - 8, ch - 4) end
   local cx = x + cw * 0.5
 
   if not small then
