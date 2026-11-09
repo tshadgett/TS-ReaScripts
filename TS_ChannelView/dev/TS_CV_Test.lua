@@ -4959,6 +4959,11 @@ do
     local m = DR.parse("3|sideways|1|9999|odd|k|0|X")
     check("bars: mended", m[1].side == "top" and m[1].width == DR.W_MAX and m[1].style == "both", true)
     check("bars: none", #DR.parse("none") + #DR.parse(""), 0)
+    -- scrolling rather than more rows: kept with the bar, exported
+    local scl = DR.parse("1|top|1|128|both|drawer_1|0|24|--s|Edit;2|top|1|128|both|drawer_2|0|24|c-iPs|Two")
+    check("bars: scroll read", tostring(scl[1].scroll) .. " " .. tostring(scl[2].scroll) .. " " .. scl[2].halign .. scl[2].pmode, "true true cP")
+    check("bars: scroll written", DR.serialize({ scl[1] }), "1|top|1|128|both|drawer_1|0|24|--s|Edit")
+    check("bars: scroll exported", (DR.parse_export(DR.export_text({ scl[1] })) or {})[1].scroll, true)
     -- a window bar's own background, before its name
     local bgl = DR.parse("2|window|1|90|icons|drawer_2|-3|24|--|#2B3A4C|Mixing;3|window|1|90|both|drawer_3|0|24|--|#plain")
     check("bars: background read", tostring(bgl[1].bg) .. " " .. bgl[1].name .. " " .. tostring(bgl[2].bg) .. " " .. bgl[2].name, "#2b3a4c Mixing nil #plain")
@@ -12767,6 +12772,41 @@ do
   check("finish strength: 60%", drawn(0.6), "99")
   check("finish strength: 150%, laid twice", drawn(1.5), "ff,80")
   check("finish strength: 0, nothing", drawn(0), "")
+end
+
+-- a bar set to scroll, too long for its place: one row in a child that
+-- clips it, the buttons along it from where it's scrolled to
+do
+  local TB0 = require("TS_CV_Toolbar")
+  local items = {}
+  for k = 1, 30 do items[k] = { cmd = tostring(40000 + k), icon = "", label = "Button " .. k } end
+  local tb = TB0.make("scrolltest", "sct", {}, { load = function() return items end, save = function() end, stamp = function() return 1 end })
+  tb.load()
+  tb.items = items
+  tb.scroll, tb.style = true, "both"
+  local children, buttons = 0, 0
+  local fake = setmetatable({
+    GetWindowDrawList = function() return "dl" end, CalcTextSize = function(_, t) return #(t or "") * 7, 13 end,
+    BeginChild = function() children = children + 1; return true end, GetWindowPos = function() return 100, 10 end,
+    InvisibleButton = function() buttons = buttons + 1; return false end,
+    GetMouseWheel = function() return 0, 0 end, GetStyleColor = function() return 0x202020ff end,
+    IsItemHovered = function() return false end, IsItemActive = function() return false end,
+    IsItemClicked = function() return false end, IsWindowHovered = function() return false end,
+    GetMouseDelta = function() return 0, 0 end, IsMouseDragging = function() return false end,
+    GetFrameCount = function() return 1 end, GetCursorScreenPos = function() return 0, 0 end,
+  }, { __index = function(_, key)
+    if key:match("^%u%a+_") and not key:match("^DrawList_") then return 1 end
+    return function() end
+  end })
+  TB0.attach(fake); W.attach(fake)
+  reaper.GetToggleCommandStateEx = reaper.GetToggleCommandStateEx or function() return -1 end
+  reaper.NamedCommandLookup = reaper.NamedCommandLookup or function(s2) return tonumber(s2) or 0 end
+  local ok, err = pcall(tb.draw, "ctx", 100, 10, 400, 30, true, "down")
+  check("bar scroll: drawn", ok and "ok" or tostring(err), "ok")
+  check("bar scroll: in a child, only what shows", tostring(children) .. " " .. tostring(buttons > 2 and buttons < 20), "1 true")
+  children = 0
+  ok, err = pcall(tb.draw_v, "ctx", 100, 10, 120, 200, "right")
+  check("bar scroll: a column too", (ok and "ok" or tostring(err)) .. " " .. children, "ok 1")
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

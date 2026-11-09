@@ -1260,6 +1260,92 @@ function TB.rows_needed(ctx, w, bh)
   return rows
 end
 
+-- ---------------------------------------------------------------------
+-- a bar too long for its place, scrolling (TB.scroll): one row (a
+-- column), moved by the wheel, a drag on its empty space or the arrows at
+-- its ends; faded where there's more, a thin bar showing where it is
+-- ---------------------------------------------------------------------
+TB.scroll = false
+-- what the bar is drawn on, for the fades (nil: the window's)
+TB.fade_col = nil
+local scr = { at = 0 }
+local SCR_ARROW, SCR_FADE = 14, 22
+
+local function chevron(dl, cx, cy, dx, dy, col)
+  -- an arrowhead pointing (dx, dy)
+  local k = 3.5
+  ImGui.DrawList_AddLine(dl, cx - dx * k * 0.5 - dy * k, cy - dy * k * 0.5 - dx * k, cx + dx * k * 0.5, cy + dy * k * 0.5, col, 1.8)
+  ImGui.DrawList_AddLine(dl, cx + dx * k * 0.5, cy + dy * k * 0.5, cx - dx * k * 0.5 + dy * k, cy - dy * k * 0.5 + dx * k, col, 1.8)
+end
+
+-- The scrolling part of a bar: across (`across`) from a to b at the other
+-- coordinate c, `thick` deep, its buttons `len` long in all. draw(dl, off)
+-- draws them `off` along, into the child's draw list. Returns nothing.
+local function scrolled(ctx, across, a, b, c, thick, len, draw)
+  local vis = b - a - SCR_ARROW * 2
+  local most = math.max(0, len - vis)
+  scr.at = math.max(0, math.min(most, scr.at))
+  local function arrow(id, at0, sign)
+    local can = (sign < 0 and scr.at > 0.5) or (sign > 0 and scr.at < most - 0.5)
+    if across then ImGui.SetCursorScreenPos(ctx, at0, c) else ImGui.SetCursorScreenPos(ctx, c, at0) end
+    local bw, bh2 = across and SCR_ARROW or thick, across and thick or SCR_ARROW
+    if ImGui.InvisibleButton(ctx, ID .. id, bw, bh2) and can then
+      scr.at = math.max(0, math.min(most, scr.at + sign * vis * 0.75))
+    end
+    local hov = ImGui.IsItemHovered(ctx)
+    local col = can and (hov and C.COL.header_text or C.COL.header_dim) or ((C.COL.header_dim & 0xFFFFFF00) | 0x40)
+    local dl = ImGui.GetWindowDrawList(ctx)
+    local mx, my = across and (at0 + SCR_ARROW * 0.5) or (c + thick * 0.5), across and (c + thick * 0.5) or (at0 + SCR_ARROW * 0.5)
+    chevron(dl, mx, my, across and sign or 0, across and 0 or sign, col)
+  end
+  arrow("sc_a", a, -1)
+  arrow("sc_b", b - SCR_ARROW, 1)
+  local v0 = a + SCR_ARROW
+  if across then ImGui.SetCursorScreenPos(ctx, v0, c) else ImGui.SetCursorScreenPos(ctx, c, v0) end
+  local cw, ch = across and vis or thick, across and thick or vis
+  if ImGui.BeginChild(ctx, ID .. "sc", math.max(1, cw), math.max(1, ch), 0,
+      ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_NoBackground) then
+    local cdl = ImGui.GetWindowDrawList(ctx)
+    local x0, y0 = ImGui.GetWindowPos(ctx)
+    -- its empty space: the bar's right-click, and a drag scrolls it
+    ImGui.SetCursorScreenPos(ctx, x0, y0)
+    W.allow_overlap(ctx)
+    ImGui.InvisibleButton(ctx, ID .. "sc_bg", math.max(1, cw), math.max(1, ch))
+    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then st.open_bg = true end
+    if ImGui.IsItemActive(ctx) and ImGui.IsMouseDragging(ctx, ImGui.MouseButton_Left, 2) then
+      local dx, dy = ImGui.GetMouseDelta(ctx)
+      scr.at = math.max(0, math.min(most, scr.at - (across and dx or dy)))
+    end
+    draw(cdl, scr.at)
+    -- the wheel, either way
+    if ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows) then
+      local wv, wh = ImGui.GetMouseWheel(ctx)
+      local d = (wh ~= 0) and wh or wv
+      if d ~= 0 then
+        scr.at = math.max(0, math.min(most, scr.at - d * 40))
+        W.take_wheel()
+      end
+    end
+    -- faded where there's more, and where it is along
+    local fc = TB.fade_col or ImGui.GetStyleColor(ctx, ImGui.Col_WindowBg)
+    local clear = fc & 0xFFFFFF00
+    if across then
+      if scr.at > 0.5 then W.grad4(cdl, x0, y0, x0 + SCR_FADE, y0 + ch, fc, clear, clear, fc) end
+      if scr.at < most - 0.5 then W.grad4(cdl, x0 + cw - SCR_FADE, y0, x0 + cw, y0 + ch, clear, fc, fc, clear) end
+      local tw = math.max(12, cw * cw / len)
+      local tx = x0 + (cw - tw) * (most > 0 and scr.at / most or 0)
+      ImGui.DrawList_AddRectFilled(cdl, tx, y0 + ch - 2, tx + tw, y0 + ch, C.COL.accent, 1)
+    else
+      if scr.at > 0.5 then W.grad4(cdl, x0, y0, x0 + cw, y0 + SCR_FADE, fc, fc, clear, clear) end
+      if scr.at < most - 0.5 then W.grad4(cdl, x0, y0 + ch - SCR_FADE, x0 + cw, y0 + ch, clear, clear, fc, fc) end
+      local th = math.max(12, ch * ch / len)
+      local ty = y0 + (ch - th) * (most > 0 and scr.at / most or 0)
+      ImGui.DrawList_AddRectFilled(cdl, x0 + cw - 2, ty, x0 + cw, ty + th, C.COL.accent, 1)
+    end
+    ImGui.EndChild(ctx)
+  end
+end
+
 -- Draws the toolbar into the box x, y, w, h and handles its own menus.
 -- Returns:
 --   menu      true when the settings button was clicked
@@ -1292,7 +1378,7 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
   local mx = x + w - mb - 4
   -- a row as tall as a tile when the bar shows tiles
   local rh = math.min(TB.row_h(bh), h - 4)
-  local rows = math.max(1, math.floor((h - 4 + C.TB_GAP) / (rh + C.TB_GAP)))
+  local rows = TB.scroll and 1 or math.max(1, math.floor((h - 4 + C.TB_GAP) / (rh + C.TB_GAP)))
   local top = y + math.max(2, (h - (rows * rh + (rows - 1) * C.TB_GAP)) * 0.5)
 
   -- The empty space is the toolbar's own right-click target, submitted
@@ -1322,6 +1408,34 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
   end
   local ws = {}
   for i, it in ipairs(TB.items) do ws[i] = item_width(ctx, it, bh) end
+  -- too long for one row, and set to scroll
+  if TB.scroll then
+    local len = 0
+    for i, bw in ipairs(ws) do len = len + bw + ((i > 1) and C.TB_GAP or 0) end
+    if len > right - (x + 4) then
+      local ih = (TB.pmode == "T") and rh or bh
+      scrolled(ctx, true, x + 2, right + 2, top, rh, len, function(cdl, off)
+        local cx2 = x + 2 + SCR_ARROW - off
+        local vis_r = right + 2 - SCR_ARROW
+        for i, it in ipairs(TB.items) do
+          local bw = ws[i]
+          if cx2 + bw > x + 2 + SCR_ARROW - 1 and cx2 < vis_r + 1 then
+            if draw_pic(ctx, cdl, i, it, cx2, top, bw, ih, dir) then
+              -- (drawn: a plugin's picture)
+            elseif TB.style == "both" then
+              draw_wide(ctx, cdl, i, it, cx2, top, bw, bh, true, dir, false)
+            else
+              draw_item(ctx, cdl, i, it, cx2, top, bw, bh, dir)
+            end
+          end
+          cx2 = cx2 + bw + C.TB_GAP
+        end
+      end)
+      ImGui.SetCursorScreenPos(ctx, x, y)
+      ImGui.Dummy(ctx, 0, 0)
+      return res
+    end
+  end
   local pos, used = TB.place_rows(ws, x + 4, right, C.TB_GAP, rows, TB.halign)
   if used > 0 then
     top = TB.place_v(y, h, used * rh + (used - 1) * C.TB_GAP, TB.valign) or top
@@ -1391,6 +1505,34 @@ function TB.draw_v(ctx, x, y, w, h, dir)
     local _, th = ImGui.CalcTextSize(ctx, hint)
     ImGui.DrawList_AddText(dl, x + 6, cy + 2, C.COL.header_dim, hint)
     cy = cy + th + 4
+  end
+  -- too long for the column, and set to scroll
+  if TB.scroll and #TB.items > 0 then
+    local hs, len = {}, 0
+    for i, it in ipairs(TB.items) do
+      local ih = it.gap and math.floor(bh * 0.5) or (it.sep and 7 or bh)
+      if TB.pmode == "T" and pic_of(it) then ih = tile_h(bh) end
+      hs[i] = ih
+      len = len + ih + ((i > 1) and C.TB_GAP or 0)
+    end
+    if len > h - 6 then
+      scrolled(ctx, false, y + 2, y + h - 2, x + 4, bw, len, function(cdl, off)
+        local cy2 = y + 2 + SCR_ARROW - off
+        local vis_b = y + h - 2 - SCR_ARROW
+        for i, it in ipairs(TB.items) do
+          local ih = hs[i]
+          if cy2 + ih > y + 2 + SCR_ARROW - 1 and cy2 < vis_b + 1 then
+            if not draw_pic(ctx, cdl, i, it, x + 4, cy2, bw, ih, dir, show_label) then
+              draw_wide(ctx, cdl, i, it, x + 4, cy2, bw, ih, show_label, dir, true)
+            end
+          end
+          cy2 = cy2 + ih + C.TB_GAP
+        end
+      end)
+      ImGui.SetCursorScreenPos(ctx, x, y)
+      ImGui.Dummy(ctx, 0, 0)
+      return
+    end
   end
   for i, it in ipairs(TB.items) do
     local ih = it.gap and math.floor(bh * 0.5) or (it.sep and 7 or bh)

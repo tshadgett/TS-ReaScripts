@@ -985,6 +985,12 @@ put them. Every bar is global, not per project.
   a shortcut, or a button on another toolbar, which lights while they're
   out); **TS_ChannelView_ToggleRackToolbars** (Pro) does the same for the
   Rack's. Bars in their own windows stay as they are.
+- **Too long for its place.** A bar's right-click ▸ Show ▸ *When it's too
+  long*: **Extend** takes more rows (a drawer up to three; what still
+  doesn't fit is in its menu), **Scroll** keeps one row (a side drawer, one
+  column) and moves it along with the wheel, a drag on its empty space or
+  the arrows at its ends, faded where there's more. Kept with each bar; on
+  the web page's Actions bar too, where a swipe moves it.
 - **Menus.** A button can be a menu of actions, separators and further
   menus, nested as deep as you like. Clicking it always opens the menu.
   *Large submenus* (its right-click, or in Organise actions) shows the

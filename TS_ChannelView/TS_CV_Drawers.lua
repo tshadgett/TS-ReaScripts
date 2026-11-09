@@ -88,16 +88,17 @@ DR.VALIGN = { { "Top", "t" }, { "Centre", "c" }, { "Bottom", "b" } }
 -- The align field also carries how button colours show: a third
 -- character "i" (coloured icons); none means underlines.
 -- (then "n": no plugin pictures on hover; how plugin buttons with a
--- picture show on the bar, "P", "T" or "I"; and in its menus, "1" to "3":
--- TS_CV_Toolbar's pmode and mmode)
+-- picture show on the bar, "P", "T" or "I"; in its menus, "1" to "3":
+-- TS_CV_Toolbar's pmode and mmode; and "s": too long for its place, it
+-- scrolls rather than taking more rows)
 local function align_of(v)
-  local h, a, c, n, pm, mm = tostring(v or ""):match("^([lcr%-])([tcb%-])([ui]?)(n?)([PTI]?)([123]?)$")
-  if not h then return "-", "-", "u", true, "", "" end
-  return h, a, (c == "i") and "i" or "u", n ~= "n", pm, mm
+  local h, a, c, n, pm, mm, sc = tostring(v or ""):match("^([lcr%-])([tcb%-])([ui]?)(n?)([PTI]?)([123]?)(s?)$")
+  if not h then return "-", "-", "u", true, "", "", false end
+  return h, a, (c == "i") and "i" or "u", n ~= "n", pm, mm, sc == "s"
 end
 local function align_field(d)
   return (d.halign or "-") .. (d.valign or "-") .. ((d.cstyle == "i") and "i" or "")
-    .. ((d.pics == false) and "n" or "") .. (d.pmode or "") .. (d.mmode or "")
+    .. ((d.pics == false) and "n" or "") .. (d.pmode or "") .. (d.mmode or "") .. (d.scroll and "s" or "")
 end
 DR.align_of = align_of
 local function size_of(v)
@@ -191,10 +192,10 @@ function DR.parse(s)
   if not s or s == "" or s == "none" then return out end
   for part in (s .. ";"):gmatch("([^;]*);") do
     local id, side, open, width, style, key, dock, size, align, bg, name =
-      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?n?[PTI]?[123]?)|(#%x%x%x%x%x%x)|(.*)$")
+      part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?n?[PTI]?[123]?s?)|(#%x%x%x%x%x%x)|(.*)$")
     if not id then
       id, side, open, width, style, key, dock, size, align, name =
-        part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?n?[PTI]?[123]?)|(.*)$")
+        part:match("^(%d+)|(%w+)|([01])|(%d+)|(%a+)|([^|]*)|(%-?%d+)|(%d+)|([lcr%-][tcb%-][ui]?n?[PTI]?[123]?s?)|(.*)$")
     end
     if not id then
       id, side, open, width, style, key, dock, size, name =
@@ -217,7 +218,7 @@ function DR.parse(s)
                         key = (key and key ~= "") and key or ("drawer_" .. id),
                         dock = tonumber(dock) or 0, size = size_of(size), name = name }
       local e = out[#out]
-      e.halign, e.valign, e.cstyle, e.pics, e.pmode, e.mmode = align_of(align)
+      e.halign, e.valign, e.cstyle, e.pics, e.pmode, e.mmode, e.scroll = align_of(align)
       e.bg = DR.bg_of(bg)
     end
   end
@@ -459,7 +460,7 @@ function DR.parse_export(text)
       elseif k == "width" then cur.width = math.max(DR.W_MIN, math.min(DR.W_MAX, tonumber(v) or DR.W_DEF))
       elseif k == "dock" then cur.dock = tonumber(v) or 0
       elseif k == "size" then cur.size = size_of(v)
-      elseif k == "align" then cur.halign, cur.valign, cur.cstyle, cur.pics, cur.pmode, cur.mmode = align_of(v)
+      elseif k == "align" then cur.halign, cur.valign, cur.cstyle, cur.pics, cur.pmode, cur.mmode, cur.scroll = align_of(v)
       elseif k == "bg" then cur.bg = DR.bg_of(v)
       elseif k == "items" then cur.items = TB.parse(v ~= "" and v or "none")
       elseif k == "web" then cur.web_items = DR.from_web(DR.json_decode(v) or {})
@@ -494,6 +495,7 @@ local function bar_for(d)
   tb.halign, tb.valign, tb.cstyle = d.halign or "-", d.valign or "-", d.cstyle or "u"
   tb.pics = d.pics ~= false
   tb.pmode, tb.mmode = d.pmode or "", d.mmode or ""
+  tb.scroll = d.scroll or false
   tb.organise = function(item) if DR.organise then DR.organise(d, item) end end
   tb.extra_bg = function(ctx, where) DR.drawer_menu(ctx, d, where) end
   -- toolbar switches (TS_CV_Toolbar): what this bar is, and the others
@@ -531,6 +533,7 @@ function DR.save()
       d.tb.halign, d.tb.valign, d.tb.cstyle = d.halign or "-", d.valign or "-", d.cstyle or "u"
       d.tb.pics = d.pics ~= false
       d.tb.pmode, d.tb.mmode = d.pmode or "", d.mmode or ""
+      d.tb.scroll = d.scroll or false
     end
   end
 end
@@ -739,6 +742,8 @@ function DR.import(entries, use_places)
     d.tb.pics = d.pics
     d.pmode, d.mmode = e.pmode or "", e.mmode or ""
     d.tb.pmode, d.tb.mmode = d.pmode, d.mmode
+    d.scroll = e.scroll or nil
+    d.tb.scroll = d.scroll or false
     d.bg = DR.bg_of(e.bg)
     local items = (d.side == "web" and e.web_items) or e.items
     d.tb.items = TB.copy_items(items or {})
@@ -865,11 +870,11 @@ local function name_w(ctx, d)
 end
 
 -- A top or bottom drawer's height at width w: as many rows as its
--- buttons need, up to three.
+-- buttons need, up to three (one when it scrolls).
 local function bar_h(ctx, d, w)
   local bh = size_of(d.size)
   local rh = d.tb.row_h(bh)      -- a tile's height when it shows tiles
-  local rows = math.min(3, d.tb.rows_needed(ctx, w - name_w(ctx, d) - PAD * 2, bh))
+  local rows = d.scroll and 1 or math.min(3, d.tb.rows_needed(ctx, w - name_w(ctx, d) - PAD * 2, bh))
   return rows * rh + (rows - 1) * C.TB_GAP + PAD * 2
 end
 
@@ -910,6 +915,7 @@ function DR.draw_h(ctx, side, x, y, w)
       local _, th = ImGui.CalcTextSize(ctx, "X")
       ImGui.DrawList_AddText(dl, x + PAD + 2, cy + (h - th) * 0.5, C.COL.header_dim, d.name:upper())
     end
+    d.tb.fade_col = C.COL.header_bg
     d.tb.draw(ctx, x + nw + PAD, cy + PAD - 2, w - nw - PAD * 2, h - PAD * 2 + 4, true,
       side == "bottom" and "up" or "down")
     cy = cy + h + 1
@@ -943,6 +949,7 @@ function DR.draw_v(ctx, side, x, y, h)
       ImGui.DrawList_PopClipRect(dl)
       top = y + th + 6
     end
+    d.tb.fade_col = C.COL.header_bg
     d.tb.draw_v(ctx, cx, top, w, y + h - top, side == "left" and "right" or "left")
     -- the inner edge: a grip to drag
     local gx = (side == "left") and (cx + w - 3) or (cx - 3)
@@ -1004,6 +1011,7 @@ function DR.draw_window_bar(ctx, d)
       x, w = x + nw, w - nw
     end
   end
+  d.tb.fade_col = (DR.ground(d) or {}).bg or C.COL.header_bg
   if h > w * 1.3 then
     d.tb.draw_v(ctx, x - 4, y, w + 8, h, "right")
   else
@@ -1165,6 +1173,11 @@ function DR.drawer_menu(ctx, d, where)
     end
     ImGui.Separator(ctx)
     DR.align_items(ctx, d)
+    ImGui.Separator(ctx)
+    -- too long for its place: more rows, or one that scrolls
+    ImGui.TextDisabled(ctx, "When it's too long")
+    if ImGui.MenuItem(ctx, "Extend##drex" .. d.id, nil, not d.scroll) then d.scroll = nil; DR.save() end
+    if ImGui.MenuItem(ctx, "Scroll##drsc" .. d.id, nil, d.scroll == true) then d.scroll = true; DR.save() end
     ImGui.Separator(ctx)
     if ImGui.MenuItem(ctx, "Colours as underlines##drcu" .. d.id, nil, d.cstyle ~= "i") then d.cstyle = "u"; DR.save() end
     if ImGui.MenuItem(ctx, "Coloured icons##drci" .. d.id, nil, d.cstyle == "i") then d.cstyle = "i"; DR.save() end
