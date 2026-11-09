@@ -2395,7 +2395,9 @@ script into the action list.
   window.
 - **Mixer:** drag the bar labelled MIXER to any height (right down closes
   it, right up fills the page); the height is remembered on that device.
-  Tap the bar to close it, and again to open it at that height. Press M, S or R and drag along the row to set a run of tracks at once.
+  Tap the bar to close it, and again to open it at that height. When it's
+  short, the pan knobs go first, then the faders become knobs. Press M, S
+  or R and drag along the row to set a run of tracks at once.
   Touching one of several selected tracks moves them all, as in REAPER. Tap
   a strip's empty space to select its track; double-tap it (or its name
   button) to collapse it to a narrow strip, and again to open it.
@@ -2430,8 +2432,8 @@ script into the action list.
   removing, linking, ranges, names, colours and lanes are done on the
   desktop.
 - **Console:** with a console set up in the project (Console setup), its
-  panel comes first in the row, folded until you open it, as on the
-  desktop: the mix's type, Drive, *Console in*, A / B (hold it to hear the
+  panel sits left of the fader strip, folded until you open it, as on the
+  desktop (outlined while the console is in): the mix's type, Drive, *Console in*, A / B (hold it to hear the
   mix without the console), this channel's own switches, and a row for
   each bus (its level, type, in or out, group, noise, and its own drive or
   Fat). With TAMD + THS, The Hot Summer's controls are under the buses. Its
