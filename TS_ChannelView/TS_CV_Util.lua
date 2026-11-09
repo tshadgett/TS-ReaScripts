@@ -771,7 +771,7 @@ end
 -- narrow cell, for three -- the ends and the middle -- (six for 0-10, every
 -- step up to five). Evenly spread, so a centred control gets its middle.
 function U.scale_marks(kind, size, n_steps)
-  local large = size == "large"
+  local large = size == "large" or size == "xl"
   local n
   if kind == "ten" then n = large and 11 or 6
   elseif n_steps and n_steps >= 2 and n_steps <= (large and 11 or 5) then n = n_steps

@@ -1742,6 +1742,17 @@ check("collapsed width unchanged", P.width(8, H, true, true), C.COLLAPSED_W)
 local function fits(text, px, font_px)
   return #text * font_px * 0.55 <= px
 end
+-- an extra large knob: kept, two cells by two
+do
+  M.set("XLKnob", { controls = { { param = 0, type = "knob", label = "Gain", size = "xl" } } })
+  M.save(); M.reload()
+  local c = M.get("XLKnob").controls[1]
+  check("xl knob: kept", c.size, "xl")
+  check("xl knob: two cells by two", table.concat({ P.cell_size(c, 8) }, "x"), "4x4")
+  check("xl knob: normal size in a short panel", table.concat({ P.cell_size(c, 3) }, "x"), "2x2")
+  M.remove("XLKnob"); M.save(); M.reload()
+end
+
 -- the overall size: every measurement from its own 100%, again and again
 do
   local cw0 = C.CELL_W_RAW or 50

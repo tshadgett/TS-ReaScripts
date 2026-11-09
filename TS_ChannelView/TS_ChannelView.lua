@@ -2193,6 +2193,7 @@ local function style_menu(fx, key, idx, c)
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, (k == "small") and "Half height, value in the tooltip.\nTwo stack in one cell."
           or (k == "large") and "One and a half times the size.\nNormal size in a one-row panel."
+          or (k == "xl") and "Twice the size: two cells by two.\nNormal size in a panel under two rows."
           or "Normal size.")
       end
     end

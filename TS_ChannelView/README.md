@@ -1308,7 +1308,8 @@ or following ChannelView's).
 - **Sizes.** *Size* in the editor (with Pro, also right-click a knob ▸
   Style ▸ Size): *Small* is half height — a
   small dial alone, its name and value in the tooltip — so two stack in one
-  cell; *Large* is half again as big. A toggle can be *Small*
+  cell; *Large* is half again as big; *Extra large* twice, two cells by two
+  (a big gain knob). A toggle can be *Small*
   too: a half-height lit push-button with its name on it. A large knob in a
   panel one row tall draws at medium.
 - **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across*,

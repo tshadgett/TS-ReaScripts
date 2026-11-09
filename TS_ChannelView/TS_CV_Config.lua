@@ -106,8 +106,9 @@ C.SIZES = {
   small  = { w = 2, h = 1, d = 18,       label = "Small" },
   medium = { w = 2, h = 2, d = C.KNOB_D, label = "Medium" },
   large  = { w = 3, h = 3, d = 52,       label = "Large" },
+  xl     = { w = 4, h = 4, d = 72,       label = "Extra large" },
 }
-C.SIZE_LIST = { "small", "medium", "large" }
+C.SIZE_LIST = { "small", "medium", "large", "xl" }
 
 -- A dropdown can show its choices as buttons instead (a control's
 -- right-click menu, Show as): across, one half-cell column per choice,

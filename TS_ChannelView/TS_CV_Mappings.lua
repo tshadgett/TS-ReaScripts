@@ -22,7 +22,7 @@
       Meter    = <1|0>|<full-scale dB>[|<trace window: 4b, 2s ...>]
       Live     = 1
       Style<n> = <style>|<cap colour>
-      Size<n>  = small | large
+      Size<n>  = small | large | xl
       Buttons<n> = across | down | <how many>
       Back<n>  = inset | <faceplate>
       Brush<n> = <1|0>
@@ -115,7 +115,7 @@
   goes: Plate, Back<n>, a section's Style<n>=plate|#rrggbb). Brush turns the
   brushed grain on (1) or off (0) for that faceplate; with no Brush line
   it is the faceplate's own (on for aluminium, off for the rest). Size<n>
-  makes knob n small or large (C.SIZES in TS_CV_Config.lua); with no Size
+  makes knob n small, large or xl (C.SIZES in TS_CV_Config.lua); with no Size
   line it is the ordinary size, and an older ChannelView ignores the line.
   On a dropdown, Size<n>=2, 3 or 4 is how many cells wide it is.
   Buttons<n> shows dropdown n as buttons -- across, down, a grid, or one
@@ -337,7 +337,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Live=1: every control shows the plugin's current name for its\n"
                 .. ";   parameter (flags bit 8 does the same for one slot)\n"
                 .. "; Style<n>=<knob or fader style>|<cap colour>, for control n (a toggle: |<lit colour>)\n"
-                .. "; Size<n>=small|large: knob n's size (no line: medium)\n"
+                .. "; Size<n>=small|large|xl: knob n's size (no line: medium)\n"
                 .. "; Back<n>=inset|<faceplate>: control n's own background\n"
                 .. "; Brush<n>=<1|0>: grain on control n's background (a divider: its section's)\n"
                 .. "; Metal<n>=1: metallic flake on control n's background (a divider: its section's)\n"

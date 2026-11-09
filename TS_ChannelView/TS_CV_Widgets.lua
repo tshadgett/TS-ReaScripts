@@ -1742,7 +1742,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local sc = (not small) and opts.scale and opts.scale.marks and #opts.scale.marks > 0
              and not (opts.img and not opts.img.nums)
              and opts.scale or nil
-  local large = opts.size == "large"
+  local large = opts.size == "large" or opts.size == "xl"
   local vin = opts.vin and not small
   local show_value = C.SHOW_VALUES and not small and (large or not sc) and not vin
   if small then
