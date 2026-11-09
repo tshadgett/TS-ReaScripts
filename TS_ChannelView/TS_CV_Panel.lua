@@ -2940,8 +2940,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
   -- a grid's pictures (image controls, Pro), behind the controls
   if FN and FN.draw_pic then
+    -- (in from its cells' edges as the controls are)
+    local m = C.CTL_MARGIN
     for _, im in ipairs(lay.images or {}) do
-      FN.draw_pic(ctx, dl, im.by.pic, gx0 + im.x, gy0 + im.y, gx0 + im.x + im.w, gy0 + im.y + im.h)
+      FN.draw_pic(ctx, dl, im.by.pic, gx0 + im.x + m, gy0 + im.y + m, gx0 + im.x + im.w - m, gy0 + im.y + im.h - m)
     end
   end
 

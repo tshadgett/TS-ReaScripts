@@ -33,6 +33,7 @@ end
 C.CELL_H      = 64        -- height of one control cell (name + knob + value)
 C.KNOB_D      = 34        -- knob diameter within the cell
 C.LABEL_GAP   = 5         -- air between the name and the control under
+C.CTL_MARGIN  = 4         -- every control's box, picture and button grid this far in from its cells' edges
                           -- it. Two pixels read as the text sitting ON
                           -- the knob. The cell height is fixed, so this
                           -- and KNOB_D trade against each other: name

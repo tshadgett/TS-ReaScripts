@@ -2416,8 +2416,8 @@ function W.toggle(ctx, id, label, value, formatted, opts)
 
   local on = value >= 0.5
   local label_h = W.LABEL_H
-  local bx1, by1 = x + 6, y + label_h + C.LABEL_GAP + 1
-  local bx2, by2 = x + cw - 6, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
+  local bx1, by1 = x + C.CTL_MARGIN, y + label_h + C.LABEL_GAP + 1
+  local bx2, by2 = x + cw - C.CTL_MARGIN, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
   if small then by1, by2 = y + 5, y + ch - 5 end
   local cx = x + cw * 0.5
 
@@ -2743,11 +2743,12 @@ function W.button_row(ctx, id, label, value, choices, opts)
   local rects = {}
   if opts.dir == "grid" then
     local cols, nr = C.button_grid(n)
-    local bw = (cw - 4 - (cols - 1) * 2) / cols
+    local M = C.CTL_MARGIN
+    local bw = (cw - 2 * M - (cols - 1) * 2) / cols
     local bh = math.max(12, math.floor((y + ch - top - 2 - (nr - 1) * 2) / nr))
     for i = 1, n do
       local col, row = (i - 1) % cols, (i - 1) // cols
-      local l, t = x + 2 + col * (bw + 2), top + row * (bh + 2)
+      local l, t = x + M + col * (bw + 2), top + row * (bh + 2)
       rects[i] = { l, t, l + bw, t + bh }
     end
   elseif opts.dir == "down" then
@@ -2755,10 +2756,10 @@ function W.button_row(ctx, id, label, value, choices, opts)
     local bh = math.max(14, math.floor((y + ch - top - 2 - (n - 1) * 2) / n))
     for i = 1, n do
       local by = top + (i - 1) * (bh + 2)
-      rects[i] = { x + 4, by, x + cw - 4, by + bh }
+      rects[i] = { x + C.CTL_MARGIN, by, x + cw - C.CTL_MARGIN, by + bh }
     end
   else
-    local bx0, bx1 = x + 2, x + cw - 2
+    local bx0, bx1 = x + C.CTL_MARGIN, x + cw - C.CTL_MARGIN
     local bw = (bx1 - bx0 - (n - 1)) / n
     local by1 = top + 2
     for i = 1, n do
