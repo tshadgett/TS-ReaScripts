@@ -477,17 +477,20 @@ local function fav_star(ctx, dl, e, click, id, rect)
   local cy = (y + y2) * 0.5
   local hov = false
   if click then
-    local keep_x, keep_y = ImGui.GetCursorScreenPos(ctx)
+    -- Its height ends where the next row starts, so the cursor lands
+    -- there by itself: a menu's last row may not be followed by any item,
+    -- and a cursor moved back by hand would trip ImGui's boundary check.
+    local _, keep_y = ImGui.GetCursorScreenPos(ctx)
+    local _, sp_y = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
     ImGui.SetCursorScreenPos(ctx, sx, y)
-    if ImGui.InvisibleButton(ctx, "##fav" .. tostring(id), STAR_W, math.max(1, y2 - y)) then
+    local clicked = ImGui.InvisibleButton(ctx, "##fav" .. tostring(id), STAR_W,
+      math.max(1, keep_y - y - (sp_y or 0)))
+    hov = ImGui.IsItemHovered(ctx)
+    if clicked then
       B.set_fav(e.ident, not on)
-      on = not on
-      ImGui.SetCursorScreenPos(ctx, keep_x, keep_y)
       return true
     end
-    hov = ImGui.IsItemHovered(ctx)
     if hov then ImGui.SetTooltip(ctx, on and "Favourite: click to take it off" or "Make it a favourite") end
-    ImGui.SetCursorScreenPos(ctx, keep_x, keep_y)
   end
   if on or hov or click then
     star(dl, sx + STAR_W * 0.5, cy, 5.5, on and FAV_COL or (hov and C.COL.header_text or ((C.COL.header_dim & 0xFFFFFF00) | 0x70)), on)
