@@ -12734,5 +12734,40 @@ do
   W.hw = was
 end
 
+-- a finish's strength (FinishK): kept for the faceplate and a section,
+-- 100 not written, and drawn at that strength (over 100: laid twice)
+do
+  local k = "FinKPlug"
+  M.set(k, { plate = "aluminium", finish = "brushed", fink = 60,
+             controls = { { param = -1, type = "section", style = "plate", cap = "gunmetal", finish = "wood", fink = 150 },
+                          { param = -1, type = "section", style = "plate", cap = "gunmetal", finish = "wood", fink = 100 } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  check("finish strength: kept", tostring(l.fink) .. " " .. tostring(l.controls[1].fink) .. " " .. tostring(l.controls[2].fink), "60 150 nil")
+  check("finish strength: copied", tostring(M.copy(l).fink) .. " " .. tostring(M.copy(l).controls[1].fink), "60 150")
+  check("finish strength: one key", tostring(M.fin_k("brushed", 60)) .. " " .. tostring(M.fin_k("brushed", 100)) .. " " .. tostring(M.fin_k("img:a.png|tile", 60)),
+    "brushed@60 brushed img:a.png|tile")
+  check("finish strength: out of range", tostring(M.fink_of("250")) .. " " .. tostring(M.fink_of("-3")) .. " " .. tostring(M.fink_of("x")), "200 0 nil")
+  M.remove(k); M.save(); M.reload()
+  local FN = require("TS_CV_Finish")
+  local tints = {}
+  local fake = setmetatable({
+    CreateImage = function() return "img" end, ValidatePtr = function() return true end,
+    DrawList_AddImage = function(_, _, _, _, _, _, _, _, _, _, col) tints[#tints + 1] = col end,
+  }, { __index = function() return function() end end })
+  FN.attach(fake); FN.clear()
+  local function drawn(st)
+    tints = {}
+    FN.rect("ctx", "dl", "brushed", 0, 0, 100, 100, 0, 0, nil, st)
+    local seen = {}
+    for _, c in ipairs(tints) do seen[#seen + 1] = string.format("%02x", c & 0xff) end
+    return table.concat(seen, ",")
+  end
+  check("finish strength: as drawn", drawn(nil), "ff")
+  check("finish strength: 60%", drawn(0.6), "99")
+  check("finish strength: 150%, laid twice", drawn(1.5), "ff,80")
+  check("finish strength: 0, nothing", drawn(0), "")
+end
+
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

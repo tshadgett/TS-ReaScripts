@@ -1148,6 +1148,20 @@ local function plate_menu(fx, key, layout)
         M.set(key, l); M.save()
       end
     end
+    -- how strongly it shows (FinishK)
+    ImGui.Separator(ctx)
+    local has = fin ~= "plain" and not M.surface_of(fin)
+    if not has then ImGui.BeginDisabled(ctx, true) end
+    ImGui.TextDisabled(ctx, "Strength")
+    ImGui.SetNextItemWidth(ctx, 160)
+    local kch, kv = ST.slider_int(ctx, "##plate_fink", layout.fink or 100, 0, 200, "%d%%")
+    if kch then
+      local l = materialise(fx)
+      l.fink = M.fink_of(kv)
+      M.set(key, l)
+    end
+    if ImGui.IsItemDeactivatedAfterEdit(ctx) then M.save() end
+    if not has then ImGui.EndDisabled(ctx) end
     ImGui.EndMenu(ctx)
   end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
@@ -1397,6 +1411,20 @@ local function brush_tick(fx, key, idx, c, kind, pl, id)
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
     ImGui.SetTooltip(ctx, kind and "The surface." or "Choose a background first.")
   end
+  -- how strongly it shows (FinishK<n>)
+  local has = kind and fin ~= "plain" and not M.surface_of(fin)
+  if not has then ImGui.BeginDisabled(ctx, true) end
+  ST.caption(ctx, "Strength")
+  ImGui.SetNextItemWidth(ctx, 160)
+  local kch, kv = ST.slider_int(ctx, "##" .. id .. "_fink", c.fink or 100, 0, 200, "%d%%")
+  if kch then
+    local l = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.fink = M.fink_of(kv) end
+    M.set(key, l)
+  end
+  if ImGui.IsItemDeactivatedAfterEdit(ctx) then M.save() end
+  if not has then ImGui.EndDisabled(ctx) end
   -- and/or a metallic flake (Metal<n>)
   local mt = M.part_metal(kind, c.metal)
   local mch, mv = ST.checkbox(ctx, "Metallic flake##" .. id .. "_m", mt)
@@ -1445,7 +1473,7 @@ local function back_menu(fx, key, idx, c)
   local function set(v)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.back = v; if not v then lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil end end
+    if lc then lc.back = v; if not v then lc.brush, lc.metal, lc.finish, lc.corners, lc.fink = nil, nil, nil, nil, nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, "Behind this control")
@@ -1469,7 +1497,7 @@ local function back_menu(fx, key, idx, c)
     local function cset(k, save)
       local l, pk = materialise(fx)
       local lc = l.controls[idx]
-      if lc then lc.back = k; if not k then lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil end end
+      if lc then lc.back = k; if not k then lc.brush, lc.metal, lc.finish, lc.corners, lc.fink = nil, nil, nil, nil, nil end end
       M.set(pk, l)
       if save then M.save() end
     end
@@ -1510,7 +1538,7 @@ local function section_menu(fx, key, idx, c)
   local function set(style, cap)
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.style, lc.cap = style, cap; if not style then lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil end end
+    if lc then lc.style, lc.cap = style, cap; if not style then lc.brush, lc.metal, lc.finish, lc.corners, lc.fink = nil, nil, nil, nil, nil end end
     M.set(key, l); M.save()
   end
   ImGui.TextDisabled(ctx, c.type == "section" and "The section it's on" or "The controls after this divider")
@@ -1541,7 +1569,7 @@ local function section_menu(fx, key, idx, c)
       if lc then
         if k then lc.style, lc.cap = "plate", k
         elseif before_style == "inset" then lc.style, lc.cap = "inset", nil
-        else lc.style, lc.cap, lc.brush, lc.metal, lc.finish, lc.corners = nil, nil, nil, nil, nil, nil end
+        else lc.style, lc.cap, lc.brush, lc.metal, lc.finish, lc.corners, lc.fink = nil, nil, nil, nil, nil, nil, nil end
       end
       M.set(pk, l)
       if save then M.save() end

@@ -1931,7 +1931,9 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   itself. In the Faceplate menu, **Finish** gives any of them a surface:
   *Plain*, *Brushed* (aluminium's own unless you change it), *Anodised*,
   *Bright*, *Satin*, *Tolex*, *Leather*, *Wood*, *Crinkle*, *Enamel*,
-  *Hammertone* or *Checker plate*, each in the faceplate's colour; the
+  *Hammertone* or *Checker plate*, each in the faceplate's colour.
+  **Strength**, under the list, sets how strongly it shows (0 to 200 %),
+  for the faceplate, and for each section and background in theirs. The
   **Metallic flake** (a fine flake and sheen, like metallic paint) goes
   over any of them. **Picture...** (in the Faceplate menu, a section's and a
   background's) puts a picture of your own on it instead: **Stretch**ed

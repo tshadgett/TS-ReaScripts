@@ -1056,7 +1056,7 @@ draw_entry_body = function(ctx)
       nv.label = c.label
       if kind == "combo" and c.type == "combo" then nv.virtual.choices = c.virtual.choices end
     end
-    local keep = { show = c.show, back = c.back, brush = c.brush, metal = c.metal, finish = c.finish, corners = c.corners, at = c.at }
+    local keep = { show = c.show, back = c.back, brush = c.brush, metal = c.metal, finish = c.finish, fink = c.fink, corners = c.corners, at = c.at }
     for k in pairs(c) do c[k] = nil end
     for k, v in pairs(nv) do c[k] = v end
     for k, v in pairs(keep) do c[k] = v end
@@ -1391,7 +1391,7 @@ draw_entry_body = function(ctx)
     local sch, si = ImGui.Combo(ctx, "##section", cur_s, table.concat(names, "\0") .. "\0")
     if sch then
       local k = keys[si + 1]
-      if k == "" then c.style, c.cap, c.brush, c.metal, c.finish, c.corners = nil, nil, nil, nil, nil, nil
+      if k == "" then c.style, c.cap, c.brush, c.metal, c.finish, c.corners, c.fink = nil, nil, nil, nil, nil, nil, nil
       elseif k == "inset" then c.style, c.cap = "inset", nil
       elseif k == "+" then pick_custom(c, "section")
       else c.style, c.cap = "plate", k end
@@ -1417,7 +1417,7 @@ draw_entry_body = function(ctx)
       if k == "+" then pick_custom(c, "back")
       else
         c.back = (k ~= "") and k or nil
-        if not c.back then c.brush, c.metal, c.finish, c.corners = nil, nil, nil, nil end
+        if not c.back then c.brush, c.metal, c.finish, c.corners, c.fink = nil, nil, nil, nil, nil end
       end
     end
     tip("This control's background. Matching neighbours join up.")

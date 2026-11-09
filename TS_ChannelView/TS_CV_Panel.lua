@@ -312,7 +312,7 @@ function P.section_key(div)
   local kind, pl = P.section_style(div)
   if not kind then return nil end
   return kind .. "|" .. (kind == "plate" and div.cap or "") .. "|"
-         .. (M.part_finish(kind, pl, div.finish, div.brush) or "")
+         .. (P.fin_k(M.part_finish(kind, pl, div.finish, div.brush), div.fink) or "")
          .. (M.part_metal(kind, div.metal) and "|m" or "")
          .. (M.corners_of(div.corners) and ("|" .. div.corners) or "")
 end
@@ -1031,7 +1031,7 @@ end
 -- true when it made one.
 local function section_from(src, style, cap, at)
   return { param = -1, type = "section", label = "", style = style, cap = cap, brush = src.brush,
-           finish = src.finish, metal = src.metal, corners = src.corners, at = at }
+           finish = src.finish, fink = src.fink, metal = src.metal, corners = src.corners, at = at }
 end
 function P.to_grid(layout, rows)
   if not layout or layout.grid then return false end
@@ -1096,6 +1096,7 @@ function P.to_grid(layout, rows)
     else
       if c.type == "divider" then
         c.style, c.cap, c.brush, c.finish, c.metal, c.corners = nil, nil, nil, nil, nil, nil
+        c.fink = nil
       end
       out[#out + 1] = c
       for _, sec in ipairs(after[c] or {}) do out[#out + 1] = sec end
@@ -2238,14 +2239,19 @@ local function grain(dl, bg, y0, ya, yb, spans)
   lines(hi, 3, 2); lines(lo, 7, 4)
 end
 
+-- a finish with its strength, as one key (TS_CV_Mappings.fin_k)
+P.fin_k = M.fin_k
+
 -- A finish over a surface (TS_CV_Finish), laid from ox, oy. Brushed falls
 -- back to the drawn grain when there are no images (an older ReaImGui).
 local function finish_rect(ctx, dl, key, bg, x1, y1, x2, y2, ox, oy, box)
   if not key or not FN then return end
   -- a picture of your own (img:...)
   if key:sub(1, 4) == "img:" then FN.surface(ctx, dl, key, x1, y1, x2, y2, ox, oy, box) return end
+  local base, k = key:match("^(.-)@(%d+)$")
+  if base then key, k = base, tonumber(k) / 100 end
   if FN.image(ctx, key) then
-    FN.rect(ctx, dl, key, x1, y1, x2, y2, ox, oy, box)
+    FN.rect(ctx, dl, key, x1, y1, x2, y2, ox, oy, box, k)
   elseif key == "brushed" then
     grain(dl, bg, oy, y1, y2, function() return { x1, x2 } end)
   end
@@ -2387,7 +2393,7 @@ end
 function P.back_key(ctl)
   local kind, pl = P.back_style(ctl.back)
   if not kind then return nil end
-  local fin = M.part_finish(kind, pl, ctl.finish, ctl.brush)
+  local fin = P.fin_k(M.part_finish(kind, pl, ctl.finish, ctl.brush), ctl.fink)
   local mt = M.part_metal(kind, ctl.metal)
   local cn = M.corners_of(ctl.corners)
   return ctl.back .. (fin and ("/" .. fin) or "") .. (mt and "/m" or "") .. (cn and ("/c" .. cn) or ""), fin, mt, cn
@@ -2420,7 +2426,8 @@ local function flake_shape(ctx, dl, gx0, gy0, loops, light, finish, bg, r)
         if finish then
           -- Bright and Satin reflect once across the whole shape
           local box
-          if (C.FINISH[finish] and C.FINISH[finish].stretch) or finish:sub(1, 4) == "img:" then
+          local fk = finish:match("^[^@]+")
+          if (C.FINISH[fk] and C.FINISH[fk].stretch) or finish:sub(1, 4) == "img:" then
             local bx1, by1, bx2, by2 = math.huge, math.huge, -math.huge, -math.huge
             for j = 1, #loops[1], 2 do
               bx1 = math.min(bx1, loops[1][j]); bx2 = math.max(bx2, loops[1][j])
@@ -2894,7 +2901,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     -- rectangle, so round gives it fully round ends
     local r = corner_r(M.corners_of(s.by.corners), x2 - x1, y2 - y1, true)
     local function grained(fill)
-      local fin = M.part_finish(kind, pl, s.by.finish, s.by.brush)
+      local fin = P.fin_k(M.part_finish(kind, pl, s.by.finish, s.by.brush), s.by.fink)
       local mt = M.part_metal(kind, s.by.metal)
       if r > 4 then
         -- the finish laid inside the rounder corners
@@ -4365,7 +4372,7 @@ fold_pop = function(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate)
     -- at the end of the frame, would be under this window
     local outer_tip = W.take_tip()
     local saved = plate and push_plate(plate)
-    if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, M.finish(layout, plate), M.metal(layout, plate))
+    if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate))
     else ImGui.DrawList_AddRectFilled(pdl, wx, wy, wx + pw, wy + ph, C.COL.panel_bg, C.PANEL_RR) end
     ImGui.DrawList_AddRect(pdl, wx, wy, wx + pw, wy + ph, C.COL.accent, 3.0, 0, 1.0)
     local locked = not T.get_enabled(track, fx.addr)
@@ -4455,7 +4462,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     if is_drag_source then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, C.PANEL_RR)
     elseif plate then
-      draw_plate(ctx, dl, x, y, ww, wh, plate, M.finish(layout, plate), M.metal(layout, plate))
+      draw_plate(ctx, dl, x, y, ww, wh, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate))
     else
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, C.PANEL_RR)
     end

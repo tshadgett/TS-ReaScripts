@@ -27,6 +27,7 @@
       Back<n>  = inset | <faceplate>
       Brush<n> = <1|0>
       Finish<n> = <finish>
+      FinishK<n> = <0..200>
       Corners<n> = soft | round
       Look<n>  = <knob parts>
       Inner<n> = <parts recipe>     (dual: the inner knob's)
@@ -38,6 +39,7 @@
       Plate    = <faceplate>
       Brush    = <1|0>
       Finish   = <finish>
+      FinishK  = <0..200>
       Metal    = 1
       Lock     = <rows>
       Palette  = <#rrggbb ...>|<#rrggbb ...>
@@ -133,7 +135,8 @@
   Finish<n> (Finish for the faceplate) is its surface finish, a key from
   C.FINISHES ("plain" for none); when there is one it says what Brush<n>
   would, and Brush<n> is still read when there isn't. The metallic flake
-  goes over any finish. Corners<n> rounds that background's or section's
+  goes over any finish. FinishK<n> (FinishK) is how strongly the finish
+  shows, in percent (no line: 100). Corners<n> rounds that background's or section's
   corners more than the usual slight rounding: soft, or round (ends fully
   rounded; a shape that isn't a plain rectangle is drawn soft).
   Look<n> is knob n's own look, built from parts (TS_CV_KnobParts.encode:
@@ -339,6 +342,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Metal<n>=1: metallic flake on control n's background (a divider: its section's)\n"
                 .. "; Finish<n>=<plain|brushed|anodised|bright|satin|tolex|leather|wood|crinkle|enamel|hammertone|checker>:\n"
                 .. ";   the finish of control n's background (a divider: its section's)\n"
+                .. "; FinishK<n>=<0..200>: how strongly that finish shows, in percent (no line: 100)\n"
                 .. "; Corners<n>=soft|round: the corners of control n's background (a divider: its section's)\n"
                 .. "; Look<n>=<k=v,...>: knob n's own look, built from parts (profile, grip, mat, col, ptr, skirt ...)\n"
                 .. "; Inner<n>=<recipe>, Look2<n>=<k=v,...>: a concentric knob's inner knob\n"
@@ -351,7 +355,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Plate=<faceplate, or #rrggbb for a colour of your own>\n"
                 .. "; Brush=<1 brushed, 0 plain>: the faceplate's grain, when not its own\n"
                 .. "; Metal=1: a metallic flake on the faceplate\n"
-                .. "; Finish=<finish>: the faceplate's finish (as Finish<n>)\n"
+                .. "; Finish=<finish>: the faceplate's finish (as Finish<n>); FinishK=<0..200> its strength\n"
                 .. "; Palette=<surfaces>|<accents>: the plugin's own colours, sampled from its window\n"
                 .. "; Lock=<rows>: layout locked, arranged at that many rows (a grid: never flows, scrolls instead)\n"
                 .. "; Grid=<columns>x<rows>: the layout is a grid, in quarter cells (an ordinary knob is 4x4)\n"
@@ -891,6 +895,23 @@ end
 function M.surface_key(s)
   if not (s and s.file) then return nil end
   return "img:" .. s.file .. "|" .. (s.fill or "stretch") .. "|" .. math.floor(s.edge or 16)
+end
+
+-- A FinishK line's strength, in percent (0..200), or nil for 100.
+local function fink_of(v)
+  local n = tonumber(U.trim(tostring(v or "")))
+  if not n then return nil end
+  n = math.max(0, math.min(200, math.floor(n + 0.5)))
+  return (n ~= 100) and n or nil
+end
+M.fink_of = fink_of
+-- A finish with its strength (FinishK, percent) as one key, "brushed@60",
+-- so surfaces that differ only in it stay apart; 100 is the finish alone
+-- (a picture of your own has no strength).
+function M.fin_k(fin, k)
+  k = fink_of(k)
+  if fin and k and fin:sub(1, 4) ~= "img:" then return fin .. "@" .. k end
+  return fin
 end
 
 -- A Finish line's key (a finish, or a surface's picture), or nil when it
@@ -2340,6 +2361,7 @@ local function parse_section(sect)
         nbtn    = nbtn_of(sect["Buttons" .. i]),
         brush   = brush_of(sect["Brush" .. i]),
         finish  = finish_of(sect["Finish" .. i]),
+        fink    = fink_of(sect["FinishK" .. i]),
         corners = corners_of(sect["Corners" .. i]),
         look    = (t == "knob" or t == "stepped" or t == "dual") and KP.decode(sect["Look" .. i]) or nil,
         img     = (t == "knob" or t == "stepped" or t == "toggle" or t == "combo") and M.img_of(sect["Img" .. i]) or nil,
@@ -2426,6 +2448,7 @@ local function parse_section(sect)
            plate = C.plate_key(U.trim(sect.Plate or "")),
            brush = brush_of(sect.Brush),
            finish = finish_of(sect.Finish),
+           fink = fink_of(sect.FinishK),
            metal = (U.trim(sect.Metal or "") == "1") or nil,
            palette = M.palette_of(sect.Palette),
            lock = lock_of(sect.Lock),
@@ -2468,6 +2491,7 @@ local function serialize(layout)
   if C.plate_key(layout.plate) then out.Plate = C.plate_key(layout.plate) end
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
   if finish_of(layout.finish) then out.Finish = layout.finish end
+  if fink_of(layout.fink) then out.FinishK = tostring(fink_of(layout.fink)) end
   if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
   if layout.grid then out.Grid = math.floor(layout.grid.cols) .. "x" .. math.floor(layout.grid.rows) end
@@ -2550,6 +2574,7 @@ local function serialize(layout)
     local styled = back_of(c.back) or ((c.type == "divider" or c.type == "section") and (c.style == "inset" or c.style == "plate"))
     if styled and c.brush ~= nil then out["Brush" .. (i - 1)] = c.brush and "1" or "0" end
     if styled and finish_of(c.finish) then out["Finish" .. (i - 1)] = c.finish end
+    if styled and fink_of(c.fink) then out["FinishK" .. (i - 1)] = tostring(fink_of(c.fink)) end
     if styled and corners_of(c.corners) then out["Corners" .. (i - 1)] = c.corners end
     if c.look and (c.type == "knob" or c.type == "stepped" or c.type == "dual") then
       local enc = KP.encode(c.look)
@@ -3172,7 +3197,7 @@ end
 -- The faceplate, and one look for each kind of control -- the one most of
 -- that kind on the source wear -- put on every control of that kind on the
 -- target, whatever plugin it's for. Canvas colours go with it.
-local BACK = { "back", "brush", "finish", "corners", "metal" }
+local BACK = { "back", "brush", "finish", "fink", "corners", "metal" }
 local STYLE_FIELDS = {
   knob     = { "style", "look", "cap", "scale_ink", "arcc", "arc" },
   dual     = { "style", "style2", "look", "look2", "cap" },
@@ -3181,8 +3206,8 @@ local STYLE_FIELDS = {
   dropdown = { "style", "cap" },
   fader    = { "style", "cap" },
   xy       = { "style", "cap" },
-  section  = { "style", "cap", "brush", "finish", "metal", "corners", "edge" },
-  divider  = { "style", "cap", "brush", "finish", "metal", "corners", "edge" },
+  section  = { "style", "cap", "brush", "finish", "fink", "metal", "corners", "edge" },
+  divider  = { "style", "cap", "brush", "finish", "fink", "metal", "corners", "edge" },
   text     = { "edge" },
 }
 for kind, f in pairs(STYLE_FIELDS) do
@@ -3205,7 +3230,7 @@ local function look_copy(v) return (type(v) == "table") and KP.copy(v) or v end
 function M.style_of(layout)
   if not layout then return nil end
   local s = { plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
-              kinds = {} }
+              fink = layout.fink, kinds = {} }
   if layout.canvas and layout.canvas.cols then
     s.cols = {}
     for k, v in pairs(layout.canvas.cols) do s.cols[k] = v end
@@ -3242,6 +3267,7 @@ end
 function M.apply_style(layout, s)
   if not (layout and s) then return 0 end
   layout.plate, layout.brush, layout.metal, layout.finish = s.plate, s.brush, s.metal, s.finish
+  layout.fink = s.fink
   if layout.canvas then
     if s.cols then
       layout.canvas.cols = {}
@@ -3932,7 +3958,7 @@ end
 function M.look_of(c)
   return { fam = M.look_family(c), type = c.type, buttons = c.buttons, style = c.style, cap = c.cap, size = c.size,
            scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc, back = c.back, brush = c.brush, metal = c.metal,
-           finish = c.finish, corners = c.corners, look = KP.copy(c.look),
+           finish = c.finish, fink = c.fink, corners = c.corners, look = KP.copy(c.look),
            style2 = c.style2, look2 = KP.copy(c.look2), img = M.copy_img(c.img),
            dir = c.dir, len = c.len, thin = c.thin }
 end
@@ -4004,6 +4030,7 @@ function M.paste_look(o, s)
   -- a hardware switch is a toggle's alone: a button row stays flat
   if o.type ~= "toggle" and o.style and C.SWITCH[o.style] then o.style = nil end
   o.back, o.brush, o.metal, o.finish, o.corners = s.back, s.brush, s.metal, s.finish, s.corners
+  o.fink = s.fink
   return true
 end
 
@@ -4013,7 +4040,7 @@ function M.copy(layout)
                 measure = layout.measure, levels = layout.levels, mug = layout.mug,
                 own_w = layout.own_w, own_h = layout.own_h,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
-                lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)),
+                fink = layout.fink, lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)),
                 grid = layout.grid and { cols = layout.grid.cols, rows = layout.grid.rows } or nil }
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
@@ -4025,7 +4052,7 @@ function M.copy(layout)
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),
                         img = M.copy_img(c.img),
-                        metal = c.metal, finish = c.finish, corners = c.corners, look = KP.copy(c.look),
+                        metal = c.metal, finish = c.finish, fink = c.fink, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
                         dir = c.dir, len = c.len, thin = c.thin, param2 = c.param2,
