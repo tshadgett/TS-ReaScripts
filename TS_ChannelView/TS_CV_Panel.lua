@@ -725,6 +725,9 @@ local function put(out, ctl, c, r, w, h, dx, dy)
     if t ~= "combo" then it.x = x + half(qx(w) - hx(nw)); it.w = nw end
     -- a dropdown in a place half a cell tall: short, its box without its name
     if t == "combo" and h <= 2 then nh, it.short = 1, true end
+    -- three quarters of a cell: a dropdown or a button, its name and its
+    -- box, nothing kept under it
+    if (t == "combo" or (t == "toggle" and ctl.size ~= "small")) and h == 3 and not ctl.buttons then nh = 1.5 end
     it.y = y + half(qy(h) - hy(nh))
     it.h = nh
   end

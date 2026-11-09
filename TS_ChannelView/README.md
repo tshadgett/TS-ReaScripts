@@ -1342,7 +1342,9 @@ or following ChannelView's).
   The list shows every choice, read from the plugin without moving it,
   scrolls past 14, and has a search box on top past 12 (Enter takes the
   first match). On a grid a dropdown is as wide as its place, and one in
-  a place half a cell tall is just its box, its name in the tooltip.
+  a place half a cell tall is just its box, its name in the tooltip;
+  three quarters of a cell tall, a dropdown or a button is its name and
+  its box with nothing under it.
 - **(Pro) Raised dropdowns.** Right-click a dropdown ▸ Style ▸ *Raised*: the box
   becomes a dark cap like a *Backlit* button (unlit), standing off the
   faceplate with a shadow under it; *Flat* (the default) prints it on the

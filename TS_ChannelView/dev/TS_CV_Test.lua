@@ -609,6 +609,14 @@ do
   check("text: drawn as words, not controls", #lt.texts .. " " .. #lt.items, "2 2")
   check("text: up when taller than wide", lt.texts[2].h > lt.texts[2].w, true)
   check("combo: half a cell tall is short", tostring(lt.items[1].short) .. " " .. tostring(lt.items[2].short), "true nil")
+  -- three quarters of a cell: a dropdown or a button, name and box, at the
+  -- top of its place (MaXyM: nothing kept under it)
+  local l3 = P.layout({ grid = { cols = 16, rows = 8 },
+    { param = 3, type = "combo", label = "Mode", at = { c = 0, r = 0, w = 8, h = 3 } },
+    { param = 4, type = "toggle", label = "On", at = { c = 8, r = 0, w = 4, h = 3 } },
+    { param = 5, type = "combo", label = "Type", at = { c = 0, r = 3, w = 8, h = 4 } } }, ph(2))
+  check("three quarters: name and box, from the top", table.concat({ l3.items[1].h, l3.items[1].y, l3.items[2].h, l3.items[2].y, l3.items[3].h }, " "),
+    "1.5 0 1.5 0 2")
   M.remove("GridText"); M.save(); M.reload()
   -- a picture on the grid (an image item): its line, read back, copied,
   -- laid out as a picture and not a control

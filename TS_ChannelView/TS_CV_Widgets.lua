@@ -2761,10 +2761,12 @@ function W.button_row(ctx, id, label, value, choices, opts)
   else
     local bx0, bx1 = x + C.CTL_MARGIN, x + cw - C.CTL_MARGIN
     local bw = (bx1 - bx0 - (n - 1)) / n
-    local by1 = top + 2
+    -- as tall as a button (W.toggle's), where there's room
+    local by1 = top + 1
+    local bh = math.max(14, math.min(C.KNOB_D - 8, y + ch - by1 - 1))
     for i = 1, n do
       local l = bx0 + (i - 1) * (bw + 1)
-      rects[i] = { l, by1, l + bw, by1 + 20 }
+      rects[i] = { l, by1, l + bw, by1 + bh }
     end
   end
 
