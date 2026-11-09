@@ -384,7 +384,7 @@ function LN.draw(ctx, dl, track, e, x0, x1, id)
         ImGui.DrawList_AddLine(dl, x0, ly + 0.5, x1, ly + 0.5, C.COL.panel_border, 1.0)
       end
       local p   = LN.plays(track, i)
-      local bs  = math.min(C.TCP_CHIP + 1, lh - 3, x1 - x0)
+      local bs  = math.min(C.TCP_CHIP + C.S(1), lh - 3, x1 - x0)
       local bx  = x0 + (x1 - x0 - bs) * 0.5
       local by  = ly + math.min(3, (lh - bs) * 0.5)
       -- Play: an accent fill when it plays alone, the contrast colour when

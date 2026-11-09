@@ -854,7 +854,7 @@ function EN.draw_lane(ctx, dl, track, L, x0, y, x1, h, base, id)
   if h - 1 < th + 2 then return end
 
   -- Buttons, right to left: hide, bypass, arm.
-  local bs = math.min(C.TCP_CHIP + 1, th + 2)
+  local bs = math.min(C.TCP_CHIP + C.S(1), th + 2)
   local by = y + math.min(pad, (h - 1 - bs) * 0.5)
   local bx = x1 - pad - bs
   ImGui.SetCursorScreenPos(ctx, bx, by)

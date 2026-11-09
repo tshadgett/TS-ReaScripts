@@ -346,7 +346,7 @@ local FOLDER_TIP  = {
 -- folder icon at its left end that collapses and expands the folder; a
 -- click on the icon is the icon's, not the button's.
 local function name_button(ctx, label, col, selected, id, w, t)
-  local full_h = C.STRIP_H - 8
+  local full_h = C.STRIP_H - C.S(8)
   local h = C.STRIP_BASE_H - 8          -- the coloured name pill itself
   local dl = ImGui.GetWindowDrawList(ctx)
   local tw, th = ImGui.CalcTextSize(ctx, label)
@@ -732,7 +732,7 @@ local function column(ctx, t, avail_h, cur_track, lift)
     if nb_hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
     if nb_dbl then dbl_name = t.track end
     if nb_menu then TM.open_context(t.track) end
-    MX.fold_edges(dl, t, x, y, ww, strip_h + name_gap + C.STRIP_H - 8)
+    MX.fold_edges(dl, t, x, y, ww, strip_h + name_gap + C.STRIP_H - C.S(8))
 
     ImGui.EndChild(ctx)
   else
@@ -920,7 +920,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
       -- folder borders down its left, against the strip: as tall as the
       -- strip and its name button (just the button in channel view)
       local bw = C.fold_bw()
-      local bar_h = strips and (inner_h - lift - 4) or (C.STRIP_H - 8)
+      local bar_h = strips and (inner_h - lift - 4) or (C.STRIP_H - C.S(8))
       -- (the one against the strip runs on under it by its rounding, so
       -- its corners there show the bar, not a gap)
       local function fold_bar(f, left, against)
@@ -966,7 +966,7 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
         local nbx, nby = ImGui.GetCursorScreenPos(ctx)
         local hit, dbl, menu = name_button(ctx, track_label(t),
           t.col or C.COL.header_bg, selected, t.guid, w, t)
-        MX.fold_edges(ImGui.GetWindowDrawList(ctx), t, math.floor(nbx), nby, math.floor(nbx + w) - math.floor(nbx), C.STRIP_H - 8)
+        MX.fold_edges(ImGui.GetWindowDrawList(ctx), t, math.floor(nbx), nby, math.floor(nbx + w) - math.floor(nbx), C.STRIP_H - C.S(8))
         if hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
         if dbl then dbl_track = t.track end
         if menu then TM.open_context(t.track) end
@@ -993,8 +993,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
     do
       if #list > 0 then x_off = x_off + C.MIX_GAP end
       ImGui.SetCursorPos(ctx, x_off, row_y)
-      local th = strips and math.max(C.STRIP_H - 8, inner_h - C.STRIP_H - lift)
-                         or (C.STRIP_H - 8)
+      local th = strips and math.max(C.STRIP_H - C.S(8), inner_h - C.STRIP_H - lift)
+                         or (C.STRIP_H - C.S(8))
       if W.dashed_plus(ctx, "mxadd", C.ADD_TILE_W, th,
           "Insert a track\u{2026}") then
         TM.open_insert(cur_track)

@@ -2182,7 +2182,7 @@ function W.xypad(ctx, id, x, y, w, h, vx, vy, label, o)
   local hovered = ImGui.IsItemHovered(ctx)
   local active = ImGui.IsItemActive(ctx)
   local show_value = C.SHOW_VALUES
-  local px1, py1 = x + 4, y + W.LABEL_H + C.LABEL_GAP + 1
+  local px1, py1 = x + 4, y + W.LABEL_H + C.LABEL_GAP + C.S(1)
   local px2, py2 = x + w - 4, y + h - (show_value and 15 or 4)
   local pw, ph = math.max(8, px2 - px1), math.max(8, py2 - py1)
   local dot = 5.5
@@ -2416,10 +2416,10 @@ function W.toggle(ctx, id, label, value, formatted, opts)
 
   local on = value >= 0.5
   local label_h = W.LABEL_H
-  local bx1, by1 = x + C.CTL_MARGIN, y + label_h + C.LABEL_GAP + 1
-  local bx2, by2 = x + cw - C.CTL_MARGIN, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
+  local bx1, by1 = x + C.CTL_MARGIN, y + label_h + C.LABEL_GAP + C.S(1)
+  local bx2, by2 = x + cw - C.CTL_MARGIN, y + label_h + C.LABEL_GAP + C.S(1) + C.KNOB_D - C.S(8)
   -- small: as a row of buttons half a cell tall (W.button_row's short)
-  if small then by1 = y + 3; by2 = by1 + math.min(C.KNOB_D - 8, ch - 4) end
+  if small then by1 = y + 3; by2 = by1 + math.min(C.KNOB_D - C.S(8), ch - 4) end
   local cx = x + cw * 0.5
 
   if not small then
@@ -2770,7 +2770,7 @@ function W.button_row(ctx, id, label, value, choices, opts)
     local bw = (bx1 - bx0 - (n - 1)) / n
     -- as tall as a button (W.toggle's), where there's room
     local by1 = top + 1
-    local bh = math.max(14, math.min(C.KNOB_D - 8, y + ch - by1 - 1))
+    local bh = math.max(14, math.min(C.KNOB_D - C.S(8), y + ch - by1 - 1))
     for i = 1, n do
       local l = bx0 + (i - 1) * (bw + 1)
       rects[i] = { l, by1, l + bw, by1 + bh }
@@ -2910,8 +2910,8 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   if opts.open_now and have then ImGui.OpenPopup(ctx, pop) end
 
   local label_h = W.LABEL_H
-  local bx1, by1 = x + 4, y + label_h + C.LABEL_GAP + 1
-  local bx2, by2 = x + cw - 4, y + label_h + C.LABEL_GAP + 1 + C.KNOB_D - 8
+  local bx1, by1 = x + 4, y + label_h + C.LABEL_GAP + C.S(1)
+  local bx2, by2 = x + cw - 4, y + label_h + C.LABEL_GAP + C.S(1) + C.KNOB_D - C.S(8)
   if opts.short then by1, by2 = y + 2, y + ch - 2 end
   local cx = x + cw * 0.5
   -- a wide one's arrows: a box's height wide at each end

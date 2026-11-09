@@ -254,7 +254,7 @@ local function make(kind)
   -- Strip mode (the Rack view): the panel is a band STRIP_W wide, as
   -- short as lets its cells fit across, and folds to a header bar.
   SD.STRIP_W = nil
-  function SD.bar_h() return C.HEADER_H + 2 end
+  function SD.bar_h() return C.HEADER_H + C.S(2) end
   function SD.strip_h(track, w)
     if SD.is_collapsed() then return SD.bar_h() end
     local n = track and (reaper.GetTrackNumSends(track, cat_of(track)) or 0) or 0
@@ -651,7 +651,7 @@ local function make(kind)
       -- with the name for the same row across the top.
       local BAR = 4
       ImGui.DrawList_AddRectFilled(dl, cxp + 2, cyp,
-        cxp + 2 + BAR, cyp + C.CELL_H - 4,
+        cxp + 2 + BAR, cyp + C.CELL_H - C.S(4),
         sd.colour or (sd.hw and C.COL.header_dim) or C.COL.panel_border, 1.5)
 
       local ix  = cxp + 2 + BAR + 3          -- inside the bar
@@ -687,7 +687,7 @@ local function make(kind)
       -- name sits above it and the value below, so the cell's own middle is
       -- a few pixels off from the thing the eye actually lines up with.
       local face  = W.knob_face_y(cyp)
-      local rx    = ix + C.CELL_W + 2
+      local rx    = ix + C.CELL_W + C.S(2)
       local rw    = C.SEND_W - (rx - cxp) - 3
       local bh, bgap = 15, 3
       local by1   = face - (bh * 2 + bgap) * 0.5
@@ -753,7 +753,7 @@ local function make(kind)
     -- the right and read as pushed left -- most obviously with one column,
     -- where there is nothing beside it to blame the gap on.
     local cx0, cy0 = cell(#sends)
-    local aw, ah = C.SEND_W - 6, C.CELL_H - 6
+    local aw, ah = C.SEND_W - C.S(6), C.CELL_H - C.S(6)
     local ax, ay = cx0 + (C.SEND_W - aw) * 0.5, cy0 + (C.CELL_H - ah) * 0.5
     ImGui.SetCursorScreenPos(ctx, ax, ay)
     local pressed = ImGui.InvisibleButton(ctx, ID .. "add", aw, ah)

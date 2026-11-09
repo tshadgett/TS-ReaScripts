@@ -410,12 +410,12 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
   local title_x = x + 6
   local aw = C.AUTO_BTN_W
   if w - aw - btn - 12 > 20 then
-    CH.auto_button(ctx, x + w - btn - aw - 8, y + 3, aw, C.HEADER_H - 6,
+    CH.auto_button(ctx, x + w - btn - aw - 8, y + 3, aw, C.HEADER_H - C.S(6),
                    track, idp)
     left_of_buttons = x + w - btn - aw - 8
     local iw = CH.infx_width(track)
     if w - aw - iw - btn - 16 > 20 then
-      CH.infx_button(ctx, x + 3, y + 3, iw, C.HEADER_H - 6, track, idp)
+      CH.infx_button(ctx, x + 3, y + 3, iw, C.HEADER_H - C.S(6), track, idp)
       title_x = x + 3 + iw + 5
     end
   end
@@ -552,7 +552,7 @@ function CH.draw_collapsed(ctx, dl, x, y, w, h, track, idp, ckey, expand, expand
   local master = CH.is_master(track)
   local g = CH.geometry(y + C.HEADER_H, h - C.HEADER_H, master)
   -- pan, in the space between the cap and the meter
-  mini_pan(ctx, dl, idp, x, y + C.HEADER_H + 2, g.top - 4, w, track)
+  mini_pan(ctx, dl, idp, x, y + C.HEADER_H + C.S(2), g.top - 4, w, track)
   local muted = get(track, "B_MUTE") > 0.5
   local solo  = get(track, "I_SOLO") > 0.5
   local rec   = get(track, "I_RECARM") > 0.5
@@ -650,7 +650,7 @@ function CH.geometry(y, h, master)
   local pad, bh, bgap = CH.BODY_PAD, CH.BTN_H, CH.BTN_GAP
   local rows = 3
   local btm  = y + h - pad - rows * bh - (rows - 1) * bgap
-  local top  = y + CH.INPUT_ROW_H + C.CELL_H + 2
+  local top  = y + CH.INPUT_ROW_H + C.CELL_H + C.S(2)
   -- Two lines of readout under the meter (peak, then RMS) and one under
   -- the fader; the taller of the two sets how much the fader gives up.
   -- The extra few pixels keep the RMS figure off the Solo button.
@@ -909,7 +909,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     -- is measured: a slim bar to the meter's right, and the meter a little
     -- narrower to make room, the pair centred together.
     local grt, gre, grp = TP.track_total(track)
-    local gside = grt and (C.GR_BAR_W + 2) or 0
+    local gside = grt and (C.GR_BAR_W + C.S(2)) or 0
     local mw = math.min(half - 4 - gside, C.LEVEL_METER_W * math.min(k, 1.75))
     local mx = x + pad + half + (half - mw - gside) * 0.5
     W.level_meter(ctx, dl, mx, top, mw, fh, lv, hold, true, rms_live)
@@ -920,7 +920,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
       for _, p in ipairs(grp) do if p.est then est_db = est_db + p.db end end
       W.gr_bar(dl, gx, top, C.GR_BAR_W, fh, grt, gpk, grange, est_db)
       local g_over = ImGui.IsWindowHovered(ctx)
-                     and ImGui.IsMouseHoveringRect(ctx, gx - 1, top, gx + C.GR_BAR_W + 1, top + fh)
+                     and ImGui.IsMouseHoveringRect(ctx, gx - 1, top, gx + C.GR_BAR_W + C.S(1), top + fh)
       local lines = { ("Track gain reduction: %.1f dB (peak %.1f)"):format(grt, gpk) }
       local unzeroed = false
       for _, p in ipairs(grp) do

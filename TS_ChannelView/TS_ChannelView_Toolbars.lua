@@ -114,7 +114,7 @@ local function bar_window(d)
   end
   -- tall enough for a row of its buttons under the title bar: floating,
   -- it can't be made shorter
-  local min_h = ImGui.GetFrameHeight(ctx) + 8 + C.TB_MIN_H + 6
+  local min_h = ImGui.GetFrameHeight(ctx) + 8 + C.TB_MIN_H + C.S(6)
   ImGui.SetNextWindowSize(ctx, 420, min_h + 8, ImGui.Cond_FirstUseEver)
   ImGui.SetNextWindowSizeConstraints(ctx, 60, min_h, 100000, 100000)
   -- the bar's own background (its right-click > Background), else the theme's

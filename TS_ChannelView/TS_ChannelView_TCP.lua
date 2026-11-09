@@ -984,7 +984,7 @@ local function draw_flyout()
 
   local row = nil
   for _, e in ipairs(app.rows) do if e.guid == f.guid then row = e break end end
-  local H  = math.max(C.HEADER_H + 120, math.min(C.TCP_PANEL_H, g.bottom - g.top))
+  local H  = math.max(C.HEADER_H + C.S(120), math.min(C.TCP_PANEL_H, g.bottom - g.top))
   -- Channel, then Sends and Receives beside it, as in ChannelView's own
   -- channel view -- the same panels, drawn by the same module.
   local CW   = C.CHANNEL_W
@@ -1344,7 +1344,7 @@ local function frame()
 
       -- The bottom toolbar: whatever is left below the arrange view --
       -- level with its scrollbar and the transport under it.
-      if bottom - area_bot >= C.TB_MIN_H + 2 then
+      if bottom - area_bot >= C.TB_MIN_H + C.S(2) then
         local dl = ImGui.GetWindowDrawList(ctx)
         ImGui.DrawList_AddLine(dl, wx, area_bot + 0.5, wx + ww, area_bot + 0.5,
           C.COL.panel_border, 1.0)

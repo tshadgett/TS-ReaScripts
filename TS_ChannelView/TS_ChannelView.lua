@@ -4549,7 +4549,7 @@ local function track_title(ctx, left_limit, right_limit, mid_y)
   local chip_w, gap = 9, 7
   -- the rack's padlock, in front: locked to this track, or following the
   -- selection (it stays when the name doesn't fit, so it can be undone)
-  local lock_w = RACK and (C.ICON_SIZE + 6) or 0
+  local lock_w = RACK and (C.ICON_SIZE + C.S(6)) or 0
   local nw, th = ImGui.CalcTextSize(ctx, name)
   local sw     = ImGui.CalcTextSize(ctx, sub)
   local total  = lock_w + chip_w + gap + nw + gap + sw
@@ -5016,7 +5016,7 @@ local function menu_bar()
   -- FX chain bypass is pushed hard right; the title then gets whatever
   -- is between the two.
   local fx_tw = ImGui.CalcTextSize(ctx, "FX")
-  local fx_w  = C.ICON_SIZE + 4 + fx_tw
+  local fx_w  = C.ICON_SIZE + C.S(4) + fx_tw
   local avail = ImGui.GetContentRegionAvail(ctx)
   local fx_left = menus_right + avail
   if app.track and avail > fx_w + 12 then
@@ -5061,7 +5061,7 @@ local function menu_bar()
   -- The view toggle sits on the left, straight after the menus; the
   -- title's left limit moves past it.
   do
-    local tw = C.ICON_SIZE + 10
+    local tw = C.ICON_SIZE + C.S(10)
     if not RACK and fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, menus_right + 6, mid_y - C.ICON_SIZE * 0.5)
@@ -5071,7 +5071,7 @@ local function menu_bar()
   end
 
   -- a hairline, then the tools
-  if fx_left - menus_right > GROUP_GAP + C.ICON_SIZE + 46 then
+  if fx_left - menus_right > GROUP_GAP + C.ICON_SIZE + C.S(46) then
     hairline(menus_right + GROUP_GAP * 0.5)
     menus_right = menus_right + GROUP_GAP
   end
@@ -5079,7 +5079,7 @@ local function menu_bar()
   -- MIDI learn: the drawer under the header (TS_CV_MidiLearn), first after
   -- the hairline
   do
-    local tw = C.ICON_SIZE + 6
+    local tw = C.ICON_SIZE + C.S(6)
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
@@ -5098,7 +5098,7 @@ local function menu_bar()
   -- in the Visualizer's spectrum, amber with one of them missing. Click
   -- for the menu.
   if app.track then
-    local tw = C.ICON_SIZE + 6
+    local tw = C.ICON_SIZE + C.S(6)
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
@@ -5130,7 +5130,7 @@ local function menu_bar()
   -- ARA plugin, the pre probe and the modulators); with one, its menu.
   -- (the Trimmer: Pro)
   if app.track and TRM then
-    local tw = C.ICON_SIZE + 6
+    local tw = C.ICON_SIZE + C.S(6)
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
@@ -5180,7 +5180,7 @@ local function menu_bar()
   -- Action drawers (TS_CV_Drawers): lit while any is open; click for the
   -- list, to open or close each, make a new one, or organise them.
   do
-    local tw = C.ICON_SIZE + 6
+    local tw = C.ICON_SIZE + C.S(6)
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, menus_right + 2, mid_y - C.ICON_SIZE * 0.5)
@@ -5196,14 +5196,14 @@ local function menu_bar()
   end
 
   -- the FX chain's group, after a hairline left of FX on/off
-  if app.track and fx_left - menus_right > GROUP_GAP + C.ICON_SIZE + 46 then
+  if app.track and fx_left - menus_right > GROUP_GAP + C.ICON_SIZE + C.S(46) then
     fx_left = fx_left - GROUP_GAP
     hairline(fx_left + GROUP_GAP * 0.5)
   end
 
   -- Load an FX chain, left of the FX bypass.
   if app.track then
-    local tw = C.ICON_SIZE + 6
+    local tw = C.ICON_SIZE + C.S(6)
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
@@ -5254,7 +5254,7 @@ local function menu_bar()
 
   -- Freeze: lit while the track has frozen plugins
   if app.track then
-    local tw = C.ICON_SIZE + 6
+    local tw = C.ICON_SIZE + C.S(6)
     if fx_left - menus_right > tw + 40 then
       local fst = frozen_state()
       ImGui.SameLine(ctx, 0, 0)
@@ -5273,7 +5273,7 @@ local function menu_bar()
 
   -- The rack: fold every plugin, or open again the ones that folded
   if RACK and app.track then
-    local tw = C.ICON_SIZE + 6
+    local tw = C.ICON_SIZE + C.S(6)
     if fx_left - menus_right > tw + 40 then
       ImGui.SameLine(ctx, 0, 0)
       ImGui.SetCursorScreenPos(ctx, fx_left - tw, mid_y - C.ICON_SIZE * 0.5)
@@ -5497,7 +5497,7 @@ local function draw_brackets()
         end
         if os_n > 0 then
           local ox = sx + sq + 4 + (label and (tw + 4) or 0)
-          local bh = C.BRK_ROW_H - 1
+          local bh = C.BRK_ROW_H - C.S(1)
           ImGui.DrawList_AddRectFilled(dl, ox, ly - bh * 0.5, ox + ow, ly + bh * 0.5, col, 2.0)
           W.push_small(ctx)
           local ot = ("%dx"):format(os_lit)
@@ -5778,7 +5778,7 @@ function POP.window(w, now)
         return wd or 120, POP.LABEL_H + (ht or ph)
       end
       local x, y = ImGui.GetCursorScreenPos(ctx)
-      local gap = C.PANEL_GAP + 4
+      local gap = C.PANEL_GAP + C.S(4)
       for k, it in ipairs(items) do
         local pw, h = one(k, it, x, y)
         -- every panel's line at the row's top, or each under the last
@@ -6103,7 +6103,7 @@ end
 
 local rack_fit = {}      -- guid -> { sig, h }
 local function rack_height(fx, layout, key, rack_w)
-  if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
+  if St.is_collapsed(fx.guid) then return C.HEADER_H + C.S(2) end
   ROWS.read()
   local sig = table.concat({ tostring(layout), key, math.floor(rack_w), math.floor(reaper.time_precise() * 2),
                              tostring(P.RACK_ROWS),
@@ -6168,7 +6168,7 @@ end
 local function rack_brk_strip(b, colx, colw)
   local dl = ImGui.GetWindowDrawList(ctx)
   local x0, y0 = ImGui.GetCursorScreenPos(ctx)
-  local h = C.BRK_ROW_H + 4
+  local h = C.BRK_ROW_H + C.S(4)
   local lx = colx + 3 + (b.row + 0.5) * C.RACK_BRK_W
   local col = C.COL.brk_container
   local off = not T.get_enabled(app.track, b.node.addr)
@@ -6193,7 +6193,7 @@ local function rack_brk_strip(b, colx, colw)
   local tw = ImGui.CalcTextSize(ctx, label)
   local os_lit = T.os_state(app.track, { addr = b.node.addr, ancestors = box_ancestors(b.node) }).lit
   if os_lit then
-    local ox, ow, bh = sx + sq + 5 + tw + 6, W.os_width(ctx, os_lit), C.BRK_ROW_H - 1
+    local ox, ow, bh = sx + sq + 5 + tw + 6, W.os_width(ctx, os_lit), C.BRK_ROW_H - C.S(1)
     ImGui.DrawList_AddRectFilled(dl, ox, my - bh * 0.5, ox + ow, my + bh * 0.5, col, 2.0)
     W.push_small(ctx)
     local ot = ("%dx"):format(os_lit)
@@ -6264,8 +6264,8 @@ local function rack_inside(rack_w)
     if fst.levels > 0 then
       local _, fy = ImGui.GetCursorScreenPos(ctx)
       for k, name in ipairs(frozen_names(fst)) do
-        frozen_strip(ctx, "rfz" .. k, colx, fy, rack_w, C.HEADER_H + 2, k .. " \u{00B7} " .. name, fst)
-        fy = fy + C.HEADER_H + 2 + C.PANEL_GAP
+        frozen_strip(ctx, "rfz" .. k, colx, fy, rack_w, C.HEADER_H + C.S(2), k .. " \u{00B7} " .. name, fst)
+        fy = fy + C.HEADER_H + C.S(2) + C.PANEL_GAP
       end
       -- the line between: "frozen above", dashes, Unfreeze, on a band of
       -- its own the column's width
@@ -6329,7 +6329,7 @@ local function rack_inside(rack_w)
       rack_brk_lines(colx, strip_y)
       ImGui.SetCursorScreenPos(ctx, keep_x, keep_y)
     end
-    if add_tile(C.HEADER_H + 12, rack_w) then B.open_menu(nil) end
+    if add_tile(C.HEADER_H + C.S(12), rack_w) then B.open_menu(nil) end
   end
   -- the wheel scrolls the column, when no control took it
   if ImGui.IsWindowHovered(ctx, ImGui.HoveredFlags_ChildWindows) then

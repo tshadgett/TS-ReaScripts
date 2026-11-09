@@ -1836,7 +1836,7 @@ right-click ▸ *Group looks…*.
   font from the list, *sans-serif*, *serif* or *monospace*, or type any
   installed font's name under *Other…*. A larger header font makes the
   header taller; control cells keep their size. Presets keep the fonts.
-- **Sizes:** control spacing.
+- **Sizes:** *Overall size*, 50% to 150%: everything together (controls, text, panels, meters, bars and the track row), each of ChannelView, the rack and the TCP window its own; then control spacing.
 - **Depth (Pro):** the 3D effect, Lighting and Shadows.
 - **The TCP window's tab** has its rows' own settings too: corner rounding
   for its track panels (Pro; the panels' own, or its own), background

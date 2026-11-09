@@ -1742,6 +1742,18 @@ check("collapsed width unchanged", P.width(8, H, true, true), C.COLLAPSED_W)
 local function fits(text, px, font_px)
   return #text * font_px * 0.55 <= px
 end
+-- the overall size: every measurement from its own 100%, again and again
+do
+  local cw0 = C.CELL_W_RAW or 50
+  C.set_cell_w(50)
+  C.set_ui(0.5)
+  local half = table.concat({ C.CELL_W, C.CELL_H, C.KNOB_D, C.SIZES.small.d, C.PANEL_PAD, C.S(8) }, " ")
+  C.set_ui(1.5); C.set_ui(1)
+  local back = table.concat({ C.CELL_W, C.CELL_H, C.KNOB_D, C.SIZES.small.d, C.PANEL_PAD, C.S(8) }, " ")
+  check("overall size: half, then back", half .. " / " .. back, "25 32 17 9 3 4 / 50 64 34 18 6 8")
+  C.set_ui(9); check("overall size: held to 150%", C.UI, 1.5)
+  C.set_ui(1); C.set_cell_w(cw0)
+end
 check("bar stays thin",             C.METER_W <= 14, true)
 check("column still under a cell",  C.METER_COL_W < C.CELL_W, true)
 -- (narrow: the value over its unit, stacked)

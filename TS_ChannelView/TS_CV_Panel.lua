@@ -165,7 +165,6 @@ end
 --
 -- A GRID (Grid= in the layout) is placed where it says instead: see
 -- "grids" below.
-local HALF_H = C.CELL_H * 0.5
 
 -- `n` half-cells across, or down, in pixels: a whole number whenever it
 -- is one, so an ordinary layout's positions stay whole pixels.
@@ -527,7 +526,7 @@ local function place_flow(controls, half_rows, rows)
   end
   return { rows = rows, items = items, rules = rules, rule_cuts = cuts, width = left(total),
            sections = styled, gaps = gaps, spacers = spacers,
-           height = math.max(1, math.min(half_rows, deepest)) * HALF_H }
+           height = math.max(1, math.min(half_rows, deepest)) * (C.CELL_H * 0.5) }
 end
 
 P.place_flow = place_flow   -- for the tests: it must agree with the strips
@@ -616,7 +615,7 @@ local function layout_flow(controls, rows)
 
   return { rows = rows, items = items, rules = rules, width = x, sections = styled, gaps = gaps,
            spacers = spacers,
-           height = math.max(1, math.min(half_rows, deepest)) * HALF_H }
+           height = math.max(1, math.min(half_rows, deepest)) * (C.CELL_H * 0.5) }
 end
 
 -- ---------------------------------------------------------------------
@@ -1355,14 +1354,14 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
     local body_h = avail_h - C.TAB_STRIP_H
     for _, pg in ipairs(pages) do
       local lay = P.layout(pg.controls, body_h, lock)
-      local sb = P.scrolls(lay, body_h, lock) and C.SCROLL_W + 2 or 0
+      local sb = P.scrolls(lay, body_h, lock) and C.SCROLL_W + C.S(2) or 0
       inner = math.max(inner, lay.width + sb)
     end
     inner = math.max(inner, tab_strip_est(pages) - C.PANEL_PAD * 2)
   else
     local lay = P.layout(controls, avail_h, lock)
     -- a locked grid too tall for the panel scrolls, its scrollbar beside it
-    local sb = P.scrolls(lay, avail_h, lock) and C.SCROLL_W + 2 or 0
+    local sb = P.scrolls(lay, avail_h, lock) and C.SCROLL_W + C.S(2) or 0
     inner = lay.width + sb
   end
   local w = math.max(C.PANEL_MIN_W, inner + C.PANEL_PAD * 2)
@@ -2824,7 +2823,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
   -- a locked grid too tall to fit scrolls, its scrollbar at the right
   local reg_x0 = grid_x0
-  if scroll then grid_w = grid_w - (C.SCROLL_W + 2) end
+  if scroll then grid_w = grid_w - (C.SCROLL_W + C.S(2)) end
   local reg_w = grid_w
 
   -- A grid narrower than the room it has is CENTRED in it. The panel has
@@ -2871,7 +2870,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     ImGui.PushStyleColor(ctx, ImGui.Col_ChildBg, 0)
     ImGui.PushStyleColor(ctx, ImGui.Col_ScrollbarBg, 0)
     ImGui.PushStyleVar(ctx, ImGui.StyleVar_ScrollbarSize, C.SCROLL_W)
-    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + 2 + 4, h, 0,
+    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + C.S(2) + 4, h, 0,
       ImGui.WindowFlags_NoScrollWithMouse)
     ImGui.PopStyleVar(ctx)
     ImGui.PopStyleColor(ctx, 2)
@@ -4135,7 +4134,7 @@ local function rack_grid_tall(vis, avail, lock)
   for _, list in ipairs(lists) do
     local lay = P.layout_w(list, avail, lock)
     if lay then
-      local sb = (lock and lay.width > avail + 0.5) and C.SCROLL_W + 2 or 0
+      local sb = (lock and lay.width > avail + 0.5) and C.SCROLL_W + C.S(2) or 0
       tall = math.max(tall, lay.height + sb)
     end
   end
@@ -4144,7 +4143,7 @@ end
 
 -- (`shared`: ChannelView shows this layout too, P.rack_from_rows)
 function P.rack_height(track, fx, layout, key, w, shared)
-  if St.is_collapsed(fx.guid) then return C.HEADER_H + 2 end
+  if St.is_collapsed(fx.guid) then return C.HEADER_H + C.S(2) end
   local base = P.head_h() + P.footer_h()
   if own_trim(key) then return base + (layout.own_h or TRP.rack_body_h(w)) end
   local io = P.has_io(track, fx, layout)

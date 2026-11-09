@@ -204,7 +204,7 @@ end
 
 -- Strip mode: the folded bar's height, and the least height at which the
 -- cells fit across w (or the tallest tried, when nothing does).
-function MR.bar_h() return C.HEADER_H + 2 end
+function MR.bar_h() return C.HEADER_H + C.S(2) end
 function MR.strip_h(which, track, w)
   if not track or MR.is_collapsed(which) then return MR.bar_h() end
   local s = MD.scan(track)

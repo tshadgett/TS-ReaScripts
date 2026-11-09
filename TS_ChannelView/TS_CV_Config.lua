@@ -28,7 +28,8 @@ C.CELL_W      = 50        -- width of one control cell (Visual Options ▸ Sizes
 C.CELL_W_DEFAULT, C.CELL_W_MIN, C.CELL_W_MAX = 50, 46, 64
 function C.set_cell_w(v)
   v = math.floor(tonumber(v) or C.CELL_W_DEFAULT)
-  C.CELL_W = math.max(C.CELL_W_MIN, math.min(C.CELL_W_MAX, v))
+  C.CELL_W_RAW = math.max(C.CELL_W_MIN, math.min(C.CELL_W_MAX, v))
+  C.CELL_W = math.floor(C.CELL_W_RAW * (C.UI or 1) + 0.5)
 end
 C.CELL_H      = 64        -- height of one control cell (name + knob + value)
 C.KNOB_D      = 34        -- knob diameter within the cell
@@ -304,7 +305,8 @@ C.CHANNEL_W   = 112       -- expanded width of the Channel panel (Visual Options
 C.CHANNEL_W_DEFAULT, C.CHANNEL_W_MIN, C.CHANNEL_W_MAX = 112, 72, 240
 function C.set_channel_w(v)
   v = math.floor(tonumber(v) or C.CHANNEL_W_DEFAULT)
-  C.CHANNEL_W = math.max(C.CHANNEL_W_MIN, math.min(C.CHANNEL_W_MAX, v))
+  C.CHANNEL_W_RAW = math.max(C.CHANNEL_W_MIN, math.min(C.CHANNEL_W_MAX, v))
+  C.CHANNEL_W = math.floor(C.CHANNEL_W_RAW * (C.UI or 1) + 0.5)
 end
 C.FADER_W    = 26        -- the fader's own track within its half
 C.FADER_CAP_H = 16        -- the moving cap: big enough to grab and to
@@ -1282,6 +1284,48 @@ end
 function C.plate_key(key)
   local p = C.plate_of(key)
   return p and p.key or nil
+end
+
+-- ---------------------------------------------------------------------
+-- Overall size (Visual Options ▸ Sizes, per tab): every measurement
+-- below grown or shrunk together from what it is at 100%. C.S(n) is a
+-- drawing's own pixel count at that size. Text sizes follow
+-- (TS_CV_VisualOptions apply_fonts), and so does the cell width.
+-- ---------------------------------------------------------------------
+C.UI = 1.0
+C.UI_MIN, C.UI_MAX = 0.5, 1.5
+local UI_KEYS = {
+  "CELL_H", "KNOB_D", "LABEL_GAP", "CTL_MARGIN", "PANEL_PAD", "PANEL_GAP", "TAB_STRIP_H", "FOOTER_H",
+  "SCROLL_W", "PANEL_MIN_W", "STRIP_H", "ICON_ROW_H", "TRACKROW_PAD_Y", "ICON_SIZE", "MIX_GAP",
+  "INFX_BTN_W", "AUTO_BTN_W", "COLLAPSED_W", "METER_W", "GR_BAR_H", "METER_COL_W", "IO_COL_W", "GRV_W",
+  "IO_BAR_W", "IO_BAR_W_SCALE", "METER_W_SCALE", "METER_FONT", "FADER_W", "FADER_CAP_H",
+  "GR_BAR_W", "LEVEL_METER_W", "SEND_W", "SEND_COL_GAP", "RMS_STRIP_W", "DIVIDER_W", "EQ_PANEL_W",
+  "RC_PANEL_W", "MAP_EQ_W", "MAP_COMP_W", "EQ_NODE_R", "TRACK_BTN_W", "ADD_TILE_W", "BRK_ROW_H",
+  "BRK_PAD", "ROW_TOP_GAP", "MENU_PAD_Y", "STRIP_SPACER", "COLOUR_STRIPE", "TCP_STRIP_W", "TCP_INDENT",
+  "TCP_PAD", "TCP_METER_H", "TCP_METER_THIN", "TCP_ICON_MAX", "TCP_LANE_W", "TCP_CHIP", "TCP_EDGE",
+  "TCP_ADD_H", "TB_BTN", "TB_GAP", "TB_MIN_H",
+}
+local ui_base = nil
+function C.S(n) local v = n * C.UI; return math.tointeger(v) or v end
+-- The size, 0.5 to 1.5. Each measurement from its own 100% value, so it
+-- can be set again and again; the cell width and the channel strip's are
+-- Visual Options' own and scaled where they're set.
+function C.set_ui(k)
+  k = math.max(C.UI_MIN, math.min(C.UI_MAX, tonumber(k) or 1))
+  if not ui_base then
+    ui_base = { sizes = {} }
+    for _, key in ipairs(UI_KEYS) do ui_base[key] = C[key] end
+    for name, sz in pairs(C.SIZES) do ui_base.sizes[name] = sz.d end
+  end
+  C.UI = k
+  local function r(v) return (v >= 3) and math.floor(v * k + 0.5) or v * k end
+  for _, key in ipairs(UI_KEYS) do
+    if type(ui_base[key]) == "number" then C[key] = r(ui_base[key]) end
+  end
+  for name, sz in pairs(C.SIZES) do sz.d = r(ui_base.sizes[name]) end
+  if C.CELL_W_RAW then C.set_cell_w(C.CELL_W_RAW) end
+  if C.CHANNEL_W_RAW then C.set_channel_w(C.CHANNEL_W_RAW) end
+  C.SENDS_MAX_W = 3 * C.SEND_W + C.SEND_COL_GAP * 2 + C.PANEL_PAD * 2
 end
 
 return C

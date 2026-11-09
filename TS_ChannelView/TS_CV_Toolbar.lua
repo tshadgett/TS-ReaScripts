@@ -1374,7 +1374,7 @@ function TB.draw(ctx, x, y, w, h, no_menu, dir)
   bh = math.min(bh, h - 4)
 
   -- Settings, hard right.
-  local mb = C.ICON_SIZE + 4
+  local mb = C.ICON_SIZE + C.S(4)
   local mx = x + w - mb - 4
   -- a row as tall as a tile when the bar shows tiles
   local rh = math.min(TB.row_h(bh), h - 4)

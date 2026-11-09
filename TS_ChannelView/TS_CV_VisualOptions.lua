@@ -87,6 +87,7 @@ local FIELDS = {
   { "trackcol",   "stripe", "str",  true },
   { "icons",      false,    "bool", true },
   { "cell_w",     C.CELL_W_DEFAULT, "num", true },
+  { "ui",         100,      "num",  true },     -- the overall size, % (not the web page's)
   -- Text: t_ the panels' text, h_ their headers, b_ the toolbars; a font
   -- nil is ReaImGui's own (t_) or the text's (h_, b_)
   { "t_font",     nil,      "str",  true },
@@ -327,6 +328,10 @@ function VO.apply(tab)
   C.METER_SCALES = pro and val(s, "mscale") or false
   C.TRACK_ICONS = val(s, "icons")
   C.TCP_ICONS   = C.TRACK_ICONS
+  -- the overall size first: the cell width and the type follow it
+  C.set_ui(((tab == "web") and 100 or val(s, "ui")) / 100)
+  local okW, Wd = pcall(require, "TS_CV_Widgets")
+  if okW and Wd then Wd.LABEL_H = math.floor(11 * C.UI + 0.5) end
   C.set_cell_w(val(s, "cell_w"))
   VO.apply_fonts(s)
   C.EFFECT_3D = pro and val(s, "d3") or false
@@ -348,6 +353,7 @@ function VO.apply_fonts(s)
   local function one(p, name)
     local lim = VO.SIZES[p]
     local size = math.max(lim[1], math.min(lim[2], math.floor(val(s, p .. "_size") + 0.5)))
+    size = math.max(7, math.floor(size * (C.UI or 1) + 0.5))         -- the overall size
     local f = { name = name, size = size, b = val(s, p .. "_b"), i = val(s, p .. "_i"), u = val(s, p .. "_u") }
     f.key = ("%s|%d|%s%s"):format(f.name or "", size, f.b and "b" or "", f.i and "i" or "")
     return f
@@ -357,7 +363,7 @@ function VO.apply_fonts(s)
     head = one("h", s.h_font or s.t_font),
     bar  = one("b", s.b_font or s.t_font),
   }
-  C.HEADER_H = math.max(20, (C.FONTS.head and C.FONTS.head.size or VO.SIZE_DEFAULT) + 7)
+  C.HEADER_H = math.floor(math.max(C.S(20), (C.FONTS.head and C.FONTS.head.size or VO.SIZE_DEFAULT) + C.S(7)) + 0.5)
 end
 
 -- ---------------------------------------------------------------------
@@ -1010,6 +1016,13 @@ end
 
 local function page_sizes(ctx, tab, s)
   section(ctx, "Sizes")
+  if tab ~= "web" then
+    row(ctx, "Overall size")
+    ImGui.SetNextItemWidth(ctx, 200)
+    local uch, uv = ST.slider_int(ctx, "##vo_ui", math.floor(val(s, "ui") + 0.5), 50, 150, "%d%%")
+    if uch then set(tab, "ui", math.floor(uv / 5 + 0.5) * 5) end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Everything together: controls, text, panels and bars.") end
+  end
   row(ctx, "Control spacing")
   ImGui.SetNextItemWidth(ctx, 200)
   local ch, v = ST.slider_int(ctx, "##vo_cw", math.floor(val(s, "cell_w")), C.CELL_W_MIN, C.CELL_W_MAX, "%d px")
