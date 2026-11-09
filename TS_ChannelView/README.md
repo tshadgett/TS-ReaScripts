@@ -2428,9 +2428,13 @@ script into the action list.
   hides them), folded until you open them. Macros play here — knobs,
   buttons, faders, dropdowns and XY pads — and a modulator's tile opens to
   its settings. Controls they drive follow them and show their range or
-  swing, as on the desktop. The + tile adds a macro or a modulator;
-  removing, linking, ranges, names, colours and lanes are done on the
-  desktop.
+  swing, as on the desktop. The + tile adds a macro or a modulator.
+  **Linking:** tap a macro's or modulator's ◯ (an XY pad has one for X and
+  one for Y), then tap controls to link or unlink them, and Done. Hold a
+  linked control (or right-click it) for its range: *At 0%*, *At 100%*,
+  *Swap the ends*, *Whole range* from a macro; *Depth*, *Invert*,
+  *Bipolar* from a modulator; and *Unlink*. Hold a macro or a modulator to
+  link, rename or remove it. Colours and lanes are set on the desktop.
 - **Console:** with a console set up in the project (Console setup), its
   panel sits left of the fader strip, folded until you open it, as on the
   desktop (outlined while the console is in): the mix's type, Drive, *Console in*, A / B (hold it to hear the
