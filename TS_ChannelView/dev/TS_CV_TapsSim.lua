@@ -1292,6 +1292,26 @@ if NEW then
   check("listen hold: the band's own Solo, on and off", table.concat(sw, ","), "true,false")
 end
 
+-- a plugin's own meters moving on the test noise aren't touches: no new
+-- zero asked for while one is measured, or just after
+do
+  local got, real, real_lt = {}, TP.touched, reaper.GetLastTouchedFX
+  TP.touched = function(_, _, p) got[#got + 1] = tostring(p) end
+  local lt = { 1, 0, 1 }
+  reaper.GetLastTouchedFX = function() return true, lt[1], lt[2], lt[3] end
+  local ph = TP.CAL_BASE + 1                      -- track 1's pre probe phase
+  TP.update()                                      -- the first seen: remembered
+  lt = { 1, 0, 2 }; TP.update()                    -- a touch
+  gmem[ph] = 1
+  lt = { 1, 0, 5 }; TP.update(); lt = { 1, 0, 6 }; TP.update()
+  gmem[ph] = 0
+  lt = { 1, 0, 7 }; TP.update()                    -- a moment after
+  now_t = now_t + 4
+  lt = { 1, 0, 8 }; TP.update()                    -- later: a touch again
+  check("zero run: its meters aren't touches", table.concat(got, ","), "2,8")
+  TP.touched, reaper.GetLastTouchedFX = real, real_lt
+end
+
 -- ---------------------------------------------------------------- records
 check("v2 round trip", TP.format_record(TP.parse_record("v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")),
       "v2|TOP|{P}|{A},{B}+{C},5,7,3,gl,{K1}+{K2}")

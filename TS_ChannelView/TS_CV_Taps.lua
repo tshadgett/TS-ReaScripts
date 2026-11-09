@@ -2606,15 +2606,31 @@ function TP.touched(tr, guid, p)
   PL.set(tr, rd.probe, "rst", i, (math.floor(PL.get(tr, rd.probe, "rst", i) or 0) + 1) % 1000000)
 end
 
+-- A track's zero being measured (the pre probe's phase, TS_TrackProbe's
+-- CAL_BASE + index * 8 + 1), or a moment after: a plugin that reports its
+-- own meters as parameters moves them on the test noise, and REAPER takes
+-- that for a touch -- which would ask for the zero again, every five
+-- seconds, for as long as it's stopped.
+TP.CAL_BASE, TP.CAL_STRIDE = 0x60000, 8
+TP.cal_seen = {}
+local function zero_running(tr, trn)
+  if trn < 1 or trn > 4096 then return false end
+  local now = reaper.time_precise()
+  if reaper.gmem_read(TP.CAL_BASE + (trn - 1) * TP.CAL_STRIDE + 1) > 0 then TP.cal_seen[tr] = now end
+  return now - (TP.cal_seen[tr] or -100) < 3
+end
+
 local function poll_touched()
   local ok, trn, fxn, parm = reaper.GetLastTouchedFX()
   if not ok then return end
+  local tr = (trn == 0) and reaper.GetMasterTrack(0) or reaper.GetTrack(0, trn - 1)
+  -- (watched every frame, so the moment after a run is caught too)
+  local running = tr and zero_running(tr, trn)
   local k = ("%d:%d:%d"):format(trn, fxn, parm)
   if k == last_touch then return end
   local first = (last_touch == nil)
   last_touch = k
-  if first then return end
-  local tr = (trn == 0) and reaper.GetMasterTrack(0) or reaper.GetTrack(0, trn - 1)
+  if first or running then return end
   if tr then TP.touched(tr, fx_guid(tr, fxn), parm) end
 end
 
