@@ -2541,19 +2541,6 @@ function W.step_named_h(o, n)
 end
 local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cur, opts)
   local changed = false
-  local to
-  if hovered and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
-    local back = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0
-    to = (cur - 1 + (back and -1 or 1)) % n + 1
-  elseif hovered and not W.wheel_taken() then
-    local wv = W.control_wheel(ctx)
-    if wv ~= 0 then
-      W.take_wheel()
-      to = math.max(1, math.min(n, cur + (wv > 0 and 1 or -1)))
-    end
-  end
-  if to and to ~= cur then cur, value, changed = to, choices[to].norm, true end
-
   local base_col = opts.on_col or C.COL.toggle_on
   local on_cols = opts.on_cols or {}
   local pat = opts.pattern
@@ -2567,8 +2554,9 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
   end
   local where = opts.leds
   local names = (where == nil or where == "column") and opts.ledn ~= false
+  -- no button: just the named lamps, a list to click
+  local hide = opts.nobtn and names and not pat
   local top, bot = opts.no_name and (y + 2) or (y + W.LABEL_H + C.LABEL_GAP), y + ch - 2
-  local cap_text = (where == "over" or where == "none" or not names) and (choices[cur].text or "") or nil
 
   -- where the cap and the lamps go: a cap up to 26 px tall, centred in
   -- its room
@@ -2587,7 +2575,7 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
     -- a column over the cap, names on their left, as on the hardware; the
     -- cap at the foot, the same size whatever the count, so a row of them
     -- lines up
-    local caph = math.min(26, math.max(14, bot - top - m * 8 - 2))
+    local caph = hide and 0 or math.min(26, math.max(14, bot - top - m * 8 - 2))
     local sp = math.max(8, math.min(12, (bot - caph - 2 - top) / math.max(1, m)))
     local lx = names and (x + cw - 9) or (x + cw * 0.5)
     for i = 1, m do lamps[i] = { lx, top + 5 + (i - 1) * sp } end
@@ -2596,7 +2584,7 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
   elseif where == "none" then
     bx1, by1, bx2, by2 = cap_in(x + 4, x + cw - 4, top + 2, bot)
   else
-    local capw = names and math.min(34, cw * 0.42) or math.max(20, cw - 22)
+    local capw = hide and -4 or names and math.min(34, cw * 0.42) or math.max(20, cw - 22)
     local sp = math.min(12, (bot - top) / math.max(1, m))
     local ly0 = (top + bot) * 0.5 - sp * (m - 1) * 0.5
     for i = 1, m do lamps[i] = { x + 13 + capw, ly0 + (i - 1) * sp } end
@@ -2604,14 +2592,48 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
   end
 
   local mx, my = ImGui.GetMousePos(ctx)
-  local hot = hovered and mx >= bx1 and mx <= bx2 and my >= by1 and my <= by2
+  -- the lamp (and its name) under the pointer: a click goes straight there
+  local on_lamp
+  if hovered and not pat and where ~= "none" and #lamps > 1 then
+    local sp = math.abs((lamps[2][1] - lamps[1][1]) + (lamps[2][2] - lamps[1][2]))
+    local half = math.max(4, sp * 0.5)
+    for i = 1, math.min(n, #lamps) do
+      local lx, ly = lamps[i][1], lamps[i][2]
+      local inside
+      if where == "over" then
+        inside = math.abs(mx - lx) <= half and math.abs(my - ly) <= 6
+      elseif name_left then
+        inside = math.abs(my - ly) <= half and mx >= x and mx <= lx + 6
+      else
+        inside = math.abs(my - ly) <= half and mx >= lx - 6 and mx <= x + cw
+      end
+      if inside then on_lamp = i break end
+    end
+  end
+  local to
+  if hovered and ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+    if on_lamp then to = on_lamp
+    elseif not hide then
+      local back = (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0
+      to = (cur - 1 + (back and -1 or 1)) % n + 1
+    end
+  elseif hovered and not W.wheel_taken() then
+    local wv = W.control_wheel(ctx)
+    if wv ~= 0 then
+      W.take_wheel()
+      to = math.max(1, math.min(n, cur + (wv > 0 and 1 or -1)))
+    end
+  end
+  if to and to ~= cur then cur, value, changed = to, choices[to].norm, true end
+  local cap_text = (where == "over" or where == "none" or not names) and (choices[cur].text or "") or nil
+  local hot = hovered and not hide and not on_lamp and mx >= bx1 and mx <= bx2 and my >= by1 and my <= by2
   -- lit while it's held down, as a momentary button is
-  local held = ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)
+  local held = ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) and not on_lamp
   local ink_col = (where == "none" and not pat and not held) and (on_cols[cur] or nil) or nil
   local cap_col = pat and base_col or (on_cols[cur] or base_col)
   -- its own pictures: Off, and On while held
   local pic_img, piw, pih
-  if opts.img then
+  if opts.img and not hide then
     local file = (held and opts.img.file2) or opts.img.file
     pic_img, piw, pih = W.picture(ctx, opts.img, file)
     if pic_img and piw and piw > 0 and pih > 0 then
@@ -2627,8 +2649,8 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
       pic_img = nil
     end
   end
-  if pic_img then
-    -- (the picture is the whole cap)
+  if pic_img or hide then
+    -- (the picture is the whole cap; or there's none)
   elseif STEP_SWITCH[opts.style or ""] then
     SW.draw(ctx, dl, opts.style, bx1, by1, bx2, by2, held, cap_col, not C.EFFECT_3D,
       cap_text or "", hot, nil)
@@ -2663,7 +2685,7 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
           local tw, th = ImGui.CalcTextSize(ctx, t)
           while tw > room and #t > 1 do t = t:sub(1, -2); tw = ImGui.CalcTextSize(ctx, t) end
           local tx = name_left and (l[1] - 7 - tw) or (l[1] + 7)
-          ImGui.DrawList_AddText(dl, tx, l[2] - th * 0.5, lit and C.COL.header_text or C.COL.label, t)
+          ImGui.DrawList_AddText(dl, tx, l[2] - th * 0.5, (lit or on_lamp == i) and C.COL.header_text or C.COL.label, t)
         end
       end
     end

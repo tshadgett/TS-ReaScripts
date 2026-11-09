@@ -1325,7 +1325,9 @@ or following ChannelView's).
   left) or *No LEDs* (the name in the choice's colour); then *Each its own
   LED*, *Light up to it* (every LED up to the choice's) or *A pattern of
   LEDs*. Each LED lights in its choice's colour (*Choice colours*), else
-  the button's. A pattern gives the button LEDs of its own, up to eight,
+  the button's. Click an LED or its name to go straight to that choice;
+  *No button, just the list* (LEDs beside or in a column, with names)
+  leaves the list alone, like radio buttons. A pattern gives the button LEDs of its own, up to eight,
   each with its name and colour, and each setting lights any of them (a
   Distressor's *Detector*: HP, Band and Link, two at once for *HP + Link*).
   It's guessed from the settings' names, and Edit layout sets it: the

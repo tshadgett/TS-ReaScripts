@@ -122,7 +122,8 @@
   button that steps through them -- and keeps how many choices it had,
   which is how much room the buttons take. A step button's line goes on:
   step|<n>|<beside, over, column or none: its LEDs>|<1/0: the LEDs'
-  names>|<own, upto or pattern: which LEDs light>. A pattern's LEDs are
+  names>|<own, upto or pattern: which LEDs light>[|nobtn: no button,
+  just the named LEDs, each clicked to choose it]. A pattern's LEDs are
   StepLeds<n>=<name>|<colour>;... (a lit colour's name or #rrggbb) and
   what each choice lights StepLit<n>=<bits>,... (LED 1 the lowest bit).
   Back<n> is control n's own background, an inset or a faceplate, drawn
@@ -608,7 +609,7 @@ local function step_of(v)
   for f in (U.trim(v or "") .. "|"):gmatch("([^|]*)|") do parts[#parts + 1] = U.trim(f) end
   if parts[1] ~= "step" then return nil end
   local where = (parts[3] == "over" or parts[3] == "none" or parts[3] == "column") and parts[3] or nil
-  return where, parts[4] ~= "0", parts[5] == "upto", parts[5] == "pattern"
+  return where, parts[4] ~= "0", parts[5] == "upto", parts[5] == "pattern", parts[6] == "nobtn"
 end
 M.step_of = step_of
 -- A step button's own LEDs and what each choice lights (StepLeds<n>,
@@ -2409,8 +2410,9 @@ local function parse_section(sect)
         local cc = controls[#controls]
         cc.size = combo_width_of(sect["Size" .. i])
         if cc.buttons == "step" then
-          local ledn, litp
-          cc.leds, ledn, cc.upto, litp = step_of(sect["Buttons" .. i])
+          local ledn, litp, nobtn
+          cc.leds, ledn, cc.upto, litp, nobtn = step_of(sect["Buttons" .. i])
+          cc.nobtn = nobtn or nil
           if ledn == false then cc.ledn = false end
           cc.upto = cc.upto or nil
           cc.litp = litp or nil
@@ -2595,7 +2597,8 @@ local function serialize(layout)
     if c.buttons and buttons_of(c.buttons) and c.nbtn then
       out["Buttons" .. (i - 1)] = c.buttons .. "|" .. math.floor(c.nbtn)
         .. ((c.buttons == "step") and ("|" .. (c.leds or "beside") .. "|" .. (c.ledn == false and "0" or "1")
-                                       .. "|" .. (c.litp and "pattern" or c.upto and "upto" or "own")) or "")
+                                       .. "|" .. (c.litp and "pattern" or c.upto and "upto" or "own")
+                                       .. (c.nobtn and "|nobtn" or "")) or "")
       if c.buttons == "step" then
         local a, b = M.step_pat_lines(c.pat)
         if a then out["StepLeds" .. (i - 1)], out["StepLit" .. (i - 1)] = a, b end
@@ -4051,6 +4054,7 @@ function M.copy(layout)
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),
+                        nobtn = c.nobtn,
                         img = M.copy_img(c.img),
                         metal = c.metal, finish = c.finish, fink = c.fink, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),

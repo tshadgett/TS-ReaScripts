@@ -4187,6 +4187,10 @@ local function control_menu()
           if (c.leds == nil or c.leds == "column") and ImGui.MenuItem(ctx, "Their names", nil, c.ledn ~= false) then
             if c.ledn == false then put("ledn", nil) else put("ledn", false) end
           end
+          if (c.leds == nil or c.leds == "column") and c.ledn ~= false and not c.litp
+             and ImGui.MenuItem(ctx, "No button, just the list", nil, c.nobtn == true) then
+            put("nobtn", (not c.nobtn) or nil)
+          end
           if c.leds ~= "none" then
             ImGui.Separator(ctx)
             if ImGui.MenuItem(ctx, "Each its own LED", nil, not c.upto and not c.litp) then

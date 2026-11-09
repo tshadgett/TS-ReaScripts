@@ -245,10 +245,13 @@ do
   M.set(k, { steps = { [4] = 16 }, controls = {
     { param = 3, type = "combo", buttons = "step", nbtn = 3 },
     { param = 4, type = "combo", buttons = "step", nbtn = 16, leds = "over", upto = true },
-    { param = 5, type = "combo", buttons = "step", nbtn = 4, ledn = false } } })
+    { param = 5, type = "combo", buttons = "step", nbtn = 4, ledn = false },
+    { param = 6, type = "combo", buttons = "step", nbtn = 8, nobtn = true } } })
   M.save(); M.reload()
   local l = M.get(k)
   local a, b, c = l.controls[1], l.controls[2], l.controls[3]
+  check("step button: no button, kept and copied", tostring(l.controls[4].nobtn) .. " " .. tostring(M.copy(l).controls[4].nobtn)
+    .. " " .. tostring(l.controls[1].nobtn), "true true nil")
   check("step button: beside, named, its own", table.concat({ a.buttons, a.nbtn, tostring(a.leds), tostring(a.ledn), tostring(a.upto) }, " "),
     "step 3 nil nil nil")
   check("step button: over, up to it", table.concat({ b.buttons, b.nbtn, tostring(b.leds), tostring(b.upto) }, " "), "step 16 over true")
@@ -8795,15 +8798,16 @@ end
 -- Shift+click back; the wheel along them; lamps lit as asked
 do
   local clicked, mods, wheel, lamps, texts = false, 0, 0, {}, {}
+  local mpx, mpy, at = 10, 30, {}
   local fake = setmetatable({
     GetMouseDelta = function() return 0, 0 end, GetMouseWheel = function() return wheel end,
-    GetMousePos = function() return 10, 30 end, GetCursorScreenPos = function() return 0, 0 end,
+    GetMousePos = function() return mpx, mpy end, GetCursorScreenPos = function() return 0, 0 end,
     GetWindowDrawList = function() return "dl" end, InvisibleButton = function() return clicked end,
     IsItemActive = function() return false end, IsItemHovered = function() return true end,
     IsItemClicked = function(_, b) return clicked and b == 0 end, IsMouseDown = function() return false end,
     IsMouseDoubleClicked = function() return false end, IsItemActivated = function() return false end,
     GetKeyMods = function() return mods end, CalcTextSize = function() return 6, 10 end,
-    DrawList_AddCircleFilled = function(_, x, y, r, col) if r > 3 and r < 3.5 then lamps[#lamps + 1] = col end end,
+    DrawList_AddCircleFilled = function(_, x, y, r, col) if r > 3 and r < 3.5 then lamps[#lamps + 1] = col; at[#at + 1] = { x, y } end end,
     DrawList_AddText = function(_, x, y, col, t) texts[#texts + 1] = t end,
     DrawList_AddRect = function(_, x1, y1, x2, y2) lamps.rect = { y1, y2 } end,
   }, { __index = function(_, key)
@@ -8871,6 +8875,29 @@ do
     end
     local two = { { norm = 0, text = "Old" }, { norm = 1, text = "New" } }
     check("step column: lines up, two lamps or three", cap_at(two), cap_at(list))
+    -- a click on a lamp or its name: that choice (MaXyM, BlueARP)
+    clicked = false; at = {}
+    press(0)
+    local third = at[3]
+    clicked = true
+    mpx, mpy = third[1] + 20, third[2]
+    local ch3, nv3 = press(0)
+    check("step: a click on a name, that choice", ch3 and nv3, 1)
+    -- no button: just the list; a click off the names does nothing
+    clicked = false; at = {}
+    press(0, { dir = "step", w = 100, h = 64, nobtn = true })
+    local first = at[1]
+    check("step, no button: the lamps move left", first and first[1] < third[1], true)
+    clicked = true
+    mpx, mpy = at[2][1] + 10, at[2][2]
+    ch3, nv3 = press(0, { dir = "step", w = 100, h = 64, nobtn = true })
+    check("step, no button: a name, that choice", ch3 and nv3, 0.5)
+    mpx, mpy = 95, 2
+    ch3 = press(0, { dir = "step", w = 100, h = 64, nobtn = true })
+    check("step, no button: off the names, nothing", ch3, false)
+    ch3, nv3 = press(0)
+    check("step, with its button: anywhere else, the next", ch3 and nv3, 0.5)
+    mpx, mpy, clicked = 10, 30, false
   end)
   check("step: draw ran", ok and true or err, true)
 end

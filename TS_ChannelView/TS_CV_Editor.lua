@@ -889,6 +889,13 @@ draw_entry_body = function(ctx)
       row_name("LED names")
       local ch, v = ImGui.Checkbox(ctx, "##stepnames", c.ledn ~= false)
       if ch then if v then c.ledn = nil else c.ledn = false end end
+      if c.ledn ~= false and not c.litp then
+        row_name("Button")
+        if ImGui.RadioButton(ctx, "Shown##stepbtn", not c.nobtn) then c.nobtn = nil end
+        ImGui.SameLine(ctx, 0, 2)
+        if ImGui.RadioButton(ctx, "Hidden##stepbtn", c.nobtn == true) then c.nobtn = true end
+        tip("Hidden: just the list. Click a name to choose it.")
+      end
     end
     if c.leds == "none" then return end
     row_name("Lit")
