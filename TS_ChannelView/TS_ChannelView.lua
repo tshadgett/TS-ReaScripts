@@ -1224,7 +1224,7 @@ local function toggle_colour_menu(fx, key, idx, c)
   -- in this button's colour (the list folds away)
   if W.fold_head(ctx, "button_styles", "Styles", KEEP_OPEN) then
     -- (a switch's style is lit in its own row below, not Flat's)
-    local cur = (c.style and (C.BUTTON_STYLE[c.style] or C.SWITCH[c.style])) and c.style or nil
+    local cur = (not c.img and c.style and (C.BUTTON_STYLE[c.style] or C.SWITCH[c.style])) and c.style or nil
     local lit = W.lit_col(c.cap) or C.COL.toggle_on
     local _, th = ImGui.CalcTextSize(ctx, "Ag")
     local rh = math.max(th, 20)
@@ -1234,7 +1234,8 @@ local function toggle_colour_menu(fx, key, idx, c)
           KEEP_OPEN, 150, rh) then
         local l = materialise(fx)
         local lc = l.controls[idx]
-        if lc then lc.style = bs.key end
+        -- (a style in place of its pictures)
+        if lc then lc.style, lc.img = bs.key, nil end
         M.set(key, l); M.save()
       end
       local bx1, by1, bx2, by2 = x + 3, y + 3, x + 33, y + rh - 3
@@ -1254,7 +1255,7 @@ local function toggle_colour_menu(fx, key, idx, c)
               KEEP_OPEN, 150, sh) then
             local l = materialise(fx)
             local lc = l.controls[idx]
-            if lc then lc.style = sw.key end
+            if lc then lc.style, lc.img = sw.key, nil end
             M.set(key, l); M.save()
           end
           SWI.draw(ctx, dl, sw.key, x + 2, y + 1, x + 34, y + sh - 1, true, lit, not C.EFFECT_3D, "ON", false,
@@ -1370,10 +1371,10 @@ local function toggle_colour_menu(fx, key, idx, c)
 
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
-  if c.style and ImGui.MenuItem(ctx, "Reset style to default") then
+  if (c.style or c.img) and ImGui.MenuItem(ctx, "Reset style to default") then
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.style = nil end
+    if lc then lc.style, lc.img = nil, nil end
     M.set(key, l); M.save()
   end
   if ImGui.MenuItem(ctx, "Apply to every button on this panel") then
@@ -1675,7 +1676,7 @@ local function apply_look(fx, idx, look, scope)
   local l, pk = materialise(fx)
   local ctl = l.controls
   local function put(c)
-    if c and (c.type == "knob" or c.type == "stepped") then c.look = KPm.copy(look); c.cap = nil end
+    if c and (c.type == "knob" or c.type == "stepped") then c.look = KPm.copy(look); c.cap, c.img = nil, nil end
   end
   if scope == "section" then
     local function edge(c) return c.type == "divider" or c.type == "page" end
@@ -2017,8 +2018,8 @@ local function style_menu(fx, key, idx, c)
       for i, st in ipairs(list) do
         if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
         local x, y = ImGui.GetCursorScreenPos(ctx)
-        if ImGui.Selectable(ctx, "##style_" .. st.key, st.key == cur and not c.look, KEEP_OPEN, CS, CS) then
-          set({ style = st.key, look = false })
+        if ImGui.Selectable(ctx, "##style_" .. st.key, st.key == cur and not c.look and not c.img, KEEP_OPEN, CS, CS) then
+          set({ style = st.key, look = false, img = false })
         end
         if ImGui.IsItemHovered(ctx) then hov_label = st.label end
         local r = CS * 0.5 - 6     -- the scale ticks sit outside this
@@ -2047,7 +2048,7 @@ local function style_menu(fx, key, idx, c)
           if reaper.MB(("Remove the recipe \"%s\"?\n\nKnobs wearing it keep their look."):format(r.name),
               "ChannelView", 4) == 6 then RCP.remove(r.name) end
         elseif picked and not on_x then
-          set({ look = KPm.copy(r.look), cap = false })
+          set({ look = KPm.copy(r.look), cap = false, img = false })
         end
         W.tile_rename(ctx, "recipe" .. i, r.name, function(new) return RCP.rename(r.name, new) end)
       end
@@ -2111,7 +2112,7 @@ local function style_menu(fx, key, idx, c)
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A picture of your own: a filmstrip, or one that turns.") end
     ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff,
-      "Style: " .. (hov_label or (now_def and now_def.label) or (c.look and "Your own look") or "Default"))
+      "Style: " .. (hov_label or (c.img and "Your picture") or (now_def and now_def.label) or (c.look and "Your own look") or "Default"))
   else
     ImGui.TextDisabled(ctx, "Style")
     for _, st in ipairs(list) do
@@ -2296,8 +2297,8 @@ local function style_menu(fx, key, idx, c)
     M.set(key, l); M.save()
   end
   if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.style ~= nil or c.cap ~= nil or c.scale_ink ~= nil
-                     or c.arc ~= nil) then
-    set({ style = false, cap = false, scale_ink = false, arc = false })
+                     or c.arc ~= nil or c.img ~= nil) then
+    set({ style = false, cap = false, scale_ink = false, arc = false, img = false })
   end
 end
 
