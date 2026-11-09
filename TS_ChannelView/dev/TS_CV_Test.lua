@@ -615,6 +615,12 @@ do
     { param = 3, type = "combo", label = "Mode", at = { c = 0, r = 0, w = 8, h = 3 } },
     { param = 4, type = "toggle", label = "On", at = { c = 8, r = 0, w = 4, h = 3 } },
     { param = 5, type = "combo", label = "Type", at = { c = 0, r = 3, w = 8, h = 4 } } }, ph(2))
+  local lb = P.layout({ grid = { cols = 16, rows = 8 },
+    { param = 3, type = "combo", label = "Spectrum", buttons = "across", nbtn = 4, at = { c = 0, r = 0, w = 8, h = 2 } },
+    { param = 4, type = "combo", label = "Mode", buttons = "step", nbtn = 3, at = { c = 8, r = 0, w = 4, h = 2 } },
+    { param = 5, type = "combo", label = "Range", buttons = "across", nbtn = 3, at = { c = 0, r = 2, w = 8, h = 4 } } }, ph(2))
+  check("buttons half a cell tall: no name, as a dropdown", tostring(lb.items[1].short) .. " " .. tostring(lb.items[2].short) .. " " .. tostring(lb.items[3].short),
+    "true nil nil")
   check("three quarters: name and box, from the top", table.concat({ l3.items[1].h, l3.items[1].y, l3.items[2].h, l3.items[2].y, l3.items[3].h }, " "),
     "1.5 0 1.5 0 2")
   M.remove("GridText"); M.save(); M.reload()

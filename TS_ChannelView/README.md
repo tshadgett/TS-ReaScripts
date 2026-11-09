@@ -1344,7 +1344,8 @@ or following ChannelView's).
   first match). On a grid a dropdown is as wide as its place, and one in
   a place half a cell tall is just its box, its name in the tooltip;
   three quarters of a cell tall, a dropdown or a button is its name and
-  its box with nothing under it.
+  its box with nothing under it. Dropdowns shown as buttons do the same:
+  half a cell tall, just the buttons.
 - **(Pro) Raised dropdowns.** Right-click a dropdown ▸ Style ▸ *Raised*: the box
   becomes a dark cap like a *Backlit* button (unlit), standing off the
   faceplate with a shadow under it; *Flat* (the default) prints it on the

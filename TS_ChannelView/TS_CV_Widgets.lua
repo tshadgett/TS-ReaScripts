@@ -2717,7 +2717,9 @@ function W.button_row(ctx, id, label, value, choices, opts)
   if opts.dir == "step" and ch < W.step_named_h(opts, opts.pattern and #opts.pattern.names
                                                    or math.min(#choices, opts.n or #choices)) then
     opts.no_name, opts.label = true, label
-  else
+  elseif not opts.short then
+    -- (half a cell tall: just the buttons, their name in the tooltip, as
+    -- a dropdown's box)
     centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
   end
 
@@ -2739,7 +2741,7 @@ function W.button_row(ctx, id, label, value, choices, opts)
   end
 
   -- each button's rect
-  local top = y + W.LABEL_H + C.LABEL_GAP
+  local top = opts.short and (y + 2) or (y + W.LABEL_H + C.LABEL_GAP)
   local rects = {}
   if opts.dir == "grid" then
     local cols, nr = C.button_grid(n)
@@ -2816,7 +2818,8 @@ function W.button_row(ctx, id, label, value, choices, opts)
     W.mod_corner(dl, r[3], r[2], 5, best == cur and (on_cols[cur] or base_col) or C.COL.toggle_off)
   end
 
-  W.tip(ctx, id, under and choices[under].text or opts.tooltip, hovered, false)
+  W.tip(ctx, id, under and ((opts.short and label and label ~= "") and (label .. ": " .. choices[under].text) or choices[under].text)
+    or opts.tooltip, hovered, false)
   return changed, value, act, pressed
 end
 

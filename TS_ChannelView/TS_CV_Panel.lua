@@ -721,6 +721,10 @@ local function put(out, ctl, c, r, w, h, dx, dy)
                sx = x, sw = qx(w), sy = y, sh = qy(h) }
   if kind == "hfader" or kind == "xy" then
     it.pw = qx(w)
+  elseif kind == "buttons" then
+    -- half a cell tall: just the buttons, their name in the tooltip (as a
+    -- dropdown's box; a step button decides for itself)
+    if h <= 2 and ctl.buttons ~= "step" then it.short = true end
   elseif not STRETCH[kind] then
     if t ~= "combo" then it.x = x + half(qx(w) - hx(nw)); it.w = nw end
     -- a dropdown in a place half a cell tall: short, its box without its name
@@ -3246,7 +3250,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
             leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl), img = ctl.img,
-            nobtn = ctl.nobtn, tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
+            nobtn = ctl.nobtn, short = item.short, tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" then
         -- Its list is read from the plugin when it's opened (and kept while
         -- it's open), or when an arrow or the wheel steps it; a plugin that
