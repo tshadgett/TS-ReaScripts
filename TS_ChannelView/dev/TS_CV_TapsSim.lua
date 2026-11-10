@@ -1282,6 +1282,16 @@ if NEW then
   end
   TP.makeup_changed()
   check("make-up: in dB when asked at its place", TP.makeup_db(track, ca, 9, { [9] = { lo = -60, hi = 18, unit = "dB", curve = "lin" } }), 6)
+  -- turned right down: far under -60, and "-oo dB"
+  for _, c in ipairs({ { "-74.3 dB", -74.3 }, { "-oo dB", TP.MUG_LO }, { "-inf dB", TP.MUG_LO } }) do
+    reaper.TrackFX_FormatParamValueNormalized = function(tr, a, p, v)
+      local f = F(a)
+      if f and f.guid == "{C1}" and p == 9 then return true, c[1] end
+      return true, "?"
+    end
+    TP.makeup_changed()
+    check("make-up: right down, " .. c[1], TP.makeup_db(track, ca, 9, nil), c[2])
+  end
   reaper.TrackFX_FormatParamValueNormalized = fpn2
   TP.makeup_changed()
   TP.update()

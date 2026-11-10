@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.7.2
+version: 2.7.3
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -434,6 +434,9 @@ author: Tim Shadgett
 //       sits under where that one was put, the gain came back down, and
 //       it goes back -- never below the measured zero (a gain raised,
 //       then lowered: a plugin whose output knob isn't followed).
+//   While a followed make-up moves, and for Q_MUGHOLD after, none of it:
+//   the plugin's gain and ChannelView's word of it don't arrive together,
+//   and a knob turned steadily keeps the two a steady distance apart.
 //   The next stopped measurement replaces it all.
 //
 //   The reading comes out on tap_grN, in the track's probe block, so a
@@ -870,7 +873,7 @@ out_pin:right
   TS_QUP = 459; TS_QWM = 460; TS_QWN = 461; TS_QWT = 462;
   // a stretch's input level summed; the level of the last that moved it
   // up, and where such a stretch sits since
-  TS_QIS = 463; TS_QUL = 464; TS_QUM = 465;
+  TS_QIS = 463; TS_QUL = 464; TS_QUM = 465; TS_QMH = 466;
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -941,6 +944,7 @@ out_pin:right
   Q_REF    = 0.3;                 // how fast the quiet stretches' place is learnt
   Q_WIN    = 1;                   // s: touched, the highest steady stretch over this
   Q_FALL   = 6;                   // dB/s the input's peak falls
+  Q_MUGHOLD = 1;                  // s after a followed make-up last moved
   cal_phase = 0; cal_t = 0; cal_quiet = 0; cal_since = 1000000000;
   nz_last = gmem[CTRL_NOZERO]; nz_age = 1000000000; cal_held = 0;
   cal_hb = 0; cal_phb = 0; cal_inpk = 0; cal_ppk = 0;
@@ -1159,6 +1163,7 @@ out_pin:right
     tap_pkdec = 10 ^ (-6 / 10 / tap_cps);   // band peaks fall 6 dB/s
     tap_qfall = Q_FALL / tap_cps;
     tap_qwin  = Q_WIN * tap_cps;
+    tap_qmh   = Q_MUGHOLD * tap_cps;
     tap_lvpk  = 10 ^ (-LV_FALL / 20 / srate);
     tap_lvcol = LV_FALL / tap_cps;          // dB a column the bands' input levels fall
     tap_lvrk  = 1 - exp(-1 / (srate * LV_RMS));
@@ -1370,11 +1375,13 @@ out_pin:right
     rb = TV_MK[t] != s[TS_MK] || mb_seq != s[TS_MBS];
     s[TS_MK] = TV_MK[t]; s[TS_MBS] = mb_seq;
     rb && t == tap_fine - 1 ? fn_rebase = 1;
+    s[TS_QMH] > 0 ? s[TS_QMH] -= 1;
     bi = 0;
     loop(GRB_N,
       mo = mugBand(t, bi);
       dm = mo - s[TS_MO + bi];
       abs(dm) > 0.0001 ? (
+        !rb ? s[TS_QMH] = tap_qmh;
         rb ? (
           // all of it moved with what's taken out
           s[TS_SM + bi] -= dm; s[TS_BS + bi] -= dm; s[TS_BSA + bi] -= dm; s[TS_BSB + bi] -= dm;
@@ -1441,7 +1448,7 @@ out_pin:right
     // one under it, since a touch, moves it down.
     ind = pin > 0.000000000000001 ? 10 * log10(pin) : -150;
     s[TS_QIP] = max(ind, s[TS_QIP] - tap_qfall);
-    (zo && !sh && nq >= 4 && s[TS_HOLD] <= 0) ? (
+    (zo && !sh && nq >= 4 && s[TS_HOLD] <= 0 && s[TS_QMH] <= 0) ? (
       m = (nq & 1) ? s[TS_ZQ + (nq - 1) / 2] : (s[TS_ZQ + nq / 2 - 1] + s[TS_ZQ + nq / 2]) * 0.5;
       (s[TS_QN] > 0 && max(m, s[TS_QHI]) - min(m, s[TS_QLO]) < Q_SPAN) ? (
         s[TS_QN] += 1; s[TS_QS] += m; s[TS_QIS] += ind;
@@ -1481,7 +1488,7 @@ out_pin:right
     // the gain came back down. It goes back towards the measured zero, never
     // past it -- so a compressor that never lets go reads no lower than it
     // did before the music moved it.
-    (zo && !sh && s[TS_STALE] > 0.5 && s[TS_QUP] > Q_TOL) ? (
+    (zo && !sh && s[TS_STALE] > 0.5 && s[TS_QUP] > Q_TOL && s[TS_QMH] <= 0) ? (
       s[TS_QWT] += 1;
       s[TS_QWT] >= tap_qwin ? (
         (s[TS_QWN] >= 3 && s[TS_QWM] < s[TS_QUM] - Q_TOL) ? (
@@ -1691,7 +1698,7 @@ out_pin:right
         v = gmem[pb + pbAt(PB_MUG, PB_MUG2, k)];
         r = floor((v + 500) / 1000);
         TV_MK[k] = r;
-        TV_MUG[k] = max(-60, min(60, v - 1000 * r));
+        TV_MUG[k] = max(-150, min(60, v - 1000 * r));
         k += 1;
       );
       k = 0;
@@ -1699,7 +1706,7 @@ out_pin:right
         v = gmem[pb + (k < 2 ? PB_MBMUG + k : PB_MBMUG2 + k - 2)];
         r = floor((v + 500) / 1000);
         r != MB_MK[k] ? ( MB_MK[k] = r; mb_seq += 1; );
-        MB_MUG[k] = max(-60, min(60, v - 1000 * r));
+        MB_MUG[k] = max(-150, min(60, v - 1000 * r));
         k += 1;
       );
       tap_gen = gmem[pb + PB_GEN];

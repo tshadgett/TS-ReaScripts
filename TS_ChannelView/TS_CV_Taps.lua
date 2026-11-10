@@ -2422,6 +2422,7 @@ end
 -- to the window while the window is running (ExtState mug_at), so the two
 -- never write different answers turn about.
 TP.MUG_EVERY, TP.MUG_KEY = 1.0, "mug_at"
+TP.MUG_LO = -150   -- dB: the lowest make-up passed on (a knob turned right down)
 local mug = { list = {}, at = -10, k = {}, kb = {}, by_addr = {}, by_guid = {}, said = -10 }
 
 -- A control's own value in dB, before any custom range: what the plugin
@@ -2440,7 +2441,8 @@ local function as_db(s)
   if b then return b, false end
   local v, unit = require("TS_CV_Units").parse(s or "")
   if unit == "db" and v and v == v then return v, true end
-  if U.trim(s or ""):lower():match("^%-inf") then return -math.huge, true end
+  local t = U.trim(s or ""):lower()
+  if t:match("^%-inf") or t:match("^%-oo") then return -math.huge, true end
   return nil
 end
 local function own_db(tr, addr, p)
@@ -2448,7 +2450,7 @@ local function own_db(tr, addr, p)
   if not fmt then return nil end
   local _, now = fmt(tr, addr, p, reaper.TrackFX_GetParamNormalized(tr, addr, p) or 0, "")
   local v, unit = as_db(now)
-  if v and unit then return math.max(-60, math.min(60, v)) end
+  if v and unit then return math.max(TP.MUG_LO, math.min(60, v)) end
   local k = tostring(reaper.TrackFX_GetFXGUID(tr, addr)) .. ":" .. p
   local ok = bare_gain[k]
   if ok == nil then
@@ -2463,7 +2465,7 @@ local function own_db(tr, addr, p)
     local _, s = reaper.TrackFX_GetFormattedParamValue(tr, addr, p, "")
     v = bare(s)
   end
-  return v and math.max(-60, math.min(60, v)) or nil
+  return v and math.max(TP.MUG_LO, math.min(60, v)) or nil
 end
 
 -- A control's value in dB as it reads (through its custom range, if it
@@ -2480,7 +2482,7 @@ function TP.makeup_db(tr, addr, p, ranges, law)
   U.with_ranges(was)
   local v, unit = UN.parse(txt or "")
   if unit ~= "db" or not v or v ~= v or math.abs(v) >= 1000 then return nil end
-  return math.max(-60, math.min(60, v))
+  return math.max(TP.MUG_LO, math.min(60, v))
 end
 
 -- A parameter's name that says it's a gain the whole signal goes through:
@@ -2632,7 +2634,7 @@ local function mug_tick(now, web)
         local dq = TP.makeup_db(e.tr, e.addr, q, e.src.ranges, e.src.laws and e.src.laws[q])
         if dq then d = (d or 0) + dq; fs = fs or {}; fs[q] = true end
       end
-      if d then v, sig = math.max(-60, math.min(60, d)), e.src.sig end
+      if d then v, sig = math.max(TP.MUG_LO, math.min(60, d)), e.src.sig end
       sig = sig .. "|" .. e.i
       local st = mug.k[e.guid]
       if not st or st.sig ~= sig then
