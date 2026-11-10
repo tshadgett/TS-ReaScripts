@@ -2688,9 +2688,10 @@ function TP.makeup_followed(tr, guid, p)
           and (PL.get(tr, e.probe, "mug_cap") or 0) >= 0.5) and true or false
 end
 
--- A plugin's gain knobs that don't read in dB and haven't been measured:
--- named as a gain (TP.makeup_name), or its compressor canvas's Makeup or
--- Input role. (Not REAPER's own Wet, which mixes rather than gains.)
+-- A plugin's gain knobs not yet measured: named as a gain
+-- (TP.makeup_name), or its compressor canvas's Makeup or Input role. Those
+-- that read in dB too: measuring checks the readout. (Not REAPER's own
+-- Wet, which mixes rather than gains.)
 function TP.gain_knobs(tr, addr, layout)
   layout = layout or {}
   local out, seen = {}, {}
@@ -2700,7 +2701,7 @@ function TP.gain_knobs(tr, addr, layout)
     if layout.gainlaw and layout.gainlaw[q] then return end
     local _, nm = reaper.TrackFX_GetParamName(tr, addr, q, "")
     if (nm or ""):lower():gsub("[^%a]", "") == "wet" then return end
-    if TP.makeup_db(tr, addr, q, layout.ranges) == nil then out[#out + 1] = q end
+    out[#out + 1] = q
   end
   for _, q in ipairs(named_makeups(tr, addr)) do add(q) end
   local cv = layout.canvas

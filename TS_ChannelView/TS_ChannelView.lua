@@ -4342,10 +4342,11 @@ local function control_menu()
         or TP.is_tapped(app.track, fx.guid) and "Measured gain reduction follows this control, automation included."
         or "Measured gain reduction follows this control, automation included,\nonce the probes measure this plugin.")
     end
-    -- a gain knob that doesn't read in dB (0 to 10): measured on a hidden
-    -- copy (TS_CV_Learn LN.start_gain), then followed as a make-up
+    -- a gain knob measured on a hidden copy (TS_CV_Learn LN.start_gain),
+    -- then followed as a make-up: one that doesn't read in dB (0 to 10),
+    -- or one whose dB readout is wrong
     local law = layout.gainlaw and layout.gainlaw[c.param]
-    if law or not db then
+    do
       local prog = TP.gain_measuring(fx.guid, c.param)
       local label = prog and ("Measuring as a gain\u{2026} %d%%"):format(math.floor(prog * 100))
         or "Measure as a gain"
@@ -4355,6 +4356,7 @@ local function control_menu()
       end
       if ED.PRO and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
         ImGui.SetTooltip(ctx, law and "Measured: followed as a gain. Click to measure again."
+          or db and "Checks its dB readout on a hidden copy:\nif it's wrong, the measured dB is followed."
           or "Measures its dB on a hidden copy,\nso measured gain reduction follows it.")
       end
     end

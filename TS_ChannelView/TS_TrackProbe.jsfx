@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.7.3
+version: 2.7.4
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -436,7 +436,9 @@ author: Tim Shadgett
 //       then lowered: a plugin whose output knob isn't followed).
 //   While a followed make-up moves, and for Q_MUGHOLD after, none of it:
 //   the plugin's gain and ChannelView's word of it don't arrive together,
-//   and a knob turned steadily keeps the two a steady distance apart.
+//   and a knob turned steadily keeps the two a steady distance apart. Nor
+//   while it sits more than Q_MUGDROP under where it was when the zero was
+//   measured: a knob turned that far down is where its dB is least sure.
 //   The next stopped measurement replaces it all.
 //
 //   The reading comes out on tap_grN, in the track's probe block, so a
@@ -873,7 +875,7 @@ out_pin:right
   TS_QUP = 459; TS_QWM = 460; TS_QWN = 461; TS_QWT = 462;
   // a stretch's input level summed; the level of the last that moved it
   // up, and where such a stretch sits since
-  TS_QIS = 463; TS_QUL = 464; TS_QUM = 465; TS_QMH = 466;
+  TS_QIS = 463; TS_QUL = 464; TS_QUM = 465; TS_QMH = 466; TS_QMZ = 467;
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -945,6 +947,7 @@ out_pin:right
   Q_WIN    = 1;                   // s: touched, the highest steady stretch over this
   Q_FALL   = 6;                   // dB/s the input's peak falls
   Q_MUGHOLD = 1;                  // s after a followed make-up last moved
+  Q_MUGDROP = 40;                 // dB a followed make-up may sit under the zero's
   cal_phase = 0; cal_t = 0; cal_quiet = 0; cal_since = 1000000000;
   nz_last = gmem[CTRL_NOZERO]; nz_age = 1000000000; cal_held = 0;
   cal_hb = 0; cal_phb = 0; cal_inpk = 0; cal_ppk = 0;
@@ -1358,7 +1361,7 @@ out_pin:right
         dm = mo - s[TS_MO + bi];
         (rb && abs(dm) > 0.0001) ? (
           s[TS_SM + bi] -= dm; s[TS_BS + bi] -= dm; s[TS_BSA + bi] -= dm; s[TS_BSB + bi] -= dm;
-          s[TS_ZERO + bi] -= dm; s[TS_ZSH + bi] -= dm;
+          s[TS_ZERO + bi] -= dm; s[TS_ZSH + bi] -= dm; bi == 0 ? s[TS_QMZ] += dm;
         );
         s[TS_MO + bi] = mo;
         bi += 1;
@@ -1385,7 +1388,7 @@ out_pin:right
         rb ? (
           // all of it moved with what's taken out
           s[TS_SM + bi] -= dm; s[TS_BS + bi] -= dm; s[TS_BSA + bi] -= dm; s[TS_BSB + bi] -= dm;
-          s[TS_ZERO + bi] -= dm; s[TS_ZSH + bi] -= dm;
+          s[TS_ZERO + bi] -= dm; s[TS_ZSH + bi] -= dm; bi == 0 ? s[TS_QMZ] += dm;
         ) : abs(dm) > 0.05 && s[TS_HB + bi] > 0.5 ? (
           // the make-up moved: the baseline goes back to before a ratio
           // could have climbed on it, or is learnt again
@@ -1448,7 +1451,7 @@ out_pin:right
     // one under it, since a touch, moves it down.
     ind = pin > 0.000000000000001 ? 10 * log10(pin) : -150;
     s[TS_QIP] = max(ind, s[TS_QIP] - tap_qfall);
-    (zo && !sh && nq >= 4 && s[TS_HOLD] <= 0 && s[TS_QMH] <= 0) ? (
+    (zo && !sh && nq >= 4 && s[TS_HOLD] <= 0 && s[TS_QMH] <= 0 && TV_MUG[t] >= s[TS_QMZ] - Q_MUGDROP) ? (
       m = (nq & 1) ? s[TS_ZQ + (nq - 1) / 2] : (s[TS_ZQ + nq / 2 - 1] + s[TS_ZQ + nq / 2]) * 0.5;
       (s[TS_QN] > 0 && max(m, s[TS_QHI]) - min(m, s[TS_QLO]) < Q_SPAN) ? (
         s[TS_QN] += 1; s[TS_QS] += m; s[TS_QIS] += ind;
@@ -1488,7 +1491,7 @@ out_pin:right
     // the gain came back down. It goes back towards the measured zero, never
     // past it -- so a compressor that never lets go reads no lower than it
     // did before the music moved it.
-    (zo && !sh && s[TS_STALE] > 0.5 && s[TS_QUP] > Q_TOL && s[TS_QMH] <= 0) ? (
+    (zo && !sh && s[TS_STALE] > 0.5 && s[TS_QUP] > Q_TOL && s[TS_QMH] <= 0 && TV_MUG[t] >= s[TS_QMZ] - Q_MUGDROP) ? (
       s[TS_QWT] += 1;
       s[TS_QWT] >= tap_qwin ? (
         (s[TS_QWN] >= 3 && s[TS_QWM] < s[TS_QUM] - Q_TOL) ? (
@@ -1596,6 +1599,7 @@ out_pin:right
       s[TS_HASCAL] = 1;
       s[TS_STALE] = 0;
       s[TS_CST] = 4;
+      s[TS_QMZ] = TV_MUG[t];
       1;
     ) : n >= CAL_MINBANDS ? (
       bi = 0;
@@ -1610,6 +1614,7 @@ out_pin:right
       s[TS_HASCAL] = 1;
       s[TS_STALE] = 0;
       s[TS_QRV] = 0; s[TS_QN] = 0; s[TS_QUP] = 0; s[TS_QWN] = 0; s[TS_QWT] = 0;
+      s[TS_QMZ] = TV_MUG[t];
       s[TS_CST] = (m >= 3 && abs(d) > 1) ? 2 : 1;
       1;
     ) : 0;

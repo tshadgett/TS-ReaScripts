@@ -750,22 +750,54 @@ for _, variant in ipairs({ "input dB", "input along" }) do
     checkf("gain knob: between points", function() return law and math.abs(M.gainlaw_at(law, 0.25) - M.gainlaw_at(law, 0) - 15) < 0.3 end)
     check("gain knob: the user's plugin untouched", ("%.1f"):format(user.fx[1].vals[0]), "0.5")
     check("gain knob: the track removed", #tracks, 1)
+    -- its output, reading in dB: right, so followed as it reads
+    gj = LN.start_gain(user, 0, "Vox :: 1176", layout, { 2 })
+    run(gj)
+    check("dB knob, right: measured", gj.state, "done")
+    check("dB knob, right: its readout kept to", ((M.get("Vox :: 1176").gainlaw or {})[2]), nil)
+    check("dB knob, right: says so", gj.msg:find("readout is right", 1, true) ~= nil, true)
+    -- its readout wrong (it says -20 to 20, it's -60 to 20): measured kept
+    local was0 = truth_gain
+    truth_gain = function(vals, level)
+      local x = level + in_gain(vals)
+      return in_gain(vals) - (x > -24 and (x + 24) * 0.75 or 0) + (-60 + 80 * vals[2])
+    end
+    gj = LN.start_gain(user, 0, "Vox :: 1176", layout, { 2 })
+    run(gj)
+    truth_gain = was0
+    local lw = (M.get("Vox :: 1176").gainlaw or {})[2]
+    check("dB knob, wrong: measured kept", lw ~= nil, true)
+    checkf(("dB knob, wrong: 0.25 to 0.75 is 40 dB (%.2f)"):format(lw and (M.gainlaw_at(lw, 0.75) - M.gainlaw_at(lw, 0.25)) or 0),
+      function() return lw and math.abs(M.gainlaw_at(lw, 0.75) - M.gainlaw_at(lw, 0.25) - 40) < 0.3 end)
     -- a knob steep at its quiet end (a log taper), what the measuring
     -- reads bottoming out about 70 dB down
     local taper = function(n) return 40 + 60 * math.log(math.max(n, 1e-6), 10) end
     local was = truth_gain
-    truth_gain = function(vals) return math.max(-70, taper(vals[0])) end
+    -- (what's measured bottoms out at -120 dBFS, whatever the tone)
+    truth_gain = function(vals, level) return math.max(-120 - level, taper(vals[0])) end
     gj = LN.start_gain(user, 0, "Vox :: 1176", layout, { 0 })
     run(gj)
     truth_gain = was
     check("steep knob: measured", gj.state, "done")
     law = (M.get("Vox :: 1176").gainlaw or {})[0]
-    for _, n in ipairs({ 0.03, 0.05, 0.07, 0.15, 0.25, 0.45, 0.7, 0.95 }) do
+    for _, n in ipairs({ 0.008, 0.012, 0.03, 0.05, 0.07, 0.15, 0.25, 0.45, 0.7, 0.95 }) do
       local got = law and M.gainlaw_at(law, n) or 0
-      checkf(("steep knob: at %.2f %.1f dB (%.1f)"):format(n, taper(n), got), function() return math.abs(got - taper(n)) < 0.6 end)
+      -- (past 70 dB down, coarser)
+      checkf(("steep knob: at %.3f %.1f dB (%.1f)"):format(n, taper(n), got), function() return math.abs(got - taper(n)) < (taper(n) < -70 and 6 or 0.6) end)
     end
     checkf("steep knob: next to nothing at the bottom", function() return law and M.gainlaw_at(law, 0) <= -100 end)
-    checkf(("steep knob: points kept to a few dozen (%d)"):format(law and #law or 0), function() return law and #law <= 52 end)
+    checkf(("steep knob: points kept to a few dozen (%d)"):format(law and #law or 0), function() return law and #law <= 60 end)
+    -- turned right down it still passes some, 85 dB down: too quiet for the
+    -- quiet tone, measured with the louder one
+    truth_gain = function(vals, level) return math.max(-120 - level, math.max(-85, taper(vals[0]))) end
+    gj = LN.start_gain(user, 0, "Vox :: 1176", layout, { 0 })
+    run(gj)
+    truth_gain = was
+    law = (M.get("Vox :: 1176").gainlaw or {})[0]
+    checkf(("floor 85 down: at 0 (%.1f)"):format(law and M.gainlaw_at(law, 0) or 0),
+      function() return law and math.abs(M.gainlaw_at(law, 0) + 85) < 1 end)
+    checkf(("floor 85 down: at 0.012 (%.1f)"):format(law and M.gainlaw_at(law, 0.012) or 0),
+      function() return law and math.abs(M.gainlaw_at(law, 0.012) - taper(0.012)) < 1.5 end)
     M.gainlaw_line(law)
   end
   M.remove("Vox :: 1176")
