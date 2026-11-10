@@ -2223,9 +2223,11 @@ function TP.measured_for_reporting(tr, guid, own)
   if not tr or not TP.measured_first() then return nil end
   local i, rd = tap_for(tr, guid, "g")
   if not i or not rd.probe then return nil end
+  -- (shut on the silence is while stopped: playing, it's looked at afresh)
+  local stopped = (reaper.GetPlayState() & 1) == 0
+  if shut[guid] == true and not stopped then shut[guid] = nil end
   if shut[guid] == true then return nil end
   if own then
-    local stopped = (reaper.GetPlayState() & 1) == 0
     local quiet = (PL.get(tr, rd.probe, "inpk", i) or -150) < TP.QUIET_DB
     if stopped and quiet and own >= TP.SHUT_DB then
       local now = reaper.time_precise()

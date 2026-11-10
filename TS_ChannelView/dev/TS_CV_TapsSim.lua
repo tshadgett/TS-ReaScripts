@@ -1133,6 +1133,12 @@ do
   now_t = now_t + 2
   check("shut: its own figure", TP.measured_for_reporting(track, "{C3}", 20), nil)
   check("shut: and stays so",   TP.measured_for_reporting(track, "{C3}", 0), nil)
+  -- playing, it's looked at afresh: a compressor that only seemed shut
+  -- (its figure held at its last on the silence) is measured again
+  local gps = reaper.GetPlayState
+  reaper.GetPlayState = function() return 1 end
+  check("shut: playing, measured again", TP.measured_for_reporting(track, "{C3}", 0), 4.5)
+  reaper.GetPlayState = gps
   F(5).params[TP.P_CAL + 2] = 3
   TP.invalidate()
   check("measured first: touched since, its own again", TP.measured_for_reporting(track, "{C3}"), nil)
