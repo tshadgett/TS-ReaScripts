@@ -200,7 +200,8 @@ function LS.draw(ctx, busy)
       local file = ask_save(name)
       if file then
         remember_dir(file)
-        local ok, err = M.export(file, keys, (d.imgs and FN) and FN.read or nil)
+        local fine, ok, err = pcall(M.export, file, keys, (d.imgs and FN) and FN.read or nil)
+        if not fine then ok, err = false, ok end
         if ok then
           msg(("Exported %d layout%s to\n%s"):format(#keys, #keys == 1 and "" or "s", file))
           close()

@@ -716,7 +716,12 @@ function E.range_start(track, addr, p)
     local _, a = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, 0, "")
     local _, b = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, 1, "")
     local va, vb = UN.parse(a or ""), UN.parse(b or "")
-    if va and vb and va ~= vb then lo, hi = va, vb end
+    if va and vb and va ~= vb then lo, hi = va, vb
+    else
+      -- no numbers at its ends: the plugin's own low and high, if it has them
+      local _, mn, mx = reaper.TrackFX_GetParamEx(track, addr, p)
+      if mn and mx and mx > mn and not (mn == 0 and mx == 1) then lo, hi = mn, mx end
+    end
   end
   return { lo = lo, hi = hi, unit = "", curve = "lin" }
 end

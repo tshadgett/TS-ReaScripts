@@ -329,6 +329,14 @@ do
   M.set(k, { controls = { { param = 1, type = "knob", img = { file = "k.png", kind = "strip", frames = 3, dir = "down", size = 0 } } } })
   local bin = string.char(137, 80, 78, 71, 0, 1, 2, 255, 254) .. ("x"):rep(9000)
   check("b64: round trip", U.b64d(U.b64e(bin)) == bin, true)
+  do
+    local ends = {}
+    for n = 0, 7 do local x = bin:sub(1, n); ends[#ends + 1] = tostring(U.b64d(U.b64e(x)) == x) end
+    check("b64: every end", table.concat(ends, " "), "true true true true true true true true")
+    check("b64: as everyone writes it", U.b64e("Man") .. U.b64e("Ma") .. U.b64e("M"), "TWFuTWE=TQ==")
+    local big = ("\0\255\17\128"):rep(300000) .. "x"
+    check("b64: a big picture, both ways", U.b64d(U.b64e(big)) == big, true)
+  end
   local tmp = os.tmpname()
   M.export(tmp, { k })
   local e1 = M.read_shared(tmp)
@@ -12255,6 +12263,8 @@ do
   check("ReEQ2: another plugin isn't", ME_.builtin({ "Gain", "Freq" }), nil)
   local lay = M_.known_ranges("JS: ReEQ2 - Parametric Graphic Equalizer", { controls = {} })
   local was = U_.with_ranges(lay.ranges)
+  check("ReEQ2: its output gains in dB, -136 to 30", ("%s %s %s %s"):format(lay.ranges[2].unit, lay.ranges[2].lo,
+    lay.ranges[135].hi, tostring(lay.ranges[4] ~= nil)), "dB -136 30 true")
   local b = cv.bands[1]
   -- its own sliders: 50.81 is 10 x 2205^0.5081 Hz, Q 32.647 is 0.707
   setv(b.on, 2); setv(b.shape, 0); setv(b.freq, 50.81); setv(b.gain, 6); setv(b.q, 32.647); setv(b.slope, 3)

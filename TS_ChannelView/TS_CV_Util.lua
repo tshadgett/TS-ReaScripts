@@ -286,30 +286,53 @@ do
   local A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
   local D = {}
   for i = 1, 64 do D[A:byte(i)] = i - 1 end
+  -- every pair of characters, by the 12 bits they stand for
+  local P = {}
+  for i = 0, 4095 do P[i] = A:sub((i >> 6) + 1, (i >> 6) + 1) .. A:sub((i & 63) + 1, (i & 63) + 1) end
+  -- A picture can run to tens of megabytes: done a few kilobytes at a
+  -- time, so nothing holds a string for every few bytes.
+  local CH = 3 * 1024
   function U.b64e(s)
-    local out, n = {}, #s
-    for i = 1, n, 3 do
-      local a, b, c = s:byte(i, i + 2)
-      local v = (a << 16) | ((b or 0) << 8) | (c or 0)
-      out[#out + 1] = A:sub((v >> 18) + 1, (v >> 18) + 1) .. A:sub(((v >> 12) & 63) + 1, ((v >> 12) & 63) + 1)
-        .. (b and A:sub(((v >> 6) & 63) + 1, ((v >> 6) & 63) + 1) or "=")
-        .. (c and A:sub((v & 63) + 1, (v & 63) + 1) or "=")
+    local n = #s
+    local full = n - n % 3
+    local out = {}
+    for i0 = 1, full, CH do
+      local q = { s:byte(i0, math.min(full, i0 + CH - 1)) }
+      local t, k = {}, 0
+      for j = 1, #q, 3 do
+        local v = (q[j] << 16) | (q[j + 1] << 8) | q[j + 2]
+        t[k + 1], t[k + 2] = P[v >> 12], P[v & 4095]
+        k = k + 2
+      end
+      out[#out + 1] = table.concat(t)
+    end
+    local r = n - full
+    if r > 0 then
+      local a, b = s:byte(full + 1, n)
+      local v = (a << 16) | ((b or 0) << 8)
+      out[#out + 1] = P[v >> 12] .. (b and A:sub(((v >> 6) & 63) + 1, ((v >> 6) & 63) + 1) or "=") .. "="
     end
     return table.concat(out)
   end
   function U.b64d(s)
-    s = s:gsub("[^%w%+/=]", "")
+    s = s:gsub("[^%w%+/]", "")
+    local n = #s
     local out = {}
-    for i = 1, #s, 4 do
-      local q = { s:byte(i, i + 3) }
-      local v, pad = 0, 0
-      for j = 1, 4 do
-        local ch = q[j]
-        if ch == nil or ch == 61 then pad = pad + 1; v = v << 6
-        else v = (v << 6) | (D[ch] or 0) end
+    for i0 = 1, n, 4096 do
+      local q = { s:byte(i0, math.min(n, i0 + 4095)) }
+      local o, k, m, j = {}, 0, #q, 1
+      while j + 3 <= m do
+        local v = (D[q[j]] << 18) | (D[q[j + 1]] << 12) | (D[q[j + 2]] << 6) | D[q[j + 3]]
+        o[k + 1], o[k + 2], o[k + 3] = v >> 16, (v >> 8) & 255, v & 255
+        k, j = k + 3, j + 4
       end
-      local bytes = string.char((v >> 16) & 255, (v >> 8) & 255, v & 255)
-      out[#out + 1] = bytes:sub(1, 3 - pad)
+      -- the end: two characters are a byte, three are two
+      if m - j + 1 >= 2 then
+        local v = (D[q[j]] << 18) | (D[q[j + 1]] << 12) | ((q[j + 2] and D[q[j + 2]] or 0) << 6)
+        o[k + 1] = v >> 16; k = k + 1
+        if q[j + 2] then o[k + 1] = (v >> 8) & 255; k = k + 1 end
+      end
+      out[#out + 1] = string.char(table.unpack(o, 1, k))
     end
     return table.concat(out)
   end

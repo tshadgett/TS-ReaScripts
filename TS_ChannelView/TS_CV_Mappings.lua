@@ -2091,7 +2091,8 @@ end
 
 -- ReEQ2 (ReJJ): 16 bands of Mode, Group, Type, Frequency, Gain, Q, Slope,
 -- bands 1-5 from parameter 17 and 6-16 from 57; each band's dynamics
--- (on, threshold, ratio, range, attack, release) from 136. Its frequency
+-- (on, threshold, ratio, range, attack, release) from 136; its Gain,
+-- Mid/Left and Side/Right Gain (2-4) and Input Gain (135). Its frequency
 -- slider runs 0..104 for 10 Hz x 2205^(x / 100), its Q 0..100 for
 -- 0.1 x 400^(x / 100), its slope steps 6 dB/oct each.
 local REEQ2 = { id = "reeq2", bands = 16, FREQ_HI = 10 * 2205 ^ 1.04 }
@@ -2099,6 +2100,7 @@ function REEQ2.band(k) return (k <= 5) and (17 + 7 * (k - 1)) or (57 + 7 * (k - 
 function REEQ2.dyn(k) return 136 + 6 * (k - 1) end
 function REEQ2.ranges()
   local r = {}
+  for _, p in ipairs({ 2, 3, 4, 135 }) do r[p] = { lo = -136, hi = 30, unit = "dB", curve = "lin" } end
   for k = 1, REEQ2.bands do
     local b, d = REEQ2.band(k), REEQ2.dyn(k)
     r[b + 3] = { lo = 10, hi = REEQ2.FREQ_HI, unit = "Hz", curve = "log" }
