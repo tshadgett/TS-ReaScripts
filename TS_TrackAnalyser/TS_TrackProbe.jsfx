@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.7.1
+version: 2.7.2
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -429,6 +429,11 @@ author: Tim Shadgett
 //       learnt from them while untouched): a gain change moves them by
 //       the change, a threshold moved on a compressor that never lets
 //       go hardly at all. With no such place learnt yet, it holds.
+//     * Touched, after the music moved it up: when for Q_WIN even the
+//       highest steady stretch no louder than the one that moved it up
+//       sits under where that one was put, the gain came back down, and
+//       it goes back -- never below the measured zero (a gain raised,
+//       then lowered: a plugin whose output knob isn't followed).
 //   The next stopped measurement replaces it all.
 //
 //   The reading comes out on tap_grN, in the track's probe block, so a
@@ -860,6 +865,12 @@ out_pin:right
   // all of it was quiet; where the quiet stretches sit, and whether known
   TS_ZQ = 440; TS_QIP = 450; TS_QM = 451; TS_QN = 452; TS_QS = 453; TS_QQ = 454;
   TS_QR = 455; TS_QRV = 456; TS_QLO = 457; TS_QHI = 458;
+  // how far the music has moved the zero up from its measurement; the
+  // highest steady stretch in the window, the stretches and columns in it
+  TS_QUP = 459; TS_QWM = 460; TS_QWN = 461; TS_QWT = 462;
+  // a stretch's input level summed; the level of the last that moved it
+  // up, and where such a stretch sits since
+  TS_QIS = 463; TS_QUL = 464; TS_QUM = 465;
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -928,6 +939,7 @@ out_pin:right
   Q_TOL    = 0.25;                // dB off the zero before it moves
   Q_STEP   = 0.6;                 // of the way, each time
   Q_REF    = 0.3;                 // how fast the quiet stretches' place is learnt
+  Q_WIN    = 1;                   // s: touched, the highest steady stretch over this
   Q_FALL   = 6;                   // dB/s the input's peak falls
   cal_phase = 0; cal_t = 0; cal_quiet = 0; cal_since = 1000000000;
   nz_last = gmem[CTRL_NOZERO]; nz_age = 1000000000; cal_held = 0;
@@ -1146,6 +1158,7 @@ out_pin:right
     tap_rel   = TAP_REL / tap_cps;
     tap_pkdec = 10 ^ (-6 / 10 / tap_cps);   // band peaks fall 6 dB/s
     tap_qfall = Q_FALL / tap_cps;
+    tap_qwin  = Q_WIN * tap_cps;
     tap_lvpk  = 10 ^ (-LV_FALL / 20 / srate);
     tap_lvcol = LV_FALL / tap_cps;          // dB a column the bands' input levels fall
     tap_lvrk  = 1 - exp(-1 / (srate * LV_RMS));
@@ -1431,11 +1444,11 @@ out_pin:right
     (zo && !sh && nq >= 4 && s[TS_HOLD] <= 0) ? (
       m = (nq & 1) ? s[TS_ZQ + (nq - 1) / 2] : (s[TS_ZQ + nq / 2 - 1] + s[TS_ZQ + nq / 2]) * 0.5;
       (s[TS_QN] > 0 && max(m, s[TS_QHI]) - min(m, s[TS_QLO]) < Q_SPAN) ? (
-        s[TS_QN] += 1; s[TS_QS] += m;
+        s[TS_QN] += 1; s[TS_QS] += m; s[TS_QIS] += ind;
         s[TS_QLO] = min(m, s[TS_QLO]); s[TS_QHI] = max(m, s[TS_QHI]);
         ind > s[TS_QIP] - Q_QUIET ? s[TS_QQ] = 0;
       ) : (
-        s[TS_QN] = 1; s[TS_QS] = m; s[TS_QLO] = s[TS_QHI] = m;
+        s[TS_QN] = 1; s[TS_QS] = m; s[TS_QIS] = ind; s[TS_QLO] = s[TS_QHI] = m;
         s[TS_QQ] = ind <= s[TS_QIP] - Q_QUIET;
       );
       s[TS_QM] = m;
@@ -1445,15 +1458,40 @@ out_pin:right
         (s[TS_STALE] > 0.5 && s[TS_QQ] > 0.5 && s[TS_QRV] > 0.5) ? (
           // touched: the quiet stretches go back to where they sat before
           abs(e - s[TS_QR]) > Q_TOL ? sft = (e - s[TS_QR]) * Q_STEP;
-        ) : e > Q_TOL ? sft = e * Q_STEP;
+          sft > 0 ? ( s[TS_QUL] = s[TS_QIS] / s[TS_QN]; s[TS_QUM] = s[TS_QR]; );
+        ) : e > Q_TOL ? ( sft = e * Q_STEP; s[TS_QUL] = s[TS_QIS] / s[TS_QN]; s[TS_QUM] = 0; );
         (s[TS_STALE] < 0.5 && s[TS_QQ] > 0.5) ? (
           s[TS_QR] = s[TS_QRV] > 0.5 ? s[TS_QR] + (e - sft - s[TS_QR]) * Q_REF : e - sft;
           s[TS_QRV] = 1;
         );
-        sft != 0 ? ( bi = 0; loop(GRB_N, s[TS_ZERO + bi] += sft; bi += 1; ); );
+        // the highest steady stretch lately (touched, the zero moved up), of
+        // those no louder than the one that last moved it up: no more
+        // compressed than that one was, so under the zero it's the gain
+        s[TS_QIS] / s[TS_QN] <= s[TS_QUL] + 1 ? (
+          s[TS_QWM] = s[TS_QWN] > 0 ? max(s[TS_QWM], e - sft) : e - sft;
+          s[TS_QWN] += 1;
+        );
+        sft != 0 ? ( bi = 0; loop(GRB_N, s[TS_ZERO + bi] += sft; bi += 1; ); s[TS_QUP] += sft; );
         s[TS_QN] = 0;
       );
     ) : s[TS_QN] = 0;
+    // Touched, with the zero moved up by the music since it was measured:
+    // when even the highest steady stretch over Q_WIN, no louder than the
+    // one that moved it up, sits under where that one was put (TS_QUM),
+    // the gain came back down. It goes back towards the measured zero, never
+    // past it -- so a compressor that never lets go reads no lower than it
+    // did before the music moved it.
+    (zo && !sh && s[TS_STALE] > 0.5 && s[TS_QUP] > Q_TOL) ? (
+      s[TS_QWT] += 1;
+      s[TS_QWT] >= tap_qwin ? (
+        (s[TS_QWN] >= 3 && s[TS_QWM] < s[TS_QUM] - Q_TOL) ? (
+          sft = max((s[TS_QWM] - s[TS_QUM]) * Q_STEP, -s[TS_QUP]);
+          bi = 0; loop(GRB_N, s[TS_ZERO + bi] += sft; bi += 1; );
+          s[TS_QUP] += sft;
+        );
+        s[TS_QWT] = 0; s[TS_QWN] = 0;
+      );
+    ) : ( s[TS_QWT] = 0; s[TS_QWN] = 0; );
     // Shut on the test signal and seen open on the music: a gate (or
     // expander) for certain -- a plugin just turned down never opens.
     (sh && s[TS_GATE] < 0.5 && gv >= 3 && go * 2 >= gv) ? (
@@ -1564,7 +1602,7 @@ out_pin:right
                                 : (s[TS_SORT + m / 2 - 1] + s[TS_SORT + m / 2]) * 0.5);
       s[TS_HASCAL] = 1;
       s[TS_STALE] = 0;
-      s[TS_QRV] = 0; s[TS_QN] = 0;
+      s[TS_QRV] = 0; s[TS_QN] = 0; s[TS_QUP] = 0; s[TS_QWN] = 0; s[TS_QWT] = 0;
       s[TS_CST] = (m >= 3 && abs(d) > 1) ? 2 : 1;
       1;
     ) : 0;
