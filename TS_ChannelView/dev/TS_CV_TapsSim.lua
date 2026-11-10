@@ -1272,6 +1272,7 @@ if NEW then
   for a = 0, 20 do local f = F(a); if f and f.guid == "{C1}" then ca = a end end
   check("make-up: a bare gain, its own number", TP.makeup_db(track, ca, 9, { [9] = { lo = -60, hi = 18, unit = "dB", curve = "lin" } }), 6)
   check("make-up: a bare number not across 0 isn't one", TP.makeup_db(track, ca, 3, nil), nil)
+  check("make-up: a knob measured as a gain", TP.makeup_db(track, ca, 3, nil, { { 0, -20 }, { 1, 20 } }), 0)
   -- Kotelnikov: its readout "6.0", but asked at its position "6.0 dB"
   local fpn2 = reaper.TrackFX_FormatParamValueNormalized
   reaper.TrackFX_FormatParamValueNormalized = function(tr, a, p, v)

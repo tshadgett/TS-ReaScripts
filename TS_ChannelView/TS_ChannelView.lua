@@ -4342,6 +4342,22 @@ local function control_menu()
         or TP.is_tapped(app.track, fx.guid) and "Measured gain reduction follows this control, automation included."
         or "Measured gain reduction follows this control, automation included,\nonce the probes measure this plugin.")
     end
+    -- a gain knob that doesn't read in dB (0 to 10): measured on a hidden
+    -- copy (TS_CV_Learn LN.start_gain), then followed as a make-up
+    local law = layout.gainlaw and layout.gainlaw[c.param]
+    if law or not db then
+      local prog = TP.gain_measuring(fx.guid, c.param)
+      local label = prog and ("Measuring as a gain\u{2026} %d%%"):format(math.floor(prog * 100))
+        or "Measure as a gain"
+      if ED.item(ImGui, ctx, label .. "##measgain", nil, law ~= nil, prog == nil) then
+        local l, k = commit()
+        TP.measure_gain(app.track, fx.addr, k or key, l, { c.param })
+      end
+      if ED.PRO and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+        ImGui.SetTooltip(ctx, law and "Measured: followed as a gain. Click to measure again."
+          or "Measures its dB on a hidden copy,\nso measured gain reduction follows it.")
+      end
+    end
   end
 
   if ED.menu(ImGui, ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then

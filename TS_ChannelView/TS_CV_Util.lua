@@ -507,6 +507,21 @@ function U.range_say(r, v)
 end
 function U.range_text(r, n) return U.range_say(r, U.range_value(r, n)) end
 
+-- A gain knob measured at points { {position, dB}, ... } (TS_CV_Mappings
+-- GainLaw<p>): its dB at position n, along them (beyond them, the end's).
+function U.gainlaw_at(pts, n)
+  if not pts or #pts < 2 then return nil end
+  if n <= pts[1][1] then return pts[1][2] end
+  for i = 2, #pts do
+    local a, b = pts[i - 1], pts[i]
+    if n <= b[1] then
+      local f = (b[1] > a[1]) and (n - a[1]) / (b[1] - a[1]) or 0
+      return a[2] + (b[2] - a[2]) * f
+    end
+  end
+  return pts[#pts][2]
+end
+
 -- A range whose ends are the plugin's own numbers (what it says at both
 -- ends, a unit or not) only labels them: the plugin's number is the
 -- value, however its scale runs between. Kept by plugin, parameter and ends.

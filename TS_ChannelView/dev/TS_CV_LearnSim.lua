@@ -738,6 +738,19 @@ for _, variant in ipairs({ "input dB", "input along" }) do
   check(variant .. ": says where it fell", job.msg:find("with the input at", 1, true) ~= nil, true)
   check(variant .. ": a Threshold mapped later sets it aside", (function()
     cv.roles.Threshold = 2; local r = M.thr_cal(cv); cv.roles.Threshold = nil; return r end)(), nil)
+  if variant == "input along" then
+    -- its input, 0 to 10, measured as a gain: -10 dB at 0, +50 at 10
+    local gj = LN.start_gain(user, 0, "Vox :: 1176", layout, { 0 })
+    run(gj)
+    check("gain knob: measured", gj.state, "done")
+    local law = (M.get("Vox :: 1176").gainlaw or {})[0]
+    check("gain knob: eleven points", law and #law, 11)
+    checkf(("gain knob: 0 to 0.4 is 24 dB (%.2f)"):format(law and (M.gainlaw_at(law, 0.4) - M.gainlaw_at(law, 0)) or 0),
+      function() return law and math.abs(M.gainlaw_at(law, 0.4) - M.gainlaw_at(law, 0) - 24) < 0.3 end)
+    checkf("gain knob: between points", function() return law and math.abs(M.gainlaw_at(law, 0.25) - M.gainlaw_at(law, 0) - 15) < 0.3 end)
+    check("gain knob: the user's plugin untouched", ("%.1f"):format(user.fx[1].vals[0]), "0.5")
+    check("gain knob: the track removed", #tracks, 1)
+  end
   M.remove("Vox :: 1176")
 end
 do

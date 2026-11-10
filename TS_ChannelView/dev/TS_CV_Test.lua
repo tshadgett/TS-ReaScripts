@@ -235,6 +235,14 @@ do
   M.save(); M.reload()
   local c = M.get(k).controls[1]
   check("round-trip buttons grid", tostring(c.buttons) .. " " .. tostring(c.nbtn), "grid 16")
+  -- a gain knob's measured dB (GainLaw<p>) kept, copied, and read between
+  M.set(k, { controls = { { param = 3, type = "knob" } }, gainlaw = { [3] = { { 0, -10 }, { 0.5, 2 }, { 1, 20 } } } })
+  M.save(); M.reload()
+  local gl = M.get(k).gainlaw
+  check("gain law: kept", gl and gl[3] and #gl[3], 3)
+  check("gain law: copied", #M.copy(M.get(k)).gainlaw[3], 3)
+  check("gain law: between points", M.gainlaw_at(gl[3], 0.75), 11)
+  check("gain law: past the ends", ("%g %g"):format(M.gainlaw_at(gl[3], -1), M.gainlaw_at(gl[3], 2)), "-10 20")
   -- the gap between them, and Reverse (every button lit but the current)
   M.set(k, { controls = { { param = 3, type = "combo", buttons = "grid", nbtn = 8, bgap = 6, invert = true },
                           { param = 4, type = "combo", buttons = "across", nbtn = 3 } } })

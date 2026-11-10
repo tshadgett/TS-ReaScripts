@@ -102,6 +102,10 @@
   the panel, the scale round a knob, tooltips, canvases, the web page.
   <unit> Hz kHz ms s dB % :1 or empty; <curve> lin, log or sq.
 
+  GainLaw<p>=<position>:<dB>,... is what a gain knob that doesn't read in
+  dB (0 to 10, 0 to 100) was measured to do at each position (TS_CV_Learn
+  LN.start_gain): the measured gain reduction follows it as a make-up.
+
   STYLE and PLATE are the hardware look (see "Hardware styles" in
   TS_CV_Config.lua). Style<n> belongs to control n, the same index as its
   Ctl<n> line, and holds the knob or fader style and the cap colour,
@@ -2281,6 +2285,7 @@ local function parse_section(sect)
   local controls, aliases, states, ranges = {}, {}, {}, {}
   local choice_names, choice_by, choice_ctx = {}, {}, {}
   local steps = {}
+  local gainlaw = {}
   local meter = nil
   if sect.Meter then
     local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
@@ -2299,6 +2304,8 @@ local function parse_section(sect)
     end
     local rp = k:match("^Range(%d+)$")
     if rp then ranges[tonumber(rp)] = M.range_of_line(v) end
+    local gp = k:match("^GainLaw(%d+)$")
+    if gp then gainlaw[tonumber(gp)] = M.gainlaw_of(v) end
     local np = k:match("^Steps(%d+)$")
     local nv = np and tonumber(v)
     if nv and nv >= 2 and nv <= 64 then steps[tonumber(np)] = math.floor(nv) end
@@ -2444,6 +2451,7 @@ local function parse_section(sect)
   controls.grid = grid
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
            steps = next(steps) and steps or nil,
+           gainlaw = next(gainlaw) and gainlaw or nil,
            choice_names = next(choice_names) and choice_names or nil,
            choice_by = next(choice_by) and choice_by or nil,
            choice_ctx = next(choice_ctx) and choice_ctx or nil,
@@ -2533,6 +2541,10 @@ local function serialize(layout)
     if line then out["Range" .. p] = line end
   end
   for p, n in pairs(layout.steps or {}) do out["Steps" .. p] = tostring(n) end
+  for p, pts in pairs(layout.gainlaw or {}) do
+    local line = M.gainlaw_line(pts)
+    if line then out["GainLaw" .. p] = line end
+  end
   for p, map in pairs(layout.choice_names or {}) do
     local line = M.choices_line(map)
     if line then out["Choices" .. p] = line end
@@ -3561,6 +3573,26 @@ function M.choice_list(key, param, list, track, addr)
   return out
 end
 
+-- A gain knob's measured dB (GainLaw<p>): { {position, dB}, ... } in
+-- order of position, or nil.
+function M.gainlaw_of(v)
+  local pts = {}
+  for a, b in (v or ""):gmatch("([%-%d%.]+):([%-%d%.]+)") do
+    local n, g = tonumber(a), tonumber(b)
+    if n and g then pts[#pts + 1] = { math.max(0, math.min(1, n)), g } end
+  end
+  table.sort(pts, function(x, y) return x[1] < y[1] end)
+  return #pts >= 2 and pts or nil
+end
+function M.gainlaw_line(pts)
+  if not pts or #pts < 2 then return nil end
+  local t = {}
+  for i, q in ipairs(pts) do t[i] = ("%.4f:%.2f"):format(q[1], q[2]) end
+  return table.concat(t, ",")
+end
+-- Its dB at position n (TS_CV_Util U.gainlaw_at)
+function M.gainlaw_at(pts, n) return U.gainlaw_at(pts, n) end
+
 -- Your own range for a parameter (RANGE<p>=<low>|<high>|<unit>|<curve>):
 -- what it reads as when the plugin won't say. Per plugin, per parameter,
 -- like a state's names (TS_CV_Util U.range_*).
@@ -4111,6 +4143,14 @@ function M.copy(layout)
   if layout.ranges then
     out.ranges = {}
     for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve } end
+  end
+  if layout.gainlaw then
+    out.gainlaw = {}
+    for p, pts in pairs(layout.gainlaw) do
+      local t = {}
+      for i, q in ipairs(pts) do t[i] = { q[1], q[2] } end
+      out.gainlaw[p] = t
+    end
   end
   if layout.steps then
     out.steps = {}

@@ -2468,8 +2468,10 @@ end
 
 -- A control's value in dB as it reads (through its custom range, if it
 -- has one), or nil when it doesn't read in dB.
-function TP.makeup_db(tr, addr, p, ranges)
+function TP.makeup_db(tr, addr, p, ranges, law)
   if not (tr and addr and p and p >= 0) then return nil end
+  -- a knob measured as a gain (GainLaw<p>): its dB at where it is
+  if law then return U.gainlaw_at(law, reaper.TrackFX_GetParamNormalized(tr, addr, p) or 0) end
   local own = own_db(tr, addr, p)
   if own then return own end
   local UN = require("TS_CV_Units")
@@ -2532,6 +2534,10 @@ function TP.makeup_of(layout, tr, addr)
       if not seen[q] then ps[#ps + 1] = q; seen[q] = true end
     end
   end
+  -- and any knob measured as a gain
+  for q in pairs(layout.gainlaw or {}) do
+    if not seen[q] then ps[#ps + 1] = q; seen[q] = true end
+  end
   p = ps[1]
   local bands, plan, bsig
   if cv and cv.kind == "multi" then
@@ -2552,9 +2558,10 @@ function TP.makeup_of(layout, tr, addr)
   local sig = {}
   for _, q in ipairs(ps) do
     local rg = layout.ranges and layout.ranges[q]
-    sig[#sig + 1] = tostring(q) .. "|" .. (rg and M.range_line(rg) or "")
+    local law = layout.gainlaw and layout.gainlaw[q]
+    sig[#sig + 1] = tostring(q) .. "|" .. (rg and M.range_line(rg) or "") .. (law and ("|" .. (M.gainlaw_line and M.gainlaw_line(law) or "law")) or "")
   end
-  return { p = p, ps = ps, bands = bands, plan = plan, ranges = layout.ranges,
+  return { p = p, ps = ps, bands = bands, plan = plan, ranges = layout.ranges, laws = layout.gainlaw,
            sig = table.concat(sig, ";"), bsig = bsig }
 end
 
@@ -2622,7 +2629,7 @@ local function mug_tick(now, web)
       local v, sig, d = 0, "none", nil
       local fs
       for _, q in ipairs(e.src and e.src.ps or {}) do
-        local dq = TP.makeup_db(e.tr, e.addr, q, e.src.ranges)
+        local dq = TP.makeup_db(e.tr, e.addr, q, e.src.ranges, e.src.laws and e.src.laws[q])
         if dq then d = (d or 0) + dq; fs = fs or {}; fs[q] = true end
       end
       if d then v, sig = math.max(-60, math.min(60, d)), e.src.sig end
@@ -2677,6 +2684,55 @@ function TP.makeup_followed(tr, guid, p)
   local e = guid and mug.by_guid[guid]
   return (e and e.tr == tr and p and e.fset and e.fset[p]
           and (PL.get(tr, e.probe, "mug_cap") or 0) >= 0.5) and true or false
+end
+
+-- A plugin's gain knobs that don't read in dB and haven't been measured:
+-- named as a gain (TP.makeup_name), or its compressor canvas's Makeup or
+-- Input role. (Not REAPER's own Wet, which mixes rather than gains.)
+function TP.gain_knobs(tr, addr, layout)
+  layout = layout or {}
+  local out, seen = {}, {}
+  local function add(q)
+    if not q or seen[q] then return end
+    seen[q] = true
+    if layout.gainlaw and layout.gainlaw[q] then return end
+    local _, nm = reaper.TrackFX_GetParamName(tr, addr, q, "")
+    if (nm or ""):lower():gsub("[^%a]", "") == "wet" then return end
+    if TP.makeup_db(tr, addr, q, layout.ranges) == nil then out[#out + 1] = q end
+  end
+  for _, q in ipairs(named_makeups(tr, addr)) do add(q) end
+  local cv = layout.canvas
+  local R = cv and cv.kind == "comp" and cv.roles or {}
+  add(R.Makeup); add(R.Input)
+  table.sort(out)
+  return out
+end
+
+-- Gain knobs being measured on a hidden copy (TS_CV_Learn LN.start_gain),
+-- in the background: { job, guid, ps }. One at a time.
+local gjob
+function TP.measure_gain(tr, addr, key, layout, ps)
+  if gjob or not (ps and #ps > 0) then return false end
+  local ok, LN = pcall(require, "TS_CV_Learn")      -- (Pro)
+  if not ok then return false end
+  gjob = { job = LN.start_gain(tr, addr, key, layout, ps), guid = fx_guid(tr, addr), ps = ps }
+  return true
+end
+-- How far along measuring this knob is (0..1), or nil when it isn't.
+function TP.gain_measuring(guid, p)
+  if not gjob or gjob.guid ~= guid then return nil end
+  for _, q in ipairs(gjob.ps) do if q == p then return gjob.job.progress or 0 end end
+  return nil
+end
+local function gain_tick()
+  if not gjob then return end
+  require("TS_CV_Learn").step(gjob.job)
+  local st = gjob.job.state
+  if st ~= "starting" and st ~= "measuring" then
+    if st == "error" then reaper.ShowConsoleMsg("ChannelView: " .. (gjob.job.msg or "") .. "\n") end
+    gjob = nil
+    TP.makeup_changed()
+  end
 end
 
 -- Forget which controls are the make-up (a layout changed).
@@ -2776,6 +2832,7 @@ end
 function TP.update(now, web)
   now = now or reaper.time_precise()
   web = web or false          -- (the web bridge's: see make-up gain)
+  if not web then gain_tick() end
   TP.fine_tidy(now)
   if now >= any_until then
     TP.active = anything_to_do()

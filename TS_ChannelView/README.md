@@ -2777,6 +2777,12 @@ mark with right-click a knob or fader ▸ **Make-up gain** (a pink dot on
 it in Edit layout, a pink corner on a fader); a compressor canvas's
 *Make-up*; a multiband canvas's *Output* and each band's *Gain*. A
 control has to read in dB (*Values* ▸ *Custom range* can give it one).
+A gain knob that reads 0 to 10 or 0 to 100 (Comprexxor's *Input* and
+*Output*, White 2A's *Gain*): right-click it ▸ **Measure as a gain** (Pro). Its
+dB is measured at eleven points on a hidden copy of the plugin (a few
+seconds; your own plugin isn't touched), and from then on it's followed
+like any other. Learning or measuring a canvas does the same for the
+plugin's gain knobs on the way.
 Needs TS_TrackProbe 2.5.1 (with ChannelView 4.0.2 and Track Analyser
 2.7.1): reopen the project after updating.
 
