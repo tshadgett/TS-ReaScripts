@@ -2,11 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.7.2
+-- @version 2.7.3
 -- @changelog
---  TS_TrackProbe 2.6.0: each track's probe can send its own spectrum and
---  play one band of the track, for ChannelView 4.0.3. Reopen a project
---  after updating.
+--  TS_TrackProbe 2.7.4: the measured zero kept right while playing, for
+--  ChannelView 4.2.0's measured gain reduction. Reopen a project after
+--  updating.
 -- @about
 --  # Track Analyser
 --

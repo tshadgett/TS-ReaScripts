@@ -1,9 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.1.3
+-- @version 4.2.0
 -- @changelog
---  Value inside the knob; the routing button stays on Sends folded away.
---  Moves with ChannelView Pro 4.1.3. See the CHANGELOG.
+--  Measured gain reduction follows the plugin's gain knobs (Check gain
+--  knobs); Overall size; plugin favourites; action bars that scroll; extra
+--  large knobs; gaps between buttons. Needs TS_TrackProbe 2.7.4. Moves
+--  with ChannelView Pro 4.2.0. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

@@ -1,5 +1,14 @@
 # Track Analyser — changelog
 
+## 2.7.3 — TS_TrackProbe 2.7.4
+
+- **TS_TrackProbe 2.7.4:** for ChannelView 4.2.0's measured gain
+  reduction: the measured zero is kept right while playing (a gain inside
+  the plugin raised, lowered or turned right down), and a zero measured
+  before anything has played no longer takes the make-up out twice. A
+  run of the zero isn't lost to a chain that lifts the test noise past
+  -12 dBFS. Reopen a project after updating, so the new probe runs.
+
 ## 2.7.2 — TS_TrackProbe 2.6.0
 
 - **TS_TrackProbe 2.6.0:** each track's probe can send its own spectrum

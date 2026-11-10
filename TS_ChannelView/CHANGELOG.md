@@ -1,5 +1,69 @@
 # ChannelView — changelog
 
+## 4.2.0 — measured gain reduction follows gain knobs, overall size, favourites
+
+### ChannelView
+
+- **Measured gain reduction follows the plugin's gain knobs:** input,
+  make-up and output controls found by name (*Makeup*, *Out Gain*,
+  *Output*, *Output Trim*, *Input*, *Input Gain*, *Gain*, ReaComp's
+  *Wet*) are added together and taken out of the reading, automation
+  included. A control that leaves the unit off (a bare number across 0)
+  or gives it only when asked is read in dB too.
+- **Check gain knobs:** the first time a plugin's gain reduction is
+  measured, a note on its panel asks *Check its gain knobs?* while
+  stopped. Say what each knob is (Input, Make-up or Output gain, or Not a
+  gain), add one it missed, then **Measure**: knobs that read 0 to 10 or
+  0 to 100, or whose dB readout isn't their real gain, are measured along
+  their travel on a hidden copy of the plugin and followed from then on.
+  A small window shows the progress and closes itself when it's done.
+  Panel menu ▸ *Check gain knobs…* any time. The right-click *Make-up
+  gain* mark is gone: the check does it.
+- **The measured zero kept right while playing** (TS_TrackProbe 2.7.4):
+  a gain raised inside the plugin is followed up, a gain turned down
+  after a touch or turned up and back down is followed back, and moving a
+  followed knob, or turning it right down, no longer leaves the reading
+  off until the next stop.
+- **Overall size:** Visual Options ▸ Sizes ▸ *Overall size*, 50 % to
+  150 % per tab: panels, type, macros, modulators and the toolbars'
+  buttons together.
+- **Plugin favourites:** a star beside a plugin's format in the browser
+  and the Add plugin menus; favourites lead lists and searches.
+- **Action bars too long for their place:** *Extend* (more rows) or
+  *Scroll* (one row or column: the wheel, a drag or the arrows), per bar.
+- **Extra large knobs**, two cells by two.
+- **Buttons:** a gap between a row's, a column's or a grid's buttons
+  (None to 8 px), and *Reverse* (every button lit but the current one).
+- **Step button:** a click on an LED or its name goes straight to that
+  choice; *No button* shows just the list.
+- **Meters:** the gain-reduction bar as thin as the input and output
+  meters, each bar against its panel's edge; the reading without "dB".
+- ReEQ2's output gains read in dB.
+- A plugin's own meters moving on the probes' test noise no longer count
+  as touching it (it asked for its zero again every few seconds).
+- Dragging a plugin to the first slot shows its drop line.
+
+### ChannelView Pro
+
+- **Grid layouts:** a small knob is its dial alone, its name in the
+  tooltip; dropdowns and buttons three quarters or half a cell tall; a
+  button as wide as its place, down to half a cell; every control the
+  same 4 px in from its cells' edges.
+- **Canvas colours:** the spectrum has a colour of its own (the meters'
+  until you set it).
+- **Compressor canvases** show measured reduction in pink, the plugin's
+  own in amber, as a panel's meter does.
+- Picture knobs show the knob's own value arc too.
+- Exporting layouts with big pictures no longer runs out of memory.
+- **Web page:** the mixer at any height, remembered per device, and keys
+  of its own (transport, tracks, undo, the mixer, ? for the list); the
+  console panel; the Macros and Modulators panels whenever they're ticked
+  in Show, with a + tile to add one; linking from the page (a source's
+  ring starts it, a tap links or unlinks a control, hold for its range);
+  plugin favourites in the picker; action bars that scroll; a narrow
+  fader strip; a choice sets the plugin's exact value; two pages at once
+  (a tablet and a browser) no longer swallow each other's commands.
+
 ## 4.1.3 — value inside the knob, picture shadows
 
 ### ChannelView
