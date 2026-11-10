@@ -744,12 +744,29 @@ for _, variant in ipairs({ "input dB", "input along" }) do
     run(gj)
     check("gain knob: measured", gj.state, "done")
     local law = (M.get("Vox :: 1176").gainlaw or {})[0]
-    check("gain knob: eleven points", law and #law, 11)
+    check("gain knob: eleven points or more", law and #law >= 11, true)
     checkf(("gain knob: 0 to 0.4 is 24 dB (%.2f)"):format(law and (M.gainlaw_at(law, 0.4) - M.gainlaw_at(law, 0)) or 0),
       function() return law and math.abs(M.gainlaw_at(law, 0.4) - M.gainlaw_at(law, 0) - 24) < 0.3 end)
     checkf("gain knob: between points", function() return law and math.abs(M.gainlaw_at(law, 0.25) - M.gainlaw_at(law, 0) - 15) < 0.3 end)
     check("gain knob: the user's plugin untouched", ("%.1f"):format(user.fx[1].vals[0]), "0.5")
     check("gain knob: the track removed", #tracks, 1)
+    -- a knob steep at its quiet end (a log taper), what the measuring
+    -- reads bottoming out about 70 dB down
+    local taper = function(n) return 40 + 60 * math.log(math.max(n, 1e-6), 10) end
+    local was = truth_gain
+    truth_gain = function(vals) return math.max(-70, taper(vals[0])) end
+    gj = LN.start_gain(user, 0, "Vox :: 1176", layout, { 0 })
+    run(gj)
+    truth_gain = was
+    check("steep knob: measured", gj.state, "done")
+    law = (M.get("Vox :: 1176").gainlaw or {})[0]
+    for _, n in ipairs({ 0.03, 0.05, 0.07, 0.15, 0.25, 0.45, 0.7, 0.95 }) do
+      local got = law and M.gainlaw_at(law, n) or 0
+      checkf(("steep knob: at %.2f %.1f dB (%.1f)"):format(n, taper(n), got), function() return math.abs(got - taper(n)) < 0.6 end)
+    end
+    checkf("steep knob: next to nothing at the bottom", function() return law and M.gainlaw_at(law, 0) <= -100 end)
+    checkf(("steep knob: points kept to a few dozen (%d)"):format(law and #law or 0), function() return law and #law <= 52 end)
+    M.gainlaw_line(law)
   end
   M.remove("Vox :: 1176")
 end
