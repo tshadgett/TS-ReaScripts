@@ -1268,6 +1268,10 @@ if NEW then
     check("gain roles: the knobs to measure", table.concat(TP.gain_knobs(track, a1, { controls = {}, gainrole = { [3] = "in", [9] = "no" }, gaincheck = true }), ","), "3")
     check("gain roles: what names say", tostring(TP.gain_role_of("Input Gain")) .. tostring(TP.gain_role_of("Out Gain"))
       .. tostring(TP.gain_role_of("Make-Up")) .. tostring(TP.gain_role_of("Ratio")), "inoutmunil")
+    check("gain roles: more names", tostring(TP.gain_role_of("Output Gain")) .. tostring(TP.gain_role_of("Input Level"))
+      .. tostring(TP.gain_role_of("Makeup Gain [dB]")) .. tostring(TP.gain_role_of("Gain")) .. tostring(TP.gain_role_of("Output Trim")),
+      "outinmumuout")
+    check("gain roles: marked as the make-up, its name says Out Gain", cands({ controls = { { param = 9 } }, mug = 9 }), "7mu,9out")
   end
   r0 = rst(); TP.touched(track, "{C1}", 9)
   check("make-up:   moving the second isn't a touch", rst(), r0)

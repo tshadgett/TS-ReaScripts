@@ -2697,9 +2697,10 @@ end
 -- What a gain knob's name says it is: "in", "out" or "mu" (make-up), or nil.
 function TP.gain_role_of(name)
   local n = (name or ""):lower():gsub("[^%a]", ""):gsub("db$", "")
-  if n == "input" or n == "inputgain" or n == "ingain" or n == "gainin" then return "in" end
-  if n == "output" or n == "out" or n == "outputgain" or n == "outgain" or n == "gainout"
-     or n == "outputtrim" or n == "outtrim" or n == "wet" then return "out" end
+  if n:find("makeup", 1, true) or n == "mug" then return "mu" end
+  if n:find("^input") or n:find("^ingain") or n:find("^intrim") or n == "in" or n == "gainin" then return "in" end
+  if n:find("^output") or n:find("^outgain") or n:find("^outtrim") or n == "out" or n == "gainout"
+     or n == "wet" then return "out" end
   if TP.makeup_name(name) then return "mu" end
   return nil
 end
@@ -2717,11 +2718,18 @@ function TP.gain_candidates(tr, addr, layout)
   end
   for q, r in pairs(layout.gainrole or {}) do add(q, r) end
   if not layout.gaincheck then
-    add(layout.mug, "mu")
+    -- (what its name says first: a knob marked as the make-up may be the
+    -- plugin's Output)
+    local function by_name(q, r)
+      if not q or q < 0 then return end
+      local _, nm = reaper.TrackFX_GetParamName(tr, addr, q, "")
+      add(q, TP.gain_role_of(nm) or r)
+    end
+    by_name(layout.mug, "mu")
     local cv = layout.canvas
     local R = (cv and cv.roles) or {}
-    if cv and cv.kind == "comp" then add(R.Makeup, "mu"); add(R.Input, "in") end
-    if cv and cv.kind == "multi" then add(R.Output, "out") end
+    if cv and cv.kind == "comp" then by_name(R.Makeup, "mu"); by_name(R.Input, "in") end
+    if cv and cv.kind == "multi" then by_name(R.Output, "out") end
     for _, q in ipairs(named_makeups(tr, addr)) do
       local _, nm = reaper.TrackFX_GetParamName(tr, addr, q, "")
       local r = TP.gain_role_of(nm)
