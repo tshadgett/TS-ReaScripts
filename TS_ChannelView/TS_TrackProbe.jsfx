@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.7.0
+version: 2.7.1
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -351,7 +351,9 @@ author: Tim Shadgett
 //   script started, or another control is the make-up now), not the
 //   audio: what the probe has learnt and measured is moved by the same
 //   amount, so the reading doesn't jump. A new multiband split
-//   (tap_mb, tap_mbx) counts the same way.
+//   (tap_mb, tap_mbx) counts the same way. This is kept up while the
+//   zero is being measured too: a zero measured before anything has
+//   played is already in the make-up as it is.
 //
 //   The make-up is written at the script's frame rate, so it can arrive a
 //   frame after the audio changed. A ratio climbing in that frame would
@@ -1325,6 +1327,23 @@ out_pin:right
           bi += 1;
         );
         cal_ph == 1 ? (s[TS_NA] += 1) : (s[TS_NB] += 1);
+      );
+      // The make-up kept in step meanwhile, as below (MAKE-UP GAIN,
+      // FOLLOWED): the zero this run finds is in today's make-up, and
+      // the first column played mustn't move it again.
+      rb = TV_MK[t] != s[TS_MK] || mb_seq != s[TS_MBS];
+      s[TS_MK] = TV_MK[t]; s[TS_MBS] = mb_seq;
+      rb && t == tap_fine - 1 ? fn_rebase = 1;
+      bi = 0;
+      loop(GRB_N,
+        mo = mugBand(t, bi);
+        dm = mo - s[TS_MO + bi];
+        (rb && abs(dm) > 0.0001) ? (
+          s[TS_SM + bi] -= dm; s[TS_BS + bi] -= dm; s[TS_BSA + bi] -= dm; s[TS_BSB + bi] -= dm;
+          s[TS_ZERO + bi] -= dm; s[TS_ZSH + bi] -= dm;
+        );
+        s[TS_MO + bi] = mo;
+        bi += 1;
       );
       s[TS_LAST] = 0;
       s[TS_DISP] = max(0, s[TS_DISP] - tap_rel);

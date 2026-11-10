@@ -2785,7 +2785,7 @@ its gain went up, and the zero follows. After you touch the plugin
 back to where quiet passages sat before the touch, so a gain turned down
 is caught too, and a threshold moved on a compressor that never lets go
 isn't mistaken for one. The next stop measures it again. Needs
-TS_TrackProbe 2.7.0: reopen the project after updating.
+TS_TrackProbe 2.7.1: reopen the project after updating.
 
 A plugin's latency needs nothing: REAPER already holds back the channels a
 plugin doesn't use by the latency it reports, so the copies arrive in line.
