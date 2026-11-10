@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.6.1
+version: 2.7.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -407,6 +407,27 @@ author: Tim Shadgett
 //   The two probes talk through gmem at CAL_BASE + track index * 8, the
 //   track index from get_host_placement(). Needs REAPER's "Run FX when
 //   stopped" (on by default).
+//
+// THE ZERO, KEPT ON THE MUSIC
+//   A measured zero holds until playback stops again, but a gain inside
+//   the plugin that nothing follows (a second output knob, a change made
+//   in the plugin's own window) moves what "no reduction" is meanwhile.
+//   So while playing, the zero is checked against the music, in STEADY
+//   STRETCHES: 80 ms (Q_COLS) where the median across bands of each
+//   band's ratio over its zero wanders less than Q_SPAN. A release still
+//   running drifts more than that, so it never counts.
+//     * A stretch sitting OVER the zero by more than Q_TOL can't be
+//       reduction: the plugin's gain went up. The zero moves Q_STEP of
+//       the way to it, touched or not.
+//     * Under the zero is either the gain coming down or a compressor
+//       that never lets go, and the music can't tell which. Untouched,
+//       the zero holds. Touched since it was measured (tap_calN 3), a
+//       QUIET stretch (the input Q_QUIET under its falling peak) moves
+//       it back to where quiet stretches sat before the touch (TS_QR,
+//       learnt from them while untouched): a gain change moves them by
+//       the change, a threshold moved on a compressor that never lets
+//       go hardly at all. With no such place learnt yet, it holds.
+//   The next stopped measurement replaces it all.
 //
 //   The reading comes out on tap_grN, in the track's probe block, so a
 //   script can read any track's taps without arming anything, every
@@ -831,6 +852,12 @@ out_pin:right
   TS_MO = 410;                    // each band's make-up last column (MAKE-UP GAIN, FOLLOWED)
   TS_MK = 420; TS_MBS = 421;      // ... the count, and the multiband split's, last seen
   TS_HBA = 430;                   // each band's columns since its baseline was first learnt
+  // the zero kept on the music (THE ZERO, KEPT ON THE MUSIC): each band's
+  // ratio over its zero this column; the input's falling peak (dB); the
+  // last column's median; the steady stretch's columns, sum, and whether
+  // all of it was quiet; where the quiet stretches sit, and whether known
+  TS_ZQ = 440; TS_QIP = 450; TS_QM = 451; TS_QN = 452; TS_QS = 453; TS_QQ = 454;
+  TS_QR = 455; TS_QRV = 456; TS_QLO = 457; TS_QHI = 458;
   LV_FALL = 20;                   // dB/s the published peak falls
   LV_RMS  = 0.3;                  // s, the RMS window
   LV_RATE = 30;                   // publications a second
@@ -893,6 +920,13 @@ out_pin:right
   CAL_SHUT = -10;                 // dB: every band this far down on the test signal: shut on it
   GATE_OPEN = 6;                  // dB over its shut level in most bands, while playing: open
   GATE_COLS = 25;                 // columns seen open before it's a gate for certain
+  Q_SPAN   = 0.6;                 // dB the median may wander in a steady stretch
+  Q_COLS   = 40;                  // columns (80 ms) of it to count
+  Q_QUIET  = 20;                  // dB under the input's peak: quiet
+  Q_TOL    = 0.25;                // dB off the zero before it moves
+  Q_STEP   = 0.6;                 // of the way, each time
+  Q_REF    = 0.3;                 // how fast the quiet stretches' place is learnt
+  Q_FALL   = 6;                   // dB/s the input's peak falls
   cal_phase = 0; cal_t = 0; cal_quiet = 0; cal_since = 1000000000;
   nz_last = gmem[CTRL_NOZERO]; nz_age = 1000000000; cal_held = 0;
   cal_hb = 0; cal_phb = 0; cal_inpk = 0; cal_ppk = 0;
@@ -1109,6 +1143,7 @@ out_pin:right
     tap_dec   = TAP_DEC / tap_cps;
     tap_rel   = TAP_REL / tap_cps;
     tap_pkdec = 10 ^ (-6 / 10 / tap_cps);   // band peaks fall 6 dB/s
+    tap_qfall = Q_FALL / tap_cps;
     tap_lvpk  = 10 ^ (-LV_FALL / 20 / srate);
     tap_lvcol = LV_FALL / tap_cps;          // dB a column the bands' input levels fall
     tap_lvrk  = 1 - exp(-1 / (srate * LV_RMS));
@@ -1121,7 +1156,7 @@ out_pin:right
   function tapReset(t) local(s, i) (
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
     i = 0; loop(TS_SORT, s[i] = 0; i += 1; );
-    s[TS_DISP] = 0; s[TS_LAST] = 0;
+    s[TS_DISP] = 0; s[TS_LAST] = 0; s[TS_QN] = 0;
     i = 0; loop(4, s[TS_MBG + i] = 0; i += 1; );
     t == tap_fine - 1 ? (fineForget());
   );
@@ -1267,7 +1302,7 @@ out_pin:right
 
   // A column's worth of one tap: per-band ratio against its baseline,
   // the median across bands, the meter's ballistics.
-  function tapColumn(t) local(s, bi, pa, pb, pk, gate, r, d, n, j, g, zo, sh, gv, go, mo, snap, rb, dm) (
+  function tapColumn(t) local(s, bi, pa, pb, pk, gate, r, d, n, j, g, zo, sh, gv, go, mo, snap, rb, dm, nq, pin, ind, m, e, sft) (
     s = TAP_BASE + t * TAP_STRIDE + TAP_S;
     n = 0;
     // the bands due this column (THE TEN BANDS, BY FFT), staggered
@@ -1297,7 +1332,7 @@ out_pin:right
     ) : (
     zo = s[TS_HASCAL] > 0.5;
     sh = zo && s[TS_CST] == 4 && s[TS_STALE] < 0.5;   // shut on the test signal
-    gv = 0; go = 0;
+    gv = 0; go = 0; nq = 0; pin = 0;
     snap = (tap_col & 31) == 0;
     // what's taken out changed, not the audio (MAKE-UP GAIN, FOLLOWED)
     rb = TV_MK[t] != s[TS_MK] || mb_seq != s[TS_MBS];
@@ -1326,6 +1361,7 @@ out_pin:right
       s[TS_HB + bi] > 0.5 ? s[TS_HBA + bi] = min(s[TS_HBA + bi] + 1, 100000);
       pa = s[TS_PA + bi];
       pb = s[TS_PB + bi];
+      pin += pa;
       s[TS_MBP + bi] = pa;
       pk = max(pa, s[TS_PK + bi] * tap_pkdec);
       s[TS_PK + bi] = pk;
@@ -1345,6 +1381,14 @@ out_pin:right
         // the measured zero where there is one, the music's baseline where not
         d = max(0, ((zo && s[TS_ZV + bi] > 0.5) ? s[TS_ZERO + bi] : s[TS_BS + bi]) - s[TS_SM + bi]);
         s[TS_MBD + bi] = d;
+        // how far over its zero (THE ZERO, KEPT ON THE MUSIC), sorted
+        (zo && s[TS_ZV + bi] > 0.5) ? (
+          e = s[TS_SM + bi] - s[TS_ZERO + bi];
+          j = nq;
+          while (j > 0 && s[TS_ZQ + j - 1] > e) ( s[TS_ZQ + j] = s[TS_ZQ + j - 1]; j -= 1; );
+          s[TS_ZQ + j] = e;
+          nq += 1;
+        );
         // shut on the test signal: open now, by GATE_OPEN or more?
         (sh && s[TS_ZSV + bi] > 0.5) ? ( gv += 1; s[TS_SM + bi] - s[TS_ZSH + bi] >= GATE_OPEN ? go += 1; );
         // insertion into the sorted scratch
@@ -1360,6 +1404,37 @@ out_pin:right
     );
     g = n < 1 ? 0 : ((n & 1) ? s[TS_SORT + (n - 1) / 2]
                              : (s[TS_SORT + n / 2 - 1] + s[TS_SORT + n / 2]) * 0.5);
+    // The measured zero, checked against the music (THE ZERO, KEPT ON
+    // THE MUSIC): a steady stretch over it moves it up; a steady quiet
+    // one under it, since a touch, moves it down.
+    ind = pin > 0.000000000000001 ? 10 * log10(pin) : -150;
+    s[TS_QIP] = max(ind, s[TS_QIP] - tap_qfall);
+    (zo && !sh && nq >= 4 && s[TS_HOLD] <= 0) ? (
+      m = (nq & 1) ? s[TS_ZQ + (nq - 1) / 2] : (s[TS_ZQ + nq / 2 - 1] + s[TS_ZQ + nq / 2]) * 0.5;
+      (s[TS_QN] > 0 && max(m, s[TS_QHI]) - min(m, s[TS_QLO]) < Q_SPAN) ? (
+        s[TS_QN] += 1; s[TS_QS] += m;
+        s[TS_QLO] = min(m, s[TS_QLO]); s[TS_QHI] = max(m, s[TS_QHI]);
+        ind > s[TS_QIP] - Q_QUIET ? s[TS_QQ] = 0;
+      ) : (
+        s[TS_QN] = 1; s[TS_QS] = m; s[TS_QLO] = s[TS_QHI] = m;
+        s[TS_QQ] = ind <= s[TS_QIP] - Q_QUIET;
+      );
+      s[TS_QM] = m;
+      s[TS_QN] >= Q_COLS ? (
+        e = s[TS_QS] / s[TS_QN];
+        sft = 0;
+        (s[TS_STALE] > 0.5 && s[TS_QQ] > 0.5 && s[TS_QRV] > 0.5) ? (
+          // touched: the quiet stretches go back to where they sat before
+          abs(e - s[TS_QR]) > Q_TOL ? sft = (e - s[TS_QR]) * Q_STEP;
+        ) : e > Q_TOL ? sft = e * Q_STEP;
+        (s[TS_STALE] < 0.5 && s[TS_QQ] > 0.5) ? (
+          s[TS_QR] = s[TS_QRV] > 0.5 ? s[TS_QR] + (e - sft - s[TS_QR]) * Q_REF : e - sft;
+          s[TS_QRV] = 1;
+        );
+        sft != 0 ? ( bi = 0; loop(GRB_N, s[TS_ZERO + bi] += sft; bi += 1; ); );
+        s[TS_QN] = 0;
+      );
+    ) : s[TS_QN] = 0;
     // Shut on the test signal and seen open on the music: a gate (or
     // expander) for certain -- a plugin just turned down never opens.
     (sh && s[TS_GATE] < 0.5 && gv >= 3 && go * 2 >= gv) ? (
@@ -1470,6 +1545,7 @@ out_pin:right
                                 : (s[TS_SORT + m / 2 - 1] + s[TS_SORT + m / 2]) * 0.5);
       s[TS_HASCAL] = 1;
       s[TS_STALE] = 0;
+      s[TS_QRV] = 0; s[TS_QN] = 0;
       s[TS_CST] = (m >= 3 && abs(d) > 1) ? 2 : 1;
       1;
     ) : 0;

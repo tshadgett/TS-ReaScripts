@@ -1227,6 +1227,27 @@ if NEW then
   TP.update()
   check("make-up: the window writes it", (at(1)), 6)
   check("make-up: no multiband split: its bands' gains 0", (gmem[B + 30] or 0) % 1000, 0)
+  -- named as one: Makeup and Out Gain, both followed, added up
+  check("make-up: names", tostring(TP.makeup_name("Out Gain")) .. tostring(TP.makeup_name("Make-Up Gain [dB]"))
+    .. tostring(TP.makeup_name("Output")) .. tostring(TP.makeup_name("Output Mode")) .. tostring(TP.makeup_name("Gain")),
+    "truetruetruefalsefalse")
+  local gpn = reaper.TrackFX_GetParamName
+  reaper.TrackFX_GetParamName = function(tr, a, p)
+    local f = F(a)
+    if f and f.guid == "{C1}" then return true, (p == 7 and "Makeup") or (p == 9 and "Out Gain") or "Ratio" end
+    return gpn(tr, a, p)
+  end
+  local gfp = reaper.TrackFX_GetFormattedParamValue
+  reaper.TrackFX_GetFormattedParamValue = function(tr, a, p)
+    local f = F(a)
+    if f and f.guid == "{C1}" and p == 9 then return true, "-2.0 dB" end
+    return gfp(tr, a, p)
+  end
+  cvs["LA-2A"] = nil; TP.makeup_changed()
+  next_one("make-up: by name, both added", 4)
+  r0 = rst(); TP.touched(track, "{C1}", 9)
+  check("make-up:   moving the second isn't a touch", rst(), r0)
+  reaper.TrackFX_GetParamName, reaper.TrackFX_GetFormattedParamValue = gpn, gfp
   gmem[B + 126] = 0
   r0 = rst(); TP.touched(track, "{C1}", 7)
   check("make-up: an older probe: moving it is a touch", rst() ~= r0, true)

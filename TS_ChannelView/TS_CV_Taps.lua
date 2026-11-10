@@ -2406,10 +2406,11 @@ end
 -- make-up gain
 -- ---------------------------------------------------------------------
 
--- Which control is a plugin's make-up: the layout's own (Makeup=, a
+-- Which controls are a plugin's make-up: the layout's own (Makeup=, a
 -- control on it), else a compressor canvas's Makeup role or a multiband
--- canvas's Output; a multiband canvas's band Gain roles too, for the tap
--- the probe splits (tap_mb). Each is written as dB + 1000 * a count, the
+-- canvas's Output; and any parameter named as one (Makeup, Out Gain,
+-- Output...), added together; a multiband canvas's band Gain roles too,
+-- for the tap the probe splits (tap_mb). Each is written as dB + 1000 * a count, the
 -- count moved when what's taken out changes rather than the audio (the
 -- script starting, another control being the make-up): the probe then
 -- moves what it has learnt with it. A control that doesn't read in dB
@@ -2434,10 +2435,36 @@ function TP.makeup_db(tr, addr, p, ranges)
   return math.max(-60, math.min(60, v))
 end
 
--- A plugin's make-up controls: { p, bands = { [k] = param }, plan (the
--- multiband's, TP.mb_plan), ranges, sig, bsig }, or nil.
+-- A parameter's name that says it's an output gain: Makeup, Make-up
+-- Gain, Out Gain, Output, Output Trim (dB on the end allowed).
+function TP.makeup_name(name)
+  local n = (name or ""):lower():gsub("[^%a]", ""):gsub("db$", "")
+  return n:find("^makeup") ~= nil or n == "mug" or n == "output" or n == "out" or n == "outputgain"
+    or n == "outgain" or n == "gainout" or n == "outputtrim" or n == "outtrim"
+end
+-- A plugin's parameters named as output gains, kept by plugin while its
+-- parameter count stays the same.
+local mug_named = {}
+local function named_makeups(tr, addr)
+  local guid = reaper.TrackFX_GetFXGUID(tr, addr)
+  local n = reaper.TrackFX_GetNumParams(tr, addr)
+  local c = guid and mug_named[guid]
+  if c and c.n == n then return c.ps end
+  local ps = {}
+  for p = 0, n - 1 do
+    local ok, nm = reaper.TrackFX_GetParamName(tr, addr, p, "")
+    if ok and TP.makeup_name(nm) then ps[#ps + 1] = p end
+  end
+  if guid then mug_named[guid] = { n = n, ps = ps } end
+  return ps
+end
+TP.named_makeups = named_makeups
+
+-- A plugin's make-up controls: { p (the first), ps (all of them), bands =
+-- { [k] = param }, plan (the multiband's, TP.mb_plan), ranges, sig, bsig },
+-- or nil.
 function TP.makeup_of(layout, tr, addr)
-  if not layout then return nil end
+  layout = layout or {}
   local p
   if layout.mug then
     for _, c in ipairs(layout.controls or {}) do
@@ -2447,6 +2474,14 @@ function TP.makeup_of(layout, tr, addr)
   local cv = layout.canvas
   local R = (cv and cv.roles) or {}
   if not p and cv then p = (cv.kind == "comp" and R.Makeup) or (cv.kind == "multi" and R.Output) or nil end
+  local ps, seen = {}, {}
+  if p then ps[1] = p; seen[p] = true end
+  if tr and addr then
+    for _, q in ipairs(named_makeups(tr, addr)) do
+      if not seen[q] then ps[#ps + 1] = q; seen[q] = true end
+    end
+  end
+  p = ps[1]
   local bands, plan, bsig
   if cv and cv.kind == "multi" then
     for k = 1, cv.nb or 3 do
@@ -2463,9 +2498,13 @@ function TP.makeup_of(layout, tr, addr)
     end
   end
   if not p and not bands then return nil end
-  local rg = p and layout.ranges and layout.ranges[p]
-  return { p = p, bands = bands, plan = plan, ranges = layout.ranges,
-           sig = tostring(p) .. "|" .. (rg and M.range_line(rg) or ""), bsig = bsig }
+  local sig = {}
+  for _, q in ipairs(ps) do
+    local rg = layout.ranges and layout.ranges[q]
+    sig[#sig + 1] = tostring(q) .. "|" .. (rg and M.range_line(rg) or "")
+  end
+  return { p = p, ps = ps, bands = bands, plan = plan, ranges = layout.ranges,
+           sig = table.concat(sig, ";"), bsig = bsig }
 end
 
 -- A multiband's split bands' gains, dB (four, 0 where none): each of its
@@ -2528,9 +2567,14 @@ local function mug_tick(now, web)
   local probes = {}
   for _, e in ipairs(mug.list) do
     if reaper.ValidatePtr(e.tr, "MediaTrack*") then
-      local v, sig = 0, "none"
-      local d = e.src and e.src.p and TP.makeup_db(e.tr, e.addr, e.src.p, e.src.ranges)
-      if d then v, sig = d, e.src.sig end
+      -- every make-up control that reads in dB, added up
+      local v, sig, d = 0, "none", nil
+      local fs
+      for _, q in ipairs(e.src and e.src.ps or {}) do
+        local dq = TP.makeup_db(e.tr, e.addr, q, e.src.ranges)
+        if dq then d = (d or 0) + dq; fs = fs or {}; fs[q] = true end
+      end
+      if d then v, sig = math.max(-60, math.min(60, d)), e.src.sig end
       sig = sig .. "|" .. e.i
       local st = mug.k[e.guid]
       if not st or st.sig ~= sig then
@@ -2538,7 +2582,7 @@ local function mug_tick(now, web)
         mug.k[e.guid] = st
       end
       PL.set(e.tr, e.probe, "mug", e.i, v + 1000 * st.k)
-      e.fset = d and { [e.src.p] = true } or nil
+      e.fset = fs
       local pk = tostring(e.tr)
       local pr = probes[pk]
       if not pr then
@@ -2585,7 +2629,7 @@ function TP.makeup_followed(tr, guid, p)
 end
 
 -- Forget which controls are the make-up (a layout changed).
-function TP.makeup_changed() mug.at = -10 end
+function TP.makeup_changed() mug.at = -10; mug_named = {} end
 
 -- ---------------------------------------------------------------------
 -- relearning

@@ -2769,12 +2769,23 @@ Setup turns it off.
 **Make-up gain.** Moving a plugin's make-up gain changes its output as
 reduction would, so the measured reading takes it out, automation
 included, and moving it doesn't count as touching the plugin. Which
-control it is: right-click a knob or fader ▸ **Make-up gain** (one per
-plugin; a pink dot on it in Edit layout, a pink corner on a fader), or a compressor canvas's *Make-up*,
-or a multiband canvas's *Output* and each band's *Gain*. The control has
-to read in dB (*Values* ▸ *Custom range* can give it one). Needs
-TS_TrackProbe 2.5.1 (with ChannelView 4.0.2 and Track Analyser 2.7.1):
-reopen the project after updating.
+controls: any named as one (*Makeup*, *Make-up Gain*, *Out Gain*,
+*Output*, *Output Trim*), added together when there are two; one you
+mark with right-click a knob or fader ▸ **Make-up gain** (a pink dot on
+it in Edit layout, a pink corner on a fader); a compressor canvas's
+*Make-up*; a multiband canvas's *Output* and each band's *Gain*. A
+control has to read in dB (*Values* ▸ *Custom range* can give it one).
+Needs TS_TrackProbe 2.5.1 (with ChannelView 4.0.2 and Track Analyser
+2.7.1): reopen the project after updating.
+
+**While playing**, the measured zero is checked against the music. A
+steady stretch where the plugin passes more than its zero allows means
+its gain went up, and the zero follows. After you touch the plugin
+(in ChannelView or its own window), quiet steady stretches bring the zero
+back to where quiet passages sat before the touch, so a gain turned down
+is caught too, and a threshold moved on a compressor that never lets go
+isn't mistaken for one. The next stop measures it again. Needs
+TS_TrackProbe 2.7.0: reopen the project after updating.
 
 A plugin's latency needs nothing: REAPER already holds back the channels a
 plugin doesn't use by the latency it reports, so the copies arrive in line.
