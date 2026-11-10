@@ -2422,10 +2422,38 @@ end
 TP.MUG_EVERY, TP.MUG_KEY = 1.0, "mug_at"
 local mug = { list = {}, at = -10, k = {}, kb = {}, by_addr = {}, by_guid = {}, said = -10 }
 
+-- A control whose readout is a bare number running from below 0 to above
+-- it (-18 to 18, -inf to 12) is a gain in dB that leaves the unit off:
+-- its own number is its value, whatever custom range it has been given.
+local bare_gain = {}
+local function bare(s)
+  s = U.trim(s or ""):lower()
+  if s == "-inf" or s == "-oo" then return -math.huge end
+  return s:match("^[%+%-]?%d*%.?%d+$") and tonumber(s) or nil
+end
+local function own_db(tr, addr, p)
+  if not reaper.TrackFX_FormatParamValueNormalized then return nil end
+  local k = tostring(reaper.TrackFX_GetFXGUID(tr, addr)) .. ":" .. p
+  local ok = bare_gain[k]
+  if ok == nil then
+    local _, a = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, 0, "")
+    local _, b = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, 1, "")
+    local va, vb = bare(a), bare(b)
+    ok = (va and vb and va < 0 and vb > 0) and true or false
+    bare_gain[k] = ok
+  end
+  if not ok then return nil end
+  local _, s = reaper.TrackFX_GetFormattedParamValue(tr, addr, p, "")
+  local v = bare(s)
+  return v and math.max(-60, math.min(60, v)) or nil
+end
+
 -- A control's value in dB as it reads (through its custom range, if it
 -- has one), or nil when it doesn't read in dB.
 function TP.makeup_db(tr, addr, p, ranges)
   if not (tr and addr and p and p >= 0) then return nil end
+  local own = own_db(tr, addr, p)
+  if own then return own end
   local UN = require("TS_CV_Units")
   local was = U.with_ranges(ranges)
   local txt = U.fmt_value(tr, addr, p)
@@ -2629,7 +2657,7 @@ function TP.makeup_followed(tr, guid, p)
 end
 
 -- Forget which controls are the make-up (a layout changed).
-function TP.makeup_changed() mug.at = -10; mug_named = {} end
+function TP.makeup_changed() mug.at = -10; mug_named = {}; bare_gain = {} end
 
 -- ---------------------------------------------------------------------
 -- relearning

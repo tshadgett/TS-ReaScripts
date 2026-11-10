@@ -1247,6 +1247,28 @@ if NEW then
   next_one("make-up: by name, both added", 4)
   r0 = rst(); TP.touched(track, "{C1}", 9)
   check("make-up:   moving the second isn't a touch", rst(), r0)
+  -- a gain that leaves the unit off (Kotelnikov's Makeup: -18 to 18,
+  -- "6.0"): its own number, whatever custom range it was given
+  local fpn = reaper.TrackFX_FormatParamValueNormalized
+  reaper.TrackFX_FormatParamValueNormalized = function(tr, a, p, v)
+    local f = F(a)
+    if f and f.guid == "{C1}" and p == 9 then return true, v == 0 and "-18.0" or v == 1 and "18.0" or "?" end
+    return true, "?"
+  end
+  reaper.TrackFX_GetFormattedParamValue = function(tr, a, p)
+    local f = F(a)
+    if f and f.guid == "{C1}" and p == 9 then return true, "6.0" end
+    return gfp(tr, a, p)
+  end
+  TP.makeup_changed()
+  local ca
+  for a = 0, 20 do local f = F(a); if f and f.guid == "{C1}" then ca = a end end
+  check("make-up: a bare gain, its own number", TP.makeup_db(track, ca, 9, { [9] = { lo = -60, hi = 18, unit = "dB", curve = "lin" } }), 6)
+  check("make-up: a bare number not across 0 isn't one", TP.makeup_db(track, ca, 3, nil), nil)
+  TP.update()
+  check("make-up: by name, a bare gain added", (at(1)), 12)
+  reaper.TrackFX_FormatParamValueNormalized = fpn
+  TP.makeup_changed()
   reaper.TrackFX_GetParamName, reaper.TrackFX_GetFormattedParamValue = gpn, gfp
   gmem[B + 126] = 0
   r0 = rst(); TP.touched(track, "{C1}", 7)
