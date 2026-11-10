@@ -1973,6 +1973,10 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   -- when it's anything else, so a plugin mixed back stands out. Only when
   -- the name keeps a useful width to its left and it clears the buttons.
   local wet_p, wet_v, wet_txt, wet_w, wet_x = wet_param(track, fx), 1, nil, 0, nil
+  -- a gain knob being measured (TS_CV_Taps TP.measure_gain): said here in
+  -- place of the wet %, a bar along the header's foot
+  local gs = TP.gain_status(fx.guid)
+  if gs then wet_p = nil end
   if wet_p then
     wet_v = reaper.TrackFX_GetParam(track, fx.addr, wet_p) or 1
     wet_txt = ("%d%%"):format(math.floor(wet_v * 100 + 0.5))
@@ -2060,6 +2064,25 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
         name_w = name_w - pw - 4
       end
       W.pop_small(ctx)
+    end
+  end
+
+  if gs then
+    W.push_small(ctx)
+    local gw, gh = ImGui.CalcTextSize(ctx, gs.text)
+    local gx = math.max(name_x + 30, btn_x - 6 - gw)
+    if gx + gw <= btn_x - 2 then
+      ImGui.SetCursorScreenPos(ctx, gx, y)
+      ImGui.InvisibleButton(ctx, "gainmeas##" .. fx.guid, gw, h)
+      ImGui.DrawList_AddText(dl, gx, y + (h - gh) * 0.5,
+        (gs.ok == false) and C.COL.warn or (gs.ok and C.COL.accent or C.COL.header_text), gs.text)
+      if gs.why then W.tip(ctx, "gainmeas##" .. fx.guid, gs.why, ImGui.IsItemHovered(ctx), false) end
+      name_w = math.max(8, gx - name_x - 6)
+    end
+    W.pop_small(ctx)
+    if gs.progress then
+      ImGui.DrawList_AddRectFilled(dl, x, y + h - 2, x + w * math.max(0.02, math.min(1, gs.progress)), y + h,
+        W.gr_fill_col(false, false))
     end
   end
 

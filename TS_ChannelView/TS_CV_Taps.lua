@@ -2709,14 +2709,35 @@ function TP.gain_knobs(tr, addr, layout)
 end
 
 -- Gain knobs being measured on a hidden copy (TS_CV_Learn LN.start_gain),
--- in the background: { job, guid, ps }. One at a time.
+-- in the background: { job, guid, ps, what }. One at a time. How each
+-- ended, for the panel's header: { [guid] = { ok, why, at } }.
 local gjob
+local gdone = {}
 function TP.measure_gain(tr, addr, key, layout, ps)
   if gjob or not (ps and #ps > 0) then return false end
   local ok, LN = pcall(require, "TS_CV_Learn")      -- (Pro)
   if not ok then return false end
-  gjob = { job = LN.start_gain(tr, addr, key, layout, ps), guid = fx_guid(tr, addr), ps = ps }
+  local what = "its gain knobs"
+  if #ps == 1 then
+    local _, nm = reaper.TrackFX_GetParamName(tr, addr, ps[1], "")
+    if nm and nm ~= "" then what = nm end
+  end
+  local guid = fx_guid(tr, addr)
+  gjob = { job = LN.start_gain(tr, addr, key, layout, ps), guid = guid, ps = ps, what = what }
+  gdone[guid] = nil
   return true
+end
+-- What the panel's header says about it: { text, progress (0..1, while
+-- measuring), ok (when done), why (when it failed) }, or nil.
+TP.GAIN_SAID_OK, TP.GAIN_SAID_FAIL = 3, 10   -- s the outcome stays up
+function TP.gain_status(guid)
+  if gjob and gjob.guid == guid then
+    return { text = "Measuring " .. gjob.what .. "\u{2026}", progress = gjob.job.progress or 0 }
+  end
+  local d = gdone[guid]
+  if not d then return nil end
+  if reaper.time_precise() - d.at > (d.ok and TP.GAIN_SAID_OK or TP.GAIN_SAID_FAIL) then gdone[guid] = nil return nil end
+  return { text = d.ok and "Measured" or "Not measured", ok = d.ok, why = d.why }
 end
 -- How far along measuring this knob is (0..1), or nil when it isn't.
 function TP.gain_measuring(guid, p)
@@ -2729,7 +2750,7 @@ local function gain_tick()
   require("TS_CV_Learn").step(gjob.job)
   local st = gjob.job.state
   if st ~= "starting" and st ~= "measuring" then
-    if st == "error" then reaper.ShowConsoleMsg("ChannelView: " .. (gjob.job.msg or "") .. "\n") end
+    gdone[gjob.guid] = { ok = st == "done", why = (st ~= "done") and gjob.job.msg or nil, at = reaper.time_precise() }
     gjob = nil
     TP.makeup_changed()
   end
