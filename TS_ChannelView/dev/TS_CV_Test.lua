@@ -250,6 +250,16 @@ do
   check("gain roles: kept", gr and (gr[2] .. gr[8] .. gr[10]), "inoutno")
   check("gain roles: checked", M.get(k).gaincheck, true)
   check("gain roles: copied", M.copy(M.get(k)).gainrole[8] .. tostring(M.copy(M.get(k)).gaincheck), "outtrue")
+  -- the plugin's, in every layout of it: checked in a variant, the plugin's own too
+  local vk = M.variant_key(k, "Compressor")
+  M.set(k, { controls = { { param = 3, type = "knob" } }, mug = 8 })
+  M.set(vk, { controls = { { param = 3, type = "knob" } }, gainrole = { [8] = "out" }, gaincheck = true,
+              gainlaw = { [8] = { { 0, -20 }, { 1, 10 } } } })
+  check("gain roles: checked in a variant, found from the plugin's own", M.gain_checked(k), vk)
+  M.share_gain(vk)
+  check("gain roles: shared to the plugin's own", tostring(M.get(k).gaincheck) .. M.get(k).gainrole[8] .. #M.get(k).gainlaw[8], "trueout2")
+  check("gain roles: shared, not the same tables", M.get(k).gainlaw[8] ~= M.get(vk).gainlaw[8], true)
+  M.remove(vk)
   -- the gap between them, and Reverse (every button lit but the current)
   M.set(k, { controls = { { param = 3, type = "combo", buttons = "grid", nbtn = 8, bgap = 6, invert = true },
                           { param = 4, type = "combo", buttons = "across", nbtn = 3 } } })

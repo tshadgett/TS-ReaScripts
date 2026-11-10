@@ -3129,6 +3129,52 @@ function M.set_default_variant(base, name, sect)
   mark(sect)
 end
 
+-- A plugin's gain knobs (GainRole, GainCheck, GainLaw) are the plugin's,
+-- not one look's: kept alike in all its layouts, its own and each variant.
+local function gain_siblings(key)
+  local base = M.split_variant(key)
+  local out = {}
+  if M.has(base) then out[#out + 1] = base end
+  for _, v in ipairs(M.variants(base)) do out[#out + 1] = M.variant_key(base, v) end
+  return out
+end
+-- From `key`'s layout to its others (saved by the caller).
+function M.share_gain(key)
+  local src = M.get(key)
+  if not src then return end
+  for _, k in ipairs(gain_siblings(key)) do
+    local l = k ~= key and M.get(k)
+    if l then
+      l.gaincheck = src.gaincheck
+      l.gainrole, l.gainlaw = nil, nil
+      if src.gainrole then
+        l.gainrole = {}
+        for p, r in pairs(src.gainrole) do l.gainrole[p] = r end
+      end
+      if src.gainlaw then
+        l.gainlaw = {}
+        for p, pts in pairs(src.gainlaw) do
+          local t = {}
+          for i, q in ipairs(pts) do t[i] = { q[1], q[2] } end
+          l.gainlaw[p] = t
+        end
+      end
+      M.set(k, l)
+    end
+  end
+end
+-- The key of one of the plugin's layouts whose gain knobs were checked
+-- (`key`'s own first), or nil.
+function M.gain_checked(key)
+  local l = M.get(key)
+  if l and l.gaincheck then return key end
+  for _, k in ipairs(gain_siblings(key)) do
+    local o = M.get(k)
+    if o and o.gaincheck then return k end
+  end
+  return nil
+end
+
 -- The variants the library has for a plugin, by name, sorted.
 function M.variants(base)
   local out, pre = {}, base .. M.VARIANT_SEP
