@@ -1183,8 +1183,9 @@ for _, f in ipairs(C.FINISHES) do C.FINISH[f.key] = f end
 
 -- A canvas's own colours while it draws (TS_CV_Panel.with_canvas_cols):
 -- its curve's, the fill under it, its highlight's (the gold handles and
--- what they set) and its meters' (what's playing), as 0xRRGGBBAA; nil for
--- the theme's (the fill: the curve's).
+-- what they set), its meters' (what's playing) and its spectrum's, as
+-- 0xRRGGBBAA; nil for the theme's (the fill: the curve's; the spectrum:
+-- the meters').
 C.CANVAS = {}
 
 C.FADER_STYLES = {

@@ -2410,6 +2410,7 @@ do
   check("canvas colours: unknown and bad ones dropped", tostring(cols.junk) .. tostring(cols.grid), "nilnil")
   check("canvas colours: written back", M_.canvas_cols_line(cols), "band3:#00ff00|bg:#2a0e0e|curve:#ff4a3a")
   check("canvas colours: none", tostring(M_.canvas_cols_of("")) .. tostring(M_.canvas_cols_line({})), "nilnil")
+  check("canvas colours: the spectrum's own", ("%06x"):format(M_.canvas_cols_of("spec:#3366ff").spec or 0), "3366ff")
   check("canvas colours: highlight", M_.canvas_cols_line(M_.canvas_cols_of("hi:#E0A33A|curve:#4aa3df")), "curve:#4aa3df|hi:#e0a33a")
   check("canvas colours: copied with the canvas", M_.copy_canvas({ kind = "comp", cols = cols }).cols.curve, 0xff4a3a)
   local P = require("TS_CV_Panel")

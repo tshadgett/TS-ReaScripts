@@ -377,7 +377,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Edge<n>=<faceplate, or #rrggbb>: section n's outline, or line n's colour\n"
                 .. "; CanvasW=<px>, CanvasH=<px>: a canvas layout's canvas, its width in ChannelView, its height in the rack\n"
                 .. "; CanvasFold=1, CanvasFoldRack=1: its controls folded away, popping out from the panel's edge\n"
-                .. "; CanvasCol=<element>:#rrggbb|...: a canvas's own colours (curve, bg, grid, meter, knob, band1..band8)"
+                .. "; CanvasCol=<element>:#rrggbb|...: a canvas's own colours (curve, bg, grid, meter, spec, knob, band1..band8)"
 
 local dir         = nil
 local sections    = {}   -- raw ini table
@@ -1347,8 +1347,8 @@ end
 -- A canvas's own colours (CanvasCol=curve:#rrggbb|bg:#...|...): what it
 -- draws in instead of the theme's, by element (M.CANVAS_COLS, and band1 to
 -- band24 for an EQ's bands), as 0xrrggbb. nil when there are none.
-M.CANVAS_COLS = { "curve", "fill", "hi", "bg", "grid", "meter", "knob" }
-local CANVAS_COL_OK = { curve = true, fill = true, hi = true, bg = true, grid = true, meter = true, knob = true }
+M.CANVAS_COLS = { "curve", "fill", "hi", "bg", "grid", "meter", "spec", "knob" }
+local CANVAS_COL_OK = { curve = true, fill = true, hi = true, bg = true, grid = true, meter = true, spec = true, knob = true }
 for k = 1, M.MAX_BANDS do CANVAS_COL_OK["band" .. k] = true end
 
 -- A canvas's colours made from a faceplate (C.plate_of; its bg 0xRRGGBBAA):

@@ -1290,9 +1290,10 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   colours: the curve (the threshold and their handles), the fill under it
   (the curve's until you set it), the highlight (a compressor's input
   bar, the reduction wedge, a de-esser's band and the other gold handles
-  and markers), the background, the grid and its text, the meters (the
-  spectrum, levels, gain reduction and the live dots), the canvas's small
-  knobs, and an EQ's bands one by one. ✕ puts one back to the theme's;
+  and markers), the background, the grid and its text, the meters
+  (levels, gain reduction and the live dots), the track's spectrum (the
+  meters' until you set it), the canvas's small knobs, and an EQ's bands
+  one by one. ✕ puts one back to the theme's;
   *From the faceplate* makes a set to match the layout's faceplate;
   *Copy* and *Paste* move a set between canvases.
 - Every change is saved as you make it. **Undo** and **Redo** step back

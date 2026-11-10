@@ -3858,11 +3858,12 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
     end
   end
   if cols.bg then ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, ((cols.bg & 0xffffff) << 8) | 0xff, 3.0) end
-  local was_c, was_h, was_m, was_f = C.CANVAS.curve, C.CANVAS.hi, C.CANVAS.meter, C.CANVAS.fill
+  local was_c, was_h, was_m, was_f, was_s = C.CANVAS.curve, C.CANVAS.hi, C.CANVAS.meter, C.CANVAS.fill, C.CANVAS.spec
   C.CANVAS.curve = cols.curve and (((cols.curve & 0xffffff) << 8) | 0xff) or nil
   C.CANVAS.fill  = cols.fill and (((cols.fill & 0xffffff) << 8) | 0xff) or nil
   C.CANVAS.hi    = cols.hi and (((cols.hi & 0xffffff) << 8) | 0xff) or nil
   C.CANVAS.meter = cols.meter and (((cols.meter & 0xffffff) << 8) | 0xff) or nil
+  C.CANVAS.spec  = cols.spec and (((cols.spec & 0xffffff) << 8) | 0xff) or nil
   local bands
   for k = 1, M.MAX_BANDS do
     local b = cols["band" .. k]
@@ -3871,7 +3872,7 @@ function P.with_canvas_cols(cv, dl, x, y, w, h, fn, ...)
   local was = EQP and EQP.set_band_colours(bands)
   local r = table.pack(pcall(fn, ...))
   for k, v in pairs(saved) do C.COL[k] = v end
-  C.CANVAS.curve, C.CANVAS.hi, C.CANVAS.meter, C.CANVAS.fill = was_c, was_h, was_m, was_f
+  C.CANVAS.curve, C.CANVAS.hi, C.CANVAS.meter, C.CANVAS.fill, C.CANVAS.spec = was_c, was_h, was_m, was_f, was_s
   if EQP then EQP.set_band_colours(was) end
   if not r[1] then error(r[2], 0) end
   return table.unpack(r, 2, r.n)
