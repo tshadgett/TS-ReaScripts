@@ -2480,11 +2480,12 @@ function TP.makeup_db(tr, addr, p, ranges)
 end
 
 -- A parameter's name that says it's an output gain: Makeup, Make-up
--- Gain, Out Gain, Output, Output Trim (dB on the end allowed).
+-- Gain, Out Gain, Output, Output Trim, Wet (ReaComp's output; dB on the
+-- end allowed). Only followed when it reads in dB, so a Wet in % isn't.
 function TP.makeup_name(name)
   local n = (name or ""):lower():gsub("[^%a]", ""):gsub("db$", "")
   return n:find("^makeup") ~= nil or n == "mug" or n == "output" or n == "out" or n == "outputgain"
-    or n == "outgain" or n == "gainout" or n == "outputtrim" or n == "outtrim"
+    or n == "outgain" or n == "gainout" or n == "outputtrim" or n == "outtrim" or n == "wet"
 end
 -- A plugin's parameters named as output gains, kept by plugin while its
 -- parameter count stays the same.

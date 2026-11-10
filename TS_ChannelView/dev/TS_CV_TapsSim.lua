@@ -1229,8 +1229,9 @@ if NEW then
   check("make-up: no multiband split: its bands' gains 0", (gmem[B + 30] or 0) % 1000, 0)
   -- named as one: Makeup and Out Gain, both followed, added up
   check("make-up: names", tostring(TP.makeup_name("Out Gain")) .. tostring(TP.makeup_name("Make-Up Gain [dB]"))
-    .. tostring(TP.makeup_name("Output")) .. tostring(TP.makeup_name("Output Mode")) .. tostring(TP.makeup_name("Gain")),
-    "truetruetruefalsefalse")
+    .. tostring(TP.makeup_name("Output")) .. tostring(TP.makeup_name("Output Mode")) .. tostring(TP.makeup_name("Gain"))
+    .. tostring(TP.makeup_name("Wet")),
+    "truetruetruefalsefalsetrue")
   local gpn = reaper.TrackFX_GetParamName
   reaper.TrackFX_GetParamName = function(tr, a, p)
     local f = F(a)
