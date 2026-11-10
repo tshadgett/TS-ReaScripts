@@ -7297,6 +7297,19 @@ do
   check("range: other params untouched", U.range_of(4), nil)
   U.with_ranges(was)
   check("range: put back", U.range_of(3), nil)
+  -- a range that only labels the plugin's own numbers (Kotelnikov's
+  -- Makeup: -60 to 18, 0.0 at the middle): the plugin's number wins
+  do
+    local fpn, gfp, gg = reaper.TrackFX_FormatParamValueNormalized, reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_GetFXGUID
+    reaper.TrackFX_FormatParamValueNormalized = function(_, _, _, v) return true, v == 0 and "-60.0" or v == 1 and "18.0" or "?" end
+    reaper.TrackFX_GetFormattedParamValue = function() return true, "0.0" end
+    reaper.TrackFX_GetFXGUID = function() return "{K}" end
+    local w2 = U.with_ranges({ [10] = { lo = -60, hi = 18, unit = "dB", curve = "lin" }, [11] = d })
+    check("range: the plugin's own numbers, labelled", U.fmt_value({}, 0, 10), "0.0 dB")
+    check("range: ends of its own: as it says", U.fmt_value({}, 0, 11), "-15.0 dB")
+    U.with_ranges(w2)
+    reaper.TrackFX_FormatParamValueNormalized, reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_GetFXGUID = fpn, gfp, gg
+  end
   reaper.TrackFX_GetParamNormalized = rgn
   -- kept with the layout
   check("range: line", M.range_line(f), "20|20000|Hz|log")

@@ -507,9 +507,39 @@ function U.range_say(r, v)
 end
 function U.range_text(r, n) return U.range_say(r, U.range_value(r, n)) end
 
+-- A range whose ends are the plugin's own numbers (its readout at both
+-- ends, without a unit) only labels them: the plugin's number is the
+-- value, however its scale runs between. Kept by plugin, parameter and ends.
+local own_ends = {}
+local function bare(s)
+  s = U.trim(s or "")
+  return s:match("^[%+%-]?%d*%.?%d+$") and tonumber(s) or nil
+end
+function U.range_is_own(track, addr, param, rg)
+  if not (reaper.TrackFX_FormatParamValueNormalized and rg.lo and rg.hi) then return false end
+  local k = tostring(reaper.TrackFX_GetFXGUID(track, addr)) .. ":" .. param .. ":" .. rg.lo .. ":" .. rg.hi
+  local e = own_ends[k]
+  if e == nil then
+    local _, a = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, 0, "")
+    local _, b = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, 1, "")
+    local va, vb = bare(a), bare(b)
+    local tol = math.abs(rg.hi - rg.lo) * 0.005 + 1e-9
+    e = (va and vb and math.abs(va - rg.lo) <= tol and math.abs(vb - rg.hi) <= tol) and true or false
+    own_ends[k] = e
+  end
+  return e
+end
+
 function U.fmt_value(track, addr, param)
   local rg = U.range_of(param)
-  if rg then return U.range_text(rg, reaper.TrackFX_GetParamNormalized(track, addr, param) or 0) end
+  if rg then
+    if U.range_is_own(track, addr, param, rg) then
+      local _, s = reaper.TrackFX_GetFormattedParamValue(track, addr, param, "")
+      local v = bare(s)
+      if v then return U.range_say(rg, v) end
+    end
+    return U.range_text(rg, reaper.TrackFX_GetParamNormalized(track, addr, param) or 0)
+  end
   local ok, s = reaper.TrackFX_GetFormattedParamValue(track, addr, param, "")
   if ok and s and s ~= "" then return s end
   local v = reaper.TrackFX_GetParamNormalized(track, addr, param)
