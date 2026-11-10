@@ -4064,16 +4064,13 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
     pushed = true
   end
 
-  -- Reserve the readout first: one line if "6.4 dB" fits the column,
-  -- otherwise the value and the unit stacked -- which is what happens in
-  -- a collapsed panel, where the whole bar is only 26px wide.
+  -- The readout under it, one line, as the in/out meters' (dB is
+  -- understood): the bar is the same length whatever it says.
   local v     = peak_db or 0
   local val   = (v >= 0.05) and string.format("%.1f", v) or "\u{2013}"
-  local one   = val .. " dB"
-  local one_w = ImGui.CalcTextSize(ctx, one)
+  local one_w = ImGui.CalcTextSize(ctx, val)
   local _, line_h = ImGui.CalcTextSize(ctx, "0")
-  local stacked = one_w > col_w - 1
-  local text_h  = (stacked and line_h * 2 or line_h) + 2
+  local text_h  = line_h + 2
 
   local bar_h = h - text_h
   local bw    = math.min(C.METER_SCALES and C.METER_W_SCALE or C.METER_W, col_w)
@@ -4128,15 +4125,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
   -- pull down" is the number you actually want.
   local col = (v >= 0.05) and C.COL.value or C.COL.header_dim
   local cx  = bx - (col_w - w) * 0.5 + col_w * 0.5   -- centre of the column
-  if stacked then
-    local vw = ImGui.CalcTextSize(ctx, val)
-    ImGui.DrawList_AddText(dl, cx - vw * 0.5, y + bar_h + 1, col, val)
-    local uw = ImGui.CalcTextSize(ctx, "dB")
-    ImGui.DrawList_AddText(dl, cx - uw * 0.5, y + bar_h + 1 + line_h,
-      C.COL.header_dim, "dB")
-  else
-    ImGui.DrawList_AddText(dl, cx - one_w * 0.5, y + bar_h + 1, col, one)
-  end
+  ImGui.DrawList_AddText(dl, cx - one_w * 0.5, y + bar_h + 1, col, val)
 
   if pushed then ImGui.PopFont(ctx) end
   return bx, y, w, bar_h

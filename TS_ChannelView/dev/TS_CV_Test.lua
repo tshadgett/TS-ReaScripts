@@ -7307,6 +7307,8 @@ do
     local w2 = U.with_ranges({ [10] = { lo = -60, hi = 18, unit = "dB", curve = "lin" }, [11] = d })
     check("range: the plugin's own numbers, labelled", U.fmt_value({}, 0, 10), "0.0 dB")
     check("range: ends of its own: as it says", U.fmt_value({}, 0, 11), "-15.0 dB")
+    reaper.TrackFX_FormatParamValueNormalized = function(_, _, _, v) return true, v == 0 and "-60.0 dB" or v == 1 and "18.0 dB" or "?" end
+    check("range: the plugin's own ends, with their unit", U.fmt_value({}, 0, 10), "0.0 dB")
     U.with_ranges(w2)
     reaper.TrackFX_FormatParamValueNormalized, reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_GetFXGUID = fpn, gfp, gg
   end

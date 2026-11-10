@@ -507,8 +507,8 @@ function U.range_say(r, v)
 end
 function U.range_text(r, n) return U.range_say(r, U.range_value(r, n)) end
 
--- A range whose ends are the plugin's own numbers (its readout at both
--- ends, without a unit) only labels them: the plugin's number is the
+-- A range whose ends are the plugin's own numbers (what it says at both
+-- ends, a unit or not) only labels them: the plugin's number is the
 -- value, however its scale runs between. Kept by plugin, parameter and ends.
 local own_ends = {}
 local function bare(s)
@@ -522,7 +522,8 @@ function U.range_is_own(track, addr, param, rg)
   if e == nil then
     local _, a = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, 0, "")
     local _, b = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, 1, "")
-    local va, vb = bare(a), bare(b)
+    local lead = function(t) return tonumber(U.trim(t or ""):match("^([%+%-]?%d*%.?%d+)")) end
+    local va, vb = lead(a), lead(b)
     local tol = math.abs(rg.hi - rg.lo) * 0.005 + 1e-9
     e = (va and vb and math.abs(va - rg.lo) <= tol and math.abs(vb - rg.hi) <= tol) and true or false
     own_ends[k] = e

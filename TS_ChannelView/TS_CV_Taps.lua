@@ -2422,29 +2422,45 @@ end
 TP.MUG_EVERY, TP.MUG_KEY = 1.0, "mug_at"
 local mug = { list = {}, at = -10, k = {}, kb = {}, by_addr = {}, by_guid = {}, said = -10 }
 
--- A control whose readout is a bare number running from below 0 to above
--- it (-18 to 18, -inf to 12) is a gain in dB that leaves the unit off:
--- its own number is its value, whatever custom range it has been given.
+-- A control's own value in dB, before any custom range: what the plugin
+-- says at its position when that's in dB (some VST3s leave the unit off
+-- their readout but give it when asked at a position), or a bare number
+-- on a control that runs from below 0 to above it (-18 to 18, -inf to
+-- 12): a gain in dB without the unit.
 local bare_gain = {}
 local function bare(s)
   s = U.trim(s or ""):lower()
   if s == "-inf" or s == "-oo" then return -math.huge end
   return s:match("^[%+%-]?%d*%.?%d+$") and tonumber(s) or nil
 end
+local function as_db(s)
+  local b = bare(s)
+  if b then return b, false end
+  local v, unit = require("TS_CV_Units").parse(s or "")
+  if unit == "db" and v and v == v then return v, true end
+  if U.trim(s or ""):lower():match("^%-inf") then return -math.huge, true end
+  return nil
+end
 local function own_db(tr, addr, p)
-  if not reaper.TrackFX_FormatParamValueNormalized then return nil end
+  local fmt = reaper.TrackFX_FormatParamValueNormalized
+  if not fmt then return nil end
+  local _, now = fmt(tr, addr, p, reaper.TrackFX_GetParamNormalized(tr, addr, p) or 0, "")
+  local v, unit = as_db(now)
+  if v and unit then return math.max(-60, math.min(60, v)) end
   local k = tostring(reaper.TrackFX_GetFXGUID(tr, addr)) .. ":" .. p
   local ok = bare_gain[k]
   if ok == nil then
-    local _, a = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, 0, "")
-    local _, b = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, 1, "")
-    local va, vb = bare(a), bare(b)
+    local _, a = fmt(tr, addr, p, 0, "")
+    local _, b = fmt(tr, addr, p, 1, "")
+    local va, vb = as_db(a), as_db(b)
     ok = (va and vb and va < 0 and vb > 0) and true or false
     bare_gain[k] = ok
   end
   if not ok then return nil end
-  local _, s = reaper.TrackFX_GetFormattedParamValue(tr, addr, p, "")
-  local v = bare(s)
+  if not v then
+    local _, s = reaper.TrackFX_GetFormattedParamValue(tr, addr, p, "")
+    v = bare(s)
+  end
   return v and math.max(-60, math.min(60, v)) or nil
 end
 
