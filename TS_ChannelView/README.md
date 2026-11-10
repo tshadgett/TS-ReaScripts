@@ -2769,8 +2769,10 @@ Setup turns it off.
 **Make-up gain.** Moving a plugin's make-up gain changes its output as
 reduction would, so the measured reading takes it out, automation
 included, and moving it doesn't count as touching the plugin. Which
-controls: any named as one (*Makeup*, *Make-up Gain*, *Out Gain*,
-*Output*, *Output Trim*, ReaComp's *Wet*), added together when there are two; one you
+controls: any named as a gain the whole signal goes through (*Makeup*,
+*Make-up Gain*, *Out Gain*, *Output*, *Output Trim*, ReaComp's *Wet*,
+and before the compressor *Input*, *Input Gain*, *Gain*: the extra
+reduction a higher input brings is measured), added together; one you
 mark with right-click a knob or fader ▸ **Make-up gain** (a pink dot on
 it in Edit layout, a pink corner on a fader); a compressor canvas's
 *Make-up*; a multiband canvas's *Output* and each band's *Gain*. A

@@ -2481,13 +2481,17 @@ function TP.makeup_db(tr, addr, p, ranges)
   return math.max(-60, math.min(60, v))
 end
 
--- A parameter's name that says it's an output gain: Makeup, Make-up
--- Gain, Out Gain, Output, Output Trim, Wet (ReaComp's output; dB on the
--- end allowed). Only followed when it reads in dB, so a Wet in % isn't.
+-- A parameter's name that says it's a gain the whole signal goes through:
+-- Makeup, Make-up Gain, Out Gain, Output, Output Trim, Wet (ReaComp's
+-- output), and Input, Input Gain, In Gain, Gain -- a gain before the
+-- compressor moves what "no reduction" is just as one after it does, and
+-- the extra reduction it brings is measured (dB on the end allowed). Only
+-- followed when it reads in dB, so a Wet in % or a Gain of 0 to 100 isn't.
 function TP.makeup_name(name)
   local n = (name or ""):lower():gsub("[^%a]", ""):gsub("db$", "")
   return n:find("^makeup") ~= nil or n == "mug" or n == "output" or n == "out" or n == "outputgain"
     or n == "outgain" or n == "gainout" or n == "outputtrim" or n == "outtrim" or n == "wet"
+    or n == "input" or n == "inputgain" or n == "ingain" or n == "gainin" or n == "gain"
 end
 -- A plugin's parameters named as output gains, kept by plugin while its
 -- parameter count stays the same.
