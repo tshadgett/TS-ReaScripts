@@ -243,6 +243,13 @@ do
   check("gain law: copied", #M.copy(M.get(k)).gainlaw[3], 3)
   check("gain law: between points", M.gainlaw_at(gl[3], 0.75), 11)
   check("gain law: past the ends", ("%g %g"):format(M.gainlaw_at(gl[3], -1), M.gainlaw_at(gl[3], 2)), "-10 20")
+  -- what each knob is, as checked
+  M.set(k, { controls = { { param = 3, type = "knob" } }, gainrole = { [2] = "in", [8] = "out", [10] = "no" }, gaincheck = true })
+  M.save(); M.reload()
+  local gr = M.get(k).gainrole
+  check("gain roles: kept", gr and (gr[2] .. gr[8] .. gr[10]), "inoutno")
+  check("gain roles: checked", M.get(k).gaincheck, true)
+  check("gain roles: copied", M.copy(M.get(k)).gainrole[8] .. tostring(M.copy(M.get(k)).gaincheck), "outtrue")
   -- the gap between them, and Reverse (every button lit but the current)
   M.set(k, { controls = { { param = 3, type = "combo", buttons = "grid", nbtn = 8, bgap = 6, invert = true },
                           { param = 4, type = "combo", buttons = "across", nbtn = 3 } } })
@@ -12068,6 +12075,75 @@ do
   check("offer: time and mix alone", d("VST3: Thing (Acme)", { "Time", "Mix", "Rate" }), "nil")
   check("offer: named, but its controls don't fit", d("VST3: Big Gate (Acme)", { "Threshold", "Output" }), "nil")
   check("offer: named, with what it needs", d("VST3: Big Gate (Acme)", { "Threshold", "Hold" }), "gate:Threshold,Hold")
+end
+
+-- ---------------------------------------------------------------------
+-- the gain knob check: its window, through check, measuring and outcome
+-- ---------------------------------------------------------------------
+do
+  local CS = require("TS_CV_CanvasSetup")
+  local TP = require("TS_CV_Taps")
+  local FT = require("TS_CV_FXTree")
+  local saved = {}
+  local function swap(t, k, v) saved[#saved + 1] = { t, k, t[k] }; t[k] = v end
+  local press, texts = {}, {}
+  local IG = setmetatable({
+    CalcTextSize = function(_, t) return #tostring(t) * 7, 13 end,
+    Begin = function() return true, true end,
+    BeginTable = function() return true end,
+    GetMainViewport = function() return "vp" end,
+    Viewport_GetCenter = function() return 400, 300 end,
+    Button = function(_, l) return press[l] == true end,
+    Text = function(_, t) texts[#texts + 1] = t end,
+    TextDisabled = function(_, t) texts[#texts + 1] = t end,
+    TextColored = function(_, _, t) texts[#texts + 1] = t end,
+  }, { __index = function(_, k)
+    if k:match("^%u%a+_") and not k:match("^DrawList") and not k:match("^Viewport") then return 0 end
+    return function()
+      if k:match("^Is") or k:match("^Begin") or k == "Selectable" or k:match("Button$") then return false end
+      return 0, 0
+    end
+  end })
+  CS.attach(IG)
+  local track = {}
+  local layouts = {}
+  swap(reaper, "ValidatePtr", function() return true end)
+  swap(reaper, "TrackFX_GetFormattedParamValue", function(_, _, p) return true, "v" .. p end)
+  swap(FT, "collect", function() return { { guid = "{GC}", addr = 0 } } end)
+  swap(M, "get", function(k) return layouts[k] end)
+  swap(M, "set", function(k, l) layouts[k] = l end)
+  swap(M, "save", function() end)
+  swap(M, "get_or_default", function() return { controls = {} } end)
+  swap(TP, "gain_candidates", function() return { { 2, "in" }, { 8, "out" }, { 10, "no" } } end)
+  local measured, job
+  swap(TP, "measure_gain", function(_, _, _, _, ps) measured = ps; job = { guid = "{GC}", ps = ps, p = ps[1], i = 1, progress = 0.4, left = 7 } return true end)
+  swap(TP, "gain_job", function() return job end)
+  swap(TP, "gain_result", function() return { ok = true, results = { { p = 2, name = "Input", ok = true }, { p = 8, name = "Output", ok = true, readout = true } } } end)
+  swap(TP, "gain_forget", function() end)
+  swap(TP, "makeup_changed", function() end)
+  local fx = { guid = "{GC}", addr = 0, name = "VST3: Comprexxor (IK Multimedia)" }
+  CS.gain_open(track, fx, "Comprexxor")
+  texts = {}; CS.gain_window(nil)
+  local all = table.concat(texts, "|")
+  check("gain check: names the plugin", all:find("Comprexxor", 1, true) ~= nil, true)
+  check("gain check: says how long", all:find("About 24 s", 1, true) ~= nil, true)
+  press.Measure = true; CS.gain_window(nil); press.Measure = nil
+  check("gain check: measures the gains, not the rest", table.concat(measured or {}, ","), "2,8")
+  local l = layouts.Comprexxor
+  check("gain check: the roles kept", l and (l.gainrole[2] .. l.gainrole[8] .. l.gainrole[10]), "inoutno")
+  check("gain check: marked checked", l and l.gaincheck, true)
+  texts = {}; CS.gain_window(nil)
+  all = table.concat(texts, "|")
+  check("gain check: measuring, which knob", all:find("Measuring", 1, true) ~= nil and all:find("(1 of 2)", 1, true) ~= nil, true)
+  check("gain check: and how long", all:find("About 7 s left", 1, true) ~= nil, true)
+  job = nil
+  texts = {}; CS.gain_window(nil)
+  all = table.concat(texts, "|")
+  check("gain check: the outcome, each knob", all:find("Input: measured", 1, true) ~= nil and all:find("Output: its readout is right", 1, true) ~= nil, true)
+  press.Close = true; CS.gain_window(nil); press.Close = nil
+  texts = {}; CS.gain_window(nil)
+  check("gain check: closed", #texts, 0)
+  for i = #saved, 1, -1 do local e = saved[i]; e[1][e[2]] = e[3] end
 end
 
 -- ---------------------------------------------------------------------

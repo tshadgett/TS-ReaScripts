@@ -4548,6 +4548,17 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         ImGui.DrawListSplitter_SetCurrentChannel(sp, 0)
       end
       if not C.HIDE_HEAD then draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req) end
+      -- a measured plugin whose gain knobs weren't checked: a note over the
+      -- top of its controls, on the channel painted last (Pro)
+      do
+        local cs = ED.PRO and not req.offline and not is_drag_source and ED.module("TS_CV_CanvasSetup")
+        if cs and cs.gain_due and cs.gain_due(track, fx, key) then
+          sp = sp or P.split(dl, 2, fx.guid)
+          ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
+          cs.gain_offer(ctx, dl, track, fx, key, x, y + P.head_h(), ww)
+          ImGui.DrawListSplitter_SetCurrentChannel(sp, 0)
+        end
+      end
       local fh = P.footer_h()
       -- the body: as wide as the panel's own layout, centred on a wider plate
       local bx, bw = x + off, ww - (w - nat_w)

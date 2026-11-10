@@ -103,8 +103,15 @@
   <unit> Hz kHz ms s dB % :1 or empty; <curve> lin, log or sq.
 
   GainLaw<p>=<position>:<dB>,... is what a gain knob that doesn't read in
-  dB (0 to 10, 0 to 100) was measured to do at each position (TS_CV_Learn
-  LN.start_gain): the measured gain reduction follows it as a make-up.
+  dB (0 to 10, 0 to 100), or reads it wrongly, was measured to do at each
+  position (TS_CV_Learn LN.start_gain): the measured gain reduction
+  follows it as a make-up.
+
+  GainRole<p>=in|mu|out|no says what a knob is, as checked (TS_CV_Canvas
+  Setup's gain knob check): an input, make-up or output gain, followed as
+  a make-up, or not a gain at all, never followed whatever its name.
+  GainCheck=1 once the plugin's gain knobs were checked: from then on
+  only these (and the Makeup and Input roles) are followed.
 
   STYLE and PLATE are the hardware look (see "Hardware styles" in
   TS_CV_Config.lua). Style<n> belongs to control n, the same index as its
@@ -2285,7 +2292,7 @@ local function parse_section(sect)
   local controls, aliases, states, ranges = {}, {}, {}, {}
   local choice_names, choice_by, choice_ctx = {}, {}, {}
   local steps = {}
-  local gainlaw = {}
+  local gainlaw, gainrole = {}, {}
   local meter = nil
   if sect.Meter then
     local on, range, win = sect.Meter:match("^%s*(%d)%s*|?%s*([%d%.]*)%s*|?%s*(%w*)")
@@ -2306,6 +2313,9 @@ local function parse_section(sect)
     if rp then ranges[tonumber(rp)] = M.range_of_line(v) end
     local gp = k:match("^GainLaw(%d+)$")
     if gp then gainlaw[tonumber(gp)] = M.gainlaw_of(v) end
+    local gr = k:match("^GainRole(%d+)$")
+    local gv = gr and U.trim(v)
+    if gv == "in" or gv == "mu" or gv == "out" or gv == "no" then gainrole[tonumber(gr)] = gv end
     local np = k:match("^Steps(%d+)$")
     local nv = np and tonumber(v)
     if nv and nv >= 2 and nv <= 64 then steps[tonumber(np)] = math.floor(nv) end
@@ -2452,6 +2462,8 @@ local function parse_section(sect)
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
            steps = next(steps) and steps or nil,
            gainlaw = next(gainlaw) and gainlaw or nil,
+           gainrole = next(gainrole) and gainrole or nil,
+           gaincheck = (U.trim(sect.GainCheck or "") == "1") or nil,
            choice_names = next(choice_names) and choice_names or nil,
            choice_by = next(choice_by) and choice_by or nil,
            choice_ctx = next(choice_ctx) and choice_ctx or nil,
@@ -2545,6 +2557,8 @@ local function serialize(layout)
     local line = M.gainlaw_line(pts)
     if line then out["GainLaw" .. p] = line end
   end
+  for p, r in pairs(layout.gainrole or {}) do out["GainRole" .. p] = r end
+  if layout.gaincheck then out.GainCheck = "1" end
   for p, map in pairs(layout.choice_names or {}) do
     local line = M.choices_line(map)
     if line then out["Choices" .. p] = line end
@@ -4143,6 +4157,11 @@ function M.copy(layout)
   if layout.ranges then
     out.ranges = {}
     for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve } end
+  end
+  out.gaincheck = layout.gaincheck
+  if layout.gainrole then
+    out.gainrole = {}
+    for p, r in pairs(layout.gainrole) do out.gainrole[p] = r end
   end
   if layout.gainlaw then
     out.gainlaw = {}

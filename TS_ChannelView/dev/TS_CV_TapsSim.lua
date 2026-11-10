@@ -1252,6 +1252,23 @@ if NEW then
   end
   cvs["LA-2A"] = nil; TP.makeup_changed()
   next_one("make-up: by name, both added", 4)
+  do
+    local a1
+    for a = 0, 20 do local f = F(a); if f and f.guid == "{C1}" then a1 = a end end
+    local function ps(l) local s = TP.makeup_of(l, track, a1); return s and table.concat(s.ps, ",") or "none" end
+    local function cands(l)
+      local out = {}
+      for _, c in ipairs(TP.gain_candidates(track, a1, l)) do out[#out + 1] = c[1] .. c[2] end
+      return table.concat(out, ",")
+    end
+    check("gain roles: found by name", cands({ controls = {} }), "7mu,9out")
+    check("gain roles: one checked as no gain isn't followed", ps({ controls = {}, gainrole = { [9] = "no" } }), "7")
+    check("gain roles: checked, only those", ps({ controls = {}, gainrole = { [3] = "in", [9] = "no" }, gaincheck = true }), "3")
+    check("gain roles: checked, offered as checked", cands({ controls = {}, gainrole = { [3] = "in", [9] = "no" }, gaincheck = true }), "3in,9no")
+    check("gain roles: the knobs to measure", table.concat(TP.gain_knobs(track, a1, { controls = {}, gainrole = { [3] = "in", [9] = "no" }, gaincheck = true }), ","), "3")
+    check("gain roles: what names say", tostring(TP.gain_role_of("Input Gain")) .. tostring(TP.gain_role_of("Out Gain"))
+      .. tostring(TP.gain_role_of("Make-Up")) .. tostring(TP.gain_role_of("Ratio")), "inoutmunil")
+  end
   r0 = rst(); TP.touched(track, "{C1}", 9)
   check("make-up:   moving the second isn't a touch", rst(), r0)
   -- a gain that leaves the unit off (Kotelnikov's Makeup: -18 to 18,

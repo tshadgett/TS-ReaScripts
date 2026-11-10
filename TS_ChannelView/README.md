@@ -2779,13 +2779,22 @@ it in Edit layout, a pink corner on a fader); a compressor canvas's
 control has to read in dB (*Values* ▸ *Custom range* can give it one).
 A gain knob that reads 0 to 10 or 0 to 100 (Comprexxor's *Input*, White
 2A's *Gain*), or one whose dB readout isn't its real gain (Comprexxor's
-*Output*): right-click it ▸ **Measure as a gain** (Pro). Its dB is measured
-along it on a hidden copy of the plugin (several seconds; your own plugin
-isn't touched), and from then on it's followed like any other. A readout
-that turns out right is followed as it reads. Learning or measuring a
-canvas does the same for the plugin's gain knobs on the way.
+*Output*), is measured along its travel on a hidden copy of the plugin
+(Pro; your own plugin isn't touched), and from then on it's followed like
+any other. A readout that turns out right is followed as it reads.
 Needs TS_TrackProbe 2.5.1 (with ChannelView 4.0.2 and Track Analyser
 2.7.1): reopen the project after updating.
+
+**Checking a plugin's gain knobs** (Pro). The first time the probes
+measure a plugin, a note on its panel asks *Check its gain knobs?* while
+playback is stopped. **Check…** lists the knobs it found by name, each as
+an *Input gain*, *Make-up gain*, *Output gain* or *Not a gain*: correct
+any, add one it missed, then **Measure**. A small window shows which knob
+is being measured and how long is left; you can carry on meanwhile, or
+Cancel. *Not now* asks again next time ChannelView starts; ✕ never asks
+for that plugin. Panel menu **=** ▸ *Layout* ▸ **Check gain knobs…** does
+it any time, and learning a compressor's canvas ends with it. Right-click
+a single knob ▸ **Measure as a gain** measures just that one.
 
 **While playing**, the measured zero is checked against the music. A
 steady stretch where the plugin passes more than its zero allows means

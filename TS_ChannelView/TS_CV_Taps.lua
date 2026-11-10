@@ -2529,17 +2529,23 @@ function TP.makeup_of(layout, tr, addr)
   local cv = layout.canvas
   local R = (cv and cv.roles) or {}
   if not p and cv then p = (cv.kind == "comp" and R.Makeup) or (cv.kind == "multi" and R.Output) or nil end
+  -- (a knob checked as not a gain never is: GainRole<p>=no)
+  local role = layout.gainrole or {}
   local ps, seen = {}, {}
-  if p then ps[1] = p; seen[p] = true end
-  if tr and addr then
-    for _, q in ipairs(named_makeups(tr, addr)) do
-      if not seen[q] then ps[#ps + 1] = q; seen[q] = true end
-    end
+  for q in pairs(role) do if role[q] == "no" then seen[q] = true end end
+  local function add(q) if q and not seen[q] then ps[#ps + 1] = q; seen[q] = true end end
+  add(p)
+  -- named as one, until the plugin's gain knobs are checked: then the
+  -- knobs checked as gains instead
+  if tr and addr and not layout.gaincheck then
+    for _, q in ipairs(named_makeups(tr, addr)) do add(q) end
   end
+  local more = {}
+  for q, r in pairs(role) do if r ~= "no" then more[#more + 1] = q end end
   -- and any knob measured as a gain
-  for q in pairs(layout.gainlaw or {}) do
-    if not seen[q] then ps[#ps + 1] = q; seen[q] = true end
-  end
+  for q in pairs(layout.gainlaw or {}) do more[#more + 1] = q end
+  table.sort(more)
+  for _, q in ipairs(more) do add(q) end
   p = ps[1]
   local bands, plan, bsig
   if cv and cv.kind == "multi" then
@@ -2688,26 +2694,50 @@ function TP.makeup_followed(tr, guid, p)
           and (PL.get(tr, e.probe, "mug_cap") or 0) >= 0.5) and true or false
 end
 
--- A plugin's gain knobs not yet measured: named as a gain
--- (TP.makeup_name), or its compressor canvas's Makeup or Input role. Those
--- that read in dB too: measuring checks the readout. (Not REAPER's own
--- Wet, which mixes rather than gains.)
-function TP.gain_knobs(tr, addr, layout)
+-- What a gain knob's name says it is: "in", "out" or "mu" (make-up), or nil.
+function TP.gain_role_of(name)
+  local n = (name or ""):lower():gsub("[^%a]", ""):gsub("db$", "")
+  if n == "input" or n == "inputgain" or n == "ingain" or n == "gainin" then return "in" end
+  if n == "output" or n == "out" or n == "outputgain" or n == "outgain" or n == "gainout"
+     or n == "outputtrim" or n == "outtrim" or n == "wet" then return "out" end
+  if TP.makeup_name(name) then return "mu" end
+  return nil
+end
+
+-- A plugin's gain knobs, for checking: { { p, role }, ... } by parameter.
+-- Those checked (GainRole<p>), else those named as gains (TP.gain_role_of;
+-- a Wet only when it reads in dB, as ReaComp's does), the knob marked as
+-- the make-up, and its compressor canvas's Makeup and Input or
+-- multiband's Output.
+function TP.gain_candidates(tr, addr, layout)
   layout = layout or {}
   local out, seen = {}, {}
-  local function add(q)
-    if not q or seen[q] then return end
-    seen[q] = true
-    if layout.gainlaw and layout.gainlaw[q] then return end
-    local _, nm = reaper.TrackFX_GetParamName(tr, addr, q, "")
-    if (nm or ""):lower():gsub("[^%a]", "") == "wet" then return end
-    out[#out + 1] = q
+  local function add(q, r)
+    if q and q >= 0 and not seen[q] then out[#out + 1] = { q, r }; seen[q] = true end
   end
-  for _, q in ipairs(named_makeups(tr, addr)) do add(q) end
-  local cv = layout.canvas
-  local R = cv and cv.kind == "comp" and cv.roles or {}
-  add(R.Makeup); add(R.Input)
-  table.sort(out)
+  for q, r in pairs(layout.gainrole or {}) do add(q, r) end
+  if not layout.gaincheck then
+    add(layout.mug, "mu")
+    local cv = layout.canvas
+    local R = (cv and cv.roles) or {}
+    if cv and cv.kind == "comp" then add(R.Makeup, "mu"); add(R.Input, "in") end
+    if cv and cv.kind == "multi" then add(R.Output, "out") end
+    for _, q in ipairs(named_makeups(tr, addr)) do
+      local _, nm = reaper.TrackFX_GetParamName(tr, addr, q, "")
+      local r = TP.gain_role_of(nm)
+      if (nm or ""):lower():gsub("[^%a]", "") ~= "wet" or TP.makeup_db(tr, addr, q, layout.ranges) then add(q, r or "mu") end
+    end
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
+  return out
+end
+
+-- The knobs to measure as gains: those of TP.gain_candidates that are.
+function TP.gain_knobs(tr, addr, layout)
+  local out = {}
+  for _, c in ipairs(TP.gain_candidates(tr, addr, layout)) do
+    if c[2] ~= "no" then out[#out + 1] = c[1] end
+  end
   return out
 end
 
@@ -2726,9 +2756,33 @@ function TP.measure_gain(tr, addr, key, layout, ps)
     if nm and nm ~= "" then what = nm end
   end
   local guid = fx_guid(tr, addr)
-  gjob = { job = LN.start_gain(tr, addr, key, layout, ps), guid = guid, ps = ps, what = what }
+  gjob = { job = LN.start_gain(tr, addr, key, layout, ps), guid = guid, ps = ps, what = what,
+           t0 = reaper.time_precise() }
   gdone[guid] = nil
   return true
+end
+-- The measuring now, for a window to show: { guid, ps, p (the knob being
+-- measured), i (its place in ps), progress, left (s, a guess) }, or nil.
+function TP.gain_job()
+  if not gjob then return nil end
+  local j = gjob.job
+  local st = j.steps and j.steps[j.i]
+  local gi = st and st.gi or 1
+  local pr = j.progress or 0
+  local el = reaper.time_precise() - gjob.t0
+  return { guid = gjob.guid, ps = gjob.ps, p = gjob.ps[gi], i = gi, progress = pr,
+           left = pr > 0.05 and el * (1 - pr) / pr or nil }
+end
+-- How the last measuring of this plugin ended: { ok, why, results (TS_CV_
+-- Learn's, each knob's), cancelled }, or nil. Kept until asked again.
+local gres = {}
+function TP.gain_result(guid) return gres[guid] end
+function TP.gain_forget(guid) gres[guid] = nil end
+function TP.gain_cancel()
+  if not gjob then return end
+  require("TS_CV_Learn").cancel(gjob.job)
+  gres[gjob.guid] = { ok = false, cancelled = true, results = {} }
+  gjob = nil
 end
 -- What the panel's header says about it: { text, progress (0..1, while
 -- measuring), ok (when done), why (when it failed) }, or nil.
@@ -2754,6 +2808,7 @@ local function gain_tick()
   local st = gjob.job.state
   if st ~= "starting" and st ~= "measuring" then
     gdone[gjob.guid] = { ok = st == "done", why = (st ~= "done") and gjob.job.msg or nil, at = reaper.time_precise() }
+    gres[gjob.guid] = { ok = st == "done", why = (st ~= "done") and gjob.job.msg or nil, results = gjob.job.results or {} }
     gjob = nil
     TP.makeup_changed()
   end

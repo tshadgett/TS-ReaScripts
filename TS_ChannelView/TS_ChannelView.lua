@@ -2723,6 +2723,13 @@ local function panel_menu()
         if cl and cl.canvas and ImGui.MenuItem(ctx, "Set up this layout\u{2026}") then
           CS.open(app.track, fx, key)
         end
+        -- what its input, make-up and output gains are, then measured
+        if ED.PRO and ImGui.MenuItem(ctx, "Check gain knobs\u{2026}") then
+          CS.gain_open(app.track, fx, key)
+        end
+        if ED.PRO and ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Say which knobs are its gains, then measure them.")
+        end
       end
       if cur then
         ImGui.Separator(ctx)
@@ -4352,7 +4359,10 @@ local function control_menu()
         or "Measure as a gain"
       if ED.item(ImGui, ctx, label .. "##measgain", nil, law ~= nil, prog == nil) then
         local l, k = commit()
-        TP.measure_gain(app.track, fx.addr, k or key, l, { c.param })
+        -- (in its own window, Pro: TS_CV_CanvasSetup)
+        if not (CS.gain_measure and CS.gain_measure(app.track, fx, k or key, { c.param })) then
+          TP.measure_gain(app.track, fx.addr, k or key, l, { c.param })
+        end
       end
       if ED.PRO and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
         ImGui.SetTooltip(ctx, law and "Measured: followed as a gain. Click to measure again."
