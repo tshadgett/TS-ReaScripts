@@ -12091,7 +12091,7 @@ end
 -- the gain knob check: its window, through check, measuring and outcome
 -- ---------------------------------------------------------------------
 do
-  local CS = require("TS_CV_CanvasSetup")
+  local GC = require("TS_CV_GainCheck")
   local TP = require("TS_CV_Taps")
   local FT = require("TS_CV_FXTree")
   local saved = {}
@@ -12114,7 +12114,7 @@ do
       return 0, 0
     end
   end })
-  CS.attach(IG)
+  GC.attach(IG)
   local track = {}
   local layouts = {}
   swap(reaper, "ValidatePtr", function() return true end)
@@ -12125,6 +12125,7 @@ do
   swap(M, "save", function() end)
   swap(M, "get_or_default", function() return { controls = {} } end)
   swap(TP, "gain_candidates", function() return { { 2, "in" }, { 8, "out" }, { 10, "no" } } end)
+  swap(reaper, "time_precise", reaper.time_precise or function() return 0 end)
   local measured, job
   swap(TP, "measure_gain", function(_, _, _, _, ps) measured = ps; job = { guid = "{GC}", ps = ps, p = ps[1], i = 1, progress = 0.4, left = 7 } return true end)
   swap(TP, "gain_job", function() return job end)
@@ -12132,27 +12133,29 @@ do
   swap(TP, "gain_forget", function() end)
   swap(TP, "makeup_changed", function() end)
   local fx = { guid = "{GC}", addr = 0, name = "VST3: Comprexxor (IK Multimedia)" }
-  CS.gain_open(track, fx, "Comprexxor")
-  texts = {}; CS.gain_window(nil)
+  GC.open(track, fx, "Comprexxor")
+  texts = {}; GC.draw(nil)
   local all = table.concat(texts, "|")
   check("gain check: names the plugin", all:find("Comprexxor", 1, true) ~= nil, true)
   check("gain check: says how long", all:find("About 24 s", 1, true) ~= nil, true)
-  press.Measure = true; CS.gain_window(nil); press.Measure = nil
+  press.Measure = true; GC.draw(nil); press.Measure = nil
   check("gain check: measures the gains, not the rest", table.concat(measured or {}, ","), "2,8")
   local l = layouts.Comprexxor
   check("gain check: the roles kept", l and (l.gainrole[2] .. l.gainrole[8] .. l.gainrole[10]), "inoutno")
   check("gain check: marked checked", l and l.gaincheck, true)
-  texts = {}; CS.gain_window(nil)
+  texts = {}; GC.draw(nil)
   all = table.concat(texts, "|")
   check("gain check: measuring, which knob", all:find("Measuring", 1, true) ~= nil and all:find("(1 of 2)", 1, true) ~= nil, true)
   check("gain check: and how long", all:find("About 7 s left", 1, true) ~= nil, true)
   job = nil
-  texts = {}; CS.gain_window(nil)
+  texts = {}; GC.draw(nil)
   all = table.concat(texts, "|")
   check("gain check: the outcome, each knob", all:find("Input: measured", 1, true) ~= nil and all:find("Output: its readout is right", 1, true) ~= nil, true)
-  press.Close = true; CS.gain_window(nil); press.Close = nil
-  texts = {}; CS.gain_window(nil)
-  check("gain check: closed", #texts, 0)
+  check("gain check: no Close to click", all:find("Close", 1, true) == nil, true)
+  local tp = reaper.time_precise
+  swap(reaper, "time_precise", function() return (tp and tp() or 0) + 10 end)
+  texts = {}; GC.draw(nil)
+  check("gain check: closes itself after", #texts, 0)
   for i = #saved, 1, -1 do local e = saved[i]; e[1][e[2]] = e[3] end
 end
 

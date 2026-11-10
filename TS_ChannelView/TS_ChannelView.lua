@@ -73,8 +73,11 @@
 --  [nomain] TS_CV_VisualOptions.lua
 --  [nomain] TS_CV_Widgets.lua
 --  [nomain] TS_CV_WebLink.lua
+--  [nomain] TS_CV_GainCheck.lua
+--  [nomain] TS_CV_Learn.lua
 --  [effect] TS_TrackProbe.jsfx
 --  [effect] TS_CV_Modulators.jsfx
+--  [effect] TS_CV_Learn.jsfx
 -- @about
 --  A dockable window showing one panel per plugin on the selected track.
 --  Each panel carries a float button, a bypass button and a set of knobs
@@ -2597,6 +2600,16 @@ local function panel_menu()
       end
     end
   end
+  -- its gain reduction measured: which knobs are its input, make-up and
+  -- output gains, then measured (TS_CV_GainCheck)
+  if layout.measure and not fx.is_container then
+    if ImGui.MenuItem(ctx, "Check gain knobs\u{2026}") then
+      require("TS_CV_GainCheck").open(app.track, fx, key)
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Say which knobs are its gains, then measure them.")
+    end
+  end
 
   -- a locked layout takes no edits (the padlock in the panel's foot);
   -- its meters can still be switched on and off
@@ -2722,13 +2735,6 @@ local function panel_menu()
         local cl = M.get(key)
         if cl and cl.canvas and ImGui.MenuItem(ctx, "Set up this layout\u{2026}") then
           CS.open(app.track, fx, key)
-        end
-        -- what its input, make-up and output gains are, then measured
-        if ED.PRO and ImGui.MenuItem(ctx, "Check gain knobs\u{2026}") then
-          CS.gain_open(app.track, fx, key)
-        end
-        if ED.PRO and ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "Say which knobs are its gains, then measure them.")
         end
       end
       if cur then
@@ -4333,44 +4339,6 @@ local function control_menu()
     ImGui.EndMenu(ctx)
   end
 
-  -- the plugin's make-up gain: the measured reduction follows it (TS_CV_Taps)
-  if (c.type == "knob" or c.type == "stepped" or c.type == "fader" or c.type == nil)
-     and c.param and c.param >= 0 then
-    local on = layout.mug == c.param
-    local db = TP.makeup_db(app.track, fx.addr, c.param, layout.ranges)
-    if ImGui.MenuItem(ctx, "Make-up gain", nil, on, on or db ~= nil) then
-      local l = commit()
-      l.mug = (not on) and c.param or nil
-      M.set(key, l); M.save()
-      TP.makeup_changed()
-    end
-    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, not (db or on) and "Needs a value in dB: Values \u{25B8} Custom range can give it one."
-        or TP.is_tapped(app.track, fx.guid) and "Measured gain reduction follows this control, automation included."
-        or "Measured gain reduction follows this control, automation included,\nonce the probes measure this plugin.")
-    end
-    -- a gain knob measured on a hidden copy (TS_CV_Learn LN.start_gain),
-    -- then followed as a make-up: one that doesn't read in dB (0 to 10),
-    -- or one whose dB readout is wrong
-    local law = layout.gainlaw and layout.gainlaw[c.param]
-    do
-      local prog = TP.gain_measuring(fx.guid, c.param)
-      local label = prog and ("Measuring as a gain\u{2026} %d%%"):format(math.floor(prog * 100))
-        or "Measure as a gain"
-      if ED.item(ImGui, ctx, label .. "##measgain", nil, law ~= nil, prog == nil) then
-        local l, k = commit()
-        -- (in its own window, Pro: TS_CV_CanvasSetup)
-        if not (CS.gain_measure and CS.gain_measure(app.track, fx, k or key, { c.param })) then
-          TP.measure_gain(app.track, fx.addr, k or key, l, { c.param })
-        end
-      end
-      if ED.PRO and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-        ImGui.SetTooltip(ctx, law and "Measured: followed as a gain. Click to measure again."
-          or db and "Checks its dB readout on a hidden copy:\nif it's wrong, the measured dB is followed."
-          or "Measures its dB on a hidden copy,\nso measured gain reduction follows it.")
-      end
-    end
-  end
 
   if ED.menu(ImGui, ctx, "Show when" .. (c.show and "  \u{25D0}" or "")) then
     show_when_menu(fx, key, layout, idx, c)
@@ -6988,6 +6956,7 @@ local function frame()
     PU.draw(ctx)
     if LS.draw(ctx, function(k) return E.is_open() and E.key() == k end) then rescan(true) end
     CS.draw(ctx)
+    require("TS_CV_GainCheck").draw(ctx)
     if TM.draw(ctx) then rescan(true) end
     CP.draw(ctx, false)
     if CN.draw(ctx) then rescan(true) end

@@ -49,7 +49,7 @@ local panel_at = {}
 -- (Pro's modules, the canvases, Trimmer and finishes, only when they're
 -- there: TS_CV_Edition)
 function P.attach(imgui)
-  ImGui = imgui; PU.attach(imgui)
+  ImGui = imgui; PU.attach(imgui); require("TS_CV_GainCheck").attach(imgui)
   for _, m in ipairs({ EQP, CP, MP, RP, TRP, FN, VU }) do if m then m.attach(imgui) end end
 end
 -- Whether `key` is a plugin with a panel of its own (Pro): ReaEQ, ReaComp,
@@ -4549,13 +4549,13 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       end
       if not C.HIDE_HEAD then draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req) end
       -- a measured plugin whose gain knobs weren't checked: a note over the
-      -- top of its controls, on the channel painted last (Pro)
-      do
-        local cs = ED.PRO and not req.offline and not is_drag_source and ED.module("TS_CV_CanvasSetup")
-        if cs and cs.gain_due and cs.gain_due(track, fx, key) then
+      -- top of its controls, on the channel painted last (TS_CV_GainCheck)
+      if layout.measure and not req.offline and not is_drag_source then
+        local GC = require("TS_CV_GainCheck")
+        if GC.due(track, fx, key) then
           sp = sp or P.split(dl, 2, fx.guid)
           ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
-          cs.gain_offer(ctx, dl, track, fx, key, x, y + P.head_h(), ww)
+          GC.offer(ctx, dl, track, fx, key, x, y + P.head_h(), ww)
           ImGui.DrawListSplitter_SetCurrentChannel(sp, 0)
         end
       end

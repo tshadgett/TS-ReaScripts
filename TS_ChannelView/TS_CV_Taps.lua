@@ -2756,7 +2756,7 @@ local gjob
 local gdone = {}
 function TP.measure_gain(tr, addr, key, layout, ps)
   if gjob or not (ps and #ps > 0) then return false end
-  local ok, LN = pcall(require, "TS_CV_Learn")      -- (Pro)
+  local ok, LN = pcall(require, "TS_CV_Learn")
   if not ok then return false end
   local what = "its gain knobs"
   if #ps == 1 then

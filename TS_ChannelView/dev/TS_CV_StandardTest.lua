@@ -15,7 +15,7 @@ package.path = here .. "../?.lua;" .. package.path
 
 local PRO = {}
 for _, n in ipairs({ "TS_CV_Pro", "TS_CV_GridEditor", "TS_CV_MapPanel", "TS_CV_MapEQ", "TS_CV_CompPanel",
-                     "TS_CV_CanvasSetup", "TS_CV_Learn", "TS_CV_EQPanel", "TS_CV_RolePanel", "TS_CV_Delay",
+                     "TS_CV_CanvasSetup", "TS_CV_EQPanel", "TS_CV_RolePanel", "TS_CV_Delay",
                      "TS_CV_Trimmer", "TS_CV_TrimmerPanel", "TS_CV_KnobEditor", "TS_CV_Recipes",
                      "TS_CV_Switches", "TS_CV_Finish", "TS_CV_Tiles", "TS_CV_PluginColours",
                      "TS_CV_Vendors", "TS_CV_Light" }) do PRO[n] = true end
@@ -152,6 +152,14 @@ local lay2 = { controls = {
 local fx = { addr = 0, guid = "{std}", name = "VST: Some Comp (Vendor)" }
 local ok, err = pcall(P.draw, "ctx", "tr", fx, lay2, "Some Comp", 300, 1, false)
 check("Standard: a grid panel drawn (text, image, step button)", ok and "ok" or tostring(err):sub(1, 200), "ok")
+-- measuring gain knobs is Standard's: Learn loads without Pro's EQ code,
+-- and a measured plugin's panel (its note to check them) draws
+local okl, LNs = pcall(require, "TS_CV_Learn")
+check("Standard: gain measuring there", okl and type(LNs.start_gain), "function")
+check("Standard: the gain knob check there", type(require("TS_CV_GainCheck").open), "function")
+lay2.measure = true
+ok, err = pcall(P.draw, "ctx", "tr", fx, lay2, "Some Comp", 300, 1, false)
+check("Standard: a measured plugin's panel drawn", ok and "ok" or tostring(err):sub(1, 200), "ok")
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))
 os.exit(fails == 0 and 0 or 1)

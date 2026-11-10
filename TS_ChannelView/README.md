@@ -2203,8 +2203,9 @@ them up the first time ChannelView shows it.
 | `TS_CV_AutoFloat.lua` | View ▸ Float plugins without controls: opening and closing their windows |
 | `TS_CV_PluginColours.lua` | A plugin's own colours, read off its window (Pro) |
 | `TS_CV_Freeze.lua` | freezing: REAPER's own, with the frozen plugins shown where they were and ChannelView's own plugins kept live |
-| `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: EQ bands, thresholds, reverb decay, saturation (Pro) |
-| `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` (Pro) |
+| `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: gain knobs; with Pro, EQ bands, thresholds, reverb decay, saturation |
+| `TS_CV_Learn.jsfx` | the measuring pair it uses. Goes in `Effects/` |
+| `TS_CV_GainCheck.lua` | checking a plugin's gain knobs, and measuring them |
 | `TS_CV_Trimmer.jsfx` | the Trimmer plugin. Goes in `Effects/` (Pro) |
 | `TS_CV_Trimmer.lua`, `TS_CV_TrimmerPanel.lua` | the Trimmer's insert, auto trim and listen; its panel (Pro) |
 | `TS_CV_Units.lua` | reading a plugin's values from its own text (dB, Hz, ms, ratios) |
@@ -2768,33 +2769,31 @@ Setup turns it off.
 
 **Make-up gain.** Moving a plugin's make-up gain changes its output as
 reduction would, so the measured reading takes it out, automation
-included, and moving it doesn't count as touching the plugin. Which
-controls: any named as a gain the whole signal goes through (*Makeup*,
-*Make-up Gain*, *Out Gain*, *Output*, *Output Trim*, ReaComp's *Wet*,
-and before the compressor *Input*, *Input Gain*, *Gain*: the extra
-reduction a higher input brings is measured), added together; one you
-mark with right-click a knob or fader ▸ **Make-up gain** (a pink dot on
-it in Edit layout, a pink corner on a fader); a compressor canvas's
-*Make-up*; a multiband canvas's *Output* and each band's *Gain*. A
-control has to read in dB (*Values* ▸ *Custom range* can give it one).
-A gain knob that reads 0 to 10 or 0 to 100 (Comprexxor's *Input*, White
-2A's *Gain*), or one whose dB readout isn't its real gain (Comprexxor's
-*Output*), is measured along its travel on a hidden copy of the plugin
-(Pro; your own plugin isn't touched), and from then on it's followed like
-any other. A readout that turns out right is followed as it reads.
+included, and moving it doesn't count as touching the plugin. The same
+goes for its input and output gains (the extra reduction a higher input
+brings is measured). Which controls: those named as a gain the whole
+signal goes through (*Makeup*, *Make-up Gain*, *Out Gain*, *Output*,
+*Output Trim*, ReaComp's *Wet*, *Input*, *Input Gain*, *Gain*), added
+together; a compressor canvas's *Make-up*; a multiband canvas's *Output*
+and each band's *Gain*; or, once checked, the ones you said. A knob that
+reads 0 to 10 or 0 to 100 (Comprexxor's *Input*, White 2A's *Gain*), or
+whose dB readout isn't its real gain (Comprexxor's *Output*), is measured
+along its travel on a hidden copy of the plugin (your own plugin isn't
+touched), and from then on followed like any other.
 Needs TS_TrackProbe 2.5.1 (with ChannelView 4.0.2 and Track Analyser
 2.7.1): reopen the project after updating.
 
-**Checking a plugin's gain knobs** (Pro). The first time the probes
-measure a plugin, a note on its panel asks *Check its gain knobs?* while
-playback is stopped. **Check…** lists the knobs it found by name, each as
-an *Input gain*, *Make-up gain*, *Output gain* or *Not a gain*: correct
-any, add one it missed, then **Measure**. A small window shows which knob
-is being measured and how long is left; you can carry on meanwhile, or
-Cancel. *Not now* asks again next time ChannelView starts; ✕ never asks
-for that plugin. Panel menu **=** ▸ *Layout* ▸ **Check gain knobs…** does
-it any time, and learning a compressor's canvas ends with it. Right-click
-a single knob ▸ **Measure as a gain** measures just that one.
+**Checking a plugin's gain knobs.** The first time the probes measure a
+plugin, a note on its panel asks *Check its gain knobs?* while playback
+is stopped. **Check…** lists the knobs it found by name, each as an
+*Input gain*, *Make-up gain*, *Output gain* or *Not a gain*: correct any,
+add one it missed, then **Measure**. A small window shows which knob is
+being measured and how long is left; you can carry on meanwhile, or
+Cancel. A readout that turns out right is followed as it reads. *Not now*
+asks again next time ChannelView starts; ✕ never asks for that plugin.
+Panel menu **=** ▸ **Check gain knobs…** does it any time, and (Pro)
+learning a compressor's canvas ends with it. What you say is the
+plugin's, in all its layouts.
 
 **While playing**, the measured zero is checked against the music. A
 steady stretch where the plugin passes more than its zero allows means
