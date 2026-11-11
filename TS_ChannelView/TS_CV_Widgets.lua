@@ -5048,4 +5048,14 @@ function W.child_skipped(ctx, w, h, x, y)
   ImGui.Dummy(ctx, math.max(0, w or 0), math.max(0, h or 0))
 end
 
+-- Before EndChild in a child whose drawing parks the cursor by hand
+-- (SetCursorScreenPos) for its own buttons: the cursor back at the
+-- child's corner, inside what it holds, so a last park past its items
+-- doesn't end it on ImGui's "SetCursorPos ... to extend window/parent
+-- boundaries" error. Nothing is added to its size.
+function W.park(ctx)
+  local x, y = ImGui.GetWindowPos(ctx)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+end
+
 return W

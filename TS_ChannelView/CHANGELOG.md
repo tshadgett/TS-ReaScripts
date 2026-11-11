@@ -51,6 +51,8 @@
 - A plugin's own meters moving on the probes' test noise no longer count
   as touching it (it asked for its zero again every few seconds).
 - Dragging a plugin to the first slot shows its drop line.
+- Fixed: ChannelView could stop on ImGui's "SetCursorPos() ... to extend
+  window/parent boundaries" error while drawing a panel.
 
 ### ChannelView Pro
 

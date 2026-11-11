@@ -4702,6 +4702,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       P.hover[fx.guid] = on and { head = my < y + C.HEADER_H, foot = my > y + wh - C.FOOTER_H } or nil
     end
     -- ReaImGui: EndChild only when BeginChild returned true.
+    W.park(ctx)
     ImGui.EndChild(ctx)
     if folded_here then fold_pop(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate) end
   else
