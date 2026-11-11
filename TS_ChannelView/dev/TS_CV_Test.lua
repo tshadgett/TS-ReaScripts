@@ -6308,6 +6308,10 @@ do
   check("marks: too many steps", #U.scale_marks("values", "medium", 9), 3)
   check("marks: large every step", #U.scale_marks("values", "large", 11), 11)
   check("short: Hz", U.short_value("12000 Hz"), "12k")
+  -- a run of decimals the plugin doesn't mean (%f), tidied; its own two or three kept
+  check("tidy: %f", U.tidy_num("24.000000") .. "|" .. U.tidy_num("1.300000") .. "|" .. U.tidy_num("7600.000000 Hz")
+    .. "|" .. U.tidy_num("-0.000000") .. "|" .. U.tidy_num("0.123456"), "24|1.3|7600 Hz|0|0.123")
+  check("tidy: the plugin's own kept", U.tidy_num("3.140") .. "|" .. U.tidy_num("0.99 s") .. "|" .. U.tidy_num("1/4"), "3.140|0.99 s|1/4")
   check("short: kHz", U.short_value("1.5 kHz"), "1.5k")
   check("short: dB", U.short_value("+6.0 dB"), "+6")
   check("short: negative zero", U.short_value("-0.00"), "0")

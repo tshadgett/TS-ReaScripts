@@ -233,6 +233,10 @@ end
 -- ("3.0", "-inf", "6.85"); the text it would show for a value
 -- (FormatParamValueNormalized) has them ("3.0 ms", "-inf dB", "6.85 :1").
 function RC.text(track, addr, p, nv)
+  return U.tidy_num(RC.raw_text(track, addr, p, nv))
+end
+-- (as the plugin says it)
+function RC.raw_text(track, addr, p, nv)
   local rg = U.range_of and U.range_of(p)
   if rg then return U.range_text(rg, nv or reaper.TrackFX_GetParamNormalized(track, addr, p)) end
   -- somewhere it isn't: as the plugin reads there (TS_CV_Units UN.formatter,

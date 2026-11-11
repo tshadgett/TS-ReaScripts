@@ -546,6 +546,21 @@ function U.range_is_own(track, addr, param, rg)
   return e
 end
 
+-- A plugin's value text with a run of decimals it doesn't mean (C's %f:
+-- "24.000000", "1.300000"): trailing zeros off, and no more decimals than
+-- the number's size needs (three under 10, two under 100, one above). Text
+-- with three decimals or fewer is the plugin's choice and stays.
+function U.tidy_num(s)
+  if type(s) ~= "string" then return s end
+  local pre, num, post = s:match("^(%s*[%+%-]?)(%d+%.%d%d%d%d+)(.*)$")
+  if not num then return s end
+  local v = tonumber(num)
+  local dec = (v >= 100) and 1 or (v >= 10) and 2 or 3
+  local t = string.format("%." .. dec .. "f", v):gsub("0+$", ""):gsub("%.$", "")
+  if t == "0" then pre = pre:gsub("[%+%-]", "") end
+  return pre .. t .. post
+end
+
 function U.fmt_value(track, addr, param)
   local rg = U.range_of(param)
   if rg then
@@ -557,7 +572,7 @@ function U.fmt_value(track, addr, param)
     return U.range_text(rg, reaper.TrackFX_GetParamNormalized(track, addr, param) or 0)
   end
   local ok, s = reaper.TrackFX_GetFormattedParamValue(track, addr, param, "")
-  if ok and s and s ~= "" then return s end
+  if ok and s and s ~= "" then return U.tidy_num(s) end
   local v = reaper.TrackFX_GetParamNormalized(track, addr, param)
   return string.format("%.2f", v or 0)
 end
