@@ -12472,8 +12472,12 @@ do
   local ok1, p2 = pcall(P.split, "dl", 2, "A")
   win, P.SITE = 1, nil
   local ok2, p1 = pcall(P.split, "dl", 2, "A")
+  win, P.PREVIEW = 3, true                       -- the Edit layout window's preview
+  local ok3, p3 = pcall(P.split, "dl", 2, "A")
+  win, P.PREVIEW = 1, nil
+  check("the editor's preview: its own", tostring(ok3) .. "|" .. tostring(p3 ~= a3 and p3 ~= p2), "true|true")
   check("another window: its own, the first's kept", tostring(ok1 and ok2) .. "|" .. tostring(p2 ~= a3 and p1 == a3) .. "|" .. made .. "|" .. splits,
-    "true|true|4|6")
+    "true|true|5|7")
 end
 
 -- ReEQ2: a known plugin, its EQ canvas mapped and read through its own

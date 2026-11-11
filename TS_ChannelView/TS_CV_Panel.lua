@@ -88,14 +88,14 @@ P.type_half = {} -- a dual knob's or XY pad's id -> which half a value is being 
 -- A draw-list splitter for a panel (`key`), split into n channels. Kept,
 -- since a new one every frame trips ReaImGui's limit on short-lived
 -- objects; made again when ReaImGui has let it go (unused for a frame).
--- One for each window the panel is drawn in (P.SITE: nil in ChannelView's
--- row, a pop-out window's own): a splitter keeps to the window it was
--- made in, and ReaImGui stops the script on one used in another, even
--- inside a pcall.
+-- One for each window the panel is drawn in (ChannelView's row; P.SITE a
+-- pop-out window's own; P.PREVIEW the Edit layout window's): a splitter
+-- keeps to the window it was made in, and ReaImGui stops the script on
+-- one used in another, even inside a pcall.
 P.SITE = nil
 local splitters = {}
 function P.split(dl, n, key)
-  local k = key .. ":" .. (P.SITE or "")
+  local k = key .. ":" .. (P.SITE or "") .. (P.PREVIEW and ":ed" or "")
   local sp = splitters[k]
   if not (sp and ImGui.ValidatePtr(sp, "ImGui_DrawListSplitter*")) then
     for old, o in pairs(splitters) do

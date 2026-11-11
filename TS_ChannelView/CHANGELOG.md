@@ -54,7 +54,8 @@
 - Fixed: ChannelView could stop on ImGui's "SetCursorPos() ... to extend
   window/parent boundaries" error while drawing a panel.
 - Fixed: ChannelView could stop on "cannot use DrawListSplitter over
-  multiple windows" when a plugin's panel was also in a pop-out window.
+  multiple windows" when a plugin's panel was also shown in Edit layout
+  or a pop-out window (switching on its GR meter, say).
 
 ### ChannelView Pro
 
