@@ -2675,6 +2675,11 @@ do
     for _, e in ipairs(type(list) == "table" and list or {}) do got[#got + 1] = e.text end
     check("steps read: uneven settings listed where they are", table.concat(got, ","), "Msec,Note,Dotted,Triplet")
     check("steps read: each one's place reads as it", type(list) == "table" and name(list[3].norm), "Dotted")
+    -- kept on disk with where each one is; a count changed since reads again
+    local SCk = require("TS_CV_Steps")
+    local back = SCk.get("StepT", 6, 1 / 3)
+    check("steps kept: where each one is", back and name(back[3].norm) .. "," .. name(back[1].norm), "Dotted,Msec")
+    check("steps kept: another count isn't this list", SCk.get("StepT", 6, 1), nil)
     M_.set("StepT", { controls = {} })
     reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_GetParamNormalized = gf, gn
   end

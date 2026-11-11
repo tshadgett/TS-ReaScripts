@@ -14,6 +14,11 @@
 
       [Pro-Q 3]
       P12=Off|12 dB/oct|24 dB/oct|48 dB/oct
+      [ValhallaSupermassive]
+      P1=Msec@0.2480|Note@0.6230|Dotted@0.8730|Triplet
+
+  A setting away from its even place (DelaySync's Msec takes half the
+  range) keeps where it is after an @.
 
   A stale entry (the plugin updated and renamed something) is corrected by
   "Rescan choices" on the control, which drops it and sweeps again.
@@ -66,21 +71,26 @@ end
 -- list -> { {norm=, text=}, ... }
 local function encode(list)
   local out = {}
-  for _, s in ipairs(list) do
-    out[#out + 1] = (s.text:gsub("[|\r\n]", " "))
+  local n = #list
+  for i, s in ipairs(list) do
+    local t = (s.text:gsub("[|@\r\n]", " "))
+    local even = (n > 1) and (i - 1) / (n - 1) or 0
+    if s.norm and math.abs(s.norm - even) > 1e-4 then t = ("%s@%.4f"):format(t, s.norm) end
+    out[#out + 1] = t
   end
   return table.concat(out, "|")
 end
 
 local function decode(str, step)
   local out = {}
-  for text in str:gmatch("[^|]+") do
-    out[#out + 1] = { norm = 0, text = text }
+  for item in str:gmatch("[^|]+") do
+    local text, at = item:match("^(.-)@([%d%.]+)$")
+    out[#out + 1] = { norm = tonumber(at or ""), text = text or item }
   end
-  -- Positions are regenerated from the step size rather than stored: the
-  -- labels are what cost a sweep, the maths is free and can't go stale.
+  -- Positions are made from the step size, the labels being what cost a
+  -- sweep; one away from its even place is kept.
   for i, s in ipairs(out) do
-    s.norm = math.max(0, math.min(1, (i - 1) * step))
+    s.norm = s.norm or math.max(0, math.min(1, (i - 1) * step))
   end
   return out
 end
@@ -90,6 +100,8 @@ function S.get(key, param, step)
   local raw = sect and sect["P" .. param]
   if not raw or raw == "" or not step or step <= 0 then return nil end
   local list = decode(raw, step)
+  -- (as many as the step says: a count changed since, read again)
+  if #list ~= math.floor(1 / step + 0.5) + 1 then return nil end
   return (#list >= 2) and list or nil
 end
 
