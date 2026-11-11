@@ -268,9 +268,7 @@ local gnever_list = nil
 local function gnever()
   if not gnever_list then
     gnever_list = {}
-    for b in (reaper.GetExtState(C.EXT_SECT, "gain_never") .. "\n"):gmatch("([^\n]*)\n") do
-      if b ~= "" then gnever_list[b] = true end
-    end
+    for _, b in ipairs(U.ext_split(reaper.GetExtState(C.EXT_SECT, "gain_never"))) do gnever_list[b] = true end
   end
   return gnever_list
 end
@@ -280,7 +278,7 @@ local function set_gnever(base)
   local out = {}
   for b in pairs(t) do out[#out + 1] = b end
   table.sort(out)
-  reaper.SetExtState(C.EXT_SECT, "gain_never", table.concat(out, "\n"), true)
+  reaper.SetExtState(C.EXT_SECT, "gain_never", U.ext_join(out), true)
 end
 
 function GC.due(track, fx, key)

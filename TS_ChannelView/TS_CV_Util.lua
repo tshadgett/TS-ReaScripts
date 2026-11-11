@@ -36,6 +36,24 @@ function U.wrap_note(text, cols)
   return table.concat(out, "\n")
 end
 
+-- A list kept in persisted ExtState: its entries apart by tabs, since
+-- REAPER's settings file keeps only a value's first line. An entry's own
+-- tabs and line breaks become spaces.
+function U.ext_join(list)
+  local out = {}
+  for _, e in ipairs(list) do
+    e = tostring(e):gsub("[\t\r\n]", " ")
+    if e ~= "" then out[#out + 1] = e end
+  end
+  return table.concat(out, "\t")
+end
+-- Its entries back, in order (line breaks, as they were once kept, too).
+function U.ext_split(s)
+  local out = {}
+  for e in tostring(s or ""):gmatch("[^\t\r\n]+") do out[#out + 1] = e end
+  return out
+end
+
 -- Shorten to `n` characters with a trailing ellipsis. Used for panel
 -- headers and knob labels, where the cell width is fixed.
 function U.truncate(s, n)

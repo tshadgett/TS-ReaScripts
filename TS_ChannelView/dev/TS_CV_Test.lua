@@ -2579,6 +2579,16 @@ do
   reaper.TrackFX_SetParamNormalized = function(_, _, p, v) put = { p, v } end
   RQx.set_gain("tr", 0, bands[1], 8, {})
   check("reaeq: gain written where it reads", put and put[1] == 1 and math.abs(put[2] - 2 / 3) < 0.002, true)
+  -- an alt band's frequency: where its own readout says (a top of 22050 Hz,
+  -- say, not the table's 24000)
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n)
+    local hz = 20 * (22050 / 20) ^ n
+    return true, hz >= 1000 and ("%.2f kHz"):format(hz / 1000) or ("%.1f Hz"):format(hz)
+  end
+  put = nil
+  RQx.set_freq("tr", 0, bands[3], 1000)
+  local want = math.log(1000 / 20) / math.log(22050 / 20)
+  check("reaeq: an alt band's frequency written where it reads", put and put[1] == 6 and math.abs(put[2] - want) < 0.002, true)
   reaper.TrackFX_FormatParamValueNormalized = fpv
   for k, v in pairs(saved) do reaper[k] = v end
 end
@@ -12117,7 +12127,23 @@ do
     check("preset: not changed since", VO.modified_for_test("tcp"), false)
     VO.set("tcp", "cell_w", 52)
     check("preset: changed shows", VO.modified_for_test("tcp"), true)
+    -- two of your own, kept on one line, both read back
+    VO.save_preset_for_test("tcp", "Light one")
+    check("presets: kept on one line", ext["TS_ChannelView_Visual/presets"]:find("\n") == nil, true)
+    VO.load(false)
+    VO.apply_preset_for_test("tcp", "Mine")
+    check("presets: both read back", VO.val(VO.effective("tcp"), "preset") .. "|" .. VO.val(VO.effective("tcp"), "cell_w"), "Mine|60")
+    -- as they were once kept (a line each) too
+    local was_p = ext["TS_ChannelView_Visual/presets"]
+    ext["TS_ChannelView_Visual/presets"] = "Old A\tcell_w=61\nOld B\tcell_w=62"
+    VO.load(false)
+    VO.apply_preset_for_test("tcp", "Old B")
+    check("presets: the older lines read", VO.val(VO.effective("tcp"), "cell_w"), 62)
+    ext["TS_ChannelView_Visual/presets"] = was_p
+    VO.load(false)
   end
+  check("ext list: one line, read back", U.ext_join({ "a b", "c\td", "", "e\nf" }) .. "|" ..
+    table.concat(U.ext_split("a b\tc d\ne f"), ","), "a b\tc d\te f|a b,c d,e f")
   -- By time: a preset at set times of day
   do
     check("bytime: times read", table.concat({ VO.parse_time("7"), VO.parse_time("0730"), VO.parse_time("19.30"),
@@ -12146,6 +12172,8 @@ do
     VO.write_times_for_test("tcp")
     VO.tick()
     check("bytime: edited, the one due now", VO.val(VO.effective("tcp"), "preset"), "Studio")
+    -- kept on one line (REAPER's settings file keeps only a value's first)
+    check("bytime: kept on one line", ext["TS_ChannelView_Visual/times_tcp"]:find("\n") == nil, true)
     -- kept, and read back
     VO.load(false)
     check("bytime: kept", VO.time_text(VO.times("tcp")[2].m) .. "=" .. VO.times("tcp")[2].name, "19:00=Minimal dark")

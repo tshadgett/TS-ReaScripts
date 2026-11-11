@@ -306,10 +306,42 @@ RQ.GAIN_CLAMP = 30
 local Q_MIN, Q_MAX = RQ.Q_MIN, RQ.Q_MAX
 local GAIN_CLAMP = RQ.GAIN_CLAMP
 
+-- The norm at which parameter `p` reads `want` (by `parse`, rising with
+-- the norm), found from ReaEQ's own readout at any norm
+-- (TrackFX_FormatParamValueNormalized: nothing moves) by bisection; nil
+-- when it can't be read that way.
+local function norm_for(track, addr, p, want, parse)
+  local fmt = reaper.TrackFX_FormatParamValueNormalized
+  if not (p and fmt) then return nil end
+  local function at(n)
+    local ok, t = fmt(track, addr, p, n, "")
+    if not ok or not t then return nil end
+    return parse(t)
+  end
+  local lo, hi = 0, 1
+  local vlo, vhi = at(lo), at(hi)
+  if not (vlo and vhi) or vhi <= vlo then return nil end
+  if want <= vlo then return lo end
+  if want >= vhi then return hi end
+  for _ = 1, 24 do
+    local mid = (lo + hi) * 0.5
+    local vm = at(mid)
+    if not vm then return nil end
+    if vm < want then lo = mid else hi = mid end
+  end
+  return (lo + hi) * 0.5
+end
+
 function RQ.set_freq(track, addr, band, hz)
   hz = math.max(C.EQ_FREQ_LO, math.min(C.EQ_FREQ_HI, hz))
-  if band.alt then RQ.write_norm(track, addr, band, 0, RQ.freq_norm(hz))
-  else reaper.TrackFX_SetEQParam(track, addr, band.bandtype, band.bandidx, 0, hz, false) end
+  if band.alt then
+    -- where ReaEQ itself says that frequency is (its range can differ
+    -- from the table's), else the table
+    local n = norm_for(track, addr, band.freq_pidx, hz, parse_freq) or RQ.freq_norm(hz)
+    RQ.write_norm(track, addr, band, 0, n)
+  else
+    reaper.TrackFX_SetEQParam(track, addr, band.bandtype, band.bandidx, 0, hz, false)
+  end
   band.freq = hz
 end
 
@@ -357,31 +389,13 @@ end
 -- came before so the NEXT frame has a real secant slope to work with.
 local BOOTSTRAP_PROBE = 0.03
 
--- The norm at which a band's gain reads `db`, found from ReaEQ's own
--- readout at any norm (TrackFX_FormatParamValueNormalized: nothing moves)
--- by bisection; nil when it can't be read that way.
+-- The norm at which a band's gain reads `db` (norm_for; "-inf" its floor).
 local function gain_norm_for(track, addr, band, db)
-  local p, fmt = band.gain_pidx, reaper.TrackFX_FormatParamValueNormalized
-  if not (p and fmt) then return nil end
   local UN = require("TS_CV_Units")
-  local function at(n)
-    local ok, t = fmt(track, addr, p, n, "")
-    if not ok or not t then return nil end
+  return norm_for(track, addr, band.gain_pidx, db, function(t)
     if t:lower():find("inf", 1, true) then return -math.huge end
     return (UN.parse(t))
-  end
-  local lo, hi = 0, 1
-  local vlo, vhi = at(lo), at(hi)
-  if not (vlo and vhi) or vhi <= vlo then return nil end
-  if db <= vlo then return lo end
-  if db >= vhi then return hi end
-  for _ = 1, 24 do
-    local mid = (lo + hi) * 0.5
-    local vm = at(mid)
-    if not vm then return nil end
-    if vm < db then lo = mid else hi = mid end
-  end
-  return (lo + hi) * 0.5
+  end)
 end
 RQ.gain_norm_for = gain_norm_for
 

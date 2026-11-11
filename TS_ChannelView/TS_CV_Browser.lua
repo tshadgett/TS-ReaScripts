@@ -199,13 +199,13 @@ installed = function()
 end
 
 -- Your favourites (the star on a plugin's row): its idents, kept in
--- ExtState, one a line. They lead every list and every search.
+-- ExtState (U.ext_join). They lead every list and every search.
 local fav_cache, fav_raw = {}, nil
 function B.favourites()
   local raw = reaper.GetExtState(C.EXT_SECT, FAV_KEY)
   if raw ~= fav_raw then
     fav_raw, fav_cache = raw, {}
-    for id in raw:gmatch("[^\n]+") do fav_cache[id] = true end
+    for _, id in ipairs(U.ext_split(raw)) do fav_cache[id] = true end
   end
   return fav_cache
 end
@@ -215,7 +215,7 @@ function B.set_fav(ident, on)
   for id in pairs(set) do if id ~= ident then out[#out + 1] = id end end
   if on then out[#out + 1] = ident end
   table.sort(out)
-  reaper.SetExtState(C.EXT_SECT, FAV_KEY, table.concat(out, "\n"), true)
+  reaper.SetExtState(C.EXT_SECT, FAV_KEY, U.ext_join(out), true)
   st.last_q = nil        -- the list again, with it moved
 end
 
@@ -258,7 +258,7 @@ end
 local function recents()
   local out = {}
   local raw = reaper.GetExtState(C.EXT_SECT, RECENT_KEY)
-  for id in raw:gmatch("[^\n]+") do out[#out + 1] = id end
+  for _, id in ipairs(U.ext_split(raw)) do out[#out + 1] = id end
   return out
 end
 
@@ -267,7 +267,7 @@ local function remember(ident)
   for _, id in ipairs(list) do
     if id ~= ident and #out < RECENT_MAX then out[#out + 1] = id end
   end
-  reaper.SetExtState(C.EXT_SECT, RECENT_KEY, table.concat(out, "\n"), true)
+  reaper.SetExtState(C.EXT_SECT, RECENT_KEY, U.ext_join(out), true)
 end
 
 -- Searching is TS_CV_Search's: every term has to find a home in the full

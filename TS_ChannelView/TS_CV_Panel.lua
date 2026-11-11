@@ -3586,6 +3586,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         W.take_wheel()
       end
     end
+    W.park(ctx)
     ImGui.EndChild(ctx)
   end
 end

@@ -36,7 +36,7 @@
 
   By time (Pro): a tab's presets changed at set times of day, each held
   from its time until the next. "bytime_<key>" on or off, "times_<key>"
-  the list ("HH:MM=name" a line), "time_at_<key>" the change last made
+  the list ("HH:MM=name" each), "time_at_<key>" the change last made
   (its day and time): a preset picked by hand stays until the next time,
   and only one window makes each change.
 
@@ -196,7 +196,7 @@ function VO.time_text(m) return ("%02d:%02d"):format(m // 60, m % 60) end
 
 function VO.read_times(tab)
   local list = {}
-  for line in (get("times_" .. tab) or ""):gmatch("[^\n]+") do
+  for _, line in ipairs(U.ext_split(get("times_" .. tab))) do
     local hm, name = line:match("^([%d:]+)=(.*)$")
     local m = VO.parse_time(hm)
     if m and name ~= "" then list[#list + 1] = { m = m, name = unesc(name) } end
@@ -212,7 +212,7 @@ local function write_times(tab, keep)
   table.sort(list, function(a, b) return a.m < b.m end)
   local lines = {}
   for _, e in ipairs(list) do lines[#lines + 1] = VO.time_text(e.m) .. "=" .. esc(e.name) end
-  put("times_" .. tab, table.concat(lines, "\n"))
+  put("times_" .. tab, U.ext_join(lines))
   if not keep then put("time_at_" .. tab, "") end
   bump()
   rev_seen = get("rev")
@@ -225,9 +225,10 @@ local function read_all()
   end
   for _, t in ipairs(VO.TABS) do VO.read_times(t.key) end
   user = {}
-  for line in (get("presets") or ""):gmatch("[^\n]+") do
-    local name, s = line:match("^(.-)\t(.*)$")
-    if name and name ~= "" then user[#user + 1] = { name = name, s = decode(s) } end
+  -- a name, then its settings ("-" for none), and so on (U.ext_split)
+  local parts = U.ext_split(get("presets"))
+  for i = 1, #parts - 1, 2 do
+    user[#user + 1] = { name = parts[i], s = decode(parts[i + 1]) }
   end
   rev_seen = get("rev")
 end
@@ -240,8 +241,12 @@ end
 
 local function write_user()
   local lines = {}
-  for _, p in ipairs(user) do lines[#lines + 1] = p.name:gsub("[\t\n]", " ") .. "\t" .. encode(p.s) end
-  put("presets", table.concat(lines, "\n"))
+  for _, p in ipairs(user) do
+    local s = encode(p.s)
+    lines[#lines + 1] = p.name
+    lines[#lines + 1] = (s ~= "") and s or "-"
+  end
+  put("presets", U.ext_join(lines))
   bump()
   rev_seen = get("rev")
 end
