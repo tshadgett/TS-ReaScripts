@@ -5799,7 +5799,9 @@ function POP.window(w, now)
             P.FILL_W = math.max(80, inner_w)
             h = POP.rack_height(it.fx, layout, key, P.FILL_W)
           end
+          P.SITE = "pop" .. w.id          -- (a window of its own: P.split)
           local pw, req = P.draw(ctx, it.tr, it.fx, layout, key, h, k, false)
+          P.SITE = nil
           P.FILL_W = nil
           wd, ht = pw, h
           -- not here: dragging (it moves plugins in ChannelView's row),

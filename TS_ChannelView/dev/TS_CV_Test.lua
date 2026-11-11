@@ -12447,14 +12447,16 @@ do
   check("bar ground: in force while drawn, put back after", (seen == lg.toggle_off) and (C.COL.toggle_off == was) and pushed == popped, true)
 end
 
--- P.split: one splitter per panel, kept; made again when let go or refused
+-- P.split: one splitter per panel and window, kept; made again when let go;
+-- never tried in another window (ReaImGui stops the script)
 do
-  local made, splits, valid, refuse = 0, 0, {}, {}
+  local made, splits, valid, win = 0, 0, {}, 1
+  local owner = {}
   local fake = setmetatable({
-    CreateDrawListSplitter = function() made = made + 1; local sp = {}; valid[sp] = true; return sp end,
+    CreateDrawListSplitter = function() made = made + 1; local sp = {}; valid[sp] = true; owner[sp] = win; return sp end,
     ValidatePtr = function(sp) return valid[sp] end,
     DrawListSplitter_Split = function(sp)
-      if refuse[sp] then error("cannot use DrawListSplitter over multiple windows") end
+      if owner[sp] ~= win then error("cannot use DrawListSplitter over multiple windows") end
       splits = splits + 1
     end,
   }, { __index = function() return function() end end })
@@ -12465,8 +12467,13 @@ do
   check("another panel, its own splitter", b ~= a1 and made, 2)
   valid[a1] = nil; local a3 = P.split("dl", 2, "A")
   check("let go: made again", a3 ~= a1 and made, 3)
-  refuse[a3] = true; local a4 = P.split("dl", 2, "A")
-  check("refused: made again and split", a4 ~= a3 and splits, 5)
+  -- the same panel in a second window (a pop-out), then the first again
+  win, P.SITE = 2, "pop1"
+  local ok1, p2 = pcall(P.split, "dl", 2, "A")
+  win, P.SITE = 1, nil
+  local ok2, p1 = pcall(P.split, "dl", 2, "A")
+  check("another window: its own, the first's kept", tostring(ok1 and ok2) .. "|" .. tostring(p2 ~= a3 and p1 == a3) .. "|" .. made .. "|" .. splits,
+    "true|true|4|6")
 end
 
 -- ReEQ2: a known plugin, its EQ canvas mapped and read through its own

@@ -87,18 +87,23 @@ P.hover = {}    -- fx GUID -> { head, foot }: the pointer was over where they go
 P.type_half = {} -- a dual knob's or XY pad's id -> which half a value is being typed for
 -- A draw-list splitter for a panel (`key`), split into n channels. Kept,
 -- since a new one every frame trips ReaImGui's limit on short-lived
--- objects; made again when ReaImGui has let it go (unused for a frame) or
--- won't split it (it was last used in another window: every window's draw
--- list can have the same address).
+-- objects; made again when ReaImGui has let it go (unused for a frame).
+-- One for each window the panel is drawn in (P.SITE: nil in ChannelView's
+-- row, a pop-out window's own): a splitter keeps to the window it was
+-- made in, and ReaImGui stops the script on one used in another, even
+-- inside a pcall.
+P.SITE = nil
 local splitters = {}
 function P.split(dl, n, key)
-  local sp = splitters[key]
-  if sp and ImGui.ValidatePtr(sp, "ImGui_DrawListSplitter*")
-      and pcall(ImGui.DrawListSplitter_Split, sp, n) then
-    return sp
+  local k = key .. ":" .. (P.SITE or "")
+  local sp = splitters[k]
+  if not (sp and ImGui.ValidatePtr(sp, "ImGui_DrawListSplitter*")) then
+    for old, o in pairs(splitters) do
+      if not ImGui.ValidatePtr(o, "ImGui_DrawListSplitter*") then splitters[old] = nil end
+    end
+    sp = ImGui.CreateDrawListSplitter(dl)
+    splitters[k] = sp
   end
-  sp = ImGui.CreateDrawListSplitter(dl)
-  splitters[key] = sp
   ImGui.DrawListSplitter_Split(sp, n)
   return sp
 end

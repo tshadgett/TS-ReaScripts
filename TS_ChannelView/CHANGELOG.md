@@ -53,6 +53,8 @@
 - Dragging a plugin to the first slot shows its drop line.
 - Fixed: ChannelView could stop on ImGui's "SetCursorPos() ... to extend
   window/parent boundaries" error while drawing a panel.
+- Fixed: ChannelView could stop on "cannot use DrawListSplitter over
+  multiple windows" when a plugin's panel was also in a pop-out window.
 
 ### ChannelView Pro
 
