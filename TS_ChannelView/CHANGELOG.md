@@ -45,6 +45,8 @@
   (24.000000) are shown tidied: 24.
 - A setting that names only the choice it's on (Valhalla's DelaySync)
   has its number of choices found for a stepped knob or buttons.
+- An LFO's synced Rate turns smoothly through its note values rather than
+  sticking.
 - ReEQ2's output gains read in dB.
 - A plugin's own meters moving on the probes' test noise no longer count
   as touching it (it asked for its zero again every few seconds).

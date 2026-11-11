@@ -804,8 +804,13 @@ end
 -- from 0..1, text, default (real) }.
 local function lin(lo, hi) return function(v) return (v - lo) / (hi - lo) end, function(n) return lo + n * (hi - lo) end end
 local function sq(hi) return function(v) return math.sqrt(math.max(0, v) / hi) end, function(n) return hi * n * n end end
-local function steps(lo, hi) return function(v) return (v - lo) / (hi - lo) end,
-  function(n) return math.floor(lo + n * (hi - lo) + 0.5) end end
+-- (a whole number of steps: STEPPED, for setting's turning)
+local STEPPED = {}
+local function steps(lo, hi)
+  local fn = function(n) return math.floor(lo + n * (hi - lo) + 0.5) end
+  STEPPED[fn] = true
+  return function(v) return (v - lo) / (hi - lo) end, fn
+end
 
 local K = {}
 do
@@ -1116,9 +1121,16 @@ end
 -- The settings knob with its lane button. A moved setting's knob sits
 -- where its sources put it; turning it moves the setting under them
 -- (both ends with it), as a linked plugin control does.
+-- A stepped setting (the synced Rate) is turned through the places between
+-- its steps: kept while it's being turned, as what it's set to rounds.
+local turning = {}
 local function setting(ctx, dl, track, src, d, x, y)
   local v = MD.field(track, src.slot, src.j, d.key)
   local base = d.tn(v)
+  local hk = d.key .. src.guid
+  local h = turning[hk]
+  if h and (reaper.time_precise() - h.t > 0.5 or d.fn(h.n) ~= v) then turning[hk], h = nil, nil end
+  if h then base = h.n end
   local mxd = MD.MX_CODE[d.key] and MD.mx_ok(track, src.slot)
   local list, live = {}, base
   if mxd then list, live = mx_view(track, src, d.key, base) end
@@ -1135,6 +1147,7 @@ local function setting(ctx, dl, track, src, d, x, y)
     end
     base = math.max(0, math.min(1, base + delta))
     MD.set_field(track, src.slot, src.j, d.key, d.fn(base))
+    if STEPPED[d.fn] then turning[hk] = { n = base, t = reaper.time_precise() } end
     for _, m in ipairs(list) do m.to = m.to + delta end
   end
   if mxd then
