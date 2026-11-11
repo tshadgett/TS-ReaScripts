@@ -1449,6 +1449,18 @@ function P.detect_steps(track, addr, param, key)
     for k = 0, n - 1 do
       if read(k / (n - 1)) ~= runs[k + 1] then n = nil break end
     end
+  elseif runs and #runs == 1 then
+    -- the same name wherever it's asked (it answers with where it is now:
+    -- Valhalla's): read moved through its range instead (TS_CV_Units)
+    local UN = require("TS_CV_Units")
+    local fmt = UN.formatter(track, addr, param)
+    local list = UN.choice_runs(fmt, 64)
+    if list and #list >= 2 then
+      n = #list
+      for k = 0, n - 1 do
+        if fmt(k / (n - 1)) ~= list[k + 1].text then n = nil break end
+      end
+    end
   end
   detect_cache[ck] = { t = now + 5, n = n }
   return n

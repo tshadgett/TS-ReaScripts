@@ -2654,6 +2654,21 @@ do
   mode = "same"
   check("steps read: one reading everywhere is none", P.detect_steps("tr", 0, 5, "StepT"), nil)
   check("steps read: nothing moved", sets, 0)
+  -- one that names only where it is now (Valhalla's DelaySync): read moved
+  -- through its range, and put back
+  do
+    local at, gf = 0.892, reaper.TrackFX_GetFormattedParamValue
+    local gn = reaper.TrackFX_GetParamNormalized
+    local names = { "Ms", "Straight", "Triplet", "Dotted" }
+    local function name(v) return names[math.min(4, math.floor(v * 4) + 1)] end
+    reaper.TrackFX_SetParamNormalized = function(_, _, _, v) at = v end
+    reaper.TrackFX_GetParamNormalized = function() return at end
+    reaper.TrackFX_GetFormattedParamValue = function() return true, name(at) end
+    reaper.TrackFX_FormatParamValueNormalized = function() return true, name(at) end
+    check("steps read: named only where it is, moved to read", P.detect_steps("tr", 0, 6, "StepT"), 4)
+    check("steps read: and put back", at, 0.892)
+    reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_GetParamNormalized = gf, gn
+  end
   -- your count
   check("steps: none of its own, none set", P.step_norm("tr", 0, 1, "StepT"), false)
   M_.set("StepT", { controls = {}, steps = { [1] = 16 } })
