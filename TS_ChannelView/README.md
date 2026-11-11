@@ -1650,7 +1650,8 @@ ready once every band is learned; change a band's controls and it learns
 that band again.
 On the canvas, drag a node across for frequency (a switch snaps to its
 settings) and up or down for gain; the wheel turns Q; double-click takes
-the band out (flat, or off). Right-click a node for its shapes (a long
+the band out (flat, or off); Alt+click switches it off, or on again (it
+stays, dim). The same works on ReaEQ's panel. Right-click a node for its shapes (a long
 list comes in groups, by model), its slope, its stereo placement and its
 On switch, or Alt+wheel to step the shape. The nodes say what the plugin's
 own controls read. Where nodes sit together, band 1 is on top. A band

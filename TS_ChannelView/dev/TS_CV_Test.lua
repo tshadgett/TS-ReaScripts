@@ -2572,6 +2572,14 @@ do
   RQx.set_freq("tr", 0, bands[3], 1000)
   check("reaeq: an alt band written by its own parameters", table.concat(wrote, " "), "p7 eq2:0:1 p6")
   check("reaeq: frequency law", ("%.2f %.2f %.3f"):format(RQx.freq_norm(20), RQx.freq_norm(24000), RQx.freq_norm(1160.5)), "0.00 1.00 0.500")
+  -- a gain dragged: written straight where ReaEQ's own readout says that gain is
+  local fpv = reaper.TrackFX_FormatParamValueNormalized
+  reaper.TrackFX_FormatParamValueNormalized = function(_, _, p, n) return true, ("%.1f dB"):format(-24 + 48 * n) end
+  local put
+  reaper.TrackFX_SetParamNormalized = function(_, _, p, v) put = { p, v } end
+  RQx.set_gain("tr", 0, bands[1], 8, {})
+  check("reaeq: gain written where it reads", put and put[1] == 1 and math.abs(put[2] - 2 / 3) < 0.002, true)
+  reaper.TrackFX_FormatParamValueNormalized = fpv
   for k, v in pairs(saved) do reaper[k] = v end
 end
 

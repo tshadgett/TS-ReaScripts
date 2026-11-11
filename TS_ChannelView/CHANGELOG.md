@@ -60,6 +60,10 @@
   same 4 px in from its cells' edges.
 - **Canvas colours:** the spectrum has a colour of its own (the meters'
   until you set it).
+- **EQ canvases and ReaEQ's panel:** Alt+click a node to switch its band
+  off, or on again; a band that's off stays as a dim node. On ReaEQ's
+  panel a node dragged up or down goes straight to the gain under the
+  mouse, without bouncing.
 - **Compressor canvases** show measured reduction in pink, the plugin's
   own in amber, as a panel's meter does.
 - Picture knobs show the knob's own value arc too.

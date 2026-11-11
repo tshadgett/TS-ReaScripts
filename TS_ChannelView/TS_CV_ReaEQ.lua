@@ -357,8 +357,45 @@ end
 -- came before so the NEXT frame has a real secant slope to work with.
 local BOOTSTRAP_PROBE = 0.03
 
+-- The norm at which a band's gain reads `db`, found from ReaEQ's own
+-- readout at any norm (TrackFX_FormatParamValueNormalized: nothing moves)
+-- by bisection; nil when it can't be read that way.
+local function gain_norm_for(track, addr, band, db)
+  local p, fmt = band.gain_pidx, reaper.TrackFX_FormatParamValueNormalized
+  if not (p and fmt) then return nil end
+  local UN = require("TS_CV_Units")
+  local function at(n)
+    local ok, t = fmt(track, addr, p, n, "")
+    if not ok or not t then return nil end
+    if t:lower():find("inf", 1, true) then return -math.huge end
+    return (UN.parse(t))
+  end
+  local lo, hi = 0, 1
+  local vlo, vhi = at(lo), at(hi)
+  if not (vlo and vhi) or vhi <= vlo then return nil end
+  if db <= vlo then return lo end
+  if db >= vhi then return hi end
+  for _ = 1, 24 do
+    local mid = (lo + hi) * 0.5
+    local vm = at(mid)
+    if not vm then return nil end
+    if vm < db then lo = mid else hi = mid end
+  end
+  return (lo + hi) * 0.5
+end
+RQ.gain_norm_for = gain_norm_for
+
 function RQ.set_gain(track, addr, band, db, state)
   db = math.max(-GAIN_CLAMP, math.min(GAIN_CLAMP, db))
+  -- where ReaEQ itself says that gain is: written straight there
+  local exact = gain_norm_for(track, addr, band, db)
+  if exact then
+    -- (in the same parameter's own norm it was read in)
+    if math.abs(exact - (band.gain_norm or -1)) > 1e-7 then
+      reaper.TrackFX_SetParamNormalized(track, addr, band.gain_pidx, exact)
+    end
+    return
+  end
   local cur_norm, cur_real = band.gain_norm, band.gain
   if not (cur_norm and cur_real) then return end
   local next_norm
