@@ -506,6 +506,14 @@ function U.range_say(r, v)
   return num(v) .. " " .. unit
 end
 function U.range_text(r, n) return U.range_say(r, U.range_value(r, n)) end
+-- A unit only (Range<p>=||Hz|): the plugin's own text, a bare number in it
+-- read in that unit ("20000" as 20.0 kHz); anything else as it is.
+function U.unit_say(r, s)
+  local t = U.trim(s or "")
+  local v = t:match("^[%+%-]?%d*%.?%d+$") and tonumber(t)
+  if not v then return s end
+  return U.range_say(r, v)
+end
 
 -- A gain knob measured at points { {position, dB}, ... } (TS_CV_Mappings
 -- GainLaw<p>): its dB at position n, along them (beyond them, the end's).
@@ -563,6 +571,11 @@ end
 
 function U.fmt_value(track, addr, param)
   local rg = U.range_of(param)
+  if rg and rg.only then
+    local ok, s = reaper.TrackFX_GetFormattedParamValue(track, addr, param, "")
+    if ok and s and s ~= "" then return U.unit_say(rg, U.tidy_num(s)) end
+    rg = nil
+  end
   if rg then
     if U.range_is_own(track, addr, param, rg) then
       local _, s = reaper.TrackFX_GetFormattedParamValue(track, addr, param, "")
@@ -901,7 +914,7 @@ end
 function U.scale_labels(track, addr, param, kind, marks)
   local out = {}
   local rg = U.range_of(param)
-  if kind == "values" and rg then
+  if kind == "values" and rg and not rg.only then
     for i, m in ipairs(marks) do out[i] = U.short_value(U.range_text(rg, m)) end
     return out
   end
@@ -909,7 +922,7 @@ function U.scale_labels(track, addr, param, kind, marks)
     for i, m in ipairs(marks) do
       local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, m, "")
       if not ok or not t or t == "" then out = nil break end
-      out[i] = U.short_value(t)
+      out[i] = U.short_value(rg and U.unit_say(rg, t) or t)
     end
     if out then return out end
     out = {}

@@ -170,8 +170,15 @@ end
 function UN.formatter(track, addr, p)
   -- your own range for it (U.ranges_now): read off that
   local rg = U.range_of and U.range_of(p)
-  if rg then return function(norm) return U.range_text(rg, norm) end end
+  if rg and not rg.only then return function(norm) return U.range_text(rg, norm) end end
   local raw = raw_formatter(track, addr, p)
+  -- a unit only: the plugin's own, read in it
+  if rg then
+    local was = U.with_ranges(nil)
+    local f = UN.formatter(track, addr, p)
+    U.with_ranges(was)
+    return function(norm) local t = f(norm); return t and U.unit_say(rg, t) end
+  end
   if not (reaper.TrackFX_GetFXGUID and reaper.TrackFX_SetParamNormalized and reaper.TrackFX_GetFormattedParamValue) then
     return raw
   end

@@ -804,7 +804,7 @@ draw_entry_body = function(ctx)
   -- curve, and Clear; for a plugin that won't say what its values are
   local function range_row(p)
     local rg = st.scratch.ranges and st.scratch.ranges[p]
-    if not rg then return end
+    if not rg or rg.only then return end
     st.rng_buf = st.rng_buf or {}
     local function num_field(id, v, w)
       ImGui.SetNextItemWidth(ctx, w)
@@ -1004,13 +1004,33 @@ draw_entry_body = function(ctx)
     -- (not for several at once: a range is the parameter's)
     if not p or p < 0 or st.multi then return end
     row_name("Values")
-    local has = st.scratch.ranges and st.scratch.ranges[p]
+    local rg = st.scratch.ranges and st.scratch.ranges[p]
+    local has = rg and not rg.only
     ImGui.SetNextItemWidth(ctx, 100)
     local vch, vi = ImGui.Combo(ctx, "##vals", has and 1 or 0, "Plugin's\0Custom\0")
     if vch then
-      if vi == 1 then E.ensure_range(p) elseif st.scratch.ranges then st.scratch.ranges[p] = nil end
+      if vi == 1 then
+        if rg and rg.only then st.scratch.ranges[p] = nil end
+        E.ensure_range(p)
+      elseif st.scratch.ranges then st.scratch.ranges[p] = nil end
     end
     tip("Custom: your own range, for a plugin that doesn't report its values.")
+    -- the plugin's own numbers in a unit (Range<p>=||Hz|)
+    if not has then
+      ImGui.SameLine(ctx, 0, 4)
+      local ucur = 0
+      for i, u_ in ipairs(U.RANGE_UNITS) do if rg and u_ == rg.unit then ucur = i - 1 end end
+      local unames = {}
+      for i, u_ in ipairs(U.RANGE_UNITS) do unames[i] = (u_ == "") and "no unit" or u_ end
+      ImGui.SetNextItemWidth(ctx, 74)
+      local uch, ui = ImGui.Combo(ctx, "##valunit", ucur, table.concat(unames, "\0") .. "\0")
+      if uch then
+        local u_ = U.RANGE_UNITS[ui + 1]
+        st.scratch.ranges = st.scratch.ranges or {}
+        st.scratch.ranges[p] = (u_ ~= "") and { unit = u_, only = true } or nil
+      end
+      tip("Its own numbers, read in a unit (20000 as 20 kHz).")
+    end
     range_row(p)
   end
 

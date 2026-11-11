@@ -1797,8 +1797,11 @@ a frequency as 0.35). Right-click a knob or fader ▸ **Values** ▸ *Custom
 range*: type what its ends read (20 to 20k), the unit and the curve
 (linear, log, squared), and it reads as that everywhere — the panel, the
 tooltip, the numbers round the dial and the web page. *The plugin's own*
-goes back. The same is in the editor's *Values* row. For a knob, *Values*
-also holds the **numbers round the dial**: *None*, *Values* or *0–10*.
+goes back. A plugin whose numbers are right but have no unit (a cutoff
+reading 20000) needs no range: **Values** ▸ **Unit** ▸ *Hz* reads its own
+number in that unit (20 kHz), whatever its range runs to. The same is in
+the editor's *Values* row. For a knob, *Values* also holds the **numbers
+round the dial**: *None*, *Values* or *0–10*.
 
 ## Visual Options
 

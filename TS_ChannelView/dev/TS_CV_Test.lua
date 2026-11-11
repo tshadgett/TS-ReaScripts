@@ -6313,6 +6313,27 @@ do
     .. "|" .. U.tidy_num("-0.000000") .. "|" .. U.tidy_num("0.123456"), "24|1.3|7600 Hz|0|0.123")
   check("tidy: the plugin's own kept", U.tidy_num("3.140") .. "|" .. U.tidy_num("0.99 s") .. "|" .. U.tidy_num("1/4"), "3.140|0.99 s|1/4")
   check("short: kHz", U.short_value("1.5 kHz"), "1.5k")
+  -- a unit only (Range<p>=||Hz|): the plugin's own number, read in it
+  do
+    local M_ = require("TS_CV_Mappings")
+    local r = M_.range_of_line("||Hz|")
+    check("unit only: read", r and (tostring(r.only) .. r.unit .. tostring(r.lo)), "trueHznil")
+    check("unit only: written back", M_.range_line(r), "||Hz|")
+    check("unit only: no unit is nothing", M_.range_of_line("|||"), nil)
+    local gf, ff = reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_FormatParamValueNormalized
+    local said = "20000"
+    reaper.TrackFX_GetFormattedParamValue = function() return true, said end
+    reaper.TrackFX_FormatParamValueNormalized = function(_, _, _, n) return true, ("%g"):format(20 + n * 19980) end
+    local was = U.with_ranges({ [0] = r })
+    check("unit only: its own number in kHz", U.fmt_value(nil, 0, 0), "20.0 kHz")
+    said = "450.000000"
+    check("unit only: tidied, in Hz", U.fmt_value(nil, 0, 0), "450 Hz")
+    said = "Off"
+    check("unit only: words as they are", U.fmt_value(nil, 0, 0), "Off")
+    check("unit only: the scale", table.concat(U.scale_labels(nil, 0, 0, "values", { 0, 1 }), " "), "20 20k")
+    U.with_ranges(was)
+    reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_FormatParamValueNormalized = gf, ff
+  end
   check("short: dB", U.short_value("+6.0 dB"), "+6")
   check("short: negative zero", U.short_value("-0.00"), "0")
   check("short: ms", U.short_value("1000 ms"), "1k")

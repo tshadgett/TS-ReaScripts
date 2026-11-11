@@ -238,6 +238,13 @@ end
 -- (as the plugin says it)
 function RC.raw_text(track, addr, p, nv)
   local rg = U.range_of and U.range_of(p)
+  if rg and rg.only then
+    -- a unit only: the plugin's own text, read in it
+    local was = U.with_ranges(nil)
+    local t = RC.raw_text(track, addr, p, nv)
+    U.with_ranges(was)
+    return U.unit_say(rg, t)
+  end
   if rg then return U.range_text(rg, nv or reaper.TrackFX_GetParamNormalized(track, addr, p)) end
   -- somewhere it isn't: as the plugin reads there (TS_CV_Units UN.formatter,
   -- which sweeps a plugin that only ever says where it is now)

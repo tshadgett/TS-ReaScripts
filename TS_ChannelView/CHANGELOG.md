@@ -38,6 +38,11 @@
   choice; *No button* shows just the list.
 - **Meters:** the gain-reduction bar as thin as the input and output
   meters, each bar against its panel's edge; the reading without "dB".
+- **A unit without a range:** right-click ▸ Values ▸ *Unit* reads a
+  plugin's own bare numbers in a unit (a cutoff's 20000 as 20 kHz), with
+  no range to type; Edit layout's Values row too.
+- Values a plugin gives with a run of decimals it doesn't mean
+  (24.000000) are shown tidied: 24.
 - ReEQ2's output gains read in dB.
 - A plugin's own meters moving on the probes' test noise no longer count
   as touching it (it asked for its zero again every few seconds).

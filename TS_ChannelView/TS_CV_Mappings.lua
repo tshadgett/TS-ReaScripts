@@ -100,7 +100,9 @@
   for a plugin that won't say what its values are (Acustica's give the
   host only their own internal numbers): what it reads as everywhere --
   the panel, the scale round a knob, tooltips, canvases, the web page.
-  <unit> Hz kHz ms s dB % :1 or empty; <curve> lin, log or sq.
+  <unit> Hz kHz ms s dB % :1 or empty; <curve> lin, log or sq. With no
+  ends (Range<p>=||Hz|) it's a unit only: the plugin's own number, read in
+  that unit (20000 as 20 kHz), whatever its range.
 
   GainLaw<p>=<position>:<dB>,... is what a gain knob that doesn't read in
   dB (0 to 10, 0 to 100), or reads it wrongly, was measured to do at each
@@ -3660,15 +3662,18 @@ function M.range_of_line(line)
   local f = {}
   for v in (U.trim(line or "") .. "|"):gmatch("([^|]*)|") do f[#f + 1] = U.trim(v) end
   local lo, hi = tonumber(f[1] or ""), tonumber(f[2] or "")
-  if not lo or not hi then return nil end
   local unit = f[3] or ""
   local ok_u = false
   for _, u_ in ipairs(U.RANGE_UNITS) do if u_ == unit then ok_u = true end end
+  -- a unit only
+  if (f[1] or "") == "" and (f[2] or "") == "" and ok_u and unit ~= "" then return { unit = unit, only = true } end
+  if not lo or not hi then return nil end
   local curve = f[4] or "lin"
   if curve ~= "log" and curve ~= "sq" then curve = "lin" end
   return { lo = lo, hi = hi, unit = ok_u and unit or "", curve = curve }
 end
 function M.range_line(r)
+  if r and r.only and r.unit and r.unit ~= "" then return "||" .. r.unit .. "|" end
   if not (r and r.lo and r.hi) then return nil end
   return ("%g|%g|%s|%s"):format(r.lo, r.hi, r.unit or "", r.curve or "lin")
 end
@@ -4202,7 +4207,7 @@ function M.copy(layout)
   end
   if layout.ranges then
     out.ranges = {}
-    for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve } end
+    for p, rg in pairs(layout.ranges) do out.ranges[p] = { lo = rg.lo, hi = rg.hi, unit = rg.unit, curve = rg.curve, only = rg.only } end
   end
   out.gaincheck = layout.gaincheck
   if layout.gainrole then

@@ -3614,8 +3614,10 @@ local function values_menu(fx, key, layout, idx, c)
   local p = c.param
   local rg = layout.ranges and layout.ranges[p]
   local tag = fx.guid .. ":" .. p
+  local only = rg and rg.only
   if app.rng_for ~= tag then
-    local r0 = rg or E.range_start(app.track, fx.addr, p)
+    local r0 = (rg and not only) and rg or E.range_start(app.track, fx.addr, p)
+    if only then r0.unit = rg.unit end
     local ui, ci = 1, 1
     for i, u in ipairs(U.RANGE_UNITS) do if u == (r0.unit or "") then ui = i end end
     for i, k in ipairs(U.RANGE_CURVES) do if k == (r0.curve or "lin") then ci = i end end
@@ -3696,11 +3698,24 @@ local function values_menu(fx, key, layout, idx, c)
   -- (a dropdown's values are its settings)
   if c.type == "combo" then return end
   ImGui.TextDisabled(ctx, "What it reads as")
-  if ImGui.MenuItem(ctx, "The plugin's own", nil, rg == nil) and rg then
+  if ImGui.MenuItem(ctx, "The plugin's own", nil, rg == nil or only) and rg and not only then
     store(nil); app.rng_for = nil
   end
+  -- the plugin's own numbers in a unit (Range<p>=||Hz|): no ends to know
+  if (rg == nil or only) and ImGui.BeginMenu(ctx, "Unit") then
+    if ImGui.MenuItem(ctx, "None", nil, not only) and only then store(nil); app.rng_for = nil end
+    for _, u in ipairs(U.RANGE_UNITS) do
+      if u ~= "" and ImGui.MenuItem(ctx, u .. "##unit", nil, only and rg.unit == u) then
+        store({ unit = u, only = true }); app.rng_for = nil
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  if (rg == nil or only) and ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Its own numbers, read in a unit (20000 as 20 kHz).")
+  end
   local want = typed()
-  if ImGui.MenuItem(ctx, "Custom range", nil, rg ~= nil, want ~= nil) then store(want) end
+  if ImGui.MenuItem(ctx, "Custom range", nil, rg ~= nil and not only, want ~= nil) then store(want) end
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
     ImGui.SetTooltip(ctx, "Your own range (below), for plugins that don't report values.")
   end
@@ -3738,7 +3753,7 @@ local function values_menu(fx, key, layout, idx, c)
     store(want); ImGui.CloseCurrentPopup(ctx)
   end
   ImGui.SameLine(ctx)
-  if ST.button(ctx, "Clear##rmclr", "remove", nil, nil, { dim = not rg }) then
+  if ST.button(ctx, "Clear##rmclr", "remove", nil, nil, { dim = not rg or only }) then
     store(nil); app.rng_for = nil; ImGui.CloseCurrentPopup(ctx)
   end
 end
