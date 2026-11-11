@@ -10120,6 +10120,29 @@ do
   check("grid sheet: several selected", okm and "ok" or tostring(errm), "ok")
   check("grid sheet: the panel's menus drawn", (called.style or 0) > 0 and (called.back or 0) > 0 and (called.look or 0) > 0
     and (called.plate or 0) > 0 and (called.section or 0) > 0 and (called.colour or 0) > 0, true)
+  -- Visual Options: By time and its list drawn (Pro)
+  do
+    local VO_ = require("TS_CV_VisualOptions")
+    local ED_ = require("TS_CV_Edition")
+    local was = ED_.PRO
+    ED_.PRO = ED_.PRO or { RELEASE = ED_.RELEASE }
+    VO_.attach(fake)
+    VO_.load(false)
+    VO_.set_by_time("tcp", true)
+    VO_.show("tcp")
+    answers.GetWindowWidth = function() return 900 end
+    answers.ArrowButton = function() return true end       -- the times shown
+    local ok1, err1 = pcall(VO_.draw, "ctx", "cv")
+    answers.ArrowButton = nil
+    local rows, was_it = 0, answers.InputText
+    answers.InputText = function(_, id, v) if id == "##vo_tm" then rows = rows + 1 end return false, v end
+    local ok2, err2 = pcall(VO_.draw, "ctx", "cv")
+    answers.InputText = was_it
+    check("visual options: a row for each time", rows, 2)
+    check("visual options: By time and its list drawn", (ok1 and "ok" or tostring(err1)) .. "|" .. (ok2 and "ok" or tostring(err2)), "ok|ok")
+    VO_.set_by_time("tcp", false)
+    ED_.PRO = was
+  end
   -- a new layout from the header: a copy, then an empty one, each edited next
   local St = require("TS_CV_State")
   local real_sv = St.set_variant
@@ -12094,6 +12117,51 @@ do
     check("preset: not changed since", VO.modified_for_test("tcp"), false)
     VO.set("tcp", "cell_w", 52)
     check("preset: changed shows", VO.modified_for_test("tcp"), true)
+  end
+  -- By time: a preset at set times of day
+  do
+    check("bytime: times read", table.concat({ VO.parse_time("7"), VO.parse_time("0730"), VO.parse_time("19.30"),
+      VO.parse_time("7:05"), tostring(VO.parse_time("24:00")), tostring(VO.parse_time("x")) }, "|"),
+      "420|450|1170|425|nil|nil")
+    local at = os.time({ year = 2026, month = 11, day = 11, hour = 20, min = 15 })
+    VO.clock = function() return at end
+    VO.set_by_time("tcp", true)
+    check("bytime: on starts from the default list, the one due now on",
+      #VO.times("tcp") .. "|" .. VO.val(VO.effective("tcp"), "preset") .. "|" .. tostring(VO.next_time("tcp")),
+      "2|Minimal dark|07:00")
+    check("bytime: nothing more to do", VO.tick(), false)
+    -- a preset picked by hand stays until the next time
+    VO.apply_preset_for_test("tcp", "Studio")
+    at = at + 3600
+    check("bytime: picked by hand, it stays", VO.tick() or VO.val(VO.effective("tcp"), "preset"), "Studio")
+    -- past midnight, still the evening's; then the morning's
+    at = os.time({ year = 2026, month = 11, day = 12, hour = 6, min = 59 })
+    check("bytime: before the first time, the last one's still", VO.tick(), false)
+    at = os.time({ year = 2026, month = 11, day = 12, hour = 7, min = 0 })
+    check("bytime: at 07:00 the light one", tostring(VO.poll()) .. VO.val(VO.effective("tcp"), "preset"), "trueMinimal light")
+    -- only once, though another window looks too
+    check("bytime: made once", VO.poll(), false)
+    -- an edited list puts on the one due now
+    VO.times("tcp")[1].name = "Studio"
+    VO.write_times_for_test("tcp")
+    VO.tick()
+    check("bytime: edited, the one due now", VO.val(VO.effective("tcp"), "preset"), "Studio")
+    -- kept, and read back
+    VO.load(false)
+    check("bytime: kept", VO.time_text(VO.times("tcp")[2].m) .. "=" .. VO.times("tcp")[2].name, "19:00=Minimal dark")
+    -- off keeps the preset on; a tab that follows has none of its own
+    VO.set_by_time("tcp", false)
+    at = os.time({ year = 2026, month = 11, day = 12, hour = 20, min = 0 })
+    check("bytime: off, nothing changes", VO.tick() or VO.val(VO.effective("tcp"), "preset"), "Studio")
+    VO.set_by_time("rack", true)
+    check("bytime: a following tab makes none", VO.tick(), false)
+    VO.set_by_time("rack", false)
+    local was_pro = ED.PRO; ED.PRO = nil
+    VO.set_by_time("tcp", true)
+    check("bytime: Standard makes none", VO.tick(), false)
+    ED.PRO = was_pro
+    VO.set_by_time("tcp", false)
+    VO.clock = function() return os.time() end
   end
   -- Standard: none of the Pro options
   ED.PRO = nil

@@ -34,6 +34,12 @@
   "presets" your own, "rev" bumped on every change so the other windows
   (separate scripts) pick it up.
 
+  By time (Pro): a tab's presets changed at set times of day, each held
+  from its time until the next. "bytime_<key>" on or off, "times_<key>"
+  the list ("HH:MM=name" a line), "time_at_<key>" the change last made
+  (its day and time): a preset picked by hand stays until the next time,
+  and only one window makes each change.
+
   Hue and Tint are also the TS_ tools' shared palette (TS_Palette):
   ChannelView's tab reads and writes them there.
 --]]
@@ -173,11 +179,51 @@ local function get(k) local v = reaper.GetExtState(SECT, k); return v ~= "" and 
 local function put(k, v) reaper.SetExtState(SECT, k, v, true) end
 local function bump() put("rev", tostring(math.floor(reaper.time_precise() * 1000) % 1000000000)) end
 
+-- By time's lists: tab -> { { m = minutes past midnight, name }, ... },
+-- in time order
+local times = {}
+
+-- "7", "7:30", "0730", "19.30" as minutes past midnight; nil if not a time
+function VO.parse_time(str)
+  str = (str or ""):gsub("%s", "")
+  local h, m = str:match("^(%d%d?)[:%.h]?(%d%d)$")
+  if not h then h, m = str:match("^(%d%d?)$"), "0" end
+  h, m = tonumber(h), tonumber(m)
+  if not h or not m or h > 23 or m > 59 then return nil end
+  return h * 60 + m
+end
+function VO.time_text(m) return ("%02d:%02d"):format(m // 60, m % 60) end
+
+function VO.read_times(tab)
+  local list = {}
+  for line in (get("times_" .. tab) or ""):gmatch("[^\n]+") do
+    local hm, name = line:match("^([%d:]+)=(.*)$")
+    local m = VO.parse_time(hm)
+    if m and name ~= "" then list[#list + 1] = { m = m, name = unesc(name) } end
+  end
+  table.sort(list, function(a, b) return a.m < b.m end)
+  times[tab] = list
+end
+
+-- `keep`: the change already made stands (else the one due now is made
+-- again, from the list as it now is)
+local function write_times(tab, keep)
+  local list = times[tab] or {}
+  table.sort(list, function(a, b) return a.m < b.m end)
+  local lines = {}
+  for _, e in ipairs(list) do lines[#lines + 1] = VO.time_text(e.m) .. "=" .. esc(e.name) end
+  put("times_" .. tab, table.concat(lines, "\n"))
+  if not keep then put("time_at_" .. tab, "") end
+  bump()
+  rev_seen = get("rev")
+end
+
 local function read_all()
   for _, t in ipairs(VO.TABS) do
     data[t.key] = decode(get("tab_" .. t.key))
     follow[t.key] = t.key ~= "cv" and get("follow_" .. t.key) ~= "0"
   end
+  for _, t in ipairs(VO.TABS) do VO.read_times(t.key) end
   user = {}
   for line in (get("presets") or ""):gmatch("[^\n]+") do
     local name, s = line:match("^(.-)\t(.*)$")
@@ -289,11 +335,13 @@ function VO.load(first)
 end
 
 -- True when another window changed something since this one last looked (then
--- everything has been read again).
+-- everything has been read again), or By time changed a preset.
 function VO.poll()
   local r = get("rev")
-  if r ~= rev_seen then read_all(); return true end
-  return false
+  local changed = false
+  if r ~= rev_seen then read_all(); changed = true end
+  if VO.tick() then changed = true end
+  return changed
 end
 
 -- ---------------------------------------------------------------------
@@ -441,7 +489,75 @@ local function save_preset(tab, name)
   return true
 end
 
+-- ---------------------------------------------------------------------
+-- By time
+-- ---------------------------------------------------------------------
+VO.TIMES_DEFAULT = { { m = 7 * 60, name = "Minimal light" }, { m = 19 * 60, name = "Minimal dark" } }
+VO.clock = function() return os.time() end          -- (the tests set it)
+
+function VO.by_time(tab) return get("bytime_" .. tab) == "1" end
+function VO.times(tab) return times[tab] or {} end
+
+-- The entry that holds now: its index, and the change's key (the day it
+-- began, and its time).
+local function slot_now(list)
+  if #list == 0 then return nil end
+  local now = VO.clock()
+  local d = os.date("*t", now)
+  local mins = d.hour * 60 + d.min
+  local idx, day = nil, now
+  for i, e in ipairs(list) do if e.m <= mins then idx = i end end
+  if not idx then idx, day = #list, now - 86400 end
+  return idx, os.date("%Y-%m-%d", day) .. " " .. VO.time_text(list[idx].m)
+end
+
+-- The next time on a tab's list, or nil (one entry or none).
+function VO.next_time(tab)
+  local list = times[tab] or {}
+  if #list < 2 then return nil end
+  local idx = slot_now(list)
+  return VO.time_text(list[idx % #list + 1].m)
+end
+
+-- Make any change that's due (Pro). A tab that follows ChannelView has
+-- none of its own. True when one was made.
+function VO.tick()
+  if not ED.PRO then return false end
+  local made = false
+  for _, t in ipairs(VO.TABS) do
+    local k = t.key
+    if not follow[k] and get("bytime_" .. k) == "1" then
+      local list = times[k] or {}
+      local idx, key = slot_now(list)
+      if idx and get("time_at_" .. k) ~= key then
+        put("time_at_" .. k, key)
+        if preset_of(list[idx].name) then apply_preset(k, list[idx].name) end
+        made = true
+      end
+    end
+  end
+  return made
+end
+
+-- By time on or off. On, with no list yet, it starts from the default
+-- one; the preset due now is put on at once. Off keeps the preset on.
+function VO.set_by_time(tab, on)
+  put("bytime_" .. tab, on and "1" or "0")
+  if on then
+    if #(times[tab] or {}) == 0 then
+      times[tab] = {}
+      for _, e in ipairs(VO.TIMES_DEFAULT) do times[tab][#times[tab] + 1] = { m = e.m, name = e.name } end
+    end
+    write_times(tab)
+    VO.tick()
+  else
+    bump()
+    rev_seen = get("rev")
+  end
+end
+
 -- (for the tests)
+VO.write_times_for_test = function(...) return write_times(...) end
 VO.save_preset_for_test = function(...) return save_preset(...) end
 VO.apply_preset_for_test = function(...) return apply_preset(...) end
 VO.modified_for_test = function(...) return modified(...) end
@@ -1106,6 +1222,29 @@ local function preset_bar(ctx, tab)
     end
     ImGui.EndPopup(ctx)
   end
+  -- By time, its list shown or hidden, and the next time while hidden
+  ImGui.SameLine(ctx)
+  local on = VO.by_time(tab)
+  local bch, bv = ST.checkbox(ctx, "By time##vo_bt", on)
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Change preset at set times of day") end
+  if bch then
+    VO.set_by_time(tab, bv)
+    win.times = bv
+    own_changed(tab)
+  end
+  if on and not bch then
+    ImGui.SameLine(ctx, 0, 2)
+    if ImGui.ArrowButton(ctx, "##vo_btshow", win.times and ImGui.Dir_Down or ImGui.Dir_Right) then
+      win.times = not win.times
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, win.times and "Hide the times" or "Show the times") end
+    local nx = VO.next_time(tab)
+    if nx and not win.times then
+      ImGui.SameLine(ctx)
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.TextDisabled(ctx, "until " .. nx)
+    end
+  end
   if naming then
     ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, 160)
@@ -1124,6 +1263,11 @@ local function preset_bar(ctx, tab)
           write_user()
           for _, t in ipairs(VO.TABS) do
             if data[t.key].preset == naming.old then data[t.key].preset = name; write_tab(t.key) end
+            local renamed = false
+            for _, e in ipairs(times[t.key] or {}) do
+              if e.name == naming.old then e.name = name; renamed = true end
+            end
+            if renamed then write_times(t.key, true) end
           end
         end
       else
@@ -1134,6 +1278,66 @@ local function preset_bar(ctx, tab)
   end
   if not ED.PRO then ImGui.EndDisabled(ctx) end
   pro_note(ctx)
+end
+
+-- By time's list: a time and a preset a row, a lamp on the one on now
+local typed = {}             -- row -> the time being typed
+local function times_list(ctx, tab)
+  local list = times[tab] or {}
+  local cur = slot_now(list)
+  local names = all_presets()
+  local K = C.COL
+  local dirty, drop = false, nil
+  ImGui.Indent(ctx, 44)
+  for i, e in ipairs(list) do
+    ImGui.PushID(ctx, i)
+    ImGui.SetNextItemWidth(ctx, 52)
+    local ch, v = ImGui.InputText(ctx, "##vo_tm", typed[i] or VO.time_text(e.m))
+    if ch then typed[i] = v end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "From (24-hour, HH:MM)") end
+    if ImGui.IsItemDeactivated(ctx) then
+      local m = VO.parse_time(typed[i])
+      if m and m ~= e.m then e.m = m; dirty = true end
+      typed[i] = nil
+    end
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 200)
+    if ImGui.BeginCombo(ctx, "##vo_tp", e.name .. (preset_of(e.name) and "" or "  (deleted)"), ImGui.ComboFlags_HeightLargest) then
+      for _, n in ipairs(names) do
+        if ImGui.Selectable(ctx, n, n == e.name) and n ~= e.name then e.name = n; dirty = true end
+      end
+      ImGui.EndCombo(ctx)
+    end
+    ImGui.SameLine(ctx)
+    local x, y = ImGui.GetCursorScreenPos(ctx)
+    local h = ImGui.GetFrameHeight(ctx)
+    local dl = ImGui.GetWindowDrawList(ctx)
+    if i == cur then
+      ImGui.DrawList_AddCircleFilled(dl, x + 6, y + h * 0.5, 6.5, (K.accent & 0xffffff00) | 0x40, 16)
+      ImGui.DrawList_AddCircleFilled(dl, x + 6, y + h * 0.5, 4.0, K.accent, 16)
+    else
+      ImGui.DrawList_AddCircleFilled(dl, x + 6, y + h * 0.5, 4.0, K.toggle_off, 16)
+      ImGui.DrawList_AddCircle(dl, x + 6, y + h * 0.5, 4.0, K.ui_edge, 16, 1.0)
+    end
+    ImGui.Dummy(ctx, 12, h)
+    if i == cur and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "On now") end
+    ImGui.SameLine(ctx)
+    if ST.button(ctx, "\u{00D7}##vo_tx", "remove", 22, 0) then drop = i end
+    ImGui.PopID(ctx)
+  end
+  if ST.button(ctx, "+ Add a time##vo_tadd") then
+    local last = list[#list]
+    list[#list + 1] = { m = last and (last.m + 60) % 1440 or 12 * 60, name = val(data[tab], "preset") }
+    dirty = true
+  end
+  ImGui.Unindent(ctx, 44)
+  if drop then table.remove(list, drop); typed = {}; dirty = true end
+  if dirty then
+    times[tab] = list
+    write_times(tab)
+    VO.tick()
+    own_changed(tab)
+  end
 end
 
 -- a few controls in the tab's look
@@ -1298,6 +1502,11 @@ function VO.draw(ctx, mine)
         own_changed(tab)
         if tab == own_tab then VO.apply(own_tab) end
       end
+    end
+    if win.times and VO.by_time(tab) then
+      if follows or not ED.PRO then ImGui.BeginDisabled(ctx, true) end
+      times_list(ctx, tab)
+      if follows or not ED.PRO then ImGui.EndDisabled(ctx) end
     end
     ImGui.Separator(ctx)
 

@@ -62,6 +62,9 @@
   same 4 px in from its cells' edges.
 - **Canvas colours:** the spectrum has a colour of its own (the meters'
   until you set it).
+- **Visual Options ▸ By time:** a tab changes preset at times of day you
+  set (light in the day, dark at night, to start). A preset picked by hand
+  stays until the next time.
 - **EQ canvases and ReaEQ's panel:** Alt+click a node to switch its band
   off, or on again; a band that's off stays as a dim node. On ReaEQ's
   panel a node dragged up or down goes straight to the gain under the

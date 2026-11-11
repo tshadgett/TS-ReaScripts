@@ -1819,6 +1819,11 @@ right-click ▸ *Group looks…*.
   light* and *Studio*, and your own (**+** saves, renames or deletes). A
   preset sets every setting of the tab; your own keep *Faders & strips*
   too. A * after its name means something's changed since.
+- **By time (Pro)**, beside the presets: the tab changes preset at the
+  times you list, each preset holding until the next time (07:00 *Minimal
+  light* and 19:00 *Minimal dark* to start). The arrow shows or hides the
+  list; the lamp marks the one on now. A preset picked by hand stays until
+  the next time; turning By time off keeps the preset that's on.
 - **Colour:** Hue and Tint (shared with the other TS_ tools), the panel
   colour (Pro: any colour, light or dark, with the window, headers and
   text following it) and the accent (Pro: from the hue, or one you pick).
