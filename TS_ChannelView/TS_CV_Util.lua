@@ -47,7 +47,7 @@ function U.ext_join(list)
   end
   return table.concat(out, "\t")
 end
--- Its entries back, in order (line breaks, as they were once kept, too).
+-- Its entries back, in order (apart by tabs or line breaks).
 function U.ext_split(s)
   local out = {}
   for e in tostring(s or ""):gmatch("[^\t\r\n]+") do out[#out + 1] = e end

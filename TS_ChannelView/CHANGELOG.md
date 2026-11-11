@@ -1,5 +1,23 @@
 # ChannelView — changelog
 
+## 4.2.1 — fixes
+
+### ChannelView
+
+- Plugin favourites, recent plugins, and the plugins you've said never
+  to ask *Check its gain knobs?* about are all kept when REAPER restarts
+  (only the first of each was).
+- Fixed: a panel whose controls scroll could stop ChannelView on ImGui's
+  "SetCursorPos() ... to extend window/parent boundaries" error.
+
+### ChannelView Pro
+
+- Your own Visual Options presets, By time's times, and the plugins
+  you've said never to offer a canvas for are all kept when REAPER
+  restarts (only the first of each was).
+- On ReaEQ's panel, a *Band (alt)* band dragged sideways goes to the
+  frequency under the mouse.
+
 ## 4.2.0 — measured gain reduction follows gain knobs, overall size, favourites
 
 ### ChannelView
@@ -51,8 +69,6 @@
 - A plugin's own meters moving on the probes' test noise no longer count
   as touching it (it asked for its zero again every few seconds).
 - Dragging a plugin to the first slot shows its drop line.
-- Recent plugins and the plugins you've said not to offer a canvas for
-  are all kept when REAPER restarts (only the first one was).
 - Fixed: ChannelView could stop on ImGui's "SetCursorPos() ... to extend
   window/parent boundaries" error while drawing a panel.
 - Fixed: ChannelView could stop on "cannot use DrawListSplitter over
@@ -73,10 +89,7 @@
 - **EQ canvases and ReaEQ's panel:** Alt+click a node to switch its band
   off, or on again; a band that's off stays as a dim node. On ReaEQ's
   panel a node dragged up or down goes straight to the gain under the
-  mouse, without bouncing, and a *Band (alt)* band dragged sideways goes
-  to the frequency under the mouse.
-- Your own Visual Options presets are all kept when REAPER restarts (only
-  the first one was).
+  mouse, without bouncing.
 - **Compressor canvases** show measured reduction in pink, the plugin's
   own in amber, as a panel's meter does.
 - Picture knobs show the knob's own value arc too.
