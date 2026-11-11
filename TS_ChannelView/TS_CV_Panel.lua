@@ -1452,15 +1452,12 @@ function P.detect_steps(track, addr, param, key)
   elseif runs and #runs == 1 then
     -- the same name wherever it's asked (it answers with where it is now:
     -- Valhalla's): read moved through its range instead (TS_CV_Units)
+    -- (its settings needn't be evenly spread: DelaySync's Msec takes half
+    -- its range, Triplet only the top; the list is read where they are,
+    -- combo_steps)
     local UN = require("TS_CV_Units")
-    local fmt = UN.formatter(track, addr, param)
-    local list = UN.choice_runs(fmt, 64)
-    if list and #list >= 2 then
-      n = #list
-      for k = 0, n - 1 do
-        if fmt(k / (n - 1)) ~= list[k + 1].text then n = nil break end
-      end
-    end
+    local list = UN.choice_runs(UN.formatter(track, addr, param), 64)
+    if list and #list >= 2 then n = #list end
   end
   detect_cache[ck] = { t = now + 5, n = n }
   return n
@@ -1599,6 +1596,12 @@ local function combo_steps(track, addr, param, key, force)
     end
   end
   reaper.TrackFX_SetParamNormalized(track, addr, param, saved)
+  -- fewer names than steps: its settings aren't evenly spread (Valhalla's
+  -- DelaySync); read where each one is instead
+  if #out < n then
+    local rc = require("TS_CV_Units").read_choices(track, addr, param, nil)
+    if type(rc) == "table" and #rc == n then out = rc end
+  end
 
   steps_cache[ck] = (#out >= 2) and out or false
   if steps_cache[ck] then SC.set(key, param, out) end

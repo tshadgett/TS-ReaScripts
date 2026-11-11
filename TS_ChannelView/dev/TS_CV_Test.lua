@@ -2659,14 +2659,23 @@ do
   do
     local at, gf = 0.892, reaper.TrackFX_GetFormattedParamValue
     local gn = reaper.TrackFX_GetParamNormalized
-    local names = { "Ms", "Straight", "Triplet", "Dotted" }
-    local function name(v) return names[math.min(4, math.floor(v * 4) + 1)] end
+    -- (spread as it is: Msec half its range, Triplet only at the top)
+    local function name(v) return v >= 0.999 and "Triplet" or v >= 0.75 and "Dotted" or v >= 0.5 and "Note" or "Msec" end
     reaper.TrackFX_SetParamNormalized = function(_, _, _, v) at = v end
     reaper.TrackFX_GetParamNormalized = function() return at end
     reaper.TrackFX_GetFormattedParamValue = function() return true, name(at) end
     reaper.TrackFX_FormatParamValueNormalized = function() return true, name(at) end
     check("steps read: named only where it is, moved to read", P.detect_steps("tr", 0, 6, "StepT"), 4)
     check("steps read: and put back", at, 0.892)
+    -- its list, where each one is, for buttons or a stepped knob
+    M_.set("StepT", { controls = {}, steps = { [6] = 4 } })
+    P.clear_caches()
+    local list = P.combo_steps("tr", 0, 6, "StepT", true)
+    local got = {}
+    for _, e in ipairs(type(list) == "table" and list or {}) do got[#got + 1] = e.text end
+    check("steps read: uneven settings listed where they are", table.concat(got, ","), "Msec,Note,Dotted,Triplet")
+    check("steps read: each one's place reads as it", type(list) == "table" and name(list[3].norm), "Dotted")
+    M_.set("StepT", { controls = {} })
     reaper.TrackFX_GetFormattedParamValue, reaper.TrackFX_GetParamNormalized = gf, gn
   end
   -- your count
