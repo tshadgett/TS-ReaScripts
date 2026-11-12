@@ -1327,9 +1327,59 @@ local function lay(tr, want, lv)
   return true
 end
 
+-- OUT OF DATE. The window and the web companion each lay the taps. After
+-- an update, one still running the old code can disagree with one running
+-- the new, and each would undo the other's routing. Each running copy says
+-- which code it runs (the text of this file as it loaded); one whose file
+-- has since changed, while another copy runs the file as it is now, stops
+-- laying taps and adding probes until it's restarted.
+local guard = { mine = nil, stamp = nil, disk = nil, disk_stamp = nil, at = -10, beat = -10, stale = false }
+TP._guard = guard
+function guard.read()
+  local here = (debug.getinfo(1, "S").source or ""):match("^@?(.*[\\/])") or ""
+  local f = io.open(here .. "TS_CV_Taps.lua", "rb")
+  if not f then return nil end
+  local s = f:read("a")
+  f:close()
+  return s
+end
+function guard.hash(s)
+  local h1, h2 = #s, 0
+  for i = 1, #s, 256 do
+    local t = { s:byte(i, math.min(#s, i + 255)) }
+    for k = 1, #t do h1 = (h1 * 31 + t[k]) % 2147483647; h2 = (h2 * 131 + t[k]) % 1000000007 end
+  end
+  return ("%x%x"):format(h1, h2)
+end
+-- the code this copy runs: as the file was when it loaded
+guard.mine = guard.read() or ""
+guard.stamp = guard.hash(guard.mine)
+function TP.out_of_date(now)
+  if guard.stale then return true end
+  now = now or reaper.time_precise()
+  if not guard.mine then
+    guard.mine = guard.read() or ""
+    guard.stamp = guard.hash(guard.mine)
+  end
+  if now - guard.beat >= 1 then
+    guard.beat = now
+    reaper.SetExtState("TS_CV_Taps", "run_" .. guard.stamp, tostring(now), false)
+  end
+  if now - guard.at < 5 then return false end
+  guard.at = now
+  local disk = guard.read()
+  if not disk or disk == guard.mine then return false end
+  if disk ~= guard.disk then guard.disk, guard.disk_stamp = disk, guard.hash(disk) end
+  if guard.disk_stamp == guard.stamp then return false end
+  local seen = tonumber(reaper.GetExtState("TS_CV_Taps", "run_" .. guard.disk_stamp))
+  guard.stale = seen ~= nil and now - seen < 3
+  return guard.stale
+end
+
 -- Brings one track into line with what's wanted. Returns true when it
 -- changed anything.
 function TP.sync(tr)
+  if TP.out_of_date() then return false end
   -- a plugin added to a widened level comes in held, like the others
   local held_new = keep_held(tr)
   local rec = read_record(tr)
@@ -1632,6 +1682,7 @@ end
 -- moves. True if one was added.
 function TP.complete_pair(tr)
   if not tr or tr == reaper.GetMasterTrack(0) or find_level(tr, nil) then return false end
+  if TP.out_of_date() then return false end
   -- never past two: a track with more already isn't missing one
   if #probes_in_order(tr) >= 2 then return false end
   local pre, post = TP.top_probes(tr)
@@ -2943,6 +2994,7 @@ function TP.update(now, web)
   end
   publish_panels(now)
   if not TP.active then return end
+  TP.out_of_date(now)
   if not attached then reaper.gmem_attach(TP.GMEM_NS); attached = true end
   hb = (hb + 1) % 1000000
   reaper.gmem_write(TP.HB_SLOT, hb)

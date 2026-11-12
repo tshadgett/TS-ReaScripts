@@ -955,6 +955,27 @@ do
     added = 0
     check("past two: nothing added",      tostring(TP.complete_pair(track)) .. " " .. added, "false 0")
   end
+  -- OUT OF DATE: a copy whose file has changed since it loaded, while
+  -- another runs the file as it is now, adds nothing and lays nothing
+  do
+    local g = TP._guard
+    local real_read = g.read
+    local disk = "code A"
+    g.read = function() return disk end
+    g.mine, g.stale, g.at, g.beat = nil, false, -10, -10
+    check("current: not out of date",     TP.out_of_date(100), false)
+    disk = "code B"
+    check("changed, nobody on it: runs",  TP.out_of_date(106), false)
+    reaper.SetExtState("TS_CV_Taps", "run_" .. g.hash("code B"), "110", false)
+    check("changed, another on it: stops", TP.out_of_date(112), true)
+    track.fx = { fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+    TP.invalidate()
+    added = 0
+    check("out of date: nothing added",   tostring(TP.complete_pair(track)) .. " " .. added, "false 0")
+    local before = track.ext[TP.EXT_KEY] or ""
+    check("out of date: nothing laid",    tostring(TP.sync(track)) .. " " .. tostring((track.ext[TP.EXT_KEY] or "") == before), "false true")
+    g.read, g.mine, g.stale, g.at, g.beat = real_read, nil, false, -10, -10
+  end
   reaper.GetTrackStateChunk, reaper.TrackFX_AddByName, reaper.TrackFX_CopyToTrack = nil, nil, nil
 end
 
