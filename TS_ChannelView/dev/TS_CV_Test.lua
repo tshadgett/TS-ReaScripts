@@ -10163,6 +10163,8 @@ do
     local was_ncl, was_cb = reaper.NamedCommandLookup, answers.ColorButton
     reaper.NamedCommandLookup = reaper.NamedCommandLookup or function() return 0 end
     answers.ColorButton = function() return false end
+    local was_bt = answers.BeginTable
+    answers.BeginTable = function() return true end
     require("TS_CV_ColourPick").attach(fake)
     local drawn = {}
     for _, page in ipairs({ { "behaviour" }, { "rules" }, { "cv", "controls" }, { "cv", "panels" }, { "cv", "faders" } }) do
@@ -10171,6 +10173,17 @@ do
       drawn[#drawn + 1] = okp and "ok" or tostring(errp)
     end
     check("options: Behaviour, Track rules and the moved settings drawn", table.concat(drawn, "|"), "ok|ok|ok|ok|ok")
+    -- the name rules reorder: the second's up arrow
+    r = TRm.get()
+    r.rules = { { how = "contains", text = "acoust", col = 0x6db966 }, { how = "is", text = "SUM", col = 0xffffff } }
+    TRm.save(r)
+    local ups, was_ab = 0, answers.ArrowButton
+    answers.ArrowButton = function(_, id) if id == "##up" then ups = ups + 1; return ups == 2 end return false end
+    VO_.show("rules")
+    local okr, errr = pcall(VO_.draw, "ctx", "cv")
+    answers.ArrowButton, answers.BeginTable = was_ab, was_bt
+    check("options: Track rules drawn with its rules", okr and "ok" or tostring(errr), "ok")
+    check("options: a name rule moved up", TRm.get().rules[1].text .. "," .. TRm.get().rules[2].text, "SUM,acoust")
     TRm.save(TRm.decode(""))
     reaper.NamedCommandLookup, answers.ColorButton = was_ncl, was_cb
     VO_.float = nil

@@ -1422,9 +1422,18 @@ local function page_rules(ctx)
     box("A template's own colour wins##vo_rtpl", "tpl_col")
     ImGui.Unindent(ctx, IND)
     ImGui.TextDisabled(ctx, "Name rules, first match wins:")
-    local drop = nil
+    local drop, move = nil, nil
     for i, rule in ipairs(r.rules) do
       ImGui.PushID(ctx, "vo_rr" .. i)
+      -- the order matters (first match wins): up and down
+      if i == 1 then ImGui.BeginDisabled(ctx, true) end
+      if ImGui.ArrowButton(ctx, "##up", ImGui.Dir_Up) then move = { i, i - 1 } end
+      if i == 1 then ImGui.EndDisabled(ctx) end
+      ImGui.SameLine(ctx, 0, 2)
+      if i == #r.rules then ImGui.BeginDisabled(ctx, true) end
+      if ImGui.ArrowButton(ctx, "##down", ImGui.Dir_Down) then move = { i, i + 1 } end
+      if i == #r.rules then ImGui.EndDisabled(ctx) end
+      ImGui.SameLine(ctx)
       local v = rcombo(ctx, "##how", rule.how, { { "contains", "contains" }, { "is", "is" } }, 90)
       if v and v ~= rule.how then rule.how = v; dirty = true end
       ImGui.SameLine(ctx)
@@ -1441,6 +1450,10 @@ local function page_rules(ctx)
       ImGui.PopID(ctx)
     end
     if drop then table.remove(r.rules, drop); dirty = true end
+    if move then
+      r.rules[move[1]], r.rules[move[2]] = r.rules[move[2]], r.rules[move[1]]
+      dirty = true
+    end
     if ImGui.SmallButton(ctx, "+ Rule##vo_radd") then
       r.rules[#r.rules + 1] = { how = "contains", text = "", col = 0x808080 }
       dirty = true
