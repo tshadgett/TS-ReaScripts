@@ -10177,44 +10177,39 @@ do
     r = TRm.get()
     r.rules = { { how = "contains", text = "acoust", col = 0x6db966 }, { how = "is", text = "SUM", col = 0xffffff } }
     TRm.save(r)
-    -- the second rule's grip held and dragged up, past the first
-    local grips, last_id = 0, nil
-    local was = { answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered }
-    answers.InvisibleButton = function(_, id)
-      last_id = id
-      if id == "##grip" then grips = grips + 1 end
-      return false
+    -- a grip held: its rule goes to the row under the pointer, and stays
+    -- there while the pointer does
+    local rows_y, held_rule, cur, last_id = 0, nil, nil, nil
+    local was2 = { answers.PushID, answers.InvisibleButton, answers.IsItemActive, answers.GetMousePos,
+                   answers.GetCursorScreenPos }
+    local mouse_y = 0
+    answers.PushID = function(_, id) cur = id end
+    answers.InvisibleButton = function(_, id) last_id = id return false end
+    answers.IsItemActive = function() return last_id == "##grip" and cur == held_rule end
+    answers.GetMousePos = function() return 0, mouse_y end
+    answers.GetCursorScreenPos = function() rows_y = rows_y + 10; return 0, rows_y end
+    answers.BeginTable = function() return true end
+    local function order_now()
+      local t = {}
+      for k, x in ipairs(TRm.get().rules) do t[k] = x.text end
+      return table.concat(t, ",")
     end
-    answers.IsItemActive = function() return last_id == "##grip" and grips == 2 end
-    answers.IsItemHovered = function() return false end
-    answers.GetMouseDragDelta = function() return 0, -12 end
-    VO_.show("rules")
-    local okr, errr = pcall(VO_.draw, "ctx", "cv")
-    answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered = was[1], was[2], was[3], was[4]
-    answers.BeginTable = was_bt
-    check("options: Track rules drawn with its rules", okr and "ok" or tostring(errr), "ok")
-    check("options: a name rule dragged up", TRm.get().rules[1].text .. "," .. TRm.get().rules[2].text, "SUM,acoust")
-    -- held over two frames, the grip stays with its rule: two places up
     r = TRm.get()
     r.rules = { { how = "is", text = "A", col = 1 }, { how = "is", text = "B", col = 2 }, { how = "is", text = "C", col = 3 } }
     TRm.save(r)
-    local held = "vo_rr" .. tostring(r.rules[3])
-    local cur, last2 = nil, nil
-    local was2 = { answers.PushID, answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered }
-    answers.PushID = function(_, id) cur = id end
-    answers.InvisibleButton = function(_, id) last2 = id return false end
-    answers.IsItemActive = function() return last2 == "##grip" and cur == held end
-    answers.IsItemHovered = function() return false end
-    answers.GetMouseDragDelta = function() return 0, -12 end
-    answers.BeginTable = function() return true end
+    VO_.show("rules")
+    held_rule, mouse_y = "vo_rr" .. tostring(r.rules[3]), -1e9      -- C, pointer above them all
+    local okd, errd = pcall(VO_.draw, "ctx", "cv")
+    check("options: Track rules drawn with its rules", okd and "ok" or tostring(errd), "ok")
+    pcall(VO_.draw, "ctx", "cv")
+    check("options: a rule dragged to the top, and it stays", order_now(), "C,A,B")
+    mouse_y = 1e9                                                    -- then below them all
     pcall(VO_.draw, "ctx", "cv")
     pcall(VO_.draw, "ctx", "cv")
-    answers.PushID, answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered =
+    check("options: then to the bottom, and it stays", order_now(), "A,B,C")
+    answers.PushID, answers.InvisibleButton, answers.IsItemActive, answers.GetMousePos, answers.GetCursorScreenPos =
       was2[1], was2[2], was2[3], was2[4], was2[5]
     answers.BeginTable = was_bt
-    local order = {}
-    for i, x in ipairs(TRm.get().rules) do order[i] = x.text end
-    check("options: a rule dragged two places stays dragged", table.concat(order, ","), "C,A,B")
     TRm.save(TRm.decode(""))
     reaper.NamedCommandLookup, answers.ColorButton = was_ncl, was_cb
     VO_.float = nil

@@ -1422,17 +1422,19 @@ local function page_rules(ctx)
     box("A template's own colour wins##vo_rtpl", "tpl_col")
     ImGui.Unindent(ctx, IND)
     ImGui.TextDisabled(ctx, "Name rules, first match wins:")
-    local drop, move = nil, nil
+    local drop, held, tops = nil, nil, {}
     for i, rule in ipairs(r.rules) do
       -- (each rule its own ID, not its place: the grip being dragged
       -- stays with its rule as it moves)
       ImGui.PushID(ctx, "vo_rr" .. tostring(rule))
-      -- the order matters (first match wins): a grip to drag it up or
-      -- down, a place at a time as the pointer passes the next row
+      -- the order matters (first match wins): a grip to drag it to the
+      -- row under the pointer
       local gh = ImGui.GetFrameHeight(ctx)
       local gx, gy = ImGui.GetCursorScreenPos(ctx)
+      tops[i] = gy
       ImGui.InvisibleButton(ctx, "##grip", 12, gh)
       local hot = ImGui.IsItemHovered(ctx) or ImGui.IsItemActive(ctx)
+      if ImGui.IsItemActive(ctx) then held = i end
       local dl = ImGui.GetWindowDrawList(ctx)
       for row = 0, 2 do
         for col = 0, 1 do
@@ -1441,14 +1443,6 @@ local function page_rules(ctx)
         end
       end
       if hot then ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS) end
-      if ImGui.IsItemActive(ctx) and not ImGui.IsItemHovered(ctx) then
-        local _, dy = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
-        local to = i + ((dy or 0) < 0 and -1 or 1)
-        if to >= 1 and to <= #r.rules then
-          move = { i, to }
-          ImGui.ResetMouseDragDelta(ctx, ImGui.MouseButton_Left)
-        end
-      end
       ImGui.SameLine(ctx)
       local v = rcombo(ctx, "##how", rule.how, { { "contains", "contains" }, { "is", "is" } }, 90)
       if v and v ~= rule.how then rule.how = v; dirty = true end
@@ -1466,9 +1460,15 @@ local function page_rules(ctx)
       ImGui.PopID(ctx)
     end
     if drop then table.remove(r.rules, drop); dirty = true end
-    if move then
-      r.rules[move[1]], r.rules[move[2]] = r.rules[move[2]], r.rules[move[1]]
-      dirty = true
+    -- a held grip: its rule goes to the row the pointer is over
+    if held and not drop then
+      local _, my = ImGui.GetMousePos(ctx)
+      local to = 1
+      for k = 1, #tops do if my >= tops[k] then to = k end end
+      if to ~= held then
+        table.insert(r.rules, to, table.remove(r.rules, held))
+        dirty = true
+      end
     end
     if ImGui.SmallButton(ctx, "+ Rule##vo_radd") then
       r.rules[#r.rules + 1] = { how = "contains", text = "", col = 0x808080 }
