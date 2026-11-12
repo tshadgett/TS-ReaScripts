@@ -396,6 +396,9 @@ track buried under a louder one marks fully). Then:
 - **Lows to highs at mixing levels:** a band counts when it's within 35 dB
   of the track's loudest at that moment, so a kick's and a bass's lows
   count and a noise floor doesn't.
+- **The bands that matter:** a band weighs fully near a track's own
+  loudest bands and nothing 24 dB under them, so the marks keep to the
+  frequencies the two tracks are about, not every band both touch.
 - **Every listed track** against the one in view, not one you pick.
 - **Panning:** a track panned to one side shares half as much with one in
   the centre, and nothing with one on the other side.

@@ -12601,6 +12601,23 @@ do
     for n = 1, 150 do now = now + 0.07; on = (n % 7 == 0); pub(); CL.tick(Bs, l2) end
     local mb2 = CL.mark(K, "Bass", "Kick In")
     check("collisions: bass in view, the kick marks less", mb2 ~= nil and mb2.bands[2] < mk.bands[2] and mb2.bands[2] > 0.05, true)
+    -- the bands that matter: both quiet in the mids (20 dB under their
+    -- lows) and level there: the lows mark, the mids hardly
+    CL._reset()
+    local function pub2()
+      seq = seq + 1
+      for tr, i in pairs(idx) do
+        local b = CL.BASE + (i + 1) * CL.STRIDE
+        gm[b], gm[b + 1], gm[b + 2], gm[b + 3], gm[b + 4], gm[b + 5], gm[b + 6] = seq, g.n, 20, 20000, -20, -20, i + 2
+        for k = 1, g.n do
+          local hz = g.hz[k]
+          gm[b + CL.OFF + k - 1] = (hz >= 40 and hz <= 120) and -30 or ((hz >= 700 and hz <= 1400) and -50 or -150)
+        end
+      end
+    end
+    for _ = 1, 60 do now = now + 0.07; pub2(); CL.tick(K, l2) end
+    local mf = CL.mark(Bs, "Kick In", "Bass")
+    check("collisions: the lows that matter mark, the quiet mids hardly", mf ~= nil and mf.bands[2] > 0.9 and mf.bands[6] < 0.2, true)
   end
   -- off: nothing
   CL.set_mode(nil)
