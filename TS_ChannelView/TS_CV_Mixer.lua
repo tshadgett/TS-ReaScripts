@@ -607,7 +607,7 @@ function MX.fold_edges(dl, t, x, y, w, h)
   if rb then ImGui.DrawList_AddRectFilled(dl, x + w - 2, y, x + w, y + h, rb.col or C.COL.header_bg) end
 end
 
-local function column(ctx, t, avail_h, cur_track, lift)
+local function column(ctx, t, avail_h, cur_track, lift, mark)
   local collapsed = t.folded or St.is_collapsed("mx:" .. t.guid)
   local w = MX.col_width(t.guid, t.folded, t.track)
   -- Selected as REAPER sees it, so a multi-selection lights every strip
@@ -743,7 +743,7 @@ local function column(ctx, t, avail_h, cur_track, lift)
     -- channel view also uses for this button on its own.
     ImGui.SetCursorScreenPos(ctx, x, y + strip_h + name_gap)
     local nb_hit, nb_dbl, nb_menu = name_button(ctx, track_label(t),
-      t.col or C.COL.header_bg, selected, t.guid, ww, t)
+      t.col or C.COL.header_bg, selected, t.guid, ww, t, mark)
     if nb_hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
     if nb_dbl then dbl_name = t.track end
     if nb_menu then TM.open_context(t.track) end
@@ -918,8 +918,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
     -- cursor.
     local row_y = select(2, ImGui.GetCursorPos(ctx))
     local x_off = 0
-    -- Collisions (channel view): measured for the track in view
-    local CL = (not strips) and cl() or nil
+    -- Collisions: measured for the track in view (the selected one)
+    local CL = cl()
     if CL and not CL.mode() then CL = nil end
     if CL then CL.tick(cur_track, list) end
     local cur_name = CL and cur_track and TO.name(cur_track) or nil
@@ -972,7 +972,8 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
           end
           MX.scroll_to_sel = false
         end
-        local want, dbl = column(ctx, t, inner_h, cur_track, lift)
+        local mark = CL and t.track ~= cur_track and CL.mark(t.track, cur_name, t.name) or nil
+        local want, dbl = column(ctx, t, inner_h, cur_track, lift, mark)
         if want then open_it = want end
         if dbl  then dbl_track = dbl end
       else

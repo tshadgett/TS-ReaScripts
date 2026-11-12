@@ -372,9 +372,9 @@ outline would have nothing to stand against.
 
 ## Collisions (Pro)
 
-In channel view, the track list can mark the tracks that share the space
-of the one you're looking at: right-click a track button ▸ **Collisions** ▸
-*Bands* or *Dot* (*Off* to stop).
+The track buttons can mark the tracks that share the space of the one
+you're looking at (in mixer view, the selected track): right-click a
+track button ▸ **Collisions** ▸ *Bands* or *Dot* (*Off* to stop).
 
 - **Bands:** ten small bars along the top of a track's button, low to
   high, each as strong as that track shares this one's space there.
@@ -2282,7 +2282,7 @@ them up the first time ChannelView shows it.
 | `TS_CV_ConsoleSetup.lua` | the Console setup window (Pro) |
 | `TS_CV_ConsoleDrawer.lua` | the console panel in channel view (Pro) |
 | `TS_CV_ConsoleState.lua` | reading and writing a Sonimus console's saved state (Pro) |
-| `TS_CV_Collisions.lua` | Collisions: the marks on channel view's track list (Pro) |
+| `TS_CV_Collisions.lua` | Collisions: the marks on the track buttons (Pro) |
 | `TS_CV_Mask.lua` | the masking model Collisions uses (Track Analyser's TS_TA_Mask) (Pro) |
 | `TS_ChannelView_ConsoleSetup.lua` | the action that opens Console setup (Pro) |
 | `TS_CV_KnobParts.lua` | knobs drawn from parts, for the recipes and your own looks |
