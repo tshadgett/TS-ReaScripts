@@ -305,7 +305,12 @@ local function publish(rig, on, compare)
     end
   else
     if pre then PL.set_publish(tr, pre, "pre", on) end
-    if post then PL.set_publish(tr, post, "post", on) end
+    if post then
+      PL.set_publish(tr, post, "post", on)
+      -- the selected track's post probe is a post probe, never the
+      -- comparison (it may have been the comparison a moment ago)
+      if on then PL.set_compare(tr, post, false) end
+    end
   end
 end
 
