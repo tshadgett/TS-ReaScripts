@@ -388,9 +388,14 @@ are where both are there (the same level marks solid, 20 dB apart nothing)
 and how far the other covers this one (Track Analyser's masking model, so a
 track buried under a louder one marks fully). Then:
 
-- **How much of the time:** a clash in every bar marks strongly, one in a
-  fill only faintly. Marks build up and fade over a few seconds while
-  REAPER plays; stopped, they stay as they were.
+- **How much of the time:** counted over the moments the track in view
+  is sounding in that band. Viewing a kick, a bass under every hit marks
+  within a few hits; viewing the bass, the kick (there only on its hits)
+  marks less. A clash that stops fades over a few seconds of playing;
+  stopped, the marks stay as they were.
+- **Lows to highs at mixing levels:** a band counts when it's within 35 dB
+  of the track's loudest at that moment, so a kick's and a bass's lows
+  count and a noise floor doesn't.
 - **Every listed track** against the one in view, not one you pick.
 - **Panning:** a track panned to one side shares half as much with one in
   the centre, and nothing with one on the other side.

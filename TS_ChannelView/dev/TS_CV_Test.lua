@@ -12566,12 +12566,41 @@ do
     CL.draw(fake, "dl", m, 0, 0, 60, false)
     local alphas = {}
     for _, d in ipairs(drawn) do alphas[#alphas + 1] = d[1] .. d[2] end
-    check("collisions: bands drawn, opacity their strength", table.concat(alphas, " "), "r51 r255 r128")
+    check("collisions: bands drawn, opacity their strength (square root)", table.concat(alphas, " "), "r114 r255 r180")
     drawn = {}
     CL.set_mode("dot")
     CL.draw(fake, "dl", m, 0, 0, 60, true)
     check("collisions: a dot (with its shade on a filled button)", #drawn == 2 and drawn[2][1] == "c" and drawn[2][2] == 255, true)
     CL.set_mode("bands")
+  end
+  -- a kick (there one moment in seven) and a bass (always), both at
+  -- 40-120 Hz around -45 dBFS: viewing the kick, the bass marks strongly
+  -- at once; viewing the bass, the kick less
+  do
+    CL._reset()
+    local K, Bs = { n = "Kick In" }, { n = "Bass" }
+    idx, lvl = { [K] = 1, [Bs] = 2 }, {}
+    local on = false
+    local function pub()
+      seq = seq + 1
+      for tr, i in pairs(idx) do
+        local b = CL.BASE + (i + 1) * CL.STRIDE
+        gm[b], gm[b + 1], gm[b + 2], gm[b + 3], gm[b + 4], gm[b + 5], gm[b + 6] = seq, g.n, 20, 20000, -20, -20, i + 2
+        local lv = (tr == Bs or on) and -45 or -150
+        for k = 1, g.n do
+          local hz = g.hz[k]
+          gm[b + CL.OFF + k - 1] = (hz >= 40 and hz <= 120) and lv or ((tr == K and on and hz > 2000 and hz < 5000) and -50 or -150)
+        end
+      end
+    end
+    local l2 = { { track = K }, { track = Bs } }
+    for n = 1, 30 do now = now + 0.07; on = (n % 7 == 0); pub(); CL.tick(K, l2) end   -- about 2 s
+    local mk = CL.mark(Bs, "Kick In", "Bass")
+    check("collisions: kick in view, the bass under it marks within 2 s", mk ~= nil and mk.bands[2] > 0.6, true)
+    CL._reset()
+    for n = 1, 150 do now = now + 0.07; on = (n % 7 == 0); pub(); CL.tick(Bs, l2) end
+    local mb2 = CL.mark(K, "Bass", "Kick In")
+    check("collisions: bass in view, the kick marks less", mb2 ~= nil and mb2.bands[2] < mk.bands[2] and mb2.bands[2] > 0.05, true)
   end
   -- off: nothing
   CL.set_mode(nil)
