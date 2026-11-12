@@ -1424,7 +1424,9 @@ local function page_rules(ctx)
     ImGui.TextDisabled(ctx, "Name rules, first match wins:")
     local drop, move = nil, nil
     for i, rule in ipairs(r.rules) do
-      ImGui.PushID(ctx, "vo_rr" .. i)
+      -- (each rule its own ID, not its place: the grip being dragged
+      -- stays with its rule as it moves)
+      ImGui.PushID(ctx, "vo_rr" .. tostring(rule))
       -- the order matters (first match wins): a grip to drag it up or
       -- down, a place at a time as the pointer passes the next row
       local gh = ImGui.GetFrameHeight(ctx)
@@ -1439,7 +1441,6 @@ local function page_rules(ctx)
         end
       end
       if hot then ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS) end
-      if ImGui.IsItemHovered(ctx) and not ImGui.IsItemActive(ctx) then ImGui.SetTooltip(ctx, "Drag to reorder") end
       if ImGui.IsItemActive(ctx) and not ImGui.IsItemHovered(ctx) then
         local _, dy = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
         local to = i + ((dy or 0) < 0 and -1 or 1)

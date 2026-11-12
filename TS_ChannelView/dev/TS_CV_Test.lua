@@ -10194,6 +10194,27 @@ do
     answers.BeginTable = was_bt
     check("options: Track rules drawn with its rules", okr and "ok" or tostring(errr), "ok")
     check("options: a name rule dragged up", TRm.get().rules[1].text .. "," .. TRm.get().rules[2].text, "SUM,acoust")
+    -- held over two frames, the grip stays with its rule: two places up
+    r = TRm.get()
+    r.rules = { { how = "is", text = "A", col = 1 }, { how = "is", text = "B", col = 2 }, { how = "is", text = "C", col = 3 } }
+    TRm.save(r)
+    local held = "vo_rr" .. tostring(r.rules[3])
+    local cur, last2 = nil, nil
+    local was2 = { answers.PushID, answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered }
+    answers.PushID = function(_, id) cur = id end
+    answers.InvisibleButton = function(_, id) last2 = id return false end
+    answers.IsItemActive = function() return last2 == "##grip" and cur == held end
+    answers.IsItemHovered = function() return false end
+    answers.GetMouseDragDelta = function() return 0, -12 end
+    answers.BeginTable = function() return true end
+    pcall(VO_.draw, "ctx", "cv")
+    pcall(VO_.draw, "ctx", "cv")
+    answers.PushID, answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered =
+      was2[1], was2[2], was2[3], was2[4], was2[5]
+    answers.BeginTable = was_bt
+    local order = {}
+    for i, x in ipairs(TRm.get().rules) do order[i] = x.text end
+    check("options: a rule dragged two places stays dragged", table.concat(order, ","), "C,A,B")
     TRm.save(TRm.decode(""))
     reaper.NamedCommandLookup, answers.ColorButton = was_ncl, was_cb
     VO_.float = nil
