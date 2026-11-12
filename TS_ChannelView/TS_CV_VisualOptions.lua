@@ -1425,14 +1425,29 @@ local function page_rules(ctx)
     local drop, move = nil, nil
     for i, rule in ipairs(r.rules) do
       ImGui.PushID(ctx, "vo_rr" .. i)
-      -- the order matters (first match wins): up and down
-      if i == 1 then ImGui.BeginDisabled(ctx, true) end
-      if ImGui.ArrowButton(ctx, "##up", ImGui.Dir_Up) then move = { i, i - 1 } end
-      if i == 1 then ImGui.EndDisabled(ctx) end
-      ImGui.SameLine(ctx, 0, 2)
-      if i == #r.rules then ImGui.BeginDisabled(ctx, true) end
-      if ImGui.ArrowButton(ctx, "##down", ImGui.Dir_Down) then move = { i, i + 1 } end
-      if i == #r.rules then ImGui.EndDisabled(ctx) end
+      -- the order matters (first match wins): a grip to drag it up or
+      -- down, a place at a time as the pointer passes the next row
+      local gh = ImGui.GetFrameHeight(ctx)
+      local gx, gy = ImGui.GetCursorScreenPos(ctx)
+      ImGui.InvisibleButton(ctx, "##grip", 12, gh)
+      local hot = ImGui.IsItemHovered(ctx) or ImGui.IsItemActive(ctx)
+      local dl = ImGui.GetWindowDrawList(ctx)
+      for row = 0, 2 do
+        for col = 0, 1 do
+          ImGui.DrawList_AddCircleFilled(dl, gx + 3.5 + col * 5, gy + gh * 0.5 - 5 + row * 5, 1.5,
+            hot and C.COL.icon_hot or C.COL.icon)
+        end
+      end
+      if hot then ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS) end
+      if ImGui.IsItemHovered(ctx) and not ImGui.IsItemActive(ctx) then ImGui.SetTooltip(ctx, "Drag to reorder") end
+      if ImGui.IsItemActive(ctx) and not ImGui.IsItemHovered(ctx) then
+        local _, dy = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
+        local to = i + ((dy or 0) < 0 and -1 or 1)
+        if to >= 1 and to <= #r.rules then
+          move = { i, to }
+          ImGui.ResetMouseDragDelta(ctx, ImGui.MouseButton_Left)
+        end
+      end
       ImGui.SameLine(ctx)
       local v = rcombo(ctx, "##how", rule.how, { { "contains", "contains" }, { "is", "is" } }, 90)
       if v and v ~= rule.how then rule.how = v; dirty = true end

@@ -10177,13 +10177,23 @@ do
     r = TRm.get()
     r.rules = { { how = "contains", text = "acoust", col = 0x6db966 }, { how = "is", text = "SUM", col = 0xffffff } }
     TRm.save(r)
-    local ups, was_ab = 0, answers.ArrowButton
-    answers.ArrowButton = function(_, id) if id == "##up" then ups = ups + 1; return ups == 2 end return false end
+    -- the second rule's grip held and dragged up, past the first
+    local grips, last_id = 0, nil
+    local was = { answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered }
+    answers.InvisibleButton = function(_, id)
+      last_id = id
+      if id == "##grip" then grips = grips + 1 end
+      return false
+    end
+    answers.IsItemActive = function() return last_id == "##grip" and grips == 2 end
+    answers.IsItemHovered = function() return false end
+    answers.GetMouseDragDelta = function() return 0, -12 end
     VO_.show("rules")
     local okr, errr = pcall(VO_.draw, "ctx", "cv")
-    answers.ArrowButton, answers.BeginTable = was_ab, was_bt
+    answers.InvisibleButton, answers.IsItemActive, answers.GetMouseDragDelta, answers.IsItemHovered = was[1], was[2], was[3], was[4]
+    answers.BeginTable = was_bt
     check("options: Track rules drawn with its rules", okr and "ok" or tostring(errr), "ok")
-    check("options: a name rule moved up", TRm.get().rules[1].text .. "," .. TRm.get().rules[2].text, "SUM,acoust")
+    check("options: a name rule dragged up", TRm.get().rules[1].text .. "," .. TRm.get().rules[2].text, "SUM,acoust")
     TRm.save(TRm.decode(""))
     reaper.NamedCommandLookup, answers.ColorButton = was_ncl, was_cb
     VO_.float = nil
