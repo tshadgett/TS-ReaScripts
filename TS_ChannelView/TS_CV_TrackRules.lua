@@ -43,7 +43,7 @@ local TR = {}
 
 local SECT, KEY = "TS_ChannelView", "track_rules"
 local STAMP = "P_EXT:TS_CV_RULECOL"
-TR.SUM_NAME = "SUM"
+TR.SUM_NAME = "SUM"         -- Console setup's summing track
 
 -- ---------------------------------------------------------------------
 -- settings
@@ -56,7 +56,7 @@ TR.DEFAULTS = {
   ret_where = "end", ret_folder = "FX",
   col_folder = "off", tpl_col = false, rules = {}, grp = {},
   sp_folder = false, sp_after = false, sp_returns = false, sp_sum = false,
-  live = false,
+  live = false, last = "SUM",
 }
 
 local function esc(s) return (tostring(s):gsub("[%%;=|,]", function(c) return ("%%%02X"):format(c:byte()) end)) end
@@ -177,6 +177,39 @@ function TR.number_name(raw, others)
     -- alone: kept as it is
   end
   return name, renames
+end
+
+-- New names for a scope's tracks (`names` in order), so each name's
+-- tracks have a number each and no two the same, renaming as few as it
+-- can: the first track with each number keeps it, and a plain name or a
+-- number already taken gets the lowest free one. A name on one track only
+-- is left as it is. Returns { [index] = new name }.
+function TR.renumber(names)
+  local groups, order = {}, {}
+  for i, n in ipairs(names) do
+    local b, k = TR.parse_name(n)
+    if b ~= "" then
+      if not groups[b] then groups[b] = {}; order[#order + 1] = b end
+      table.insert(groups[b], { i = i, k = k })
+    end
+  end
+  local out = {}
+  for _, b in ipairs(order) do
+    local g = groups[b]
+    if #g > 1 then
+      local used, redo = {}, {}
+      for _, m in ipairs(g) do
+        if m.k and not used[m.k] then used[m.k] = true else redo[#redo + 1] = m end
+      end
+      local free = 1
+      for _, m in ipairs(redo) do
+        while used[free] do free = free + 1 end
+        used[free] = true
+        out[m.i] = b .. " " .. free
+      end
+    end
+  end
+  return out
 end
 
 -- ---------------------------------------------------------------------
@@ -375,7 +408,11 @@ local function set_name(tr, n) reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", 
 local function index_of(tr) return math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0) end
 local function nrecv(tr) return reaper.GetTrackNumSends(tr, -1) or 0 end
 local function nsends(tr) return reaper.GetTrackNumSends(tr, 0) or 0 end
-local function is_sum(tr) return name_of(tr) == TR.SUM_NAME end
+-- The track kept at the end (Keep at the end; SUM to start), by name.
+local function is_sum(tr)
+  local last = TR.get().last or ""
+  return last ~= "" and name_of(tr) == last
+end
 
 local function to_rgb(native)
   if not native or native & 0x1000000 == 0 then return nil end
@@ -456,6 +493,29 @@ function TR.number(new, s)
       local name, renames = TR.number_name(raw, names)
       if name ~= raw then set_name(tr, name) end
       for i, nn in pairs(renames) do set_name(others[i], nn) end
+    end
+  end
+end
+
+-- Every series in the project numbered (TR.renumber), folder by folder or
+-- across the project; folders left alone aren't.
+function TR.number_all(s)
+  local scopes = {}
+  if s.number_scope == "project" then
+    scopes[1] = tracks()
+  else
+    local by = {}
+    for _, tr in ipairs(tracks()) do
+      local p = parent_of(tr) or false
+      if not by[p] then by[p] = {}; scopes[#scopes + 1] = by[p]; by[p].p = p end
+      table.insert(by[p], tr)
+    end
+  end
+  for _, sc in ipairs(scopes) do
+    if not (sc.p and left_alone(s, sc.p)) then
+      local names = {}
+      for i, tr in ipairs(sc) do names[i] = name_of(tr) end
+      for i, n in pairs(TR.renumber(names)) do set_name(sc[i], n) end
     end
   end
 end
@@ -744,6 +804,16 @@ function TR.apply_all(force)
   local s = TR.get()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
+  local sel = {}
+  for i = 0, reaper.CountSelectedTracks(0) - 1 do sel[#sel + 1] = reaper.GetSelectedTrack(0, i) end
+  if s.number then TR.number_all(s) end
+  if s.sort ~= "off" then
+    for _, tr in ipairs(tracks()) do
+      if depth(tr) > 0 and not left_alone(s, tr) then TR.sort_folder(tr, s.sort) end
+    end
+    reaper.Main_OnCommand(40297, 0)
+    for _, tr in ipairs(sel) do if reaper.ValidatePtr2(0, tr, "MediaTrack*") then reaper.SetTrackSelected(tr, true) end end
+  end
   TR.colour(nil, s, nil, force)
   TR.spacers(s)
   reaper.PreventUIRefresh(-1)

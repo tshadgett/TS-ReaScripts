@@ -2263,8 +2263,10 @@ A template's own folders are flattened, or kept as a folder inside
 
 **FX returns:** the sends panel's *New track*, *New track from template*
 and *New track with FX chain* make a return: at the end of the project or
-into a folder you name, numbered, and coloured as an FX return. Anything
-ChannelView adds at the end goes before a track named SUM.
+into a folder you name, numbered, and coloured as an FX return.
+
+**Keep at the end:** a track's name (SUM to start, Console setup's
+summing track). Anything ChannelView adds at the end goes before it.
 
 **Colours,** first match wins: your name rules (*contains* or *is* a
 word, and a colour), then each group's track colour (*Faders & strips*:
@@ -2273,12 +2275,14 @@ shades of it. A template's own colour can win. A track you've coloured
 yourself is left alone.
 
 **Spacers:** before each folder, after each folder's last track, before
-the FX returns, before SUM. With any of them on, ChannelView keeps the
+the FX returns, before the track kept at the end. With any of them on, ChannelView keeps the
 spacers, and takes out others.
 
 **When:** only on tracks ChannelView adds, or as tracks are added and
 moved (also by REAPER or other scripts). *Apply to the project now* puts
-every track right, and asks first about tracks coloured by hand. With SWS
+every track right: it numbers every series (renaming as few tracks as it
+can: Gtr DI 1, Gtr DI 1, Gtr DI 2 becomes 1, 3, 2), sorts the folders,
+colours and spaces, and asks first about tracks coloured by hand. With SWS
 auto colouring or auto layout on, the tab says so: the two would fight.
 
 **Toolbar actions:** right-click a template or an FX chain in any of

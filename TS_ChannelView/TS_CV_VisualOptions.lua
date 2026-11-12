@@ -1399,13 +1399,19 @@ local function page_rules(ctx)
       local fch, fv = ImGui.InputText(ctx, "##vo_rretf", r.ret_folder or "")
       if fch then r.ret_folder = fv; dirty = true end
     end
-    ImGui.TextDisabled(ctx, "Always before SUM.")
+
+    section(ctx, "End of the project")
+    rrow(ctx, "Keep at the end")
+    ImGui.SetNextItemWidth(ctx, 120)
+    local lch, lv = ImGui.InputTextWithHint(ctx, "##vo_rlast", "a track's name", r.last or "")
+    if lch then r.last = lv:match("^%s*(.-)%s*$"); dirty = true end
+    tip(ctx, "Tracks ChannelView adds at the end go before it.\nSUM is Console setup's summing track.")
 
     section(ctx, "Spacers")
     box("Before each folder##vo_rsp1", "sp_folder")
     box("After each folder's last track##vo_rsp2", "sp_after")
     box("Before the FX returns##vo_rsp3", "sp_returns")
-    box("Before SUM##vo_rsp4", "sp_sum")
+    if (r.last or "") ~= "" then box("Before " .. r.last .. "##vo_rsp4", "sp_sum") end
     if TR.spacers_on(r) then ImGui.TextDisabled(ctx, "Spacers elsewhere are taken out.") end
 
     ImGui.TableNextColumn(ctx)

@@ -282,6 +282,30 @@ P.tracks = { T("Bass", 0), T("FX", 1), T("Plate", -1, { recv = 1 }), T("SUM", 0,
 tr = TR.new_return("Hall.RfxChain", "Hall", by("Bass"))
 check("return: into the FX folder", layout(), "Bass:0 FX:1 Plate:0 Hall:-1 SUM:0")
 
+-- Apply: existing series numbered, renaming as few as it can, then sorted
+do
+  local ren = TR.renumber({ "Gtr DI 1", "Gtr DI 1", "Gtr DI 2", "Guitar", "Guitar", "Solo", "Bass" })
+  local t = {}
+  for i = 1, 7 do t[i] = ren[i] or "-" end
+  check("renumber: fewest renames", table.concat(t, ","), "-,Gtr DI 3,-,Guitar 1,Guitar 2,-,-")
+end
+P.tracks = { T("Guitars", 1), T("Gtr DI 1", 0), T("Gtr DI 1", 0), T("Gtr DI 2", 0), T("Guitar", 0), T("Guitar", -1),
+             T("Drums", 1), T("Tom", 0), T("Tom", -1), T("Solo", 0), T("Solo", 0) }
+set({ number = true, sort = "series", alone = { "Drums" } })
+TR.apply_all(false)
+check("apply: numbered and kept together", layout(),
+  "Guitars:1 Gtr DI 1:0 Gtr DI 2:0 Gtr DI 3:0 Guitar 1:0 Guitar 2:-1 Drums:1 Tom:0 Tom:-1 Solo 1:0 Solo 2:0")
+
+-- keep at the end: another name, or none
+P.tracks = { T("Bass", 0), T("Mix Bus", 0, { recv = 1 }) }
+set({ last = "Mix Bus" })
+TR.add_from_template("guitar", nil)
+check("keep at the end: another track", layout(), "Bass:0 Guitar 1:0 Mix Bus:0")
+P.tracks = { T("Bass", 0), T("SUM", 0, { recv = 1 }) }
+set({ last = "" })
+TR.add_from_template("guitar", nil)
+check("keep at the end: none", layout(), "Bass:0 SUM:0 Guitar 1:0")
+
 -- the menu item's name
 project()
 check("label: plain top-level", TR.add_label(by("Bass")), "Add child from template")
