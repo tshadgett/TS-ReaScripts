@@ -399,7 +399,7 @@ local function name_button(ctx, label, col, selected, id, w, t, mark)
   -- track keeps its own fill, so it stays the obvious one)
   local tint = (t and t.track and not selected) and TO.track_tint(t.track) or 0
   if tint > 0 and col then fill = U.tint(fill, col, tint) end
-  -- (Visual Options ▸ Track buttons) Filled: the button is the track's
+  -- (Options ▸ Track buttons) Filled: the button is the track's
   -- colour, a little lighter hovered, the selected one outlined in the
   -- name's ink; Bar: the colour along the top
   local studio = C.TRACK_COL == "filled" and col

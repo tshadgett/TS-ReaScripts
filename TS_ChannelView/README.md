@@ -25,7 +25,7 @@ this guide marked **(Pro)** need it.
 Pro adds grid layouts and the grid editor (*Edit layout*), the Rack view,
 the web companion, canvases (EQ, compressor and the rest, for any plugin,
 and ReaEQ's and ReaComp's), knob and button styles and colours, faceplates,
-finishes, sections and backgrounds, most of Visual Options (the panel
+finishes, sections and backgrounds, most of Options (the panel
 colour and accent, default control styles, corners, the 3D effect's
 lighting and shadows, presets), the plugin's own colours, vendor looks,
 plugin pictures on action bars, VU meters and visualisers, more than one layout per plugin and
@@ -456,7 +456,8 @@ so its probes are the new ones.
   and a sidechain send into a two-channel track passes no audio. Right-click
   a send to switch it between direct and sidechain, or remove it.
 * A **header bar**: on the left the **☰** menu (*View*, *Layouts*, *Web
-  companion*, *Dock* and *Run when REAPER starts*) and the view toggle, then
+  companion*, *Console setup…*, *Options…*, *Dock* and *Run when REAPER
+  starts*) and the view toggle, then
   the **MIDI learn** and **Probes** buttons; the track's colour chip, number
   and name **centred**; and on the right **OS**, the FX chain button and the
   **FX chain bypass** — which bypasses every plugin on the track at once, a
@@ -471,7 +472,7 @@ so its probes are the new ones.
 * Each panel header has the chain position, the plugin name, and four icon
   buttons: collapse, bypass (power), float (opens the plugin's own window)
   and the panel menu.
-* **Float plugins without controls** (View): a plugin whose layout has no
+* **Float plugins without controls** (Options ▸ Behaviour): a plugin whose layout has no
   controls — an instrument you'd rather play from its own window, say —
   opens its own window when you come to its track, a moment after so
   stepping through tracks doesn't flash windows open, and closes it when
@@ -547,7 +548,7 @@ so its probes are the new ones.
   round it (left inside, right outside, a tick at the peak hold).
   Double-click it for unity, right-click for the fader's menu. Shorter
   still, the pan knob goes and the volume takes its place.
-* **Strip width.** Visual Options ▸ *Faders & strips* sets how wide the
+* **Strip width.** Options ▸ *Faders & strips* sets how wide the
   fader panel, every mixer strip and the track name buttons are (the
   *Default* row, 72 to 240 px, 112 to start), and folder parents, VCA
   leaders and FX returns can each have their own. The meter grows and
@@ -703,11 +704,11 @@ so its probes are the new ones.
   it's a column-flow feature only.
 * **Remove a plugin** from a panel's menu. One undo step, no prompt — same
   as deleting from REAPER's own FX chain.
-* *View ▸ Panel alignment* centres the panels instead of packing them
-  left.
+* *Options ▸ Panels ▸ Panel alignment* centres the panels instead of
+  packing them left.
 * *View ▸ Macros*, *Modulators*, *Sends* and *Receives* show or hide those
   panels; a hidden one gives its room to the plugins.
-* *Visual Options ▸ Colour* has a **Hue** slider: the whole palette is generated
+* *Options ▸ Colour* has a **Hue** slider: the whole palette is generated
   from one hue, so it can be brought into line with a REAPER theme without
   picking thirty colours. Bypass and warning colours deliberately don't
   follow it, and lightness never changes — the contrast relationships are
@@ -761,7 +762,7 @@ plugin, the pre probe and the modulators; with one there, it's the menu.
 
 ## Console setup (Pro)
 
-**View ▸ Console setup…** (or the *TS_ChannelView_ConsoleSetup* action)
+**☰ ▸ Console setup…** (or the *TS_ChannelView_ConsoleSetup* action)
 sets up a console plugin you own across the session and keeps it in step:
 **Slate VCC**, **Waves NLS**, **Sonimus** (its A, N, S and T consoles as
 types), **The Analog Molecule Deluxe with The Hot Summer Plus**, and **The
@@ -1343,7 +1344,7 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
 ## Panel layout: sizes, button rows and sections
 
 Controls sit on a grid of half-cells. An ordinary control is one cell;
-**Visual Options ▸ Sizes** sets how wide a column is (46–64 px, 50 by
+**Options ▸ Sizes** sets how wide a column is (46–64 px, 50 by
 default), for ChannelView, the TCP window and the web page (each its own,
 or following ChannelView's).
 
@@ -1632,9 +1633,9 @@ panel: *Looks like a compressor (Threshold, Ratio, Attack, Release)*. One
 it can't place gets no box. **Use the canvas**
 makes a layout with that canvas, makes it the plugin's default and opens
 its setup; **Other…** picks another kind; **Not now** hides it until
-ChannelView starts again; **Never** stops it for that plugin. *View ▸
-Offer canvases for new plugins* turns the offers off (on again, it asks
-again for every plugin).
+ChannelView starts again; **Never** stops it for that plugin. *Options ▸
+Behaviour ▸ Offer canvases for new plugins* turns the offers off (on
+again, it asks again for every plugin).
 
 ReaEQ and ReaComp have canvases of their own, and ReaGate and ReaLimit
 start with a gate and a limiter canvas already set up (Set up the canvas…
@@ -1845,14 +1846,15 @@ number in that unit (20 kHz), whatever its range runs to. The same is in
 the editor's *Values* row. For a knob, *Values* also holds the **numbers
 round the dial**: *None*, *Values* or *0–10*.
 
-## Visual Options
+## Options
 
-**View ▸ Visual Options…** is one window for how ChannelView looks. It
+**☰ ▸ Options…** is one window for how ChannelView looks and behaves. It
 also opens from the TCP window's settings menu, and from a track fader's
 right-click ▸ *Group looks…*.
 
-- **Tabs:** ChannelView, Rack (Pro), TCP window and Web (Pro), each with
-  settings of its own. The Rack, the TCP window and the web page *Follow
+- **Tabs:** the looks, ChannelView, Rack (Pro), TCP window and Web (Pro),
+  then **Behaviour** and **Track rules** (below). Each look has settings
+  of its own. The Rack, the TCP window and the web page *Follow
   ChannelView* to start; untick it to give one its own (it starts as a
   copy of ChannelView's). Changes show at once, in every window that's
   open.
@@ -1870,16 +1872,20 @@ right-click ▸ *Group looks…*.
   text following it) and the accent (Pro: from the hue, or one you pick).
 - **Controls (Pro):** the default knob (any style or recipe, or your own
   with *Customise…*, its colour and a value arc), button, dropdown and
-  plugin fader — what a control with no style of its own draws as.
+  plugin fader — what a control with no style of its own draws as. For
+  every tab: **Values under controls** (off, a value shows while you
+  hover its control).
 - **Panels (Pro):** corner rounding, the power switch (an icon or a
   lamp), the header and foot hidden until the pointer is over them, and
   **Meter scales**: figures on the GR and In / Out meters, as on the
-  fader meters (the web page's GR meters too).
+  fader meters (the web page's GR meters too). On the ChannelView and
+  Rack tabs: **Panel alignment**, left or centred.
 - **Track buttons:** the track's colour on its name button (Pro: *Bar
   below*, *Bar above* or *Filled*) and the track icons.
 - **Faders & strips:** each group's fader style and colour, strip width
   and background tint (folder parents, VCA leaders, FX returns and the
-  Default), REAPER's spacer size (needs SWS), and **Folder borders**: a
+  Default), each group's **track colour** (see Track rules), REAPER's
+  spacer size (needs SWS), and **Folder borders**: a
   bar in a folder's colour down the left of its strip and the right of
   its last track's, name buttons included, 1 to 8 px, with a pair for
   each folder inside another. They describe tracks, not a window, so
@@ -1895,6 +1901,12 @@ right-click ▸ *Group looks…*.
 - **The TCP window's tab** has its rows' own settings too: corner rounding
   for its track panels (Pro; the panels' own, or its own), background
   tint, folder indent (0 for none) and which track buttons show.
+- **Behaviour:** *Float plugins without controls* (ChannelView and the
+  rack each their own), *Offer canvases for new plugins* (Pro), *Use mouse
+  wheel on controls* and *Return keyboard focus to REAPER* (needs
+  js_ReaScriptAPI or SWS).
+- **Track rules:** what happens when ChannelView adds or duplicates
+  tracks, and how tracks are coloured and spaced (below).
 
 The preview at the right shows the tab's look as you change it, and its
 controls work.
@@ -2037,7 +2049,7 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
 Only *Theme* and the *Accent* cap follow Hue/Tint; every other faceplate and
 cap colour is fixed, the way hardware is. The menus stay open while you
 click through them, so you can try a few and watch the panel change.
-Visual Options ▸ *Depth* ▸ **3D effect** (on by default) lights the panels
+Options ▸ *Depth* ▸ **3D effect** (on by default) lights the panels
 from the top left:
 a gentle gradient on the faceplates (Theme stays flat), panel edges that
 catch the light, and shadows under knobs, switches, styled buttons and
@@ -2063,7 +2075,7 @@ have looks too: right-click the fader for its **Style** (any of the fader
 styles) and **Colour** (the cap colours, [+] for any colour, recent colours).
 It acts on the selection when the track is part of it, as REAPER's menus
 do, and is saved with the track in the project. **Group looks…** in the
-same menu opens Visual Options ▸ *Faders & strips*, which gives every **folder parent**, **VCA leader** and **FX return** (a
+same menu opens Options ▸ *Faders & strips*, which gives every **folder parent**, **VCA leader** and **FX return** (a
 track with receives that's neither a folder parent nor in a folder) a look
 of its own, and **Default** covers every other track — and whatever a
 group leaves unset — all kept with ChannelView for every project. A
@@ -2077,7 +2089,7 @@ strips* has a **Background** strength (folder parents at 60% and everything else
 15%, say), and a track can have its own in the fader menu's **Background**
 slider; *As group* goes back to its group's. Off by default. A light
 colour is held back so the readouts on it stay readable. The TCP window's
-rows follow, unless Visual Options ▸ TCP window ▸ *Background tint* is
+rows follow, unless Options ▸ TCP window ▸ *Background tint* is
 off; the fader
 panel it opens always does. The web page has it too.
 
@@ -2091,7 +2103,7 @@ in the track's colour.
 | drag up/down | change value |
 | wheel over empty space | scroll the row of panels sideways |
 | hold Shift | fine |
-| mouse wheel | step (unless *View ▸ Use mouse wheel on controls* is off: then it only ever scrolls) |
+| mouse wheel | step (unless *Options ▸ Behaviour ▸ Use mouse wheel on controls* is off: then it only ever scrolls) |
 | double-click | back to the parameter's centre/detent |
 | hover | the current value, in a tooltip that stays put |
 | right-click | control menu |
@@ -2179,7 +2191,7 @@ meters** shows each track's plugin delay compensation under its meter,
 in samples and milliseconds — on tracks with any, when the row is tall
 enough.
 
-Visual Options ▸ TCP window ▸ **Track buttons** choose which of monitoring,
+Options ▸ TCP window ▸ **Track buttons** choose which of monitoring,
 record arm, mute and solo are on every row; with *Show the others while
 on*, the rest appear only while they're on. Each keeps its own place, in
 that order, so they line up down the panel. Press mute, solo or record arm
@@ -2204,12 +2216,77 @@ folder. With measurement taps on the track, ChannelView asks first whether
 to keep them: *Yes* saves the track as it is, taps and channels included;
 *No* leaves them out (and any plugin held at a channel count for them),
 and they go back once it's saved. The probes stay either way. *Add track
-▸ New track from template* brings one in.
+▸ New track from template* brings one in, and **Add child from template**
+or **Add sibling from template** (see Track rules) puts one in a folder
+with the track.
+
+Right-click a track ▸ **Duplicate track** copies it with its items;
+**Duplicate track without items** copies everything else.
 
 Each plugin's own ChannelView settings (the layout it shows, a folded
 panel, a virtual control's setting, its page) go with the track: into a
 template, a duplicated track, or a track copied and pasted. The copy takes
 them up the first time ChannelView shows it.
+
+## Track rules
+
+*Options ▸ Track rules* sets what happens when ChannelView adds or
+duplicates tracks, and how tracks are coloured and spaced. Everything
+starts off: until you tick something, tracks are added as REAPER adds
+them.
+
+**Add child from template / Add sibling from template** (the **+** menu,
+and right-click a track ▸ *Add track*): the name says what it does beside
+the track you're on.
+
+- On a top-level track that isn't a folder, it becomes one, with the
+  template's tracks inside.
+- On a folder parent, the template's tracks go into its folder, at the
+  top or the bottom (*New children go*).
+- On a track inside a folder, they go after it, in the same folder.
+
+A template's own folders are flattened, or kept as a folder inside
+(*Template's folders*).
+
+**Adding and duplicating**
+
+- **Number them:** Guitar 1 beside Guitar 1 becomes Guitar 2, in its
+  folder or across the project; a lone Guitar beside numbered ones becomes
+  Guitar 1. *Templates with more than one track keep their names* (a kit's
+  Rack Tom 1 and 2), and *Leave these folders alone* lists folders that
+  aren't numbered or sorted (Drums, say).
+- **Sort the folder:** A–Z, or *Keep a series together* (Guitar 3 goes
+  beside Guitars 1 and 2; nothing else moves).
+- **Select and arm the new track:** the one with sends, when one has any
+  (an instrument with its outputs), or all of them. *Disarm the others*,
+  and with TS_TrackingMode installed, *Only in Tracking mode*.
+
+**FX returns:** the sends panel's *New track*, *New track from template*
+and *New track with FX chain* make a return: at the end of the project or
+into a folder you name, numbered, and coloured as an FX return. Anything
+ChannelView adds at the end goes before a track named SUM.
+
+**Colours,** first match wins: your name rules (*contains* or *is* a
+word, and a colour), then each group's track colour (*Faders & strips*:
+VCA leaders, folder parents, FX returns), then the folder's colour or
+shades of it. A template's own colour can win. A track you've coloured
+yourself is left alone.
+
+**Spacers:** before each folder, after each folder's last track, before
+the FX returns, before SUM. With any of them on, ChannelView keeps the
+spacers, and takes out others.
+
+**When:** only on tracks ChannelView adds, or as tracks are added and
+moved (also by REAPER or other scripts). *Apply to the project now* puts
+every track right, and asks first about tracks coloured by hand. With SWS
+auto colouring or auto layout on, the tab says so: the two would fight.
+
+**Toolbar actions:** right-click a template or an FX chain in any of
+ChannelView's menus ▸ *Make toolbar action…*. A template's action adds it
+as a child or sibling of the selected track; a chain's adds an FX return
+with it, sent from the selected track. They're in the action list as
+*ChannelView - Add from template - …* and *ChannelView - New FX return -
+…*, and their scripts in `Scripts/TS_ChannelView actions`.
 
 ## Files
 
@@ -2226,7 +2303,8 @@ them up the first time ChannelView shows it.
 | `TS_CV_GridEditor.lua` | the grid editor (*Edit layout*) (Pro) |
 | `TS_CV_Widgets.lua` | knob / button / stepped-value drawing |
 | `TS_CV_Style.lua` | the look of option sheets and dialogs: captions, chips, switches, sliders |
-| `TS_CV_VisualOptions.lua` | View ▸ Visual Options: its window, its presets, and each window's settings |
+| `TS_CV_VisualOptions.lua` | ☰ ▸ Options: its window, its presets, and each window's settings |
+| `TS_CV_TrackRules.lua` | Track rules: adding from a template beside a track, numbering, sorting, colours, spacers, toolbar actions |
 | `TS_CV_Panel.lua` | one plugin's panel |
 | `TS_CV_Editor.lua` | the Setup Edit Parameters dialog |
 | `TS_CV_Mixer.lua` | mixer view, and the shared track row (`MX.draw_row`) both views draw into |
@@ -2251,7 +2329,7 @@ them up the first time ChannelView shows it.
 | `TS_CV_Busy.lua` | backing off while REAPER is busy |
 | `TS_CV_MapPanel.lua` | an EQ layout's canvas (Pro) |
 | `TS_CV_MapEQ.lua` | an EQ layout's bands: their shapes, reading and setting them (Pro) |
-| `TS_CV_AutoFloat.lua` | View ▸ Float plugins without controls: opening and closing their windows |
+| `TS_CV_AutoFloat.lua` | Float plugins without controls: opening and closing their windows |
 | `TS_CV_PluginColours.lua` | A plugin's own colours, read off its window (Pro) |
 | `TS_CV_Freeze.lua` | freezing: REAPER's own, with the frozen plugins shown where they were and ChannelView's own plugins kept live |
 | `TS_CV_Learn.lua` | learning and measuring on a hidden copy of the plugin: gain knobs; with Pro, EQ bands, thresholds, reverb decay, saturation |
@@ -2420,7 +2498,7 @@ script into the action list.
   shows or hides the console, macros, modulators, sends and receives on
   this device.
 - **Looks:** finishes, corners, switches, knob recipes, your own knob
-  looks and concentric pairs draw as on the desktop. Visual Options' *Web*
+  looks and concentric pairs draw as on the desktop. Options' *Web*
   tab (or ChannelView's, while it follows it) sets its colours, default
   styles, corners, power switch, auto-hidden header and foot, track
   buttons, Lighting and Shadows.

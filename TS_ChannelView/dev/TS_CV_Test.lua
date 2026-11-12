@@ -1659,7 +1659,7 @@ ch("accent unaffected by tint",  C.COL.accent ~= C.COL.panel_bg)
 -- and back
 C.BASE_HUE, C.TINT = 219, 1.0; C.build_palette()
 ch("reset restores the original", C.COL.accent == ORIGINAL.accent)
--- Visual Options' colours: a picked accent as it is, its family spaced
+-- Options' colours: a picked accent as it is, its family spaced
 -- from it, the greys and fixed colours untouched; a light background
 -- turns the inks dark; and back
 do
@@ -2503,7 +2503,7 @@ do
   Cc.COL.header_text, Cc.COL.panel_bg = was_t, was_p
 end
 
--- Visual Options > Text: the panels' text, headers and toolbars
+-- Options > Text: the panels' text, headers and toolbars
 do
   local VO_ = require("TS_CV_VisualOptions")
   local Cc = require("TS_CV_Config")
@@ -10130,7 +10130,7 @@ do
   check("grid sheet: several selected", okm and "ok" or tostring(errm), "ok")
   check("grid sheet: the panel's menus drawn", (called.style or 0) > 0 and (called.back or 0) > 0 and (called.look or 0) > 0
     and (called.plate or 0) > 0 and (called.section or 0) > 0 and (called.colour or 0) > 0, true)
-  -- Visual Options: By time and its list drawn (Pro)
+  -- Options: By time and its list drawn (Pro)
   do
     local VO_ = require("TS_CV_VisualOptions")
     local ED_ = require("TS_CV_Edition")
@@ -10151,6 +10151,29 @@ do
     check("visual options: a row for each time", rows, 2)
     check("visual options: By time and its list drawn", (ok1 and "ok" or tostring(err1)) .. "|" .. (ok2 and "ok" or tostring(err2)), "ok|ok")
     VO_.set_by_time("tcp", false)
+    -- Behaviour and Track rules, and the settings under Controls, Panels
+    -- and Faders & strips
+    local TRm = require("TS_CV_TrackRules")
+    local r = TRm.get()
+    r.number, r.arm, r.ret_where = true, true, "folder"
+    r.rules = { { how = "contains", text = "acoust", col = 0x6db966 } }
+    r.grp = { fxret = 0xf085fe }
+    TRm.save(r)
+    VO_.float = { get = function() return false end, assign = function() end }
+    local was_ncl, was_cb = reaper.NamedCommandLookup, answers.ColorButton
+    reaper.NamedCommandLookup = reaper.NamedCommandLookup or function() return 0 end
+    answers.ColorButton = function() return false end
+    require("TS_CV_ColourPick").attach(fake)
+    local drawn = {}
+    for _, page in ipairs({ { "behaviour" }, { "rules" }, { "cv", "controls" }, { "cv", "panels" }, { "cv", "faders" } }) do
+      VO_.show(page[1], page[2])
+      local okp, errp = pcall(VO_.draw, "ctx", "cv")
+      drawn[#drawn + 1] = okp and "ok" or tostring(errp)
+    end
+    check("options: Behaviour, Track rules and the moved settings drawn", table.concat(drawn, "|"), "ok|ok|ok|ok|ok")
+    TRm.save(TRm.decode(""))
+    reaper.NamedCommandLookup, answers.ColorButton = was_ncl, was_cb
+    VO_.float = nil
     ED_.PRO = was
   end
   -- a new layout from the header: a copy, then an empty one, each edited next
@@ -12063,7 +12086,7 @@ do
 end
 
 -- ---------------------------------------------------------------------
--- Visual Options: storage, following, presets, applying, migrating
+-- Options: storage, following, presets, applying, migrating
 -- ---------------------------------------------------------------------
 do
   local ext = {}
@@ -13098,7 +13121,7 @@ do
   check("image draw: the finishes' FN.image kept", FN.image ~= FN.draw_pic and type(FN.image), "function")
 end
 
--- a GR meter's figures (Visual Options' Meter scales): three or four
+-- a GR meter's figures (Options' Meter scales): three or four
 -- round ones, the range's end among them
 check("gr figures: 12", table.concat(W.gr_marks(12), ","), "3,6,9,12")
 check("gr figures: 18", table.concat(W.gr_marks(18), ","), "6,12,18")

@@ -2377,7 +2377,7 @@ function TB.draw_menus(ctx, where)
   icon_picker(ctx, where)
 end
 
--- A bar and its menus in the toolbars' font (Visual Options > Text)
+-- A bar and its menus in the toolbars' font (Options > Text)
 for _, k in ipairs({ "draw", "draw_v", "draw_menus" }) do
   local f = TB[k]
   TB[k] = function(ctx, ...)

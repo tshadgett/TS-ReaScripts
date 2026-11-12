@@ -797,7 +797,7 @@ end
 -- ---------------------------------------------------------------------
 -- A group's mixer strips can be wider or narrower than the strip width
 -- (C.CHANNEL_W, the Default's): ExtState "group_w", "vca=110;parent=120".
--- Unset, a group's strips are the strip width. (Visual Options ▸ Faders &
+-- Unset, a group's strips are the strip width. (Options ▸ Faders &
 -- strips)
 local GW_KEY = "group_w"
 local gws
@@ -978,8 +978,9 @@ end
 -- Duplicates `tracks` with REAPER's own action, so everything a track
 -- carries comes along -- items, FX, envelopes, routing -- each copy
 -- landing after its original. The copies end up selected, as they do
--- from REAPER's menu.
-function TO.duplicate_tracks(tracks)
+-- from REAPER's menu. `no_items`: the copies' items are taken out. Then
+-- the Track rules (numbering, sorting, colours, spacers, arming).
+function TO.duplicate_tracks(tracks, no_items)
   local AC = require("TS_CV_Actions")
   local list = {}
   for _, tr in ipairs(tracks) do
@@ -991,15 +992,31 @@ function TO.duplicate_tracks(tracks)
   -- each plugin's own settings go with the copies (TS_CV_Carry)
   local CR = require("TS_CV_Carry")
   for _, tr in ipairs(list) do CR.write(tr, nil) end
+  local had = {}
+  for i = 0, reaper.CountTracks(0) - 1 do had[reaper.GetTrack(0, i)] = true end
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
   reaper.Main_OnCommand(40297, 0)          -- Track: Unselect all tracks
   for _, tr in ipairs(list) do reaper.SetTrackSelected(tr, true) end
   local ok = AC.run("Track: Duplicate tracks", 40062)
+  local copies = {}
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    if not had[tr] then copies[#copies + 1] = tr end
+  end
+  if no_items then
+    for _, tr in ipairs(copies) do
+      for k = reaper.CountTrackMediaItems(tr) - 1, 0, -1 do
+        reaper.DeleteTrackMediaItem(tr, reaper.GetTrackMediaItem(tr, k))
+      end
+    end
+  end
+  require("TS_CV_TrackRules").after_add(copies, {})
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock(#list == 1 and "ChannelView: duplicate track"
-                                  or "ChannelView: duplicate tracks", -1)
+  local what = #list == 1 and "track" or "tracks"
+  reaper.Undo_EndBlock("ChannelView: duplicate " .. what .. (no_items and " without items" or ""), -1)
   reaper.TrackList_AdjustWindows(false)
+  reaper.UpdateArrange()
   return ok
 end
 
@@ -1100,13 +1117,18 @@ local function restore(sel)
   if #sel > 0 then reaper.Main_OnCommand(40914, 0) end   -- first selected is last touched
 end
 
+-- ("At the end" is before SUM when there is one: TS_CV_TrackRules.)
 function TO.new_track_at_end()
-  local n = reaper.CountTracks(0)
+  local n = require("TS_CV_TrackRules").end_index()
   reaper.Undo_BeginBlock()
   reaper.InsertTrackAtIndex(n, true)
+  local tr = reaper.GetTrack(0, n)
+  if tr and (reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") or 0) ~= 0 then
+    reaper.SetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH", 0)
+  end
   reaper.Undo_EndBlock("ChannelView: insert new track", -1)
   reaper.TrackList_AdjustWindows(false)
-  return reaper.GetTrack(0, n)
+  return tr
 end
 
 function TO.template_at_end(path)
@@ -1117,9 +1139,18 @@ function TO.template_at_end(path)
   reaper.PreventUIRefresh(1)
   TO.insert_template(path, nil)            -- nil: after the last track
   local first = nil
+  local new = {}
   for i = 0, reaper.CountTracks(0) - 1 do
     local tr = reaper.GetTrack(0, i)
-    if not before[tr] then first = tr break end
+    if not before[tr] then first = first or tr; new[#new + 1] = tr end
+  end
+  -- before SUM, when there is one
+  local sum = require("TS_CV_TrackRules").sum_track()
+  if sum and first and (reaper.GetMediaTrackInfo_Value(first, "IP_TRACKNUMBER") or 0) >
+                       (reaper.GetMediaTrackInfo_Value(sum, "IP_TRACKNUMBER") or 0) then
+    reaper.Main_OnCommand(40297, 0)
+    for _, tr in ipairs(new) do reaper.SetTrackSelected(tr, true) end
+    reaper.ReorderSelectedTracks(math.floor(reaper.GetMediaTrackInfo_Value(sum, "IP_TRACKNUMBER") or 1) - 1, 0)
   end
   restore(sel)
   reaper.PreventUIRefresh(-1)

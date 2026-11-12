@@ -338,23 +338,36 @@ local function make(kind)
   -- "New track" / "New track from template" at the top of the add menu:
   -- the new track goes at the end of the project and is routed straight
   -- away. Returns true when a send was made.
+  -- (each new track an FX return: the Track rules after, one undo step)
+  local function new_return(make, track, mode)
+    reaper.Undo_BeginBlock()
+    local tr = make()
+    local ok = tr and SD.add_send(track, tr, mode)
+    if ok then require("TS_CV_TrackRules").after_return(tr) end
+    reaper.Undo_EndBlock("ChannelView: new FX return", -1)
+    return ok
+  end
   local function new_track_items(ctx, track, mode)
     local added = false
     if ImGui.MenuItem(ctx, "   New track##" .. ID .. "nt") then
-      local tr = TO.new_track_at_end()
-      if tr and SD.add_send(track, tr, mode) then added = true end
+      if new_return(TO.new_track_at_end, track, mode) then added = true end
     end
     if ImGui.BeginMenu(ctx, "   New track from template##" .. ID .. "tt",
                        TM.has_templates(templates)) then
       TM.template_items(ctx, templates, function(path)
-        local tr = TO.template_at_end(path)
-        if tr and SD.add_send(track, tr, mode) then added = true end
+        if new_return(function() return TO.template_at_end(path) end, track, mode) then added = true end
       end)
       ImGui.EndMenu(ctx)
     end
-    local tr = TM.chain_menu(ctx, chains, nil, true,
-                             "   New track with FX chain##" .. ID .. "tc")
-    if tr and SD.add_send(track, tr, mode) then added = true end
+    local f = nil
+    if ImGui.BeginMenu(ctx, "   New track with FX chain##" .. ID .. "tc", CN.has_chains(chains)) then
+      CN.items(ctx, chains, function(c) f = c end)
+      ImGui.EndMenu(ctx)
+    end
+    if not CN.has_chains(chains) and ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "No FX chains in " .. (CN.dir()))
+    end
+    if f and new_return(function() return CN.new_track(f, nil, true) end, track, mode) then added = true end
     ImGui.Separator(ctx)
     return added
   end

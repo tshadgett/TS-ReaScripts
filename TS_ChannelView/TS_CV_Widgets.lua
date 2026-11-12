@@ -34,7 +34,7 @@ local function plain(o)
 end
 W.plain = plain
 
--- A control with no style of its own takes Visual Options' default for
+-- A control with no style of its own takes Options' default for
 -- its kind (C.DEF): `fam` "knob", "button", "combo" or "fader". A copy
 -- when it changes anything, so the caller's options are left alone.
 local function defaulted(o, fam)
@@ -252,7 +252,7 @@ end
 local meter_font = nil
 function W.set_meter_font(f) meter_font = f end
 
--- Visual Options' text settings (C.FONTS: "text" the panels' text,
+-- Options' text settings (C.FONTS: "text" the panels' text,
 -- "head" their headers, "bar" the toolbars; each { name, size, b, i, u,
 -- key }, nil for ReaImGui's own font at its own size). A font is made once
 -- per name, weight and slant and kept with the context.
@@ -3478,7 +3478,7 @@ end
 -- nil for none) }. Returns changed, value, act.
 function W.param_fader(ctx, id, x, y, w, h, value, label, shown, o)
   o = plain(o)
-  -- no style of its own: Visual Options' default fader
+  -- no style of its own: Options' default fader
   if C.DEF.fader and not (o.look and o.look.style) then
     local c = {}
     for k, v in pairs(o) do c[k] = v end
@@ -4100,7 +4100,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
       x + w - 1, ty, C.COL.knob_ring, 1.0)
   end
 
-  -- its figures over the bar (Visual Options' Meter scales), dark over
+  -- its figures over the bar (Options' Meter scales), dark over
   -- the lit part, light over the rest
   if C.METER_SCALES then
     for _, g in ipairs(W.gr_marks(max_db)) do
@@ -4191,7 +4191,7 @@ function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol, side)
   if meter_font then ImGui.PushFont(ctx, meter_font, C.METER_FONT); pushed = true end
   local _, line_h = ImGui.CalcTextSize(ctx, "0")
   local bar_h = h - (line_h + 2)
-  -- (wider with its figures on it, Visual Options' Meter scales)
+  -- (wider with its figures on it, Options' Meter scales)
   local bw = math.min(C.METER_SCALES and C.IO_BAR_W_SCALE or C.IO_BAR_W, w)
   local bx = (side == "l") and (x + 1) or (side == "r") and (x + w - bw - 1) or (x + (w - bw) * 0.5)
   W.level_meter(ctx, dl, bx, y, bw, bar_h, { pk },
@@ -4778,7 +4778,7 @@ function W.icon_button(ctx, id, icon, size, active, tooltip, on_col, ink)
   return pressed
 end
 
--- The lamp power switch (Visual Options), at the cursor: a square lamp, lit in
+-- The lamp power switch (Options), at the cursor: a square lamp, lit in
 -- the accent while the plugin runs, a dark one while it's bypassed.
 -- Returns pressed.
 function W.power_lamp(ctx, id, size, on, tooltip)

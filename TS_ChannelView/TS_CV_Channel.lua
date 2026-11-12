@@ -164,7 +164,7 @@ local function fader_menu(ctx, track, pid)
     ImGui.SetTooltip(ctx, cat_label and ("Back to the " .. cat_label:lower() .. " look") or "Back to the Default look")
   end
 
-  -- each group's look, width and background: Visual Options ▸ Faders &
+  -- each group's look, width and background: Options ▸ Faders &
   -- strips (the window that drew this hands CH.group_looks its opener)
   if CH.group_looks and ImGui.MenuItem(ctx, "Group looks\u{2026}") then CH.group_looks() end
   ImGui.EndPopup(ctx)

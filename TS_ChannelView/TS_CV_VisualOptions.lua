@@ -1,7 +1,7 @@
 -- @noindex
 -- Not a package of its own: installed by TS_ChannelView.lua's @provides.
 --[[
-  TS_CV_VisualOptions.lua -- View > Visual Options: one window for how
+  TS_CV_VisualOptions.lua -- View > Options: one window for how
   ChannelView, the Rack, the TCP window and the web companion look.
 
   Each of the four has a tab and its own settings; the Rack, the TCP
@@ -66,6 +66,11 @@ VO.TABS = {
   { key = "rack", label = "Rack" },
   { key = "tcp",  label = "TCP window" },
   { key = "web",  label = "Web" },
+}
+-- after the looks: settings
+VO.SETTINGS = {
+  { key = "behaviour", label = "Behaviour" },
+  { key = "rules",     label = "Track rules" },
 }
 
 -- name, default, kind, part of a preset (true: a tab's own; "g": the
@@ -395,7 +400,7 @@ function VO.apply(tab)
   C.build_palette()
 end
 
--- Visual Options > Text into C.FONTS (TS_CV_Widgets W.push_font): each
+-- Options > Text into C.FONTS (TS_CV_Widgets W.push_font): each
 -- of text, head and bar { name, size, b, i, u, key }. Always a size, the
 -- default 13 too: left to ReaImGui's own default it needn't scale with
 -- Windows' display scaling as the others do (at 175 % it came out the
@@ -980,6 +985,24 @@ local function tcp_rows(ctx, page)
   end
 end
 
+-- A swatch for a Track rules colour (0xRRGGBB, or nil: an outline)
+-- that opens the colour picker; `on_pick(rgb)` as it changes.
+local function rules_colour_button(ctx, id, rgb, title, on_pick)
+  local face = rgb and ((rgb << 8) | 0xff) or 0x00000000
+  if ImGui.ColorButton(ctx, "##" .. id, face, ImGui.ColorEditFlags_NoTooltip, 34, 20) then
+    local before = rgb
+    CP.open({ title = title, rgb = rgb or 0x808080, window = true,
+      preview = function(v) on_pick(v) end,
+      apply   = function(v) on_pick(v) end,
+      cancel  = function() on_pick(before) end })
+  end
+  if not rgb then
+    local x1, y1 = ImGui.GetItemRectMin(ctx)
+    local x2, y2 = ImGui.GetItemRectMax(ctx)
+    ImGui.DrawList_AddRect(ImGui.GetWindowDrawList(ctx), x1, y1, x2, y2, C.COL.ui_edge or 0x808080ff, 2)
+  end
+end
+
 local function page_faders(ctx)
   section(ctx, "Strips")
   row(ctx, "Spacer size")
@@ -1007,12 +1030,15 @@ local function page_faders(ctx)
 
   section(ctx, "Track faders, widths and backgrounds, by group")
   local now = reaper.time_precise()
-  if ImGui.BeginTable(ctx, "##vo_groups", 5, ImGui.TableFlags_SizingFixedFit) then
+  local TR = require("TS_CV_TrackRules")
+  local rules = TR.get()
+  if ImGui.BeginTable(ctx, "##vo_groups", 6, ImGui.TableFlags_SizingFixedFit) then
     ImGui.TableSetupColumn(ctx, "")
     ImGui.TableSetupColumn(ctx, "Fader style")
     ImGui.TableSetupColumn(ctx, "Colour")
     ImGui.TableSetupColumn(ctx, "Strip width")
     ImGui.TableSetupColumn(ctx, "Background")
+    ImGui.TableSetupColumn(ctx, "Track colour")
     ImGui.TableHeadersRow(ctx)
     for _, c in ipairs(TO.FADER_CATS) do
       local d = TO.fader_default(c.key) or {}
@@ -1071,10 +1097,27 @@ local function page_faders(ctx)
       local pct = TO.bg_tint(c.key)
       local bch, bv = ST.slider_int(ctx, "##vo_bt" .. c.key, pct, 0, 100, pct > 0 and "%d%% track colour" or "Off")
       if bch then TO.set_bg_tint(c.key, bv, true); bump() end
+      -- the group's track colour (Track rules' colours)
+      ImGui.TableNextColumn(ctx)
+      if c.key == "default" then
+        ImGui.AlignTextToFramePadding(ctx)
+        ImGui.TextDisabled(ctx, "\u{2014}")
+      else
+        local cur = rules.grp[c.key]
+        rules_colour_button(ctx, "vo_tc" .. c.key, cur, c.label .. " track colour", function(v)
+          rules.grp[c.key] = v
+          TR.save(rules)
+        end)
+        if cur then
+          ImGui.SameLine(ctx)
+          if ImGui.SmallButton(ctx, "\u{00d7}##vo_tcx" .. c.key) then rules.grp[c.key] = nil; TR.save(rules) end
+        end
+      end
     end
     ImGui.EndTable(ctx)
   end
   ImGui.TextDisabled(ctx, "A track's own look wins, then its group's, then the Default.")
+  ImGui.TextDisabled(ctx, "Track colours: by Options \u{25B8} Track rules.")
   local _ = now
 end
 
@@ -1173,6 +1216,249 @@ end
 
 local PAGE_FN = { colour = page_colour, controls = page_controls, panels = page_panels,
                   tracks = page_tracks, text = page_text, sizes = page_sizes, depth = page_depth }
+
+-- ---------------------------------------------------------------------
+-- settings, not looks: Behaviour and Track rules
+-- ---------------------------------------------------------------------
+
+local function tip(ctx, text)
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, text) end
+end
+
+local function put_cv(k, v) reaper.SetExtState(C.EXT_SECT, k, v and "1" or "0", true) end
+
+local function page_behaviour(ctx)
+  section(ctx, "Plugins")
+  if VO.float then
+    local ch, v = ST.checkbox(ctx, "Float plugins without controls##vo_bfl", VO.float.get())
+    if ch then VO.float.assign(v) end
+    tip(ctx, "A plugin whose layout has no controls opens its own window when you\n" ..
+      "come to its track, and it closes when you move on, unless you pin it\n" ..
+      "(the pin in its panel's header).")
+  end
+  if ED.PRO and VO.float then
+    local ch, v = ST.checkbox(ctx, "Offer canvases for new plugins##vo_bco", C.CANVAS_OFFERS)
+    if ch then
+      C.CANVAS_OFFERS = v
+      put_cv("canvas_offers", v)
+      if v then require("TS_CV_CanvasSetup").forget_nevers() end
+    end
+    tip(ctx, "A plugin with no layout whose controls look like a\n" ..
+      "compressor, EQ, gate... offers that canvas.\nTurning it on again asks again for every plugin.")
+  end
+  section(ctx, "Controls")
+  local ch, v = ST.checkbox(ctx, "Use mouse wheel on controls##vo_bwh", C.WHEEL_CONTROLS)
+  if ch then C.WHEEL_CONTROLS = v; put_cv("wheel_controls", v) end
+  tip(ctx, "Off: the wheel only scrolls.")
+  local how = require("TS_CV_Focus").mechanism()
+  ch, v = ST.checkbox(ctx, "Return keyboard focus to REAPER##vo_bfo", C.FOCUS_BACK and how ~= nil, { dim = how == nil })
+  if ch then C.FOCUS_BACK = v; put_cv("focus_back", v) end
+  tip(ctx, how and "Keyboard goes back to REAPER after a click,\nso Space and shortcuts keep working."
+           or "Needs js_ReaScriptAPI or SWS.")
+end
+
+-- Settings that aren't part of a look, under a look's page: Values under
+-- controls (Controls), Panel alignment (Panels, ChannelView and the rack).
+local function page_extra(ctx, tab, page)
+  if page == "controls" then
+    section(ctx, "Every tab")
+    local ch, v = ST.checkbox(ctx, "Values under controls##vo_xval", C.SHOW_VALUES)
+    if ch then C.SHOW_VALUES = v; put_cv("show_values", v); bump() end
+    tip(ctx, "Off: a control's value shows while you hover it.")
+  elseif page == "panels" and (tab == "cv" or tab == "rack") and own_tab ~= "tcp" then
+    section(ctx, "Every tab")
+    row(ctx, "Panel alignment")
+    ImGui.SetNextItemWidth(ctx, 140)
+    if ImGui.BeginCombo(ctx, "##vo_xalign", C.ROW_ALIGN == "centre" and "Centred" or "Left") then
+      if ImGui.Selectable(ctx, "Left", C.ROW_ALIGN ~= "centre") then
+        C.ROW_ALIGN = "left"; reaper.SetExtState(C.EXT_SECT, "row_align", "left", true)
+      end
+      if ImGui.Selectable(ctx, "Centred", C.ROW_ALIGN == "centre") then
+        C.ROW_ALIGN = "centre"; reaper.SetExtState(C.EXT_SECT, "row_align", "centre", true)
+      end
+      ImGui.EndCombo(ctx)
+    end
+  end
+end
+
+-- SWS's own auto colouring or auto layout on: it would fight the rules.
+local sws = { ids = nil }
+local function sws_auto_on()
+  if not sws.ids then
+    sws.ids = {}
+    local sec = reaper.SectionFromUniqueID and reaper.SectionFromUniqueID(0)
+    if reaper.kbd_enumerateActions and sec then
+      local i = 0
+      while true do
+        local id, name = reaper.kbd_enumerateActions(sec, i)
+        if not id or id <= 0 then break end
+        local n = name and name:lower() or ""
+        if n:find("^sws") and n:find("toggle auto") and (n:find("colo") or n:find("layout")) then
+          sws.ids[#sws.ids + 1] = id
+        end
+        i = i + 1
+      end
+    end
+  end
+  for _, id in ipairs(sws.ids) do
+    if reaper.GetToggleCommandState(id) == 1 then return true end
+  end
+  return false
+end
+
+local function rcombo(ctx, id, cur, opts, w)
+  local label = cur
+  for _, o in ipairs(opts) do if o[1] == cur then label = o[2] end end
+  ImGui.SetNextItemWidth(ctx, w or 170)
+  local out = nil
+  if ImGui.BeginCombo(ctx, id, label) then
+    for _, o in ipairs(opts) do
+      if ImGui.Selectable(ctx, o[2], o[1] == cur) then out = o[1] end
+    end
+    ImGui.EndCombo(ctx)
+  end
+  return out
+end
+
+local function rrow(ctx, label)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, label)
+  ImGui.SameLine(ctx, 190)
+end
+
+local function page_rules(ctx)
+  local TR = require("TS_CV_TrackRules")
+  local r = TR.get()
+  local dirty = false
+  local function box(label, key, opts)
+    local ch, v = ST.checkbox(ctx, label, r[key], opts)
+    if ch then r[key] = v; dirty = true end
+  end
+  local function rpick(id, key, opts, w)
+    local v = rcombo(ctx, id, r[key], opts, w)
+    if v ~= nil and v ~= r[key] then r[key] = v; dirty = true end
+  end
+  local IND = 22
+
+  if TR.colours_on(r) or TR.spacers_on(r) then
+    if sws_auto_on() then
+      ImGui.TextColored(ctx, C.COL.warn, "SWS auto colouring or auto layout is on: it changes tracks too. Use one or the other.")
+    end
+  end
+  if ImGui.BeginTable(ctx, "##vo_rules", 2, ImGui.TableFlags_SizingStretchSame) then
+    ImGui.TableNextRow(ctx)
+    ImGui.TableNextColumn(ctx)
+
+    section(ctx, "Adding and duplicating")
+    box("Number them##vo_rnum", "number")
+    tip(ctx, "Guitar 1 beside Guitar 1 becomes Guitar 2.")
+    ImGui.SameLine(ctx)
+    rpick("##vo_rnsc", "number_scope", { { "folder", "in their folder" }, { "project", "across the project" } }, 150)
+    ImGui.Indent(ctx, IND)
+    box("Templates with more than one track keep their names##vo_rmul", "keep_multi")
+    tip(ctx, "A drum kit's Rack Tom 1 and 2 stay as they are.")
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.TextDisabled(ctx, "Leave these folders alone")
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 150)
+    local ach, av = ImGui.InputTextWithHint(ctx, "##vo_ralone", "Drums, Strings", table.concat(r.alone, ", "))
+    if ach then
+      r.alone = {}
+      for n in av:gmatch("[^,]+") do
+        n = n:match("^%s*(.-)%s*$")
+        if n ~= "" then r.alone[#r.alone + 1] = n end
+      end
+      dirty = true
+    end
+    tip(ctx, "Not numbered or sorted.")
+    ImGui.Unindent(ctx, IND)
+    rrow(ctx, "Sort the folder")
+    rpick("##vo_rsort", "sort", { { "off", "Off" }, { "az", "A\u{2013}Z" }, { "series", "Keep a series together" } })
+    rrow(ctx, "New children go")
+    rpick("##vo_rkids", "children", { { "top", "at the top" }, { "bottom", "at the bottom" } })
+    rrow(ctx, "Template's folders")
+    rpick("##vo_rtf", "tfolders", { { "flatten", "flatten" }, { "keep", "keep as a sub-folder" } })
+    box("Select and arm the new track##vo_rarm", "arm")
+    tip(ctx, "The one with sends, when one has any; else all of them.")
+    if r.arm then
+      ImGui.Indent(ctx, IND)
+      box("Disarm the others##vo_rdis", "disarm")
+      if TR.tracking_installed() then
+        box("Only in Tracking mode##vo_rtrk", "arm_tracking")
+        tip(ctx, "TS_TrackingMode: in Mixing mode they're selected, not armed.")
+      end
+      ImGui.Unindent(ctx, IND)
+    end
+
+    section(ctx, "FX returns")
+    rrow(ctx, "New returns go")
+    rpick("##vo_rret", "ret_where", { { "end", "at the end" }, { "folder", "into the folder named" } })
+    if r.ret_where == "folder" then
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, 100)
+      local fch, fv = ImGui.InputText(ctx, "##vo_rretf", r.ret_folder or "")
+      if fch then r.ret_folder = fv; dirty = true end
+    end
+    ImGui.TextDisabled(ctx, "Always before SUM.")
+
+    section(ctx, "Spacers")
+    box("Before each folder##vo_rsp1", "sp_folder")
+    box("After each folder's last track##vo_rsp2", "sp_after")
+    box("Before the FX returns##vo_rsp3", "sp_returns")
+    box("Before SUM##vo_rsp4", "sp_sum")
+    if TR.spacers_on(r) then ImGui.TextDisabled(ctx, "Spacers elsewhere are taken out.") end
+
+    ImGui.TableNextColumn(ctx)
+    section(ctx, "Colours")
+    rrow(ctx, "Tracks in a folder take")
+    rpick("##vo_rcf", "col_folder", { { "off", "nothing" }, { "same", "its colour" }, { "shades", "shades of its colour" } })
+    ImGui.Indent(ctx, IND)
+    box("A template's own colour wins##vo_rtpl", "tpl_col")
+    ImGui.Unindent(ctx, IND)
+    ImGui.TextDisabled(ctx, "Name rules, first match wins:")
+    local drop = nil
+    for i, rule in ipairs(r.rules) do
+      ImGui.PushID(ctx, "vo_rr" .. i)
+      local v = rcombo(ctx, "##how", rule.how, { { "contains", "contains" }, { "is", "is" } }, 90)
+      if v and v ~= rule.how then rule.how = v; dirty = true end
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, 120)
+      local tch, tv = ImGui.InputText(ctx, "##txt", rule.text or "")
+      if tch then rule.text = tv; dirty = true end
+      ImGui.SameLine(ctx)
+      rules_colour_button(ctx, "vo_rrc" .. i, rule.col, "Colour for \"" .. (rule.text or "") .. "\"", function(c)
+        rule.col = c
+        TR.save(r)
+      end)
+      ImGui.SameLine(ctx)
+      if ImGui.SmallButton(ctx, "\u{00d7}##x") then drop = i end
+      ImGui.PopID(ctx)
+    end
+    if drop then table.remove(r.rules, drop); dirty = true end
+    if ImGui.SmallButton(ctx, "+ Rule##vo_radd") then
+      r.rules[#r.rules + 1] = { how = "contains", text = "", col = 0x808080 }
+      dirty = true
+    end
+    ImGui.TextDisabled(ctx, "Then group colours (Faders & strips), then the folder's.")
+    ImGui.TextDisabled(ctx, "Tracks you've coloured yourself are left alone.")
+
+    section(ctx, "When")
+    rpick("##vo_rlive", "live", { { false, "Only on tracks ChannelView adds" }, { true, "As tracks are added and moved" } }, 230)
+    if ImGui.Button(ctx, "Apply to the project now##vo_rapply") then
+      local force = false
+      local n = TR.colours_on(r) and TR.hand_coloured() or 0
+      local go = true
+      if n > 0 then
+        local a = reaper.MB(("%d track%s have colours no rule gave them.\n\nRecolour them too?"):format(n, n == 1 and "" or "s"),
+          "Track rules", 3)
+        if a == 2 then go = false elseif a == 6 then force = true end
+      end
+      if go then TR.apply_all(force) end
+    end
+    ImGui.EndTable(ctx)
+  end
+  if dirty then TR.save(r) end
+end
 
 -- the preset bar: previous, the list, next, and + (save, rename, delete)
 local naming = nil          -- { mode = "save"|"rename", name, old }
@@ -1470,10 +1756,21 @@ function VO.draw(ctx, mine)
   own_tab = mine or own_tab
   if not win.open then return end
   ImGui.SetNextWindowSize(ctx, 900, 560, ImGui.Cond_FirstUseEver)
-  local visible, open = ImGui.Begin(ctx, "Visual Options###tscv_visual", true, ImGui.WindowFlags_NoCollapse)
+  local visible, open = ImGui.Begin(ctx, "Options###tscv_visual", true, ImGui.WindowFlags_NoCollapse)
   if visible then
     if ImGui.BeginTabBar(ctx, "##vo_tabs") then
       for _, t in ipairs(VO.TABS) do
+        local flags = (win.select == t.key) and ImGui.TabItemFlags_SetSelected or 0
+        if ImGui.BeginTabItem(ctx, t.label .. "##vo_t" .. t.key, nil, flags) then
+          win.tab = t.key
+          ImGui.EndTabItem(ctx)
+        end
+      end
+      -- settings, not looks
+      ImGui.BeginDisabled(ctx, true)
+      ImGui.TabItemButton(ctx, "|##vo_tdiv", ImGui.TabItemFlags_NoTooltip)
+      ImGui.EndDisabled(ctx)
+      for _, t in ipairs(VO.SETTINGS) do
         local flags = (win.select == t.key) and ImGui.TabItemFlags_SetSelected or 0
         if ImGui.BeginTabItem(ctx, t.label .. "##vo_t" .. t.key, nil, flags) then
           win.tab = t.key
@@ -1484,6 +1781,15 @@ function VO.draw(ctx, mine)
     end
     win.select = nil
     local tab = win.tab
+    if tab == "behaviour" or tab == "rules" then
+      if ImGui.BeginChild(ctx, "##vo_settings", 0, 0) then
+        if tab == "behaviour" then page_behaviour(ctx) else page_rules(ctx) end
+        ImGui.EndChild(ctx)
+      end
+      ImGui.End(ctx)
+      if not open then win.open = false; naming = nil end
+      return
+    end
     local s = data[tab]
     local follows = follow[tab]
     if follows then ImGui.BeginDisabled(ctx, true) end
@@ -1530,6 +1836,7 @@ function VO.draw(ctx, mine)
         if follows then ImGui.BeginDisabled(ctx, true) end
         PAGE_FN[win.page](ctx, tab, follows and VO.effective(tab) or s)
         if follows then ImGui.EndDisabled(ctx) end
+        page_extra(ctx, tab, win.page)
         if tab == "tcp" then tcp_rows(ctx, win.page) end
       end
       ImGui.EndChild(ctx)

@@ -447,6 +447,18 @@ local function items(ctx, node, pick, ticked)
   end
   for i, f in ipairs(node.files) do
     if ImGui.MenuItem(ctx, f.name .. "##cn" .. i, nil, ticked and ticked(f) or false) then pick(f) end
+    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+      CN.mk_pick = f
+      ImGui.OpenPopup(ctx, "##cn_mk")
+    end
+  end
+  -- right-click a chain: a toolbar action for it (TS_CV_TrackRules)
+  if ImGui.BeginPopup(ctx, "##cn_mk") then
+    if ImGui.MenuItem(ctx, "Make toolbar action\u{2026}") then CN.mk_go = CN.mk_pick end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "An action that adds an FX return with this chain,\nsent from the selected track.")
+    end
+    ImGui.EndPopup(ctx)
   end
 end
 

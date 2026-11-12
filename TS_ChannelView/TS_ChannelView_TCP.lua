@@ -14,9 +14,9 @@
     * a strip of the track's colour down the left, indented per folder
       level the way REAPER's own panel does it
     * the name, and a horizontal peak meter under it
-    * the track's icon on the right, when Visual Options ▸ Track buttons ▸ Track icons is on
+    * the track's icon on the right, when Options ▸ Track buttons ▸ Track icons is on
     * small monitoring / record arm / M / S buttons, each in a fixed
-      place: always there, or only while on (Visual Options ▸ Track buttons);
+      place: always there, or only while on (Options ▸ Track buttons);
       M, S and arm swipe down the column, as in the mixer
 
   What you can do to one:
@@ -154,7 +154,6 @@ local function cv_get(k, default)
   if v == "" then return default end
   return v
 end
-local function cv_set(k, v) reaper.SetExtState(C.EXT_SECT, k, tostring(v), true) end
 
 -- Hue and tint are shared by the TS_ tools -- see TS_Palette in
 -- TS_ChannelView.lua. Falls back to ChannelView's own keys when the
@@ -168,7 +167,7 @@ local function pal_get()
 end
 
 C.FOCUS_BACK = cv_get("focus_back", "1") == "1"
--- Visual Options (colours, control styles, sizes): the TCP window's own
+-- Options (colours, control styles, sizes): the TCP window's own
 -- tab, or ChannelView's while it follows it
 local VO = require("TS_CV_VisualOptions")
 VO.load(false)
@@ -249,7 +248,7 @@ local function poll_shared(now)
   C.FOCUS_BACK = cv_get("focus_back", "1") == "1"
   C.SHOW_VALUES = cv_get("show_values", "1") == "1"
   C.WHEEL_CONTROLS = cv_get("wheel_controls", "1") == "1"
-  -- the rows' settings, set in Visual Options
+  -- the rows' settings, set in Options
   TCP_TINT = ext_get("tint", "1") == "1"
   C.TCP_INDENT_FOLDERS = ext_get("indent", C.TCP_INDENT_FOLDERS and "1" or "0") == "1"
   C.TCP_INDENT = tonumber(ext_get("indent_px", "")) or C.TCP_INDENT
@@ -419,7 +418,7 @@ local function draw_row_inner(dl, e, x, w, now)
   local row_bg = sel and C.COL.header_bg or C.COL.panel_bg
   local tint = (TCP_TINT and not e.master) and TO.track_tint(tr) or 0
   if tint > 0 and col then row_bg = U.tint_readable(row_bg, col, tint) end
-  -- (Visual Options' corner rounding for track panels, C.TCP_RR)
+  -- (Options' corner rounding for track panels, C.TCP_RR)
   local rr = math.min(C.TCP_RR or 0, (y1 - 1 - y0) * 0.5)
   ImGui.DrawList_AddRectFilled(dl, ix, y0, x + w, y1 - 1, row_bg, rr)
   -- the colour strip: the left of the row's own rounded shape (a strip
@@ -1115,13 +1114,6 @@ local function settings_menu()
     ImGui.Separator(ctx)
   end
 
-  if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
-    C.SHOW_VALUES = not C.SHOW_VALUES
-    cv_set("show_values", C.SHOW_VALUES and "1" or "0")
-  end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "Shared with ChannelView")
-  end
   if ImGui.MenuItem(ctx, "Fixed item lane controls", nil, C.TCP_LANES) then
     C.TCP_LANES = not C.TCP_LANES
     ext_set("lanes", C.TCP_LANES and "1" or "0")
@@ -1146,18 +1138,6 @@ local function settings_menu()
   local pch, pv = ST.slider_int(ctx, "Channel panel height", math.floor(C.TCP_PANEL_H), 180, 700)
   if pch then C.TCP_PANEL_H = pv; ext_set("panel_h", pv) end
 
-  do
-    local how = FO.mechanism()
-    if ImGui.MenuItem(ctx, "Return keyboard focus to REAPER", nil,
-        C.FOCUS_BACK and how ~= nil, how ~= nil) then
-      C.FOCUS_BACK = not C.FOCUS_BACK
-      cv_set("focus_back", C.FOCUS_BACK and "1" or "0")
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "Shared with ChannelView")
-    end
-  end
-
   -- Run at startup: this script's own fenced line in __startup.lua.
   do
     if not SU.checked() then SU.scan() end
@@ -1173,8 +1153,8 @@ local function settings_menu()
   end
 
   ImGui.Separator(ctx)
-  if ImGui.MenuItem(ctx, "Visual Options\u{2026}") then VO.show("tcp") end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Colours, control styles, sizes.") end
+  if ImGui.MenuItem(ctx, "Options\u{2026}") then VO.show("tcp") end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Looks, behaviour and track rules.") end
 
   if ImGui.BeginMenu(ctx, "Dock") then
     for _, d in ipairs(DOCKS) do
@@ -1374,7 +1354,7 @@ local function frame()
     app.win = nil
   end
   ImGui.PopStyleVar(ctx, 3)
-  VO.draw(ctx, "tcp")      -- View ▸ Visual Options, its own window
+  VO.draw(ctx, "tcp")      -- View ▸ Options, its own window
   W.pop_font(ctx, text_font)
   ST.pop(ctx)
   ImGui.PopStyleColor(ctx)

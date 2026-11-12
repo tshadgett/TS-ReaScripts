@@ -65,6 +65,7 @@
 --  [nomain] TS_CV_Trace.lua
 --  [nomain] TS_CV_TrackMenu.lua
 --  [nomain] TS_CV_TrackOps.lua
+--  [nomain] TS_CV_TrackRules.lua
 --  [nomain] TS_CV_TrackStrip.lua
 --  [nomain] TS_CV_FXButtons.lua
 --  [nomain] TS_CV_KnobParts.lua
@@ -388,11 +389,16 @@ C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 C.MIXER_VIEW  = (not RACK) and ext_get("mixer_view", "0") == "1"
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
--- View > Visual Options: colours, the default control styles, panels,
+-- View > Options: colours, the default control styles, panels,
 -- track buttons, sizes and depth -- the rack's own tab, or ChannelView's
 -- (TS_CV_VisualOptions; it brings older settings over the first time)
 app.VO = require("TS_CV_VisualOptions")
 app.vo_tab = RACK and "rack" or "cv"
+-- Options ▸ Behaviour's "Float plugins without controls" (this window's own)
+app.VO.float = {
+  get = function() return app.float_empty end,
+  assign = function(v) app.float_empty = v; ext_set(FLOAT_KEY, v and "1" or "0") end,
+}
 app.VO.load(not RACK)
 app.VO.apply(app.vo_tab)
 app.VO.attach(ImGui)
@@ -1997,7 +2003,7 @@ local function style_menu(fx, key, idx, c)
   local fam = style_family(c.type)
   if fam == "toggle" or c.type == "combo" then return toggle_colour_menu(fx, key, idx, c) end
   local list = (fam == "fader") and C.FADER_STYLES or C.KNOB_STYLES
-  -- (no style: Visual Options' default, Reset to default below)
+  -- (no style: Options' default, Reset to default below)
   local cur = C.KNOB_STYLE_ALIAS[c.style] or c.style
   local dl = ImGui.GetWindowDrawList(ctx)
   local _, th = ImGui.CalcTextSize(ctx, "Ag")
@@ -4845,7 +4851,7 @@ local function menu_bar()
     local sz = C.ICON_SIZE
     W.ICONS.menu(ImGui.GetWindowDrawList(ctx), (x1 + x2 - sz) * 0.5, (y1 + y2 - sz) * 0.5, sz,
       (hov or main_open) and C.COL.icon_hot or C.COL.icon)
-    W.tip(ctx, "cvmain", "View, layouts and web companion", hov and not main_open, false)
+    W.tip(ctx, "cvmain", "View, layouts, web companion and options", hov and not main_open, false)
   end
   if main_open then
     if ImGui.BeginMenu(ctx, "View") then
@@ -4856,49 +4862,6 @@ local function menu_bar()
           app.aux[a.key] = not app.aux[a.key]
           ext_set(AUX_PFX .. a.key, app.aux[a.key] and "1" or "0")
         end
-      end
-      ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, "Float plugins without controls", nil, app.float_empty) then
-        app.float_empty = not app.float_empty
-        ext_set(FLOAT_KEY, app.float_empty and "1" or "0")
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "A plugin whose layout has no controls opens its own window when you\n" ..
-          "come to its track, and it closes when you move on, unless you pin it\n" ..
-          "(the pin in its panel's header).")
-      end
-      -- a plugin with no layout of its own: a strip offering a canvas (Pro)
-      if ED.PRO then
-        if ImGui.MenuItem(ctx, "Offer canvases for new plugins", nil, C.CANVAS_OFFERS) then
-          C.CANVAS_OFFERS = not C.CANVAS_OFFERS
-          ext_set("canvas_offers", C.CANVAS_OFFERS and "1" or "0")
-          if C.CANVAS_OFFERS then require("TS_CV_CanvasSetup").forget_nevers() end
-        end
-        if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, "A plugin with no layout whose controls look like a\n" ..
-            "compressor, EQ, gate... offers that canvas.\nTurning it on again asks again for every plugin.")
-        end
-      end
-      if ImGui.MenuItem(ctx, "Auto-hide this header", nil, app.header_hide) then
-        app.header_hide = not app.header_hide
-        ext_set(app.hide_key, app.header_hide and "1" or "0")
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "For a small screen: the panels take the header's room, and it slides\n"
-          .. "out over them while the pointer is at the window's top edge.")
-      end
-      if ImGui.MenuItem(ctx, "Values under controls", nil, C.SHOW_VALUES) then
-        C.SHOW_VALUES = not C.SHOW_VALUES
-        ext_set("show_values", C.SHOW_VALUES and "1" or "0")
-      end
-      -- off: the wheel never moves a control, it only scrolls (shared with
-      -- the TCP window)
-      if ImGui.MenuItem(ctx, "Use mouse wheel on controls", nil, C.WHEEL_CONTROLS) then
-        C.WHEEL_CONTROLS = not C.WHEEL_CONTROLS
-        ext_set("wheel_controls", C.WHEEL_CONTROLS and "1" or "0")
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "Off: the wheel only scrolls.")
       end
       -- the patch bay (Pro) at all (shared with the TCP window)
       do
@@ -4919,42 +4882,15 @@ local function menu_bar()
         ImGui.SetTooltip(ctx, "Preset controls along each panel's foot.")
       end
 
-      -- Keyboard focus back to REAPER after a click here, so its shortcuts
-      -- keep working. See TS_CV_Focus.
-      do
-        local how = FO.mechanism()
-        if ImGui.MenuItem(ctx, "Return keyboard focus to REAPER", nil,
-            C.FOCUS_BACK and how ~= nil, how ~= nil) then
-          C.FOCUS_BACK = not C.FOCUS_BACK
-          ext_set("focus_back", C.FOCUS_BACK and "1" or "0")
-        end
-        if ImGui.IsItemHovered(ctx) then
-          ImGui.SetTooltip(ctx, how and
-            "Keyboard goes back to REAPER after a click,\nso Space and shortcuts keep working."
-            or "Needs js_ReaScriptAPI or SWS.")
-        end
-      end
-
       ImGui.Separator(ctx)
-
-      if ImGui.BeginMenu(ctx, "Panel alignment") then
-        if ImGui.MenuItem(ctx, "Left", nil, C.ROW_ALIGN == "left") then
-          C.ROW_ALIGN = "left"; ext_set("row_align", C.ROW_ALIGN)
-        end
-        if ImGui.MenuItem(ctx, "Centred", nil, C.ROW_ALIGN == "centre") then
-          C.ROW_ALIGN = "centre"; ext_set("row_align", C.ROW_ALIGN)
-        end
-        ImGui.EndMenu(ctx)
+      if ImGui.MenuItem(ctx, "Auto-hide this header", nil, app.header_hide) then
+        app.header_hide = not app.header_hide
+        ext_set(app.hide_key, app.header_hide and "1" or "0")
       end
-      ImGui.Separator(ctx)
-      if ED.PRO and ED.module("TS_CV_ConsoleSetup") and ImGui.MenuItem(ctx, "Console setup\u{2026}") then
-        ED.module("TS_CV_ConsoleSetup").show()
-      end
-      if ImGui.MenuItem(ctx, "Visual Options\u{2026}") then app.VO.show(app.vo_tab) end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, "Colours, control styles, panels, sizes.")
+        ImGui.SetTooltip(ctx, "For a small screen: the panels take the header's room, and it slides\n"
+          .. "out over them while the pointer is at the window's top edge.")
       end
-
       ImGui.EndMenu(ctx)
     end
     if ImGui.BeginMenu(ctx, "Layouts") then
@@ -4997,6 +4933,14 @@ local function menu_bar()
     if web_open then
       web_menu()
       ImGui.EndMenu(ctx)
+    end
+    ImGui.Separator(ctx)
+    if ED.PRO and ED.module("TS_CV_ConsoleSetup") and ImGui.MenuItem(ctx, "Console setup\u{2026}") then
+      ED.module("TS_CV_ConsoleSetup").show()
+    end
+    if ImGui.MenuItem(ctx, "Options\u{2026}") then app.VO.show(app.vo_tab) end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Looks, behaviour and track rules.")
     end
     ImGui.Separator(ctx)
     if ImGui.BeginMenu(ctx, "Dock") then
@@ -6509,7 +6453,7 @@ local function frame()
     local now = reaper.time_precise()
     if now - colour_poll > 0.5 then
       colour_poll = now
-      -- Visual Options changed in another window (the rack, the TCP's),
+      -- Options changed in another window (the rack, the TCP's),
       -- or the shared hue and tint by another TS_ tool
       if app.VO.poll() then
         app.VO.apply(app.vo_tab)
@@ -6559,7 +6503,7 @@ local function frame()
 
   ImGui.PushStyleColor(ctx, ImGui.Col_WindowBg, C.COL.win_bg)
   -- the look of every panel, dialogue and menu drawn this frame, in its
-  -- text font (Visual Options > Text)
+  -- text font (Options > Text)
   ST.push(ctx)
   local text_font = W.push_font(ctx, "text")
   -- Read BEFORE our own ItemSpacing goes on the stack: what the header
@@ -6982,6 +6926,7 @@ local function frame()
     -- Probe taps: the heartbeat that keeps them measuring, and one
     -- track's routing re-checked per frame.
     TP.update()
+    require("TS_CV_TrackRules").tick()
     -- a factory preset the plugin didn't tell REAPER about (TS_CV_Presets)
     require("TS_CV_Presets").tick()
     FO.update(ctx, ImGui, C.FOCUS_BACK)
@@ -7000,7 +6945,7 @@ local function frame()
   AE.draw(ctx)
   -- the knob look editor (Style > Customise...), its own window too
   KE.draw(ctx)
-  -- View > Visual Options
+  -- View > Options
   app.VO.draw(ctx, app.vo_tab)
   -- View > Console setup (Pro)
   ED.module("TS_CV_ConsoleSetup", ED.stub()).draw(ctx)

@@ -153,6 +153,7 @@ local function context_menu(ctx)
     if not TM.has_templates(tree) then
       tip_if_hovered(ctx, "No track templates in " .. (TO.templates_dir()))
     end
+    if not master and TM.add_from_template_menu(ctx, tree, tr) then changed = true end
     if not st.ctx_chains then st.ctx_chains = CN.list() end
     if TM.chain_menu(ctx, st.ctx_chains, tr) then changed = true end
     ImGui.EndMenu(ctx)
@@ -237,6 +238,11 @@ local function context_menu(ctx)
   if ImGui.MenuItem(ctx, many and ("Duplicate %d tracks"):format(#tg) or "Duplicate track",
       nil, false, not master) then
     TO.duplicate_tracks(tg)
+    changed = true
+  end
+  if ImGui.MenuItem(ctx, many and ("Duplicate %d tracks without items"):format(#tg)
+                               or "Duplicate track without items", nil, false, not master) then
+    TO.duplicate_tracks(tg, true)
     changed = true
   end
   if ImGui.MenuItem(ctx, many and ("Save %d tracks as track template\u{2026}"):format(#tg)
@@ -439,6 +445,18 @@ local function items(ctx, node, pad, on_pick)
       on_pick(f.path)
     end
     chip(ctx, f.colour)
+    if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then
+      st.mk_pick = f
+      ImGui.OpenPopup(ctx, "##tm_mk")
+    end
+  end
+  -- right-click a template: a toolbar action for it (TS_CV_TrackRules)
+  if ImGui.BeginPopup(ctx, "##tm_mk") then
+    if ImGui.MenuItem(ctx, "Make toolbar action\u{2026}") then st.mk_go = st.mk_pick end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "An action that adds this template as a child or\nsibling of the selected track.")
+    end
+    ImGui.EndPopup(ctx)
   end
 end
 
@@ -466,6 +484,24 @@ function TM.chain_menu(ctx, chains, after, at_end, label)
     tip_if_hovered(ctx, "No FX chains in " .. (CN.dir()))
   end
   return made
+end
+
+-- "Add child from template" / "Add sibling from template" beside `track`
+-- (TS_CV_TrackRules: by the folders, and the Track rules after). Returns
+-- true on the frame one was added.
+function TM.add_from_template_menu(ctx, tree, track)
+  local TR = require("TS_CV_TrackRules")
+  local label = TR.add_label(track)
+  if not label then return false end
+  local added = false
+  if ImGui.BeginMenu(ctx, label, TM.has_templates(tree)) then
+    TM.template_items(ctx, tree, function(path)
+      TR.add_from_template(path, track)
+      added = true
+    end)
+    ImGui.EndMenu(ctx)
+  end
+  return added
 end
 
 function TM.has_templates(tree)
@@ -504,6 +540,7 @@ local function insert_menu(ctx)
   if not TM.has_templates(tree) then
     tip_if_hovered(ctx, "No track templates in " .. (TO.templates_dir()))
   end
+  if anchor and TM.add_from_template_menu(ctx, tree, anchor) then changed = true end
   if TM.chain_menu(ctx, st.ins_chains, anchor, false, "Insert new track with FX chain") then
     changed = true
   end
@@ -640,6 +677,18 @@ function TM.draw(ctx)
     local tg = st.tpl_req
     st.tpl_req = nil
     if TO.save_template(tg) then changed = true end
+  end
+  -- Make toolbar action, picked last frame (the menus have closed)
+  local mk_t, mk_c = st.mk_go, CN.mk_go
+  st.mk_go, CN.mk_go = nil, nil
+  if mk_t or mk_c then
+    local TR = require("TS_CV_TrackRules")
+    local name, why
+    if mk_t then name, why = TR.make_action("template", mk_t.path, mk_t.name)
+    else name, why = TR.make_action("return", mk_c.rel, mk_c.name, mk_c.path) end
+    reaper.MB(name and ("Added to the action list:\n" .. name ..
+      "\n\nTo put it on a toolbar: right-click the toolbar, Customize toolbar, Add.")
+      or why, "ChannelView", 0)
   end
   if context_menu(ctx)  then changed = true end
   if rename_popup(ctx)  then changed = true end

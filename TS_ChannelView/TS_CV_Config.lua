@@ -19,8 +19,8 @@ C.WIN_TITLE = "ChannelView"
 -- A control occupies one CELL. Panels are a fixed HEIGHT (they fill the
 -- window) and grow in COLUMNS: controls flow top-to-bottom down a column,
 -- then wrap into a new column to the right, which widens the panel.
-C.CELL_W      = 50        -- width of one control cell (Visual Options ▸ Sizes)
--- Visual Options ▸ Sizes moves the cell width between these (each of
+C.CELL_W      = 50        -- width of one control cell (Options ▸ Sizes)
+-- Options ▸ Sizes moves the cell width between these (each of
 -- ChannelView, the rack, its TCP window and the web page, or ChannelView's
 -- for those following it); the cell's height,
 -- the knobs and the type stay as they are, only the air between columns
@@ -205,7 +205,7 @@ C.ROT_FONT  = "Arial"     -- the LICE side has no access to ImGui's font
 C.ROT_UP    = true        -- reading bottom-to-top, the way a book spine
                           -- does everywhere except the United States
 
--- The fonts offered by name (Visual Options, a text control's Font); any
+-- The fonts offered by name (Options, a text control's Font); any
 -- other is typed in.
 do
   local os_ = (reaper and reaper.GetOS and reaper.GetOS() or ""):lower()
@@ -242,7 +242,7 @@ C.GRV_W       = 220       -- the gain-reduction trace, when a meter is opened ou
 C.GRV_WINDOWS = { "1b", "2b", "4b", "8b", "1s", "2s", "4s" }
 C.GRV_DEFAULT = "4b"
 C.IO_BAR_W    = 8         -- the bar itself
-C.IO_BAR_W_SCALE = 20     -- ... with its figures on it (Visual Options' Meter scales)
+C.IO_BAR_W_SCALE = 20     -- ... with its figures on it (Options' Meter scales)
 C.METER_W_SCALE  = 18     -- a GR meter's bar with its figures
 C.METER_FONT  = 10        -- point size for the readout
 -- "left" or "right" edge of the panel body. Right, so a panel reads the way
@@ -294,12 +294,12 @@ C.GR_RANGE_RELAX = 3.0    -- seconds before the scale steps back down
 -- Fader and meter split the panel's inner width in half each, so the two
 -- read as a balanced pair rather than a fader with an afterthought beside
 -- it. FADER_W is just the moving part; its half is wider than that.
-C.CHANNEL_W   = 112       -- expanded width of the Channel panel (Visual Options ▸ Faders & strips, Default)
+C.CHANNEL_W   = 112       -- expanded width of the Channel panel (Options ▸ Faders & strips, Default)
                           -- (fader and meter take half each, and the
                           --  meter's scale needs room for its numbers)
 -- The width of an expanded channel strip: the pinned Channel panel, every
 -- mixer strip, and the track name buttons, which share it (a group can
--- have its own: TO.track_width). Set in Visual Options ▸ Faders & strips;
+-- have its own: TO.track_width). Set in Options ▸ Faders & strips;
 -- the fader and meter scale with it (TS_CV_Channel.draw_body),
 -- so it can go narrower than the default as well as wider. Collapsed
 -- strips keep their own width.
@@ -537,10 +537,10 @@ function C.spacer_w()
   spacer_now = math.max(1, math.min(64, math.floor(v or 16)))
   return spacer_now
 end
--- read it again next time (Visual Options has just set it)
+-- read it again next time (Options has just set it)
 function C.spacer_refresh() spacer_now = nil end
 
--- Folder borders (Visual Options ▸ Faders & strips): a bar in a folder's
+-- Folder borders (Options ▸ Faders & strips): a bar in a folder's
 -- colour down the left of its first track's strip and the right of its
 -- last's, this wide, 0 when off. Read every second, so the web page's
 -- bridge (another script) follows it too.
@@ -571,7 +571,7 @@ C.TCP_WIN_TITLE  = "ChannelView TCP"
 -- stripe along ChannelView's name buttons.
 C.COLOUR_STRIPE  = 3
 C.TCP_STRIP_W    = 7
-C.TCP_INDENT     = 8      -- per folder level, the way REAPER indents (Visual Options)
+C.TCP_INDENT     = 8      -- per folder level, the way REAPER indents (Options)
 C.TCP_INDENT_FOLDERS = true  -- indent at all
 C.TCP_PAD        = 4      -- inner padding of a row
 C.TCP_METER_H    = 12     -- the horizontal meter under the name
@@ -666,7 +666,7 @@ C.POWER, C.TRACK_COL = "icon", "stripe"
 C.HIDE_HEAD, C.HIDE_FOOT = false, false
 C.LIGHT_UI = false
 
--- Visual Options' defaults (Pro): what a control with no style of its own
+-- Options' defaults (Pro): what a control with no style of its own
 -- draws as. knob/button/combo/fader: a style key, or nil for the plain one;
 -- knob_cap/button_col/fader_cap: a cap or lamp key or #hex, or nil;
 -- knob_look: a knob built from parts, in place of knob; knob_arc: a value
@@ -1289,7 +1289,7 @@ function C.plate_key(key)
 end
 
 -- ---------------------------------------------------------------------
--- Overall size (Visual Options ▸ Sizes, per tab): every measurement
+-- Overall size (Options ▸ Sizes, per tab): every measurement
 -- below grown or shrunk together from what it is at 100%. C.S(n) is a
 -- drawing's own pixel count at that size. Text sizes follow
 -- (TS_CV_VisualOptions apply_fonts), and so does the cell width.
@@ -1311,7 +1311,7 @@ local ui_base = nil
 function C.S(n) local v = n * C.UI; return math.tointeger(v) or v end
 -- The size, 0.5 to 1.5. Each measurement from its own 100% value, so it
 -- can be set again and again; the cell width and the channel strip's are
--- Visual Options' own and scaled where they're set.
+-- Options' own and scaled where they're set.
 function C.set_ui(k)
   k = math.max(C.UI_MIN, math.min(C.UI_MAX, tonumber(k) or 1))
   if not ui_base then

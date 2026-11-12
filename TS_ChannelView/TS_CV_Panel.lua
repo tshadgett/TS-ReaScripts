@@ -2106,7 +2106,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     end
   end
 
-  -- the name in the header font (Visual Options > Text)
+  -- the name in the header font (Options > Text)
   local name = U.fx_label(fx)
   local head_font = W.push_font(ctx, "head")
   local nw, nh = ImGui.CalcTextSize(ctx, name)
@@ -3374,7 +3374,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         -- W.fader doesn't care what 0..1 means, only that the caller
         -- does.
         local look = (ctl.style or ctl.cap) and { style = ctl.style, cap = W.cap_col(ctl.cap) } or nil
-        -- (no style of its own: Visual Options' default fader)
+        -- (no style of its own: Options' default fader)
         if C.DEF.fader and not ctl.style then
           look = { style = C.DEF.fader, cap = W.cap_col(ctl.cap or C.DEF.fader_cap) }
         end
@@ -4551,7 +4551,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         draw_collapsed(ctx, dl, x, y, ww, wh, track, fx, enabled, req, meter)
       end
     else
-      -- An auto-hidden header and foot (Visual Options) are drawn over
+      -- An auto-hidden header and foot (Options) are drawn over
       -- the body while the pointer is on the panel: submitted first, so
       -- their buttons take the clicks, on a channel painted last.
       local sp
