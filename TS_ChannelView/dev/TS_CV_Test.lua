@@ -12475,6 +12475,102 @@ do
   check("bar ground: in force while drawn, put back after", (seen == lg.toggle_off) and (C.COL.toggle_off == was) and pushed == popped, true)
 end
 
+-- Collisions (Pro): the tracks covering the one in view, from their
+-- probes' ERB bands (TS_TrackProbe 2.8.0), on the masking model Track
+-- Analyser uses
+do
+  local MK = require("TS_CV_Mask")
+  local g = MK.grid(256, 20, 20000)
+  check("collisions: one band per ERB, 20 Hz to 20 kHz", g.n, 41)
+  local CL = require("TS_CV_Collisions")
+  CL._reset()
+  local function near(v, want) return math.abs(v - want) < 0.05 end
+  check("collisions: the same place costs nothing", near(CL.pan_db({ l = 1, r = 1 }, { l = 2, r = 2 }), 0), true)
+  check("collisions: centre against hard left", near(CL.pan_db({ l = 1, r = 1 }, { l = 1, r = 0 }), -6.02), true)
+  check("collisions: a whole side apart", CL.pan_db({ l = 1, r = 0 }, { l = 0, r = 1 }), CL.PAN_DB)
+  check("collisions: ranges in words", table.concat({ CL._range_text(180, 450), CL._range_text(1200, 4000),
+    CL._range_text(450, 1200), CL._range_text(1000, 1040) }, " | "),
+    "180\u{2013}450 Hz | 1.2\u{2013}4 kHz | 450 Hz\u{2013}1.2 kHz | 1 kHz")
+  -- a vocal in view, keys 10 dB over it at 1-4 kHz, the same keys panned
+  -- hard left, a muted pad, the vocal's own folder (its bus)
+  local A, B, Cl, D, F = { n = "Vox" }, { n = "Keys" }, { n = "Gtr L" }, { n = "Pad" }, { n = "Vocals" }
+  local idx = { [A] = 1, [B] = 2, [Cl] = 3, [D] = 4, [F] = 5 }
+  local lvl = { [A] = -30, [B] = -20, [Cl] = -20, [D] = -20, [F] = -20 }
+  local gm, seq = {}, 0
+  local function publish()
+    seq = seq + 1
+    for tr, i in pairs(idx) do
+      local b = CL.BASE + (i + 1) * CL.STRIDE
+      gm[b], gm[b + 1], gm[b + 2], gm[b + 3], gm[b + 4], gm[b + 5], gm[b + 6] = seq, g.n, 20, 20000, -20, -20, i + 2
+      for k = 1, g.n do
+        local hz = g.hz[k]
+        gm[b + CL.OFF + k - 1] = (hz >= 1000 and hz <= 4000) and lvl[tr] or -150
+      end
+    end
+  end
+  local saved = {}
+  for _, k in ipairs({ "gmem_read", "time_precise", "GetPlayState", "GetMediaTrackInfo_Value", "GetParentTrack",
+                       "GetMasterTrack", "GetExtState", "SetExtState" }) do saved[k] = reaper[k] end
+  local now, play, ext = 100, 1, { collisions = "bands" }
+  reaper.gmem_read = function(a) return gm[a] or 0 end
+  reaper.time_precise = function() return now end
+  reaper.GetPlayState = function() return play end
+  reaper.GetMediaTrackInfo_Value = function(tr, k)
+    if k == "B_MUTE" then return tr == D and 1 or 0 end
+    if k == "D_VOL" then return 1 end
+    if k == "D_PAN" then return tr == Cl and -1 or 0 end
+    return 0
+  end
+  reaper.GetParentTrack = function(tr) return tr == A and F or nil end
+  reaper.GetMasterTrack = function() return "master" end
+  reaper.GetExtState = function(_, k) return ext[k] or "" end
+  reaper.SetExtState = function(_, k, v) ext[k] = v end
+  local TPs = package.loaded["TS_CV_Taps"]
+  package.loaded["TS_CV_Taps"] = { want_spectrum = function(tr) return idx[tr], {} end }
+  local list = { { track = A }, { track = B }, { track = Cl }, { track = D }, { track = F } }
+  for _ = 1, 600 do now = now + 0.07; publish(); CL.tick(A, list) end    -- 42 s playing
+  local mb, mc = CL.mark(B, "Vox", "Keys"), CL.mark(Cl, "Vox", "Gtr L")
+  check("collisions: keys over the vocal mark at 1-4 kHz, nothing low",
+    mb ~= nil and mb.bands[7] > 0.3 and mb.bands[2] == 0, true)
+  check("collisions: the tip", mb and mb.tip, "Keys covers Vox at 1.1\u{2013}3.6 kHz, most of the time")
+  check("collisions: panned away, less", mc == nil or mc.dot < mb.dot * 0.6, true)
+  check("collisions: a muted track marks nothing", CL.mark(D, "Vox", "Pad"), nil)
+  check("collisions: the vocal's own folder marks nothing", CL.mark(F, "Vox", "Vocals"), nil)
+  -- stopped: the marks stay as they were
+  play = 0
+  local before = mb.dot
+  lvl[B] = -120
+  for _ = 1, 100 do now = now + 0.07; publish(); CL.tick(A, list) end
+  check("collisions: stopped, the marks stay", CL.mark(B, "Vox", "Keys").dot, before)
+  -- playing again, the keys gone quiet: the mark fades
+  play = 1
+  for _ = 1, 300 do now = now + 0.07; publish(); CL.tick(A, list) end
+  local mq = CL.mark(B, "Vox", "Keys")
+  check("collisions: gone quiet, it fades", mq == nil or mq.dot < before * 0.1, true)
+  -- drawn: a band for each one strong enough, or one dot
+  do
+    local drawn = {}
+    local fake = { DrawList_AddRectFilled = function(_, x1, y1, x2, y2, col) drawn[#drawn + 1] = { "r", col & 0xFF } end,
+                   DrawList_AddCircleFilled = function(_, x, y, r, col) drawn[#drawn + 1] = { "c", col & 0xFF } end }
+    local m = { bands = { 0, 0, 0, 0, 0, 0.2, 1, 0.5, 0, 0.01 }, dot = 1, tip = "" }
+    CL.draw(fake, "dl", m, 0, 0, 60, false)
+    local alphas = {}
+    for _, d in ipairs(drawn) do alphas[#alphas + 1] = d[1] .. d[2] end
+    check("collisions: bands drawn, opacity their strength", table.concat(alphas, " "), "r51 r255 r128")
+    drawn = {}
+    CL.set_mode("dot")
+    CL.draw(fake, "dl", m, 0, 0, 60, true)
+    check("collisions: a dot (with its shade on a filled button)", #drawn == 2 and drawn[2][1] == "c" and drawn[2][2] == 255, true)
+    CL.set_mode("bands")
+  end
+  -- off: nothing
+  CL.set_mode(nil)
+  check("collisions: off", CL.mark(B, "Vox", "Keys"), nil)
+  package.loaded["TS_CV_Taps"] = TPs
+  for k, v in pairs(saved) do reaper[k] = v end
+  CL._reset()
+end
+
 -- P.split: one splitter per panel and window, kept; made again when let go;
 -- never tried in another window (ReaImGui stops the script)
 do

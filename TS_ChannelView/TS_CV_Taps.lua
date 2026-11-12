@@ -2301,13 +2301,15 @@ end
 TP.SPEC_BASE, TP.SPEC_STRIDE, TP.SPEC_TRACKS = 0x3A0000, 272, 4096
 TP.TA_POST = 0x20000
 local spec_seen, spec_frame, spec_probe, spec_tick = {}, {}, {}, 0
-function TP.spectrum(tr)
+
+-- Keeps a track's post probe running its spectrum (field 127 moving),
+-- without reading it: TP.spectrum below, and Collisions (TS_CV_Collisions,
+-- which reads the probe's ERB bands instead). Returns the track's index
+-- and its post probe, or nil when it has none.
+function TP.want_spectrum(tr)
   if not tr then return nil end
   local now = reaper.time_precise()
   local key = tostring(tr)
-  local f = spec_frame[key]
-  if f and now - f.t < 0.012 then return f.s end
-  if not TP._spec_gm then reaper.gmem_attach(TP.GMEM_NS); TP._spec_gm = true end
   local idx = PL.track_index(tr)
   -- where its post probe is: looked for twice a second, not every frame
   local pc = spec_probe[key]
@@ -2317,11 +2319,22 @@ function TP.spectrum(tr)
     spec_probe[key] = pc
   end
   local probe = pc.fx
+  if not (idx and probe and idx + 1 < TP.SPEC_TRACKS) then return nil end
+  if not TP._spec_gm then reaper.gmem_attach(TP.GMEM_NS); TP._spec_gm = true end
+  spec_tick = (spec_tick + 1) % 1000000
+  PL.set(tr, probe, "cv_spec", 1, spec_tick + 1)
+  return idx, probe
+end
+function TP.spectrum(tr)
+  if not tr then return nil end
+  local now = reaper.time_precise()
+  local key = tostring(tr)
+  local f = spec_frame[key]
+  if f and now - f.t < 0.012 then return f.s end
+  if not TP._spec_gm then reaper.gmem_attach(TP.GMEM_NS); TP._spec_gm = true end
+  local idx, probe = TP.want_spectrum(tr)
   local out
-  if idx and probe and idx + 1 < TP.SPEC_TRACKS then
-    -- asked for: the probe's field 127 kept moving
-    spec_tick = (spec_tick + 1) % 1000000
-    PL.set(tr, probe, "cv_spec", 1, spec_tick + 1)
+  if probe then
     local b = TP.SPEC_BASE + (idx + 1) * TP.SPEC_STRIDE
     local seq = reaper.gmem_read(b)
     local s = spec_seen[key]

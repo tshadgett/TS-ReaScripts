@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.7.4
+version: 2.8.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -58,6 +58,9 @@ author: Tim Shadgett
 //              * 272 (A SPECTRUM PER TRACK)
 //   0x4C0000   where a probe that isn't publishing writes its block, so
 //              it never lands on the one Track Analyser reads
+//   0x4E0000   each track's ERB bands and left / right levels for
+//              ChannelView's Collisions, + (track index + 1) * 64
+//              (COLLISIONS)
 //   73         tap heartbeat, bumped by any reader
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
@@ -325,6 +328,22 @@ author: Tim Shadgett
 //   but not for Track Analyser, writes its own block at 0x4C0000 rather
 //   than over the PRE / POST block Track Analyser is reading.
 //
+// COLLISIONS
+//   ChannelView marks, on its track list, the tracks that cover the one
+//   in view, and how much of the time. The spectrum above is a display
+//   level (instant attack, a slow release), which would make a kick look
+//   as if it never stops; this is each frame as it is. While A SPECTRUM
+//   PER TRACK runs, the post probe also writes, at 0x4E0000 + (track
+//   index + 1) * 64: [0] a count that moves with every frame, [1] bands,
+//   [2] lowest and [3] highest frequency, [4] the left and [5] the right
+//   channel's level since the last frame (dB, mean square), [6] the track
+//   index + 2 (who wrote it), and from [8] each band's power this frame
+//   (dB, mean square, a sine of amplitude 1 at -3). The bands are
+//   equivalent rectangular bandwidths (Glasberg & Moore), one each from
+//   20 Hz to 20 kHz: the grid ChannelView's masking model works on, so
+//   nothing has to be regrouped there. A band narrower than a bin (the
+//   lowest) takes the nearest bin's density times its width.
+//
 // LISTENING TO A BAND
 //   The same place, written by ChannelView: [6] a frequency (Hz), [7] a
 //   Q, [8] a count that moves while someone listens, [9] what's heard:
@@ -563,6 +582,10 @@ out_pin:right
   // A SPECTRUM PER TRACK
   PB_CVSPEC = 127; CVS_BASE = 0x3A0000; CVS_STRIDE = 272; CVS_TRACKS = 4096; CVS_OFF_BAND = 16;
   SINK_BASE = 0x4C0000;
+  // COLLISIONS
+  COL_BASE = 0x4E0000; COL_STRIDE = 64; COL_OFF = 8; COL_MAXB = 48;
+  COL_E = 43000;                  // COL_MAXB+1, band edges in bins
+  col_nb = 0; col_hi = 20000; col_seq = 0; col_l = col_r = col_n = 0;
   cvs_v = cvs_last = 0; cvs_age = 1000000000; cvs_seq = 0; cv_active = 0;
   lsn_hb = lsn_last = 0; lsn_age = 1000000000; lsn_on = 0; lsn_mix = 0;
   lsn_f = lsn_q = lsn_k = -1;
@@ -804,11 +827,21 @@ out_pin:right
 
   // Where each band starts and ends, in bins. Recomputed only when the FFT
   // size or the sample rate changes, so the per-frame pass has no logs in it.
-  function buildBands() local(i, ratio) (
+  function buildBands() local(i, ratio, elo, ehi) (
     ratio = log(BAND_HI / BAND_LO);
     i = 0;
     loop(BANDS + 1,
       BUF_BEDGE[i] = BAND_LO * exp(ratio * i / BANDS) * fftsz / srate;
+      i += 1;
+    );
+    // COLLISIONS: one band per ERB from BAND_LO to the top (below Nyquist)
+    col_hi = min(BAND_HI, srate * 0.45);
+    elo = 21.4 * log10(4.37 * BAND_LO / 1000 + 1);
+    ehi = 21.4 * log10(4.37 * col_hi / 1000 + 1);
+    col_nb = max(4, min(COL_MAXB, floor(ehi - elo + 0.5)));
+    i = 0;
+    loop(col_nb + 1,
+      COL_E[i] = (10 ^ ((elo + i * (ehi - elo) / col_nb) / 21.4) - 1) * 1000 / 4.37 * fftsz / srate;
       i += 1;
     );
   );
@@ -2156,6 +2189,8 @@ out_pin:right
   active ? (
 
     m = (spl0 + spl1) * 0.5;
+    // COLLISIONS: each channel's level, for where the track sits
+    cv_active ? ( col_l += spl0 * spl0; col_r += spl1 * spl1; col_n += 1; );
 
     //-- the alignment delay ------------------------------------------
     //   Pre probe only. Without it, column N of one probe and column N of
@@ -2258,6 +2293,36 @@ out_pin:right
                : BUF_AVG[i] += pw;
         );
         i += 1;
+      );
+
+      // COLLISIONS: this frame's power in each ERB band, and the left and
+      // right levels since the last frame (Hann: 2 * sum |X|^2 / (0.375
+      // n^2) is the mean square)
+      (cv_active && col_n > 0) ? (
+        cb = COL_BASE + (pl_tr + 1) * COL_STRIDE;
+        cs = 2 / (0.375 * fftsz * fftsz);
+        bi = 0;
+        loop(col_nb,
+          e0 = COL_E[bi]; e1 = COL_E[bi + 1];
+          k0 = max(1, ceil(e0)); k1 = min(nbins - 1, ceil(e1) - 1);
+          ps = 0;
+          k1 >= k0 ? (
+            kk = k0;
+            loop(k1 - k0 + 1, ps += BUF_FFT[kk * 2] ^ 2 + BUF_FFT[kk * 2 + 1] ^ 2; kk += 1; );
+            ps *= cs;
+          ) : (
+            kk = max(1, min(nbins - 1, floor((e0 + e1) * 0.5 + 0.5)));
+            ps = (BUF_FFT[kk * 2] ^ 2 + BUF_FFT[kk * 2 + 1] ^ 2) * cs * (e1 - e0);
+          );
+          gmem[cb + COL_OFF + bi] = ps > 0.00000000000000000001 ? 10 * log10(ps) : -200;
+          bi += 1;
+        );
+        gmem[cb + 1] = col_nb; gmem[cb + 2] = BAND_LO; gmem[cb + 3] = col_hi;
+        gmem[cb + 4] = col_l > 0 ? 10 * log10(col_l / col_n) : -200;
+        gmem[cb + 5] = col_r > 0 ? 10 * log10(col_r / col_n) : -200;
+        gmem[cb + 6] = pl_tr + 2;
+        col_seq += 1; gmem[cb] = col_seq;
+        col_l = col_r = col_n = 0;
       );
 
       // The average itself stays in BUF_AVG, which the band summary reads

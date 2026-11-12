@@ -65,6 +65,19 @@ local function pb()
 end
 MX.patch_bay = pb
 
+-- Collisions (TS_CV_Collisions, Pro): marks on channel view's track
+-- buttons; nil without Pro. Its menu goes in a track button's right-click.
+local CLM
+local function cl()
+  if CLM == nil then CLM = require("TS_CV_Edition").module("TS_CV_Collisions") or false end
+  return CLM or nil
+end
+TM.collisions_menu = function(ctx)
+  local ED = require("TS_CV_Edition")
+  local m = cl()
+  if m then m.menu(ImGui, ctx) else ED.item(ImGui, ctx, "Collisions") end
+end
+
 -- The patch bay opened or closed (once a frame, off last frame's pointer)
 -- and the height it takes: from the strips in mixer view, from the panels
 -- above the name row in channel view (the caller gives the row that much
@@ -345,7 +358,7 @@ local FOLDER_TIP  = {
 -- double-clicked, right-clicked. A folder parent's button carries a
 -- folder icon at its left end that collapses and expands the folder; a
 -- click on the icon is the icon's, not the button's.
-local function name_button(ctx, label, col, selected, id, w, t)
+local function name_button(ctx, label, col, selected, id, w, t, mark)
   local full_h = C.STRIP_H - C.S(8)
   local h = C.STRIP_BASE_H - 8          -- the coloured name pill itself
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -461,8 +474,10 @@ local function name_button(ctx, label, col, selected, id, w, t)
   end
   local cx = x + left + (w - left) * 0.5
   ImGui.DrawList_AddText(dl, cx - tw * 0.5, y + text_h * 0.5 - th * 0.5, text_col, shown)
+  -- Collisions: along the top of the name part, over it
+  if mark then cl().draw(ImGui, dl, mark, x, y + 1, w, studio and true or false) end
 
-  W.tip(ctx, "tsname" .. id, label, hovered, false)
+  W.tip(ctx, "tsname" .. id, mark and (label .. "\n" .. mark.tip) or label, hovered, false)
   return pressed,
          hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
          rclick
@@ -903,6 +918,11 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
     -- cursor.
     local row_y = select(2, ImGui.GetCursorPos(ctx))
     local x_off = 0
+    -- Collisions (channel view): measured for the track in view
+    local CL = (not strips) and cl() or nil
+    if CL and not CL.mode() then CL = nil end
+    if CL then CL.tick(cur_track, list) end
+    local cur_name = CL and cur_track and TO.name(cur_track) or nil
     local rects = {}      -- each column's screen x and width, for dropping
     ImGui.SetCursorPos(ctx, 0, row_y)
     local org_x, org_y = ImGui.GetCursorScreenPos(ctx)   -- the row's content origin, on screen
@@ -964,8 +984,9 @@ function MX.draw_row(ctx, total_h, cur_track, strips, pad_y, pad_x, row_w)
         -- a hardcoded guess at it, so a blank track is the same grey in
         -- both views.
         local nbx, nby = ImGui.GetCursorScreenPos(ctx)
+        local mark = CL and t.track ~= cur_track and CL.mark(t.track, cur_name, t.name) or nil
         local hit, dbl, menu = name_button(ctx, track_label(t),
-          t.col or C.COL.header_bg, selected, t.guid, w, t)
+          t.col or C.COL.header_bg, selected, t.guid, w, t, mark)
         MX.fold_edges(ImGui.GetWindowDrawList(ctx), t, math.floor(nbx), nby, math.floor(nbx + w) - math.floor(nbx), C.STRIP_H - C.S(8))
         if hit then MX.click(t.track, t.guid, ImGui.GetKeyMods(ctx)) end
         if dbl then dbl_track = t.track end

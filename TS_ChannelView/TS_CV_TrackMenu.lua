@@ -226,6 +226,11 @@ local function context_menu(ctx)
   if ImGui.MenuItem(ctx, "Icon\u{2026}") then
     st.ico_req, st.ico_tracks = true, tg
   end
+  -- (channel view's track list: TS_CV_Mixer sets it)
+  if TM.collisions_menu then
+    ImGui.Separator(ctx)
+    TM.collisions_menu(ctx)
+  end
 
   ImGui.Separator(ctx)
   local many = #tg > 1

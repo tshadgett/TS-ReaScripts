@@ -31,8 +31,8 @@ lighting and shadows, presets), the plugin's own colours, vendor looks,
 plugin pictures on action bars, VU meters and visualisers, more than one layout per plugin and
 switching between them, the offer of a canvas for a new plugin, Show when
 rules and virtual controls, the TS_CV Trimmer, the gain-reduction trace,
-the patch bay (in the mixer and the TCP window), comparing two plugins and
-Console setup.
+the patch bay (in the mixer and the TCP window), comparing two plugins,
+Console setup and Collisions.
 
 Without Pro, everything else works as described, and a layout made with Pro
 still works: its grid, Show rules and virtual controls are drawn as they
@@ -369,6 +369,34 @@ colour rather than in one accent colour for every track (`C.SEL_OUTLINE`,
 `"track"` or `"accent"`). It has to be brightened rather than used
 straight: on the selected strip the fill is already that colour, so the
 outline would have nothing to stand against.
+
+## Collisions (Pro)
+
+In channel view, the track list can mark the tracks that cover the one
+you're looking at: right-click a track button ▸ **Collisions** ▸ *Bands*
+or *Dot* (*Off* to stop).
+
+- **Bands:** ten small bars along the top of a track's button, low to
+  high, each as strong as that track covers this one there.
+- **Dot:** one mark in the button's corner, as strong as its strongest
+  band.
+- **Hover** a marked button for where and how often: "Keys covers Vox at
+  1.1–3.6 kHz, most of the time".
+
+It uses Track Analyser's masking model (where one track sits under the
+masked threshold another makes, spread up and down the spectrum), and
+adds:
+
+- **How much of the time:** a clash in every bar marks strongly, one in a
+  fill only faintly. Marks build up and fade over a few seconds while
+  REAPER plays; stopped, they stay as they were.
+- **Every listed track** against the one in view, not one you pick.
+- **Panning:** a track panned away from this one covers it less.
+- Each track at its fader; muted tracks, and the track's own folder
+  parents and children (they carry it), are left out.
+
+Each track needs its probes (TS_TrackProbe 2.8.0 or later). Reopen the
+project after updating, so the new probe runs.
 
 ## What it does
 
@@ -2241,6 +2269,8 @@ them up the first time ChannelView shows it.
 | `TS_CV_ConsoleSetup.lua` | the Console setup window (Pro) |
 | `TS_CV_ConsoleDrawer.lua` | the console panel in channel view (Pro) |
 | `TS_CV_ConsoleState.lua` | reading and writing a Sonimus console's saved state (Pro) |
+| `TS_CV_Collisions.lua` | Collisions: the marks on channel view's track list (Pro) |
+| `TS_CV_Mask.lua` | the masking model Collisions uses (Track Analyser's TS_TA_Mask) (Pro) |
 | `TS_ChannelView_ConsoleSetup.lua` | the action that opens Console setup (Pro) |
 | `TS_CV_KnobParts.lua` | knobs drawn from parts, for the recipes and your own looks |
 | `TS_CV_KnobEditor.lua` | the *Knob look* window (Pro) |
