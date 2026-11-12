@@ -372,31 +372,36 @@ outline would have nothing to stand against.
 
 ## Collisions (Pro)
 
-In channel view, the track list can mark the tracks that cover the one
-you're looking at: right-click a track button ▸ **Collisions** ▸ *Bands*
-or *Dot* (*Off* to stop).
+In channel view, the track list can mark the tracks that share the space
+of the one you're looking at: right-click a track button ▸ **Collisions** ▸
+*Bands* or *Dot* (*Off* to stop).
 
 - **Bands:** ten small bars along the top of a track's button, low to
-  high, each as strong as that track covers this one there.
+  high, each as strong as that track shares this one's space there.
 - **Dot:** one mark in the button's corner, as strong as its strongest
   band.
-- **Hover** a marked button for where and how often: "Keys covers Vox at
+- **Hover** a marked button for where and how often: "Keys and Vox share
   1.1–3.6 kHz, most of the time".
 
-It uses Track Analyser's masking model (where one track sits under the
-masked threshold another makes, spread up and down the spectrum), and
-adds:
+In each band, a mark is the stronger of how close the two tracks' levels
+are where both are there (the same level marks solid, 20 dB apart nothing)
+and how far the other covers this one (Track Analyser's masking model, so a
+track buried under a louder one marks fully). Then:
 
 - **How much of the time:** a clash in every bar marks strongly, one in a
   fill only faintly. Marks build up and fade over a few seconds while
   REAPER plays; stopped, they stay as they were.
 - **Every listed track** against the one in view, not one you pick.
-- **Panning:** a track panned away from this one covers it less.
+- **Panning:** a track panned to one side shares half as much with one in
+  the centre, and nothing with one on the other side.
 - Each track at its fader; muted tracks, and the track's own folder
   parents and children (they carry it), are left out.
 
-Each track needs its probes (TS_TrackProbe 2.8.0 or later). Reopen the
-project after updating, so the new probe runs.
+Collisions hears each track through its probes (TS_TrackProbe 2.8.0 or
+later). Turning it on offers a probe pair to the listed tracks without one
+(asked first), and the menu offers it again for tracks added later. A
+track without probes says so on hover. Reopen a project after updating,
+so its probes are the new ones.
 
 ## What it does
 

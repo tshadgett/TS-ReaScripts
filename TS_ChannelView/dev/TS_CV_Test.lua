@@ -12485,17 +12485,19 @@ do
   local CL = require("TS_CV_Collisions")
   CL._reset()
   local function near(v, want) return math.abs(v - want) < 0.05 end
-  check("collisions: the same place costs nothing", near(CL.pan_db({ l = 1, r = 1 }, { l = 2, r = 2 }), 0), true)
-  check("collisions: centre against hard left", near(CL.pan_db({ l = 1, r = 1 }, { l = 1, r = 0 }), -6.02), true)
-  check("collisions: a whole side apart", CL.pan_db({ l = 1, r = 0 }, { l = 0, r = 1 }), CL.PAN_DB)
+  check("collisions: the same place shares all", near(CL.pan_share({ l = 1, r = 1 }, { l = 2, r = 2 }), 1), true)
+  check("collisions: centre against hard left, half", near(CL.pan_share({ l = 1, r = 1 }, { l = 1, r = 0 }), 0.5), true)
+  check("collisions: a whole side apart, none", CL.pan_share({ l = 1, r = 0 }, { l = 0, r = 1 }), 0)
   check("collisions: ranges in words", table.concat({ CL._range_text(180, 450), CL._range_text(1200, 4000),
     CL._range_text(450, 1200), CL._range_text(1000, 1040) }, " | "),
     "180\u{2013}450 Hz | 1.2\u{2013}4 kHz | 450 Hz\u{2013}1.2 kHz | 1 kHz")
   -- a vocal in view, keys 10 dB over it at 1-4 kHz, the same keys panned
-  -- hard left, a muted pad, the vocal's own folder (its bus)
+  -- hard left, a muted pad, the vocal's own folder (its bus), a double of
+  -- the vocal at its level, a track 30 dB under it, one without probes
   local A, B, Cl, D, F = { n = "Vox" }, { n = "Keys" }, { n = "Gtr L" }, { n = "Pad" }, { n = "Vocals" }
-  local idx = { [A] = 1, [B] = 2, [Cl] = 3, [D] = 4, [F] = 5 }
-  local lvl = { [A] = -30, [B] = -20, [Cl] = -20, [D] = -20, [F] = -20 }
+  local Dbl, Q, N = { n = "Vox dbl" }, { n = "Quiet" }, { n = "No probes" }
+  local idx = { [A] = 1, [B] = 2, [Cl] = 3, [D] = 4, [F] = 5, [Dbl] = 6, [Q] = 7 }
+  local lvl = { [A] = -30, [B] = -20, [Cl] = -20, [D] = -20, [F] = -20, [Dbl] = -30, [Q] = -60 }
   local gm, seq = {}, 0
   local function publish()
     seq = seq + 1
@@ -12526,14 +12528,22 @@ do
   reaper.GetExtState = function(_, k) return ext[k] or "" end
   reaper.SetExtState = function(_, k, v) ext[k] = v end
   local TPs = package.loaded["TS_CV_Taps"]
-  package.loaded["TS_CV_Taps"] = { want_spectrum = function(tr) return idx[tr], {} end }
-  local list = { { track = A }, { track = B }, { track = Cl }, { track = D }, { track = F } }
+  package.loaded["TS_CV_Taps"] = { want_spectrum = function(tr) return idx[tr], {} end,
+                                   has_probes = function(tr) return idx[tr] ~= nil end }
+  local list = { { track = A }, { track = B }, { track = Cl }, { track = D }, { track = F },
+                 { track = Dbl }, { track = Q }, { track = N } }
   for _ = 1, 600 do now = now + 0.07; publish(); CL.tick(A, list) end    -- 42 s playing
   local mb, mc = CL.mark(B, "Vox", "Keys"), CL.mark(Cl, "Vox", "Gtr L")
   check("collisions: keys over the vocal mark at 1-4 kHz, nothing low",
     mb ~= nil and mb.bands[7] > 0.3 and mb.bands[2] == 0, true)
-  check("collisions: the tip", mb and mb.tip, "Keys covers Vox at 1.1\u{2013}3.6 kHz, most of the time")
-  check("collisions: panned away, less", mc == nil or mc.dot < mb.dot * 0.6, true)
+  check("collisions: the tip", mb and mb.tip, "Keys and Vox share 1.1\u{2013}3.6 kHz, most of the time")
+  check("collisions: panned away, half", mc ~= nil and math.abs(mc.dot - mb.dot * 0.5) < 0.05, true)
+  local md = CL.mark(Dbl, "Vox", "Vox dbl")
+  check("collisions: the same at the same level marks solid", md ~= nil and md.dot > 0.95, true)
+  check("collisions: 30 dB under, nothing", CL.mark(Q, "Vox", "Quiet"), nil)
+  local mn = CL.mark(N, "Vox", "No probes")
+  check("collisions: no probes, said on hover", mn and mn.none and mn.tip, "No probes: Collisions can't hear this track")
+  check("collisions: the menu counts it", CL.missing, 1)
   check("collisions: a muted track marks nothing", CL.mark(D, "Vox", "Pad"), nil)
   check("collisions: the vocal's own folder marks nothing", CL.mark(F, "Vox", "Vocals"), nil)
   -- stopped: the marks stay as they were
