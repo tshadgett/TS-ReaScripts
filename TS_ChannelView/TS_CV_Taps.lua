@@ -398,8 +398,9 @@ local function find_level(tr, caddr, depth)
   for i, a in ipairs(items) do
     if is_probe(tr, a) then
       local role = probe_role(tr, a)
+      -- (2: the post probe, while Track Analyser compares against this track)
       if role == 0 and not pre then pre = i
-      elseif role == 1 and pre and not post then post = i end
+      elseif (role == 1 or role == 2) and pre and not post then post = i end
     end
   end
   if pre and post then return { caddr = caddr, items = items, pre = pre, post = post } end
@@ -1554,7 +1555,7 @@ function TP.top_probes(tr)
     if is_probe(tr, i) then
       local r = probe_role(tr, i)
       if r == 0 and not pre then pre = i
-      elseif r == 1 and not post then post = i end
+      elseif (r == 1 or r == 2) and not post then post = i end
     end
   end
   return pre, post
@@ -1631,6 +1632,8 @@ end
 -- moves. True if one was added.
 function TP.complete_pair(tr)
   if not tr or tr == reaper.GetMasterTrack(0) or find_level(tr, nil) then return false end
+  -- never past two: a track with more already isn't missing one
+  if #probes_in_order(tr) >= 2 then return false end
   local pre, post = TP.top_probes(tr)
   if (pre ~= nil) == (post ~= nil) then return false end
   local a, b = add_pair(tr)

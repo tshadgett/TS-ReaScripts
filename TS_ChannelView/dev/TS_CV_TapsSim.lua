@@ -936,6 +936,25 @@ do
   check("complete: inserted",             (TP.insert_probes(track)), true)
   check("complete: only the pre probe",   added .. " " .. order(), "1 N1 EQ POST")
   check("complete: roles",                (F(0).params[TP.P_ROLE] or 0) .. (F(2).params[TP.P_ROLE] or 0), "01")
+  -- Track Analyser comparing against this track: its last probe is the
+  -- comparison, still the track's post probe; nothing is ever added
+  -- (once, a probe was added at every chain change, each one the new
+  -- comparison)
+  do
+    local PLx = require("TS_CV_ProbeLink")
+    track.fx = { P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+    TP.invalidate()
+    PLx.set_compare(track, 2, true)
+    added = 0
+    check("compare: still a pair",        TP.probe_state(track), "pair")
+    check("compare: nothing added",       tostring(TP.complete_pair(track)) .. " " .. added, "false 0")
+    PLx.set_compare(track, 2, false)
+    -- more than two already: never another
+    track.fx = { fx("A", "{EQ}", 2, 2), P(1, "{P1}"), P(1, "{P2}"), P(1, "{P3}") }
+    TP.invalidate()
+    added = 0
+    check("past two: nothing added",      tostring(TP.complete_pair(track)) .. " " .. added, "false 0")
+  end
   reaper.GetTrackStateChunk, reaper.TrackFX_AddByName, reaper.TrackFX_CopyToTrack = nil, nil, nil
 end
 

@@ -1761,7 +1761,9 @@ out_pin:right
       tap_st = gmem[pb + PB_ST];
       cvs_v = gmem[pb + PB_CVSPEC];
     ) : (
-      cvs_v = cvs_last;
+      // (the post probe while Track Analyser compares against this track:
+      // still asked for ChannelView's spectrum)
+      cvs_v = role == 2 ? gmem[pb + PB_CVSPEC] : cvs_last;
       tap_n = 0; tap_mb = 0; tap_fine = 0; tap_watch = 0; tap_st = 0;
       k = 0; loop(TAP_MAX, TV_MUG[k] = 0; k += 1; );
       k = 0; loop(4, MB_MUG[k] = 0; k += 1; );
@@ -1805,10 +1807,11 @@ out_pin:right
   base = publish < 0.5 ? SINK_BASE : role < 0.5 ? PRE_BASE : (role < 1.5 ? POST_BASE : CMP_BASE);
   // ChannelView wants this track's spectrum while field 127 moves
   cvs_v != cvs_last ? ( cvs_last = cvs_v; cvs_age = 0; ) : cvs_age += samplesblock;
-  cv_active = role == 1 && cvs_last != 0 && cvs_age < srate && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
+  // (2: the post probe while Track Analyser compares against this track)
+  cv_active = (role == 1 || role == 2) && cvs_last != 0 && cvs_age < srate && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
   cbase = CVS_BASE + (pl_tr + 1) * CVS_STRIDE;
   // ChannelView listening to a band (LISTENING TO A BAND)
-  lsn_ok = role == 1 && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
+  lsn_ok = (role == 1 || role == 2) && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
   lsn_hb = lsn_ok ? gmem[cbase + 8] : 0;
   lsn_hb != lsn_last ? ( lsn_last = lsn_hb; lsn_age = 0; ) : lsn_age += samplesblock;
   lsn_on = lsn_ok && lsn_last != 0 && lsn_age < srate * 0.25 && gmem[cbase + 6] > 0;
