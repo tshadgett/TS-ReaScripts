@@ -2127,10 +2127,11 @@ local function mseg_graph(ctx, dl, track, src, p, x, y, w, h, edit)
       pts[k][1], pts[k][2] = f, snapv(fv(my))
       changed = true
     elseif g.bend and pts[g.bend] then
-      -- up bows it up, down down (as the segment runs)
+      -- up bows it up, down down, whichever way the segment runs (a
+      -- positive bend sags a rising one and bulges a falling one)
       local up = (pts[g.bend + 1][2] >= pts[g.bend][2]) and 1 or -1
       local fine = ((ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0) and C.FINE_MULT or 1
-      pts[g.bend][3] = math.max(-1, math.min(1, g.b0 - up * (my - g.my) / (y1 - y0) * 2 * fine))
+      pts[g.bend][3] = math.max(-1, math.min(1, g.b0 + up * (my - g.my) / (y1 - y0) * 2 * fine))
       changed = true
     end
   elseif not act and g then
