@@ -1,5 +1,14 @@
 # Track Analyser — changelog
 
+## 2.7.4 — TS_TrackProbe 2.8.0
+
+- **TS_TrackProbe 2.8.0:** each track's probe sends its ERB bands and
+  left / right levels for ChannelView 4.3.0's Collisions. The probe
+  compared against still counts as its track's post probe. Reopen a
+  project after updating, so the new probe runs.
+- Fixed: comparing against a track and then selecting that track left its
+  post probe marked as the comparison, so the front spectrum stood still.
+
 ## 2.7.3 — TS_TrackProbe 2.7.4
 
 - **TS_TrackProbe 2.7.4:** for ChannelView 4.2.0's measured gain

@@ -1,10 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.2.1
+-- @version 4.3.0
 -- @changelog
---  Favourites, recent plugins and the never-ask lists are all kept when
---  REAPER restarts; a panel whose controls scroll no longer stops
---  ChannelView. Moves with ChannelView Pro 4.2.1. See the CHANGELOG.
+--  Options (on the main menu) with a Behaviour tab and Track rules for
+--  adding tracks: templates beside a track, numbering, sorting, colours,
+--  spacers. Steps and MSEG modulators. Knobs keep name, dial and value
+--  together. Reopen a project after updating. Moves with ChannelView Pro
+--  4.3.0. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

@@ -1,5 +1,84 @@
 # ChannelView — changelog
 
+## 4.3.0 — Options and Track rules, Steps and MSEG modulators, knobs that sit level
+
+### ChannelView
+
+- **Options:** *Visual Options* is now *Options*, on the main menu beside
+  *Console setup*. Its new **Behaviour** tab holds the settings that were
+  in the View menu: *Float plugins without controls*, *Use mouse wheel on
+  controls*, *Return keyboard focus to REAPER*, and the new *Adaptive
+  units* (a readout of 1000 ms or more in seconds, of 1000 Hz or more in
+  kHz). *Values under controls* is under *Controls*, *Panel alignment*
+  under *Panels*.
+- **Track rules** (Options ▸ Track rules): what happens when ChannelView
+  adds or duplicates tracks. *Add child from template* / *Add sibling
+  from template* beside a track, in the + menu and a track's right-click.
+  Automatic numbering of a name's tracks (in the folder or across the
+  project), A–Z or series sorting, select and arm the new tracks, where
+  new FX returns go (before the track
+  kept at the end, or into a folder), colour rules (by name, with a grip
+  to drag each rule up or down, first match wins; a colour for VCAs,
+  folder parents and FX returns; children in their folder's colour or in
+  shades of it), spacers (before folders, after a folder's last track,
+  before FX returns, before the track kept at the end), and *Keep at the
+  end* (SUM to start). Colours and spacers follow as tracks are added
+  and moved; *Apply to the project now* numbers every series, sorts the
+  folders and colours the lot (asking first about tracks coloured by
+  hand). Right-click a template or an FX chain: *Make toolbar action…*.
+- **Duplicate track without items** in a track's right-click.
+- **Modulators: Steps and MSEG.** *Steps* plays a sequence you draw, up
+  to 32 steps: paint them or draw a line, join steps into one held step,
+  bipolar, shift, randomise, glide and swing, forward, reverse, ping pong
+  or random, and MIDI out as a CC or as notes (a range, a scale and key,
+  gate and velocity; a step at the bottom a rest). *MSEG* (multi-segment
+  envelope) plays a shape you draw: up to 16 points, segments bent by a
+  handle, snap to a grid, synced or in Hz, set off with the song, free,
+  by a MIDI note or by the audio going over a threshold (the track or its
+  sidechain, from any track), looped or once, with presets of its own and
+  yours. Opened, their tiles take two columns. Reopen a project after
+  updating, so its modulator plugin runs the new code.
+- **Knobs keep their name, dial and value together** at fixed gaps, at
+  the top of their place, so a row of knobs has its names on one line
+  and its dials level. An extra large knob sits up under its name. Hiding
+  a knob's name, or putting its value inside, gives back the room it took.
+- **Values ▸ Unit** converts a readout that already has a unit of the
+  same kind (2000.0 ms read as ms shows 2.00 s).
+- The TCP window brings a track selected anywhere into view, as REAPER's
+  track panel does.
+- Track buttons and mixer strip headers shorten a long track name the way
+  control names are shortened, keeping its number.
+- The drop marker shows before the first plugin too.
+- Fixed: a track's post probe that Track Analyser compares against counted
+  as missing, so another was added at every chain change.
+- After an update, a ChannelView window or web companion still running
+  the old code stops laying probe taps, so the two can't undo each
+  other's routing (meters flickering) until it's restarted.
+
+### ChannelView Pro
+
+- **Collisions:** the track buttons (channel view's track list and mixer
+  view's strips) mark the tracks that cover the selected one: ten bands
+  along the top, or a dot, as strong as the cover there. Hover for where
+  and how often. Each track is heard through its probes (TS_TrackProbe
+  2.8.0); turning Collisions on offers probes to the tracks without.
+- **Edit layout:** *Place in its frame* puts a knob, a dropdown or a
+  button at the top of its place (the usual), its centre or its bottom.
+  A knob's place is as tall as what it shows, and can be made taller; a
+  small knob a step taller shows its name. **Fine grid** (or Alt held
+  while dragging) moves and resizes in half steps. The editor keeps
+  Delete, Backspace and Ctrl+Z/C/V for itself while you work in it.
+- **Name when** gives a control other names, each while a parameter reads
+  a given way (Show when's rules), the first that holds shown; a text
+  element has **Text when** the same way. On the web page too.
+- An EQ curve or a visualiser can hide its frame (*Frame: Hidden*).
+- Text elements follow *Overall size*.
+- **ReEQ2 2.3:** its Low Cut and High Cut are drawn resonant by their Q.
+- The web page shows Steps and MSEG tiles as they play; the steps can be
+  painted there.
+- Fixed: Edit layout could stop ChannelView on ImGui's EndChild error
+  while REAPER rescanned plugins (a ReaPack sync).
+
 ## 4.2.1 — fixes
 
 ### ChannelView

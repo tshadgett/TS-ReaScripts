@@ -2,11 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.7.3
+-- @version 2.7.4
 -- @changelog
---  TS_TrackProbe 2.7.4: the measured zero kept right while playing, for
---  ChannelView 4.2.0's measured gain reduction. Reopen a project after
---  updating.
+--  TS_TrackProbe 2.8.0: ERB bands for ChannelView 4.3.0's Collisions.
+--  The front spectrum no longer stands still after selecting the track
+--  compared against. Reopen a project after updating.
 -- @about
 --  # Track Analyser
 --

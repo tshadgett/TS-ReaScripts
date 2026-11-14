@@ -921,8 +921,7 @@ function MD.add_mod(track, kind, ara_first)
       end
     end
     MD.set_field(track, slot, j, "type", t)
-    -- its pattern: a new one's (ModPat reads it, finds it blank, writes
-    -- the default)
+    -- its pattern: the default, written to the plugin
     if kind == "steps" or kind == "mseg" then
       local MP = require("TS_CV_ModPat")
       MP.forget(track, slot, j)
