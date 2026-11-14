@@ -21,6 +21,7 @@
 --  [nomain] TS_CV_Units.lua
 --  [nomain] TS_CV_ReaFX.lua
 --  [nomain] TS_CV_ModRack.lua
+--  [nomain] TS_CV_ModPat.lua
 --  [nomain] TS_CV_Busy.lua
 --  [nomain] TS_CV_MidiLearn.lua
 --  [nomain] TS_CV_Drawers.lua
@@ -6945,6 +6946,8 @@ local function frame()
     -- track's routing re-checked per frame.
     TP.update()
     require("TS_CV_TrackRules").tick()
+    -- Steps' and MSEGs' patterns on their way to and from their plugin
+    require("TS_CV_ModPat").tick()
     -- a factory preset the plugin didn't tell REAPER about (TS_CV_Presets)
     require("TS_CV_Presets").tick()
     FO.update(ctx, ImGui, C.FOCUS_BACK)

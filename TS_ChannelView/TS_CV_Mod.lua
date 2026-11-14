@@ -67,7 +67,7 @@ MD.PATHS = {
 
 -- A modulator's fields, in the plugin's order: key, default, lo, hi.
 MD.FIELDS = {
-  { "type",   0,    0, 3 },
+  { "type",   0,    0, 5 },
   { "out",    0,    0, 1 },
   { "outb",   0.5,  0, 1 },
   { "depth",  1,    0, 1 },
@@ -100,9 +100,9 @@ function MD.macro_param(i) return i - 1 end
 function MD.param(j, key) return MD.NM + (j - 1) * MD.PER + OFF[key] end
 
 -- the kinds of modulator, by Type
-MD.KINDS = { "lfo", "follower", "midi" }
-MD.KIND_NAME = { lfo = "LFO", follower = "Follower", midi = "MIDI" }
-local KIND_TYPE = { lfo = 1, follower = 2, midi = 3 }
+MD.KINDS = { "lfo", "follower", "midi", "steps", "mseg" }
+MD.KIND_NAME = { lfo = "LFO", follower = "Follower", midi = "MIDI", steps = "Steps", mseg = "MSEG" }
+local KIND_TYPE = { lfo = 1, follower = 2, midi = 3, steps = 4, mseg = 5 }
 MD.KIND_TYPE = KIND_TYPE
 
 -- the control types a macro can be shown as
@@ -140,7 +140,27 @@ function MD.mlo_of(sus) return 127 * math.max(0, math.min(1, sus)) end
 
 MD.COLOURS = { 0xe8a23aff, 0xb07ce8ff, 0x4cc3a8ff, 0xd9604aff, 0x5aa0e0ff, 0xd8c450ff,
                0x9ac46aff, 0xc07aa0ff, 0x6ac4c4ff, 0x7a9ae8ff, 0xe07ab0ff, 0xa0a8b0ff }
-local KIND_COL = { lfo = 0xb07ce8ff, follower = 0x4cc3a8ff, midi = 0x7a9ae8ff }
+local KIND_COL = { lfo = 0xb07ce8ff, follower = 0x4cc3a8ff, midi = 0x7a9ae8ff, steps = 0xe0913aff, mseg = 0x3fb8afff }
+
+-- STEPS AND MSEG (TS_CV_Modulators.jsfx): their settings in the other
+-- kinds' fields. Steps: Attack the number of steps, Shape the direction,
+-- Floor the swing (0..-80 is 0..80 %), Gate bipolar, MIDI Source its MIDI
+-- out (0 off, 1 CC, 2 notes), Channel, MIDI CC the CC number (notes: the
+-- velocity), Low and High note the notes' range, Release scale x 12 + key,
+-- Ceiling the notes' gate (-60..12 is 0..100 %). MSEG: MIDI Source its
+-- trigger, Hold its loop, Floor the audio trigger's threshold.
+MD.STEP_DIRS = { "Forward", "Reverse", "Ping pong", "Random" }
+MD.STEP_OUT = { "Off", "CC", "Notes" }
+MD.MSEG_TRIG = { "Sync", "Free", "MIDI note", "Audio" }
+function MD.swing_of(floor_db) return math.max(0, math.min(80, -(floor_db or 0))) end
+function MD.gate_of(ceil) return math.max(0, math.min(1, ((ceil or 0) + 60) / 72)) end
+function MD.ceil_of_gate(g) return -60 + 72 * math.max(0, math.min(1, g)) end
+-- a kind's own starting settings, over MD.FIELDS' defaults
+MD.KIND_DEFAULTS = {
+  steps = { att = 16, rsync = 0, shape = 0, floor = 0, gate = 0, msrc = 0, mch = 1, mcc = 74,
+            mlo = 48, mhi = 72, rel = 12, ceil = MD.ceil_of_gate(0.75) },
+  mseg = { rsync = 11, msrc = 0, mhold = 1, floor = -30, mch = 0, mlo = 0, mhi = 127 },
+}
 
 -- ---------------------------------------------------------------------
 -- small REAPER helpers
@@ -883,10 +903,22 @@ function MD.add_mod(track, kind, ara_first)
   local guid
   if slot then
     local list = build(track, slot)
+    local own = MD.KIND_DEFAULTS[kind] or {}
     for _, f in ipairs(MD.FIELDS) do
-      if f[1] ~= "out" and f[1] ~= "outb" then MD.set_field(track, slot, j, f[1], f[2]) end
+      if f[1] ~= "out" and f[1] ~= "outb" then
+        local v = own[f[1]]
+        if v == nil then v = f[2] end
+        MD.set_field(track, slot, j, f[1], v)
+      end
     end
     MD.set_field(track, slot, j, "type", t)
+    -- its pattern: a new one's (ModPat reads it, finds it blank, writes
+    -- the default)
+    if kind == "steps" or kind == "mseg" then
+      local MP = require("TS_CV_ModPat")
+      MP.forget(track, slot, j)
+      MP.put(track, slot, j, kind, MP.default(kind))
+    end
     local mods = MD.read_mods(track)
     mods[j] = { name = fresh_name(list, MD.KIND_NAME[kind]), col = KIND_COL[kind] }
     -- another of the same kind: the next colour along
@@ -1276,7 +1308,15 @@ function MD.set_msrc(track, slot, j, ms)
   local was = math.floor(MD.field(track, slot, j, "msrc") + 0.5)
   MD.set_field(track, slot, j, "msrc", ms)
   local function at(k) return math.abs(MD.field(track, slot, j, k) - MD.FIELDS[k][2]) < 0.01 end
-  local follower = math.floor(MD.field(track, slot, j, "type") + 0.5) == KIND_TYPE.follower
+  local t = math.floor(MD.field(track, slot, j, "type") + 0.5)
+  -- a Steps' MIDI out: CC's number, or the notes' velocity, in MIDI CC
+  if t == KIND_TYPE.steps then
+    if ms ~= was and ms == 1 then MD.set_field(track, slot, j, "mcc", 74)
+    elseif ms ~= was and ms == 2 then MD.set_field(track, slot, j, "mcc", 100) end
+    return
+  end
+  if t == KIND_TYPE.mseg then return end
+  local follower = t == KIND_TYPE.follower
   if follower then
     if MD.is_env(ms) and not MD.is_env(was) and at("mcc") and at("mlo") then
       if at("att") and at("rel") then

@@ -845,7 +845,8 @@ free in Hz, phase, depth, smoothing), a **Follower** (the track's own
 audio or its sidechain on 3/4, attack, release, floor and ceiling, or a
 gate that's on above the floor) or **MIDI** (velocity, note, CC, pitch
 bend or aftertouch, on any channel or one, with the note range, CC number
-or a velocity hold as fits). MIDI passes through untouched. Click a tile's
+or a velocity hold as fits), **Steps** or an **MSEG** (below). MIDI passes
+through untouched. Click a tile's
 name to open its settings; every setting has a small lane button for its
 automation lane.
 
@@ -884,6 +885,41 @@ adds a pre-fader send (audio only) from it to this track's 3/4. Every
 Follower on Sidechain hears it, and so does a plugin keying from 3/4.
 *This track's sidechain (3/4)* takes the send away again; a sidechain
 send you made yourself is left alone.
+
+**Steps** plays a sequence you draw: up to 32 steps, each as long as its
+*Step* (synced) or at a rate in Hz, forward, reverse, ping pong or at
+random. Open its tile (it takes two columns) and drag across the bars to
+paint them, or pick **Line** and drag a straight line across them; the
+wheel over a step nudges it, a double-click puts it back. The dots under
+the bars sit between the steps: click one to **join** the two steps
+either side into one held step (again to split them), or drag along them
+to join a run. **Bipolar** steps up and down from the middle. ◀ ▶ shift
+the pattern a step; **Randomise** and **Clear**. *Glide* slides from one
+step into the next, *Swing* lengthens every first step of a pair.
+**MIDI out** sends the steps as well: **CC** (a controller number, on a
+channel), or **Notes**, each run of joined steps one note, its height
+across a range (From, To) kept to a scale and key, a step at the very
+bottom a rest; *Gate* is how much of its run each note lasts, and every
+note has the same *Velocity*. Notes play only while the transport runs,
+out of the modulator plugin to whatever follows it on the track.
+
+**MSEG** (multi-segment envelope) plays a shape you draw. Open its tile
+and drag the points; double-click empty space to add one (up to 16) or a
+point to take it away; drag the small circle half way along a segment up
+or down to bend it. **Snap** puts points on the grid (**Grid** 4 to 32).
+Its length is synced (1/16 to 8 bars) or a rate in Hz. Its trigger:
+**Song** (it follows the song position), **Free**, **Note** (each note in
+its range starts it again) or **Audio** (the track's level, or its
+sidechain's, going over a threshold). **Loop** off, a trigger runs it
+once and it holds at its end, an envelope. **Presets** has ramps, a
+triangle, a pump, a half sine and steps, and keeps your own (*Save this
+as…*).
+
+A Steps' bars and an MSEG's points are kept by the modulator plugin with
+the project, so they play with ChannelView closed; they aren't
+parameters, so they can't be automated (their settings can). On the web
+page their tiles show the bars or the curve as they play, the steps can
+be painted, and their settings set.
 
 A modulator's buttons light in its own colour.
 
@@ -2351,6 +2387,7 @@ with it, sent from the selected track. They're in the action list as
 | `TS_CV_Trace.lua` | the gain-reduction trace's data, shared with the web page |
 | `TS_CV_Mod.lua` | macros and modulators: the plugin, the links, ranges and swings |
 | `TS_CV_ModRack.lua` | the Macros and Modulators panels |
+| `TS_CV_ModPat.lua` | the Steps' and MSEGs' patterns, to and from the modulator plugin |
 | `TS_CV_Modulators.jsfx` | the ChannelView Modulators plugin. Goes in `Effects/` |
 | `TS_CV_CanvasSetup.lua` | setting up a canvas layout for any plugin (Pro) |
 | `TS_CV_CanvasMod.lua` | macros and modulators on a canvas's handles (Pro) |

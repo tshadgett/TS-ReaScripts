@@ -79,6 +79,33 @@ noindex: true
     249       Trigger tracks: modulator n (bit n-1 set) takes its notes
               only from another track's MIDI send, which arrives on MIDI
               bus 8 + n and goes no further than this plugin.
+    250       Instance: this plugin's number, given it by ChannelView,
+              which talks to it by that number (STEPS AND MSEG, below).
+
+  STEPS AND MSEG (Types 4 and 5). Their settings are in the fields the
+  other kinds use; their pattern (a Steps' 32 values and which of them
+  are joined to the one before, an MSEG's points) is kept here, with the
+  project, and ChannelView reads and writes it through gmem TS_CV_Mod:
+     0 a message's number (ChannelView counts them), 1 the Instance it's
+     for, 2 the modulator (1-8), 3 what: 1 read the steps, 2 write them,
+     3 read the points, 4 write them; 4 the number of the last one done;
+     10.. the pattern (steps: 32 values then 32 joins; points: how many,
+     then x, y and bend for each). 1000 + 8 x (Instance mod 8192) + n - 1:
+     where modulator n is now (the step playing, or 0..1 along the MSEG).
+  Steps: Attack the number of steps (2-32), Rate (sync) each step's
+  length, Shape the direction (Forward, Reverse, Ping pong, Random),
+  Floor the swing (0..-80 is 0..80 %), Gate whether it's bipolar (for
+  ChannelView only), Smooth its glide. MIDI out in MIDI Source: 0 none,
+  1 CC (MIDI CC its number), 2 notes, on MIDI Channel (Omni is 1): each
+  run of joined steps one note, its value across Low..High note on the
+  scale and key in Release (scale x 12 + key), Ceiling its gate (-60..12
+  is 0..100 %), MIDI CC its velocity; a step at the bottom is a rest.
+  Notes only while the transport plays.
+  MSEG: Rate (sync) or (Hz) its length, Phase where it starts; MIDI
+  Source its trigger: 0 the song position, 1 free running, 2 a MIDI note
+  (Channel, Low and High note), 3 the audio going over the Floor (Follower
+  Source the track or sidechain); Hold its loop: off, a trigger runs it
+  once and it holds at its end.
 
   THE FOLLOWER'S ENVELOPES. A Follower whose MIDI Source is 5, 6 or 7
   is an Envelope, Envelope x level (its peak how far the loudest of the
@@ -112,7 +139,7 @@ slider13:mac13=0<0,1,0.0001>-Macro 13
 slider14:mac14=0<0,1,0.0001>-Macro 14
 slider15:mac15=0<0,1,0.0001>-Macro 15
 slider16:mac16=0<0,1,0.0001>-Macro 16
-slider17:m1_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 1 Type
+slider17:m1_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 1 Type
 slider18:m1_out=0<0,1,0.0001>-Mod 1 Output
 slider19:m1_outb=0.5<0,1,0.0001>-Mod 1 Output bipolar
 slider20:m1_depth=1<0,1,0.001>-Mod 1 Depth
@@ -134,7 +161,7 @@ slider35:m1_mcc=1<0,127,1>-Mod 1 MIDI CC
 slider36:m1_mlo=36<0,127,1>-Mod 1 MIDI Low note
 slider37:m1_mhi=96<0,127,1>-Mod 1 MIDI High note
 slider38:m1_mhold=1<0,1,1{Off,On}>-Mod 1 MIDI Hold
-slider39:m2_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 2 Type
+slider39:m2_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 2 Type
 slider40:m2_out=0<0,1,0.0001>-Mod 2 Output
 slider41:m2_outb=0.5<0,1,0.0001>-Mod 2 Output bipolar
 slider42:m2_depth=1<0,1,0.001>-Mod 2 Depth
@@ -156,7 +183,7 @@ slider57:m2_mcc=1<0,127,1>-Mod 2 MIDI CC
 slider58:m2_mlo=36<0,127,1>-Mod 2 MIDI Low note
 slider59:m2_mhi=96<0,127,1>-Mod 2 MIDI High note
 slider60:m2_mhold=1<0,1,1{Off,On}>-Mod 2 MIDI Hold
-slider61:m3_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 3 Type
+slider61:m3_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 3 Type
 slider62:m3_out=0<0,1,0.0001>-Mod 3 Output
 slider63:m3_outb=0.5<0,1,0.0001>-Mod 3 Output bipolar
 slider64:m3_depth=1<0,1,0.001>-Mod 3 Depth
@@ -178,7 +205,7 @@ slider79:m3_mcc=1<0,127,1>-Mod 3 MIDI CC
 slider80:m3_mlo=36<0,127,1>-Mod 3 MIDI Low note
 slider81:m3_mhi=96<0,127,1>-Mod 3 MIDI High note
 slider82:m3_mhold=1<0,1,1{Off,On}>-Mod 3 MIDI Hold
-slider83:m4_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 4 Type
+slider83:m4_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 4 Type
 slider84:m4_out=0<0,1,0.0001>-Mod 4 Output
 slider85:m4_outb=0.5<0,1,0.0001>-Mod 4 Output bipolar
 slider86:m4_depth=1<0,1,0.001>-Mod 4 Depth
@@ -200,7 +227,7 @@ slider101:m4_mcc=1<0,127,1>-Mod 4 MIDI CC
 slider102:m4_mlo=36<0,127,1>-Mod 4 MIDI Low note
 slider103:m4_mhi=96<0,127,1>-Mod 4 MIDI High note
 slider104:m4_mhold=1<0,1,1{Off,On}>-Mod 4 MIDI Hold
-slider105:m5_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 5 Type
+slider105:m5_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 5 Type
 slider106:m5_out=0<0,1,0.0001>-Mod 5 Output
 slider107:m5_outb=0.5<0,1,0.0001>-Mod 5 Output bipolar
 slider108:m5_depth=1<0,1,0.001>-Mod 5 Depth
@@ -222,7 +249,7 @@ slider123:m5_mcc=1<0,127,1>-Mod 5 MIDI CC
 slider124:m5_mlo=36<0,127,1>-Mod 5 MIDI Low note
 slider125:m5_mhi=96<0,127,1>-Mod 5 MIDI High note
 slider126:m5_mhold=1<0,1,1{Off,On}>-Mod 5 MIDI Hold
-slider127:m6_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 6 Type
+slider127:m6_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 6 Type
 slider128:m6_out=0<0,1,0.0001>-Mod 6 Output
 slider129:m6_outb=0.5<0,1,0.0001>-Mod 6 Output bipolar
 slider130:m6_depth=1<0,1,0.001>-Mod 6 Depth
@@ -244,7 +271,7 @@ slider145:m6_mcc=1<0,127,1>-Mod 6 MIDI CC
 slider146:m6_mlo=36<0,127,1>-Mod 6 MIDI Low note
 slider147:m6_mhi=96<0,127,1>-Mod 6 MIDI High note
 slider148:m6_mhold=1<0,1,1{Off,On}>-Mod 6 MIDI Hold
-slider149:m7_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 7 Type
+slider149:m7_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 7 Type
 slider150:m7_out=0<0,1,0.0001>-Mod 7 Output
 slider151:m7_outb=0.5<0,1,0.0001>-Mod 7 Output bipolar
 slider152:m7_depth=1<0,1,0.001>-Mod 7 Depth
@@ -266,7 +293,7 @@ slider167:m7_mcc=1<0,127,1>-Mod 7 MIDI CC
 slider168:m7_mlo=36<0,127,1>-Mod 7 MIDI Low note
 slider169:m7_mhi=96<0,127,1>-Mod 7 MIDI High note
 slider170:m7_mhold=1<0,1,1{Off,On}>-Mod 7 MIDI Hold
-slider171:m8_type=0<0,3,1{Off,LFO,Follower,MIDI}>-Mod 8 Type
+slider171:m8_type=0<0,5,1{Off,LFO,Follower,MIDI,Steps,MSEG}>-Mod 8 Type
 slider172:m8_out=0<0,1,0.0001>-Mod 8 Output
 slider173:m8_outb=0.5<0,1,0.0001>-Mod 8 Output bipolar
 slider174:m8_depth=1<0,1,0.001>-Mod 8 Depth
@@ -347,6 +374,7 @@ slider247:m6_byp=0<0,1,1{Off,On}>-Mod 6 Bypass
 slider248:m7_byp=0<0,1,1{Off,On}>-Mod 7 Bypass
 slider249:m8_byp=0<0,1,1{Off,On}>-Mod 8 Bypass
 slider250:trig=0<0,255,1>-Trigger tracks
+slider251:inst=0<0,1048576,1>-Instance
 
 in_pin:Input L
 in_pin:Input R
@@ -356,7 +384,7 @@ out_pin:Output L
 out_pin:Output R
 out_pin:Output 3
 out_pin:Output 4
-options:no_meter
+options:no_meter gmem=TS_CV_Mod
 
 @init
 ext_noinit = 1;
@@ -540,15 +568,159 @@ function env_audio(j, db, thr, ceil, legato, bylev) local(l) (
   );
 );
 
+// STEPS AND MSEG: their patterns (kept with the project) and state.
+// (above mbuf's 65536)
+PAT = 80000;    // 8 x 32 step values
+JN = 80300;     // 8 x 32: joined to the step before
+MS = 80600;     // 8 x 50: point count, then x, y, bend for up to 16
+spos = 81000; lastk = 81010; curi = 81020; crun = 81030; non = 81040;
+noff = 81050; lastcc = 81060; rndi = 81070; mpos = 81080; mtr = 81090;
+mph = 81100; scmask = 81110;
+// the scales, as which of the 12 notes above the key they take
+scmask[0] = 4095; scmask[1] = 2741; scmask[2] = 1453; scmask[3] = 1709;
+scmask[4] = 661; scmask[5] = 1193; scmask[6] = 2477; scmask[7] = 1257;
+memset(non, -1, 8); memset(lastcc, -1, 8); memset(lastk, -1, 8); memset(crun, -1, 8);
+g_seq = gmem[0];
+
+// a step's value: its run's first step's
+function st_first(j, i) local(b) (
+  b = j * 32;
+  while (i > 0 && JN[b + i] >= 0.5) ( i -= 1; );
+  i;
+);
+// how many steps the run from i takes
+function st_runlen(j, i, cnt) local(b, k, n) (
+  b = j * 32; k = i + 1; n = 1;
+  while (k < cnt && JN[b + k] >= 0.5) ( n += 1; k += 1; );
+  n;
+);
+// the note a value plays across lo..hi, on the scale and key in `sk`
+// (scale x 12 + key); -1 when the range has none of the scale's
+function st_note(v, lo, hi, sk) local(key, mask, n, cn, idx, t) (
+  key = floor(sk + 0.5) % 12; mask = scmask[max(0, min(7, floor(floor(sk + 0.5) / 12)))];
+  lo = floor(lo + 0.5); hi = floor(hi + 0.5);
+  lo > hi ? ( t = lo; lo = hi; hi = t; );
+  cn = 0; n = lo;
+  loop(hi - lo + 1, (mask & (2 ^ ((n - key + 120) % 12))) ? cn += 1; n += 1; );
+  cn < 1 ? -1 : (
+    idx = floor(v * (cn - 1) + 0.5); n = lo; t = -1;
+    loop(hi - lo + 1,
+      (mask & (2 ^ ((n - key + 120) % 12))) ? ( idx == 0 ? t = n; idx -= 1; );
+      n += 1;
+    );
+    t;
+  );
+);
+// A Steps modulator's value this block, its MIDI sent
+// (its fields read straight from its sliders: fld(j, k) is field k)
+function fld(j, k) ( slider(17 + 22 * j + k); );
+function st_run(j) local(cnt, sync, ri, rhz, ph, dir, swing, mode, ch, ccn, lo, hi, sk, gate, p, pr, r, sw, k, i, m, v, rs, rl, note, chn) (
+  cnt = max(2, min(32, floor(fld(j, 11) + 0.5)));
+  sync = fld(j, 6); ri = max(0, min(15, floor(fld(j, 7) + 0.5))); rhz = fld(j, 8); ph = fld(j, 9);
+  dir = fld(j, 5); swing = -fld(j, 13); mode = fld(j, 16); ch = fld(j, 17); ccn = fld(j, 18);
+  lo = fld(j, 19); hi = fld(j, 20); sk = fld(j, 12); gate = (fld(j, 14) + 60) / 72;
+  sync >= 0.5 && playing ? ( spos[j] = beat_position / beats[ri]; ) : (
+    spos[j] += (sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, rhz)) * dt;
+    spos[j] > 1000000 ? spos[j] -= 1000000;
+  );
+  p = max(0, spos[j] + ph * cnt);
+  // swing: the first of each pair longer, the second shorter
+  sw = max(0, min(0.8, swing / 100)) * 0.5;
+  pr = floor(p / 2); r = p - 2 * pr;
+  k = 2 * pr + (r < 1 + sw ? 0 : 1);
+  dir = floor(dir + 0.5);
+  dir == 1 ? ( i = cnt - 1 - (k % cnt); )
+  : dir == 2 ? ( m = k % (2 * cnt - 2); i = m < cnt ? m : 2 * cnt - 2 - m; )
+  : dir == 3 ? ( k != lastk[j] ? rndi[j] = min(cnt - 1, floor(rand(cnt))); i = rndi[j]; )
+  : ( i = k % cnt; );
+  rs = st_first(j, i);
+  v = PAT[j * 32 + rs];
+  mode = floor(mode + 0.5);
+  chn = max(1, min(16, floor(ch + 0.5))) - 1;
+  // a note held on when it's no longer sending notes, or stopped
+  non[j] >= 0 && (mode != 2 || !playing) ? ( midisend(0, 0x80 + chn, non[j], 0); non[j] = -1; );
+  k != lastk[j] ? (
+    // a new run (the same step again, from Random, starts again too)
+    (rs != crun[j] || i == curi[j]) ? (
+      crun[j] = rs;
+      mode == 2 && playing ? (
+        non[j] >= 0 ? ( midisend(0, 0x80 + chn, non[j], 0); non[j] = -1; );
+        v >= 0.005 ? (
+          note = st_note(v, lo, hi, sk);
+          note >= 0 ? (
+            midisend(0, 0x90 + chn, note, max(1, min(127, floor(ccn + 0.5))));
+            non[j] = note;
+            rl = st_runlen(j, rs, cnt);
+            noff[j] = p + max(0.05, rl * max(0.01, min(1, gate)));
+          );
+        );
+      );
+    );
+    lastk[j] = k; curi[j] = i;
+  );
+  non[j] >= 0 && p >= noff[j] ? ( midisend(0, 0x80 + chn, non[j], 0); non[j] = -1; );
+  mode == 1 ? (
+    m = floor(v * 127 + 0.5);
+    m != lastcc[j] ? ( midisend(0, 0xB0 + chn, max(0, min(127, floor(ccn + 0.5))), m); lastcc[j] = m; );
+  ) : lastcc[j] = -1;
+  v;
+);
+// An MSEG's level at f (0..1) along its points: each segment bent by its
+// first point's bend (-1..1)
+function ms_eval(j, f) local(b, n, k, x0, x1, y0, y1, c, t) (
+  b = j * 50; n = max(2, min(16, floor(MS[b] + 0.5)));
+  MS[b] < 2 ? f : f <= MS[b + 1] ? MS[b + 2] : f >= MS[b + 1 + (n - 1) * 3] ? MS[b + 2 + (n - 1) * 3] : (
+    k = 0;
+    while (k < n - 2 && f >= MS[b + 1 + (k + 1) * 3]) ( k += 1; );
+    x0 = MS[b + 1 + k * 3]; y0 = MS[b + 2 + k * 3]; c = MS[b + 3 + k * 3];
+    x1 = MS[b + 1 + (k + 1) * 3]; y1 = MS[b + 2 + (k + 1) * 3];
+    t = x1 > x0 ? (f - x0) / (x1 - x0) : 1;
+    abs(c) > 0.001 ? t = (exp(c * 6 * t) - 1) / (exp(c * 6) - 1);
+    y0 + (y1 - y0) * t;
+  );
+);
+// An MSEG modulator's value this block
+function ms_run(j) local(sync, ri, rhz, ph, trg, lp, thr, f, db, once) (
+  sync = fld(j, 6); ri = max(0, min(15, floor(fld(j, 7) + 0.5))); rhz = fld(j, 8); ph = fld(j, 9);
+  trg = floor(fld(j, 16) + 0.5); lp = fld(j, 21); thr = fld(j, 13);
+  once = trg >= 2 && lp < 0.5;
+  trg == 0 && sync >= 0.5 && playing ? ( mpos[j] = beat_position / beats[ri]; ) : (
+    trg == 2 && mtr[j] ? ( mpos[j] = 0; mtr[j] = 0; );
+    trg == 3 ? (
+      db = env[j] > 0.0000001 ? 20 * log10(env[j]) : -140;
+      eheld[j] < 0.5 ? ( db > thr ? ( eheld[j] = 1; mpos[j] = 0; ); ) : ( db < thr - 3 ? eheld[j] = 0; );
+    );
+    mpos[j] += (sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, rhz)) * dt;
+    once ? ( mpos[j] = min(mpos[j], 1); ) : ( mpos[j] > 1000000 ? mpos[j] -= 1000000; );
+  );
+  f = once ? min(1, mpos[j] + ph) : (mpos[j] + ph) - floor(mpos[j] + ph);
+  mph[j] = f;
+  ms_eval(j, f);
+);
+
 @block
 dt = samplesblock / srate;
+// a message from ChannelView (STEPS AND MSEG)
+gmem[0] != g_seq ? (
+  g_seq = gmem[0];
+  inst > 0 && gmem[1] == inst ? (
+    gj = max(1, min(8, floor(gmem[2] + 0.5))) - 1; gc = floor(gmem[3] + 0.5);
+    gc == 1 ? ( gi = 0; loop(32, gmem[10 + gi] = PAT[gj * 32 + gi]; gmem[42 + gi] = JN[gj * 32 + gi]; gi += 1; ); )
+    : gc == 2 ? ( gi = 0; loop(32, PAT[gj * 32 + gi] = gmem[10 + gi]; JN[gj * 32 + gi] = gmem[42 + gi]; gi += 1; ); )
+    : gc == 3 ? ( gi = 0; loop(49, gmem[10 + gi] = MS[gj * 50 + gi]; gi += 1; ); )
+    : gc == 4 ? ( gi = 0; loop(49, MS[gj * 50 + gi] = gmem[10 + gi]; gi += 1; ); );
+    gmem[4] = g_seq;
+  );
+);
 // a Follower envelope's level detector: 1 ms up, 30 ms down
 ga_fast = 1 - exp(-1 / (0.001 * srate)); gr_fast = 1 - exp(-1 / (0.03 * srate));
 playing = (play_state & 1) == 1;
 nf = 0;
 mx_apply_all();           // THE MATRIX: moved settings, for this block
 nm = (m1_type == 3) + (m2_type == 3) + (m3_type == 3) + (m4_type == 3)
-   + (m5_type == 3) + (m6_type == 3) + (m7_type == 3) + (m8_type == 3);
+   + (m5_type == 3) + (m6_type == 3) + (m7_type == 3) + (m8_type == 3)
+   + (m1_type == 5 && floor(m1_msrc + 0.5) == 2) + (m2_type == 5 && floor(m2_msrc + 0.5) == 2) + (m3_type == 5 && floor(m3_msrc + 0.5) == 2) + (m4_type == 5 && floor(m4_msrc + 0.5) == 2)
+   + (m5_type == 5 && floor(m5_msrc + 0.5) == 2) + (m6_type == 5 && floor(m6_msrc + 0.5) == 2) + (m7_type == 5 && floor(m7_msrc + 0.5) == 2) + (m8_type == 5 && floor(m8_msrc + 0.5) == 2);
 
 // MIDI: everything passes through; the MIDI modulators read it
 nm > 0 ? (
@@ -564,6 +736,9 @@ nm > 0 ? (
       on = st == 0x90 && d2 > 0;
       off = st == 0x80 || (st == 0x90 && d2 == 0);
 
+      // an MSEG set off by a note
+      m1_type == 5 && floor(m1_msrc + 0.5) == 2 && ((trig & 1) ? tb == 1 : tb == 0)
+        && (m1_mch < 0.5 || floor(m1_mch + 0.5) == ch) && on && d1 >= min(m1_mlo, m1_mhi) && d1 <= max(m1_mlo, m1_mhi) ? mtr[0] = 1;
       m1_type == 3 && ((trig & 1) ? tb == 1 : tb == 0) && (m1_mch < 0.5 || floor(m1_mch + 0.5) == ch) ? (
         ms = floor(m1_msrc + 0.5);
         ms >= 5 ? (
@@ -587,6 +762,9 @@ nm > 0 ? (
       );
 
 
+      // an MSEG set off by a note
+      m2_type == 5 && floor(m2_msrc + 0.5) == 2 && ((trig & 2) ? tb == 2 : tb == 0)
+        && (m2_mch < 0.5 || floor(m2_mch + 0.5) == ch) && on && d1 >= min(m2_mlo, m2_mhi) && d1 <= max(m2_mlo, m2_mhi) ? mtr[1] = 1;
       m2_type == 3 && ((trig & 2) ? tb == 2 : tb == 0) && (m2_mch < 0.5 || floor(m2_mch + 0.5) == ch) ? (
         ms = floor(m2_msrc + 0.5);
         ms >= 5 ? (
@@ -610,6 +788,9 @@ nm > 0 ? (
       );
 
 
+      // an MSEG set off by a note
+      m3_type == 5 && floor(m3_msrc + 0.5) == 2 && ((trig & 4) ? tb == 3 : tb == 0)
+        && (m3_mch < 0.5 || floor(m3_mch + 0.5) == ch) && on && d1 >= min(m3_mlo, m3_mhi) && d1 <= max(m3_mlo, m3_mhi) ? mtr[2] = 1;
       m3_type == 3 && ((trig & 4) ? tb == 3 : tb == 0) && (m3_mch < 0.5 || floor(m3_mch + 0.5) == ch) ? (
         ms = floor(m3_msrc + 0.5);
         ms >= 5 ? (
@@ -633,6 +814,9 @@ nm > 0 ? (
       );
 
 
+      // an MSEG set off by a note
+      m4_type == 5 && floor(m4_msrc + 0.5) == 2 && ((trig & 8) ? tb == 4 : tb == 0)
+        && (m4_mch < 0.5 || floor(m4_mch + 0.5) == ch) && on && d1 >= min(m4_mlo, m4_mhi) && d1 <= max(m4_mlo, m4_mhi) ? mtr[3] = 1;
       m4_type == 3 && ((trig & 8) ? tb == 4 : tb == 0) && (m4_mch < 0.5 || floor(m4_mch + 0.5) == ch) ? (
         ms = floor(m4_msrc + 0.5);
         ms >= 5 ? (
@@ -656,6 +840,9 @@ nm > 0 ? (
       );
 
 
+      // an MSEG set off by a note
+      m5_type == 5 && floor(m5_msrc + 0.5) == 2 && ((trig & 16) ? tb == 5 : tb == 0)
+        && (m5_mch < 0.5 || floor(m5_mch + 0.5) == ch) && on && d1 >= min(m5_mlo, m5_mhi) && d1 <= max(m5_mlo, m5_mhi) ? mtr[4] = 1;
       m5_type == 3 && ((trig & 16) ? tb == 5 : tb == 0) && (m5_mch < 0.5 || floor(m5_mch + 0.5) == ch) ? (
         ms = floor(m5_msrc + 0.5);
         ms >= 5 ? (
@@ -679,6 +866,9 @@ nm > 0 ? (
       );
 
 
+      // an MSEG set off by a note
+      m6_type == 5 && floor(m6_msrc + 0.5) == 2 && ((trig & 32) ? tb == 6 : tb == 0)
+        && (m6_mch < 0.5 || floor(m6_mch + 0.5) == ch) && on && d1 >= min(m6_mlo, m6_mhi) && d1 <= max(m6_mlo, m6_mhi) ? mtr[5] = 1;
       m6_type == 3 && ((trig & 32) ? tb == 6 : tb == 0) && (m6_mch < 0.5 || floor(m6_mch + 0.5) == ch) ? (
         ms = floor(m6_msrc + 0.5);
         ms >= 5 ? (
@@ -702,6 +892,9 @@ nm > 0 ? (
       );
 
 
+      // an MSEG set off by a note
+      m7_type == 5 && floor(m7_msrc + 0.5) == 2 && ((trig & 64) ? tb == 7 : tb == 0)
+        && (m7_mch < 0.5 || floor(m7_mch + 0.5) == ch) && on && d1 >= min(m7_mlo, m7_mhi) && d1 <= max(m7_mlo, m7_mhi) ? mtr[6] = 1;
       m7_type == 3 && ((trig & 64) ? tb == 7 : tb == 0) && (m7_mch < 0.5 || floor(m7_mch + 0.5) == ch) ? (
         ms = floor(m7_msrc + 0.5);
         ms >= 5 ? (
@@ -725,6 +918,9 @@ nm > 0 ? (
       );
 
 
+      // an MSEG set off by a note
+      m8_type == 5 && floor(m8_msrc + 0.5) == 2 && ((trig & 128) ? tb == 8 : tb == 0)
+        && (m8_mch < 0.5 || floor(m8_mch + 0.5) == ch) && on && d1 >= min(m8_mlo, m8_mhi) && d1 <= max(m8_mlo, m8_mhi) ? mtr[7] = 1;
       m8_type == 3 && ((trig & 128) ? tb == 8 : tb == 0) && (m8_mch < 0.5 || floor(m8_mch + 0.5) == ch) ? (
         ms = floor(m8_msrc + 0.5);
         ms >= 5 ? (
@@ -805,6 +1001,15 @@ m1_type == 1 ? (
     u = env_step(0, m1_att, m1_ceil, m1_floor, m1_rel, m1_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[0];
+) : m1_type == 4 ? (
+  isf[0] = 0;
+  u = st_run(0);
+  gmem[1000 + 8 * (inst % 8192) + 0] = curi[0];
+) : m1_type == 5 ? (
+  isf[0] = floor(m1_msrc + 0.5) == 3;
+  isf[0] ? ( nf += 1; fsrc[0] = m1_fsrc >= 0.5; ga[0] = ga_fast; gr[0] = gr_fast; );
+  u = ms_run(0);
+  gmem[1000 + 8 * (inst % 8192) + 0] = mph[0];
 ) : (
   isf[0] = 0;
   u = 0;
@@ -874,6 +1079,15 @@ m2_type == 1 ? (
     u = env_step(1, m2_att, m2_ceil, m2_floor, m2_rel, m2_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[1];
+) : m2_type == 4 ? (
+  isf[1] = 0;
+  u = st_run(1);
+  gmem[1000 + 8 * (inst % 8192) + 1] = curi[1];
+) : m2_type == 5 ? (
+  isf[1] = floor(m2_msrc + 0.5) == 3;
+  isf[1] ? ( nf += 1; fsrc[1] = m2_fsrc >= 0.5; ga[1] = ga_fast; gr[1] = gr_fast; );
+  u = ms_run(1);
+  gmem[1000 + 8 * (inst % 8192) + 1] = mph[1];
 ) : (
   isf[1] = 0;
   u = 0;
@@ -943,6 +1157,15 @@ m3_type == 1 ? (
     u = env_step(2, m3_att, m3_ceil, m3_floor, m3_rel, m3_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[2];
+) : m3_type == 4 ? (
+  isf[2] = 0;
+  u = st_run(2);
+  gmem[1000 + 8 * (inst % 8192) + 2] = curi[2];
+) : m3_type == 5 ? (
+  isf[2] = floor(m3_msrc + 0.5) == 3;
+  isf[2] ? ( nf += 1; fsrc[2] = m3_fsrc >= 0.5; ga[2] = ga_fast; gr[2] = gr_fast; );
+  u = ms_run(2);
+  gmem[1000 + 8 * (inst % 8192) + 2] = mph[2];
 ) : (
   isf[2] = 0;
   u = 0;
@@ -1012,6 +1235,15 @@ m4_type == 1 ? (
     u = env_step(3, m4_att, m4_ceil, m4_floor, m4_rel, m4_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[3];
+) : m4_type == 4 ? (
+  isf[3] = 0;
+  u = st_run(3);
+  gmem[1000 + 8 * (inst % 8192) + 3] = curi[3];
+) : m4_type == 5 ? (
+  isf[3] = floor(m4_msrc + 0.5) == 3;
+  isf[3] ? ( nf += 1; fsrc[3] = m4_fsrc >= 0.5; ga[3] = ga_fast; gr[3] = gr_fast; );
+  u = ms_run(3);
+  gmem[1000 + 8 * (inst % 8192) + 3] = mph[3];
 ) : (
   isf[3] = 0;
   u = 0;
@@ -1081,6 +1313,15 @@ m5_type == 1 ? (
     u = env_step(4, m5_att, m5_ceil, m5_floor, m5_rel, m5_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[4];
+) : m5_type == 4 ? (
+  isf[4] = 0;
+  u = st_run(4);
+  gmem[1000 + 8 * (inst % 8192) + 4] = curi[4];
+) : m5_type == 5 ? (
+  isf[4] = floor(m5_msrc + 0.5) == 3;
+  isf[4] ? ( nf += 1; fsrc[4] = m5_fsrc >= 0.5; ga[4] = ga_fast; gr[4] = gr_fast; );
+  u = ms_run(4);
+  gmem[1000 + 8 * (inst % 8192) + 4] = mph[4];
 ) : (
   isf[4] = 0;
   u = 0;
@@ -1150,6 +1391,15 @@ m6_type == 1 ? (
     u = env_step(5, m6_att, m6_ceil, m6_floor, m6_rel, m6_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[5];
+) : m6_type == 4 ? (
+  isf[5] = 0;
+  u = st_run(5);
+  gmem[1000 + 8 * (inst % 8192) + 5] = curi[5];
+) : m6_type == 5 ? (
+  isf[5] = floor(m6_msrc + 0.5) == 3;
+  isf[5] ? ( nf += 1; fsrc[5] = m6_fsrc >= 0.5; ga[5] = ga_fast; gr[5] = gr_fast; );
+  u = ms_run(5);
+  gmem[1000 + 8 * (inst % 8192) + 5] = mph[5];
 ) : (
   isf[5] = 0;
   u = 0;
@@ -1219,6 +1469,15 @@ m7_type == 1 ? (
     u = env_step(6, m7_att, m7_ceil, m7_floor, m7_rel, m7_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[6];
+) : m7_type == 4 ? (
+  isf[6] = 0;
+  u = st_run(6);
+  gmem[1000 + 8 * (inst % 8192) + 6] = curi[6];
+) : m7_type == 5 ? (
+  isf[6] = floor(m7_msrc + 0.5) == 3;
+  isf[6] ? ( nf += 1; fsrc[6] = m7_fsrc >= 0.5; ga[6] = ga_fast; gr[6] = gr_fast; );
+  u = ms_run(6);
+  gmem[1000 + 8 * (inst % 8192) + 6] = mph[6];
 ) : (
   isf[6] = 0;
   u = 0;
@@ -1288,6 +1547,15 @@ m8_type == 1 ? (
     u = env_step(7, m8_att, m8_ceil, m8_floor, m8_rel, m8_gate >= 0.5);
     ms == 7 ? u = 1 - u;
   ) : u = mu[7];
+) : m8_type == 4 ? (
+  isf[7] = 0;
+  u = st_run(7);
+  gmem[1000 + 8 * (inst % 8192) + 7] = curi[7];
+) : m8_type == 5 ? (
+  isf[7] = floor(m8_msrc + 0.5) == 3;
+  isf[7] ? ( nf += 1; fsrc[7] = m8_fsrc >= 0.5; ga[7] = ga_fast; gr[7] = gr_fast; );
+  u = ms_run(7);
+  gmem[1000 + 8 * (inst % 8192) + 7] = mph[7];
 ) : (
   isf[7] = 0;
   u = 0;
@@ -1305,6 +1573,12 @@ m8_type >= 1 && byp_all < 0.5 && m8_byp < 0.5 ? (
 
 
 mx_restore();             // the knobs' own values back
+
+@serialize
+// the Steps' and MSEGs' patterns (STEPS AND MSEG)
+file_mem(0, PAT, 256);
+file_mem(0, JN, 256);
+file_mem(0, MS, 400);
 
 @sample
 nf > 0 ? (

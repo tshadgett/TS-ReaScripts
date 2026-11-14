@@ -667,6 +667,130 @@ do
   TR.fx[slot + 1].params = was
 end
 
+-- STEPS AND MSEG: their own starting settings; their patterns written to
+-- the plugin and read back through its mailbox (a stand-in for the
+-- JSFX's, below); a copied plugin given a number of its own; their tiles
+-- drawn, opened and not
+do
+  local MP = require("TS_CV_ModPat")
+  MP._reset()
+  local gm = {}
+  local was = { reaper.gmem_attach, reaper.gmem_read, reaper.gmem_write, reaper.ValidatePtr2 }
+  reaper.gmem_attach = function() end
+  reaper.gmem_read = function(i) return gm[i] or 0 end
+  reaper.gmem_write = function(i, v) gm[i] = v end
+  reaper.ValidatePtr2 = function() return true end
+  local mem = { pat = {}, jn = {}, ms = {} }
+  local last = 0
+  local function plugin_block()
+    local slot = MD.plugin(TR)
+    if (gm[0] or 0) == last or not slot then return end
+    last = gm[0]
+    local inst = math.floor(reaper.TrackFX_GetParam(TR, slot, MP.INST) + 0.5)
+    if inst <= 0 or gm[1] ~= inst then return end
+    local j, cmd = gm[2] - 1, gm[3]
+    for i = 0, 63 do
+      if cmd == 1 then gm[10 + i] = (i < 32) and (mem.pat[j * 32 + i] or 0) or (mem.jn[j * 32 + i - 32] or 0)
+      elseif cmd == 2 then if i < 32 then mem.pat[j * 32 + i] = gm[10 + i] else mem.jn[j * 32 + i - 32] = gm[10 + i] end
+      elseif cmd == 3 and i < 49 then gm[10 + i] = mem.ms[j * 50 + i] or 0
+      elseif cmd == 4 and i < 49 then mem.ms[j * 50 + i] = gm[10 + i] end
+    end
+    gm[4] = last
+  end
+  local function run() for _ = 1, 6 do MP.tick(); plugin_block() end end
+  local gs = MD.add_mod(TR, "steps", false)
+  local ss = MD.find(TR, gs)
+  local slot = ss.slot
+  check("steps: added, its kind", ss and ss.kind, "steps")
+  check("steps: its own settings", ("%d %d %d %d"):format(MD.field(TR, slot, ss.j, "att"), MD.field(TR, slot, ss.j, "floor"),
+    MD.field(TR, slot, ss.j, "rsync"), MD.field(TR, slot, ss.j, "mcc")), "16 0 0 74")
+  run()
+  check("steps: its pattern written to the plugin", ("%.2f %.2f"):format(mem.pat[(ss.j - 1) * 32] or -1, mem.pat[(ss.j - 1) * 32 + 2] or -1), "0.10 0.70")
+  check("steps: the plugin numbered", math.floor(reaper.TrackFX_GetParam(TR, slot, MP.INST)) > 0, true)
+  local gm2 = MD.add_mod(TR, "mseg", false)
+  local ms = MD.find(TR, gm2)
+  run()
+  check("mseg: its points written", ("%d %.1f %.1f"):format(mem.ms[(ms.j - 1) * 50] or -1, mem.ms[(ms.j - 1) * 50 + 4] or -1,
+    mem.ms[(ms.j - 1) * 50 + 5] or -1), "3 0.5 1.0")
+  -- read back, from nothing kept
+  MP._reset()
+  check("read: nothing at first", tostring(MP.get(TR, slot, ss.j, "steps")), "nil")
+  run()
+  local p = MP.get(TR, slot, ss.j, "steps")
+  check("read: the plugin's", p and ("%.2f"):format(p.vals[3]), "0.70")
+  -- joined steps, written and read back
+  p.joins[4], p.joins[5] = true, true
+  MP.put(TR, slot, ss.j, "steps", p)
+  run()
+  MP._reset()
+  MP.get(TR, slot, ss.j, "steps"); run()
+  p = MP.get(TR, slot, ss.j, "steps")
+  check("joins: kept by the plugin", p and tostring(p.joins[4]) .. tostring(p.joins[5]) .. tostring(p.joins[6]), "truetruefalse")
+  check("joins: one value across the run", MP.first(p, 5), 3)
+  local runs = MP.runs(p, 16)
+  check("joins: the runs", #runs .. " " .. runs[3][1] .. "-" .. runs[3][2], "14 3-5")
+  local q = MP.get(TR, slot, ms.j, "mseg"); run()
+  q = MP.get(TR, slot, ms.j, "mseg")
+  check("mseg: read back", q and #q.pts, 3)
+  check("mseg: its level half way", q and ("%.2f"):format(MP.level(q, 0.25)), "0.50")
+  q.pts[1][3] = 0.5
+  check("mseg: a bend bows it", MP.level(q, 0.25) < 0.5, true)
+  -- a copy of the plugin (a duplicated track): a number of its own
+  local n = TR.fx[slot + 1]
+  local id1 = MP.inst(TR, slot)
+  local g0 = n.guid
+  n.guid = "{COPY}"
+  local id2 = MP.inst(TR, slot)
+  n.guid = g0
+  check("copy: a number of its own", id2 ~= id1 and id2 > 0, true)
+  -- the notes a step plays
+  check("notes: the scale across the range", ("%s %s %s"):format(MP.note_of(0.01, 60, 72, 1, 0), MP.note_of(1, 60, 72, 1, 0),
+    MP.note_of(0.5, 60, 72, 1, 0)), "60 72 67")
+  check("notes: the bottom a rest", tostring(MP.note_of(0, 60, 72, 1, 0)), "nil")
+  -- the tiles, drawn (a stand-in ImGui that answers everything)
+  local MR = require("TS_CV_ModRack")
+  local W = require("TS_CV_Widgets")
+  local fake = setmetatable({
+    BeginChild = function() return true end, BeginPopup = function() return false end,
+    GetWindowPos = function() return 0, 0 end, GetWindowSize = function() return 900, 700 end,
+    GetMousePos = function() return 40, 120 end, CalcTextSize = function(_, t) return #(t or "") * 6, 10 end,
+    GetCursorScreenPos = function() return 0, 0 end, GetKeyMods = function() return 0 end,
+    GetContentRegionAvail = function() return 900, 700 end, GetFrameHeight = function() return 20 end,
+    GetWindowDrawList = function() return "dl" end, GetForegroundDrawList = function() return "dl" end,
+    GetMouseWheel = function() return 0, 0 end,
+  }, { __index = function(_, k)
+    if not k:match("^DrawList_") and k:match("^%u%a*_%u") then return 0 end
+    return function() return false end
+  end })
+  MR.attach(fake); W.attach(fake)
+  local stub = {}
+  for _, k in ipairs({ "GetExtState", "SetExtState", "SetToggleCommandState", "RefreshToolbar2", "GetPlayState",
+                       "GetSetMediaTrackInfo_String", "GetMediaTrackInfo_Value" }) do
+    if not reaper[k] then stub[#stub + 1] = k; reaper[k] = function() return "" end end
+  end
+  -- (the panel unfolded)
+  local gx = reaper.GetExtState
+  reaper.GetExtState = function(sect, k) if k == "mods_collapsed" then return "0" end return gx(sect, k) end
+  local function draw()
+    local ok, err = pcall(MR.draw_mods, "ctx", TR, 600)
+    return ok and "ok" or tostring(err)
+  end
+  check("tiles: closed", draw(), "ok")
+  MR._open(TR, gs, true); MR._open(TR, gm2, true)
+  check("tiles: opened", draw(), "ok")
+  MD.set_field(TR, slot, ss.j, "msrc", 2)
+  MD.set_field(TR, slot, ms.j, "msrc", 3)
+  check("tiles: notes out, an audio trigger", draw(), "ok")
+  MD.set_field(TR, slot, ms.j, "msrc", 2)
+  check("tiles: a note trigger", draw(), "ok")
+  check("tiles: an opened one two columns wide", MR.width_for("mods", TR, 700) > 2 * MR.SIZE.TILE_W, true)
+  MR._open(TR, gs, false); MR._open(TR, gm2, false)
+  MD.remove(TR, MD.find(TR, gs)); MD.remove(TR, MD.find(TR, gm2))
+  reaper.GetExtState = gx
+  for _, k in ipairs(stub) do reaper[k] = nil end
+  reaper.gmem_attach, reaper.gmem_read, reaper.gmem_write, reaper.ValidatePtr2 = table.unpack(was)
+end
+
 -- remove everything: the plugin stays (it has a lane with automation)
 for _, src in ipairs(MD.scan(TR).list) do MD.remove(TR, src) end
 check("all gone", #MD.scan(TR).list, 0)

@@ -22,6 +22,13 @@ your own to run that block:
 
     TS_CV_TEST_FXTAGS=~/path/to/reaper-fxtags.ini lua5.4 dev/TS_CV_Test.lua
 
+`dev/TS_CV_ModJsfxTest.cpp` runs `TS_CV_Modulators.jsfx`'s Steps and
+MSEG for real in ysfx (built with 256 sliders: the file's header says
+how), with a second small JSFX standing in for ChannelView's side of gmem
+`TS_CV_Mod`: the mailbox, the steps and their notes, the joins, an MSEG's
+level. `dev/TS_CV_ModSim.lua` covers the Lua side (`TS_CV_ModPat`) against a
+stand-in for the same mailbox, and draws the tiles.
+
 The layout has a baseline of its own. `dev/TS_CV_LayoutFixture.lua` holds
 where every control landed in a set of real and made-up layouts, in both
 flows at one to six rows; the test checks every one is still where it
