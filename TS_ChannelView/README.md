@@ -1211,7 +1211,8 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   the plugin's own window puts it on the panel. A parameter already on the
   panel is greyed: click it to select it there, drag it to move it.
 - **In the middle**, the panel as it is, with the grid over it in quarter
-  cells (**Fine grid**, in the toolbar: half steps). Drag a control to move
+  cells (**Fine grid**, in the toolbar, or Alt held while dragging: half
+  steps). Drag a control to move
   it, and its corner to resize it: a knob's width steps it small, medium,
   large and extra large, and it can be made taller than it needs (a small
   one a step taller shows its name); a fader goes upright or across, a
