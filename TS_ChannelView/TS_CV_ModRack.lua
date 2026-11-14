@@ -2160,7 +2160,9 @@ end
 local function mseg_h(track, src, isopen)
   if not isopen then return C.S(58) end
   local trg = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
+  local side = trg == 3 and MD.field(track, src.slot, src.j, "fsrc") >= 0.5
   return C.S(122) + C.S(22) * 2 + ((trg >= 2) and (trg == 3 and Z.KCELL_H or C.S(22)) or 0) + Z.KCELL_H
+    + (side and C.S(22) or 0)
 end
 body_h.mseg = mseg_h
 
@@ -2286,6 +2288,11 @@ local function mseg_body(ctx, dl, track, src, x, y, w, isopen)
       MD.need_sidechain(track)
     end
     y = y + Z.KCELL_H
+    -- the sidechain's track (as a Follower's)
+    if side then
+      sc_row(ctx, dl, track, src, x, y, math.min(w, C.S(240)))
+      y = y + C.S(22)
+    end
   end
   setting(ctx, dl, track, src, sync and K_LEN or K.rhz, x, y)
   setting(ctx, dl, track, src, K.depth, x + Z.KCELL_W, y)
