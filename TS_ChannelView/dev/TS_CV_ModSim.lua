@@ -698,6 +698,14 @@ do
     gm[4] = last
   end
   local function run() for _ = 1, 6 do MP.tick(); plugin_block() end end
+  -- a plugin from before them (still running the old code) takes neither
+  local pslot = MD.plugin(TR)
+  local pn = pslot and TR.fx[pslot + 1].params
+  if pslot then
+    TR.fx[pslot + 1].params = 250
+    check("steps: not on an older plugin", tostring(MD.add_mod(TR, "steps", false)), "nil")
+    TR.fx[pslot + 1].params = 251
+  end
   local gs = MD.add_mod(TR, "steps", false)
   local ss = MD.find(TR, gs)
   local slot = ss.slot
@@ -788,6 +796,7 @@ do
   MD.remove(TR, MD.find(TR, gs)); MD.remove(TR, MD.find(TR, gm2))
   reaper.GetExtState = gx
   for _, k in ipairs(stub) do reaper[k] = nil end
+  if pslot then TR.fx[pslot + 1].params = pn end
   reaper.gmem_attach, reaper.gmem_read, reaper.gmem_write, reaper.ValidatePtr2 = table.unpack(was)
 end
 

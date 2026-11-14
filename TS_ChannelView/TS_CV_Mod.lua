@@ -888,9 +888,18 @@ end
 
 -- Adds a modulator of `kind` ("lfo", "follower", "midi"), every field at
 -- its default.
+-- Whether the track's plugin can be a Steps or MSEG: one from before them
+-- (still running the old code until the project is opened again) can't
+MD.INST = MD.NM + MD.NO * MD.PER + 58     -- 250: the Instance parameter
+function MD.kind_ok(track, kind)
+  if kind ~= "steps" and kind ~= "mseg" then return true end
+  local slot = track and MD.plugin(track)
+  return not slot or (reaper.TrackFX_GetNumParams(track, slot) or 0) > MD.INST
+end
+
 function MD.add_mod(track, kind, ara_first)
   local t = KIND_TYPE[kind]
-  if not (track and t) then return nil end
+  if not (track and t) or not MD.kind_ok(track, kind) then return nil end
   local slot0 = MD.plugin(track)
   local j
   for jj = 1, MD.NO do

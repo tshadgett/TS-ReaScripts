@@ -2364,14 +2364,19 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   mod_menu(ctx, track, src, s, req)
 end
 
-local function mod_add_menu(ctx, req)
+local function mod_add_menu(ctx, req, track)
   if not ImGui.BeginPopup(ctx, "modadd") then return end
   ImGui.TextDisabled(ctx, "Add a modulator")
   ImGui.Separator(ctx)
   local notes = { lfo = "tempo-synced or free", follower = "a signal's level", midi = "velocity, note, CC, bend",
                   steps = "a sequence you draw", mseg = "a shape you draw" }
   for _, k in ipairs(MD.KINDS) do
-    if ImGui.MenuItem(ctx, MD.KIND_NAME[k] .. "##madd" .. k, notes[k]) then req.add_mod = k end
+    local ok = MD.kind_ok(track, k)
+    if ImGui.MenuItem(ctx, MD.KIND_NAME[k] .. "##madd" .. k, notes[k], false, ok) then req.add_mod = k end
+    if not ok and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, "The modulator plugin on this track is from before " .. MD.KIND_NAME[k]
+        .. ".\nSave and open the project again to update it.")
+    end
   end
   ImGui.EndPopup(ctx)
 end
@@ -2535,7 +2540,7 @@ function MR.draw_mods(ctx, track, avail_h)
         ImGui.OpenPopup(ctx, "modadd")
       end
     end
-    mod_add_menu(ctx, req)
+    mod_add_menu(ctx, req, track)
   end)
 end
 
