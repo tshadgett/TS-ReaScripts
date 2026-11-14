@@ -227,6 +227,7 @@ local app = {
   overflow = {},
   last_poll = 0,
   first_sel = nil,
+  scroll_to = nil,   -- a track newly selected: brought into view
 }
 
 -- ---------------------------------------------------------------------
@@ -267,6 +268,9 @@ local function follow_selection()
   local first = reaper.GetSelectedTrack2(0, 0, true)
   if first == app.first_sel then return end
   app.first_sel = first
+  -- selected anywhere (the mixer, a control surface...): into view, as
+  -- ChannelView's mixer view does
+  app.scroll_to = first
   if app.fly and first and first ~= app.fly.track then
     app.fly = { track = first, guid = reaper.GetTrackGUID(first) }
   end
@@ -1206,6 +1210,16 @@ local function frame()
   if app.geom then
     app.rows = AR.place(AR.collect(), app.geom)
     app.any_lanes = C.TCP_LANES and LN.any()
+    if app.scroll_to then
+      for _, e in ipairs(app.rows) do
+        if e.track == app.scroll_to then
+          local d = AR.into_view(e, app.geom)
+          if d then AR.scroll(d) end
+          break
+        end
+      end
+      app.scroll_to = nil
+    end
   else
     app.rows = {}
   end

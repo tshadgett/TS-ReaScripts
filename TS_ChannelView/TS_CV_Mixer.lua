@@ -464,12 +464,17 @@ local function name_button(ctx, label, col, selected, id, w, t, mark)
   local clip = w - 10 - left
   local shown = label
   if tw > clip then
-    local k = #shown
-    while k > 1 do
-      k = k - 1
-      local t2 = shown:sub(1, k) .. "."
-      tw = ImGui.CalcTextSize(ctx, t2)
-      if tw <= clip then shown = t2 break end
+    if t and t.num and t.name then
+      shown = MX.fit_label(function(x) local tw2 = ImGui.CalcTextSize(ctx, x) return tw2 end, t, clip, ImGui.GetFontSize(ctx))
+      tw = ImGui.CalcTextSize(ctx, shown)
+    else
+      local k = #shown
+      while k > 1 do
+        k = k - 1
+        local t2 = shown:sub(1, k) .. "."
+        tw = ImGui.CalcTextSize(ctx, t2)
+        if tw <= clip then shown = t2 break end
+      end
     end
   end
   local cx = x + left + (w - left) * 0.5
@@ -481,6 +486,30 @@ local function name_button(ctx, label, col, selected, id, w, t, mark)
   return pressed,
          hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
          rclick
+end
+
+-- A track's label fitted into `room` (measure(s) its width): the number
+-- kept and the name abbreviated (U.abbreviate: brackets, short forms,
+-- vowels, spaces, then cut), as a control's name is. With no room for the
+-- number and a letter, the label cut. Cached by name, room and font size.
+local fitted, fitted_n = {}, 0
+function MX.fit_label(measure, t, room, size)
+  local key = t.num .. "\0" .. t.name .. "\0" .. math.floor(room) .. "\0" .. (size or 0)
+  local hit = fitted[key]
+  if hit then return hit end
+  local prefix = t.num > 0 and (t.num .. "  ") or ""
+  local out
+  if measure(prefix .. t.name) <= room then
+    out = prefix .. t.name
+  elseif measure(prefix .. t.name:sub(1, 1) .. ".") <= room then
+    out = prefix .. U.abbreviate(t.name, function(x) return measure(prefix .. x) <= room end)
+  else
+    out = prefix ~= "" and (t.num .. "") or t.name
+    while #out > 1 and measure(out) > room do out = out:sub(1, #out - 1) end
+  end
+  if fitted_n > 2000 then fitted, fitted_n = {}, 0 end
+  fitted[key], fitted_n = out, fitted_n + 1
+  return out
 end
 
 -- The label a name button shows: "3  Kick Drum", or just "MASTER" --
@@ -531,9 +560,8 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
     local label = track_label(t)
     local avail = (x + w) - name_x - btn - 5 - (room and (aw + 4) or 0)
     local tw, th = ImGui.CalcTextSize(ctx, label)
-    while tw > avail and #label > 1 do
-      label = label:sub(1, #label - 1)
-      tw = ImGui.CalcTextSize(ctx, label)
+    if tw > avail and avail > 0 then
+      label = MX.fit_label(function(x2) local tw2 = ImGui.CalcTextSize(ctx, x2) return tw2 end, t, avail, ImGui.GetFontSize(ctx))
     end
     -- Readable on any track colour, which is the one thing a
     -- user-chosen background cannot be trusted to allow. The header is

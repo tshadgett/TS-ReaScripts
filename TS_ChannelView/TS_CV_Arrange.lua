@@ -61,6 +61,22 @@ function AR.place(list, g)
   return list
 end
 
+-- How far to scroll the arrange view, in REAPER pixels, to bring placed
+-- entry `e` (AR.place) wholly into view: negative up, positive down, nil
+-- when it's in view already or has no height. One taller than the view
+-- comes in at its top.
+function AR.into_view(e, g)
+  if not e or (e.h or 0) <= 0 then return nil end
+  local s = g.scale or 1
+  local top, bot = e.y, e.y + e.h
+  if top < g.top then return math.floor((top - g.top) / s) end
+  if bot > g.bottom then
+    local d = math.min(bot - g.bottom, top - g.top)
+    return math.ceil(d / s)
+  end
+  return nil
+end
+
 -- Which gap a drop at `my` would land in, for reordering: returns the
 -- 0-based position to move BEFORE (the track count for "after the
 -- last"), and the y to draw the marker at. Only real tracks with a

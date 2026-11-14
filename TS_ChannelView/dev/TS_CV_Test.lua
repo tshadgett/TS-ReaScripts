@@ -4574,6 +4574,25 @@ do
   b, ly = AR.drop_target(rows, 200, 4)
   check("below everything: the end",       b, 4)
   check("  marker under the last lanes",   ly, 70)
+  -- the selected track brought into view (the view 0..100, REAPER px at 2x)
+  local g = { top = 0, bottom = 100, scale = 2 }
+  check("into view: in view, no scroll",   AR.into_view({ y = 20, h = 20 }, g), nil)
+  check("into view: above, scroll up",     AR.into_view({ y = -40, h = 20 }, g), -20)
+  check("into view: below, scroll down",   AR.into_view({ y = 110, h = 20 }, g), 15)
+  check("into view: taller than the view, to its top", AR.into_view({ y = 150, h = 200 }, g), 75)
+  check("into view: no height, none",      AR.into_view({ y = 500, h = 0 }, g), nil)
+  end
+  -- track buttons: the number kept, the name abbreviated to fit
+  do
+    local MXm = require("TS_CV_Mixer")
+    local function m(x) return #x * 6 end            -- 6 px a character
+    check("track label: fits as it is", MXm.fit_label(m, { num = 2, name = "Bass" }, 60), "2  Bass")
+    check("track label: abbreviated, number kept", MXm.fit_label(m, { num = 1, name = "Drums" }, 42), "1  Drms")
+    check("track label: short forms first", MXm.fit_label(m, { num = 6, name = "Low Frequency" }, 60), "6  Lo Freq")
+    local tight = MXm.fit_label(m, { num = 13, name = "Guitars" }, 36)
+    check("track label: tight, still starts with its number and name", tight:sub(1, 5), "13  G")
+    check("track label: no room for a letter, the number", MXm.fit_label(m, { num = 13, name = "Guitars" }, 20), "13")
+    check("track label: the master", MXm.fit_label(m, { num = 0, name = "MASTER" }, 60), "MASTER")
   end
 end
 

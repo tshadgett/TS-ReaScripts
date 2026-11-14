@@ -62,6 +62,10 @@ track panel. A track with one of REAPER's spacers above it has a gap
 before it, in the mixer and the track list, as wide as REAPER draws its
 spacers (Preferences ▸ Appearance).
 
+A name too long for its button is abbreviated the way a control's name is
+(brackets first, then short forms, vowels and spaces, cutting only last),
+keeping the track number: *1  Drms*, not *1  Dru.*
+
 Mixer strip headers carry the track colour and no name. The name is
 directly below at full width in the track list, and the header could only
 have shown a truncation of it. Unselected, the header and its button
@@ -2185,6 +2189,10 @@ ReaPack). Every colour picker in ChannelView and the TCP window has it.
 
 For its first 20 seconds the TCP window keeps REAPER's own track panel
 shut: REAPER sometimes opens it again at startup.
+
+Select a track anywhere (the mixer, ChannelView, a control surface) and
+the TCP window brings it into view, scrolling the arrange view with it as
+REAPER's own track panel does.
 
 In the TCP window, the settings menu's **Plugin delay (PDC) under
 meters** shows each track's plugin delay compensation under its meter,
