@@ -524,13 +524,36 @@ function U.range_say(r, v)
   return num(v) .. " " .. unit
 end
 function U.range_text(r, n) return U.range_say(r, U.range_value(r, n)) end
+-- What a unit is in its family's own (ms and s in ms, Hz and kHz in Hz)
+local UNIT_SCALE = { ms = { "t", 1 }, s = { "t", 1000 }, Hz = { "f", 1 }, kHz = { "f", 1000 } }
+-- A number and its unit at the start of a readout ("2000.0 ms"), or nil
+local function num_unit(t)
+  local n, u = U.trim(t or ""):match("^([%+%-]?%d*%.?%d+)%s*(%a*)$")
+  return tonumber(n), u
+end
+
 -- A unit only (Range<p>=||Hz|): the plugin's own text, a bare number in it
--- read in that unit ("20000" as 20.0 kHz); anything else as it is.
+-- read in that unit ("20000" as 20.0 kHz), and one with a unit of the
+-- same kind put in it ("2000.0 ms" as 2.00 s); anything else as it is.
 function U.unit_say(r, s)
-  local t = U.trim(s or "")
-  local v = t:match("^[%+%-]?%d*%.?%d+$") and tonumber(t)
+  local v, u = num_unit(s)
   if not v then return s end
+  if u ~= "" and u ~= (r.unit or "") then
+    local from, to = UNIT_SCALE[u], UNIT_SCALE[r.unit or ""]
+    if not (from and to and from[1] == to[1]) then return s end
+    v = v * from[2] / to[2]
+  end
   return U.range_say(r, v)
+end
+
+-- Adaptive units (Options ▸ Behaviour, U.ADAPTIVE): a readout of 1000 ms
+-- or more in seconds, of 1000 Hz or more in kHz; anything else as it is.
+U.ADAPTIVE = false
+function U.adaptive(s)
+  if not U.ADAPTIVE or type(s) ~= "string" then return s end
+  local v, u = num_unit(s)
+  if v and (u == "ms" or u == "Hz") and math.abs(v) >= 1000 then return U.range_say({ unit = u }, v) end
+  return s
 end
 
 -- A gain knob measured at points { {position, dB}, ... } (TS_CV_Mappings
@@ -603,7 +626,7 @@ function U.fmt_value(track, addr, param)
     return U.range_text(rg, reaper.TrackFX_GetParamNormalized(track, addr, param) or 0)
   end
   local ok, s = reaper.TrackFX_GetFormattedParamValue(track, addr, param, "")
-  if ok and s and s ~= "" then return U.tidy_num(s) end
+  if ok and s and s ~= "" then return U.adaptive(U.tidy_num(s)) end
   local v = reaper.TrackFX_GetParamNormalized(track, addr, param)
   return string.format("%.2f", v or 0)
 end

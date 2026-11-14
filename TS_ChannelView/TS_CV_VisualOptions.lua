@@ -1250,6 +1250,9 @@ local function page_behaviour(ctx)
   local ch, v = ST.checkbox(ctx, "Use mouse wheel on controls##vo_bwh", C.WHEEL_CONTROLS)
   if ch then C.WHEEL_CONTROLS = v; put_cv("wheel_controls", v) end
   tip(ctx, "Off: the wheel only scrolls.")
+  ch, v = ST.checkbox(ctx, "Adaptive units##vo_bau", U.ADAPTIVE)
+  if ch then U.ADAPTIVE = v; put_cv("adaptive_units", v) end
+  tip(ctx, "1000 ms and over in seconds, 1000 Hz and over in kHz.")
   local how = require("TS_CV_Focus").mechanism()
   ch, v = ST.checkbox(ctx, "Return keyboard focus to REAPER##vo_bfo", C.FOCUS_BACK and how ~= nil, { dim = how == nil })
   if ch then C.FOCUS_BACK = v; put_cv("focus_back", v) end

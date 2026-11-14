@@ -389,6 +389,7 @@ C.PRESET_BAR = ext_get("preset_bar", C.PRESET_BAR and "1" or "0") == "1"
 C.MIXER_VIEW  = (not RACK) and ext_get("mixer_view", "0") == "1"
 C.ROW_ALIGN   = ext_get("row_align", C.ROW_ALIGN)
 C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
+U.ADAPTIVE    = ext_get("adaptive_units", "0") == "1"
 -- View > Options: colours, the default control styles, panels,
 -- track buttons, sizes and depth -- the rack's own tab, or ChannelView's
 -- (TS_CV_VisualOptions; it brings older settings over the first time)
@@ -3443,7 +3444,12 @@ local function name_menu(fx, key, layout, idx, c)
   if ImGui.MenuItem(ctx, "Show name", nil, not c.noname) then
     local l = materialise(fx)
     local lc = l.controls[idx]
-    if lc then lc.noname = (not c.noname) or nil end
+    if lc then
+      local old = {}
+      for k, v in pairs(lc) do old[k] = v end
+      lc.noname = (not c.noname) or nil
+      P.knob_reframe(lc, old)
+    end
     M.set(key, l); M.save()
   end
   tip("Off: no name over it, and no room kept for one. Its name shows on hover.")
@@ -3451,7 +3457,12 @@ local function name_menu(fx, key, layout, idx, c)
     if ImGui.MenuItem(ctx, "Value inside the knob", nil, c.vin == true) then
       local l = materialise(fx)
       local lc = l.controls[idx]
-      if lc then lc.vin = (not c.vin) or nil end
+      if lc then
+        local old = {}
+        for k, v in pairs(lc) do old[k] = v end
+        lc.vin = (not c.vin) or nil
+        P.knob_reframe(lc, old)
+      end
       M.set(key, l); M.save()
     end
     tip("Its value in the knob's middle, without units, and no value line under it.")
@@ -6001,13 +6012,17 @@ local function panel_row(row_h, row_w)
       end
       app.drop_gap = drop
       if drop then
-        local dl = ImGui.GetWindowDrawList(ctx)
+        -- over the panels (child windows draw over this window's own
+        -- list), kept inside the row
+        local dl = ImGui.GetForegroundDrawList(ctx)
         local rx, wy = ImGui.GetWindowPos(ctx)
-        local wh = select(2, ImGui.GetWindowSize(ctx))
-        -- (before the first panel: inside the row's left edge, not clipped)
+        local ww, wh = ImGui.GetWindowSize(ctx)
+        -- (before the first panel: inside the row's left edge)
         local dx = math.max(drop.x, rx + 2)
+        ImGui.DrawList_PushClipRect(dl, rx, wy, rx + ww, wy + wh, false)
         ImGui.DrawList_AddRectFilled(dl, dx - 1.5, wy + 2,
           dx + 1.5, wy + wh - 2, drop.into and C.COL.brk_container or C.COL.drop_marker, 1.0)
+        ImGui.DrawList_PopClipRect(dl)
         if drop.into then
           ImGui.SetTooltip(ctx, "Into " .. box_label(drop.into))
         end
@@ -6324,11 +6339,13 @@ local function rack_inside(rack_w)
     local drop = app.track and rack_drop(my) or nil
     app.drop_gap = drop
     if drop then
-      local dl = ImGui.GetWindowDrawList(ctx)
-      local wx = ImGui.GetWindowPos(ctx)
-      local ww = ImGui.GetWindowSize(ctx)
+      local dl = ImGui.GetForegroundDrawList(ctx)
+      local wx, wy = ImGui.GetWindowPos(ctx)
+      local ww, wh = ImGui.GetWindowSize(ctx)
+      ImGui.DrawList_PushClipRect(dl, wx, wy, wx + ww, wy + wh, false)
       ImGui.DrawList_AddRectFilled(dl, wx + 2, drop.y - 1.5, wx + ww - 2, drop.y + 1.5,
         drop.into and C.COL.brk_container or C.COL.drop_marker, 1.0)
+      ImGui.DrawList_PopClipRect(dl)
       if drop.into then ImGui.SetTooltip(ctx, "Into " .. box_label(drop.into)) end
     end
     if not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
@@ -6465,6 +6482,7 @@ local function frame()
       C.SHOW_VALUES = ext_get("show_values", "1") == "1"
       C.WHEEL_CONTROLS = ext_get("wheel_controls", "1") == "1"
       C.FOCUS_BACK  = ext_get("focus_back", "1") == "1"
+      U.ADAPTIVE    = ext_get("adaptive_units", "0") == "1"
       TO.reload_fader_defaults()      -- the TCP window may have changed them
       -- a layout saved by the other window (ChannelView / its Rack view)
       local ms, ss = M.sync(), SC.sync()

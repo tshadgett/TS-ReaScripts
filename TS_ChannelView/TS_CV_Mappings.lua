@@ -2374,6 +2374,8 @@ local function parse_section(sect)
         noname  = ((f & 128) ~= 0) or nil,
         -- bit 8: its value drawn inside the knob, with no value line
         vin     = ((f & 256) ~= 0) or nil,
+        -- bit 9: a curve or visualiser drawn without its frame
+        noframe = ((f & 512) ~= 0 and (t == "curve" or t == "vis")) or nil,
         -- bit 4: the second parameter reversed (an XY pad's Y, a
         -- concentric knob's inner knob); bit 1 reverses the first
         invert2 = ((f & 16) ~= 0 and (t == "xy" or t == "dual")) or nil,
@@ -2403,7 +2405,11 @@ local function parse_section(sect)
         -- a value arc's own colour (a cap colour's name, or #rrggbb)
         arcc    = (t == "knob" or t == "stepped") and M.arc_col_of(sect["ArcCol" .. i]) or nil,
         show    = (t ~= "page" and t ~= "section") and M.show_of(sect["Show" .. i]) or nil,
+        -- its name (a text element's words) while a rule holds: NameWhen<n>.<k>
+        namew   = (t ~= "page" and t ~= "section" and t ~= "divider") and M.namew_of(sect, i) or nil,
         at      = at_of(sect["At" .. i], t == "divider"),
+        -- a knob in its place on a grid: at the top (none), centre or bottom
+        place   = ({ centre = "centre", bottom = "bottom" })[U.trim(sect["Place" .. i] or "")],
         -- a section's outline or a line's colour: a faceplate's or your own
         edge    = (t == "section" or t == "divider" or t == "text") and C.plate_key(U.trim(sect["Edge" .. i] or "")) or nil,
         -- a text's place along its room (Align<n>=left|right; centred without)
@@ -2582,13 +2588,15 @@ local function serialize(layout)
   for i, c in ipairs(layout.controls or {}) do
     -- See parse_section: bit 0 bipolar, bit 1 reverse, bit 2 no-rule,
     -- bit 3 live name, bit 4 the second parameter reversed, bits 5-6 the
-    -- value arc, bit 7 its name hidden, bit 8 its value inside the knob.
+    -- value arc, bit 7 its name hidden, bit 8 its value inside the knob,
+    -- bit 9 a curve's or visualiser's frame hidden.
     local flags = (c.bipolar and 1 or 0) | (c.invert and 2 or 0)
                 | (c.no_rule and 4 or 0) | (c.live and 8 or 0)
                 | ((c.invert2 and (c.type == "xy" or c.type == "dual")) and 16 or 0)
                 | ((({ pos = 1, neg = 2, mid = 3 })[c.arc or ""] or 0) << 5)
                 | (c.noname and 128 or 0)
                 | (c.vin and 256 or 0)
+                | (c.noframe and 512 or 0)
     out["Ctl" .. (i - 1)] = string.format("%d|%s|%d|%s",
       c.param or -1,
       c.type or "knob",
@@ -2652,7 +2660,12 @@ local function serialize(layout)
     if c.type == "act" and M.ACTS[c.act or ""] then out["Act" .. (i - 1)] = c.act end
     if c.type == "curve" or c.type == "vis" then M.vis_lines(c.vis, i - 1, out) end
     if c.show and c.type ~= "page" and c.type ~= "section" then out["Show" .. (i - 1)] = M.show_line(c.show) end
+    for k, e in ipairs(c.namew or {}) do
+      if k > M.NAMEW_MAX then break end
+      out["NameWhen" .. (i - 1) .. "." .. k] = M.show_line(e.rule) .. "~" .. ((e.text or ""):gsub("[~\r\n]", " "))
+    end
     if layout.grid and c.at then out["At" .. (i - 1)] = M.at_line(c.at) end
+    if c.place then out["Place" .. (i - 1)] = c.place end
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
     if c.type == "text" and M.text_font_line(c.font) then out["TextFont" .. (i - 1)] = M.text_font_line(c.font) end
     if c.type == "image" and M.pic_line(c.pic) then out["Pic" .. (i - 1)] = M.pic_line(c.pic) end
@@ -2787,6 +2800,51 @@ function M.show_match(v, r, slack, same)
   end
   if op == "not" then return not hit end
   return hit
+end
+
+-- A control's other names (a text element's other words), each while a
+-- rule holds (NameWhen<n>.<k>=<rule as Show<n>>~<name>): { rule, text }
+-- in order, the first that holds shown; none holding, its own.
+M.NAMEW_MAX = 16
+function M.namew_of(sect, i)
+  local out = {}
+  for k = 1, M.NAMEW_MAX do
+    local line = sect["NameWhen" .. i .. "." .. k]
+    if not line then break end
+    local rl, text = line:match("^(.-)~(.*)$")
+    local r = rl and M.show_of(rl)
+    if r then out[#out + 1] = { rule = r, text = U.trim(text) } end
+  end
+  return (#out > 0) and out or nil
+end
+function M.namew_copy(list)
+  if not list then return nil end
+  local out = {}
+  for k, e in ipairs(list) do
+    local r = e.rule
+    out[k] = { text = e.text, rule = { param = r.param, vname = r.vname, op = M.show_op(r), norm = r.norm, norm2 = r.norm2,
+                                       more = r.more and { table.unpack(r.more) } or nil, tol = r.tol } }
+  end
+  return out
+end
+-- What a rule on a plugin reads now (M.visible's getv): a parameter's
+-- value, or a virtual control's setting on that instance
+function M.reader(track, fx, controls)
+  local St = require("TS_CV_State")
+  local base = U.plugin_key(fx.name or "")
+  return function(p, vname)
+    if vname then return St.vvalue(fx.guid, vname, base, controls) end
+    return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+  end
+end
+
+-- The name a control has now, by its rules (`getv(param, vname)` as
+-- M.visible's), or nil for its own
+function M.name_when(c, getv)
+  for _, e in ipairs(c.namew or {}) do
+    if M.show_match(getv(e.rule.param, e.rule.vname), e.rule, nil, nil) then return e.text end
+  end
+  return nil
 end
 
 -- The controls a layout shows right now, given a reader for its
@@ -4157,7 +4215,7 @@ function M.copy(layout)
   end
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
-                        invert = c.invert, no_rule = c.no_rule, live = c.live, noname = c.noname, vin = c.vin,
+                        invert = c.invert, no_rule = c.no_rule, live = c.live, noname = c.noname, vin = c.vin, noframe = c.noframe,
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
                         leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),
@@ -4170,7 +4228,8 @@ function M.copy(layout)
                         invert2 = c.invert2, edge = c.edge, align = c.align, font = M.text_font_copy(c.font), pic = M.pic_copy(c.pic), lamp = c.lamp,
                         vu = M.vu_copy(c.vu), vis = M.copy_canvas(c.vis), act = c.act,
                         ccols = c.ccols and M.choice_cols_of(M.choice_cols_line(c.ccols)) or nil,
-                        at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil,
+                        at = c.at and { c = c.at.c, r = c.at.r, w = c.at.w, h = c.at.h } or nil, place = c.place,
+                        namew = M.namew_copy(c.namew),
                         show = c.show and { param = c.show.param, vname = c.show.vname, op = M.show_op(c.show),
                                             norm = c.show.norm, norm2 = c.show.norm2,
                                             more = c.show.more and { table.unpack(c.show.more) } or nil,

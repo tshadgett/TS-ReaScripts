@@ -230,6 +230,53 @@ end
 local function fader_thick(ctl) return ctl.thin and 1 or 2 end
 P.fader_thick = fader_thick
 
+-- A knob's height at 100%, from what it shows (W.knob in a frame): its
+-- name unless hidden, its dial, and under it its value line unless the
+-- value's inside (a medium one with numbers round it has none) or the
+-- end numbers when it has them. A small one: its dial alone. nil for
+-- what isn't a knob.
+local function is_knob(ctl) return ctl.type == nil or ctl.type == "knob" or ctl.type == "stepped" end
+P.is_knob = is_knob
+function P.knob_px(ctl)
+  if not is_knob(ctl) then return nil end
+  local sz = C.SIZES[ctl.size or "medium"] or C.SIZES.medium
+  local ui = C.UI or 1
+  local r = math.floor(sz.d / ui + 0.5) * 0.5
+  if ctl.size == "small" then return r * 2 end
+  local lh, gap, th = 11, 5, math.floor(C.METER_FONT / ui + 0.5)
+  local nb = ctl.noname and 0 or (lh + gap)
+  local large = ctl.size == "large" or ctl.size == "xl"
+  -- (a layout control has no numbers round it)
+  local sc = M.scale_kind(ctl) ~= nil and not ctl.virtual and not (ctl.img and not ctl.img.nums)
+  local value = not ctl.vin and (large or not sc)
+  local cy = nb + r
+  if sc then
+    local r1 = W.mark_reach(r)
+    if ctl.size == "xl" then cy = math.max(cy, (ctl.noname and 0 or lh) - 1 + r1 + 1 + th) end
+    return cy + r1 * 0.7072 + 1 + th + (value and 13 or 0)
+  end
+  return cy + r + (value and 14 or 0)
+end
+
+-- How many units of `unit` px (at 100%) a knob's height takes, a couple
+-- of px short allowed for
+function P.knob_units(ctl, unit)
+  local px = P.knob_px(ctl)
+  return px and math.max(1, math.ceil((px - 2) / unit)) or nil
+end
+
+-- After a change to what a knob on a grid shows (`old`: a copy of it
+-- before): its place shorter or taller by as much as that takes
+function P.knob_reframe(c, old)
+  if not (c.at and is_knob(c) and is_knob(old)) then return end
+  local u = C.CELL_H / (C.UI or 1) / 4
+  local a, b = P.knob_units(old, u), P.knob_units(c, u)
+  if a and b and a ~= b then
+    local at = c.at
+    c.at = { c = at.c, r = at.r, w = at.w, h = math.max(2, b, at.h + b - a) }
+  end
+end
+
 function P.cell_size(ctl, half_rows)
   if ctl.type == "fader" then
     local t = fader_thick(ctl)
@@ -286,7 +333,10 @@ function P.cell_size(ctl, half_rows)
     or (ctl.type == "dual" and ctl.size ~= "small")
     or (ctl.type == "toggle" and ctl.size == "small")
   local sz = sizable and ctl.size and C.SIZES[ctl.size]
-  if sz and sz.h <= half_rows then return sz.w, sz.h end
+  -- a knob: as tall as what it shows takes
+  local kh = is_knob(ctl) and P.knob_units(ctl, C.CELL_H / (C.UI or 1) / 2)
+  if sz and sz.h <= half_rows then return sz.w, kh or sz.h end
+  if kh and kh <= half_rows then return 2, kh end
   return 2, 2
 end
 
@@ -294,6 +344,11 @@ end
 -- "small", "large", or nil for the ordinary one (which is also what a
 -- size too tall for the panel was given instead).
 function P.item_size(item)
+  -- a knob: its own size, unless it was given a medium's width instead
+  local c = item.ctl
+  if c and is_knob(c) and c.size and C.SIZES[c.size] and item.w == C.SIZES[c.size].w then
+    return (c.size ~= "medium") and c.size or nil
+  end
   for _, k in ipairs(C.SIZE_LIST) do
     local sz = C.SIZES[k]
     if k ~= "medium" and item.w == sz.w and item.h == sz.h then return k end
@@ -738,8 +793,14 @@ local function put(out, ctl, c, r, w, h, dx, dy)
     -- three quarters of a cell: a dropdown or a button, its name and its
     -- box, nothing kept under it
     if (t == "combo" or (t == "toggle" and ctl.size ~= "small")) and h == 3 and not ctl.buttons then nh = 1.5 end
-    it.y = y + half(qy(h) - hy(nh))
+    -- in its place: at the top unless it says otherwise (Place<n>)
+    local spare = qy(h) - hy(nh)
+    if spare < 0 or ctl.place == "centre" then it.y = y + half(spare)
+    elseif ctl.place == "bottom" then it.y = y + spare
+    else it.y = y end
     it.h = nh
+    -- a knob: its whole place is its frame (W.knob places what it shows)
+    if is_knob(ctl) then it.y, it.fh = y, qy(h) end
   end
   out.items[#out.items + 1] = it
 end
@@ -1248,6 +1309,8 @@ function P.visible(controls, track, fx)
   return shown
 end
 
+P.reader = function(track, fx, controls) return M.reader(track, fx, controls) end
+
 -- A virtual control's colour (TS_CV_Mappings Virt<n>) when it's given
 -- none of its own: violet, the canvases' second colour, so it reads as
 -- the layout's and not the plugin's
@@ -1281,7 +1344,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     changed, nv, act = W.button_row(ctx, id, shown_name, v, list,
       { dir = ctl.buttons, n = #list, w = hx(item.w), h = hy(item.h),
         leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl), img = ctl.img,
-        nobtn = ctl.nobtn, gap = ctl.bgap, rev = ctl.invert, tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
+        nobtn = ctl.nobtn, gap = ctl.bgap, place = ctl.place, rev = ctl.invert, tooltip = name .. ": " .. shown, on_col = W.lit_col(ctl.cap) or P.VIRT_COL, style = ctl.style })
   elseif ctl.type == "combo" then
     local list = {}
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
@@ -1292,7 +1355,7 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     changed, nv, act = W.knob(ctx, id, shown_name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = W.cap_col(ctl.cap) or P.VIRT_COL,
         style = ctl.style, size = size, look = ctl.look, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc),
-        img = ctl.img, vin = ctl.vin })
+        img = ctl.img, vin = ctl.vin, h = item.fh or hy(item.h), place = ctl.place })
   end
   if ctl.noname then W.LABEL_H, C.LABEL_GAP, W.tip_name = keep_lh, keep_gap, nil end
   if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
@@ -3020,7 +3083,11 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   end
 
   -- a grid's words (text controls)
-  for _, tx in ipairs(lay.texts or {}) do P.draw_text_item(ctx, dl, gx0, gy0, tx) end
+  for _, tx in ipairs(lay.texts or {}) do
+    -- (its other words while a rule holds)
+    tx.text = tx.by.namew and track and M.name_when(tx.by, P.reader(track, fx, layout.controls)) or nil
+    P.draw_text_item(ctx, dl, gx0, gy0, tx)
+  end
 
   -- its EQ curves (curve controls): the canvas's bands in each place
   for n, cu in ipairs(lay.curves or {}) do
@@ -3078,7 +3145,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       P.draw_curve_item(ctx, dl, gx0 + item.x, gy0 + item.y, hx(item.w), hy(item.h), track, fx, layout, req, "f" .. i, ctl)
 
     elseif ctl.type == "text" then
-      P.draw_text_item(ctx, dl, gx0, gy0, { x = item.x, y = item.y, w = hx(item.w), h = hy(item.h), by = ctl })
+      P.draw_text_item(ctx, dl, gx0, gy0, { x = item.x, y = item.y, w = hx(item.w), h = hy(item.h), by = ctl,
+        text = ctl.namew and M.name_when(ctl, P.reader(track, fx, layout.controls)) or nil })
 
     elseif ctl.type == "image" then
       if FN and FN.draw_pic then
@@ -3180,7 +3248,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         if link2 then ring2 = make_ring(link2, ctl.invert2 and true or false, p2x) end
       end
       local cell_x, cell_y = gx0 + item.x, gy0 + item.y
-      local cell_w, cell_h = item.pw or hx(item.w), hy(item.h)
+      local cell_w, cell_h = item.pw or hx(item.w), item.fh or hy(item.h)
       W.last_knob, W.last_fader, W.last_xy = nil, nil, nil
       -- (your name for the choice it's on, when you've given one)
       local said_raw = U.fmt_value(track, fx.addr, p)
@@ -3188,6 +3256,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       local _, pname = reaper.TrackFX_GetParamName(track, fx.addr, p, "")
       local label    = M.display_name(key, p, ctl.label, pname,
                                       ctl.live or layout.live)
+      -- another name while a rule holds (Name when)
+      if ctl.namew then label = M.name_when(ctl, P.reader(track, fx, layout.controls)) or label end
       -- Just the value. The plugin's name is on the header two
       -- centimetres away and the parameter index is an implementation
       -- detail -- neither is what you're hovering to find out.
@@ -3297,7 +3367,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.button_row(ctx, id, label, value, list,
           { dir = ctl.buttons, n = ctl.nbtn, w = hx(item.w), h = hy(item.h),
             leds = ctl.leds, ledn = ctl.ledn, upto = ctl.upto, pattern = P.step_pattern(ctl), img = ctl.img,
-            nobtn = ctl.nobtn, gap = ctl.bgap, rev = ctl.invert, short = item.short, tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
+            nobtn = ctl.nobtn, gap = ctl.bgap, place = ctl.place, rev = ctl.invert, short = item.short, tooltip = tip, on_col = lit, on_cols = on_cols, style = ctl.style, mod = modded })
       elseif ctl.type == "combo" then
         -- Its list is read from the plugin when it's opened (and kept while
         -- it's open), or when an arrow or the wheel steps it; a plugin that
@@ -3423,6 +3493,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = st, snaps = snaps, mod = modded, ring = ring, lamp = P.lamp(track, fx, layout, p),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look, img = ctl.img, vin = ctl.vin,
+            h = cell_h, place = ctl.place,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
@@ -3430,6 +3501,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
             lamp = P.lamp(track, fx, layout, p), img = ctl.img, vin = ctl.vin,
+            h = cell_h, place = ctl.place,
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
@@ -3906,8 +3978,11 @@ end
 -- placeholder without an EQ.
 function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n, ctl)
   local x1, y1, x2, y2 = x + 1, y + 1, x + w - 1, y + h - 1
-  ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, U.with_alpha(C.COL.panel_bg, 0xff), 3.0)
-  ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, 0x00000038, 3.0)
+  local framed = not (ctl and ctl.noframe)
+  if framed then
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, U.with_alpha(C.COL.panel_bg, 0xff), 3.0)
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, 0x00000038, 3.0)
+  end
   local cv = M.curve_cv(layout, ctl)
   -- its own bands: set up by its control's number
   local setup
@@ -3926,7 +4001,7 @@ function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n, ctl)
     P.with_canvas_cols(cv, dl, x1, y1, x2 - x1, y2 - y1, MP.draw_eq, ctx, dl, x1, y1, x2 - x1, y2 - y1,
       track, fx, layout, req, { id = ":c" .. n, small = true, cv = cv, setup = setup })
   end
-  ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 3.0, 0, 1.0)
+  if framed then ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 3.0, 0, 1.0) end
 end
 
 -- A visualiser (TS_CV_Mappings "vis", control `ctl`, number `i`): its
@@ -3962,6 +4037,8 @@ function P.draw_vis_item(ctx, dl, x, y, w, h, track, fx, layout, req, ctl, i)
       if ImGui.Button(ctx, "Set it up\u{2026}##vis" .. fx.guid .. i, bw, 0) then req.canvas_setup = i end
     end
   end
+  -- (its frame hidden: kept while it's not set up, so it can be found)
+  if drawn and ctl.noframe then return end
   ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, C.COL.knob_ring, 3.0, 0, 1.0)
 end
 
@@ -3975,14 +4052,16 @@ local TEXT_PX = { small = 11, large = 18 }
 P.TEXT_PX = TEXT_PX
 function P.draw_text_item(ctx, dl, ox, oy, t)
   local c = t.by
-  local txt = c.label or ""
+  local txt = t.text or c.label or ""
   if txt == "" then return end
   local f = c.font or {}
   if f.caps then txt = txt:upper() end
   local col = C.edge_rgba(c.edge) or C.COL.label
   local x0, y0 = ox + t.x, oy + t.y
   local base = ImGui.GetFontSize(ctx)
-  local px = f.px or TEXT_PX[c.size] or base
+  -- (its own size is at 100%: it follows Overall size like the rest)
+  local px = f.px or TEXT_PX[c.size]
+  px = px and math.max(6, math.floor(px * (C.UI or 1) + 0.5)) or base
   local tf = C.FONTS and C.FONTS.text
   local font = W.font_of(ctx, { name = f.name or (tf and tf.name), b = f.b, i = f.i })
   ImGui.PushFont(ctx, font, px)

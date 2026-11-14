@@ -107,6 +107,19 @@ function F.leave()
   state.leave = true
 end
 
+-- A window that wants the keyboard for itself (the layout editor's
+-- Delete and Ctrl+Z), where it is this frame: a click in it gets no
+-- hand-back. Called each frame it's drawn.
+function F.keep(x1, y1, x2, y2)
+  state.keep = { x1, y1, x2, y2, reaper.time_precise() }
+end
+
+-- Whether a click at x, y is in a window that keeps the keyboard (one
+-- drawn in the last half second)
+function F.kept(k, x, y, now)
+  return k ~= nil and now - k[5] < 0.5 and x >= k[1] and x < k[3] and y >= k[2] and y < k[4]
+end
+
 -- The hand-back itself, to wherever `s` says.
 function F.hand_back(s)
   local tracks = s.tracks
@@ -135,6 +148,10 @@ function F.update(ctx, ImGui, enabled)
   -- An item of ours becoming active means it was clicked, whatever the
   -- hover test said.
   if active and not state.active_was then clicked = true end
+  if clicked and state.keep then
+    local mx, my = ImGui.GetMousePos(ctx)
+    if F.kept(state.keep, mx, my, reaper.time_precise()) then state.leave = true end
+  end
   state.active_was = active
   local popup = ImGui.IsPopupOpen(ctx, "",
     ImGui.PopupFlags_AnyPopupId | ImGui.PopupFlags_AnyPopupLevel)

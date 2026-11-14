@@ -388,6 +388,42 @@ do
   M.remove(k); M.save(); M.reload()
 end
 
+-- A visualiser's or curve's frame hidden (bit 9) survives the ini and a
+-- copy; a knob never takes it
+do
+  local k = "NoFramePlug"
+  M.set(k, { controls = { { param = -1, type = "vis", label = "", noframe = true, vis = { kind = "filters", roles = {}, rev = {} } },
+                          { param = -1, type = "curve", label = "", noframe = true },
+                          { param = 1, type = "vis", label = "", vis = { kind = "filters", roles = {}, rev = {} } } } })
+  M.save(); M.reload()
+  local l = M.get(k)
+  check("frame hidden: kept", tostring(l.controls[1].noframe) .. " " .. tostring(l.controls[2].noframe) .. " "
+    .. tostring(l.controls[3].noframe), "true true nil")
+  check("frame hidden: kept by a copy", M.copy(l).controls[1].noframe, true)
+  M.remove(k); M.save(); M.reload()
+end
+
+-- Name when: other names, each while a rule holds (NameWhen<n>.<k>),
+-- the first holding shown; none, its own
+do
+  local k = "NameWhenPlug"
+  M.set(k, { controls = { { param = 1, type = "knob", label = "",
+    namew = { { rule = { param = 0, op = "is", norm = 1, tol = 0.25 }, text = "Mid" },
+              { rule = { param = 0, op = "is", norm = 0, tol = 0.25 }, text = "Left" } } } } })
+  M.save(); M.reload()
+  local c = M.get(k).controls[1]
+  check("name when: kept", #(c.namew or {}) .. " " .. (c.namew and c.namew[2].text or ""), "2 Left")
+  check("name when: kept by a copy", M.copy(M.get(k)).controls[1].namew[1].text, "Mid")
+  local at = 1
+  local function getv() return at end
+  check("name when: the first holding", M.name_when(c, getv), "Mid")
+  at = 0
+  check("name when: the next", M.name_when(c, getv), "Left")
+  at = 0.5
+  check("name when: none, its own", tostring(M.name_when(c, getv)), "nil")
+  M.remove(k); M.save(); M.reload()
+end
+
 -- The make-up gain control (Makeup=) survives the ini and a copy.
 do
   local k = "MakeupPlug"
@@ -763,8 +799,24 @@ do
   check("grid editor: no going on another", T.free(0, 4, 4, 4, nil), false)
   check("grid editor: room beside it", T.free(4, 4, 4, 4, nil), true)
   local k = { type = "knob" }
-  check("grid editor: a knob dragged big", table.concat({ T.fit(k, 7, 7) }, "x") .. tostring(k.size), "6x6large")
+  -- (its size by its width; its frame as tall as it was made)
+  -- a knob's frame from what it shows: its name hidden, its value inside
+  local function q(c) return P.knob_units(c, require("TS_CV_Config").CELL_H / 4) end
+  check("knob frame: medium, numbers round it", q({ type = "knob" }), 4)
+  check("knob frame: medium, its name hidden", q({ type = "knob", scale = "none", noname = true }), 3)
+  check("knob frame: medium, its value inside", q({ type = "knob", scale = "none", vin = true }), 3)
+  check("knob frame: extra large, plain", q({ type = "knob", size = "xl", scale = "none" }), 7)
+  check("knob frame: large in a flow, name and value gone, two half cells",
+    table.concat({ P.cell_size({ type = "knob", size = "large", scale = "none", noname = true, vin = true }, 8) }, "x"), "3x2")
+  check("knob frame: still drawn large", P.item_size({ w = 3, h = 2, ctl = { type = "knob", size = "large" } }), "large")
+  local kn = { type = "knob", scale = "none", at = { c = 0, r = 0, w = 4, h = 6 } }
+  local old = { type = "knob", scale = "none", at = kn.at }
+  kn.noname = true
+  P.knob_reframe(kn, old)
+  check("knob frame: hiding its name gives back its room", kn.at.h, 5)
+  check("grid editor: a knob dragged big", table.concat({ T.fit(k, 7, 7) }, "x") .. tostring(k.size), "6x7large")
   check("grid editor: dragged flat, small", table.concat({ T.fit(k, 4, 2) }, "x") .. tostring(k.size), "4x2small")
+  check("grid editor: a small one a row taller keeps its size", table.concat({ T.fit(k, 4, 3) }, "x") .. tostring(k.size), "4x3small")
   check("grid editor: back to medium", table.concat({ T.fit(k, 4, 4) }, "x") .. tostring(k.size), "4x4nil")
   local f = { type = "fader" }
   check("grid editor: a fader dragged wide", table.concat({ T.fit(f, 10, 3) }, "x") .. tostring(f.dir), "10x3h")
@@ -4477,6 +4529,11 @@ do
   check("a text field keeps it",               (function() f(true, true, false); return f(false, true, false) end)(), false)
   check("until it's done with",                f(false, false, false), true)
   check("a popup closing hands back too",      (function() f(false, true, true); return f(false, false, false) end)(), true)
+  -- a window keeping the keyboard (the layout editor): a click in it, lately drawn
+  local k = { 100, 50, 400, 300, 10 }
+  check("a click in the layout editor keeps it", F.kept(k, 200, 100, 10.2), true)
+  check("not outside it",                      F.kept(k, 50, 100, 10.2), false)
+  check("nor once it's gone",                  F.kept(k, 200, 100, 11), false)
 
   -- Where it goes: the arrange view, or the tracks after a track was
   -- clicked (Insert FX actions follow the context).
@@ -6378,6 +6435,16 @@ do
   check("tidy: %f", U.tidy_num("24.000000") .. "|" .. U.tidy_num("1.300000") .. "|" .. U.tidy_num("7600.000000 Hz")
     .. "|" .. U.tidy_num("-0.000000") .. "|" .. U.tidy_num("0.123456"), "24|1.3|7600 Hz|0|0.123")
   check("tidy: the plugin's own kept", U.tidy_num("3.140") .. "|" .. U.tidy_num("0.99 s") .. "|" .. U.tidy_num("1/4"), "3.140|0.99 s|1/4")
+  -- Values ▸ Unit: a readout with a unit of the same kind put in it
+  check("unit: a unit's text converted", U.unit_say({ unit = "ms" }, "2000.0 ms") .. "|" .. U.unit_say({ unit = "Hz" }, "1.5 kHz")
+    .. "|" .. U.unit_say({ unit = "ms" }, "4 dB") .. "|" .. U.unit_say({ unit = "Hz" }, "440"), "2.00 s|1.50 kHz|4 dB|440 Hz")
+  -- Adaptive units: 1000 ms and over in seconds, 1000 Hz and over in kHz
+  U.ADAPTIVE = false
+  check("adaptive: off, as it reads", U.adaptive("2000.0 ms"), "2000.0 ms")
+  U.ADAPTIVE = true
+  check("adaptive: on", U.adaptive("2000.0 ms") .. "|" .. U.adaptive("12000 Hz") .. "|" .. U.adaptive("250 ms") .. "|" .. U.adaptive("1200 dB"),
+    "2.00 s|12.0 kHz|250 ms|1200 dB")
+  U.ADAPTIVE = false
   check("short: kHz", U.short_value("1.5 kHz"), "1.5k")
   -- a unit only (Range<p>=||Hz|): the plugin's own number, read in it
   do
@@ -8980,6 +9047,25 @@ do
       if ch2 then v = math.floor(nv2 * 10 + 0.5) / 10 end
     end
     check("knob: a rounding plugin still follows a slow drag", v >= 0.5, true)
+    -- in a frame: name, dial and value at fixed gaps, at its top by
+    -- default, or its centre or bottom
+    down = false
+    local med = CC.CELL_H
+    W.knob("ctx", "##frm", "Gain", 0.5, "1.0 dB", {})
+    local free_cy = W.last_knob.cy
+    W.knob("ctx", "##frm", "Gain", 0.5, "1.0 dB", { h = med })
+    check("knob: a frame its own height draws as before", W.last_knob.cy, free_cy)
+    W.knob("ctx", "##frm", "Gain", 0.5, "1.0 dB", { h = med + 40 })
+    check("knob: at the top of a taller frame", W.last_knob.cy, free_cy)
+    W.knob("ctx", "##frm", "Gain", 0.5, "1.0 dB", { h = med + 40, place = "bottom" })
+    check("knob: or at its bottom", W.last_knob.cy, free_cy + 40)
+    W.knob("ctx", "##frm", "Gain", 0.5, "1.0 dB", { h = med + 40, place = "centre" })
+    check("knob: or its centre", W.last_knob.cy, free_cy + 20)
+    -- an extra large one: its dial under its name, not down in its place
+    W.knob("ctx", "##frm", "Mix", 0.5, "50 %", { size = "xl" })
+    local xl_free = W.last_knob.cy
+    W.knob("ctx", "##frm", "Mix", 0.5, "50 %", { size = "xl", h = CC.CELL_H * 2 })
+    check("knob: an extra large dial sits up under its name", W.last_knob.cy < xl_free, true)
   end)
   check("stepped: drag sim ran", ok and true or err, true)
   reaper.new_array = had
@@ -10028,6 +10114,13 @@ do
   check("curve: span", lo .. ".." .. hi, "-1..1")
   local b = { type = "bell", f = 1000, g = 10, q = 1, c = C }
   check("curve: added to the model", near(ME.band_db(b, 1000 * oct(1)) - ME.model_db(b, 1000 * oct(1)), 3), true)
+  -- ReEQ2 2.3's resonant cuts: Butterworth at Q 0.7071, the highest-Q
+  -- section's Q times r above it (at 12 dB/oct the band's Q itself)
+  local function at(t, q, n, f) return ME.model_db({ type = t, f = 1000, g = 0, q = q, order = n }, f) end
+  check("resonant cut: Butterworth at 0.7071", math.abs(at("hpr", 0.7071, 4, 1000) - at("hpbw", 0.7071, 4, 1000)) < 1e-9, true)
+  check("resonant cut: a peak at its Q", ("%.2f"):format(at("hpr", 2, 2, 1000)), "6.02")
+  check("resonant cut: a high cut too", ("%.2f"):format(at("lpr", 2, 2, 1000)), "6.02")
+  check("resonant cut: r", ("%.4f"):format(ME.cut_r(2, 4)), ("%.4f"):format(2 * math.sqrt(2)))
   -- encoded and back
   local L = { D = true, Mp = 8, M = { 0, 1 }, shapes = {
     [1] = { type = "bell", K = { 1, 1, 1 }, C = { { g = -9, i0 = -2, v = { 0, -0.5, 1.25, -0.04 } }, { g = 9, i0 = -2, v = { 0.1, 0.2 } } } },
@@ -10106,7 +10199,7 @@ do
     GetCursorPosX = function() return 0 end, GetContentRegionAvail = function() return 800, 600 end,
     GetItemRectMax = function() return 100, 100 end, GetItemRectMin = function() return 0, 0 end,
     GetWindowPos = function() return 0, 0 end, GetWindowSize = function() return 400, 400 end,
-    GetKeyMods = function() return 0 end,
+    GetKeyMods = function() return 0 end, GetFontSize = function() return 13 end,
   }
   local fake = setmetatable(answers, { __index = function(_, k)
     if not k:match("^DrawList_") and not k:match("^Viewport_") and k:match("^%u%a*_%u") then return 0 end
@@ -10144,6 +10237,22 @@ do
   T.cur().controls[#T.cur().controls].at = { c = 12, r = 0, w = 8, h = 4 }
   T.watch()
   check("grid sheet: a virtual control's", frame(#T.cur().controls), "ok")
+  -- Name when on a knob, Text when on words (Pro)
+  do
+    local ED_ = require("TS_CV_Edition")
+    local was = ED_.PRO
+    ED_.PRO = ED_.PRO or { RELEASE = ED_.RELEASE }
+    local nw = { { rule = { param = 1, op = "is", norm = 1, tol = 0.25 }, text = "Mid" },
+                 { rule = { param = 1, op = "between", norm = 0, norm2 = 0.5, tol = 0.005 }, text = "Low" } }
+    T.cur().controls[1].namew = nw
+    T.watch()
+    check("grid sheet: a knob's Name when", frame(1), "ok")
+    T.cur().controls[#T.cur().controls + 1] = { param = -1, type = "text", label = "Hi", at = { c = 0, r = 12, w = 4, h = 1 },
+      namew = M.namew_copy(nw) }
+    T.watch()
+    check("grid sheet: words' Text when", frame(#T.cur().controls), "ok")
+    ED_.PRO = was
+  end
   T.select(1); T.pick(3)
   local okm, errm = pcall(GE.draw, "ctx")
   check("grid sheet: several selected", okm and "ok" or tostring(errm), "ok")

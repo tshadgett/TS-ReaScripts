@@ -1681,6 +1681,11 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local small = opts.size == "small"
   local cw = math.tointeger(C.CELL_W * sz.w / 2) or C.CELL_W * sz.w / 2
   local ch = math.tointeger(C.CELL_H * sz.h / 2) or C.CELL_H * sz.h / 2
+  -- a small one's own height, before any frame it's given
+  local small_h = ch
+  -- its frame, when the panel gives it one (opts.h): what it shows is
+  -- placed in it (opts.place)
+  if opts.h then ch = opts.h end
   local r = sz.d * 0.5
 
   W.allow_overlap(ctx)
@@ -1733,9 +1738,11 @@ function W.knob(ctx, id, label, value, formatted, opts)
     end
   end
 
-  -- geometry: the dial centred in the room between the name
-  -- and the value line, or in the whole cell when it's small
-  -- and has neither
+  -- geometry: in a frame (opts.h), the name, the dial under it and the
+  -- value (or the end numbers) under that, at fixed gaps, at the frame's
+  -- top, centre or bottom (opts.place). Without one, or in one too short
+  -- for them, the dial centred in the room between the name and the
+  -- value line, or in the whole cell when it's small and has neither.
   local label_h = W.LABEL_H
   local cx = x + cw * 0.5
   local cy
@@ -1745,8 +1752,40 @@ function W.knob(ctx, id, label, value, formatted, opts)
   local large = opts.size == "large" or opts.size == "xl"
   local vin = opts.vin and not small
   local show_value = C.SHOW_VALUES and not small and (large or not sc) and not vin
-  if small then
+  -- a small one in a frame tall enough shows its name, in small type
+  local small_named = small and opts.h ~= nil and (label or "") ~= "" and label_h > 0
+                      and ch >= small_h + label_h + 2
+  local gy, gb = y, y + ch    -- where what it shows starts and ends
+  local fitted, fit_cy, fit_bot, sth = false, nil, nil, nil
+  if opts.h and (not small or small_named) then
+    W.push_small(ctx)
+    sth = select(2, ImGui.CalcTextSize(ctx, "0"))
+    W.pop_small(ctx)
+    local nb = small_named and (sth + 2) or (label_h + ((label_h > 0) and C.LABEL_GAP or 0))
+    local g
+    fit_cy = nb + r
+    if sc then
+      local r1 = W.mark_reach(r)
+      -- (an extra large one keeps room for the numbers over its dial)
+      if opts.size == "xl" then fit_cy = math.max(fit_cy, label_h - 1 + r1 + 1 + sth) end
+      fit_bot = fit_cy + r1 * 0.7072 + 1 + sth
+      g = fit_bot + (show_value and 13 or 0)
+    else
+      g = fit_cy + r + ((show_value and 14) or (small_named and 1) or 0)
+    end
+    if g <= ch + 2 then
+      fitted = true
+      local spare = math.max(0, ch - g)
+      local place = opts.place
+      gy = y + ((place == "bottom") and spare or (place == "centre") and math.floor(spare * 0.5) or 0)
+      gb = gy + math.min(g, ch)
+    end
+  end
+  if fitted then
+    cy = gy + fit_cy
+  elseif small then
     -- no name (in the tooltip, with the value): the middle of its place
+    small_named = false
     cy = y + ch * 0.5
   else
     local room = ch - label_h - C.LABEL_GAP - (show_value and 14 or 0)
@@ -1758,7 +1797,9 @@ function W.knob(ctx, id, label, value, formatted, opts)
   -- name above, past the sides -- is left out, its tick staying.
   local dial_r = r
   local num_top, num_bot, num_th
-  if sc then
+  if sc and fitted then
+    num_top, num_th, num_bot = gy + label_h - 1, sth, gy + fit_bot
+  elseif sc then
     W.push_small(ctx)
     local _, th = ImGui.CalcTextSize(ctx, "0")
     W.pop_small(ctx)
@@ -1783,14 +1824,14 @@ function W.knob(ctx, id, label, value, formatted, opts)
       -- when it has no name over it)
       local name_h = 0
       if label_h > 0 then name_h = select(2, ImGui.CalcTextSize(ctx, "Ag")) or 0 end
-      local clear = y + math.max(label_h, name_h) + ((label_h > 0) and 3 or 1)
+      local clear = gy + math.max(label_h, name_h) + ((label_h > 0) and 3 or 1)
       local function reach() return W.mark_reach(dial_r) + (fo.arc and 1.5 or 0.5) end
       local min_r = r * 0.8
       for _ = 1, 24 do
         if sc then
-          cy = math.max(num_bot - (W.mark_reach(dial_r) * 0.7072 + 1 + num_th), y + label_h + C.LABEL_GAP + dial_r)
+          cy = math.max(num_bot - (W.mark_reach(dial_r) * 0.7072 + 1 + num_th), gy + label_h + C.LABEL_GAP + dial_r)
         else
-          local lim = y + ch - dial_r - (show_value and 12 or 1)
+          local lim = gb - dial_r - (show_value and 12 or 1)
           cy = math.max(cy, math.min(clear + reach(), lim))
         end
         if cy - reach() >= clear - 0.01 or dial_r <= min_r then break end
@@ -1802,15 +1843,19 @@ function W.knob(ctx, id, label, value, formatted, opts)
   -- a lamp before the name (opts.lamp: its colour, or false for dark)
   local lw = (opts.lamp ~= nil) and 9 or 0
   local lth, ltw
-  if small then
+  if small_named then
+    W.push_small(ctx)
+    lth, ltw = centred_text(ctx, dl, cx + lw * 0.5, gy, label or "", C.COL.label, cw - 2 - lw, true)
+    W.pop_small(ctx)
+  elseif small then
     -- (no name: the lamp at the dial's top left)
     if lw > 0 then W.lamp(dl, cx - r - 2, cy - r + 2, opts.lamp) end
     lw = 0
   else
-    lth, ltw = centred_text(ctx, dl, cx + lw * 0.5, y, label or "", C.COL.label, cw - 2 - lw, true)
+    lth, ltw = centred_text(ctx, dl, cx + lw * 0.5, gy, label or "", C.COL.label, cw - 2 - lw, true)
   end
   if lw > 0 then
-    W.lamp(dl, cx + lw * 0.5 - (ltw or 0) * 0.5 - 5, y + (lth or 13) * 0.5 + (small and -1 or 0), opts.lamp)
+    W.lamp(dl, cx + lw * 0.5 - (ltw or 0) * 0.5 - 5, gy + (lth or 13) * 0.5 + (small and -1 or 0), opts.lamp)
   end
 
   local pic = opts.img and W.picture_knob(ctx, dl, cx, cy, dial_r, value, opts.img, opts.dim)
@@ -1873,7 +1918,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   -- off its bottom edge (a large knob with numbers keeps it at the foot)
   if show_value then
     W.push_small(ctx)
-    local vy = sc and (y + ch - 13) or (cy + dial_r + 1)
+    local vy = sc and (gb - 13) or (cy + dial_r + 1)
     centred_text(ctx, dl, cx, vy, formatted or "", C.COL.value, cw - 2)
     W.pop_small(ctx)
   end
@@ -2565,10 +2610,12 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
   local hide = opts.nobtn and names and not pat
   local top, bot = opts.no_name and (y + 2) or (y + W.LABEL_H + C.LABEL_GAP), y + ch - 2
 
-  -- where the cap and the lamps go: a cap up to 26 px tall, centred in
-  -- its room
+  -- where the cap and the lamps go: a cap up to 26 px tall, at the top
+  -- of its room, its centre or its bottom (opts.place)
+  local place = opts.place or "top"
   local function cap_in(l, r, t, b)
-    local mid, hh = (t + b) * 0.5, math.min(26, b - t) * 0.5
+    local hh = math.min(26, b - t) * 0.5
+    local mid = (place == "centre") and (t + b) * 0.5 or (place == "bottom") and (b - hh) or (t + hh)
     return l, mid - hh, r, mid + hh
   end
   local bx1, by1, bx2, by2
@@ -2593,7 +2640,17 @@ local function step_button(ctx, dl, x, y, cw, ch, hovered, value, choices, n, cu
   else
     local capw = hide and -4 or names and math.min(34, cw * 0.42) or math.max(20, cw - 22)
     local sp = math.min(12, (bot - top) / math.max(1, m))
-    local ly0 = (top + bot) * 0.5 - sp * (m - 1) * 0.5
+    local span = sp * (m - 1)
+    -- (in line with the cap beside them, or from the top or foot alone)
+    local ly0 = (top + bot) * 0.5 - span * 0.5
+    local caph = math.min(26, bot - top)
+    if place == "top" then
+      ly0 = top + sp * 0.5
+      if not hide then ly0 = math.max(ly0, top + caph * 0.5 - span * 0.5) end
+    elseif place == "bottom" then
+      ly0 = bot - sp * 0.5 - span
+      if not hide then ly0 = math.min(ly0, bot - caph * 0.5 - span * 0.5) end
+    end
     for i = 1, m do lamps[i] = { x + 13 + capw, ly0 + (i - 1) * sp } end
     bx1, by1, bx2, by2 = cap_in(x + 4, x + 4 + capw, top, bot)
   end

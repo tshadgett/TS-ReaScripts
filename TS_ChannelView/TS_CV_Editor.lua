@@ -692,6 +692,60 @@ local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row, m
   return changed
 end
 
+-- Name when (Text when, on a text element): other names, each while a
+-- rule holds, the first holding shown; none, its own (TS_CV_Mappings
+-- NameWhen<n>.<k>). Each: its source, the rule's value, the name, ✕.
+local function namew_ui(ctx, c, word, field_w)
+  local tr, addr = st.track, st.fx.addr
+  local controls = st.scratch.controls
+  ST.caption(ctx, word)
+  local list = source_list(tr, addr, controls, c, nil)
+  st.namew_buf = st.namew_buf or {}
+  local drop
+  for k, e in ipairs(c.namew or {}) do
+    ImGui.PushID(ctx, "nw" .. k)
+    ImGui.SetNextItemWidth(ctx, field_w)
+    local sch, si = ImGui.Combo(ctx, "##nws", source_index(list, e.rule), source_names(list))
+    if sch and list[si + 1] then e.rule = rule_start(tr, addr, list[si + 1], controls) end
+    rule_value_ui(ctx, "##nwr", tr, addr, e.rule, controls, 92, field_w - 96,
+      function(t) ImGui.AlignTextToFramePadding(ctx); ImGui.TextDisabled(ctx, t); ImGui.SameLine(ctx) end, true)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.TextDisabled(ctx, "\u{2192}"); ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, field_w - 52)
+    local tch, tv = ImGui.InputTextWithHint(ctx, "##nwt", word == "Text when" and "words" or "name", e.text or "")
+    if tch then e.text = (tv:gsub("[~\r\n]", " ")) end
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "\u{2715}##nwx") then drop = k end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Remove") end
+    ImGui.PopID(ctx)
+    ImGui.Spacing(ctx)
+  end
+  if drop then
+    table.remove(c.namew, drop)
+    if #c.namew == 0 then c.namew = nil end
+  end
+  if #(c.namew or {}) < M.NAMEW_MAX and ImGui.Button(ctx, "+ " .. word .. "\u{2026}##nwadd") then
+    -- (on a switch or dropdown when there's one)
+    local e = (E.show_sources(tr, addr, st.key, controls, c) or {})[1] or list[1]
+    if e then
+      c.namew = c.namew or {}
+      c.namew[#c.namew + 1] = { rule = rule_start(tr, addr, e, controls), text = "" }
+    end
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, (word == "Text when" and "Other words" or "Another name")
+      .. " while a parameter reads a given way.\nThe first that holds shows; none, its own.")
+  end
+end
+-- for a text element's sheet (TS_CV_GridEditor)
+function E.namew_for(ctx, env, c, word)
+  local saved = st
+  st = env
+  local ok, err = pcall(namew_ui, ctx, c, word, 236)
+  st = saved
+  if not ok then error(err, 0) end
+end
+
 -- The selected control's settings, as a column: each on a row of its own,
 -- its name captioned above it, and only the rows that apply to its type.
 local COL_W   = 330          -- the column's width
@@ -1486,6 +1540,7 @@ draw_entry_body = function(ctx)
       rule_value_ui(ctx, "##show", tr, addr, c.show, st.scratch.controls, 92, FIELD_W - 96,
         function(t) row_name(t) end, true)
     end
+    if is_param and not virt and not st.multi then namew_ui(ctx, c, "Name when", FIELD_W) end
   end
 
   -- the ticks
@@ -1547,6 +1602,14 @@ draw_entry_body = function(ctx)
     local ich, iv = ST.checkbox(ctx, "Value inside the knob", c.vin == true)
     if ich then c.vin = iv or nil end
     tip("Its value in the knob's middle, without units, and no value line under it.")
+  end
+  -- on a grid: where a knob, a dropdown or a button sits in its place
+  if is_param and c.at and (c.type == nil or c.type == "knob" or c.type == "stepped"
+      or c.type == "combo" or c.type == "toggle") then
+    ImGui.AlignTextToFramePadding(ctx); ImGui.Text(ctx, "Place in its frame"); ImGui.SameLine(ctx)
+    local pl = ST.seg(ctx, "##ed_place", { { "Top", "top" }, { "Centre", "centre" }, { "Bottom", "bottom" } },
+      c.place or "top")
+    if pl then c.place = (pl ~= "top") and pl or nil end
   end
 
   -- a button's own words for its two states, for this plugin everywhere

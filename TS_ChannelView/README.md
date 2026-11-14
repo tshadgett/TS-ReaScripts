@@ -1211,8 +1211,10 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   the plugin's own window puts it on the panel. A parameter already on the
   panel is greyed: click it to select it there, drag it to move it.
 - **In the middle**, the panel as it is, with the grid over it in quarter
-  cells. Drag a control to move it, and its corner to resize it: a knob
-  steps small, medium and large, a fader goes upright or across, a
+  cells (**Fine grid**, in the toolbar: half steps). Drag a control to move
+  it, and its corner to resize it: a knob's width steps it small, medium,
+  large and extra large, and it can be made taller than it needs (a small
+  one a step taller shows its name); a fader goes upright or across, a
   dropdown takes any width, a section any size. A section shows as an
   outline: drag it by its edge, and what's on it goes with it (inside it,
   the grid works as anywhere else). To draw lines, click **Line** on the
@@ -1232,7 +1234,15 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   right-click has them (automation stays on the right-click). Its size
   (a knob's or a button's, a fader's length, thickness and way) is what
   you draw it on the grid. A control that changes shape (a dropdown shown
-  as buttons, say) takes its own size where it is, if there's room. For a
+  as buttons, say) takes its own size where it is, if there's room.
+  **Place in its frame** puts a knob, a dropdown or a button at the top of
+  its place (the usual), its centre or its bottom; a knob's name, dial and
+  value keep the same gaps whatever its size. **Name when** (Pro) gives it
+  other names, each while a parameter reads a given way (as Show when's
+  rules), the first that holds shown and its own when none does: Mid or
+  Left on a gain that follows a Stereo Mode switch. A text element has
+  **Text when** the same way. An EQ curve or a visualiser has
+  **Frame**: *Shown* or *Hidden*. For a
   section, **Outline** and **Fill**, side by side: click either for its
   choices (the fill's finish and corners too). For a line, **Colour**. With nothing
   selected, the panel itself: locked, fit the grid to what's on it, the
@@ -1523,13 +1533,14 @@ shows on the control you renamed. The editor has the same: *Alias*,
 
 **Hiding a name.** Right-click ▸ Name ▸ *Show name* (or Edit layout's
 *Hide its name*, for several at once) takes a control's name off the
-panel, and the room it took with it: the control moves up into it. Its
-name shows when you hover it. On the web page too.
+panel, and the room it took with it: the control moves up into it, and on
+a grid its place is that much shorter. Its name shows when you hover it.
+On the web page too.
 
 **Value inside the knob.** Right-click ▸ Name ▸ *Value inside the knob*
 (or Edit layout's checkbox of that name) shows a knob's value in its
 middle, without its units, and drops the value line under it, so the
-knob takes less room. Hover it for the full value. It works on knobs,
+knob takes less room (on a grid, its place gets shorter). Hover it for the full value. It works on knobs,
 stepped knobs, picture knobs and concentric knobs (the inner knob's value
 inside, the ring's under it), and on the web page.
 
@@ -1730,6 +1741,9 @@ its bands from ReEQ2's own formulas, its frequency, Q and slopes, its
 dynamics, and each of its 14 types drawn as ReEQ2 builds it. Its *Mode*
 works as in ReEQ2: *Off* takes a band out, *Disabled* turns it off. Its
 knobs read in Hz, Q, dB and dB/oct everywhere, without a layout too.
+From ReEQ2 2.3 its Low Cut and High Cut are drawn resonant by their Q.
+Its steeper bells and shelves are drawn at 12 dB/oct: ReEQ2 keeps their
+slope to itself, not as a parameter.
 
 **Ready to use.** Pro-Q 3 and 4, Kirchhoff-EQ and ReEQ2 come with their EQ
 canvas mapped and learned, and Pro-C 2, Pro-C 3 and Cenozoix Compressor
@@ -1846,7 +1860,9 @@ range*: type what its ends read (20 to 20k), the unit and the curve
 tooltip, the numbers round the dial and the web page. *The plugin's own*
 goes back. A plugin whose numbers are right but have no unit (a cutoff
 reading 20000) needs no range: **Values** ▸ **Unit** ▸ *Hz* reads its own
-number in that unit (20 kHz), whatever its range runs to. The same is in
+number in that unit (20 kHz), whatever its range runs to. A readout that
+has a unit of the same kind already is put in it too: *ms* on one reading
+2000.0 ms shows 2.00 s. The same is in
 the editor's *Values* row. For a knob, *Values* also holds the **numbers
 round the dial**: *None*, *Values* or *0–10*.
 
@@ -1907,8 +1923,10 @@ right-click ▸ *Group looks…*.
   tint, folder indent (0 for none) and which track buttons show.
 - **Behaviour:** *Float plugins without controls* (ChannelView and the
   rack each their own), *Offer canvases for new plugins* (Pro), *Use mouse
-  wheel on controls* and *Return keyboard focus to REAPER* (needs
-  js_ReaScriptAPI or SWS).
+  wheel on controls*, *Adaptive units* (a readout of 1000 ms or more in
+  seconds, of 1000 Hz or more in kHz) and *Return keyboard focus to REAPER*
+  (needs js_ReaScriptAPI or SWS). The layout editor keeps Delete,
+  Backspace and Ctrl+Z, C and V for itself while you work in it.
 - **Track rules:** what happens when ChannelView adds or duplicates
   tracks, and how tracks are coloured and spaced (below).
 
