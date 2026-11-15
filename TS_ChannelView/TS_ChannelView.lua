@@ -1,12 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.3.0
+-- @version 4.3.1
 -- @changelog
---  Options (on the main menu) with a Behaviour tab and Track rules for
---  adding tracks: templates beside a track, numbering, sorting, colours,
---  spacers. Steps and MSEG modulators. Knobs keep name, dial and value
---  together. Reopen a project after updating. Moves with ChannelView Pro
---  4.3.0. See the CHANGELOG.
+--  Double-click puts a control back to 0 when its range runs through 0.
+--  Scan for new plugins in the add-plugin menu. Readings without units
+--  read by their names. Fixed: probes on some instruments' tracks
+--  stalling REAPER on macOS; a modulator tile's garbled text. Moves with
+--  ChannelView Pro 4.3.1. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -2655,7 +2655,7 @@ local function panel_menu()
           return M.display_name(base, p, nil, pn, false)
         end
         local function fmt(p, n)
-          local ok_, sv = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, p, n, "")
+          local ok_, sv = U.format_norm(app.track, fx.addr, p, n, "")
           return ok_ and U.trim(sv or "") or nil
         end
         local function vfind(nm)
@@ -3478,7 +3478,7 @@ local function name_menu(fx, key, layout, idx, c)
     ImGui.TextDisabled(ctx, "State names: this plugin, everywhere")
     local function hint(n)
       if reaper.TrackFX_FormatParamValueNormalized then
-        local ok, t = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, c.param, n, "")
+        local ok, t = U.format_norm(app.track, fx.addr, c.param, n, "")
         if ok and t and t ~= "" then return t end
       end
       return n < 0.5 and "off" or "on"
@@ -3794,7 +3794,7 @@ local function show_when_menu(fx, key, layout, idx, c)
       return M.display_name(key, p, nil, pn, false)
     end
     local function fmt(p, n)
-      local ok_, sv = reaper.TrackFX_FormatParamValueNormalized(app.track, fx.addr, p, n, "")
+      local ok_, sv = U.format_norm(app.track, fx.addr, p, n, "")
       return ok_ and U.trim(sv or "") or nil
     end
     local function vfind(nm)

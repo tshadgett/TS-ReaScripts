@@ -928,15 +928,26 @@ local function own_plugin(tr, a)
   return n:find("ChannelView Modulators", 1, true) ~= nil or n:find("TS_CV_Modulators", 1, true) ~= nil
 end
 
+-- Plugins that still follow the count after being asked to hold
+-- (guid -> true): asked once only. Asking again would re-lay a plugin out
+-- at every check, and an instrument may reload its sounds each time.
+local unholdable = {}
+
+-- Whether a plugin follows the count and can be asked to hold
+local function to_hold(tr, a)
+  return not own_plugin(tr, a) and not unholdable[fx_guid(tr, a)] and follows_count(tr, a)
+end
+
 -- Holds each plugin among `items` that follows the count at h.n0, noting
 -- it in h.held. True when it held any.
 local function hold_items(tr, items, h)
   local any = false
   for _, a in ipairs(items) do
-    if not own_plugin(tr, a) and follows_count(tr, a) then
+    if to_hold(tr, a) then
       reaper.TrackFX_SetNamedConfigParm(tr, a, "channel_config", tostring(h.n0))
-      h.held[fx_guid(tr, a)] = true
-      any = true
+      local g = fx_guid(tr, a)
+      if follows_count(tr, a) then unholdable[g] = true
+      else h.held[g] = true; any = true end
     end
   end
   return any
@@ -1021,7 +1032,7 @@ local function keep_held(tr)
     if key == "TOP" or caddr then
       local items = level_items(tr, caddr)
       for _, a in ipairs(items) do
-        if not own_plugin(tr, a) and follows_count(tr, a) then todo[#todo + 1] = { a, h } end
+        if to_hold(tr, a) then todo[#todo + 1] = { a, h } end
       end
       unplug[#unplug + 1] = { items, h }
     end

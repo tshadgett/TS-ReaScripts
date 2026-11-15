@@ -421,6 +421,14 @@ do
   check("name when: the next", M.name_when(c, getv), "Left")
   at = 0.5
   check("name when: none, its own", tostring(M.name_when(c, getv)), "nil")
+  -- a list's setting the plugin keeps off the middle of its run (Mid/Side
+  -- at 1.0, the run's middle 0.833): the plugin's text says it's there
+  local d = { rule = { param = 0, op = "is", norm = 0.833, tol = 0.166 }, text = "Mid" }
+  local c2 = { namew = { { rule = { param = 0, op = "is", norm = 0.5, tol = 0.166 }, text = "Left" }, d } }
+  at = 1.0
+  check("name when: off the middle, by distance", tostring(M.name_when(c2, getv)), "nil")
+  local function same(_, n) return math.abs(n - 0.833) < 1e-6 end
+  check("name when: off the middle, by its text", M.name_when(c2, getv, same), "Mid")
   M.remove(k); M.save(); M.reload()
 end
 
@@ -929,6 +937,23 @@ do
   check("typed value: a bare number in the unit it shows (kHz)", n2 and txt(n2):sub(1, 4), "5.00")
   local n3 = UN_.typed_norm("tr", 0, 7, "300 Hz")
   check("typed value: with its unit", n3 and txt(n3):sub(1, 3), "300")
+  reaper = real
+end
+-- double-click: where a range through 0 reads 0 (ReEQ2's gain, -136..+30
+-- dB, not linear in its knob), else REAPER's middle
+do
+  local real = reaper
+  local function db(n) return n <= 0 and "-inf dB" or ("%.1f dB"):format(-136 + 166 * n ^ 0.4) end
+  local function hz(n) return ("%.1f Hz"):format(20 * 1000 ^ n) end
+  reaper = setmetatable({
+    TrackFX_FormatParamValueNormalized = function(_, _, p, n) return true, (p == 1 and db or hz)(n) end,
+    TrackFX_GetFormattedParamValue = function(_, _, p) return true, (p == 1 and db or hz)(0.3) end,
+    TrackFX_GetFXGUID = function() return "{DEFTEST}" end,
+    TrackFX_GetParamEx = function() return 0.5, 0, 1, 0.5 end,
+  }, { __index = real })
+  local z = U.param_default("tr", 0, 1)
+  check("double-click: a gain to 0 dB", db(z):match("^%-?0%.%d") ~= nil, true)
+  check("double-click: a frequency to the middle", U.param_default("tr", 0, 2), 0.5)
   reaper = real
 end
 -- an EQ curve on a grid: kept, and the canvas drawn there, not beside
@@ -7971,6 +7996,53 @@ do
   check("mapeq: guess low gain", g[2] and g[2].gain, 0)
   check("mapeq: guess mid freq", g[3] and g[3].freq, 3)
   check("mapeq: guess high has no freq", g[4] and g[4].freq, nil)
+  -- ZL Equalizer 2's names: bands counted from 0, a Filter Status switch,
+  -- an Order (its slope), dynamics after each band's own controls
+  do
+    local zl = { "Filter Structure", "External Side", "Bypass", "Output Gain", "Gain Scale", "Auto Gain" }
+    for k = 0, 2 do
+      for _, n in ipairs({ "Filter Status", "Filter Type", "Order", "LRMode", "Freq", "Gain", "Target Gain", "Q",
+                           "Dynamic ON", "Threshold (dB)", "Knee Width", "Attack", "Release", "Side Freq", "Side Q" }) do
+        zl[#zl + 1] = n .. k
+      end
+    end
+    local gz = ME.guess(zl)
+    check("mapeq: ZL bands from 0", #gz .. " " .. (gz[1] and gz[1].name or ""), "3 Band 1")
+    check("mapeq: ZL band 1's controls", gz[1] and (gz[1].on .. " " .. gz[1].shape .. " " .. gz[1].slope .. " "
+      .. gz[1].freq .. " " .. gz[1].gain .. " " .. gz[1].q), "6 7 8 10 11 13")
+    check("mapeq: ZL band 1's dynamics", gz[1] and gz[1].dyn and (gz[1].dyn.on .. " " .. gz[1].dyn.thr), "14 15")
+    check("mapeq: ZL band 1's stereo placement (LRMode)", gz[1] and gz[1].stereo, 9)
+    check("mapeq: ZL Flat Gain", ME.type_of_name("Flat Gain"), "flat")
+    check("mapeq: flat gain everywhere", ("%.1f %.1f"):format(ME.model_db({ type = "flat", f = 41, g = 5.5 }, 30),
+      ME.model_db({ type = "flat", f = 41, g = 5.5 }, 15000)), "5.5 5.5")
+    -- a bell at 96 dB/oct (ZL's, 148 Hz, Q 0.277): flat on top, its sides
+    -- at its bandwidth's edges (about 38 and 570 Hz)
+    local zb = { type = "bell", f = 148, g = 8, q = 0.277, order = 16 }
+    check("mapeq: steep bell flat on top", ("%.1f %.1f %.1f"):format(ME.model_db(zb, 60), ME.model_db(zb, 148), ME.model_db(zb, 400)), "8.0 8.0 8.0")
+    check("mapeq: steep bell's sides", ME.model_db(zb, 25) < 0.5 and ME.model_db(zb, 900) < 0.5, true)
+  end
+  check("own name: dropped", U.drop_own_name("1000.0 Freq", "Freq0", "1000.0"), "1000.0")
+  check("own name: kept when it shows it", U.drop_own_name("Stereo Mode", "Mode", "Stereo Mode"), "Stereo Mode")
+  check("own name: a short name kept", U.drop_own_name("3 Q", "Q", "3"), "3 Q")
+  check("unit by name", table.concat({ U.unit_by_name("Freq0", 10, 160000) or "-", U.unit_by_name("Threshold (dB)0", -80, 0) or "-",
+    U.unit_by_name("Output Gain", -30, 30) or "-", U.unit_by_name("Gain Scale", -100, 200) or "-",
+    U.unit_by_name("Attack0", 0, 1000) or "-", U.unit_by_name("Gain", 0, 2) or "-" }, " "), "Hz dB dB - ms -")
+  do
+    local real = reaper
+    local function txt(p, n)
+      if p == 13 then return ("%.1f Freq"):format(10 * 16000 ^ n) end
+      return ("%.2f Gain"):format(-30 + 60 * n)
+    end
+    reaper = setmetatable({
+      TrackFX_FormatParamValueNormalized = function(_, _, p, n) return true, txt(p, n) end,
+      TrackFX_GetFormattedParamValue = function(_, _, p) return true, (txt(p, 0.5):gsub(" %a+$", "")) end,
+      TrackFX_GetParamName = function(_, _, p) return true, p == 13 and "Freq0" or "Gain0" end,
+      TrackFX_GetFXGUID = function() return "{ZLTEST}" end,
+    }, { __index = real })
+    check("ZL readings: in their units", select(2, U.format_norm("tr", 0, 13, 0.5)) .. " / " .. select(2, U.format_norm("tr", 0, 14, 0)),
+      "1264.9 Hz / -30.00 dB")
+    reaper = real
+  end
 
   -- layouts: a canvas survives the library
   local key = "TestEQ73 :: EQ"
@@ -10578,8 +10650,8 @@ do
         { "mod",    { Rate = 1, Depth = 2, Phase = 3, Mix = 5 }, nil, "Depth Mix Phase Rate" },
         { "mod",    { V1Rate = 1, V1Depth = 2, V1Phase = 3, V1Pan = 4, V2Rate = 5, V2Depth = 6, V2Pan = 7 }, nil, "Pan V1Depth V1Pan V1Phase V1Rate V2Pan" },
         { "multi",  { Crossover1 = 1, Crossover2 = 2, B1Threshold = 3, B2Threshold = 4, B3Threshold = 5,
-                      B1Ratio = 6, B1Gain = 7, B1Attack = 8 }, 3,
-          "Atk B1Threshold B2Threshold B3Threshold Crossover1 Crossover2 Gain Ratio" },
+                      B1Ratio = 6, B1Gain = 7, B1Attack = 8, Output = 9, Mix = 10 }, 3,
+          "Atk B1Threshold B2Threshold B3Threshold Crossover1 Crossover2 Gain MIX OUT Ratio" },
         -- the dynamics canvases (CompPanel's)
         { "limit",  { Threshold = 1, Ceiling = 2, Release = 3 }, nil, "Ceiling Release Threshold", true },
         { "gate",   { Threshold = 1, Attack = 2, Hold = 3, Release = 4, Range = 5, Hysteresis = 6, Ratio = 7 }, nil,
@@ -13545,6 +13617,34 @@ do
   children = 0
   ok, err = pcall(tb.draw_v, "ctx", 100, 10, 120, 200, "right")
   check("bar scroll: a column too", (ok and "ok" or tostring(err)) .. " " .. children, "ok 1")
+end
+
+-- Scan for new plugins: REAPER's FX browser opened, F5 pressed in it, the
+-- list read again once its scan has come and gone, the browser shut again
+do
+  local Brw = require("TS_CV_Browser")
+  local real = reaper
+  local t, open, cmds, posted, scanning, deferred = 0, false, {}, {}, false, nil
+  reaper = setmetatable({
+    time_precise = function() return t end,
+    GetToggleCommandState = function() return open and 1 or 0 end,
+    Main_OnCommand = function(c) cmds[#cmds + 1] = c; open = not open end,
+    JS_Window_Find = function(title) if title == "Add FX to" and open then return "fxb" end
+                                     if title == "Scanning" and scanning then return "scan" end end,
+    JS_WindowMessage_Post = function(_, msg, k) posted[#posted + 1] = msg .. ":" .. k end,
+    defer = function(f) deferred = f end,
+    GetOS = function() return "Win64" end,
+  }, { __index = real })
+  local function run() local f = deferred; deferred = nil; if f then f() end end
+  Brw.scan()
+  check("scan: the FX browser opened", table.concat(cmds, ","), "40271")
+  t = 0.5; run()
+  check("scan: F5 pressed in it", table.concat(posted, ","), "WM_KEYDOWN:116,WM_KEYUP:116")
+  scanning = true; t = 1; run()
+  check("scan: waits while REAPER scans", Brw.scanning(), true)
+  scanning = false; t = 2; run()
+  check("scan: done, the browser shut again", tostring(Brw.scanning()) .. " " .. table.concat(cmds, ","), "false 40271,40271")
+  reaper = real
 end
 
 -- favourites (the star on a plugin's row): kept, taken off, and leading

@@ -156,6 +156,8 @@ reaper = {
   TrackFX_SetNamedConfigParm = function(tr, a, k, v)
     local f = F(a)
     if f and f.cc and k == "channel_config" then
+      -- (one that won't be held: laid out afresh each time it's asked)
+      if f.refuse then f.asked = (f.asked or 0) + 1; relayout(f, track.nch); return true end
       local n = tonumber(tostring(v):match("^%s*(%-?%d+)")) or 0
       f.held = (n > 0) and n or nil
       -- held at another count than the one it took from the track: laid
@@ -1034,6 +1036,20 @@ do
   check("released: the track back to 4",       track.nch, 4)
   check("released: following again",          tostring(f2.held), "nil")
   check("released: the record gone",           track.ext["P_EXT:TS_CV_HOLD"], "")
+end
+-- An instrument that follows the track and won't be held (Pianoverse):
+-- asked once, not at every check
+reset()
+do
+  local pv = fx("VST3: Pianoverse (IK Multimedia)", "{PV}", 0, 4, { cc = true, refuse = true })
+  table.insert(track.fx, 1, pv)
+  TP.invalidate()
+  TP.sync(track)
+  for _ = 1, 4 do TP.invalidate(); TP.sync(track) end
+  check("won't hold: asked once",               pv.asked, 1)
+  check("won't hold: not recorded as held",     (track.ext["P_EXT:TS_CV_HOLD"] or ""):match("^TOP|%d+|([^|]*)"), "")
+  TP.invalidate()
+  check("won't hold: settles",                  TP.sync(track), false)
 end
 local measure_was, get_was = measure, package.loaded["TS_CV_Mappings"].get
 -- A plugin with a sidechain on a two-channel track (Waves SSLComp: 4 in,

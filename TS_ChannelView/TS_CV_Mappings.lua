@@ -2828,21 +2828,32 @@ function M.namew_copy(list)
   return out
 end
 -- What a rule on a plugin reads now (M.visible's getv): a parameter's
--- value, or a virtual control's setting on that instance
+-- value, or a virtual control's setting on that instance; and, second,
+-- M.visible's `same` for that instance
 function M.reader(track, fx, controls)
   local St = require("TS_CV_State")
   local base = U.plugin_key(fx.name or "")
   return function(p, vname)
     if vname then return St.vvalue(fx.guid, vname, base, controls) end
     return reaper.TrackFX_GetParamNormalized(track, fx.addr, p) or 0
+  end, function(p, n)
+    return require("TS_CV_Units").reads_as(track, fx.addr, fx.guid, p, n)
   end
 end
 
--- The name a control has now, by its rules (`getv(param, vname)` as
--- M.visible's), or nil for its own
-function M.name_when(c, getv)
+-- A rule on a list's settings (not a switch's two halves) also holds when
+-- the plugin reads as it would at the rule's value (M.show_match's `same`)
+local function by_text(r, same)
+  if not same or r.vname or (r.tol or 0.499) >= 0.49 then return nil end
+  return function(n) return same(r.param, n) end
+end
+
+-- The name a control has now, by its rules (`getv(param, vname)` and
+-- `same(param, n)` as M.visible's, M.reader's second), or nil for its own
+function M.name_when(c, getv, ...)
+  local same = ...
   for _, e in ipairs(c.namew or {}) do
-    if M.show_match(getv(e.rule.param, e.rule.vname), e.rule, nil, nil) then return e.text end
+    if M.show_match(getv(e.rule.param, e.rule.vname), e.rule, nil, by_text(e.rule, same)) then return e.text end
   end
   return nil
 end
@@ -2860,10 +2871,7 @@ function M.visible(controls, getv, same)
     local r = c.show
     if r and c.type ~= "page" then
       any = true
-      -- (a list's settings, not a switch's two halves)
-      local by_text = same and not r.vname and (r.tol or 0.499) < 0.49
-        and function(n) return same(r.param, n) end or nil
-      if M.show_match(getv(r.param, r.vname), r, nil, by_text) then out[#out + 1] = c else hidden[i] = true end
+      if M.show_match(getv(r.param, r.vname), r, nil, by_text(r, same)) then out[#out + 1] = c else hidden[i] = true end
     else
       out[#out + 1] = c
     end

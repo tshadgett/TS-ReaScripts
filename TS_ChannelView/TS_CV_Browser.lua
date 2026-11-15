@@ -873,6 +873,77 @@ local function items(ctx, track)
     ImGui.EndMenu(ctx)
   end
 
+  ImGui.Separator(ctx)
+  local scanning = B.scanning()
+  if ImGui.MenuItem(ctx, scanning and "Scanning for new plugins\u{2026}" or "Scan for new plugins", nil, false, not scanning) then
+    B.scan()
+  end
+  if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, "REAPER's own scan, from its FX browser.")
+  end
+end
+
+-- ---------------------------------------------------------------------
+-- scanning for new plugins: REAPER's FX browser (View: Show FX browser
+-- window, 40271) and its "Scan for new plugins" (F5), pressed for you
+-- with js_ReaScriptAPI. The list is read again once its scan is over; the
+-- browser is closed again if it wasn't open. Where F5 can't be pressed
+-- (no js_ReaScriptAPI, or not on Windows), the browser is left open for
+-- you, and the list is read again when you close it.
+-- ---------------------------------------------------------------------
+local scan = nil
+local SCAN_CMD = 40271
+function B.scanning() return scan ~= nil end
+
+local function find_win(...)
+  if not reaper.JS_Window_Find then return nil end
+  for _, t in ipairs({ ... }) do
+    local h = reaper.JS_Window_Find(t, false)
+    if h then return h end
+  end
+  return nil
+end
+
+local function scan_tick()
+  if not scan then return end
+  local now = reaper.time_precise()
+  local open = reaper.GetToggleCommandState(SCAN_CMD) == 1
+  if not scan.posted and now - scan.t0 > 0.4 then
+    local h = find_win("Add FX to", "FX Browser", "FX browser")
+    if h and reaper.JS_WindowMessage_Post then
+      reaper.JS_WindowMessage_Post(h, "WM_KEYDOWN", 0x74, 0, 0, 0)
+      reaper.JS_WindowMessage_Post(h, "WM_KEYUP", 0x74, 0, 0, 0)
+      -- (on Windows, a scan with nothing new to read can come and go
+      -- unseen: taken as done after a few seconds)
+      scan.pressed = (reaper.GetOS() or ""):match("^Win") ~= nil
+    end
+    scan.posted = now
+  end
+  if scan.posted then
+    local quick = not scan.seen and now - scan.posted > 5 and scan.pressed
+    if find_win("Scanning") then scan.seen = true
+    elseif scan.seen or quick then
+      -- its scan over: the list afresh, and its browser shut if it was
+      IX.reset(); B.forget()
+      if scan.opened and open then reaper.Main_OnCommand(SCAN_CMD, 0) end
+      scan = nil
+      return
+    elseif not open or now - scan.posted > 600 then
+      -- (left to you: the list afresh once the browser's closed)
+      IX.reset(); B.forget()
+      scan = nil
+      return
+    end
+  end
+  reaper.defer(scan_tick)
+end
+
+function B.scan()
+  if scan then return end
+  local open = reaper.GetToggleCommandState(SCAN_CMD) == 1
+  if not open then reaper.Main_OnCommand(SCAN_CMD, 0) end
+  scan = { t0 = reaper.time_precise(), opened = not open }
+  reaper.defer(scan_tick)
 end
 
 -- The same list, drawn inside a menu that's already open -- a submenu of

@@ -58,9 +58,16 @@ end
 -- headers and knob labels, where the cell width is fixed.
 function U.truncate(s, n)
   s = tostring(s or "")
-  if #s <= n then return s end
-  if n <= 1 then return s:sub(1, n) end
-  return s:sub(1, n - 1) .. "\u{2026}"
+  local len = utf8.len(s)
+  if not len then
+    -- (not UTF-8: by bytes)
+    if #s <= n then return s end
+    if n <= 1 then return s:sub(1, n) end
+    return s:sub(1, n - 1) .. "\u{2026}"
+  end
+  if len <= n then return s end
+  if n <= 1 then return s:sub(1, (utf8.offset(s, n + 1) or #s + 1) - 1) end
+  return s:sub(1, utf8.offset(s, n) - 1) .. "\u{2026}"
 end
 
 -- ---------------------------------------------------------------------
@@ -584,8 +591,8 @@ function U.range_is_own(track, addr, param, rg)
   local k = tostring(reaper.TrackFX_GetFXGUID(track, addr)) .. ":" .. param .. ":" .. rg.lo .. ":" .. rg.hi
   local e = own_ends[k]
   if e == nil then
-    local _, a = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, 0, "")
-    local _, b = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, 1, "")
+    local _, a = U.format_norm(track, addr, param, 0, "")
+    local _, b = U.format_norm(track, addr, param, 1, "")
     local lead = function(t) return tonumber(U.trim(t or ""):match("^([%+%-]?%d*%.?%d+)")) end
     local va, vb = lead(a), lead(b)
     local tol = math.abs(rg.hi - rg.lo) * 0.005 + 1e-9
@@ -631,15 +638,101 @@ function U.fmt_value(track, addr, param)
   return string.format("%.2f", v or 0)
 end
 
+-- What parameter p would read at n (TrackFX_FormatParamValueNormalized),
+-- less its own name when the plugin adds it there and not to what it
+-- shows ("1000.0 Freq" for Freq0, shown as "1000.0": ZL's).
+function U.drop_own_name(s, name, shown)
+  local base = ((name or ""):gsub("^%s+", ""):gsub("%s*%d+$", ""))
+  if #base < 2 then return s end
+  local tail = (" " .. base):lower()
+  local function ends(x) return #x > #tail and x:sub(-#tail):lower() == tail end
+  if ends(s) and not ends(shown or "") then return (s:sub(1, -#tail - 1):gsub("%s+$", "")) end
+  return s
+end
+-- A bare number's unit by the parameter's name ("Freq0" in Hz, "Threshold
+-- (dB)" or "Output Gain" in dB, "Attack" in ms), or nil. For plugins
+-- that give no units at all (ZL's). `lo`, `hi`: what it reads at its ends
+-- (a gain or threshold in dB goes below 0, a frequency or time doesn't).
+function U.unit_by_name(name, lo, hi)
+  local nm = " " .. (name or ""):lower():gsub("[_%-]", " ") .. " "
+  local said = nm:match("[%(%[]%s*(%a+)%s*[%)%]]")
+  if said == "db" then return "dB" elseif said == "hz" then return "Hz" elseif said == "ms" then return "ms" end
+  lo, hi = math.min(lo or 0, hi or 0), math.max(lo or 0, hi or 0)
+  if (nm:match("%f[%a]freq") or nm:match("%f[%a]cutoff%f[%A]")) and lo > 0 then return "Hz" end
+  if (nm:match("%f[%a]gain%f[%A]") or nm:match("%f[%a]thresh") or nm:match("%f[%a]ceiling%f[%A]"))
+     and not nm:match("scale") and not nm:match("%f[%a]auto%f[%A]") and lo < 0 then return "dB" end
+  if (nm:match("%f[%a]attack%f[%A]") or nm:match("%f[%a]release%f[%A]") or nm:match("lookahead"))
+     and lo >= 0 and hi > 0 then return "ms" end
+  return nil
+end
+
+-- (per instance and parameter: its name's unit, or false)
+local named_unit = {}
+local function unit_of_param(track, addr, p, name)
+  local g = reaper.TrackFX_GetFXGUID and reaper.TrackFX_GetFXGUID(track, addr)
+  local k = tostring(g or addr) .. ":" .. p
+  local u = named_unit[k]
+  if u == nil then
+    local function at(n)
+      local _, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, n, "")
+      return tonumber((t or ""):match("^%s*([%-%+]?%d*%.?%d+)"))
+    end
+    local lo, hi = at(0), at(1)
+    u = (lo and hi) and U.unit_by_name(name, lo, hi) or false
+    named_unit[k] = u
+  end
+  return u or nil
+end
+function U.format_norm(track, addr, p, n, buf)
+  local ok, s = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, n, buf or "")
+  if ok and s and s ~= "" and reaper.TrackFX_GetParamName and reaper.TrackFX_GetFormattedParamValue then
+    local _, name = reaper.TrackFX_GetParamName(track, addr, p, "")
+    local _, shown = reaper.TrackFX_GetFormattedParamValue(track, addr, p, "")
+    s = U.drop_own_name(s, name, shown)
+    -- a bare number, where what it shows is bare too: in its name's unit
+    if s:match("^%s*[%-%+]?%d*%.?%d+%s*$") and (shown or ""):match("^%s*[%-%+]?%d*%.?%d+%s*$") then
+      local u = unit_of_param(track, addr, p, name)
+      if u then s = s:gsub("%s+$", "") .. " " .. u end
+    end
+  end
+  return ok, s
+end
+
 -- REAPER's "default" for a param isn't exposed; GetParamEx's midval is the
 -- closest thing the API offers and is the plugin's own centre/detent for
--- most plugins. Used as the double-click reset target.
+-- most plugins.
 function U.param_mid_norm(track, addr, param)
   local _, minv, maxv, midv = reaper.TrackFX_GetParamEx(track, addr, param)
   if minv and maxv and midv and maxv > minv then
     return math.max(0, math.min(1, (midv - minv) / (maxv - minv)))
   end
   return 0.5
+end
+
+-- Where a double-click puts a parameter: where it reads 0 when its range
+-- runs from below 0 to above it (a gain of -136..+30 dB to 0 dB), else
+-- U.param_mid_norm. Kept for the session per instance and parameter.
+local zero_at = {}
+function U.param_default(track, addr, param)
+  local g = reaper.TrackFX_GetFXGUID and reaper.TrackFX_GetFXGUID(track, addr)
+  local k = tostring(g or addr) .. ":" .. tostring(param)
+  local z = zero_at[k]
+  if z == nil then
+    z = false
+    local UN = require("TS_CV_Units")
+    local fmt = UN.formatter(track, addr, param)
+    local v0, v1 = UN.at(fmt, 0), UN.at(fmt, 1)
+    if v0 and v1 and math.min(v0, v1) < 0 and math.max(v0, v1) > 0 then
+      local n, v = UN.find_norm(fmt, 0)
+      -- (near enough 0 to read as it: a stepped range may have no 0)
+      local function fin(x) return (x > -math.huge and x < math.huge) and x or 0 end
+      local span = math.abs(fin(v1) - fin(v0))
+      if n and v and math.abs(v) <= math.max(0.05, span * 0.002) then z = n end
+    end
+    -- (a plugin that can't be read just now: asked again next time)
+    if v0 or v1 then zero_at[k] = z end
+  end
+  return z or U.param_mid_norm(track, addr, param)
 end
 
 -- ---------------------------------------------------------------------
@@ -961,7 +1054,7 @@ function U.scale_labels(track, addr, param, kind, marks)
   end
   if kind == "values" and reaper.TrackFX_FormatParamValueNormalized then
     for i, m in ipairs(marks) do
-      local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, m, "")
+      local ok, t = U.format_norm(track, addr, param, m, "")
       if not ok or not t or t == "" then out = nil break end
       out[i] = U.short_value(rg and U.unit_say(rg, t) or t)
     end

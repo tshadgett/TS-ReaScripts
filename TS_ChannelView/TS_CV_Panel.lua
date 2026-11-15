@@ -1497,7 +1497,7 @@ function P.detect_steps(track, addr, param, key)
   local hit = detect_cache[ck]
   if hit and now < hit.t then return hit.n end
   local function read(v)
-    local ok, s = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+    local ok, s = U.format_norm(track, addr, param, v, "")
     s = ok and s and s:match("^%s*(.-)%s*$") or ""
     return s ~= "" and s or nil
   end
@@ -1700,7 +1700,7 @@ local function button_choices(track, addr, param, key, n)
     local v = st and math.min(1, k * st) or (k / (count - 1))
     local txt
     if reaper.TrackFX_FormatParamValueNormalized then
-      local ok, sv = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+      local ok, sv = U.format_norm(track, addr, param, v, "")
       if ok and sv and U.trim(sv) ~= "" then txt = U.trim(sv); named = named + 1 end
     end
     if txt then
@@ -3305,7 +3305,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
               mod = modded or mod2, shown_x = shown, shown_y = shown2, tip = tip2, under = under })
           -- a double-click puts both back: Y here, X below
           if act.double_click and ok2 then
-            reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, U.param_mid_norm(track, fx.addr, p2))
+            reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, U.param_default(track, fx.addr, p2))
           end
         else
           c1, v1, c2, v2, act = W.dual_knob(ctx, id, name, value, raw2,
@@ -3317,7 +3317,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           -- knob's here, the ring's below
           if act.double_click == "inner" then
             if ok2 then
-              reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, U.param_mid_norm(track, fx.addr, p2))
+              reaper.TrackFX_SetParamNormalized(track, fx.addr, p2, U.param_default(track, fx.addr, p2))
             end
             act.double_click = nil
           end
@@ -3510,7 +3510,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         label = full_label
       end
       if act and act.double_click then
-        local d = U.param_mid_norm(track, fx.addr, p)
+        local d = U.param_default(track, fx.addr, p)
         nv, changed = rev and (1 - d) or d, true
       end
       -- Ctrl+click (Cmd on a Mac) a knob or fader: a value typed in

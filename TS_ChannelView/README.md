@@ -637,6 +637,11 @@ so its probes are the new ones.
   list and in searches, have their own *Favourites* submenu and filter, and
   the web page's plugin picker shows the same stars.
 
+  **Scan for new plugins**, at the foot of the menu, runs REAPER's own scan
+  from its FX browser and reads the list again when it's done. Without
+  js_ReaScriptAPI (or on a Mac), it opens the FX browser for you to press
+  F5 there; the list is read again when you close it.
+
   A plugin you've taken out of its developer in REAPER's FX browser
   (right-click ▸ *Remove from developer*) is left out of the menu and the
   search too, so one gesture hides it everywhere; one already on a track
@@ -919,7 +924,8 @@ A Steps' bars and an MSEG's points are kept by the modulator plugin with
 the project, so they play with ChannelView closed; they aren't
 parameters, so they can't be automated (their settings can). On the web
 page their tiles show the bars or the curve as they play, the steps can
-be painted, and their settings set.
+be painted, an MSEG's points edited as here (double-tap for double-click),
+and their settings set.
 
 A modulator's buttons light in its own colour.
 
@@ -2163,7 +2169,7 @@ in the track's colour.
 | wheel over empty space | scroll the row of panels sideways |
 | hold Shift | fine |
 | mouse wheel | step (unless *Options ▸ Behaviour ▸ Use mouse wheel on controls* is off: then it only ever scrolls) |
-| double-click | back to the parameter's centre/detent |
+| double-click | back to 0 when its range runs through 0 (a gain to 0 dB), else to its centre |
 | hover | the current value, in a tooltip that stays put |
 | right-click | control menu |
 | click a stepped value | its list of choices |

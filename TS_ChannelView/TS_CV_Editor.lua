@@ -475,7 +475,7 @@ local function param_choices(tr, addr, p, controls, key)
   if not switch then return nil end
   local function say(n, dflt)
     if reaper.TrackFX_FormatParamValueNormalized then
-      local fok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, p, n, "")
+      local fok, sv = U.format_norm(tr, addr, p, n, "")
       if fok and U.trim(sv or "") ~= "" then return U.trim(sv) end
     end
     return dflt
@@ -621,7 +621,7 @@ local function rule_value_ui(ctx, id, tr, addr, r, controls, op_w, val_w, row, m
     local txt = ""
     if r.vname then txt = ("%d %%"):format(math.floor((norm or 0) * 100 + 0.5))
     elseif reaper.TrackFX_FormatParamValueNormalized then
-      local ok, sv = reaper.TrackFX_FormatParamValueNormalized(tr, addr, r.param, norm or 0, "")
+      local ok, sv = U.format_norm(tr, addr, r.param, norm or 0, "")
       if ok then txt = U.trim(sv or "") end
     end
     if txt == "" then txt = ("%.0f%%"):format((norm or 0) * 100) end
@@ -767,8 +767,8 @@ function E.range_start(track, addr, p)
   local lo, hi = 0, 100
   local UN = require("TS_CV_Units")
   if track and addr and reaper.TrackFX_FormatParamValueNormalized then
-    local _, a = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, 0, "")
-    local _, b = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, 1, "")
+    local _, a = U.format_norm(track, addr, p, 0, "")
+    local _, b = U.format_norm(track, addr, p, 1, "")
     local va, vb = UN.parse(a or ""), UN.parse(b or "")
     if va and vb and va ~= vb then lo, hi = va, vb
     else
@@ -1619,7 +1619,7 @@ draw_entry_body = function(ctx)
     local sn = st.scratch.states[c.param] or { "", "" }
     local function hint(v)
       if st.track and st.fx and reaper.TrackFX_FormatParamValueNormalized then
-        local ok, t = reaper.TrackFX_FormatParamValueNormalized(st.track, st.fx.addr, c.param, v, "")
+        local ok, t = U.format_norm(st.track, st.fx.addr, c.param, v, "")
         if ok and t and t ~= "" then return t end
       end
       return v < 0.5 and "off" or "on"

@@ -1,5 +1,39 @@
 # ChannelView — changelog
 
+## 4.3.1 — fixes, double-click to 0, Scan for new plugins, ZL Equalizer 2
+
+### ChannelView
+
+- **Double-click** puts a control whose range runs from below 0 to above
+  it back to 0 (a gain to 0 dB); any other to its centre, as before.
+- **Scan for new plugins**, at the foot of the add-plugin menu, runs
+  REAPER's own scan from its FX browser and reads the list again.
+- Plugins that give their readings without units (ZL's) are read in the
+  unit their names say: a Freq in Hz, a Gain or Threshold in dB, an Attack
+  or Release in ms. A reading that carries its parameter's name ("1000.0
+  Freq") is read without it.
+- Fixed: on macOS, adding probes to some instruments' tracks (IK
+  Multimedia's Pianoverse) made REAPER all but unresponsive. A plugin that
+  won't be held at its channel count is asked only once.
+- Fixed: a modulator tile's line of text could end in garbled characters,
+  and was cut short; it now fits the tile.
+
+### ChannelView Pro
+
+- **Web page:** an MSEG's points can be edited there as on the desktop:
+  drag a point, drag a segment's middle handle to bend it, double-tap to
+  add a point or take one away, and Snap.
+- **Multiband canvases:** Output and Mix are sliders on the canvas's top
+  line, no longer over the last band; a threshold at 0 dB shows whole.
+- **EQ canvases:** ZL Equalizer 2's bands are found (numbered from 0,
+  Filter Status as each band's switch, Order as its slope, LR Mode as its
+  stereo placement) and learn quickly. A bell given a steeper slope draws
+  flatter on top; *Flat Gain* draws as a level line. Learning holds each
+  band on both channels.
+- Fixed: Name when / Text when ignored a rule on a list's setting the
+  plugin keeps away from the middle of its range (ReEQ2's Mid/Side), so
+  the control kept its own name.
+
 ## 4.3.0 — Options and Track rules, Steps and MSEG modulators, knobs that sit level
 
 ### ChannelView

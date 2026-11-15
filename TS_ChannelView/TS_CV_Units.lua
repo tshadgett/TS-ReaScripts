@@ -111,7 +111,7 @@ end
 local function raw_formatter(track, addr, p)
   return function(norm)
     if not reaper.TrackFX_FormatParamValueNormalized then return nil end
-    local ok, s = reaper.TrackFX_FormatParamValueNormalized(track, addr, p, norm, "")
+    local ok, s = U.format_norm(track, addr, p, norm, "")
     if ok and s and trim(s) ~= "" then return trim(s) end
     return nil
   end
@@ -345,7 +345,7 @@ function UN.read_choices(track, addr, param, st)
   end
   for k = 0, count - 1 do
     local v = stepped and math.min(1, k * st) or k / (count - 1)
-    local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+    local ok, t = U.format_norm(track, addr, param, v, "")
     t = ok and trim(t or "") or ""
     if t == "" then
       -- a setting with no name (Cenozoix's Style names some of its 128):

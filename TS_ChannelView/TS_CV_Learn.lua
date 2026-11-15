@@ -32,6 +32,7 @@
 --]]
 
 local UN = require("TS_CV_Units")
+local U  = require("TS_CV_Util")
 -- (ChannelView Pro's: asked for only by what learns an EQ's curve, so
 -- measuring a gain knob needs none of it)
 local ME = setmetatable({}, { __index = function(_, k) return require("TS_CV_MapEQ")[k] end })
@@ -363,6 +364,17 @@ local function plan(job)
     local meta = { k = k, kind = b.gain and "gain" or "cut" }
     job.meta[k] = meta
     if b.on then flat[b.on] = on_value(job, b.on) end
+    -- (on both channels while it's measured: the noise is the same in
+    -- each, so a band on Side alone would do nothing)
+    if b.stereo then
+      for _, r in ipairs(positions(job, b.stereo, 12) or {}) do
+        local t = (r.text or ""):lower()
+        if not (t:find("left", 1, true) or t:find("right", 1, true) or t:find("mid", 1, true) or t:find("side", 1, true)) then
+          flat[b.stereo] = r.norm
+          break
+        end
+      end
+    end
     -- (an unused band does nothing: in use while it's measured)
     local used = ME.find_used(job.tmp, job.p, b)
     if used then flat[used] = on_value(job, used) end
@@ -1758,7 +1770,7 @@ end
 -- What the user's plugin says it is at position n, dB, or nil.
 local function readout_db(job, p, n)
   if not reaper.TrackFX_FormatParamValueNormalized then return nil end
-  local _, s = reaper.TrackFX_FormatParamValueNormalized(job.track, job.addr, p, n, "")
+  local _, s = U.format_norm(job.track, job.addr, p, n, "")
   local t = (s or ""):lower():gsub("^%s+", "")
   if t:match("^%-inf") or t:match("^%-oo") then return -math.huge end
   local v, unit = UN.parse(s or "")

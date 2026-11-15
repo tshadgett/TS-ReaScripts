@@ -1212,6 +1212,18 @@ local function lanes_of(track, src)
   return LANES[src.kind]
 end
 
+-- s shortened (…) to fit maxw px in the current font
+local function fit_w(ctx, s, maxw)
+  if ImGui.CalcTextSize(ctx, s) <= maxw then return s end
+  local n = utf8.len(s) or #s
+  while n > 1 do
+    n = n - 1
+    local t = U.truncate(s, n)
+    if ImGui.CalcTextSize(ctx, t) <= maxw then return t end
+  end
+  return ""
+end
+
 local function sub_text(track, src, nlinks)
   local d = nlinks == 0 and "drag \u{25EF} onto a control" or ("drives %d"):format(nlinks)
   local f = function(k) return live_field(track, src, k) end
@@ -2360,7 +2372,7 @@ local function draw_tile(ctx, dl, track, src, s, x, y, h, req)
   local links = s.by_mod[src.guid] or {}
   W.push_small(ctx)
   local sub = held and ("bypassed \u{00B7} " .. sub_text(track, src, #links)) or sub_text(track, src, #links)
-  ImGui.DrawList_AddText(dl, x + C.S(8), y + Z.HEAD - 1, held and C.COL.bypass_on or C.COL.header_dim, U.truncate(sub, 34))
+  ImGui.DrawList_AddText(dl, x + C.S(8), y + Z.HEAD - 1, held and C.COL.bypass_on or C.COL.header_dim, fit_w(ctx, sub, w - C.S(28)))
   W.pop_small(ctx)
   link_handle(ctx, dl, src, 1, x + w - C.S(12), y + C.S(9), C.S(5.5))
   local bx, by, bw = x + C.S(6), y + Z.HEAD + Z.SUB + 2, w - C.S(12)

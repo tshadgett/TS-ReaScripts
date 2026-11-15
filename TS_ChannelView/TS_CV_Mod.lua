@@ -263,7 +263,7 @@ local function curve_of(track, s, p)
     local ns, rs, last = {}, {}, -1
     for i = 0, 256 do
       local n = i / 256
-      local ok, said = reaper.TrackFX_FormatParamValueNormalized(track, s, p, n, "")
+      local ok, said = U.format_norm(track, s, p, n, "")
       local shown = ok and said or ""
       local db = shown:lower():find("inf", 1, true) and -math.huge or tonumber(shown:match("[-+]?%d+%.?%d*"))
       if db then
@@ -683,7 +683,7 @@ end
 -- shows a negative number at its bottom and not at its top.
 function MD.is_centred(track, addr, param)
   local function txt(v)
-    local ok, t = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, v, "")
+    local ok, t = U.format_norm(track, addr, param, v, "")
     return ok and t or ""
   end
   local lo, hi = txt(0), txt(1)
@@ -1038,7 +1038,7 @@ function MD.steps_of(track, addr, param)
   if not n or n < 2 or n > 8 then return nil end
   local names = {}
   for k = 1, n do
-    local _, s = reaper.TrackFX_FormatParamValueNormalized(track, addr, param, (k - 1) / (n - 1), "")
+    local _, s = U.format_norm(track, addr, param, (k - 1) / (n - 1), "")
     names[k] = (s and s ~= "") and s or tostring(k)
   end
   return names
