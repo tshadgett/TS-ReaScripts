@@ -21,7 +21,13 @@ local MP = {}
 MP.NS, MP.HOME = "TS_CV_Mod", "TS_TA_Mem"   -- ours; and the one the rest of ChannelView keeps attached
 MP.INST = 250                                -- the plugin's Instance parameter
 MP.STEPS, MP.POINTS = 32, 16
-local READ_STEPS, WRITE_STEPS, READ_POINTS, WRITE_POINTS = 1, 2, 3, 4
+local READ_STEPS, WRITE_STEPS, READ_POINTS, WRITE_POINTS, WRITE_TRIG = 1, 2, 3, 4, 5
+-- A Steps' trigger, kept with its pattern (cells 74-80; 81 says the
+-- plugin knows of it): how (0 the song, 1 free, 2 a note, 3 the audio),
+-- the audio's source (0 track, 1 sidechain), its threshold in dB, the
+-- note's channel (0 any), low and high note
+MP.TRIG_CELL, MP.TRIG_HAS = 74, 81
+MP.TRIG_DEFAULT = { mode = 0, src = 0, thr = -30, ch = 0, lo = 0, hi = 127 }
 local WAIT, TRIES = 0.5, 5
 local FRESH = 2          -- a pattern read again after this long (another script may have changed it)
 
@@ -98,15 +104,30 @@ function MP.put(track, slot, j, kind, p)
   local key = key_of(track, slot, j)
   local now = reaper.time_precise()
   p.kind, p._at, p._put = kind, now, now
+  local had = cache[key]
+  if p.trig == nil and had and had.trig then p.trig, p._tset = had.trig, had._tset end
   cache[key] = p
   queue(key, { key = key, track = track, slot = slot, j = j, kind = kind, p = p,
                cmd = (kind == "steps") and WRITE_STEPS or WRITE_POINTS })
 end
 
+-- A Steps' trigger set ({ mode, src, thr, ch, lo, hi }, any of them):
+-- kept with its pattern at once, and sent
+function MP.set_trig(track, slot, j, t)
+  local key = key_of(track, slot, j)
+  local p = cache[key]
+  if not (p and p.kind == "steps" and p.trig) then return false end
+  for k, v in pairs(t) do p.trig[k] = v end
+  p._tset = reaper.time_precise()
+  local tk = key .. ":t"
+  queue(tk, { key = tk, track = track, slot = slot, j = j, kind = "steps", cmd = WRITE_TRIG, trig = p.trig })
+  return true
+end
+
 -- Forget what's kept of a modulator (its kind changed, or it went)
 function MP.forget(track, slot, j)
   local key = key_of(track, slot, j)
-  cache[key], pending[key], failed[key] = nil, nil, nil
+  cache[key], pending[key], failed[key], pending[key .. ":t"] = nil, nil, nil, nil
 end
 
 -- Where modulator j is now: the step playing (1-based), or 0..1 along the MSEG
@@ -145,6 +166,21 @@ local function from_cells(kind, read)
       p.vals[i] = math.max(0, math.min(1, read(10 + i - 1) or 0))
       p.joins[i] = i > 1 and (read(10 + MP.STEPS + i - 1) or 0) >= 0.5
     end
+    -- its trigger, when the plugin keeps one (an older one doesn't)
+    if (read(MP.TRIG_HAS) or 0) >= 0.5 then
+      local c = MP.TRIG_CELL
+      local t = {}
+      for k, v in pairs(MP.TRIG_DEFAULT) do t[k] = v end
+      if (read(c + 6) or 0) >= 0.5 then
+        t.mode = math.floor((read(c) or 0) + 0.5)
+        t.src = math.floor((read(c + 1) or 0) + 0.5)
+        t.thr = read(c + 2) or t.thr
+        t.ch = math.floor((read(c + 3) or 0) + 0.5)
+        t.lo = math.floor((read(c + 4) or 0) + 0.5)
+        t.hi = math.floor((read(c + 5) or 127) + 0.5)
+      end
+      p.trig = t
+    end
     return p
   end
   local n = math.floor((read(10) or 0) + 0.5)
@@ -162,9 +198,13 @@ local function send(msg)
   local id = MP.inst(msg.track, msg.slot)
   return with(function()
     local seq = math.floor(reaper.gmem_read(0) or 0) + 1
-    if msg.p then
+    if msg.cmd == WRITE_TRIG then
+      local t, c = msg.trig, MP.TRIG_CELL
+      for k, v in ipairs({ t.mode, t.src, t.thr, t.ch, t.lo, t.hi, 1 }) do reaper.gmem_write(c + k - 1, v) end
+    elseif msg.p then
       for i, v in ipairs(to_cells(msg)) do reaper.gmem_write(10 + i - 1, v) end
     end
+    if msg.cmd == READ_STEPS then reaper.gmem_write(MP.TRIG_HAS, 0) end
     reaper.gmem_write(1, id)
     reaper.gmem_write(2, msg.j)
     reaper.gmem_write(3, msg.cmd)
@@ -190,6 +230,8 @@ function MP.tick()
         elseif not pending[m.key] and not (had and (had._put or 0) >= inflight.at) then
           -- (not over what's been drawn since it was asked)
           p._at = now
+          -- (nor over a trigger set since)
+          if had and had.trig and (had._tset or 0) >= inflight.at then p.trig, p._tset = had.trig, had._tset end
           cache[m.key] = p
         elseif had then
           had._at = now

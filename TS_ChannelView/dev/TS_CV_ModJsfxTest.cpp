@@ -103,6 +103,44 @@ int main(int argc, char **argv) {
     check(nm, G(m2 + 1), bp == 2.0 ? 1.0 : 0.5, 0.01);
   }
   check("mseg: where it is, published", gr(1000 + 8 * (ID % 8192) + 1), 0.75, 0.01);
+  auto note = [&](int n) {
+    ysfx_midi_event_t ev = {}; uint8_t d[3] = { 0x90, (uint8_t)n, 100 };
+    ev.bus = 0; ev.offset = 0; ev.size = 3; ev.data = d; ysfx_send_midi(M, &ev);
+  };
+  // modulator 3: an LFO, saw up at 1 Hz, set off by a note
+  const int m3 = 17 + 44;
+  S(m3, 1); S(m3 + 3, 1); S(m3 + 5, 3); S(m3 + 6, 0); S(m3 + 8, 1); S(m3 + 9, 0);
+  S(m3 + 16, 2); S(m3 + 17, 0); S(m3 + 19, 0); S(m3 + 20, 127);
+  ti.playback_state = 0; ysfx_set_time_info(M, &ti);
+  for (int b = 0; b < 40; b++) run(M);
+  double before = G(m3 + 1);
+  note(60); run(M);
+  check("lfo: running free before the note", before > 0.2 ? 1 : 0, 1, 0);
+  check("lfo: a note starts it again", G(m3 + 1), 512.0 / 48000.0, 0.005);
+  // ... and by the audio over its threshold (-20 dB)
+  S(m3 + 16, 3); S(m3 + 13, -20); S(m3 + 10, 0);
+  for (int b = 0; b < 40; b++) run(M);
+  double quiet = G(m3 + 1);
+  // (its level is read over a block, so heard the next)
+  for (int i = 0; i < 512; i++) bufs[0][i] = bufs[1][i] = 0.5f;
+  run(M); run(M);
+  for (int i = 0; i < 512; i++) bufs[0][i] = bufs[1][i] = 0.0f;
+  check("lfo: running on while it's quiet", quiet > 0.2 ? 1 : 0, 1, 0);
+  check("lfo: the audio over its threshold starts it again", G(m3 + 1), 512.0 / 48000.0, 0.005);
+  // modulator 1, the Steps: its trigger a note (written as ChannelView does)
+  double trv[7] = { 2, 0, -30, 0, 0, 127, 1 };
+  for (int i = 0; i < 7; i++) gw(74 + i, trv[i]);
+  gw(1, ID); gw(2, 1); gw(3, 5); gw(0, gr(0) + 1); run(M);
+  gw(81, 0); gw(1, ID); gw(2, 1); gw(3, 1); gw(0, gr(0) + 1); run(M);
+  check("steps trigger: read back", gr(74), 2);
+  check("steps trigger: its high note", gr(79), 127);
+  check("steps trigger: said it's there", gr(81), 1);
+  S(m1 + 16, 0);
+  double mid = 0;
+  for (int b = 0; b < 100 && mid != 0.9; b++) { run(M); mid = G(m1 + 1); }
+  note(64); run(M);
+  check("steps: playing on its own when stopped", mid, 0.9, 0.001);
+  check("steps: a note starts it from its first step", G(m1 + 1), 0.2, 0.001);
   printf(fails == 0 ? "\nALL PASS (%d)\n" : "\n%d FAILURES\n", fails == 0 ? passes : fails);
   return fails == 0 ? 0 : 1;
 }

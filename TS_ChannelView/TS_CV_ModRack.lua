@@ -118,7 +118,9 @@ local GROUP_W = Z.CELL_W * 2 + Z.GAP
 
 -- Macro cells, two to a row (an XY pad takes a row), down then into the
 -- next pair of columns. { src, x, y, w, h } from the grid's top-left, the
--- number of column pairs, and where the add tile goes.
+-- number of column pairs, and where the add tile goes: under the last
+-- cells, or { header = true } (a + in the header) when there's no room
+-- there, rather than a column of its own.
 local function place_macros(macros, room, with_add)
   local out, gx, y, col, groups = {}, 0, 0, 0, 1
   local function newrow() y = y + Z.CELL_H + Z.GAP; col = 0 end
@@ -138,14 +140,17 @@ local function place_macros(macros, room, with_add)
   local add
   if with_add then
     if col == 1 then newrow() end
-    if y > 0 and y + Z.ADD_H > room then gx, y, groups = gx + GROUP_W + Z.GAP, 0, groups + 1 end
-    add = { x = gx, y = y }
+    if y > 0 and y + Z.ADD_H > room then add = { header = true }
+    else add = { x = gx, y = y } end
   end
   return out, groups, add
 end
 
 -- (Steps and MSEG: their bodies' heights, set where they're drawn)
 local body_h = {}
+-- What sets a modulator off -- with the song, free, a note, the audio --
+-- and that one's settings (TRIG below)
+local trig_rows, trig_h, field_trig
 -- A tile's width: a Steps or MSEG opened takes two columns
 local function tile_w(track, src)
   if (src.kind == "steps" or src.kind == "mseg") and open[tostring(track) .. src.guid] then
@@ -161,7 +166,13 @@ local function tile_h(track, src)
     h = h + body_h[src.kind](track, src, isopen)
   elseif src.kind == "lfo" then
     h = h + C.S(30)
-    if isopen then h = h + C.S(22) + Z.KCELL_H * 2 end
+    if isopen then
+      h = h + C.S(22) + Z.KCELL_H * 2
+      if MD.retrig_ok(track, src.slot) then
+        local g = field_trig(nil, nil, track, src)
+        h = h + trig_h(g("mode"), g("src") == 1)
+      end
+    end
   elseif src.kind == "midi" then
     h = h + C.S(16)
     if isopen then
@@ -182,7 +193,8 @@ end
 
 -- Tiles down, then into another column; a column as wide as its widest
 -- (an opened Steps or MSEG's two). Returns the places, the columns, the
--- add tile's place and the width they take.
+-- add tile's place (under the last tile, or { header = true }: a + in the
+-- header when there's no room there) and the width they take.
 local function place_mods(track, mods, room, with_add)
   local out, x, y, cols, cw = {}, 0, 0, 1, Z.TILE_W
   for _, src in ipairs(mods) do
@@ -194,8 +206,8 @@ local function place_mods(track, mods, room, with_add)
   end
   local add
   if with_add then
-    if y > 0 and y + Z.ADD_H > room then x, y, cols, cw = x + cw + Z.GAP, 0, cols + 1, Z.TILE_W end
-    add = { x = x, y = y }
+    if y > 0 and y + Z.ADD_H > room then add = { header = true }
+    else add = { x = x, y = y } end
   end
   return out, cols, add, x + cw
 end
@@ -1189,7 +1201,7 @@ end
 -- The fields a modulator's lanes menu offers, by kind.
 local LANES = {
   lfo = { { "rsync", "Rate (synced)" }, { "rhz", "Rate (Hz)" }, { "depth", "Depth" }, { "phase", "Phase" },
-          { "shape", "Shape" }, { "sync", "Sync / Free" }, { "smooth", "Smooth" } },
+          { "shape", "Shape" }, { "sync", "Sync / Hz" }, { "smooth", "Smooth" } },
   follower = { { "att", "Attack" }, { "rel", "Release" }, { "floor", "Floor" }, { "ceil", "Ceiling" },
                { "gate", "Gate" }, { "fsrc", "Source" }, { "depth", "Depth" }, { "smooth", "Smooth" } },
   midi = { { "msrc", "Source" }, { "mch", "Channel" }, { "mcc", "CC" }, { "mlo", "Low note" }, { "mhi", "High note" },
@@ -1230,7 +1242,9 @@ local function sub_text(track, src, nlinks)
   if src.kind == "lfo" then
     local rate = f("sync") >= 0.5 and (MD.SYNC[math.floor(f("rsync") + 0.5) + 1] or "?")
                  or ("%.2f Hz"):format(f("rhz"))
+    local trg = MD.retrig_ok(track, src.slot) and math.floor(f("msrc") + 0.5) or 0
     return d .. " \u{00B7} " .. rate .. " \u{00B7} " .. (MD.SHAPES[math.floor(f("shape") + 0.5) + 1] or ""):lower()
+      .. ((trg >= 2) and (" \u{00B7} " .. (trg == 2 and "note" or "audio")) or "")
   elseif src.kind == "steps" then
     local rate = f("sync") >= 0.5 and (MD.SYNC[math.floor(f("rsync") + 0.5) + 1] or "?")
                  or ("%.2f Hz"):format(f("rhz"))
@@ -1292,10 +1306,14 @@ local function lfo_body(ctx, dl, track, src, key, x, y, w, isopen)
     MD.set_field(track, src.slot, src.j, "sync", 1)
   end
   mx_switch(ctx, dl, track, src, "sync", 1, px, y + C.S(8), C.S(46), Z.PILL_H)
-  if pill(ctx, dl, "free##" .. src.guid, px + C.S(50), y + C.S(8), 46, "Free", not sync, src.col) and sync then
+  if pill(ctx, dl, "free##" .. src.guid, px + C.S(50), y + C.S(8), 46, "Hz", not sync, src.col) and sync then
     MD.set_field(track, src.slot, src.j, "sync", 0)
   end
   mx_switch(ctx, dl, track, src, "sync", 0, px + C.S(50), y + C.S(8), C.S(46), Z.PILL_H)
+  y = y + Z.KCELL_H
+  if MD.retrig_ok(track, src.slot) then
+    trig_rows(ctx, dl, track, src, x, y, w, field_trig(ctx, dl, track, src))
+  end
 end
 
 local function level_bar(dl, src, v, x, y, w)
@@ -1698,6 +1716,78 @@ local function choice_pill(ctx, dl, id, x, y, w, text, items, cur, col, tip)
   end
   return got
 end
+
+-- ---------------------------------------------------------------------
+-- TRIG: what sets an LFO, a Steps or an MSEG off. `g(k)` reads one of its
+-- settings -- mode (0 with the song, 1 free, 2 a note, 3 the audio), ch,
+-- lo, hi (the note's channel and range), src (1 the sidechain) -- `s(k, v)`
+-- sets one, and `thr(x, y)` draws its threshold's knob.
+-- ---------------------------------------------------------------------
+local TRIG_NAMES = { "Song", "Free", "Note", "Audio" }
+local TRIG_TIP = { "With the song: where it is in the bar", "Running on its own", "Each note starts it again",
+                   "Starts again when the audio goes over the threshold" }
+
+trig_h = function(mode, side)
+  return C.S(22) + ((mode == 2) and C.S(22) or (mode == 3) and (Z.KCELL_H + (side and C.S(22) or 0)) or 0)
+end
+
+trig_rows = function(ctx, dl, track, src, x, y, w, g, s, thr)
+  local trg = g("mode")
+  for i, t in ipairs(TRIG_NAMES) do
+    local tid = ("trg%d##%s"):format(i, src.guid)
+    if pill(ctx, dl, tid, x + (i - 1) * C.S(42), y, C.S(40), t, trg == i - 1, src.col) and trg ~= i - 1 then
+      s("mode", i - 1)
+    end
+    W.tip(ctx, tid, TRIG_TIP[i], ImGui.IsItemHovered(ctx), false)
+  end
+  y = y + C.S(22)
+  if trg == 2 then
+    local chn = g("ch")
+    local chs = { "Omni" }
+    for k = 1, 16 do chs[k + 1] = ("Ch %d"):format(k) end
+    local c = choice_pill(ctx, dl, "trch##" .. src.guid, x, y, C.S(46), chs[chn + 1] or "Omni", chs, chn + 1, src.col)
+    if c then s("ch", c - 1) end
+    local names = {}
+    for k = 0, 127 do names[k + 1] = note_name(k) end
+    local lo, hi = g("lo"), g("hi")
+    local a = choice_pill(ctx, dl, "trlo##" .. src.guid, x + C.S(50), y, C.S(44), note_name(lo), names, lo + 1, src.col,
+      "The notes that set it off: from")
+    if a then s("lo", a - 1) end
+    W.push_small(ctx)
+    ImGui.DrawList_AddText(dl, x + C.S(97), y + C.S(2), C.COL.label, "to")
+    W.pop_small(ctx)
+    local b = choice_pill(ctx, dl, "trhi##" .. src.guid, x + C.S(112), y, C.S(44), note_name(hi), names, hi + 1, src.col)
+    if b then s("hi", b - 1) end
+    y = y + C.S(22)
+  elseif trg == 3 then
+    thr(x, y)
+    local side = g("src") == 1
+    local sx = x + Z.KCELL_W + C.S(6)
+    if pill(ctx, dl, "trtk##" .. src.guid, sx, y + C.S(4), C.S(66), "Track", not side, src.col) and side then
+      s("src", 0)
+    end
+    if pill(ctx, dl, "trsc##" .. src.guid, sx, y + C.S(24), C.S(66), "Sidechain", side, src.col) and not side then
+      s("src", 1)
+      MD.need_sidechain(track)
+    end
+    y = y + Z.KCELL_H
+    -- the sidechain's track (as a Follower's)
+    if side then
+      sc_row(ctx, dl, track, src, x, y, math.min(w, C.S(240)))
+      y = y + C.S(22)
+    end
+  end
+  return y
+end
+
+-- An LFO's or MSEG's, in its fields (the MIDI ones, Floor the threshold,
+-- Follower Source the audio's): g, s and thr for trig_rows
+local TRIG_FIELD = { mode = "msrc", ch = "mch", lo = "mlo", hi = "mhi", src = "fsrc" }
+field_trig = function(ctx, dl, track, src)
+  return function(k) return math.floor(MD.field(track, src.slot, src.j, TRIG_FIELD[k]) + 0.5) end,
+    function(k, v) MD.set_field(track, src.slot, src.j, TRIG_FIELD[k], v) end,
+    function(x, y) setting(ctx, dl, track, src, K.thr, x, y) end
+end
 SM.choice_pill = choice_pill
 
 local function copy_steps(p)
@@ -1873,11 +1963,28 @@ local K_VEL = { key = "mcc", label = "Velocity", def = 100,
                 text = function(v) return ("%d"):format(math.floor(v + 0.5)) end }
 STEPPED[K_VEL.fn] = true
 
+-- A Steps' trigger, kept with its pattern (TS_CV_ModPat MP.set_trig):
+-- g, s and thr for trig_rows
+local K_STHR = { tn = K.thr.tn, fn = K.thr.fn, text = K.thr.text }
+local function steps_trig(ctx, dl, track, src, p)
+  local t = p.trig
+  return function(k) return math.floor((t[k] or 0) + 0.5) end,
+    function(k, v) MP.set_trig(track, src.slot, src.j, { [k] = v }) end,
+    function(x, y)
+      local ch, nv = tknob(ctx, dl, "sthr##" .. src.guid, x, y, K_STHR.tn(t.thr), "Threshold",
+        K_STHR.text(t.thr), K_STHR.tn(MP.TRIG_DEFAULT.thr), src.col)
+      if ch then MP.set_trig(track, src.slot, src.j, { thr = K_STHR.fn(nv) }) end
+    end
+end
+
 -- how tall a Steps tile's body is
 local function steps_h(track, src, isopen)
   if not isopen then return C.S(58) end
   local out = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
+  local p = MP.get(track, src.slot, src.j, "steps")
+  local t = p and p.trig
   return C.S(112) + C.S(16) + C.S(22) * 3 + Z.KCELL_H + C.S(22) + ((out == 2) and (C.S(22) + Z.KCELL_H) or 0)
+    + (t and trig_h(t.mode, t.src == 1) or 0)
 end
 body_h.steps = steps_h
 
@@ -1946,7 +2053,7 @@ local function steps_body(ctx, dl, track, src, x, y, w, isopen)
     MD.set_field(track, src.slot, src.j, "sync", 1)
   end
   mx_switch(ctx, dl, track, src, "sync", 1, sx, y, C.S(46), Z.PILL_H)
-  if pill(ctx, dl, "stfr##" .. src.guid, sx + C.S(48), y, C.S(46), "Free", not sync, src.col) and sync then
+  if pill(ctx, dl, "stfr##" .. src.guid, sx + C.S(48), y, C.S(46), "Hz", not sync, src.col) and sync then
     MD.set_field(track, src.slot, src.j, "sync", 0)
   end
   mx_switch(ctx, dl, track, src, "sync", 0, sx + C.S(48), y, C.S(46), Z.PILL_H)
@@ -1958,6 +2065,13 @@ local function steps_body(ctx, dl, track, src, x, y, w, isopen)
   setting(ctx, dl, track, src, K_SWING, x + Z.KCELL_W * 3, y)
   setting(ctx, dl, track, src, K.phase, x + Z.KCELL_W * 4, y)
   y = y + Z.KCELL_H
+  -- its trigger (kept with its pattern, when the plugin keeps one)
+  if p.trig then
+    W.push_small(ctx)
+    ImGui.DrawList_AddText(dl, x, y + C.S(2), C.COL.label, "Starts")
+    W.pop_small(ctx)
+    y = trig_rows(ctx, dl, track, src, x + C.S(50), y, w - C.S(50), steps_trig(ctx, dl, track, src, p))
+  end
   -- MIDI out
   local out = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
   W.push_small(ctx)
@@ -2171,15 +2285,11 @@ end
 
 local function mseg_h(track, src, isopen)
   if not isopen then return C.S(58) end
-  local trg = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
-  local side = trg == 3 and MD.field(track, src.slot, src.j, "fsrc") >= 0.5
-  return C.S(122) + C.S(22) * 2 + ((trg >= 2) and (trg == 3 and Z.KCELL_H or C.S(22)) or 0) + Z.KCELL_H
-    + (side and C.S(22) or 0)
+  local g = field_trig(nil, nil, track, src)
+  return C.S(122) + C.S(22) + trig_h(g("mode"), g("src") == 1) + Z.KCELL_H
 end
 body_h.mseg = mseg_h
 
-local MSEG_TRIG_TIP = { "With the song: where it is in the bar", "Running on its own", "Each note starts it again",
-                        "Starts again when the audio goes over the threshold" }
 local K_LEN = { key = "rsync", label = "Length", tn = K.rsync.tn, fn = K.rsync.fn, def = 11, text = K.rsync.text }
 
 local function mseg_body(ctx, dl, track, src, x, y, w, isopen)
@@ -2260,52 +2370,7 @@ local function mseg_body(ctx, dl, track, src, x, y, w, isopen)
   end
   y = y + C.S(22)
   -- its trigger
-  local trg = math.floor(MD.field(track, src.slot, src.j, "msrc") + 0.5)
-  local tnames = { "Song", "Free", "Note", "Audio" }
-  for i, t in ipairs(tnames) do
-    local tid = ("mstr%d##%s"):format(i, src.guid)
-    if pill(ctx, dl, tid, x + (i - 1) * C.S(52), y, C.S(50), t, trg == i - 1, src.col) and trg ~= i - 1 then
-      MD.set_field(track, src.slot, src.j, "msrc", i - 1)
-    end
-    W.tip(ctx, tid, MSEG_TRIG_TIP[i], ImGui.IsItemHovered(ctx), false)
-  end
-  y = y + C.S(22)
-  if trg == 2 then
-    local chn = math.floor(MD.field(track, src.slot, src.j, "mch") + 0.5)
-    local chs = { "Omni" }
-    for k = 1, 16 do chs[k + 1] = ("Ch %d"):format(k) end
-    local c = choice_pill(ctx, dl, "msch##" .. src.guid, x, y, C.S(54), chs[chn + 1] or "Omni", chs, chn + 1, src.col)
-    if c then MD.set_field(track, src.slot, src.j, "mch", c - 1) end
-    local names = {}
-    for k = 0, 127 do names[k + 1] = note_name(k) end
-    local lo = math.floor(MD.field(track, src.slot, src.j, "mlo") + 0.5)
-    local hi = math.floor(MD.field(track, src.slot, src.j, "mhi") + 0.5)
-    W.push_small(ctx)
-    ImGui.DrawList_AddText(dl, x + C.S(60), y + C.S(2), C.COL.label, "Notes")
-    W.pop_small(ctx)
-    local a = choice_pill(ctx, dl, "mslo##" .. src.guid, x + C.S(96), y, C.S(44), note_name(lo), names, lo + 1, src.col)
-    if a then MD.set_field(track, src.slot, src.j, "mlo", a - 1) end
-    local b = choice_pill(ctx, dl, "mshi##" .. src.guid, x + C.S(144), y, C.S(44), note_name(hi), names, hi + 1, src.col)
-    if b then MD.set_field(track, src.slot, src.j, "mhi", b - 1) end
-    y = y + C.S(22)
-  elseif trg == 3 then
-    setting(ctx, dl, track, src, K.thr, x, y)
-    local side = MD.field(track, src.slot, src.j, "fsrc") >= 0.5
-    local sx = x + Z.KCELL_W + C.S(6)
-    if pill(ctx, dl, "mstk##" .. src.guid, sx, y + C.S(8), C.S(50), "Track", not side, src.col) and side then
-      MD.set_field(track, src.slot, src.j, "fsrc", 0)
-    end
-    if pill(ctx, dl, "mssc##" .. src.guid, sx + C.S(52), y + C.S(8), C.S(66), "Sidechain", side, src.col) and not side then
-      MD.set_field(track, src.slot, src.j, "fsrc", 1)
-      MD.need_sidechain(track)
-    end
-    y = y + Z.KCELL_H
-    -- the sidechain's track (as a Follower's)
-    if side then
-      sc_row(ctx, dl, track, src, x, y, math.min(w, C.S(240)))
-      y = y + C.S(22)
-    end
-  end
+  y = trig_rows(ctx, dl, track, src, x, y, w, field_trig(ctx, dl, track, src))
   setting(ctx, dl, track, src, sync and K_LEN or K.rhz, x, y)
   setting(ctx, dl, track, src, K.depth, x + Z.KCELL_W, y)
   setting(ctx, dl, track, src, K.phase, x + Z.KCELL_W * 2, y)
@@ -2453,13 +2518,17 @@ local function frame_of(ctx, dl, which, x, y, ww, wh, foot, extra)
     ImGui.DrawFlags_RoundCornersTop)
   ImGui.DrawList_AddLine(dl, x, y + C.HEADER_H, x + ww, y + C.HEADER_H, C.COL.panel_border, 1.0)
   ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)  -- (its edge over the header)
+  -- (in the header font, as a plugin panel's name)
+  local hf = W.push_font(ctx, "head")
   local _, th = ImGui.CalcTextSize(ctx, TITLE[which])
   ImGui.DrawList_AddText(dl, x + C.S(6), y + (C.HEADER_H - th) * 0.5, C.COL.header_text, TITLE[which])
+  W.pop_font(ctx, hf)
   ImGui.SetCursorScreenPos(ctx, x + ww - btn - 3, y + C.S(3))
   if W.icon_button(ctx, which .. "col", "collapse", btn, false, "Fold the " .. TITLE[which]:lower() .. " away") then
     set_collapsed(which, true)
   end
-  if extra then extra(x + ww - 2 * btn - 7, y + C.S(3)) end
+  local left = x + ww - btn - C.S(3)
+  if extra then extra(x + ww - 2 * btn - C.S(7), y + C.S(3)); left = x + ww - 2 * btn - C.S(7) end
   -- the foot, as every panel's: how many are in use, centred
   local fh = C.FOOTER_H
   local fy = y + wh - fh
@@ -2470,6 +2539,20 @@ local function frame_of(ctx, dl, which, x, y, ww, wh, foot, extra)
   local tw, fth = ImGui.CalcTextSize(ctx, foot)
   ImGui.DrawList_AddText(dl, x + (ww - tw) * 0.5, fy + (fh - fth) * 0.5, C.COL.header_dim, foot)
   W.pop_small(ctx)
+  return left
+end
+
+-- The add tile where place_* put it: under the last cells, or a + in the
+-- header left of its buttons (`left`). True when clicked.
+local function add_button(ctx, id, add, gx, gy, w, left, y, tip)
+  if not add then return false end
+  if add.header then
+    local btn = C.ICON_SIZE
+    ImGui.SetCursorScreenPos(ctx, left - btn - C.S(4), y + C.S(3))
+    return W.icon_button(ctx, id, "plus", btn, false, tip)
+  end
+  ImGui.SetCursorScreenPos(ctx, gx + add.x, gy + add.y)
+  return W.dashed_plus(ctx, id, w, Z.ADD_H, tip)
 end
 
 local function draw_child(ctx, which, track, avail_h, inside)
@@ -2506,17 +2589,14 @@ function MR.draw_macros(ctx, track, avail_h)
       slim(ctx, dl, "macros", x, y, ww, wh, #s.macros)
       return
     end
-    frame_of(ctx, dl, "macros", x, y, ww, wh, ("%d of %d used"):format(used, MD.NM))
+    local left = frame_of(ctx, dl, "macros", x, y, ww, wh, ("%d of %d used"):format(used, MD.NM))
     local gx, gy = x + C.PANEL_PAD, y + C.HEADER_H + C.PANEL_PAD
     local placed, _, add = place_macros(s.macros, room_of(wh + 0), used < MD.NM)
     for _, p in ipairs(placed) do
       draw_macro(ctx, dl, track, p.src, s, gx + p.x, gy + p.y, p.w, p.h, req)
     end
-    if add then
-      ImGui.SetCursorScreenPos(ctx, gx + add.x, gy + add.y)
-      if W.dashed_plus(ctx, "macroadd_foot", GROUP_W, Z.ADD_H, "Add a macro") then
-        ImGui.OpenPopup(ctx, "macroadd")
-      end
+    if add_button(ctx, "macroadd_foot", add, gx, gy, GROUP_W, left, y, "Add a macro") then
+      ImGui.OpenPopup(ctx, "macroadd")
     end
     macro_add_menu(ctx, track, req)
   end)
@@ -2538,7 +2618,7 @@ function MR.draw_mods(ctx, track, avail_h)
       return
     end
     local slot = s.mods[1] and s.mods[1].slot
-    frame_of(ctx, dl, "mods", x, y, ww, wh, ("%d of %d used"):format(#s.mods, MD.NO),
+    local left = frame_of(ctx, dl, "mods", x, y, ww, wh, ("%d of %d used"):format(#s.mods, MD.NO),
       MD.bypass_ok(track, slot) and function(bx, by)
         local on = MD.bypassed(track, slot)
         ImGui.SetCursorScreenPos(ctx, bx, by)
@@ -2554,11 +2634,8 @@ function MR.draw_mods(ctx, track, avail_h)
     for _, p in ipairs(placed) do
       draw_tile(ctx, dl, track, p.src, s, gx + p.x, gy + p.y, p.h, req)
     end
-    if add then
-      ImGui.SetCursorScreenPos(ctx, gx + add.x, gy + add.y)
-      if W.dashed_plus(ctx, "modadd_foot", Z.TILE_W, Z.ADD_H, "Add a modulator") then
-        ImGui.OpenPopup(ctx, "modadd")
-      end
+    if add_button(ctx, "modadd_foot", add, gx, gy, Z.TILE_W, left, y, "Add a modulator") then
+      ImGui.OpenPopup(ctx, "modadd")
     end
     mod_add_menu(ctx, req, track)
   end)
@@ -2620,6 +2697,8 @@ function MR.overlay(ctx, track, panel_at)
 end
 
 -- (tests: a tile opened)
+-- (tests) where the cells and the add tile go
+MR._place = { macros = function(...) return place_macros(...) end, mods = function(...) return place_mods(...) end }
 function MR._open(track, guid, on) open[tostring(track) .. guid] = on or nil end
 
 return MR

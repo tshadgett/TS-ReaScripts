@@ -95,6 +95,7 @@ local FIELDS = {
   { "hide_head",  false,    "bool", true },
   { "hide_foot",  false,    "bool", true },
   { "mscale",     false,    "bool", true },     -- figures on the GR and In / Out meters
+  { "mwidth",     "normal", "str",  true },     -- those meters: normal, narrow, thin
   { "trackcol",   "stripe", "str",  true },
   { "icons",      false,    "bool", true },
   { "cell_w",     C.CELL_W_DEFAULT, "num", true },
@@ -383,15 +384,18 @@ function VO.apply(tab)
   C.TRACK_COL = pro and val(s, "trackcol") or "stripe"
   C.HIDE_HEAD = pro and val(s, "hide_head") or false
   C.HIDE_FOOT = pro and val(s, "hide_foot") or false
-  C.METER_SCALES = pro and val(s, "mscale") or false
+  C.METER_WIDTH = pro and tab ~= "web" and val(s, "mwidth") or "normal"
+  C.METER_SCALES = pro and val(s, "mscale") and C.METER_WIDTH ~= "thin" or false
   C.TRACK_ICONS = val(s, "icons")
   C.TCP_ICONS   = C.TRACK_ICONS
   -- the overall size first: the cell width and the type follow it
   C.set_ui(((tab == "web") and 100 or val(s, "ui")) / 100)
-  local okW, Wd = pcall(require, "TS_CV_Widgets")
-  if okW and Wd then Wd.LABEL_H = math.floor(11 * C.UI + 0.5) end
   C.set_cell_w(val(s, "cell_w"))
   VO.apply_fonts(s)
+  -- a control's name band: as tall as its words (the text size, after
+  -- Overall size), so a larger text pushes the dial down, not into it
+  local okW, Wd = pcall(require, "TS_CV_Widgets")
+  if okW and Wd then Wd.LABEL_H = math.max(math.floor(11 * C.UI + 0.5), C.text_px() - 2) end
   C.EFFECT_3D = pro and val(s, "d3") or false
   C.LIGHT  = math.max(0, math.min(C.LIGHT_MAX, val(s, "light")))
   C.SHADOW = math.max(0, math.min(C.SHADOW_MAX, val(s, "shadow")))
@@ -911,6 +915,15 @@ local function page_panels(ctx, tab, s)
   row(ctx, "Meter scales")
   local mch, mv = ST.checkbox(ctx, "On the GR and In / Out meters##vo_ms", val(s, "mscale"))
   if mch then set(tab, "mscale", mv) end
+  if tab ~= "web" then
+    row(ctx, "Meter width")
+    local mw = ST.seg(ctx, "##vo_mw", { { "Normal", "normal" }, { "Narrow", "narrow" }, { "Thin", "thin" } },
+      val(s, "mwidth"))
+    if mw then set(tab, "mwidth", mw) end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "The GR and In / Out meters. Narrow: no readouts under them.\nThin: no scale either.")
+    end
+  end
   if not ED.PRO then ImGui.EndDisabled(ctx) end
 end
 
@@ -1020,7 +1033,7 @@ local function page_faders(ctx)
   local fon = C.fold_bw() > 0
   local fch, fv = ST.checkbox(ctx, "##vo_fb", fon)
   if fch then reaper.SetExtState(C.EXT_SECT, "fold_borders", fv and "1" or "0", true); C.fold_refresh() end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A bar in the folder's colour at each side of its tracks.") end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A bar at each side of a folder's tracks: the folder's colour on the left, its last track's on the right.") end
   if fon then
     ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, 140)

@@ -165,7 +165,8 @@ function MX.tracks()
   end
   -- Folder borders (C.fold_bw): each folder's first and last track in
   -- the row. t.lbars, the folders whose bar goes down its left, outermost
-  -- first; t.rbars, those down its right, innermost first. A folder's
+  -- first, in the folder's colour; t.rbars, those down its right,
+  -- innermost first, in the last track's. A folder's
   -- tracks hidden from the mixer are passed over; its children hidden
   -- by the folder leave both bars on the parent.
   if C.fold_bw() > 0 then
@@ -176,6 +177,13 @@ function MX.tracks()
       t[side] = t[side] or {}
       table.insert(t[side], f)
     end
+    local function close(f)
+      if not (f and f.first) then return end
+      add(f.first, "lbars", f)
+      local last = out[f.last]
+      local lc = last and last.track and U.track_colour(last.track, 0xff)
+      add(f.last, "rbars", { k = f.k, col = lc or f.col, first = f.first, last = f.last })
+    end
     for k = 1, #depths do
       local li = at[k]
       if li then for _, f in ipairs(stack) do f.first = f.first or li; f.last = li end end
@@ -185,11 +193,11 @@ function MX.tracks()
       elseif d < 0 then
         for _ = 1, -d do
           local f = table.remove(stack)
-          if f and f.first then add(f.first, "lbars", f); add(f.last, "rbars", f) end
+          close(f)
         end
       end
     end
-    for _, f in ipairs(stack) do if f.first then add(f.first, "lbars", f); add(f.last, "rbars", f) end end
+    for _, f in ipairs(stack) do close(f) end
     -- (closed innermost first: the left ones the other way round)
     for _, t in ipairs(out) do
       local l = t.lbars
@@ -360,7 +368,7 @@ local FOLDER_TIP  = {
 -- click on the icon is the icon's, not the button's.
 local function name_button(ctx, label, col, selected, id, w, t, mark)
   local full_h = C.STRIP_H - C.S(8)
-  local h = C.STRIP_BASE_H - 8          -- the coloured name pill itself
+  local h = C.strip_base_h() - C.S(8)   -- the coloured name pill itself
   local dl = ImGui.GetWindowDrawList(ctx)
   local tw, th = ImGui.CalcTextSize(ctx, label)
   local folder = t and t.folder
@@ -410,7 +418,7 @@ local function name_button(ctx, label, col, selected, id, w, t, mark)
   end
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + full_h, fill, C.STRIP_ROUND)
   if block > 0 and t and t.icon then
-    local pad = 4
+    local pad = C.S(4)
     IC.draw(ctx, dl, t.icon, x + pad, y + pad, w - pad * 2, block - pad * 2)
   end
   -- One outline round the whole thing, inset by half the stroke: centred
@@ -444,8 +452,8 @@ local function name_button(ctx, label, col, selected, id, w, t, mark)
   -- The folder icon, in its own square at the left end.
   local left = 0
   if folder then
-    local isz = math.max(8, text_h - 2)
-    local ix, iy = x + 3, y + (text_h - isz) * 0.5
+    local isz = math.max(8, text_h - C.S(2))
+    local ix, iy = x + C.S(3), y + (text_h - isz) * 0.5
     ImGui.SetCursorScreenPos(ctx, ix, iy)
     if ImGui.InvisibleButton(ctx, "tsfold" .. id, isz, isz) then
       TO.cycle_folder(t.track)
@@ -458,10 +466,10 @@ local function name_button(ctx, label, col, selected, id, w, t, mark)
     local m = t.fmode or 0
     W.ICONS[FOLDER_ICON[m]](dl, ix, iy, isz, text_col)
     W.tip(ctx, "tsfold" .. id, FOLDER_TIP[m], ihov, false)
-    left = isz + 4
+    left = isz + C.S(4)
   end
 
-  local clip = w - 10 - left
+  local clip = w - C.S(10) - left
   local shown = label
   if tw > clip then
     if t and t.num and t.name then
@@ -541,24 +549,19 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
   ImGui.DrawList_AddLine(dl, x, y + h, x + w, y + h, C.COL.panel_border, 1.0)
 
   local btn = C.ICON_SIZE
-  local aw  = C.AUTO_BTN_W
+  local p3 = C.S(3)
   -- The automation button lives here too. Mixer view is where you set
   -- these across a session, so leaving it to channel view would mean
-  -- visiting every track to do what the row is for.
-  local room = (w - btn - aw - 14 > 8)
-  -- Input FX at the left edge, where the signal enters the strip, when
-  -- there's room for it as well; the name starts after it.
-  local iw = CH.infx_width(t.track)
-  local show_in = room and (w - btn - aw - iw - 18 > 8)
-  local name_x = x + 5
-  if show_in then
-    CH.infx_button(ctx, x + 3, y + 3, iw, h - 6, t.track, "mx" .. t.guid)
-    name_x = x + 3 + iw + 4
-  end
+  -- visiting every track to do what the row is for. Input FX at the left
+  -- edge, where the signal enters the strip; the name starts after it and
+  -- gives way first. Both as wide as their words (CH.header_widths).
+  local iw, aw = CH.header_widths(ctx, t.track, w - btn - C.S(8) - p3)
+  CH.infx_button(ctx, x + p3, y + p3, iw, h - C.S(6), t.track, "mx" .. t.guid)
+  local name_x = x + p3 + iw + C.S(4)
 
   if C.MIX_STRIP_NAME then
     local label = track_label(t)
-    local avail = (x + w) - name_x - btn - 5 - (room and (aw + 4) or 0)
+    local avail = (x + w) - name_x - btn - C.S(5) - aw - C.S(4)
     local tw, th = ImGui.CalcTextSize(ctx, label)
     if tw > avail and avail > 0 then
       label = MX.fit_label(function(x2) local tw2 = ImGui.CalcTextSize(ctx, x2) return tw2 end, t, avail, ImGui.GetFontSize(ctx))
@@ -574,16 +577,13 @@ local function strip_header(ctx, dl, x, y, w, t, selected, hovered)
 
   -- Inked from the header's own colour, like the name, so it reads on
   -- a light track colour as well as a dark one.
-  ImGui.SetCursorScreenPos(ctx, x + w - btn - 3, y + 3)
+  ImGui.SetCursorScreenPos(ctx, x + w - btn - p3, y + p3)
   if W.icon_button(ctx, "mxc" .. t.guid, "collapse", btn, false,
       "Collapse strip", nil, U.contrast_text(base)) then
     CH.set_collapse("mx:" .. t.guid, t.track, true)
   end
 
-  if room then
-    CH.auto_button(ctx, x + w - btn - aw - 8, y + 3, aw, h - 6,
-                   t.track, "mx" .. t.guid)
-  end
+  CH.auto_button(ctx, x + w - btn - aw - C.S(8), y + p3, aw, h - C.S(6), t.track, "mx" .. t.guid)
 end
 
 -- A collapsed strip is the Channel panel's collapsed bar, the same way

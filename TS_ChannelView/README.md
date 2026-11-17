@@ -846,7 +846,7 @@ choices, spread evenly (right-click ▸ *Choices…*); drop one on a stepped
 parameter and it offers to take that parameter's own choices.
 
 **Modulators** are an **LFO** (six shapes, a rate synced to the tempo or
-free in Hz, phase, depth, smoothing), a **Follower** (the track's own
+in Hz, phase, depth, smoothing, and a trigger as an MSEG's), a **Follower** (the track's own
 audio or its sidechain on 3/4, attack, release, floor and ceiling, or a
 gate that's on above the floor) or **MIDI** (velocity, note, CC, pitch
 bend or aftertouch, on any channel or one, with the note range, CC number
@@ -907,6 +907,7 @@ across a range (From, To) kept to a scale and key, a step at the very
 bottom a rest; *Gate* is how much of its run each note lasts, and every
 note has the same *Velocity*. Notes play only while the transport runs,
 out of the modulator plugin to whatever follows it on the track.
+**Starts** is its trigger, as an MSEG's (below).
 
 **MSEG** (multi-segment envelope) plays a shape you draw. Open its tile
 and drag the points; double-click empty space to add one (up to 16) or a
@@ -915,7 +916,8 @@ or down to bend it. **Snap** puts points on the grid (**Grid** 4 to 32).
 Its length is synced (1/16 to 8 bars) or a rate in Hz. Its trigger:
 **Song** (it follows the song position), **Free**, **Note** (each note in
 its range starts it again) or **Audio** (the track's level, or its
-sidechain's, going over a threshold). **Loop** off, a trigger runs it
+sidechain's, going over a threshold). An LFO and a Steps have the same
+four (a project made with an earlier version: reopen it first). **Loop** off, a trigger runs it
 once and it holds at its end, an envelope. **Presets** has ramps, a
 triangle, a pump, a half sine and steps, and keeps your own (*Save this
 as…*).
@@ -1415,7 +1417,7 @@ or following ChannelView's).
 - **Button rows.** Right-click a dropdown ▸ Show as ▸ *Buttons across*,
   *Buttons down* or *Buttons grid*: one button per choice, the current one
   lit. A grid is as near square as its count allows (16 as 4 × 4, 12 as
-  4 × 3). For 2 to 16 choices; buttons too tall for the panel show as a
+  4 × 3). For 2 to 64 choices; buttons too tall for the panel show as a
   dropdown. On a grid layout the buttons fill their place. Under them in
   the same menu, *Gap between buttons*: none, 2 px (the usual), 4, 6 or
   8. Right-click ▸ *Reverse* lights every button but the current one.
@@ -1590,7 +1592,9 @@ inside, the ring's under it), and on the web page.
 A **toggle** says what its state is called: your **state names** if you've
 set them (right-click ▸ Name ▸ State names, or the editor's *State names*
 row), else the plugin's own word for the state, and ON/OFF only when the
-plugin just reports a number.
+plugin just reports a number. **Button text** (under State names in both
+places) puts other words on the button itself: the state names then read
+under it (IN on the button, *Active* under it).
 
 A **dropdown** (or a stepped knob) can have your own **choice names**:
 right-click ▸ Name ▸ *Choice names*, or the editor's *Choice names* row,
@@ -1941,7 +1945,9 @@ right-click ▸ *Group looks…*.
 - **Panels (Pro):** corner rounding, the power switch (an icon or a
   lamp), the header and foot hidden until the pointer is over them, and
   **Meter scales**: figures on the GR and In / Out meters, as on the
-  fader meters (the web page's GR meters too). On the ChannelView and
+  fader meters (the web page's GR meters too). **Meter width**, those
+  meters: *Normal*, *Narrow* (no readouts under them; hover for them) or
+  *Thin* (no scale either). On the ChannelView and
   Rack tabs: **Panel alignment**, left or centred.
 - **Track buttons:** the track's colour on its name button (Pro: *Bar
   below*, *Bar above* or *Filled*) and the track icons.
@@ -1949,8 +1955,8 @@ right-click ▸ *Group looks…*.
   and background tint (folder parents, VCA leaders, FX returns and the
   Default), each group's **track colour** (see Track rules), REAPER's
   spacer size (needs SWS), and **Folder borders**: a
-  bar in a folder's colour down the left of its strip and the right of
-  its last track's, name buttons included, 1 to 8 px, with a pair for
+  bar down the left of a folder's strip in its colour and down the right
+  of its last track's in that track's, name buttons included, 1 to 8 px, with a pair for
   each folder inside another. They describe tracks, not a window, so
   every tab shares them.
 - **Text:** the font for the panels' text, for their headers, and for the

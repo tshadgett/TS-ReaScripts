@@ -1636,8 +1636,23 @@ draw_entry_body = function(ctx)
       local raw = { c1 and v1 or sn[1] or "", c2 and v2 or sn[2] or "" }
       st.scratch.states[c.param] = (off ~= "" or on ~= "") and raw or nil
     end
-    tip("Off, then on, for this plugin everywhere.\n" ..
+    tip("Off, then on, read under the button, for this plugin everywhere.\n" ..
       "Leave empty for the plugin's own text.")
+    -- the words on the button itself (BtnText<p>)
+    st.scratch.btext = st.scratch.btext or {}
+    local bt = st.scratch.btext[c.param] or { "", "" }
+    row_name("Button text")
+    ImGui.SetNextItemWidth(ctx, 96)
+    local d1, w1 = ImGui.InputTextWithHint(ctx, "##btoff", "OFF", bt[1] or "")
+    ImGui.SameLine(ctx, 0, 6)
+    ImGui.SetNextItemWidth(ctx, 96)
+    local d2, w2 = ImGui.InputTextWithHint(ctx, "##bton", "ON", bt[2] or "")
+    if d1 or d2 then
+      local off, on = U.trim(d1 and w1 or bt[1] or ""), U.trim(d2 and w2 or bt[2] or "")
+      local raw = { d1 and w1 or bt[1] or "", d2 and w2 or bt[2] or "" }
+      st.scratch.btext[c.param] = (off ~= "" or on ~= "") and raw or nil
+    end
+    tip("Off, then on. Leave empty to show the state names.")
   end
 
   -- a dropdown's (or stepped knob's) own words for its choices, for this

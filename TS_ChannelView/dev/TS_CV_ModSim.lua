@@ -148,6 +148,13 @@ reaper = {
     if n.maps then return #n.maps end
     return n.params
   end,
+  -- (the modulator plugin's Version: there from 252 parameters)
+  TrackFX_GetParamName = function(tr, addr, p)
+    local n = node_of(tr, addr)
+    if not n then return false, "" end
+    if p == 251 and n.params > 251 then return true, "Version" end
+    return p < n.params, "P" .. p
+  end,
   TrackFX_GetParamNormalized = function(tr, addr, p)
     local n = node_of(tr, addr); return n and (n.values[p] or 0) or 0
   end,
@@ -680,7 +687,8 @@ do
   reaper.gmem_read = function(i) return gm[i] or 0 end
   reaper.gmem_write = function(i, v) gm[i] = v end
   reaper.ValidatePtr2 = function() return true end
-  local mem = { pat = {}, jn = {}, ms = {} }
+  local mem = { pat = {}, jn = {}, ms = {}, tr = {} }
+  local knows_trig = true      -- (a plugin from before Steps' triggers: false)
   local last = 0
   local function plugin_block()
     local slot = MD.plugin(TR)
@@ -694,6 +702,12 @@ do
       elseif cmd == 2 then if i < 32 then mem.pat[j * 32 + i] = gm[10 + i] else mem.jn[j * 32 + i - 32] = gm[10 + i] end
       elseif cmd == 3 and i < 49 then gm[10 + i] = mem.ms[j * 50 + i] or 0
       elseif cmd == 4 and i < 49 then mem.ms[j * 50 + i] = gm[10 + i] end
+    end
+    if knows_trig and cmd == 1 then
+      for i = 0, 6 do gm[74 + i] = mem.tr[j * 8 + i] or 0 end
+      gm[81] = 1
+    elseif knows_trig and cmd == 5 then
+      for i = 0, 6 do mem.tr[j * 8 + i] = gm[74 + i] end
     end
     gm[4] = last
   end
@@ -737,6 +751,31 @@ do
   check("joins: one value across the run", MP.first(p, 5), 3)
   local runs = MP.runs(p, 16)
   check("joins: the runs", #runs .. " " .. runs[3][1] .. "-" .. runs[3][2], "14 3-5")
+  -- its trigger: with the song until set; set, written, read back
+  check("trigger: with the song at first", p.trig and ("%d %d %d"):format(p.trig.mode, p.trig.thr, p.trig.hi), "0 -30 127")
+  check("trigger: set", MP.set_trig(TR, slot, ss.j, { mode = 2, lo = 60 }), true)
+  run()
+  local jb = (ss.j - 1) * 8
+  check("trigger: written to the plugin", ("%d %d %d %d"):format(mem.tr[jb] or -1, mem.tr[jb + 4] or -1,
+    mem.tr[jb + 5] or -1, mem.tr[jb + 6] or -1), "2 60 127 1")
+  p.vals[1] = 0.33
+  MP.put(TR, slot, ss.j, "steps", { vals = p.vals, joins = p.joins })
+  check("trigger: kept over a pattern drawn", MP.get(TR, slot, ss.j, "steps").trig.mode, 2)
+  run()
+  MP._reset()
+  MP.get(TR, slot, ss.j, "steps"); run()
+  p = MP.get(TR, slot, ss.j, "steps")
+  check("trigger: read back", p and p.trig and ("%d %d"):format(p.trig.mode, p.trig.lo), "2 60")
+  knows_trig = false
+  MP._reset()
+  MP.get(TR, slot, ss.j, "steps"); run()
+  p = MP.get(TR, slot, ss.j, "steps")
+  check("trigger: none from an older plugin", p and tostring(p.trig), "nil")
+  check("trigger: none to set there", MP.set_trig(TR, slot, ss.j, { mode = 1 }), false)
+  knows_trig = true
+  MP._reset()
+  MP.get(TR, slot, ss.j, "steps"); run()
+  p = MP.get(TR, slot, ss.j, "steps")
   local q = MP.get(TR, slot, ms.j, "mseg"); run()
   q = MP.get(TR, slot, ms.j, "mseg")
   check("mseg: read back", q and #q.pts, 3)
@@ -794,6 +833,21 @@ do
   MD.set_field(TR, slot, ms.j, "fsrc", 0)
   MD.set_field(TR, slot, ms.j, "msrc", 2)
   check("tiles: a note trigger", draw(), "ok")
+  -- an LFO's trigger (a plugin with a Version) and a Steps' own
+  TR.fx[slot + 1].params = 252
+  local gl = MD.add_mod(TR, "lfo", false)
+  local ls = MD.find(TR, gl)
+  MR._open(TR, gl, true)
+  check("lfo: with the song, as it was", MD.field(TR, slot, ls.j, "msrc"), 0)
+  check("tiles: an LFO's trigger", draw(), "ok")
+  MD.set_field(TR, slot, ls.j, "msrc", 2)
+  check("tiles: an LFO set off by a note", draw(), "ok")
+  MD.set_field(TR, slot, ls.j, "msrc", 3); MD.set_field(TR, slot, ls.j, "fsrc", 1)
+  check("tiles: an LFO set off by the sidechain", draw(), "ok")
+  MP.get(TR, slot, ss.j, "steps"); run()
+  MP.set_trig(TR, slot, ss.j, { mode = 3, src = 1 }); run()
+  check("tiles: a Steps set off by the audio", draw(), "ok")
+  MR._open(TR, gl, false); MD.remove(TR, MD.find(TR, gl))
   check("tiles: an opened one two columns wide", MR.width_for("mods", TR, 700) > 2 * MR.SIZE.TILE_W, true)
   MR._open(TR, gs, false); MR._open(TR, gm2, false)
   MD.remove(TR, MD.find(TR, gs)); MD.remove(TR, MD.find(TR, gm2))
@@ -801,6 +855,19 @@ do
   for _, k in ipairs(stub) do reaper[k] = nil end
   if pslot then TR.fx[pslot + 1].params = pn end
   reaper.gmem_attach, reaper.gmem_read, reaper.gmem_write, reaper.ValidatePtr2 = table.unpack(was)
+end
+
+-- the add tile: under the last cells when there's room; a + in the header
+-- when not, never a column of its own
+do
+  local MR = require("TS_CV_ModRack")
+  local cells = { { kind = "knob" }, { kind = "knob" }, { kind = "knob" } }
+  local _, groups, add = MR._place.macros(cells, 1000, true)
+  check("add tile: under the cells", tostring(add and not add.header) .. " " .. groups, "true 1")
+  local placed = MR._place.macros(cells, 1000, false)
+  local room = placed[#placed].y + placed[#placed].h
+  local _, g2, add2 = MR._place.macros(cells, room, true)
+  check("add tile: no room, in the header", tostring(add2 and add2.header) .. " " .. g2, "true 1")
 end
 
 -- remove everything: the plugin stays (it has a lane with automation)

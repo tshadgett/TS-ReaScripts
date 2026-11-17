@@ -2425,9 +2425,10 @@ local function glow_text(ctx, dl, cx, ty, t, ink, gcol, maxw)
   centred_text(ctx, dl, cx, ty, t, ink, maxw, true)
 end
 
--- opts.text: what the button says, in place of ON / OFF -- the state's
--- name (TS_CV_Mappings.button_text). Shown on the button, it isn't
--- repeated in the value line under it.
+-- opts.text: what the button says, in place of ON / OFF -- its button
+-- text or the state's name (TS_CV_Mappings.button_text).
+-- opts.under: the reading under it (TS_CV_Mappings.under_text), false for
+-- none; nil: `formatted`, unless the button says it already.
 -- opts.on_col: the colour it lights when on (C.TOGGLE_COLS), in place of
 -- the theme's; its text goes dark or light to read on it.
 -- opts.style: its face -- lens, window or backlit (W.button_face), or a
@@ -2509,7 +2510,8 @@ function W.toggle(ctx, id, label, value, formatted, opts)
     end
     -- what the state's called, under it (a lamp says it on its cap)
     if not small then
-      local under = (opts.style ~= "lamp" and opts.text) or (C.SHOW_VALUES and not opts.text and formatted) or nil
+      local under = (opts.style ~= "lamp" and (opts.under or opts.text))
+        or (opts.style == "lamp" and opts.under) or (C.SHOW_VALUES and not opts.text and formatted) or nil
       if under then
         W.push_small(ctx)
         centred_text(ctx, dl, cx, sy2 + 1, under, C.COL.value, cw - 2)
@@ -2539,9 +2541,11 @@ function W.toggle(ctx, id, label, value, formatted, opts)
     W.mod_corner(dl, bx2, by1, 5, on and (opts.on_col or C.COL.toggle_on) or C.COL.toggle_off)
   end
 
-  if C.SHOW_VALUES and not opts.text and not small then
+  local under = opts.under
+  if under == nil then under = not opts.text and formatted end
+  if C.SHOW_VALUES and under and not small then
     W.push_small(ctx)
-    centred_text(ctx, dl, cx, by2 + 2, formatted or "", C.COL.value, cw - 2)
+    centred_text(ctx, dl, cx, by2 + 2, under, C.COL.value, cw - 2)
     W.pop_small(ctx)
   end
   W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
@@ -3735,12 +3739,17 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
     local mid   = (bar_l + bar_r) * 0.5
     local first = chans[1] or -150
     local last  = chans[n] or -150
+    -- (in the small face, which follows Overall size and the text size
+    -- together; a mark too close to the one above it is left out)
+    W.push_small(ctx)
+    local prev_y = -math.huge
     for _, mark in ipairs(C.METER_MARKS) do
       local my = y + 2 + (h - 4) * (1 - W.level_frac(mark))
-      if my > y + 6 and my < y + h - 4 then
-        local lbl = tostring(mark)
-        local lw, lh = ImGui.CalcTextSize(ctx, lbl)
-        local half = lw * 0.5 + 2
+      local lbl = tostring(mark)
+      local lw, lh = ImGui.CalcTextSize(ctx, lbl)
+      if my > y + lh * 0.5 + 1 and my < y + h - lh * 0.5 and my - prev_y >= lh + 1 then
+        prev_y = my
+        local half = lw * 0.5 + C.S(2)
         ImGui.DrawList_AddLine(dl, bar_l, my, mid - half - 1, my,
           scale_ink(first, mark), 1.0)
         ImGui.DrawList_AddLine(dl, mid + half + 1, my, bar_r, my,
@@ -3759,18 +3768,23 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
         end
       end
     end
+    W.pop_small(ctx)
   elseif opts_scale then
+    W.push_small(ctx)
+    local prev_y = -math.huge
     for _, mark in ipairs(C.METER_MARKS) do
       local my = y + 2 + (h - 4) * (1 - W.level_frac(mark))
-      if my > y + 6 and my < y + h - 4 then
+      local lbl = tostring(mark)
+      local lw, lh = ImGui.CalcTextSize(ctx, lbl)
+      if my > y + lh * 0.5 + 1 and my < y + h - lh * 0.5 and my - prev_y >= lh + 1 then
+        prev_y = my
         ImGui.DrawList_AddLine(dl, bar_l, my, bar_r, my,
           U.with_alpha(C.COL.knob_ring, 0x80), 1.0)
-        local lbl = tostring(mark)
-        local lw, lh = ImGui.CalcTextSize(ctx, lbl)
-        ImGui.DrawList_AddText(dl, x + w - 2 - lw, my - lh * 0.5,
+        ImGui.DrawList_AddText(dl, x + w - C.S(2) - lw, my - lh * 0.5,
           C.COL.header_dim, lbl)
       end
     end
+    W.pop_small(ctx)
   else
     for _, mark in ipairs({ -6, -18 }) do
       local my = y + 2 + (h - 4) * (1 - W.level_frac(mark))
@@ -4127,7 +4141,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
   local val   = (v >= 0.05) and string.format("%.1f", v) or "\u{2013}"
   local one_w = ImGui.CalcTextSize(ctx, val)
   local _, line_h = ImGui.CalcTextSize(ctx, "0")
-  local text_h  = line_h + 2
+  local text_h  = (C.METER_READOUT == false) and 0 or (line_h + 2)
 
   local bar_h = h - text_h
   local bw    = math.min(C.METER_SCALES and C.METER_W_SCALE or C.METER_W, col_w)
@@ -4143,9 +4157,10 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
 
   -- the bar
   local frac = math.max(0, math.min(1, (gr_db or 0) / max_db))
+  local ins = (w < 7) and 1 or 2     -- (a thin one: filled to its edge)
   if frac > 0.001 then
-    ImGui.DrawList_AddRectFilled(dl, x + 2, inner_y,
-      x + w - 2, inner_y + inner_h * frac, W.gr_fill_col(est, dim), 1.0)
+    ImGui.DrawList_AddRectFilled(dl, x + ins, inner_y,
+      x + w - ins, inner_y + inner_h * frac, W.gr_fill_col(est, dim), 1.0)
   end
 
   -- scale marks: quarters of the range, so the ticks mean something
@@ -4153,7 +4168,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
   for i = 1, 4 do
     local ty = inner_y + inner_h * (i / 4)
     local wide = (i == 4)
-    ImGui.DrawList_AddLine(dl, x + (wide and 1 or w - 6), ty,
+    ImGui.DrawList_AddLine(dl, x + (wide and 1 or math.max(1, w - 6)), ty,
       x + w - 1, ty, C.COL.knob_ring, 1.0)
   end
 
@@ -4182,7 +4197,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
   -- pull down" is the number you actually want.
   local col = (v >= 0.05) and C.COL.value or C.COL.header_dim
   local cx  = bx - (col_w - w) * 0.5 + col_w * 0.5   -- centre of the column
-  ImGui.DrawList_AddText(dl, cx - one_w * 0.5, y + bar_h + 1, col, val)
+  if text_h > 0 then ImGui.DrawList_AddText(dl, cx - one_w * 0.5, y + bar_h + 1, col, val) end
 
   if pushed then ImGui.PopFont(ctx) end
   return bx, y, w, bar_h
@@ -4247,14 +4262,17 @@ function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol, side)
   local pushed = false
   if meter_font then ImGui.PushFont(ctx, meter_font, C.METER_FONT); pushed = true end
   local _, line_h = ImGui.CalcTextSize(ctx, "0")
-  local bar_h = h - (line_h + 2)
+  local said = C.METER_READOUT ~= false
+  local bar_h = h - (said and (line_h + 2) or 0)
   -- (wider with its figures on it, Options' Meter scales)
   local bw = math.min(C.METER_SCALES and C.IO_BAR_W_SCALE or C.IO_BAR_W, w)
   local bx = (side == "l") and (x + 1) or (side == "r") and (x + w - bw - 1) or (x + (w - bw) * 0.5)
   W.level_meter(ctx, dl, bx, y, bw, bar_h, { pk },
     W.level_peak(key, pk, now), C.METER_SCALES or nil, rms)
-  local tw = ImGui.CalcTextSize(ctx, readout)
-  ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + bar_h + 1, rcol or C.COL.header_dim, readout)
+  if said then
+    local tw = ImGui.CalcTextSize(ctx, readout)
+    ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, y + bar_h + 1, rcol or C.COL.header_dim, readout)
+  end
   if pushed then ImGui.PopFont(ctx) end
 end
 

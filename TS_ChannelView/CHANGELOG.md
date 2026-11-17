@@ -1,5 +1,43 @@
 # ChannelView — changelog
 
+## 4.3.2 — sizes that follow the text, button text, LFO and Steps triggers
+
+### ChannelView
+
+- **Sizes follow Overall size and the text size** together: a strip's
+  IN and TRIM buttons are as wide as their words and narrow alike when
+  the strip is narrow, never hidden (a narrow preset kept IN out of
+  sight); the strip's rows and buttons, the track buttons' row and its
+  padding, a knob's name (a larger text pushes the dial down rather than
+  into it) and the meter scale's marks (one too close to the next is
+  left out).
+- The **Macros, Modulators, Sends and Receives** titles are in the
+  header font, as a plugin panel's name.
+- The **add tile** never takes a column of its own: with no room under
+  the last tile, it's a + in the panel's header.
+- **Buttons and dropdowns** take up to 64 choices (16 before).
+- **Button text** (right-click ▸ Name, under State names; the editor's
+  row too): the words on a button, apart from its state names, which
+  then read under it (IN on the button, *Active* under it).
+- **LFO and Steps triggers:** **Song**, **Free**, **Note** (a channel and
+  a note range) or **Audio** (a threshold, the track or its sidechain),
+  as an MSEG has. Their rate buttons read *Sync / Hz*. Reopen your
+  projects after updating for the modulator plugin's new code.
+- **Folder borders:** the bar down the right of a folder's last track is
+  in that track's colour.
+
+### ChannelView Pro
+
+- **Meter width** (Options ▸ Panels): a plugin panel's GR and In / Out
+  meters *Normal*, *Narrow* (no readouts under them; hover for them) or
+  *Thin* (no scale either).
+- On a grid, a button, a row of buttons or a dropdown with its name
+  hidden gives back the room the name took, and takes it again when the
+  name is shown.
+- **Web page:** a button's state name under it when it has button text,
+  LFO and Steps triggers, up to 64 choices, folder borders in the last
+  track's colour.
+
 ## 4.3.1 — fixes, double-click to 0, Scan for new plugins, ZL Equalizer 2
 
 ### ChannelView

@@ -268,6 +268,14 @@ end
 -- After a change to what a knob on a grid shows (`old`: a copy of it
 -- before): its place shorter or taller by as much as that takes
 function P.knob_reframe(c, old)
+  -- a button, button row or dropdown on a grid: a quarter cell shorter
+  -- with its name hidden, taller again shown (Edit layout's refit too)
+  if c.at and (c.type == "toggle" or c.type == "combo") and c.type == old.type
+     and (c.noname or false) ~= (old.noname or false) then
+    local at = c.at
+    c.at = { c = at.c, r = at.r, w = at.w, h = math.max(2, at.h + (c.noname and -1 or 1)) }
+    return
+  end
   if not (c.at and is_knob(c) and is_knob(old)) then return end
   local u = C.CELL_H / (C.UI or 1) / 4
   local a, b = P.knob_units(old, u), P.knob_units(c, u)
@@ -3352,6 +3360,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         changed, nv, act = W.toggle(ctx, id, label, value, st,
           { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
             text = said or ((size == "small") and label or nil), w = (lay.grid and not ctl.img) and hx(item.w) or nil,
+            under = M.under_text(st, said, value >= 0.5) or false,
             on_col = lit, size = size, style = ctl.style, mod = modded, img = ctl.img })
       elseif ctl.type == "combo" and item.kind == "buttons" then
         -- its choices as buttons: the plugin's own names (button_choices),

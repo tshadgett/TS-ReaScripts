@@ -310,7 +310,24 @@ end
 -- The input FX button's width: "IN" fits the usual one; the master's
 -- "MON" (its monitoring FX) needs a few pixels more.
 function CH.infx_width(track)
-  return C.INFX_BTN_W + (CH.is_master(track) and 8 or 0)
+  return C.INFX_BTN_W + (CH.is_master(track) and C.S(8) or 0)
+end
+
+-- A header's input FX and automation buttons, each as wide as its words
+-- in the current font (at least its usual width), and both narrowed alike
+-- when `room` (what's left beside the collapse button) can't take them
+-- with their gaps: they never go. Returns iw, aw.
+function CH.header_widths(ctx, track, room)
+  local pad = C.S(10)
+  local iw = math.max(CH.infx_width(track), ImGui.CalcTextSize(ctx, CH.is_master(track) and "MON" or "IN") + pad)
+  local aw = C.AUTO_BTN_W
+  for _, e in pairs(CH.AUTO) do aw = math.max(aw, ImGui.CalcTextSize(ctx, e.text) + pad) end
+  local gap = C.S(3)
+  if room and room < iw + aw + C.S(10) then
+    local k = math.max(0.3, math.min(1, (room - gap) / (iw + aw)))
+    iw, aw = math.floor(iw * k), math.floor(aw * k)
+  end
+  return iw, aw
 end
 
 function CH.infx_button(ctx, x, y, w, h, track, idp)
@@ -391,7 +408,8 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
     C.COL.panel_border, 1.0)
 
   local btn = C.ICON_SIZE
-  ImGui.SetCursorScreenPos(ctx, x + w - btn - 3, y + 3)
+  local p3 = C.S(3)
+  ImGui.SetCursorScreenPos(ctx, x + w - btn - p3, y + p3)
   if opts.on_close then
     if W.icon_button(ctx, idp .. "close", "collapse", btn, false,
         "Close", nil, opts.ink) then
@@ -406,19 +424,12 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
   -- edge, where the signal enters the strip. The "Channel" title takes
   -- whatever room is left between them, and gives way when there isn't
   -- enough, as a mixer strip's header does.
-  local left_of_buttons = x + w - btn - 3
-  local title_x = x + 6
-  local aw = C.AUTO_BTN_W
-  if w - aw - btn - 12 > 20 then
-    CH.auto_button(ctx, x + w - btn - aw - 8, y + 3, aw, C.HEADER_H - C.S(6),
-                   track, idp)
-    left_of_buttons = x + w - btn - aw - 8
-    local iw = CH.infx_width(track)
-    if w - aw - iw - btn - 16 > 20 then
-      CH.infx_button(ctx, x + 3, y + 3, iw, C.HEADER_H - C.S(6), track, idp)
-      title_x = x + 3 + iw + 5
-    end
-  end
+  local iw, aw = CH.header_widths(ctx, track, w - btn - C.S(8) - p3)
+  local bh = C.HEADER_H - C.S(6)
+  CH.auto_button(ctx, x + w - btn - aw - C.S(8), y + p3, aw, bh, track, idp)
+  local left_of_buttons = x + w - btn - aw - C.S(8)
+  CH.infx_button(ctx, x + p3, y + p3, iw, bh, track, idp)
+  local title_x = x + p3 + iw + C.S(5)
 
   local title = opts.title or "Channel"
   local room  = left_of_buttons - 4 - title_x
@@ -636,8 +647,9 @@ end
 -- per-track one, because this same body is every strip in mixer view.
 -- Without it every strip would share one set of ImGui ids and one peak
 -- store, and they would all fight over both.
--- Height of the record-input row across the top of the body.
-CH.INPUT_ROW_H = 18
+-- Height of the record-input row across the top of the body: as tall as
+-- its words need, and following Overall size.
+function CH.input_row_h() return math.max(C.S(18), C.text_px() + C.S(6)) end
 
 -- Where a strip's body puts things, from the body's top `y` and height
 -- `h`: the fader's top and height, and the first button row. The full
@@ -645,22 +657,23 @@ CH.INPUT_ROW_H = 18
 -- side by side in the mixer. Three button rows (mute|solo, phase|monitor,
 -- record arm), the master's too -- mute|solo, nothing, mono -- so its fader
 -- and buttons sit on the same lines as every other strip's.
-CH.BTN_H, CH.BTN_GAP, CH.BODY_PAD = 15, 3, 5
+-- A button as tall as its words need (and at least its usual 15 px), all
+-- following Overall size.
 function CH.geometry(y, h, master)
-  local pad, bh, bgap = CH.BODY_PAD, CH.BTN_H, CH.BTN_GAP
+  local pad, bh, bgap = C.S(5), math.max(C.S(15), C.text_px() + C.S(3)), C.S(3)
   local rows = 3
   local btm  = y + h - pad - rows * bh - (rows - 1) * bgap
-  local top  = y + CH.INPUT_ROW_H + C.CELL_H + C.S(2)
+  local top  = y + CH.input_row_h() + C.CELL_H + C.S(2)
   -- Two lines of readout under the meter (peak, then RMS) and one under
   -- the fader; the taller of the two sets how much the fader gives up.
   -- The extra few pixels keep the RMS figure off the Solo button.
-  local fh   = btm - top - 32 - 4
+  local fh   = btm - top - 2 * C.text_px() - C.S(10)
   return { top = top, fh = fh, btm = btm, bh = bh, bgap = bgap, rows = rows }
 end
 
 -- A fader shorter than this is too short to use: the volume is a knob
 -- instead, its level meter a ring round it.
-CH.FADER_MIN = 90
+CH.FADER_MIN = 90       -- (at 100 %: C.S of it)
 
 -- The volume as a knob between `top` and `bottom`, centred across x..x+w,
 -- with each channel's level (and its peak hold) on a ring round the dial:
@@ -730,15 +743,16 @@ end
 
 function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   idp = idp or "ch"
-  local pad = 5
+  local pad = C.S(5)
   local now = reaper.time_precise()
+  local irh = CH.input_row_h()
 
   -- The record input, as a dropdown across the top. The master has no
   -- input, but keeps the row empty so its fader lines up with the rest.
   if not CH.is_master(track) then
     local pid = idp .. "inpop"
-    if W.dropdown(ctx, idp .. "inp", IN.text(track), x + pad, y + 3,
-        w - pad * 2, CH.INPUT_ROW_H - 4, "Record input: " .. IN.text(track)) then
+    if W.dropdown(ctx, idp .. "inp", IN.text(track), x + pad, y + C.S(3),
+        w - pad * 2, irh - C.S(4), "Record input: " .. IN.text(track)) then
       ImGui.OpenPopup(ctx, pid)
     end
     if ImGui.BeginPopup(ctx, pid) then
@@ -746,17 +760,17 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
       ImGui.EndPopup(ctx)
     end
   end
-  y = y + CH.INPUT_ROW_H
-  h = h - CH.INPUT_ROW_H
+  y = y + irh
+  h = h - irh
 
   -- (the body's lines: buttons along the bottom, the fader above them;
   -- y and h are below the input row now, the geometry counts from the
   -- body's own top -- CH.geometry)
   local master = CH.is_master(track)
-  local geo = CH.geometry(y - CH.INPUT_ROW_H, h + CH.INPUT_ROW_H, master)
+  local geo = CH.geometry(y - irh, h + irh, master)
   -- Too short for a fader, and too short for the volume knob under the
   -- pan: the pan goes and the volume takes its place.
-  local no_pan = geo.fh < CH.FADER_MIN and (geo.btm - 4 - geo.top) < C.CELL_H
+  local no_pan = geo.fh < C.S(CH.FADER_MIN) and (geo.btm - C.S(4) - geo.top) < C.CELL_H
 
   -- pan across the top
   if not no_pan then
@@ -764,7 +778,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     local pan_txt = (math.abs(pan) < 0.005) and "C"
       or string.format("%d%s", math.floor(math.abs(pan) * 100 + 0.5),
                        pan < 0 and "L" or "R")
-    ImGui.SetCursorScreenPos(ctx, x + (w - C.CELL_W) * 0.5, y + 2)
+    ImGui.SetCursorScreenPos(ctx, x + (w - C.CELL_W) * 0.5, y + C.S(2))
     local pch, pnv, pact = W.knob(ctx, idp .. "pan", "Pan", (pan + 1) * 0.5, pan_txt,
       { bipolar = true, tooltip = pan_txt })
     local dblp = pact and pact.double_click
@@ -859,9 +873,9 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   local top   = geo.top
   local fh    = geo.fh
 
-  if fh < CH.FADER_MIN then
+  if fh < C.S(CH.FADER_MIN) then
     -- too short for a fader to be any use: a knob, the meter round it
-    volume_knob(ctx, dl, x + pad, inner, no_pan and (y + 2) or top, btm - 4, track, idp, vol, now)
+    volume_knob(ctx, dl, x + pad, inner, no_pan and (y + C.S(2)) or top, btm - C.S(4), track, idp, vol, now)
   else
     local fx = x + pad + (half - fw) * 0.5
     local fch, fnv, fact = W.fader(ctx, idp .. "fader", fx, top, fw, fh,
@@ -881,7 +895,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     -- buttons
     local vt = U.db_text(vol)
     local tw, th = ImGui.CalcTextSize(ctx, vt)
-    ImGui.DrawList_AddText(dl, x + pad + (half - tw) * 0.5, top + fh + 2,
+    ImGui.DrawList_AddText(dl, x + pad + (half - tw) * 0.5, top + fh + C.S(2),
       C.COL.value, vt)
 
     -- Everything the meter shows, per channel: the live level, the peak
@@ -910,7 +924,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     -- narrower to make room, the pair centred together.
     local grt, gre, grp = TP.track_total(track)
     local gside = grt and (C.GR_BAR_W + C.S(2)) or 0
-    local mw = math.min(half - 4 - gside, C.LEVEL_METER_W * math.min(k, 1.75))
+    local mw = math.min(half - C.S(4) - gside, C.LEVEL_METER_W * math.min(k, 1.75))
     local mx = x + pad + half + (half - mw - gside) * 0.5
     W.level_meter(ctx, dl, mx, top, mw, fh, lv, hold, true, rms_live)
     if grt then

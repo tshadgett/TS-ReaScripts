@@ -603,9 +603,12 @@ local function make(kind)
           C.COL.panel_border, 1.0)
         ImGui.DrawList_AddRect(dl, x, y, x + ww, y + wh, C.COL.panel_border, C.PANEL_RR, 0, 1.0)
         local title = title_of(track)
+        -- (in the header font, as a plugin panel's name)
+        local hf = W.push_font(ctx, "head")
         local _, th = ImGui.CalcTextSize(ctx, title)
-        ImGui.DrawList_AddText(dl, x + 6, y + (C.HEADER_H - th) * 0.5,
+        ImGui.DrawList_AddText(dl, x + C.S(6), y + (C.HEADER_H - th) * 0.5,
           C.COL.header_text, title)
+        W.pop_font(ctx, hf)
         local btn = C.ICON_SIZE
 
         -- Routing, to the left of the collapse control, on Sends only --

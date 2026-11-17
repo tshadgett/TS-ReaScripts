@@ -65,8 +65,11 @@ C.ICON_ROW_H  = 44        -- what an icon row adds: stripe and icon
 -- it here, once, at the start of a frame, keeps both views and the
 -- mixer strips in agreement.
 function C.set_icon_row(on)
-  C.STRIP_H = C.STRIP_BASE_H + (on and C.ICON_ROW_H or 0)
+  C.STRIP_H = C.strip_base_h() + (on and C.ICON_ROW_H or 0)
 end
+-- The name row's height without icons: its usual 30 px after Overall
+-- size, and taller when the text needs it
+function C.strip_base_h() return math.max(C.S(C.STRIP_BASE_H), C.text_px() + C.S(14)) end
 C.MIN_ROWS    = 1         -- never compute fewer rows than this
 
 -- "trackrow" (the track-name row shared by both views, and its own
@@ -115,7 +118,7 @@ C.SIZE_LIST = { "small", "medium", "large", "xl" }
 -- under its name; down, a column of buttons two to a half-row; or a grid,
 -- a half-cell per column and two rows to a half-row. Past this many
 -- choices it stays a dropdown.
-C.BUTTONS_MAX = 16
+C.BUTTONS_MAX = 64
 -- A grid of n buttons: as near square as n allows, columns first (16:
 -- 4 x 4, 12: 4 x 3, 6: 3 x 2). Returns columns, rows.
 function C.button_grid(n)
@@ -1307,6 +1310,10 @@ local UI_KEYS = {
   "TCP_PAD", "TCP_METER_H", "TCP_METER_THIN", "TCP_ICON_MAX", "TCP_LANE_W", "TCP_CHIP", "TCP_EDGE",
   "TCP_ADD_H", "TB_BTN", "TB_GAP", "TB_MIN_H",
 }
+-- The text font's size in px now (Options ▸ Text, times Overall size)
+function C.text_px()
+  return (C.FONTS and C.FONTS.text and C.FONTS.text.size) or math.floor(13 * (C.UI or 1) + 0.5)
+end
 local ui_base = nil
 function C.S(n) local v = n * C.UI; return math.tointeger(v) or v end
 -- The size, 0.5 to 1.5. Each measurement from its own 100% value, so it
@@ -1325,6 +1332,18 @@ function C.set_ui(k)
     if type(ui_base[key]) == "number" then C[key] = r(ui_base[key]) end
   end
   for name, sz in pairs(C.SIZES) do sz.d = r(ui_base.sizes[name]) end
+  -- the plugin panels' meters (Options' Meter width): Narrow leaves out
+  -- the readouts under them (the tooltip has them), Thin the scale too
+  local mw = C.METER_WIDTH
+  C.METER_READOUT = mw ~= "narrow" and mw ~= "thin"
+  if mw == "thin" then
+    C.IO_BAR_W, C.METER_W = r(5), r(5)
+    C.IO_BAR_W_SCALE, C.METER_W_SCALE = C.IO_BAR_W, C.METER_W
+  end
+  if not C.METER_READOUT then
+    C.IO_COL_W = (C.METER_SCALES and C.IO_BAR_W_SCALE or C.IO_BAR_W) + r(2)
+    C.METER_COL_W = (C.METER_SCALES and C.METER_W_SCALE or C.METER_W) + r(2)
+  end
   if C.CELL_W_RAW then C.set_cell_w(C.CELL_W_RAW) end
   if C.CHANNEL_W_RAW then C.set_channel_w(C.CHANNEL_W_RAW) end
   C.SENDS_MAX_W = 3 * C.SEND_W + C.SEND_COL_GAP * 2 + C.PANEL_PAD * 2

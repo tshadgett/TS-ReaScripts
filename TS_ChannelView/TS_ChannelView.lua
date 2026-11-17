@@ -1,12 +1,13 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.3.1
+-- @version 4.3.2
 -- @changelog
---  Double-click puts a control back to 0 when its range runs through 0.
---  Scan for new plugins in the add-plugin menu. Readings without units
---  read by their names. Fixed: probes on some instruments' tracks
---  stalling REAPER on macOS; a modulator tile's garbled text. Moves with
---  ChannelView Pro 4.3.1. See the CHANGELOG.
+--  Sizes follow Overall size and the text size: IN and TRIM never hidden,
+--  the strip, track buttons, knob names and meter marks. Button text
+--  apart from state names. LFO and Steps set off by a note or the audio,
+--  as an MSEG (reopen your projects). Up to 64 choices; the add tile a +
+--  in the header when there's no room. Moves with ChannelView Pro 4.3.2.
+--  See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -3500,7 +3501,26 @@ local function name_menu(fx, key, layout, idx, c)
       M.save()
       ImGui.CloseCurrentPopup(ctx)
     end
-    tip("Off, then on. Leave empty to keep the plugin's text.")
+    tip("Off, then on, read under the button. Leave empty to keep the plugin's text.")
+    -- and the words on the button itself, apart from them
+    ImGui.TextDisabled(ctx, "Button text: this plugin, everywhere")
+    ImGui.SetNextItemWidth(ctx, 82)
+    local _, b1 = ImGui.InputTextWithHint(ctx, "##btoff", "OFF", app.state_buf[3] or "")
+    local f1 = enter_pressed()
+    app.state_buf[3] = b1
+    ImGui.SameLine(ctx, 0, 6)
+    ImGui.SetNextItemWidth(ctx, 82)
+    local _, b2 = ImGui.InputTextWithHint(ctx, "##bton", "ON", app.state_buf[4] or "")
+    local f2 = enter_pressed()
+    app.state_buf[4] = b2
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Set##btext") or f1 or f2 then
+      materialise(fx)
+      M.set_btext(key, c.param, app.state_buf[3], app.state_buf[4])
+      M.save()
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    tip("Off, then on. Leave empty to show the state names.")
   end
 
   -- A dropdown's choices, likewise (Choices<p>): one box each, the
@@ -5602,7 +5622,8 @@ local function panel_requests(i, fx, layout, key, req)
       app.label_buf = c and c.label or ""
       app.rng_for = nil
       local st = c and c.param and M.get_states(key, c.param)
-      app.state_buf = { st and st[1] or "", st and st[2] or "" }
+      local bt = c and c.param and M.get_btext(key, c.param)
+      app.state_buf = { st and st[1] or "", st and st[2] or "", bt and bt[1] or "", bt and bt[2] or "" }
       app.choice_buf = {}
       app.choice_ctx = nil
       for t, nm in pairs(c and c.param and M.get_choice_names(key, c.param, app.track, fx.addr) or {}) do app.choice_buf[t] = nm end

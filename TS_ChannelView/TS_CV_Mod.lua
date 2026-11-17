@@ -1222,7 +1222,7 @@ end
 -- A switch's settings, by name.
 function MD.mx_names(key)
   if key == "shape" then return MD.SHAPES end
-  if key == "sync" then return { "Free", "Sync" } end
+  if key == "sync" then return { "Hz", "Sync" } end
   if key == "fsrc" then return { "Track", "Sidechain" } end
   return { "Off", "On" }
 end
@@ -1360,6 +1360,16 @@ function MD.trig_ok(track, slot)
   return slot ~= nil and (reaper.TrackFX_GetNumParams(track, slot) or 0) > MD.TRIG
 end
 local function trig_bus(j) return 8 + j end
+
+-- Whether the plugin can set off an LFO or a Steps by a note or the
+-- audio (its Version parameter): one from before can't, until the
+-- project is opened again
+MD.VER = MD.INST + 1
+function MD.retrig_ok(track, slot)
+  if not slot then return false end
+  local ok, nm = reaper.TrackFX_GetParamName(track, slot, MD.VER, "")
+  return ok and nm == "Version"
+end
 -- the receive that's modulator j's trigger: its index and its track
 local function trig_recv(track, j)
   for r = 0, reaper.GetTrackNumSends(track, -1) - 1 do

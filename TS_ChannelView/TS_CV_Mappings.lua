@@ -2293,7 +2293,7 @@ end
 local function parse_section(sect)
   local controls, aliases, states, ranges = {}, {}, {}, {}
   local choice_names, choice_by, choice_ctx = {}, {}, {}
-  local steps = {}
+  local steps, btext = {}, {}
   local gainlaw, gainrole = {}, {}
   local meter = nil
   if sect.Meter then
@@ -2310,6 +2310,11 @@ local function parse_section(sect)
     if sp then
       local off, on = v:match("^([^|]*)|(.*)$")
       if off then states[tonumber(sp)] = { U.trim(off), U.trim(on) } end
+    end
+    local bp = k:match("^BtnText(%d+)$")
+    if bp then
+      local off, on = v:match("^([^|]*)|(.*)$")
+      if off then btext[tonumber(bp)] = { U.trim(off), U.trim(on) } end
     end
     local rp = k:match("^Range(%d+)$")
     if rp then ranges[tonumber(rp)] = M.range_of_line(v) end
@@ -2468,6 +2473,7 @@ local function parse_section(sect)
   local grid = grid_of(sect.Grid)
   controls.grid = grid
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
+           btext = next(btext) and btext or nil,
            steps = next(steps) and steps or nil,
            gainlaw = next(gainlaw) and gainlaw or nil,
            gainrole = next(gainrole) and gainrole or nil,
@@ -2554,6 +2560,12 @@ local function serialize(layout)
     local off, on = U.trim(st[1] or ""), U.trim(st[2] or "")
     if off ~= "" or on ~= "" then
       out["States" .. p] = off:gsub("[|\r\n]", " ") .. "|" .. on:gsub("[|\r\n]", " ")
+    end
+  end
+  for p, st in pairs(layout.btext or {}) do
+    local off, on = U.trim(st[1] or ""), U.trim(st[2] or "")
+    if off ~= "" or on ~= "" then
+      out["BtnText" .. p] = off:gsub("[|\r\n]", " ") .. "|" .. on:gsub("[|\r\n]", " ")
     end
   end
   for p, rg in pairs(layout.ranges or {}) do
@@ -3552,6 +3564,25 @@ function M.set_states(key, param, off, on)
   M.set(key, l)
 end
 
+-- Button text: the words on a toggle's button for its two states, apart
+-- from its state names (the reading under it). BtnText<param>=<off>|<on>,
+-- like States; either may be empty.
+function M.get_btext(key, param)
+  local l = M.get(key)
+  local st = l and l.btext and l.btext[param]
+  if st and ((st[1] or "") ~= "" or (st[2] or "") ~= "") then return st end
+  return nil
+end
+
+function M.set_btext(key, param, off, on)
+  local l = M.get(key) or { controls = {}, aliases = {} }
+  l.btext = l.btext or {}
+  off, on = U.trim(off or ""), U.trim(on or "")
+  l.btext[param] = (off ~= "" or on ~= "") and { off, on } or nil
+  if not next(l.btext) then l.btext = nil end
+  M.set(key, l)
+end
+
 -- Choice names: your own words for a dropdown's choices (or a stepped
 -- knob's, or a dropdown shown as buttons), per plugin, per parameter, like
 -- state names. Keyed by what the plugin calls the choice, so they follow
@@ -3763,15 +3794,21 @@ function M.state_text(key, param, raw, shown)
   return (name and name ~= "") and name or shown
 end
 
--- What a toggle's button should SAY, or nil for plain ON / OFF: your name
--- for the state it's in if you've given one, else the plugin's own word
--- for it ("Thrust", "Normal", "Link") -- but not when the plugin only has
--- a number for it ("0.0", "1.00", "100 %", "-inf dB"), which says less
--- than ON / OFF does.
+-- What a toggle's button should SAY, or nil for plain ON / OFF: its
+-- button text for the state it's in, else your name for the state, else
+-- the plugin's own word for it ("Thrust", "Normal", "Link") -- but not
+-- when the plugin only has a number for it ("0.0", "1.00", "100 %",
+-- "-inf dB"), which says less than ON / OFF does.
 function M.button_text(key, param, raw, shown)
+  local on = (raw or 0) >= 0.5
+  local bt = M.get_btext(key, param)
+  if bt then
+    local name = on and bt[2] or bt[1]
+    if name and name ~= "" then return name end
+  end
   local st = M.get_states(key, param)
   if st then
-    local name = ((raw or 0) >= 0.5) and st[2] or st[1]
+    local name = on and st[2] or st[1]
     if name and name ~= "" then return name end
   end
   local s = U.trim(shown or "")
@@ -3779,6 +3816,17 @@ function M.button_text(key, param, raw, shown)
   local low = s:lower()
   if low:match("^[%-%+]?%d*%.?%d") or low:match("^[%-%+]?inf") then return nil end
   return s
+end
+
+-- The reading under a toggle: its state's name (or the plugin's text),
+-- nil when it would only say again what the button says (`said`, nil for
+-- ON / OFF).
+function M.under_text(state, said, on)
+  local u = U.trim(state or "")
+  if u == "" then return nil end
+  local b = said or (on and "ON" or "OFF")
+  if u:lower() == U.trim(b):lower() then return nil end
+  return u
 end
 
 -- What a parameter should be called, most specific first: a slot's own
@@ -3929,7 +3977,8 @@ end
 -- ini) isn't offered.
 local function is_layout(t)
   for k in pairs(t) do
-    if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k:match("^Range%d+$") or k == "Plate"
+    if k:match("^Ctl%d+$") or k:match("^Alias%d+$") or k:match("^States%d+$") or k:match("^BtnText%d+$")
+       or k:match("^Range%d+$") or k == "Plate"
        or k:match("^Choices%d+$")
        or k == "Canvas" then
       return true
@@ -4251,6 +4300,10 @@ function M.copy(layout)
   out.switch = M.copy_rules(layout.switch)
   out.states = {}
   for p, st in pairs(layout.states or {}) do out.states[p] = { st[1], st[2] } end
+  if layout.btext then
+    out.btext = {}
+    for p, st in pairs(layout.btext) do out.btext[p] = { st[1], st[2] } end
+  end
   if layout.choice_names then
     out.choice_names = {}
     for p, map in pairs(layout.choice_names) do

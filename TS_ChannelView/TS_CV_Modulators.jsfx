@@ -81,6 +81,8 @@ noindex: true
               bus 8 + n and goes no further than this plugin.
     250       Instance: this plugin's number, given it by ChannelView,
               which talks to it by that number (STEPS AND MSEG, below).
+    251       Version: 2 for this one, whose LFOs and Steps can be set
+              off (by a note or the audio) as an MSEG can.
 
   STEPS AND MSEG (Types 4 and 5). Their settings are in the fields the
   other kinds use; their pattern (a Steps' 32 values and which of them
@@ -88,9 +90,10 @@ noindex: true
   project, and ChannelView reads and writes it through gmem TS_CV_Mod:
      0 a message's number (ChannelView counts them), 1 the Instance it's
      for, 2 the modulator (1-8), 3 what: 1 read the steps, 2 write them,
-     3 read the points, 4 write them; 4 the number of the last one done;
-     10.. the pattern (steps: 32 values then 32 joins; points: how many,
-     then x, y and bend for each). 1000 + 8 x (Instance mod 8192) + n - 1:
+     3 read the points, 4 write them, 5 write a Steps' trigger; 4 the
+     number of the last one done; 10.. the pattern (steps: 32 values then
+     32 joins, and from 74 its trigger, 81 set to 1; points: how many, then
+     x, y and bend for each). 1000 + 8 x (Instance mod 8192) + n - 1:
      where modulator n is now (the step playing, or 0..1 along the MSEG).
   Steps: Attack the number of steps (2-32), Rate (sync) each step's
   length, Shape the direction (Forward, Reverse, Ping pong, Random),
@@ -100,7 +103,12 @@ noindex: true
   run of joined steps one note, its value across Low..High note on the
   scale and key in Release (scale x 12 + key), Ceiling its gate (-60..12
   is 0..100 %), MIDI CC its velocity; a step at the bottom is a rest.
-  Notes only while the transport plays.
+  Notes only while the transport plays. Its trigger is kept with its
+  pattern (TR): 0 the song position, 1 free running, 2 a note (on a
+  channel, 0 any, between a low and high note), 3 the audio going over a
+  threshold (the track or its sidechain); then the source, threshold,
+  channel, low and high note, and 1 once it's been set.
+  An LFO's MIDI Source is its trigger, as an MSEG's (the same fields).
   MSEG: Rate (sync) or (Hz) its length, Phase where it starts; MIDI
   Source its trigger: 0 the song position, 1 free running, 2 a MIDI note
   (Channel, Low and High note), 3 the audio going over the Floor (Follower
@@ -375,6 +383,7 @@ slider248:m7_byp=0<0,1,1{Off,On}>-Mod 7 Bypass
 slider249:m8_byp=0<0,1,1{Off,On}>-Mod 8 Bypass
 slider250:trig=0<0,255,1>-Trigger tracks
 slider251:inst=0<0,1048576,1>-Instance
+slider252:ver=2<0,100,1>-Version
 
 in_pin:Input L
 in_pin:Input R
@@ -576,11 +585,22 @@ MS = 80600;     // 8 x 50: point count, then x, y, bend for up to 16
 spos = 81000; lastk = 81010; curi = 81020; crun = 81030; non = 81040;
 noff = 81050; lastcc = 81060; rndi = 81070; mpos = 81080; mtr = 81090;
 mph = 81100; scmask = 81110;
+TR = 81200;     // 8 x 8: a Steps' trigger (STEPS AND MSEG)
 // the scales, as which of the 12 notes above the key they take
 scmask[0] = 4095; scmask[1] = 2741; scmask[2] = 1453; scmask[3] = 1709;
 scmask[4] = 661; scmask[5] = 1193; scmask[6] = 2477; scmask[7] = 1257;
 memset(non, -1, 8); memset(lastcc, -1, 8); memset(lastk, -1, 8); memset(crun, -1, 8);
 g_seq = gmem[0];
+
+// An LFO set off by a note (mtr, from the MIDI) or by the audio going
+// over `thr` (its follower's level): back to its start
+function lfo_trig(j, trg, thr) local(db) (
+  trg == 2 && mtr[j] ? ( acc[j] = 0; lastc[j] = -1; mtr[j] = 0; );
+  trg == 3 ? (
+    db = env[j] > 0.0000001 ? 20 * log10(env[j]) : -140;
+    eheld[j] < 0.5 ? ( db > thr ? ( eheld[j] = 1; acc[j] = 0; lastc[j] = -1; ); ) : ( db < thr - 3 ? eheld[j] = 0; );
+  );
+);
 
 // a step's value: its run's first step's
 function st_first(j, i) local(b) (
@@ -614,12 +634,20 @@ function st_note(v, lo, hi, sk) local(key, mask, n, cn, idx, t) (
 // A Steps modulator's value this block, its MIDI sent
 // (its fields read straight from its sliders: fld(j, k) is field k)
 function fld(j, k) ( slider(17 + 22 * j + k); );
-function st_run(j) local(cnt, sync, ri, rhz, ph, dir, swing, mode, ch, ccn, lo, hi, sk, gate, p, pr, r, sw, k, i, m, v, rs, rl, note, chn) (
+function st_run(j) local(cnt, sync, ri, rhz, ph, dir, swing, mode, ch, ccn, lo, hi, sk, gate, p, pr, r, sw, k, i, m, v, rs, rl, note, chn, trg, db) (
   cnt = max(2, min(32, floor(fld(j, 11) + 0.5)));
   sync = fld(j, 6); ri = max(0, min(15, floor(fld(j, 7) + 0.5))); rhz = fld(j, 8); ph = fld(j, 9);
   dir = fld(j, 5); swing = -fld(j, 13); mode = fld(j, 16); ch = fld(j, 17); ccn = fld(j, 18);
   lo = fld(j, 19); hi = fld(j, 20); sk = fld(j, 12); gate = (fld(j, 14) + 60) / 72;
-  sync >= 0.5 && playing ? ( spos[j] = beat_position / beats[ri]; ) : (
+  trg = floor(TR[j * 8] + 0.5);
+  trg == 0 && sync >= 0.5 && playing ? ( spos[j] = beat_position / beats[ri]; ) : (
+    // set off by a note, or the audio over its threshold: from its start
+    trg == 2 && mtr[j] ? ( spos[j] = 0; lastk[j] = -1; crun[j] = -1; mtr[j] = 0; );
+    trg == 3 ? (
+      db = env[j] > 0.0000001 ? 20 * log10(env[j]) : -140;
+      eheld[j] < 0.5 ? ( db > TR[j * 8 + 2] ? ( eheld[j] = 1; spos[j] = 0; lastk[j] = -1; crun[j] = -1; ); )
+                     : ( db < TR[j * 8 + 2] - 3 ? eheld[j] = 0; );
+    );
     spos[j] += (sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, rhz)) * dt;
     spos[j] > 1000000 ? spos[j] -= 1000000;
   );
@@ -705,10 +733,12 @@ gmem[0] != g_seq ? (
   g_seq = gmem[0];
   inst > 0 && gmem[1] == inst ? (
     gj = max(1, min(8, floor(gmem[2] + 0.5))) - 1; gc = floor(gmem[3] + 0.5);
-    gc == 1 ? ( gi = 0; loop(32, gmem[10 + gi] = PAT[gj * 32 + gi]; gmem[42 + gi] = JN[gj * 32 + gi]; gi += 1; ); )
+    gc == 1 ? ( gi = 0; loop(32, gmem[10 + gi] = PAT[gj * 32 + gi]; gmem[42 + gi] = JN[gj * 32 + gi]; gi += 1; );
+                gi = 0; loop(7, gmem[74 + gi] = TR[gj * 8 + gi]; gi += 1; ); gmem[81] = 1; )
     : gc == 2 ? ( gi = 0; loop(32, PAT[gj * 32 + gi] = gmem[10 + gi]; JN[gj * 32 + gi] = gmem[42 + gi]; gi += 1; ); )
     : gc == 3 ? ( gi = 0; loop(49, gmem[10 + gi] = MS[gj * 50 + gi]; gi += 1; ); )
-    : gc == 4 ? ( gi = 0; loop(49, MS[gj * 50 + gi] = gmem[10 + gi]; gi += 1; ); );
+    : gc == 4 ? ( gi = 0; loop(49, MS[gj * 50 + gi] = gmem[10 + gi]; gi += 1; ); )
+    : gc == 5 ? ( gi = 0; loop(7, TR[gj * 8 + gi] = gmem[74 + gi]; gi += 1; ); );
     gmem[4] = g_seq;
   );
 );
@@ -717,10 +747,13 @@ ga_fast = 1 - exp(-1 / (0.001 * srate)); gr_fast = 1 - exp(-1 / (0.03 * srate));
 playing = (play_state & 1) == 1;
 nf = 0;
 mx_apply_all();           // THE MATRIX: moved settings, for this block
-nm = (m1_type == 3) + (m2_type == 3) + (m3_type == 3) + (m4_type == 3)
-   + (m5_type == 3) + (m6_type == 3) + (m7_type == 3) + (m8_type == 3)
-   + (m1_type == 5 && floor(m1_msrc + 0.5) == 2) + (m2_type == 5 && floor(m2_msrc + 0.5) == 2) + (m3_type == 5 && floor(m3_msrc + 0.5) == 2) + (m4_type == 5 && floor(m4_msrc + 0.5) == 2)
-   + (m5_type == 5 && floor(m5_msrc + 0.5) == 2) + (m6_type == 5 && floor(m6_msrc + 0.5) == 2) + (m7_type == 5 && floor(m7_msrc + 0.5) == 2) + (m8_type == 5 && floor(m8_msrc + 0.5) == 2);
+// (how many take notes: MIDI ones, and LFOs, Steps and MSEGs a note sets off)
+nm = 0; nj = 0;
+loop(8,
+  nt = slider(17 + 22 * nj); ns = floor(slider(17 + 22 * nj + 16) + 0.5);
+  nm += nt == 3 || ((nt == 1 || nt == 5) && ns == 2) || (nt == 4 && floor(TR[nj * 8] + 0.5) == 2);
+  nj += 1;
+);
 
 // MIDI: everything passes through; the MIDI modulators read it
 nm > 0 ? (
@@ -736,9 +769,12 @@ nm > 0 ? (
       on = st == 0x90 && d2 > 0;
       off = st == 0x80 || (st == 0x90 && d2 == 0);
 
-      // an MSEG set off by a note
-      m1_type == 5 && floor(m1_msrc + 0.5) == 2 && ((trig & 1) ? tb == 1 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m1_type == 5 || m1_type == 1) && floor(m1_msrc + 0.5) == 2 && ((trig & 1) ? tb == 1 : tb == 0)
         && (m1_mch < 0.5 || floor(m1_mch + 0.5) == ch) && on && d1 >= min(m1_mlo, m1_mhi) && d1 <= max(m1_mlo, m1_mhi) ? mtr[0] = 1;
+      m1_type == 4 && floor(TR[0] + 0.5) == 2 && ((trig & 1) ? tb == 1 : tb == 0)
+        && (TR[3] < 0.5 || floor(TR[3] + 0.5) == ch) && on
+        && d1 >= min(TR[4], TR[5]) && d1 <= max(TR[4], TR[5]) ? mtr[0] = 1;
       m1_type == 3 && ((trig & 1) ? tb == 1 : tb == 0) && (m1_mch < 0.5 || floor(m1_mch + 0.5) == ch) ? (
         ms = floor(m1_msrc + 0.5);
         ms >= 5 ? (
@@ -762,9 +798,12 @@ nm > 0 ? (
       );
 
 
-      // an MSEG set off by a note
-      m2_type == 5 && floor(m2_msrc + 0.5) == 2 && ((trig & 2) ? tb == 2 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m2_type == 5 || m2_type == 1) && floor(m2_msrc + 0.5) == 2 && ((trig & 2) ? tb == 2 : tb == 0)
         && (m2_mch < 0.5 || floor(m2_mch + 0.5) == ch) && on && d1 >= min(m2_mlo, m2_mhi) && d1 <= max(m2_mlo, m2_mhi) ? mtr[1] = 1;
+      m2_type == 4 && floor(TR[8] + 0.5) == 2 && ((trig & 2) ? tb == 2 : tb == 0)
+        && (TR[11] < 0.5 || floor(TR[11] + 0.5) == ch) && on
+        && d1 >= min(TR[12], TR[13]) && d1 <= max(TR[12], TR[13]) ? mtr[1] = 1;
       m2_type == 3 && ((trig & 2) ? tb == 2 : tb == 0) && (m2_mch < 0.5 || floor(m2_mch + 0.5) == ch) ? (
         ms = floor(m2_msrc + 0.5);
         ms >= 5 ? (
@@ -788,9 +827,12 @@ nm > 0 ? (
       );
 
 
-      // an MSEG set off by a note
-      m3_type == 5 && floor(m3_msrc + 0.5) == 2 && ((trig & 4) ? tb == 3 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m3_type == 5 || m3_type == 1) && floor(m3_msrc + 0.5) == 2 && ((trig & 4) ? tb == 3 : tb == 0)
         && (m3_mch < 0.5 || floor(m3_mch + 0.5) == ch) && on && d1 >= min(m3_mlo, m3_mhi) && d1 <= max(m3_mlo, m3_mhi) ? mtr[2] = 1;
+      m3_type == 4 && floor(TR[16] + 0.5) == 2 && ((trig & 4) ? tb == 3 : tb == 0)
+        && (TR[19] < 0.5 || floor(TR[19] + 0.5) == ch) && on
+        && d1 >= min(TR[20], TR[21]) && d1 <= max(TR[20], TR[21]) ? mtr[2] = 1;
       m3_type == 3 && ((trig & 4) ? tb == 3 : tb == 0) && (m3_mch < 0.5 || floor(m3_mch + 0.5) == ch) ? (
         ms = floor(m3_msrc + 0.5);
         ms >= 5 ? (
@@ -814,9 +856,12 @@ nm > 0 ? (
       );
 
 
-      // an MSEG set off by a note
-      m4_type == 5 && floor(m4_msrc + 0.5) == 2 && ((trig & 8) ? tb == 4 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m4_type == 5 || m4_type == 1) && floor(m4_msrc + 0.5) == 2 && ((trig & 8) ? tb == 4 : tb == 0)
         && (m4_mch < 0.5 || floor(m4_mch + 0.5) == ch) && on && d1 >= min(m4_mlo, m4_mhi) && d1 <= max(m4_mlo, m4_mhi) ? mtr[3] = 1;
+      m4_type == 4 && floor(TR[24] + 0.5) == 2 && ((trig & 8) ? tb == 4 : tb == 0)
+        && (TR[27] < 0.5 || floor(TR[27] + 0.5) == ch) && on
+        && d1 >= min(TR[28], TR[29]) && d1 <= max(TR[28], TR[29]) ? mtr[3] = 1;
       m4_type == 3 && ((trig & 8) ? tb == 4 : tb == 0) && (m4_mch < 0.5 || floor(m4_mch + 0.5) == ch) ? (
         ms = floor(m4_msrc + 0.5);
         ms >= 5 ? (
@@ -840,9 +885,12 @@ nm > 0 ? (
       );
 
 
-      // an MSEG set off by a note
-      m5_type == 5 && floor(m5_msrc + 0.5) == 2 && ((trig & 16) ? tb == 5 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m5_type == 5 || m5_type == 1) && floor(m5_msrc + 0.5) == 2 && ((trig & 16) ? tb == 5 : tb == 0)
         && (m5_mch < 0.5 || floor(m5_mch + 0.5) == ch) && on && d1 >= min(m5_mlo, m5_mhi) && d1 <= max(m5_mlo, m5_mhi) ? mtr[4] = 1;
+      m5_type == 4 && floor(TR[32] + 0.5) == 2 && ((trig & 16) ? tb == 5 : tb == 0)
+        && (TR[35] < 0.5 || floor(TR[35] + 0.5) == ch) && on
+        && d1 >= min(TR[36], TR[37]) && d1 <= max(TR[36], TR[37]) ? mtr[4] = 1;
       m5_type == 3 && ((trig & 16) ? tb == 5 : tb == 0) && (m5_mch < 0.5 || floor(m5_mch + 0.5) == ch) ? (
         ms = floor(m5_msrc + 0.5);
         ms >= 5 ? (
@@ -866,9 +914,12 @@ nm > 0 ? (
       );
 
 
-      // an MSEG set off by a note
-      m6_type == 5 && floor(m6_msrc + 0.5) == 2 && ((trig & 32) ? tb == 6 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m6_type == 5 || m6_type == 1) && floor(m6_msrc + 0.5) == 2 && ((trig & 32) ? tb == 6 : tb == 0)
         && (m6_mch < 0.5 || floor(m6_mch + 0.5) == ch) && on && d1 >= min(m6_mlo, m6_mhi) && d1 <= max(m6_mlo, m6_mhi) ? mtr[5] = 1;
+      m6_type == 4 && floor(TR[40] + 0.5) == 2 && ((trig & 32) ? tb == 6 : tb == 0)
+        && (TR[43] < 0.5 || floor(TR[43] + 0.5) == ch) && on
+        && d1 >= min(TR[44], TR[45]) && d1 <= max(TR[44], TR[45]) ? mtr[5] = 1;
       m6_type == 3 && ((trig & 32) ? tb == 6 : tb == 0) && (m6_mch < 0.5 || floor(m6_mch + 0.5) == ch) ? (
         ms = floor(m6_msrc + 0.5);
         ms >= 5 ? (
@@ -892,9 +943,12 @@ nm > 0 ? (
       );
 
 
-      // an MSEG set off by a note
-      m7_type == 5 && floor(m7_msrc + 0.5) == 2 && ((trig & 64) ? tb == 7 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m7_type == 5 || m7_type == 1) && floor(m7_msrc + 0.5) == 2 && ((trig & 64) ? tb == 7 : tb == 0)
         && (m7_mch < 0.5 || floor(m7_mch + 0.5) == ch) && on && d1 >= min(m7_mlo, m7_mhi) && d1 <= max(m7_mlo, m7_mhi) ? mtr[6] = 1;
+      m7_type == 4 && floor(TR[48] + 0.5) == 2 && ((trig & 64) ? tb == 7 : tb == 0)
+        && (TR[51] < 0.5 || floor(TR[51] + 0.5) == ch) && on
+        && d1 >= min(TR[52], TR[53]) && d1 <= max(TR[52], TR[53]) ? mtr[6] = 1;
       m7_type == 3 && ((trig & 64) ? tb == 7 : tb == 0) && (m7_mch < 0.5 || floor(m7_mch + 0.5) == ch) ? (
         ms = floor(m7_msrc + 0.5);
         ms >= 5 ? (
@@ -918,9 +972,12 @@ nm > 0 ? (
       );
 
 
-      // an MSEG set off by a note
-      m8_type == 5 && floor(m8_msrc + 0.5) == 2 && ((trig & 128) ? tb == 8 : tb == 0)
+      // an LFO or MSEG set off by a note, or a Steps (its trigger in TR)
+      (m8_type == 5 || m8_type == 1) && floor(m8_msrc + 0.5) == 2 && ((trig & 128) ? tb == 8 : tb == 0)
         && (m8_mch < 0.5 || floor(m8_mch + 0.5) == ch) && on && d1 >= min(m8_mlo, m8_mhi) && d1 <= max(m8_mlo, m8_mhi) ? mtr[7] = 1;
+      m8_type == 4 && floor(TR[56] + 0.5) == 2 && ((trig & 128) ? tb == 8 : tb == 0)
+        && (TR[59] < 0.5 || floor(TR[59] + 0.5) == ch) && on
+        && d1 >= min(TR[60], TR[61]) && d1 <= max(TR[60], TR[61]) ? mtr[7] = 1;
       m8_type == 3 && ((trig & 128) ? tb == 8 : tb == 0) && (m8_mch < 0.5 || floor(m8_mch + 0.5) == ch) ? (
         ms = floor(m8_msrc + 0.5);
         ms >= 5 ? (
@@ -952,9 +1009,11 @@ nm > 0 ? (
 m1_type == 1 ? (
   ri = max(0, min(15, floor(m1_rsync + 0.5)));
   hz = m1_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m1_rhz);
-  m1_sync >= 0.5 && playing ? (
+  trg = floor(m1_msrc + 0.5);
+  trg == 0 && m1_sync >= 0.5 && playing ? (
     acc[0] = beat_position / beats[ri];
   ) : (
+    lfo_trig(0, trg, m1_floor);
     acc[0] += hz * dt;
     acc[0] > 1000000 ? acc[0] -= 1000000;
   );
@@ -976,7 +1035,8 @@ m1_type == 1 ? (
     c != lastc[0] ? ( rnd[0] = rand(1); lastc[0] = c; );
     u = rnd[0];
   );
-  isf[0] = 0;
+  isf[0] = trg == 3;
+  isf[0] ? ( nf += 1; fsrc[0] = m1_fsrc >= 0.5; ga[0] = ga_fast; gr[0] = gr_fast; );
 ) : m1_type == 2 ? (
   isf[0] = 1; nf += 1;
   fsrc[0] = m1_fsrc >= 0.5;
@@ -1002,7 +1062,8 @@ m1_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[0];
 ) : m1_type == 4 ? (
-  isf[0] = 0;
+  isf[0] = floor(TR[0] + 0.5) == 3;
+  isf[0] ? ( nf += 1; fsrc[0] = TR[1] >= 0.5; ga[0] = ga_fast; gr[0] = gr_fast; );
   u = st_run(0);
   gmem[1000 + 8 * (inst % 8192) + 0] = curi[0];
 ) : m1_type == 5 ? (
@@ -1030,9 +1091,11 @@ m1_type >= 1 && byp_all < 0.5 && m1_byp < 0.5 ? (
 m2_type == 1 ? (
   ri = max(0, min(15, floor(m2_rsync + 0.5)));
   hz = m2_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m2_rhz);
-  m2_sync >= 0.5 && playing ? (
+  trg = floor(m2_msrc + 0.5);
+  trg == 0 && m2_sync >= 0.5 && playing ? (
     acc[1] = beat_position / beats[ri];
   ) : (
+    lfo_trig(1, trg, m2_floor);
     acc[1] += hz * dt;
     acc[1] > 1000000 ? acc[1] -= 1000000;
   );
@@ -1054,7 +1117,8 @@ m2_type == 1 ? (
     c != lastc[1] ? ( rnd[1] = rand(1); lastc[1] = c; );
     u = rnd[1];
   );
-  isf[1] = 0;
+  isf[1] = trg == 3;
+  isf[1] ? ( nf += 1; fsrc[1] = m2_fsrc >= 0.5; ga[1] = ga_fast; gr[1] = gr_fast; );
 ) : m2_type == 2 ? (
   isf[1] = 1; nf += 1;
   fsrc[1] = m2_fsrc >= 0.5;
@@ -1080,7 +1144,8 @@ m2_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[1];
 ) : m2_type == 4 ? (
-  isf[1] = 0;
+  isf[1] = floor(TR[8] + 0.5) == 3;
+  isf[1] ? ( nf += 1; fsrc[1] = TR[9] >= 0.5; ga[1] = ga_fast; gr[1] = gr_fast; );
   u = st_run(1);
   gmem[1000 + 8 * (inst % 8192) + 1] = curi[1];
 ) : m2_type == 5 ? (
@@ -1108,9 +1173,11 @@ m2_type >= 1 && byp_all < 0.5 && m2_byp < 0.5 ? (
 m3_type == 1 ? (
   ri = max(0, min(15, floor(m3_rsync + 0.5)));
   hz = m3_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m3_rhz);
-  m3_sync >= 0.5 && playing ? (
+  trg = floor(m3_msrc + 0.5);
+  trg == 0 && m3_sync >= 0.5 && playing ? (
     acc[2] = beat_position / beats[ri];
   ) : (
+    lfo_trig(2, trg, m3_floor);
     acc[2] += hz * dt;
     acc[2] > 1000000 ? acc[2] -= 1000000;
   );
@@ -1132,7 +1199,8 @@ m3_type == 1 ? (
     c != lastc[2] ? ( rnd[2] = rand(1); lastc[2] = c; );
     u = rnd[2];
   );
-  isf[2] = 0;
+  isf[2] = trg == 3;
+  isf[2] ? ( nf += 1; fsrc[2] = m3_fsrc >= 0.5; ga[2] = ga_fast; gr[2] = gr_fast; );
 ) : m3_type == 2 ? (
   isf[2] = 1; nf += 1;
   fsrc[2] = m3_fsrc >= 0.5;
@@ -1158,7 +1226,8 @@ m3_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[2];
 ) : m3_type == 4 ? (
-  isf[2] = 0;
+  isf[2] = floor(TR[16] + 0.5) == 3;
+  isf[2] ? ( nf += 1; fsrc[2] = TR[17] >= 0.5; ga[2] = ga_fast; gr[2] = gr_fast; );
   u = st_run(2);
   gmem[1000 + 8 * (inst % 8192) + 2] = curi[2];
 ) : m3_type == 5 ? (
@@ -1186,9 +1255,11 @@ m3_type >= 1 && byp_all < 0.5 && m3_byp < 0.5 ? (
 m4_type == 1 ? (
   ri = max(0, min(15, floor(m4_rsync + 0.5)));
   hz = m4_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m4_rhz);
-  m4_sync >= 0.5 && playing ? (
+  trg = floor(m4_msrc + 0.5);
+  trg == 0 && m4_sync >= 0.5 && playing ? (
     acc[3] = beat_position / beats[ri];
   ) : (
+    lfo_trig(3, trg, m4_floor);
     acc[3] += hz * dt;
     acc[3] > 1000000 ? acc[3] -= 1000000;
   );
@@ -1210,7 +1281,8 @@ m4_type == 1 ? (
     c != lastc[3] ? ( rnd[3] = rand(1); lastc[3] = c; );
     u = rnd[3];
   );
-  isf[3] = 0;
+  isf[3] = trg == 3;
+  isf[3] ? ( nf += 1; fsrc[3] = m4_fsrc >= 0.5; ga[3] = ga_fast; gr[3] = gr_fast; );
 ) : m4_type == 2 ? (
   isf[3] = 1; nf += 1;
   fsrc[3] = m4_fsrc >= 0.5;
@@ -1236,7 +1308,8 @@ m4_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[3];
 ) : m4_type == 4 ? (
-  isf[3] = 0;
+  isf[3] = floor(TR[24] + 0.5) == 3;
+  isf[3] ? ( nf += 1; fsrc[3] = TR[25] >= 0.5; ga[3] = ga_fast; gr[3] = gr_fast; );
   u = st_run(3);
   gmem[1000 + 8 * (inst % 8192) + 3] = curi[3];
 ) : m4_type == 5 ? (
@@ -1264,9 +1337,11 @@ m4_type >= 1 && byp_all < 0.5 && m4_byp < 0.5 ? (
 m5_type == 1 ? (
   ri = max(0, min(15, floor(m5_rsync + 0.5)));
   hz = m5_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m5_rhz);
-  m5_sync >= 0.5 && playing ? (
+  trg = floor(m5_msrc + 0.5);
+  trg == 0 && m5_sync >= 0.5 && playing ? (
     acc[4] = beat_position / beats[ri];
   ) : (
+    lfo_trig(4, trg, m5_floor);
     acc[4] += hz * dt;
     acc[4] > 1000000 ? acc[4] -= 1000000;
   );
@@ -1288,7 +1363,8 @@ m5_type == 1 ? (
     c != lastc[4] ? ( rnd[4] = rand(1); lastc[4] = c; );
     u = rnd[4];
   );
-  isf[4] = 0;
+  isf[4] = trg == 3;
+  isf[4] ? ( nf += 1; fsrc[4] = m5_fsrc >= 0.5; ga[4] = ga_fast; gr[4] = gr_fast; );
 ) : m5_type == 2 ? (
   isf[4] = 1; nf += 1;
   fsrc[4] = m5_fsrc >= 0.5;
@@ -1314,7 +1390,8 @@ m5_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[4];
 ) : m5_type == 4 ? (
-  isf[4] = 0;
+  isf[4] = floor(TR[32] + 0.5) == 3;
+  isf[4] ? ( nf += 1; fsrc[4] = TR[33] >= 0.5; ga[4] = ga_fast; gr[4] = gr_fast; );
   u = st_run(4);
   gmem[1000 + 8 * (inst % 8192) + 4] = curi[4];
 ) : m5_type == 5 ? (
@@ -1342,9 +1419,11 @@ m5_type >= 1 && byp_all < 0.5 && m5_byp < 0.5 ? (
 m6_type == 1 ? (
   ri = max(0, min(15, floor(m6_rsync + 0.5)));
   hz = m6_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m6_rhz);
-  m6_sync >= 0.5 && playing ? (
+  trg = floor(m6_msrc + 0.5);
+  trg == 0 && m6_sync >= 0.5 && playing ? (
     acc[5] = beat_position / beats[ri];
   ) : (
+    lfo_trig(5, trg, m6_floor);
     acc[5] += hz * dt;
     acc[5] > 1000000 ? acc[5] -= 1000000;
   );
@@ -1366,7 +1445,8 @@ m6_type == 1 ? (
     c != lastc[5] ? ( rnd[5] = rand(1); lastc[5] = c; );
     u = rnd[5];
   );
-  isf[5] = 0;
+  isf[5] = trg == 3;
+  isf[5] ? ( nf += 1; fsrc[5] = m6_fsrc >= 0.5; ga[5] = ga_fast; gr[5] = gr_fast; );
 ) : m6_type == 2 ? (
   isf[5] = 1; nf += 1;
   fsrc[5] = m6_fsrc >= 0.5;
@@ -1392,7 +1472,8 @@ m6_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[5];
 ) : m6_type == 4 ? (
-  isf[5] = 0;
+  isf[5] = floor(TR[40] + 0.5) == 3;
+  isf[5] ? ( nf += 1; fsrc[5] = TR[41] >= 0.5; ga[5] = ga_fast; gr[5] = gr_fast; );
   u = st_run(5);
   gmem[1000 + 8 * (inst % 8192) + 5] = curi[5];
 ) : m6_type == 5 ? (
@@ -1420,9 +1501,11 @@ m6_type >= 1 && byp_all < 0.5 && m6_byp < 0.5 ? (
 m7_type == 1 ? (
   ri = max(0, min(15, floor(m7_rsync + 0.5)));
   hz = m7_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m7_rhz);
-  m7_sync >= 0.5 && playing ? (
+  trg = floor(m7_msrc + 0.5);
+  trg == 0 && m7_sync >= 0.5 && playing ? (
     acc[6] = beat_position / beats[ri];
   ) : (
+    lfo_trig(6, trg, m7_floor);
     acc[6] += hz * dt;
     acc[6] > 1000000 ? acc[6] -= 1000000;
   );
@@ -1444,7 +1527,8 @@ m7_type == 1 ? (
     c != lastc[6] ? ( rnd[6] = rand(1); lastc[6] = c; );
     u = rnd[6];
   );
-  isf[6] = 0;
+  isf[6] = trg == 3;
+  isf[6] ? ( nf += 1; fsrc[6] = m7_fsrc >= 0.5; ga[6] = ga_fast; gr[6] = gr_fast; );
 ) : m7_type == 2 ? (
   isf[6] = 1; nf += 1;
   fsrc[6] = m7_fsrc >= 0.5;
@@ -1470,7 +1554,8 @@ m7_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[6];
 ) : m7_type == 4 ? (
-  isf[6] = 0;
+  isf[6] = floor(TR[48] + 0.5) == 3;
+  isf[6] ? ( nf += 1; fsrc[6] = TR[49] >= 0.5; ga[6] = ga_fast; gr[6] = gr_fast; );
   u = st_run(6);
   gmem[1000 + 8 * (inst % 8192) + 6] = curi[6];
 ) : m7_type == 5 ? (
@@ -1498,9 +1583,11 @@ m7_type >= 1 && byp_all < 0.5 && m7_byp < 0.5 ? (
 m8_type == 1 ? (
   ri = max(0, min(15, floor(m8_rsync + 0.5)));
   hz = m8_sync >= 0.5 ? (tempo / 60) / beats[ri] : max(0.01, m8_rhz);
-  m8_sync >= 0.5 && playing ? (
+  trg = floor(m8_msrc + 0.5);
+  trg == 0 && m8_sync >= 0.5 && playing ? (
     acc[7] = beat_position / beats[ri];
   ) : (
+    lfo_trig(7, trg, m8_floor);
     acc[7] += hz * dt;
     acc[7] > 1000000 ? acc[7] -= 1000000;
   );
@@ -1522,7 +1609,8 @@ m8_type == 1 ? (
     c != lastc[7] ? ( rnd[7] = rand(1); lastc[7] = c; );
     u = rnd[7];
   );
-  isf[7] = 0;
+  isf[7] = trg == 3;
+  isf[7] ? ( nf += 1; fsrc[7] = m8_fsrc >= 0.5; ga[7] = ga_fast; gr[7] = gr_fast; );
 ) : m8_type == 2 ? (
   isf[7] = 1; nf += 1;
   fsrc[7] = m8_fsrc >= 0.5;
@@ -1548,7 +1636,8 @@ m8_type == 1 ? (
     ms == 7 ? u = 1 - u;
   ) : u = mu[7];
 ) : m8_type == 4 ? (
-  isf[7] = 0;
+  isf[7] = floor(TR[56] + 0.5) == 3;
+  isf[7] ? ( nf += 1; fsrc[7] = TR[57] >= 0.5; ga[7] = ga_fast; gr[7] = gr_fast; );
   u = st_run(7);
   gmem[1000 + 8 * (inst % 8192) + 7] = curi[7];
 ) : m8_type == 5 ? (
@@ -1579,6 +1668,7 @@ mx_restore();             // the knobs' own values back
 file_mem(0, PAT, 256);
 file_mem(0, JN, 256);
 file_mem(0, MS, 400);
+file_mem(0, TR, 64);
 
 @sample
 nf > 0 ? (

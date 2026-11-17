@@ -822,6 +822,14 @@ do
   kn.noname = true
   P.knob_reframe(kn, old)
   check("knob frame: hiding its name gives back its room", kn.at.h, 5)
+  local tg = { type = "toggle", at = { c = 0, r = 0, w = 4, h = 4 } }
+  local tg_old = { type = "toggle", at = tg.at }
+  tg.noname = true
+  P.knob_reframe(tg, tg_old)
+  check("button frame: hiding its name gives back its room", tg.at.h, 3)
+  tg.noname = nil
+  P.knob_reframe(tg, { type = "toggle", noname = true, at = tg.at })
+  check("button frame: shown again, its room back", tg.at.h, 4)
   check("grid editor: a knob dragged big", table.concat({ T.fit(k, 7, 7) }, "x") .. tostring(k.size), "6x7large")
   check("grid editor: dragged flat, small", table.concat({ T.fit(k, 4, 2) }, "x") .. tostring(k.size), "4x2small")
   check("grid editor: a small one a row taller keeps its size", table.concat({ T.fit(k, 4, 3) }, "x") .. tostring(k.size), "4x3small")
@@ -1881,6 +1889,16 @@ do
   check("overall size: half, then back", half .. " / " .. back, "25 32 17 9 3 4 / 50 64 34 18 6 8")
   C.set_ui(9); check("overall size: held to 150%", C.UI, 1.5)
   C.set_ui(1); C.set_cell_w(cw0)
+  -- the panels' meters narrower (Options' Meter width)
+  local io0, gr0 = C.IO_COL_W, C.METER_COL_W
+  C.METER_WIDTH = "narrow"; C.set_ui(1)
+  check("meter width: narrow, no readouts", ("%s %d %d"):format(tostring(C.METER_READOUT), C.IO_COL_W, C.METER_COL_W),
+    ("false %d %d"):format(C.IO_BAR_W + 2, C.METER_W + 2))
+  C.METER_WIDTH = "thin"; C.set_ui(1.5)
+  check("meter width: thin", ("%d %d %d"):format(C.IO_BAR_W, C.METER_W, C.IO_COL_W), "8 8 11")
+  C.METER_WIDTH = nil; C.set_ui(1)
+  check("meter width: normal again", ("%s %d %d"):format(tostring(C.METER_READOUT), C.IO_COL_W, C.METER_COL_W),
+    ("true %d %d"):format(io0, gr0))
 end
 check("bar stays thin",             C.METER_W <= 14, true)
 check("column still under a cell",  C.METER_COL_W < C.CELL_W, true)
@@ -3854,13 +3872,14 @@ do
   do
     local keep = { TRACKS[1], TRACKS[2], TRACKS[3] }
     for k = 1, 3 do TRACKS[k] = nil end
-    local FT = { { name = "A", show = 1, space = 0, d = 1 }, { name = "B", show = 1, space = 0, d = 1 },
-                 { name = "C", show = 1, space = 0, d = 0 }, { name = "D", show = 0, space = 0, d = -2 },
+    local FT = { { name = "A", show = 1, space = 0, d = 1, cc = 0x10000ff }, { name = "B", show = 1, space = 0, d = 1, cc = 0x100ff00 },
+                 { name = "C", show = 1, space = 0, d = 0, cc = 0x1ff0000 }, { name = "D", show = 0, space = 0, d = -2 },
                  { name = "E", show = 1, space = 0, d = 0 } }
     for k, t in ipairs(FT) do TRACKS[k] = t end
     local gv, gx = reaper.GetMediaTrackInfo_Value, reaper.GetExtState
     reaper.GetMediaTrackInfo_Value = function(t, k)
       if k == "I_FOLDERDEPTH" then return t.d or 0 end
+      if k == "I_CUSTOMCOLOR" and t.cc then return t.cc end
       return gv(t, k)
     end
     local CFG = require "TS_CV_Config"
@@ -3874,6 +3893,10 @@ do
     check("folder borders: each parent's left", ks(fl[2].lbars) .. "|" .. ks(fl[3].lbars), "1|2")
     check("folder borders: on the last track shown, innermost first", ks(fl[4].rbars), "2,1")
     check("folder borders: none outside the folders", fl[5].name .. ks(fl[5].lbars) .. ks(fl[5].rbars), "E")
+    local Uc = require("TS_CV_Util")
+    check("folder borders: the left in the folder's colour", fl[2].lbars[1].col == Uc.track_colour(FT[1], 0xff), true)
+    check("folder borders: the right in the last track's", fl[4].rbars[1].col == Uc.track_colour(FT[3], 0xff)
+      and fl[4].rbars[2].col == fl[4].rbars[1].col and fl[4].rbars[1].col ~= fl[2].lbars[1].col, true)
     reaper.GetExtState = function(sec, k)
       if sec == CFG.EXT_SECT and k == "fold_borders" then return "0" end
       return gx and gx(sec, k) or ""
@@ -5509,6 +5532,19 @@ do
   check("button: a level says ON/OFF",      MP.button_text(k, 9, 0, "-inf dB"), nil)
   check("button: a percentage too",         MP.button_text(k, 9, 1, "100 %"), nil)
   check("button: nothing says ON/OFF",      MP.button_text(k, 9, 1, "  "), nil)
+  -- button text apart from the state names: on the button, the names under it
+  MP.set_btext(k, 4, "OUT", "IN"); MP.save(); MP.reload()
+  check("button text: round-trip",          table.concat(MP.get_btext(k, 4) or {}, "/"), "OUT/IN")
+  check("button text: copied",              MP.copy(MP.get(k)).btext[4][2], "IN")
+  check("button text: on the button",      MP.button_text(k, 4, 1, "1.0"), "IN")
+  check("button text: the state name under", MP.under_text(MP.state_text(k, 4, 1, "1.0"), "IN", true), "Auto")
+  check("button text: one side left empty", (MP.set_btext(k, 4, "", "IN") or MP.button_text(k, 4, 0, "0.0")), "Off")
+  check("under: not what the button says",  tostring(MP.under_text("Thrust", "Thrust", true)), "nil")
+  check("under: nor ON again",              tostring(MP.under_text("on", nil, true)), "nil")
+  check("under: a number under ON",         MP.under_text("1.00", nil, true), "1.00")
+  MP.set_btext(k, 4, "", ""); MP.save(); MP.reload()
+  check("button text: cleared",             tostring(MP.get_btext(k, 4)), "nil")
+  check("button text: the state name again", MP.button_text(k, 4, 1, "1.0"), "Auto")
   -- the brushed finish: the faceplate's own unless the layout says
   local CC = require("TS_CV_Config")
   check("brush: aluminium brushed by default", MP.brushed(MP.get(k), CC.plate_of("aluminium")), true)
@@ -5847,7 +5883,7 @@ do
     select(1, C.button_grid(10)), select(2, C.button_grid(10)) }, " "), "4 4 4 3 3 2 4 3")
   check("buttons: sixteen in a grid", (pos({ B("grid", 16) }, 2)), "0,0/4x3 w116")
   check("buttons: nine in a grid", (pos({ B("grid", 9) }, 2)), "0,0/3x2 w87")
-  check("buttons: up to sixteen", C.BUTTONS_MAX, 16)
+  check("buttons: up to sixty-four", C.BUTTONS_MAX, 64)
   local lay = P.layout({ B("across", 3) }, 2)
   check("buttons: the layout says so", lay.items[1].kind, "buttons")
   check("buttons: not on a knob", (pos({ { type = "knob", buttons = "across", nbtn = 4 } }, 2)), "0,0/2x2 w58")
