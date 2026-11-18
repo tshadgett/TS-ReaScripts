@@ -28,14 +28,14 @@
 local ED = {}
 
 -- the release both editions are; Pro must be the same
-ED.RELEASE = "1.0.0"
+ED.RELEASE = "1.0.1"
 
 -- where ReaPack puts each edition's files, under REAPER's Scripts
 ED.STANDARD_DIR = "TS-ReaScripts/TS_DrumToolbox/"
 ED.PRO_DIR      = "TS-DrumToolbox-Pro/TS_DrumToolbox/"
 
 -- How to get Pro (shown in Standard)
-ED.PRO_URL = "https://github.com/tshadgett/TS-ReaScripts/tree/main/TS_DrumToolbox#standard-and-pro"
+ED.PRO_URL = "https://ko-fi.com/tshadgett/shop"
 
 function ED.paths(own)
   local res = (reaper and reaper.GetResourcePath and reaper.GetResourcePath() or ".") .. "/Scripts/"

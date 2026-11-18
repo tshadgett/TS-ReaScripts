@@ -1,9 +1,8 @@
 -- @description TS_DrumToolbox - offline drum detection, bleed control, replacement, gate and noise for the whole kit
 -- @author Tim Shadgett
--- @version 1.0.0
+-- @version 1.0.1
 -- @changelog
---   Setup, Detect, Align and Quantise; with DrumToolbox Pro: Level, Gate,
---   Tone, Reinforce and the drum panel in ChannelView Pro.
+--   How to get Pro opens the Ko-fi shop.
 -- @provides
 --   [nomain] TS_DrumToolbox_core.lua
 --   [nomain] TS_DT_Edition.lua
