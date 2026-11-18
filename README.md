@@ -8,6 +8,7 @@ what the mix as a whole is doing.
 |---|---|
 | **[ChannelView](TS_ChannelView/)** | A docked channel strip: one editable control panel per plugin on the selected track. Pick the parameters you actually reach for, lay them out once, and every instance of that plugin comes up the same way. Gain reduction meters for every compressor, including ones that don't report it. **ChannelView Pro**, an add-on with its own ReaPack link, adds grid layouts, the rack, a tablet page, canvases and hardware looks. |
 | **[Track Analyser](TS_TrackAnalyser/)** | A docked two-panel display showing what your processing is *doing* — the measured magnitude response of whatever sits between two probes, drawn over the spectrum, plus a before/after waveform with gain reduction over it. Nothing is modelled; both panels read the audio. |
+| **[DrumToolbox](TS_DrumToolbox/)** | Drum editing for a whole multitrack kit at once: every hit on every drum found, the bleed between the mics discounted, then the kit aligned and quantised from that hit map. **DrumToolbox Pro**, an add-on with its own ReaPack link, adds levelling, a gate opened by the hits, tone bands, reinforcement with noise, samples or a kit instrument, and the drum's panel in ChannelView Pro. |
 | **[TS_Visualizer](TS_Visualizer/)** | A docked metering window: LUFS, goniometer, oscilloscope, spectrum, spectrogram, a Dynamics plot of loudness against PSR with targets, and a per-track spectrum overlay. A fork of Junki Kim's JKK_Visualizer, sharing the other tools' colour controls. |
 | **[TS_360LinkFollow](TS_360LinkFollow/)** | For the SSL UF8 / UC1: hide a track in REAPER and its SSL 360 Link strip leaves the 360 Plug-in Mixer and the UF8; show it and the strip comes back. A background toggle that sets 360 Link offline on hidden tracks. |
 
@@ -50,9 +51,11 @@ Download the repo, then:
   `TS_Visualizer/TS_Visualizer.jsfx` → `REAPER/Effects/TS_Visualizer/`
 - `TS_360LinkFollow/TS_360LinkFollow.lua` → `REAPER/Scripts/` (load it as an
   action; it is a toggle)
+- `TS_DrumToolbox/*.lua` → `REAPER/Scripts/TS_DrumToolbox/`
 
 Then **Actions ▸ Show action list ▸ New action ▸ Load ReaScript…** and pick
-`TS_ChannelView.lua`, `TS_TrackAnalyser.lua` and `TS_Visualizer.lua`.
+`TS_ChannelView.lua`, `TS_TrackAnalyser.lua`, `TS_Visualizer.lua` and
+`TS_DrumToolbox.lua`.
 
 Nothing assumes a fixed install path, so either route works.
 
@@ -69,6 +72,8 @@ controls:
   deliberately does not model.
 - [TS_Visualizer](TS_Visualizer/README.md) — its modules, what this fork
   added to Junki Kim's original, and the loudness and dynamics targets.
+- [DrumToolbox](TS_DrumToolbox/README.md) — the tabs from Setup to
+  Reinforce, what's in Standard and what's Pro.
 
 ## Working on these
 
@@ -88,7 +93,8 @@ warning. The script says so plainly when it happens.
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Use it, change it, ship it; just keep the
-copyright notice. ChannelView Pro isn't in this repo and isn't MIT.
+copyright notice. ChannelView Pro and DrumToolbox Pro aren't in
+this repo and aren't MIT.
 
 ## Credits
 
