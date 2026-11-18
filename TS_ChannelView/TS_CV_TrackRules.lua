@@ -823,27 +823,41 @@ function TR.apply_all(force)
 end
 
 -- As tracks are added and moved: once the tracks' order, folders, names
--- or receives change, the colours and spacers are put right. Call once a
--- frame.
-local watch = { at = -10, sig = nil }
+-- or receives change, the colours and spacers are put right. A track
+-- that wasn't there before (added by another script, or in REAPER) is
+-- coloured as ChannelView colours the tracks it adds, whatever colour it
+-- came with. Call once a frame.
+local watch = { at = -10, sig = nil, seen = nil, proj = nil }
 function TR.tick()
   local now = reaper.time_precise()
   if now - watch.at < 0.5 then return end
   watch.at = now
   local s = TR.get()
-  if not s.live or not (TR.colours_on(s) or TR.spacers_on(s)) then watch.sig = nil return end
-  local parts = {}
+  if not s.live or not (TR.colours_on(s) or TR.spacers_on(s)) then watch.sig, watch.seen = nil, nil return end
+  -- (another project, or the first look: nothing counts as new)
+  local proj = reaper.EnumProjects(-1)
+  if watch.proj ~= proj then watch.proj, watch.seen = proj, nil end
+  local first = watch.seen == nil
+  watch.seen = watch.seen or {}
+  local parts, fresh = {}, {}
   for _, tr in ipairs(tracks()) do
-    parts[#parts + 1] = reaper.GetTrackGUID(tr) .. depth(tr) .. name_of(tr) .. nrecv(tr)
+    local g = reaper.GetTrackGUID(tr)
+    if not watch.seen[g] then
+      watch.seen[g] = true
+      if not first then fresh[tr] = true end
+    end
+    parts[#parts + 1] = g .. depth(tr) .. name_of(tr) .. nrecv(tr)
   end
   local sig = table.concat(parts, "|")
   if sig == watch.sig then return end
   watch.sig = sig
   reaper.PreventUIRefresh(1)
-  TR.colour(nil, s)
+  local n = TR.colour(nil, s, fresh)
   TR.spacers(s)
   reaper.PreventUIRefresh(-1)
   reaper.TrackList_AdjustWindows(false)
+  -- (the arrange view's items take a track's new colour only on a redraw)
+  if n > 0 then reaper.UpdateArrange() end
 end
 
 -- ---------------------------------------------------------------------

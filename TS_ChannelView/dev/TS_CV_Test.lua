@@ -922,6 +922,49 @@ do
   check("spacer: none set, 16", C.spacer_w(), 16)
   reaper = real
 end
+-- DrumToolbox Pro's panel (TS_CV_DrumPanel): found, its plugins left out
+-- of the row, its width; a failing call turns it off
+do
+  local real = reaper
+  local attached, drawn = nil, 0
+  package.loaded["TS_DrumToolbox_panel"] = nil
+  package.preload["TS_DrumToolbox_panel"] = function()
+    return {
+      attach = function(im, cv) attached = cv end,
+      hidden_fx = function(_, i) return i == 1 end,
+      panel_w = function() return 300 end,
+      draw_panel = function() drawn = drawn + 1 end,
+      drum_of = function() return { via = "Snare" } end,
+    }
+  end
+  local said = {}
+  reaper = setmetatable({
+    GetResourcePath = function() return "/res" end,
+    TrackFX_GetCount = function() return 3 end,
+    TrackFX_GetFXGUID = function(_, i) return "{G" .. i .. "}" end,
+    ShowConsoleMsg = function(m) said[#said + 1] = m end,
+  }, { __index = real })
+  package.loaded["TS_CV_DrumPanel"] = nil
+  local DPm = require("TS_CV_DrumPanel")
+  DPm.attach({})
+  local list = { { guid = "{G0}", kind = "fx" }, { guid = "{G1}", kind = "fx" }, { guid = "{G2}", kind = "fx" } }
+  local kept = DPm.strip("tr", list)
+  local g = {}
+  for _, n in ipairs(kept) do g[#g + 1] = n.guid end
+  check("drum panel: its plugin left out of the row", table.concat(g, ","), "{G0},{G2}")
+  check("drum panel: ChannelView's sizes passed", attached and attached.PANEL_PAD == C.PANEL_PAD and attached.COL == C.COL, true)
+  check("drum panel: its width", DPm.panel_w("tr"), 300)
+  DPm.draw(nil, "tr", 200)
+  check("drum panel: drawn", drawn, 1)
+  check("drum panel: the drum a track is", DPm.drum_of("tr").via, "Snare")
+  DPm._panel().panel_w = function() error("boom") end
+  check("drum panel: a failure turns it off", DPm.panel_w("tr") .. " " .. DPm.panel_w("tr") .. " " .. #said, "0 0 1")
+  check("drum panel: nothing hidden then", #DPm.strip("tr", list), 3)
+  package.preload["TS_DrumToolbox_panel"] = nil
+  package.loaded["TS_DrumToolbox_panel"] = nil
+  package.loaded["TS_CV_DrumPanel"] = nil
+  reaper = real
+end
 -- a value typed in (Ctrl+click a knob or fader)
 do
   local CH_ = require("TS_CV_Channel")
@@ -929,6 +972,53 @@ do
   check("typed volume: -inf", CH_.typed_vol("-inf"), 0)
   check("typed volume: not a number", CH_.typed_vol("loud"), nil)
   check("typed pan", tostring(CH_.typed_pan("30L")) .. " " .. tostring(CH_.typed_pan("15r")) .. " " .. tostring(CH_.typed_pan("c")) .. " " .. tostring(CH_.typed_pan("-50")), "-0.3 0.15 0 -0.5")
+  check("typed width", tostring(CH_.typed_width("60")) .. " " .. tostring(CH_.typed_width("-100 %")) .. " " .. tostring(CH_.typed_width("wide")), "0.6 -1 nil")
+  check("pan text", CH_.pan_text(0.24) .. " " .. CH_.pan_text(-1) .. " " .. CH_.pan_text(0.001) .. " " .. CH_.width_text(0.6), "24R 100L C 60%")
+  -- pan modes: the track's, the project's default resolved, and each drawn
+  do
+    local real = reaper
+    local vals = { I_PANMODE = -1, D_PAN = 0.2, D_WIDTH = 0.6, D_DUALPANL = -0.7, D_DUALPANR = 0.8 }
+    local sets = {}
+    reaper = setmetatable({
+      GetMediaTrackInfo_Value = function(_, k) return vals[k] or 0 end,
+      SetMediaTrackInfo_Value = function(_, k, v) vals[k] = v; sets[#sets + 1] = k end,
+      GetTrackUIPan = function() return true, 0, 0, 5 end,
+      GetMasterTrack = function() return "master" end, ValidatePtr2 = function() return true end,
+      GetExtState = function() return "" end,
+    }, { __index = function(_, k) return real[k] or function() return 0 end end })
+    local m, eff = CH_.pan_mode("tr")
+    check("pan mode: the project's default, resolved", m .. " " .. eff, "-1 5")
+    vals.I_PANMODE = 6
+    m, eff = CH_.pan_mode("tr")
+    check("pan mode: the track's own", m .. " " .. eff, "6 6")
+    reaper.GetTrackUIPan = nil
+    vals.I_PANMODE = -1
+    check("pan mode: no answer, stereo balance", select(2, CH_.pan_mode("tr")), 3)
+    reaper.GetTrackUIPan = function() return true, 0, 0, 5 end
+    -- drawn in a stand-in ImGui: each mode, wide and narrow
+    local fake = setmetatable({
+      GetCursorScreenPos = function() return 0, 0 end, GetMousePos = function() return -100, -100 end,
+      CalcTextSize = function(_, t) return #tostring(t or "") * 6, 10 end, GetWindowDrawList = function() return "dl" end,
+      BeginPopup = function() return false end, IsItemActivated = function() return false end,
+      GetKeyMods = function() return 0 end, GetMouseWheel = function() return 0, 0 end,
+      BeginChild = function() return true end, GetContentRegionAvail = function() return 120, 400 end,
+    }, { __index = function(_, k)
+      if not k:match("^DrawList_") and k:match("^%u%a*_%u") then return 0 end
+      return function() return false end
+    end })
+    local Wd = require("TS_CV_Widgets")
+    CH_.attach(fake); Wd.attach(fake)
+    local res = {}
+    for _, mode in ipairs({ 3, 5, 6 }) do
+      vals.I_PANMODE = mode
+      for _, w in ipairs({ 60, 200 }) do
+        local ok, err = pcall(CH_.draw_body, fake, "dl", 0, 0, w, 400, "tr", "t" .. mode .. w)
+        res[#res + 1] = ok and "ok" or tostring(err)
+      end
+    end
+    check("pan modes: each drawn, narrow and wide", table.concat(res, " "), "ok ok ok ok ok ok")
+    reaper = real
+  end
   local UN_ = require("TS_CV_Units")
   local real = reaper
   local now = 0.5

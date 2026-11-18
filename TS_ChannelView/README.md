@@ -423,7 +423,12 @@ so its probes are the new ones.
   underneath: fader dB on the left, peak hold and RMS on the right. Mute,
   solo, phase and monitoring sit in a button grid at the bottom, with
   **record arm on a full-width row of its own** — it's the one you hit in a
-  hurry and the one whose state you check from across the room. It sits outside the scrolling row on purpose: the fader is the one
+  hurry and the one whose state you check from across the room. Right-click
+  the pan knob for the track's **pan mode** (REAPER's own: Stereo balance,
+  Stereo pan, Dual pan, or the project's default): Stereo pan shows Pan and
+  Width, Dual pan Left and Right, as two knobs when the strip is wide enough
+  and as one concentric knob (the middle the first, the ring the second)
+  when it isn't. It sits outside the scrolling row on purpose: the fader is the one
   control you reach for regardless of which plugin you were looking at.
   Collapses to a bar like any panel, keeping the meter, mute and solo
   reachable. Monitoring cycles – / IN / AU and shows *auto* in its own
@@ -460,8 +465,8 @@ so its probes are the new ones.
   and a sidechain send into a two-channel track passes no audio. Right-click
   a send to switch it between direct and sidechain, or remove it.
 * A **header bar**: on the left the **☰** menu (*View*, *Layouts*, *Web
-  companion*, *Console setup…*, *Options…*, *Dock* and *Run when REAPER
-  starts*) and the view toggle, then
+  companion*, *Console setup…*, *DrumToolbox…*, *Options…*, *Dock* and
+  *Run when REAPER starts*) and the view toggle, then
   the **MIDI learn** and **Probes** buttons; the track's colour chip, number
   and name **centred**; and on the right **OS**, the FX chain button and the
   **FX chain bypass** — which bypasses every plugin on the track at once, a
@@ -608,7 +613,8 @@ so its probes are the new ones.
   lane away, asking first if there's automation on it. An XY pad or a
   concentric knob has one of each for its two parameters. The Channel
   panel's fader menu has *Volume automation lane*, a right-click on its pan
-  knob *Pan automation lane*, and a ReaEQ band's menu *Automation lanes ▸
+  knob *Pan automation lane* (and *Width*, or *Left pan* and *Right pan*, as
+  the pan mode has them), and a ReaEQ band's menu *Automation lanes ▸
   Frequency / Gain / Q*. REAPER switches a parameter's modulation on when
   it makes a lane for it, which holds the control where it is; ChannelView
   switches that straight back off.
@@ -820,6 +826,17 @@ follows the bus of the track it's showing, the plugin button opens the
 console's own window, and its outline lights while the console is in. Fold it with
 the button in its header. With The Analog Molecule and The Hot Summer, the
 triangle at its right edge opens The Hot Summer's settings beside it.
+
+## DrumToolbox (Pro)
+
+With **DrumToolbox Pro** installed (its own ReaPack package; see the
+[DrumToolbox README](../TS_DrumToolbox/README.md)), a drum's channel shows
+its DrumToolbox panel after the console panel, before the fader, and
+DrumToolbox's own plugins are left out of the plugin row, as the console's
+are. Tracks DrumToolbox isn't working on show nothing new.
+
+**☰ ▸ DrumToolbox…** opens DrumToolbox's window (ticked while it's open);
+it's in the menu whenever DrumToolbox is installed.
 
 ## Macros and modulators
 
@@ -2354,7 +2371,8 @@ the FX returns, before the track kept at the end. With any of them on, ChannelVi
 spacers, and takes out others.
 
 **When:** only on tracks ChannelView adds, or as tracks are added and
-moved (also by REAPER or other scripts). *Apply to the project now* puts
+moved (also by REAPER or other scripts: a track added there takes the
+rules' colour whatever colour it came with). *Apply to the project now* puts
 every track right: it numbers every series (renaming as few tracks as it
 can: Gtr DI 1, Gtr DI 1, Gtr DI 2 becomes 1, 3, 2), sorts the folders,
 colours and spaces, and asks first about tracks coloured by hand. With SWS
@@ -2440,6 +2458,7 @@ with it, sent from the selected track. They're in the action list as
 | `TS_CV_ConsoleSetup.lua` | the Console setup window (Pro) |
 | `TS_CV_ConsoleDrawer.lua` | the console panel in channel view (Pro) |
 | `TS_CV_ConsoleState.lua` | reading and writing a Sonimus console's saved state (Pro) |
+| `TS_CV_DrumPanel.lua` | DrumToolbox Pro's drum panel in channel view (Pro) |
 | `TS_CV_Collisions.lua` | Collisions: the marks on the track buttons (Pro) |
 | `TS_CV_Mask.lua` | the masking model Collisions uses (Track Analyser's TS_TA_Mask) (Pro) |
 | `TS_ChannelView_ConsoleSetup.lua` | the action that opens Console setup (Pro) |

@@ -1,13 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.3.2
+-- @version 4.3.3
 -- @changelog
---  Sizes follow Overall size and the text size: IN and TRIM never hidden,
---  the strip, track buttons, knob names and meter marks. Button text
---  apart from state names. LFO and Steps set off by a note or the audio,
---  as an MSEG (reopen your projects). Up to 64 choices; the add tile a +
---  in the header when there's no room. Moves with ChannelView Pro 4.3.2.
---  See the CHANGELOG.
+--  The pan knob's right-click sets the track's pan mode: Stereo pan (pan
+--  and width) and Dual pan (left and right) as two knobs, or one
+--  concentric knob on a narrow strip. Track rules colour tracks added by
+--  other scripts. DrumToolbox in the main menu. Moves with ChannelView Pro
+--  4.3.3. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -241,6 +240,8 @@ CN.attach(ImGui); LS.attach(ImGui); MR.attach(ImGui); CS.attach(ImGui); ML.attac
 TB.attach(ImGui); DR.attach(ImGui); AE.attach(ImGui); KE.attach(ImGui)
 if ED.PRO then require("TS_CV_GridEditor").attach(ImGui) end
 if ED.PRO then ED.module("TS_CV_ConsoleSetup", ED.stub()).attach(ImGui) end
+-- DrumToolbox Pro's panel, when it's installed (TS_CV_DrumPanel)
+if ED.PRO then ED.module("TS_CV_DrumPanel", ED.stub()).attach(ImGui) end
 if POP.CMP then POP.CMP.attach(ImGui); P.over_panel = POP.CMP.overlay end
 -- action drawers (global, not per project), and the window that organises
 -- every action bar
@@ -504,6 +505,8 @@ local function rescan(force)
     if POP.CMP then list = POP.CMP.strip(app.track, list) end
     -- the console's plugins, when its panel stands for them (Pro)
     if ED.PRO then list = ED.module("TS_CV_ConsoleDrawer", ED.stub()).strip(app.track, list) or list end
+    -- and DrumToolbox's, which its panel stands for (Pro)
+    if ED.PRO then list = ED.module("TS_CV_DrumPanel", ED.stub()).strip(app.track, list) or list end
     -- a container with knobs on it gets a panel of its own, at its head;
     -- folded to that panel, what's inside it stays out of the row
     local tr, with_panel = app.track, {}
@@ -4972,6 +4975,12 @@ local function menu_bar()
     if ED.PRO and ED.module("TS_CV_ConsoleSetup") and ImGui.MenuItem(ctx, "Console setup\u{2026}") then
       ED.module("TS_CV_ConsoleSetup").show()
     end
+    -- DrumToolbox, when it's installed (ticked while it's open)
+    do
+      local AC = require("TS_CV_Actions")
+      local dt, dt_on = AC.drumtoolbox()
+      if dt and ImGui.MenuItem(ctx, "DrumToolbox\u{2026}", nil, dt_on, not dt_on) then AC.open_drumtoolbox() end
+    end
     if ImGui.MenuItem(ctx, "Options\u{2026}") then app.VO.show(app.vo_tab) end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "Looks, behaviour and track rules.")
@@ -6571,6 +6580,10 @@ local function frame()
   -- relies on there being no bottom decoration to subtract.
   if C.WIN_NO_SCROLLBAR then wflags = wflags | ImGui.WindowFlags_NoScrollbar end
 
+  -- Track rules as tracks are added and moved: every frame, whether the
+  -- window shows or not (docked behind another tab, say)
+  require("TS_CV_TrackRules").tick()
+
   local visible, open = ImGui.Begin(ctx, C.WIN_TITLE, true, wflags)
 
   if visible then
@@ -6802,12 +6815,15 @@ local function frame()
     local rv_w   = rv_on and RV.width_for(app.track, row_h) or 0
     local sd_w   = sd_on and SD.width_for(app.track, row_h) or 0
     -- the macros and the modulators, pinned beside the fader panel
-    -- (and the console panel before the fader, Pro: counted in with them)
+    -- (and the console and DrumToolbox panels before the fader, Pro:
+    -- counted in with them)
     local mr_w   = (ma_on and MR.width_for("macros", app.track, row_h) or 0)
                    + (mo_on and MR.width_for("mods", app.track, row_h) or 0)
                    + (ED.PRO and (ED.module("TS_CV_ConsoleDrawer", ED.stub()).panel_w() or 0) or 0)
+                   + (ED.PRO and (ED.module("TS_CV_DrumPanel", ED.stub()).panel_w(app.track) or 0) or 0)
     local n_gaps = 1 + (ma_on and 1 or 0) + (mo_on and 1 or 0) + (sd_on and 1 or 0) + (rv_on and 1 or 0)
                    + ((ED.PRO and (ED.module("TS_CV_ConsoleDrawer", ED.stub()).panel_w() or 0) or 0) > 0 and 1 or 0)
+                   + ((ED.PRO and (ED.module("TS_CV_DrumPanel", ED.stub()).panel_w(app.track) or 0) or 0) > 0 and 1 or 0)
     local mid_w  = math.max(80, full_w - ch_w - mr_w - rv_w - sd_w - C.PANEL_GAP * n_gaps)
 
     -- A double-click on a NAME BUTTON renames that track (name_dbl), in
@@ -6878,6 +6894,10 @@ local function frame()
       side_drawers(row_h)
       if ED.PRO and (ED.module("TS_CV_ConsoleDrawer", ED.stub()).panel_w() or 0) > 0 then
         ED.module("TS_CV_ConsoleDrawer").draw_panel(ctx, row_h)
+        ImGui.SameLine(ctx, 0, C.PANEL_GAP)
+      end
+      if ED.PRO and (ED.module("TS_CV_DrumPanel", ED.stub()).panel_w(app.track) or 0) > 0 then
+        ED.module("TS_CV_DrumPanel").draw(ctx, app.track, row_h)
         ImGui.SameLine(ctx, 0, C.PANEL_GAP)
       end
       CH.draw(ctx, app.track, row_h)
@@ -6968,7 +6988,6 @@ local function frame()
     -- Probe taps: the heartbeat that keeps them measuring, and one
     -- track's routing re-checked per frame.
     TP.update()
-    require("TS_CV_TrackRules").tick()
     -- Steps' and MSEGs' patterns on their way to and from their plugin
     require("TS_CV_ModPat").tick()
     -- a factory preset the plugin didn't tell REAPER about (TS_CV_Presets)

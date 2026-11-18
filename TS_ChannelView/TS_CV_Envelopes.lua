@@ -199,6 +199,11 @@ EN.TRACK_ENVS = {
     action = "Track: Toggle track pre-FX pan envelope visible", id = 40409,
     pt = function() return 0 end },
 }
+-- Width, offered by the pan knob's menu only (Stereo pan and Dual pan,
+-- where it's the right channel's pan), not by the add menu
+EN.WIDTH_ENV = { name = "Width", chunk = "<WIDTHENV2",
+  action = "Track: Toggle track width envelope visible",
+  pt = function(tr) return tv(tr, "D_WIDTH", 1) end }
 
 -- fx and param for an FX parameter envelope; -1, -1 for the track's own.
 local function parent_of(env)
@@ -446,6 +451,7 @@ function EN.def_for(track, env)
   for _, def in ipairs(EN.TRACK_ENVS) do
     if EN.track_env(track, def) == env then return def end
   end
+  if EN.track_env(track, EN.WIDTH_ENV) == env then return EN.WIDTH_ENV end
   return nil
 end
 
@@ -604,6 +610,7 @@ end
 
 function EN.def_named(name)
   for _, def in ipairs(EN.TRACK_ENVS) do if def.name == name then return def end end
+  if name == EN.WIDTH_ENV.name then return EN.WIDTH_ENV end
   return nil
 end
 

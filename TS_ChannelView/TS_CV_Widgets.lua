@@ -1981,12 +1981,15 @@ local function dual_arc(dl, cx, cy, r, v1, v2, o)
   local a1 = A_MIN + A_SPAN * math.max(0, math.min(1, v1 or 0))
   local a2 = A_MIN + A_SPAN * math.max(0, math.min(1, v2 or 0))
   local rk = r - 4
+  -- (o.bip1, o.bip2: that one's arc from the middle, as a pan's)
+  local mid = A_MIN + A_SPAN * 0.5
+  local s1, s2 = o.bip1 and mid or A_MIN, o.bip2 and mid or A_MIN
   arc(dl, cx, cy, r - 1.5, A_MIN, A_MAX, C.COL.knob_track, 3.0)
-  arc(dl, cx, cy, r - 1.5, A_MIN, a1, fade(C.COL.knob_fill), 3.0)
+  arc(dl, cx, cy, r - 1.5, math.min(s1, a1), math.max(s1, a1), fade(C.COL.knob_fill), 3.0)
   ImGui.DrawList_AddCircleFilled(dl, cx, cy, rk, o.hot and C.COL.knob_body_hi or C.COL.knob_body, 32)
   local ri = rk - 3
   arc(dl, cx, cy, ri, A_MIN, A_MAX, C.COL.knob_track, 2.5)
-  arc(dl, cx, cy, ri, A_MIN, a2, fade(o.cap or C.COL.knob_fill_bi), 2.5)
+  arc(dl, cx, cy, ri, math.min(s2, a2), math.max(s2, a2), fade(o.cap or C.COL.knob_fill_bi), 2.5)
   local c1, s1, c2, s2 = math.cos(a1), math.sin(a1), math.cos(a2), math.sin(a2)
   ImGui.DrawList_AddLine(dl, cx + c1 * (rk - 1), cy + s1 * (rk - 1), cx + c1 * (r + 1), cy + s1 * (r + 1),
     fade(C.COL.knob_pointer), 2.0)
@@ -2124,7 +2127,8 @@ local dual_grab = {}   -- id -> "outer" / "inner": which one this drag turns
 -- the inner, anywhere else the ring. The wheel turns the inner, Shift+wheel
 -- the ring. Returns changed1, v1, changed2, v2, act, where
 -- act.double_click is "outer" or "inner" (the one under the pointer).
--- `o`: size, cap, dim, mod1, mod2, shown1, shown2, tip.
+-- `o`: size, cap, dim, mod1, mod2, shown1, shown2, tip; bip1, bip2 (the
+-- ring's or the inner knob's arc from the middle).
 function W.dual_knob(ctx, id, label, v1, v2, o)
   o = plain(o or {})
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -2183,6 +2187,7 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
   centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true)
   local hot = turning or (hovered and zone()) or nil
   W.dual_face(dl, cx, cy, r, v1, v2, { cap = o.cap, dim = o.dim, hot = hot, mod1 = o.mod1, mod2 = o.mod2,
+    bip1 = o.bip1, bip2 = o.bip2,
     style = o.style, style2 = o.style2, look = o.look, look2 = o.look2, ctx = ctx })
   -- where it is, for a link's rings: the ring's radius and the inner knob's
   W.last_knob = { cx = cx, cy = cy, r = r, ri = ri, dual = true }
@@ -5033,8 +5038,8 @@ function W.vertical_text(ctx, dl, cx, y, text, col, max_h)
     -- Trimmed against the room down the bar, which for rotated text is
     -- measured along its WIDTH.
     local tw, th = ImGui.CalcTextSize(ctx, text)
-    while tw > max_h and #text > 1 do
-      text = text:sub(1, #text - 1)
+    while tw > max_h and (utf8.len(text) or #text) > 1 do
+      text = text:sub(1, (utf8.offset(text, -1) or #text) - 1)
       tw = ImGui.CalcTextSize(ctx, text .. "\u{2026}")
       if tw <= max_h then text = text .. "\u{2026}" break end
     end
@@ -5069,9 +5074,12 @@ function W.vertical_text(ctx, dl, cx, y, text, col, max_h)
   line_h = line_h - 2
   local n = math.max(0, math.floor(max_h / line_h))
   local used = 0
-  for i = 1, math.min(#text, n) do
-    local ch = text:sub(i, i)
-    if i == n and #text > n then ch = "\u{2026}" end
+  -- (a character at a time, not a byte: a dot or an accent is two)
+  local chars = {}
+  for _, c in utf8.codes(text) do chars[#chars + 1] = utf8.char(c) end
+  for i = 1, math.min(#chars, n) do
+    local ch = chars[i]
+    if i == n and #chars > n then ch = "\u{2026}" end
     if ch ~= " " then
       local w = ImGui.CalcTextSize(ctx, ch)
       ImGui.DrawList_AddText(dl, cx - w * 0.5, y + used, col, ch)

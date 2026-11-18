@@ -92,10 +92,10 @@ end
 
 -- "Volume / Pan automation lane": shows the track's envelope (made if
 -- there isn't one), or hides it.
-function CH.lane_item(ctx, track, name)
+function CH.lane_item(ctx, track, name, label)
   local EN = require("TS_CV_Envelopes")
   local l = EN.track_lane(track, name)
-  if ImGui.MenuItem(ctx, name .. " automation lane", l and l.auto and "has automation" or nil,
+  if ImGui.MenuItem(ctx, (label or name) .. " automation lane", l and l.auto and "has automation" or nil,
                     l ~= nil and l.shown) then
     EN.toggle_track_lane(track, name)
   end
@@ -234,6 +234,125 @@ function CH.typed_pan(text)
   if up:find("L") then n = -math.abs(n) elseif up:find("R") then n = math.abs(n) end
   return math.max(-1, math.min(1, n / 100))
 end
+local pan_pair_half = {}   -- a concentric pan knob being typed into: "inner" or "outer"
+
+-- REAPER's pan modes (I_PANMODE), as its own pan right-click names them:
+-- -1 the project's default, 0 the 3.x balance, 3 stereo balance / mono
+-- pan, 5 stereo pan (pan and width), 6 dual pan (left and right).
+CH.PAN_MODES = { { -1, "Project default" }, { 3, "Stereo balance" }, { 5, "Stereo pan" }, { 6, "Dual pan" } }
+local PAN_NAME = { [0] = "Balance (3.x)", [3] = "Stereo balance", [5] = "Stereo pan", [6] = "Dual pan" }
+-- The track's pan mode as set (-1 the project's) and as it works: the
+-- project's default resolved (GetTrackUIPan), else stereo balance.
+function CH.pan_mode(track)
+  local set_to = math.floor(CH.read(track, "I_PANMODE", -1) + 0.5)
+  local eff = set_to
+  if eff < 0 and reaper.GetTrackUIPan then
+    local ok, _, _, m = reaper.GetTrackUIPan(track)
+    if ok and m and m >= 0 then eff = math.floor(m + 0.5) end
+  end
+  if eff < 0 then eff = 3 end
+  return set_to, eff
+end
+CH.pan_name = function(m) return PAN_NAME[m] or "Stereo balance" end
+
+-- A pan value as REAPER writes it: 24R, 100L, C
+function CH.pan_text(p)
+  if math.abs(p) < 0.005 then return "C" end
+  return ("%d%s"):format(math.floor(math.abs(p) * 100 + 0.5), p < 0 and "L" or "R")
+end
+-- Width, -100 % to 100 %
+function CH.width_text(v) return ("%d%%"):format(math.floor(v * 100 + (v < 0 and -0.5 or 0.5))) end
+function CH.typed_width(text)
+  local n = tonumber((U.trim(text or "")):match("[%+%-]?%d*%.?%d+") or "")
+  return n and math.max(-1, math.min(1, n / 100)) or nil
+end
+
+-- The pan knob's right-click: the track's pan mode, the lanes that mode
+-- has, and the knobs back to where they start
+function CH.pan_menu(ctx, track)
+  local set_to, eff = CH.pan_mode(track)
+  ImGui.TextDisabled(ctx, "Pan mode")
+  for _, e in ipairs(CH.PAN_MODES) do
+    local hint = (e[1] == -1 and set_to == -1) and CH.pan_name(eff) or nil
+    if ImGui.MenuItem(ctx, e[2], hint, set_to == e[1]) and set_to ~= e[1] then
+      set(track, "I_PANMODE", e[1])
+      reaper.Undo_OnStateChange("ChannelView: pan mode " .. e[2]:lower())
+    end
+  end
+  if set_to == 0 then ImGui.MenuItem(ctx, PAN_NAME[0], nil, true, false) end
+  ImGui.Separator(ctx)
+  -- (in Dual pan REAPER's pan envelope is the left channel's, its width
+  -- envelope the right's)
+  if eff == 6 then
+    CH.lane_item(ctx, track, "Pan", "Left pan")
+    CH.lane_item(ctx, track, "Width", "Right pan")
+  else
+    CH.lane_item(ctx, track, "Pan")
+    if eff == 5 then CH.lane_item(ctx, track, "Width") end
+  end
+  if eff == 5 or eff == 6 then
+    ImGui.Separator(ctx)
+    local what = (eff == 5) and "Reset (centre, full width)" or "Reset (hard left and right)"
+    if ImGui.MenuItem(ctx, what) then
+      if eff == 5 then set(track, "D_PAN", 0); set(track, "D_WIDTH", 1)
+      else set(track, "D_DUALPANL", -1); set(track, "D_DUALPANR", 1) end
+      reaper.Undo_OnStateChange("ChannelView: reset pan")
+    end
+  end
+end
+
+-- Stereo pan's pan and width, or Dual pan's left and right: two knobs side
+-- by side when the strip has room for them, else one concentric knob (the
+-- pan, or left, in the middle; the width, or right, the ring). Same height
+-- either way. Returns whether it was right-clicked.
+local function pan_pair(ctx, track, idp, x, y, w, eff)
+  local dual = eff == 6
+  local k1, k2 = dual and "D_DUALPANL" or "D_PAN", dual and "D_DUALPANR" or "D_WIDTH"
+  local n1, n2 = dual and "Left" or "Pan", dual and "Right" or "Width"
+  local d1, d2 = dual and -1 or 0, 1
+  local a, b = get(track, k1, d1), get(track, k2, d2)
+  local ta = CH.pan_text(a)
+  local tb = dual and CH.pan_text(b) or CH.width_text(b)
+  local function typed2(t) if dual then return CH.typed_pan(t) end return CH.typed_width(t) end
+  local right = false
+  if w >= 2 * C.CELL_W + C.S(8) then
+    local x0 = x + (w - 2 * C.CELL_W) * 0.5
+    local function one(i, key, name, v, txt, dflt, parse)
+      ImGui.SetCursorScreenPos(ctx, x0 + (i - 1) * C.CELL_W, y)
+      local id = idp .. "pan" .. i
+      local ch, nv, act = W.knob(ctx, id, name, (v + 1) * 0.5, txt, { bipolar = true, tooltip = name .. ": " .. txt })
+      if act and act.double_click then nv, ch = (dflt + 1) * 0.5, true end
+      if ch then set(track, key, nv * 2 - 1) end
+      if act and act.right_click then right = true end
+      local t = W.type_box(ctx, id, act and act.type_in, name, txt)
+      local tv = t and parse(t)
+      if tv then set(track, key, tv) end
+    end
+    one(1, k1, n1, a, ta, d1, CH.typed_pan)
+    one(2, k2, n2, b, tb, d2, typed2)
+  else
+    ImGui.SetCursorScreenPos(ctx, x + (w - C.CELL_W) * 0.5, y)
+    local id = idp .. "pan"
+    local c1, v1, c2, v2, act = W.dual_knob(ctx, id, n1 .. " / " .. n2, (b + 1) * 0.5, (a + 1) * 0.5,
+      { shown1 = tb, shown2 = ta, bip1 = true, bip2 = true, tip = n1 .. ": " .. ta .. "\n" .. n2 .. ": " .. tb
+        .. "\nDrag the middle: " .. n1:lower() .. "; the ring: " .. n2:lower() })
+    if act.double_click == "inner" then v2, c2 = (d1 + 1) * 0.5, true
+    elseif act.double_click == "outer" then v1, c1 = (d2 + 1) * 0.5, true end
+    if c2 then set(track, k1, v2 * 2 - 1) end
+    if c1 then set(track, k2, v1 * 2 - 1) end
+    if act.right_click then right = true end
+    local half = act.type_in
+    if half then pan_pair_half[id] = half end
+    local inner = pan_pair_half[id] == "inner"
+    local t = W.type_box(ctx, id, act.type_in and true or false, inner and n1 or n2, inner and ta or tb)
+    if t then
+      if inner then local tv = CH.typed_pan(t); if tv then set(track, k1, tv) end
+      else local tv = typed2(t); if tv then set(track, k2, tv) end end
+    end
+  end
+  return right
+end
+
 local function type_vol(ctx, id, act, track, vol)
   local t = W.type_box(ctx, id, act and act.type_in, "Volume (dB)", U.db_text(vol))
   local v = t and CH.typed_vol(t)
@@ -773,11 +892,16 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
   local no_pan = geo.fh < C.S(CH.FADER_MIN) and (geo.btm - C.S(4) - geo.top) < C.CELL_H
 
   -- pan across the top
-  if not no_pan then
+  local _, pan_eff = CH.pan_mode(track)
+  if not no_pan and (pan_eff == 5 or pan_eff == 6) then
+    if pan_pair(ctx, track, idp, x, y + C.S(2), w, pan_eff) then ImGui.OpenPopup(ctx, idp .. "panmenu") end
+    if ImGui.BeginPopup(ctx, idp .. "panmenu") then
+      CH.pan_menu(ctx, track)
+      ImGui.EndPopup(ctx)
+    end
+  elseif not no_pan then
     local pan = get(track, "D_PAN")
-    local pan_txt = (math.abs(pan) < 0.005) and "C"
-      or string.format("%d%s", math.floor(math.abs(pan) * 100 + 0.5),
-                       pan < 0 and "L" or "R")
+    local pan_txt = CH.pan_text(pan)
     ImGui.SetCursorScreenPos(ctx, x + (w - C.CELL_W) * 0.5, y + C.S(2))
     local pch, pnv, pact = W.knob(ctx, idp .. "pan", "Pan", (pan + 1) * 0.5, pan_txt,
       { bipolar = true, tooltip = pan_txt })
@@ -785,7 +909,7 @@ function CH.draw_body(ctx, dl, x, y, w, h, track, idp)
     if dblp then pnv, pch = 0.5, true end
     if pact and pact.right_click then ImGui.OpenPopup(ctx, idp .. "panmenu") end
     if ImGui.BeginPopup(ctx, idp .. "panmenu") then
-      CH.lane_item(ctx, track, "Pan")
+      CH.pan_menu(ctx, track)
       ImGui.EndPopup(ctx)
     end
     -- Centre is a place; a drag is a distance. See the fader below.

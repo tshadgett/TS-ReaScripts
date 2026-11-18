@@ -247,6 +247,25 @@ by("Guitars").col = nat(0xff0000)
 TR.apply_all(false)
 check("changed by hand since: left alone", by("Guitar 2").col, nat(0x777777))
 
+-- as tracks are added elsewhere (another script, or REAPER): a new one
+-- coloured by the rules whatever colour it came with; the others as they
+-- were (a hand colour stays)
+project(); set({ col_folder = "same", live = true })
+reaper.EnumProjects = function() return "proj" end
+local clock = 0
+reaper.time_precise = function() return clock end
+by("Guitar 1").col = nat(0x00ff00)                -- by hand
+TR.tick()                                         -- (the first look: nothing new)
+check("live: the first look leaves a hand colour", by("Guitar 1").col, nat(0x00ff00))
+local g1 = by("Guitar 1")
+local added = T("Guitar 3", 0, { col = nat(0x00ff00) })   -- came with its sibling's colour
+for i, t in ipairs(P.tracks) do if t == g1 then table.insert(P.tracks, i + 1, added) break end end
+clock = clock + 1
+TR.tick()
+check("live: a track added elsewhere takes the folder's colour", added.col, nat(0xc98a3a))
+check("live: a hand colour still left alone", by("Guitar 1").col, nat(0x00ff00))
+reaper.time_precise = function() return os.clock() end
+
 -- spacers
 project(); set({ sp_folder = true, sp_after = true, sp_sum = true })
 TR.apply_all(false)

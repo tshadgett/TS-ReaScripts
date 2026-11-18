@@ -51,6 +51,25 @@ function AC.find(name, fallback)
   return hit or fallback
 end
 
+-- DrumToolbox's main script, when it's installed (from ReaPack, or the
+-- scripts folder's own copy), or nil; and whether it's running now
+function AC.drumtoolbox()
+  local res = reaper.GetResourcePath() .. "/Scripts/"
+  for _, p in ipairs({ res .. "TS-ReaScripts/TS_DrumToolbox/TS_DrumToolbox.lua", res .. "TS_DrumToolbox/TS_DrumToolbox.lua" }) do
+    local f = io.open(p, "rb")
+    if f then f:close(); return p, reaper.GetExtState("TS_DrumToolbox", "running") == "1" end
+  end
+  return nil, false
+end
+-- Opens it (when it isn't open already)
+function AC.open_drumtoolbox()
+  local p, running = AC.drumtoolbox()
+  if not p or running then return false end
+  local id = reaper.AddRemoveReaScript(true, 0, p, true)
+  if id and id > 0 then reaper.Main_OnCommand(id, 0) return true end
+  return false
+end
+
 -- Runs it; false when there was nothing to run.
 function AC.run(name, fallback)
   local id = AC.find(name, fallback)

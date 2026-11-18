@@ -1,5 +1,30 @@
 # ChannelView — changelog
 
+## 4.3.3 — pan modes, DrumToolbox
+
+### ChannelView
+
+- **Pan mode** on the pan knob's right-click: REAPER's own Stereo balance,
+  Stereo pan, Dual pan, or the project's default. Stereo pan shows Pan and
+  Width, Dual pan Left and Right: two knobs when the strip is wide enough,
+  one concentric knob (the middle the first, the ring the second) when it
+  isn't, both its arcs from the middle. The menu offers their automation
+  lanes too.
+- **Track rules** colour a track added by another script or by REAPER
+  whatever colour it came with, while ChannelView runs (docked out of
+  sight too), and the arrange view shows it straight away.
+- **☰ ▸ DrumToolbox…** opens DrumToolbox's window when it's installed.
+
+### ChannelView Pro
+
+- **DrumToolbox Pro's drum panel** in channel view, after the console
+  panel, before the fader; DrumToolbox's plugins are left out of the
+  plugin row. Needs DrumToolbox Pro 1.0.0.
+- **Console setup with Sonimus** sets the console's state on the plugin
+  alone, without reloading every plugin on the track (which could crash
+  REAPER with some plugins loaded).
+- The folded console panel's names show a dot or an accent as it is.
+
 ## 4.3.2 — sizes that follow the text, button text, LFO and Steps triggers
 
 ### ChannelView
