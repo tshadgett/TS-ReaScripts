@@ -10,7 +10,6 @@ what the mix as a whole is doing.
 | **[Track Analyser](TS_TrackAnalyser/)** | A docked two-panel display showing what your processing is *doing* — the measured magnitude response of whatever sits between two probes, drawn over the spectrum, plus a before/after waveform with gain reduction over it. Nothing is modelled; both panels read the audio. |
 | **[DrumToolbox](TS_DrumToolbox/)** | Drum editing for a whole multitrack kit at once: every hit on every drum found, the bleed between the mics discounted, then the kit aligned and quantised from that hit map. **DrumToolbox Pro**, an add-on with its own ReaPack link, adds levelling, a gate opened by the hits, tone bands, reinforcement with noise, samples or a kit instrument, and the drum's panel in ChannelView Pro. |
 | **[TS_Visualizer](TS_Visualizer/)** | A docked metering window: LUFS, goniometer, oscilloscope, spectrum, spectrogram, a Dynamics plot of loudness against PSR with targets, and a per-track spectrum overlay. A fork of Junki Kim's JKK_Visualizer, sharing the other tools' colour controls. |
-| **[TS_360LinkFollow](TS_360LinkFollow/)** | For the SSL UF8 / UC1: hide a track in REAPER and its SSL 360 Link strip leaves the 360 Plug-in Mixer and the UF8; show it and the strip comes back. A background toggle that sets 360 Link offline on hidden tracks. |
 
 ### The probes
 
@@ -49,8 +48,6 @@ Download the repo, then:
   (ChannelView needs it too; one copy is enough)
 - `TS_Visualizer/*.lua` → `REAPER/Scripts/TS_Visualizer/`, and
   `TS_Visualizer/TS_Visualizer.jsfx` → `REAPER/Effects/TS_Visualizer/`
-- `TS_360LinkFollow/TS_360LinkFollow.lua` → `REAPER/Scripts/` (load it as an
-  action; it is a toggle)
 - `TS_DrumToolbox/*.lua` → `REAPER/Scripts/TS_DrumToolbox/`
 
 Then **Actions ▸ Show action list ▸ New action ▸ Load ReaScript…** and pick
