@@ -1,5 +1,26 @@
 # ChannelView — changelog
 
+## 4.3.4 — shared meters, meter widths
+
+### ChannelView
+
+- **Shared meters:** two plugins side by side, the second straight after
+  the first and both with input and output meters, share one meter in
+  the gap between their panels: the first's output is the second's
+  input. Under it, what the first plugin does to the level. Each panel
+  keeps its own where another plugin sits between them, hidden or not.
+
+### ChannelView Pro
+
+- **Meter width:** *Narrow* is a 12 px bar with no figures on it and no
+  reading under it (with Meter scales on, it was barely narrower than
+  Normal); *Thin* has no frame, its bar the whole width.
+- **Meter scales** stay inside their meters at any Overall size.
+- Every meter has the same dark frame, on a canvas too.
+- **Edit layout** no longer stops ChannelView with "SetCursorPos ... to
+  extend window/parent boundaries" when a click shortens the list on
+  the right while it's scrolled down.
+
 ## 4.3.3 — pan modes, DrumToolbox
 
 ### ChannelView

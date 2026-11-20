@@ -29,7 +29,7 @@
 local ED = {}
 
 -- the release both editions are; Pro must be the same
-ED.RELEASE = "4.3.3"
+ED.RELEASE = "4.3.4"
 
 -- where ReaPack puts each edition's files, under REAPER's Scripts
 ED.STANDARD_DIR = "TS-ReaScripts/TS_ChannelView/"

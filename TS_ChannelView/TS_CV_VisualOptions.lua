@@ -385,7 +385,8 @@ function VO.apply(tab)
   C.HIDE_HEAD = pro and val(s, "hide_head") or false
   C.HIDE_FOOT = pro and val(s, "hide_foot") or false
   C.METER_WIDTH = pro and tab ~= "web" and val(s, "mwidth") or "normal"
-  C.METER_SCALES = pro and val(s, "mscale") and C.METER_WIDTH ~= "thin" or false
+  -- (figures on a Normal meter only: Narrow and Thin are the bar alone)
+  C.METER_SCALES = pro and val(s, "mscale") and C.METER_WIDTH == "normal" or false
   C.TRACK_ICONS = val(s, "icons")
   C.TCP_ICONS   = C.TRACK_ICONS
   -- the overall size first: the cell width and the type follow it
@@ -921,7 +922,7 @@ local function page_panels(ctx, tab, s)
       val(s, "mwidth"))
     if mw then set(tab, "mwidth", mw) end
     if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "The GR and In / Out meters. Narrow: no readouts under them.\nThin: no scale either.")
+      ImGui.SetTooltip(ctx, "The GR and In / Out meters. Narrow: no readouts or figures.\nThin: thinner still.")
     end
   end
   if not ED.PRO then ImGui.EndDisabled(ctx) end

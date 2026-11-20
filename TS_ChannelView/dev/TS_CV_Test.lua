@@ -1983,7 +1983,7 @@ do
   local io0, gr0 = C.IO_COL_W, C.METER_COL_W
   C.METER_WIDTH = "narrow"; C.set_ui(1)
   check("meter width: narrow, no readouts", ("%s %d %d"):format(tostring(C.METER_READOUT), C.IO_COL_W, C.METER_COL_W),
-    ("false %d %d"):format(C.IO_BAR_W + 2, C.METER_W + 2))
+    "false 14 14")
   C.METER_WIDTH = "thin"; C.set_ui(1.5)
   check("meter width: thin", ("%d %d %d"):format(C.IO_BAR_W, C.METER_W, C.IO_COL_W), "8 8 11")
   C.METER_WIDTH = nil; C.set_ui(1)
@@ -13743,6 +13743,101 @@ do
   children = 0
   ok, err = pcall(tb.draw_v, "ctx", 100, 10, 120, 200, "right")
   check("bar scroll: a column too", (ok and "ok" or tostring(err)) .. " " .. children, "ok 1")
+end
+
+-- A child's cursor parked at the start of what it holds (W.park): scrolled
+-- down past content that has just got shorter, the window's corner would
+-- be past its end (ImGui's "SetCursorPos ... to extend" error at EndChild)
+do
+  local at
+  local fake = setmetatable({
+    GetWindowPos = function() return 100, 10 end,
+    GetCursorStartPos = function() return 8, -292 end,
+    SetCursorScreenPos = function(_, x, y) at = x .. " " .. y end,
+  }, { __index = function() return function() end end })
+  W.attach(fake)
+  W.park("ctx")
+  check("park: at the content's start, scrolled", at, "108 -282")
+end
+
+-- A plugin panel's meter: the RMS strip never wider than the bar, the
+-- figures kept inside the meter
+do
+  local rects, clips = {}, 0
+  local fake = setmetatable({
+    CalcTextSize = function(_, t) return #(t or "") * 6, 9 end,
+    DrawList_AddRectFilled = function(_, x1, y1, x2, y2, col) rects[#rects + 1] = { x2 - x1, col } end,
+    DrawList_PushClipRect = function() clips = clips + 1 end,
+  }, { __index = function(_, key)
+    if key:match("^%u%a+_") and not key:match("^DrawList_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake)
+  local rms_w, bar_w
+  W.level_meter("ctx", "dl", 0, 0, 6, 200, { -6 }, -6, nil, -12)
+  for _, r in ipairs(rects) do
+    if r[2] == C.COL.level_rms then rms_w = r[1] elseif r[2] ~= C.COL.knob_body then bar_w = bar_w or r[1] end
+  end
+  check("meter: a thin bar's RMS strip no wider than it", tostring(rms_w <= bar_w), "true")
+  W.level_meter("ctx", "dl", 0, 0, 14, 200, { -6 }, -6, true, nil)
+  check("meter: its figures clipped to it", clips > 0, true)
+end
+
+-- A meter's slot and frame keep their own colours when a canvas's or a
+-- faceplate's colours take over the knobs'
+do
+  local frames = {}
+  local fake = setmetatable({
+    CalcTextSize = function(_, t) return #(t or "") * 6, 9 end,
+    DrawList_AddRect = function(_, _, _, _, _, col) frames[#frames + 1] = col end,
+  }, { __index = function(_, key)
+    if key:match("^%u%a+_") and not key:match("^DrawList_") then return 1 end
+    return function() end
+  end })
+  W.attach(fake)
+  local keep = C.COL.knob_ring
+  C.COL.knob_ring = 0x12345678
+  W.level_meter("ctx", "dl", 0, 0, 14, 200, { -6 }, -6, nil, nil)
+  W.gr_meter("ctx", "dl", 0, 0, 20, 200, 3, 3, 12, false, false, nil)
+  C.COL.knob_ring = keep
+  check("meter: frames in the meter's own colour", frames[1] == C.COL.meter_frame and frames[2] == C.COL.meter_frame, true)
+end
+
+-- Two panels share one meter in the gap only when the second plugin comes
+-- straight after the first and both show their meters (P.shares_io), and a
+-- panel sharing one is a column narrower
+do
+  local TP_, St_, T_ = require("TS_CV_Taps"), require("TS_CV_State"), require("TS_CV_FXTree")
+  local MD_ = require("TS_CV_Mod")
+  local keep = { TP_.levels, TP_.is_metered, St_.is_collapsed, T_.get_offline, MD_.plugin, reaper.TrackFX_GetFXName }
+  local names = { [1] = "JS: TS_TrackProbe", [2] = "VST3: Saturator" }
+  reaper.TrackFX_GetFXName = function(_, addr) return names[addr] ~= nil, names[addr] or "" end
+  MD_.plugin = function() return nil end
+  local metered = { ga = true, gb = true, gc = true, gd = true }
+  TP_.levels = function(_, g) return metered[g] and { in_pk = -6, in_rms = -12, out_pk = -5, out_rms = -11 } or nil end
+  TP_.is_metered = function(_, g) return metered[g] == true end
+  St_.is_collapsed = function() return false end
+  T_.get_offline = function() return false end
+  local lay = { levels = true }
+  local function fx(g, idx, extra)
+    local f = { guid = g, addr = idx, index = idx, parent_path = {}, name = "VST: " .. g, parallel = 0 }
+    for k, v in pairs(extra or {}) do f[k] = v end
+    return f
+  end
+  local a, b = fx("ga", 0), fx("gb", 1)
+  check("shared meter: next in the chain", P.shares_io("tr", a, lay, "ka", b, lay, "kb"), true)
+  check("shared meter: across a probe", P.shares_io("tr", a, lay, "ka", fx("gb", 2), lay, "kb"), true)
+  check("shared meter: not across a hidden plugin", P.shares_io("tr", a, lay, "ka", fx("gb", 3), lay, "kb"), false)
+  check("shared meter: not into a parallel one", P.shares_io("tr", a, lay, "ka", fx("gb", 1, { parallel = 1 }), lay, "kb"), false)
+  check("shared meter: not into a container", P.shares_io("tr", a, lay, "ka", fx("gb", 1, { parent_path = { 1 } }), lay, "kb"), false)
+  check("shared meter: not when one has none", P.shares_io("tr", a, lay, "ka", b, { levels = false }, "kb"), false)
+  metered.gb = nil
+  check("shared meter: not when one isn't measured", P.shares_io("tr", a, lay, "ka", b, lay, "kb"), false)
+  TP_.levels, TP_.is_metered, St_.is_collapsed, T_.get_offline = keep[1], keep[2], keep[3], keep[4]
+  MD_.plugin, reaper.TrackFX_GetFXName = keep[5], keep[6]
+  local both = P.width(4, 200, false, false, nil, true)
+  local one = P.width(4, 200, false, false, nil, { l = false, r = true })
+  check("shared meter: a panel sharing one is a column narrower", both - one, C.IO_COL_W + C.PANEL_PAD)
 end
 
 -- Scan for new plugins: REAPER's FX browser opened, F5 pressed in it, the

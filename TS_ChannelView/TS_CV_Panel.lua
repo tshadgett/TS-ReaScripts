@@ -1392,6 +1392,17 @@ end
 -- and only matters for one thing: a ReaEQ panel isn't a grid at all, so
 -- none of the layout applies to it -- it gets a fixed canvas width
 -- instead. See TS_CV_EQPanel.lua.
+-- Which of a panel's input and output meters it draws: true for both,
+-- or { l = , r = } when it shares one with the panel beside it (the
+-- meter is then in the gap between them: P.draw_gap_io)
+local function io_l(io) return io == true or (type(io) == "table" and io.l) end
+local function io_r(io) return io == true or (type(io) == "table" and io.r) end
+-- the space either side the input and output meters take
+local function io_w(io)
+  if not io then return 0 end
+  return ((io_l(io) and 1 or 0) + (io_r(io) and 1 or 0)) * (C.IO_COL_W + C.PANEL_PAD)
+end
+
 function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
   if collapsed then return C.COLLAPSED_W end
   -- the TS_CV Trimmer: its own panel, as wide as the strip's height needs
@@ -1409,13 +1420,13 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
       side = P.width(n_or_controls, avail_h, false, false, nil, false, false, lock) - C.PANEL_PAD
     end
     -- with input/output meters: on the panel's two outside edges
-    return MP.width(canvas.kind, canvas) + side + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
+    return MP.width(canvas.kind, canvas) + side + io_w(has_io)
   end
   if key and own_eq(key) then
-    return P.own_w(key) + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0)
+    return P.own_w(key) + io_w(has_io)
   end
   -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
-  if key and own_rc(key) then return P.own_w(key) + (has_io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0) end
+  if key and own_rc(key) then return P.own_w(key) + io_w(has_io) end
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -1446,7 +1457,7 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
   if has_meter then w = w + C.METER_COL_W + C.PANEL_PAD end
   -- ...and opened out into its trace, the trace beside it.
   if has_meter and has_trace then w = w + C.GRV_W + C.PANEL_PAD end
-  if has_io then w = w + (C.IO_COL_W + C.PANEL_PAD) * 2 end
+  w = w + io_w(has_io)
   return w
 end
 
@@ -1994,15 +2005,16 @@ end
 -- hard left of the panel, output hard right, so the panel reads the way
 -- the audio flows. `lx` and `rx` are the two columns' left edges. Returns
 -- true when it drew them.
-local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
+local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled, io)
   local lv = TP.levels(track, fx.guid)
   if not lv then return false end
+  local l, r = io_l(io), io_r(io)
   local key = "io" .. fx.guid
   local tip
   if lv.old then
     -- A probe from an older version, still running: nothing to read.
-    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", -150, nil, "?", nil, "l")
-    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", -150, nil, "?", nil, "r")
+    if l then W.io_bar(ctx, dl, lx, y, w, h, key .. "i", -150, nil, "?", nil, "l") end
+    if r then W.io_bar(ctx, dl, rx, y, w, h, key .. "o", -150, nil, "?", nil, "r") end
     tip = "Older probe: no levels.\n" ..
           "Reopen the project to update it."
   else
@@ -2011,8 +2023,8 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
     local out_rms = byp and -150 or lv.out_rms
     local in_hold = W.level_peak(key .. "i", lv.in_pk, reaper.time_precise())
     local itxt, otxt, ocol = W.io_readouts(lv, byp, in_hold)
-    W.io_bar(ctx, dl, lx, y, w, h, key .. "i", lv.in_pk, lv.in_rms, itxt, C.COL.header_dim, "l")
-    W.io_bar(ctx, dl, rx, y, w, h, key .. "o", out_pk, out_rms, otxt, ocol, "r")
+    if l then W.io_bar(ctx, dl, lx, y, w, h, key .. "i", lv.in_pk, lv.in_rms, itxt, C.COL.header_dim, "l") end
+    if r then W.io_bar(ctx, dl, rx, y, w, h, key .. "o", out_pk, out_rms, otxt, ocol, "r") end
     local function f(v) return (v and v > -149) and ("%.1f"):format(v) or "-inf" end
     tip = ("Input   peak %s   RMS %s dBFS\nOutput  peak %s   RMS %s dBFS\n%s")
       :format(f(lv.in_pk), f(lv.in_rms), f(not byp and lv.out_pk or nil), f(not byp and lv.out_rms or nil),
@@ -2020,12 +2032,73 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled)
               or ((lv.in_rms > -70) and ("Change %+.1f dB RMS")
                   :format(lv.out_rms - lv.in_rms) or "No input signal"))
   end
-  for _, c in ipairs({ { lx, "ioi##" }, { rx, "ioo##" } }) do
-    ImGui.SetCursorScreenPos(ctx, c[1], y)
-    ImGui.InvisibleButton(ctx, c[2] .. fx.guid, w, h, ImGui.ButtonFlags_MouseButtonRight)
-    W.tip(ctx, c[2] .. fx.guid, tip, ImGui.IsItemHovered(ctx), false)
+  for _, c in ipairs({ { l, lx, "ioi##" }, { r, rx, "ioo##" } }) do
+    if c[1] then
+      ImGui.SetCursorScreenPos(ctx, c[2], y)
+      ImGui.InvisibleButton(ctx, c[3] .. fx.guid, w, h, ImGui.ButtonFlags_MouseButtonRight)
+      W.tip(ctx, c[3] .. fx.guid, tip, ImGui.IsItemHovered(ctx), false)
+    end
   end
   return true
+end
+
+-- Whether panels `a` and `b`, side by side in the row, share one meter
+-- between them: `b` is the plugin after `a` in the same chain, with only
+-- probes and ChannelView Modulators between them (they pass the audio
+-- untouched) -- no other plugin, hidden or folded away, nor one running
+-- beside it -- and both show their input and output meters, so `a`'s
+-- output is `b`'s input.
+local function passes_through(track, path)
+  local addr = T.addr_at(track, path)
+  if not addr then return false end
+  if #path == 1 and MD.plugin(track) == addr then return true end
+  local ok, name = reaper.TrackFX_GetFXName(track, addr)
+  return ok and name:find(TP.PROBE_NAME, 1, true) ~= nil
+end
+function P.shares_io(track, a, la, ka, b, lb, kb)
+  -- (parallel: REAPER's 0 runs after the one before, 1 and 2 beside it)
+  if not (a and b) or a.is_container or b.is_container or (b.parallel or 0) ~= 0 then return false end
+  if not (a.index and b.index) or b.index <= a.index then return false end
+  if table.concat(a.parent_path or {}, ".") ~= table.concat(b.parent_path or {}, ".") then return false end
+  for j = a.index + 1, b.index - 1 do
+    local path = {}
+    for d, v in ipairs(a.parent_path or {}) do path[d] = v end
+    path[#path + 1] = j
+    if not passes_through(track, path) then return false end
+  end
+  if St.is_collapsed(a.guid) or St.is_collapsed(b.guid) then return false end
+  if own_trim(ka) or own_trim(kb) then return false end
+  if T.get_offline(track, a.addr) or T.get_offline(track, b.addr) then return false end
+  if not (P.has_io(track, a, la) and P.has_io(track, b, lb)) then return false end
+  return TP.levels(track, a.guid) ~= nil and TP.levels(track, b.guid) ~= nil
+end
+
+-- The meter two panels share, in the gap between them (P.shares_io): the
+-- signal there (`b`'s input), and under it what `a` does to it, as `a`'s
+-- output meter reads
+function P.draw_gap_io(ctx, dl, x, y, w, h, track, a, b)
+  local la, lb = TP.levels(track, a.guid), TP.levels(track, b.guid)
+  if not (la and lb) then return end
+  local key = "io" .. b.guid .. "i"
+  local tip
+  if la.old or lb.old then
+    W.io_bar(ctx, dl, x, y, w, h, key, -150, nil, "?", nil, nil)
+    tip = "Older probe: no levels.\nReopen the project to update it."
+  else
+    local byp = not T.get_enabled(track, a.addr)
+    local _, otxt, ocol = W.io_readouts(la, byp, nil)
+    W.io_bar(ctx, dl, x, y, w, h, key, lb.in_pk, lb.in_rms, otxt, ocol, nil)
+    local function f(v) return (v and v > -149) and ("%.1f"):format(v) or "-inf" end
+    local function nm(fx) return fx.alias or U.clean_fx_name(fx.name or "") end
+    tip = ("%s into %s\nPeak %s   RMS %s dBFS\n%s")
+      :format(nm(a), nm(b), f(lb.in_pk), f(lb.in_rms),
+              byp and (nm(a) .. " bypassed")
+              or ((la.in_rms > -70) and ("%s: change %+.1f dB RMS"):format(nm(a), la.out_rms - la.in_rms)
+                  or "No input signal"))
+  end
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.InvisibleButton(ctx, "iog##" .. b.guid, w, h, ImGui.ButtonFlags_MouseButtonRight)
+  W.tip(ctx, "iog##" .. b.guid, tip, ImGui.IsItemHovered(ctx), false)
 end
 
 -- ---------------------------------------------------------------------
@@ -2905,10 +2978,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   if io then
     local ok = draw_io(ctx, dl, grid_x0, grid_x0 + grid_w - C.IO_COL_W,
                        y + C.PANEL_PAD, C.IO_COL_W, h - C.PANEL_PAD * 2,
-                       track, fx, T.get_enabled(track, fx.addr))
+                       track, fx, T.get_enabled(track, fx.addr), io)
     if ok then
-      grid_x0 = grid_x0 + C.IO_COL_W + C.PANEL_PAD
-      grid_w  = grid_w - (C.IO_COL_W + C.PANEL_PAD) * 2
+      if io_l(io) then grid_x0 = grid_x0 + C.IO_COL_W + C.PANEL_PAD end
+      grid_w = grid_w - io_w(io)
     end
   end
   if meter then
@@ -4150,8 +4223,8 @@ end
 local function rc_body(ctx, dl, x, y, ww, bh, track, fx, req, io, enabled, plate, saved)
   local ex, ew = x, ww
   if io and draw_io(ctx, dl, x + C.PANEL_PAD, x + ww - C.PANEL_PAD - C.IO_COL_W,
-                    y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
-    ex, ew = x + C.IO_COL_W + C.PANEL_PAD, ww - (C.IO_COL_W + C.PANEL_PAD) * 2
+                    y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled, io) then
+    ex, ew = x + (io_l(io) and C.IO_COL_W + C.PANEL_PAD or 0), ww - io_w(io)
   end
   return on_screen(plate, saved, dl, ex + 1, y + P.head_h() + 1, ew - 2, bh - 2,
     CP.draw, ctx, dl, ex, y + P.head_h(), ew, bh, track, fx, req)
@@ -4252,7 +4325,6 @@ P.RACK_GR_ROWS = 3
 local gr_across = {}
 function P.rack_gr_across(guid) return gr_across[guid] == true end
 -- the space either side the input and output meters take
-local function io_w(io) return io and (C.IO_COL_W + C.PANEL_PAD) * 2 or 0 end
 
 -- How tall a grid is across `avail` in the rack: each page's, the
 -- tallest; with the tab strip, and without.
@@ -4581,6 +4653,11 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   -- input/output meters: on any panel, a canvas's or ReaComp's included
   -- (their own strip beside the curve is the reduction only)
   local io = (not is_trim) and P.has_io(track, fx, layout)
+  -- one shared with the panel beside it, in the gap (ChannelView's row
+  -- sets P.io_next for the panel it draws next: P.shares_io)
+  local share = P.io_next
+  P.io_next = nil
+  if io and share then io = { l = not share.l, r = not share.r } end
   local canvas = (not is_eq and not is_rc and not is_trim) and canvas_of(layout) or nil
   if canvas then meter = nil end
   local nat_w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
@@ -4687,8 +4764,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         local ex, ew = bx, bw
         if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
                           y + P.head_h() + C.PANEL_PAD, C.IO_COL_W,
-                          wh - P.head_h() - fh - C.PANEL_PAD * 2, track, fx, enabled) then
-          ex, ew = bx + C.IO_COL_W + C.PANEL_PAD, bw - (C.IO_COL_W + C.PANEL_PAD) * 2
+                          wh - P.head_h() - fh - C.PANEL_PAD * 2, track, fx, enabled, io) then
+          ex, ew = bx + (io_l(io) and C.IO_COL_W + C.PANEL_PAD or 0), bw - io_w(io)
         end
         EQP.draw(ctx, dl, ex, y + P.head_h(), ew, wh - P.head_h() - fh, track, fx, req)
       elseif canvas then
@@ -4699,8 +4776,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         local bh = wh - P.head_h() - fh
         local ex, ew = bx, bw
         if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
-                          y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled) then
-          ex, ew = bx + C.IO_COL_W + C.PANEL_PAD, bw - (C.IO_COL_W + C.PANEL_PAD) * 2
+                          y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled, io) then
+          ex, ew = bx + (io_l(io) and C.IO_COL_W + C.PANEL_PAD or 0), bw - io_w(io)
         end
         -- the rack: the canvas across the whole width, the controls under it
         local stacked = P.RACK and P.FILL_W and true or false

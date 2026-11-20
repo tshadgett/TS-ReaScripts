@@ -690,6 +690,7 @@ C.LIGHT_LUM = {
   empty_text = 0.420, header_drag = 0.660, icon = 0.300, icon_hot = 0.050,
   icon_on = 0.950, fader_cap = 0.250, eq_grid = 0.740, eq_grid_0db = 0.620,
   eq_preview = 0.450, eq_spectrum = 0.720, meter_ink = 0.250,
+  meter_slot = 0.820, meter_frame = 0.550,
   route_off = 0.620, auto_trim = 0.550,
   header_bg_byp = 0.640, header_bg_off = 0.640, ui_remove_bg = 0.750,
   frozen_bg = 0.800, frozen_head = 0.740, frozen_text = 0.300, frozen_line = 0.400,
@@ -785,6 +786,11 @@ C.PALETTE = {
   -- well above that range and the other well below it.
   meter_ink     = { "tint",  0.0, 0.110, 0.620 },
   meter_ink_lit = { "tint",  0.0, 0.240, 0.105 },
+  -- A meter's slot and frame: a knob's body and ring, but entries of
+  -- their own, so a canvas's or faceplate's colours (which take over the
+  -- knobs') leave every meter alike
+  meter_slot    = { "tint",    1.0, 0.165, 0.178 },
+  meter_frame   = { "tint",    1.0, 0.147, 0.280 },
   rec_on     = { "fixed",  358.8, 0.650, 0.563 },
   solo_on    = { "fixed",   43.1, 0.645, 0.569 },
   mute_on    = { "fixed",   16.9, 0.645, 0.569 },
@@ -1333,16 +1339,19 @@ function C.set_ui(k)
   end
   for name, sz in pairs(C.SIZES) do sz.d = r(ui_base.sizes[name]) end
   -- the plugin panels' meters (Options' Meter width): Narrow leaves out
-  -- the readouts under them (the tooltip has them), Thin the scale too
+  -- the readouts under them and the figures on them (the tooltip has the
+  -- readings), a bar halfway between Normal's room and Thin's; Thin is
+  -- narrower still
   local mw = C.METER_WIDTH
   C.METER_READOUT = mw ~= "narrow" and mw ~= "thin"
-  if mw == "thin" then
-    C.IO_BAR_W, C.METER_W = r(5), r(5)
-    C.IO_BAR_W_SCALE, C.METER_W_SCALE = C.IO_BAR_W, C.METER_W
+  if mw == "narrow" or mw == "thin" then
+    local bw = r(mw == "thin" and 5 or 12)
+    C.IO_BAR_W, C.METER_W = bw, bw
+    C.IO_BAR_W_SCALE, C.METER_W_SCALE = bw, bw
   end
   if not C.METER_READOUT then
-    C.IO_COL_W = (C.METER_SCALES and C.IO_BAR_W_SCALE or C.IO_BAR_W) + r(2)
-    C.METER_COL_W = (C.METER_SCALES and C.METER_W_SCALE or C.METER_W) + r(2)
+    C.IO_COL_W = C.IO_BAR_W + r(2)
+    C.METER_COL_W = C.METER_W + r(2)
   end
   if C.CELL_W_RAW then C.set_cell_w(C.CELL_W_RAW) end
   if C.CHANNEL_W_RAW then C.set_channel_w(C.CHANNEL_W_RAW) end

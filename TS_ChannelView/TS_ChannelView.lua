@@ -1,12 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.3.3
+-- @version 4.3.4
 -- @changelog
---  The pan knob's right-click sets the track's pan mode: Stereo pan (pan
---  and width) and Dual pan (left and right) as two knobs, or one
---  concentric knob on a narrow strip. Track rules colour tracks added by
---  other scripts. DrumToolbox in the main menu. Moves with ChannelView Pro
---  4.3.3. See the CHANGELOG.
+--  Two plugins side by side, the second straight after the first and both
+--  with input and output meters, share one meter in the gap between
+--  their panels. Moves with ChannelView Pro 4.3.4. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -5932,6 +5930,29 @@ local function panel_row(row_h, row_w)
         for k = b.first, b.last do drop[k] = math.max(drop[k] or 0, d) end
       end
       local function panel_h(i) return inner_h - (drop[i] or 0) end
+      -- Two panels side by side share one meter in the gap between them
+      -- when the second plugin comes next after the first (probes aside)
+      -- and both show their input and output (P.shares_io): shared[i], panels i
+      -- and i + 1. Not on a blind compare's boxes, nor where their tops
+      -- differ.
+      local shared = {}
+      do
+        local blind = POP.CMP and POP.CMP.blind(app.track)
+        for i = 1, #app.chain - 1 do
+          local a, b = app.chain[i], app.chain[i + 1]
+          if (drop[i] or 0) == (drop[i + 1] or 0)
+             and not (blind and (POP.CMP.side_of(app.track, a.guid) or POP.CMP.side_of(app.track, b.guid))) then
+            local la, ka = layout_for(a)
+            local lb, kb = layout_for(b)
+            shared[i] = P.shares_io(app.track, a, la, ka, b, lb, kb)
+          end
+        end
+      end
+      local function io_of(i, fx, lay)
+        local io = P.has_io(app.track, fx, lay)
+        if io and (shared[i - 1] or shared[i]) then io = { l = not shared[i - 1], r = not shared[i] } end
+        return io
+      end
 
       -- Centring needs the row's full width up front, so measure first.
       -- Only worth it when everything fits; once the panels overflow they
@@ -5946,10 +5967,11 @@ local function panel_row(row_h, row_w)
                             and T.reports_gr(app.track, fx.addr, fx.guid)
           total = total + P.width(P.visible(lay.controls or {}, app.track, fx), panel_h(i),
                                   St.is_collapsed(fx.guid), has_meter, k,
-                                  P.has_io(app.track, fx, lay),
+                                  io_of(i, fx, lay),
                                   St.is_gr_open(fx.guid), M.locked(lay),
                                   (not P.own_eq(k) and not P.own_rc(k)) and P.canvas_of(lay) or nil)
           if i > 1 then total = total + C.PANEL_GAP end
+          if shared[i] then total = total + C.IO_COL_W + C.PANEL_GAP end
         end
         local avail_w = ImGui.GetContentRegionAvail(ctx)
         if total < avail_w then
@@ -5974,6 +5996,15 @@ local function panel_row(row_h, row_w)
       end
       for i, fx in ipairs(app.chain) do
         if i > 1 then ImGui.SameLine(ctx, 0, C.PANEL_GAP) end
+        -- the meter this panel shares with the one before it, in the gap
+        if shared[i - 1] then
+          local gx, gy0 = ImGui.GetCursorScreenPos(ctx)
+          local gy = row_top + (drop[i] or 0) + P.head_h() + C.PANEL_PAD
+          local gh = panel_h(i) - P.head_h() - P.footer_h() - C.PANEL_PAD * 2
+          P.draw_gap_io(ctx, ImGui.GetWindowDrawList(ctx), gx, gy, C.IO_COL_W, gh,
+                        app.track, app.chain[i - 1], fx)
+          ImGui.SetCursorScreenPos(ctx, gx + C.IO_COL_W + C.PANEL_GAP, gy0)
+        end
         local px = ImGui.GetCursorScreenPos(ctx)
         local py = row_top + (drop[i] or 0)
         ImGui.SetCursorScreenPos(ctx, px, py)
@@ -5985,7 +6016,9 @@ local function panel_row(row_h, row_w)
         if cmp and POP.CMP.blind(app.track) then
           w, req = POP.CMP.blind_panel(ctx, app.track, fx, panel_h(i)), {}
         else
+          if shared[i - 1] or shared[i] then P.io_next = { l = shared[i - 1] or false, r = shared[i] or false } end
           w, req = P.draw(ctx, app.track, fx, layout, key, panel_h(i), i, is_src)
+          P.io_next = nil
         end
 
         app.panel_rects[#app.panel_rects + 1] = {

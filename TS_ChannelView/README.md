@@ -1963,8 +1963,8 @@ right-click ▸ *Group looks…*.
   lamp), the header and foot hidden until the pointer is over them, and
   **Meter scales**: figures on the GR and In / Out meters, as on the
   fader meters (the web page's GR meters too). **Meter width**, those
-  meters: *Normal*, *Narrow* (no readouts under them; hover for them) or
-  *Thin* (no scale either). On the ChannelView and
+  meters: *Normal*, *Narrow* (no readouts under them and no figures on
+  them; hover for the readings) or *Thin* (narrower still). On the ChannelView and
   Rack tabs: **Panel alignment**, left or centred.
 - **Track buttons:** the track's colour on its name button (Pro: *Bar
   below*, *Bar above* or *Filled*) and the track icons.
@@ -3053,6 +3053,12 @@ It works for any plugin between the probes, including ones that report their
 own reduction; those are tapped for their levels alone. Gain reduction and
 levels together share the limit of eight plugins per track. On a canvas the
 two meters run down the panel's left and right edges.
+
+Two panels side by side with their meters on, the second plugin straight
+after the first, **share one meter** in the gap between them: the first's
+output is the second's input. Under it is the first plugin's change. Each
+panel keeps its own where something sits between them (a plugin hidden,
+folded or running in parallel, a container's edge).
 
 ### The gain-reduction trace (Pro)
 

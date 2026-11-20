@@ -153,6 +153,9 @@ local function container_addr(track, path)
   end
   return rv
 end
+-- A slot's FX address from its path ({ top slot, slot in that container,
+-- ... }, 0-based), or nil
+T.addr_at = container_addr
 
 local function container_probe_addr(track, path)
   if #path == 1 then return CONTAINER_FLAG + path[1] + 1 end

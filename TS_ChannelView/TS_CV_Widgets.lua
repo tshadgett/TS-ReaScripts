@@ -3659,8 +3659,11 @@ end
 -- puts a labelled ladder down the RIGHT of the meter, which is where a
 -- console puts it and where it doesn't sit between you and the bars.
 function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body, 2.0)
-  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.knob_ring, 2.0, 0, 1.0)
+  -- (a thin one, under 7 px, has no frame: its slot, and the bar the
+  -- whole width of it)
+  local thin = w < 7
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.meter_slot, thin and 1.0 or 2.0)
+  if not thin then ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.meter_frame, 2.0, 0, 1.0) end
 
   -- The ladder is printed OVER the bars, the way REAPER's own meters
   -- do it, so the bars get the whole width instead of giving a third
@@ -3684,13 +3687,16 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
     gut = math.min(gut + 5, w * 0.5)
   end
 
-  local bar_l, bar_r = x + 1.5, x + w - 1.5 - gut
+  local ins = thin and 0 or 1.5
+  local bar_l, bar_r = x + ins, x + w - ins - gut
   local n  = math.max(1, #chans)
   local bw = (bar_r - bar_l - (n - 1)) / n
   -- The RMS hairline's width, worked out once: the bars draw it and the
   -- peak-hold lines stop short of it, and those two had better agree
   -- about how wide it is.
-  local rms_w = math.min(C.RMS_STRIP_W, math.max(2, bw * 0.4))
+  -- Whole pixels, and never wider than the bar it sits on: a thin bar at
+  -- a small Overall size has a strip of a pixel.
+  local rms_w = math.max(1, math.min(C.RMS_STRIP_W, math.floor(bw * 0.4 + 0.5)))
   for i = 1, n do
     local db = chans[i] or -150
     local f  = W.level_frac(db)
@@ -3745,8 +3751,10 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
     local first = chans[1] or -150
     local last  = chans[n] or -150
     -- (in the small face, which follows Overall size and the text size
-    -- together; a mark too close to the one above it is left out)
+    -- together; a mark too close to the one above it is left out. Kept
+    -- inside the meter: a figure as wide as the bar has no dashes.)
     W.push_small(ctx)
+    ImGui.DrawList_PushClipRect(dl, x, y, x + w, y + h, true)
     local prev_y = -math.huge
     for _, mark in ipairs(C.METER_MARKS) do
       local my = y + 2 + (h - 4) * (1 - W.level_frac(mark))
@@ -3755,10 +3763,12 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
       if my > y + lh * 0.5 + 1 and my < y + h - lh * 0.5 and my - prev_y >= lh + 1 then
         prev_y = my
         local half = lw * 0.5 + C.S(2)
-        ImGui.DrawList_AddLine(dl, bar_l, my, mid - half - 1, my,
-          scale_ink(first, mark), 1.0)
-        ImGui.DrawList_AddLine(dl, mid + half + 1, my, bar_r, my,
-          scale_ink(last, mark), 1.0)
+        if mid - half - 1 - bar_l >= 2 then
+          ImGui.DrawList_AddLine(dl, bar_l, my, mid - half - 1, my,
+            scale_ink(first, mark), 1.0)
+          ImGui.DrawList_AddLine(dl, mid + half + 1, my, bar_r, my,
+            scale_ink(last, mark), 1.0)
+        end
 
         local tx, ty = mid - lw * 0.5, my - lh * 0.5
         if n > 1 then
@@ -3773,6 +3783,7 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
         end
       end
     end
+    ImGui.DrawList_PopClipRect(dl)
     W.pop_small(ctx)
   elseif opts_scale then
     W.push_small(ctx)
@@ -3784,7 +3795,7 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
       if my > y + lh * 0.5 + 1 and my < y + h - lh * 0.5 and my - prev_y >= lh + 1 then
         prev_y = my
         ImGui.DrawList_AddLine(dl, bar_l, my, bar_r, my,
-          U.with_alpha(C.COL.knob_ring, 0x80), 1.0)
+          U.with_alpha(C.COL.meter_frame, 0x80), 1.0)
         ImGui.DrawList_AddText(dl, x + w - C.S(2) - lw, my - lh * 0.5,
           C.COL.header_dim, lbl)
       end
@@ -3793,7 +3804,7 @@ function W.level_meter(ctx, dl, x, y, w, h, chans, peak_db, opts_scale, rms_db)
   else
     for _, mark in ipairs({ -6, -18 }) do
       local my = y + 2 + (h - 4) * (1 - W.level_frac(mark))
-      ImGui.DrawList_AddLine(dl, x + w - 4, my, x + w - 1, my, C.COL.knob_ring, 1.0)
+      ImGui.DrawList_AddLine(dl, x + w - 4, my, x + w - 1, my, C.COL.meter_frame, 1.0)
     end
   end
 
@@ -3839,7 +3850,7 @@ end
 -- No ladder at all: a TCP meter is a few pixels tall, and figures or
 -- ticks squeezed into it only get in the way of the bars.
 function W.level_meter_h(ctx, dl, x, y, w, h, chans, peak_db, rms_db)
-  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.knob_body, 1.5)
+  ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.meter_slot, 1.5)
 
   local n = math.max(1, #chans)
   local bar_l, bar_r = x + 1, x + w - 1
@@ -4154,15 +4165,16 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
   local bx    = (side == "l") and (x + 1) or (side == "r") and (x + col_w - bw - 1) or (x + (col_w - bw) * 0.5)
   local w     = bw
 
-  ImGui.DrawList_AddRectFilled(dl, bx, y, bx + w, y + bar_h, C.COL.knob_body, 2.0)
-  ImGui.DrawList_AddRect(dl, bx, y, bx + w, y + bar_h, C.COL.knob_ring, 2.0, 0, 1.0)
+  ImGui.DrawList_AddRectFilled(dl, bx, y, bx + w, y + bar_h, C.COL.meter_slot, (w < 7) and 1.0 or 2.0)
+  -- (a thin one, under 7 px, has no frame)
+  if w >= 7 then ImGui.DrawList_AddRect(dl, bx, y, bx + w, y + bar_h, C.COL.meter_frame, 2.0, 0, 1.0) end
 
   x = bx
   local inner_y, inner_h = y + 2, bar_h - 4
 
   -- the bar
   local frac = math.max(0, math.min(1, (gr_db or 0) / max_db))
-  local ins = (w < 7) and 1 or 2     -- (a thin one: filled to its edge)
+  local ins = (w < 7) and 0 or 2     -- (a thin one: filled to its edge)
   if frac > 0.001 then
     ImGui.DrawList_AddRectFilled(dl, x + ins, inner_y,
       x + w - ins, inner_y + inner_h * frac, W.gr_fill_col(est, dim), 1.0)
@@ -4174,7 +4186,7 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
     local ty = inner_y + inner_h * (i / 4)
     local wide = (i == 4)
     ImGui.DrawList_AddLine(dl, x + (wide and 1 or math.max(1, w - 6)), ty,
-      x + w - 1, ty, C.COL.knob_ring, 1.0)
+      x + w - 1, ty, C.COL.meter_frame, 1.0)
   end
 
   -- its figures over the bar (Options' Meter scales), dark over
@@ -4185,8 +4197,10 @@ function W.gr_meter(ctx, dl, x, y, col_w, h, gr_db, peak_db, max_db, est, dim, s
       if ty > y + 6 and ty < y + bar_h - 5 then
         local s = tostring(g)
         local tw, th = ImGui.CalcTextSize(ctx, s)
-        ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, ty - th * 0.5,
-          ((gr_db or 0) >= g) and C.COL.meter_ink_lit or C.COL.meter_ink, s)
+        if tw <= w - 2 then
+          ImGui.DrawList_AddText(dl, x + (w - tw) * 0.5, ty - th * 0.5,
+            ((gr_db or 0) >= g) and C.COL.meter_ink_lit or C.COL.meter_ink, s)
+        end
       end
     end
   end
@@ -4221,8 +4235,8 @@ function W.gr_meter_h(ctx, dl, x, y, w, h, gr_db, peak_db, max_db, est, dim)
   local tw, th = ImGui.CalcTextSize(ctx, "-88.8 dB")
   local bx = x + tw + 6
   local bw = math.max(10, x + w - bx)
-  ImGui.DrawList_AddRectFilled(dl, bx, y, bx + bw, y + h, C.COL.knob_body, 2.0)
-  ImGui.DrawList_AddRect(dl, bx, y, bx + bw, y + h, C.COL.knob_ring, 2.0, 0, 1.0)
+  ImGui.DrawList_AddRectFilled(dl, bx, y, bx + bw, y + h, C.COL.meter_slot, 2.0)
+  ImGui.DrawList_AddRect(dl, bx, y, bx + bw, y + h, C.COL.meter_frame, 2.0, 0, 1.0)
   local ix0, ix1, iy0, iy1 = bx + 2, bx + bw - 2, y + 2, y + h - 2
   local iw = ix1 - ix0
   local frac = math.max(0, math.min(1, (gr_db or 0) / max_db))
@@ -4232,7 +4246,7 @@ function W.gr_meter_h(ctx, dl, x, y, w, h, gr_db, peak_db, max_db, est, dim)
   for i = 1, 4 do
     local tx = ix1 - iw * (i / 4)
     local full = (i == 4)
-    ImGui.DrawList_AddLine(dl, tx, full and (y + 1) or (y + h - 4), tx, y + h - 1, C.COL.knob_ring, 1.0)
+    ImGui.DrawList_AddLine(dl, tx, full and (y + 1) or (y + h - 4), tx, y + h - 1, C.COL.meter_frame, 1.0)
   end
   if C.METER_SCALES and h >= 11 then
     for _, g in ipairs(W.gr_marks(max_db)) do
@@ -4269,9 +4283,15 @@ function W.io_bar(ctx, dl, x, y, w, h, key, pk, rms, readout, rcol, side)
   local _, line_h = ImGui.CalcTextSize(ctx, "0")
   local said = C.METER_READOUT ~= false
   local bar_h = h - (said and (line_h + 2) or 0)
-  -- (wider with its figures on it, Options' Meter scales)
-  local bw = math.min(C.METER_SCALES and C.IO_BAR_W_SCALE or C.IO_BAR_W, w)
-  local bx = (side == "l") and (x + 1) or (side == "r") and (x + w - bw - 1) or (x + (w - bw) * 0.5)
+  -- (wider with its figures on it, Options' Meter scales: wide enough
+  -- for them in the face they're drawn in, whatever the sizes)
+  local bw = C.IO_BAR_W
+  if C.METER_SCALES then
+    local fw = ImGui.CalcTextSize(ctx, "-24")
+    bw = math.max(C.IO_BAR_W_SCALE, math.ceil(fw) + 4)
+  end
+  bw = math.min(bw, w)
+  local bx = (side == "l") and (x + 1) or (side == "r") and (x + w - bw - 1) or math.floor(x + (w - bw) * 0.5 + 0.5)
   W.level_meter(ctx, dl, bx, y, bw, bar_h, { pk },
     W.level_peak(key, pk, now), C.METER_SCALES or nil, rms)
   if said then
@@ -5133,12 +5153,16 @@ end
 
 -- Before EndChild in a child whose drawing parks the cursor by hand
 -- (SetCursorScreenPos) for its own buttons: the cursor back at the
--- child's corner, inside what it holds, so a last park past its items
--- doesn't end it on ImGui's "SetCursorPos ... to extend window/parent
--- boundaries" error. Nothing is added to its size.
+-- start of what the child holds, so a last park past its items doesn't
+-- end it on ImGui's "SetCursorPos ... to extend window/parent
+-- boundaries" error. The start, not the window's corner: scrolled down
+-- past content that has just got shorter, the corner is below the end of
+-- it. Nothing is added to its size.
 function W.park(ctx)
   local x, y = ImGui.GetWindowPos(ctx)
-  ImGui.SetCursorScreenPos(ctx, x, y)
+  local sx, sy = ImGui.GetCursorStartPos(ctx)
+  if type(x) ~= "number" or type(sx) ~= "number" then return end
+  ImGui.SetCursorScreenPos(ctx, x + sx, y + sy)
 end
 
 return W
