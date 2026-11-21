@@ -30,6 +30,9 @@ local ImGui
 function ML.attach(imgui) ImGui = imgui end
 
 ML.EXT = "midi_learn"
+-- whether the bar's open, kept per window (the TCP window's overview has
+-- its own: ML.OPEN_KEY set before it's first asked)
+ML.OPEN_KEY = ML.EXT
 ML.ROW_H = 50
 ML.MODES = {
   { 0, "Absolute" },
@@ -60,7 +63,7 @@ local function ext_set(k, v) reaper.SetExtState(C.EXT_SECT, k, tostring(v), true
 
 function ML.is_open()
   if st.open == nil then
-    st.open = ext_get(ML.EXT, "0") == "1"
+    st.open = ext_get(ML.OPEN_KEY, "0") == "1"
     st.sel_only = ext_get(ML.EXT .. "_sel", "1") == "1"
     st.soft = ext_get(ML.EXT .. "_soft", "0") == "1"
   end
@@ -68,7 +71,7 @@ function ML.is_open()
 end
 function ML.set_open(v)
   st.open = v and true or false
-  ext_set(ML.EXT, st.open and "1" or "0")
+  ext_set(ML.OPEN_KEY, st.open and "1" or "0")
 end
 function ML.toggle() ML.set_open(not ML.is_open()) end
 
@@ -321,8 +324,9 @@ end
 -- ---------------------------------------------------------------------
 
 -- Height it takes at this width: one row, or two when the window is narrow.
-function ML.height(w)
-  if not ML.is_open() then return 0 end
+-- `always`: as it would be open (a bar still sliding away).
+function ML.height(w, always)
+  if not always and not ML.is_open() then return 0 end
   return (w < 900) and (ML.ROW_H * 2 - 6) or ML.ROW_H
 end
 
@@ -351,12 +355,13 @@ local function clip_text(ctx, t, w)
 end
 
 -- Draws the drawer at the cursor, `w` wide; returns the height used.
-function ML.draw(ctx, w)
-  if not ML.is_open() then return 0 end
+-- `always`: drawn closed too (the TCP window's, sliding away).
+function ML.draw(ctx, w, always)
+  if not always and not ML.is_open() then return 0 end
   poll_touched()
   poll_midi()
   local now = reaper.time_precise()
-  local h = ML.height(w)
+  local h = ML.height(w, always)
   local dl = ImGui.GetWindowDrawList(ctx)
   local x0, y0 = ImGui.GetCursorScreenPos(ctx)
   ImGui.DrawList_AddRectFilled(dl, x0, y0, x0 + w, y0 + h - 4, C.COL.panel_bg, 4.0)

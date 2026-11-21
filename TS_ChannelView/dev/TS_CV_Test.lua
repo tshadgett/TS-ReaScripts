@@ -5315,7 +5315,7 @@ do
     local old = DR.parse("1|top|1|128|both|Edit;2|left|0|90|icons|Tracks")
     check("bars: old drawers' line", #old == 2 and old[2].side == "left" and old[2].key == "drawer_2" and old[2].name == "Tracks", true)
     local m = DR.parse("3|sideways|1|9999|odd|k|0|X")
-    check("bars: mended", m[1].side == "top" and m[1].width == DR.W_MAX and m[1].style == "both", true)
+    check("bars: mended", m[1].side == "sideways" and m[1].width == DR.W_MAX and m[1].style == "both", true)
     check("bars: none", #DR.parse("none") + #DR.parse(""), 0)
     -- scrolling rather than more rows: kept with the bar, exported
     local scl = DR.parse("1|top|1|128|both|drawer_1|0|24|--s|Edit;2|top|1|128|both|drawer_2|0|24|c-iPs|Two")
@@ -5331,6 +5331,23 @@ do
     check("bars: background imported", (DR.parse_export(DR.export_text({ bgl[1] })) or {})[1].bg, "#2b3a4c")
     check("bars: names lose ; and |", DR.serialize({ { id = 1, side = "top", open = true, width = 100, style = "both", key = "drawer_1", name = "a;b|c" } }),
       "1|top|1|100|both|drawer_1|0|24|--|abc")
+    -- a place this copy doesn't know is kept (a newer script's), named Elsewhere
+    local nk = DR.parse("4|tcp9|1|128|icons|drawer_4|0|24|--|Later")
+    check("bars: unknown place kept", nk[1].side .. " " .. DR.SIDE_NAME[nk[1].side], "tcp9 Elsewhere")
+    -- strays an older copy put at the top: the first goes back, the other goes
+    local gone = 0
+    local function ftb(n) return { items = n, cancel_pick = function() end, forget = function() gone = gone + 1 end } end
+    local rl = {
+      { id = 1, side = "top", name = "Overview toolbar", key = "drawer_1", tb = ftb({}) },
+      { id = 2, side = "top", name = "Overview toolbar", key = "drawer_2", tb = ftb({}) },
+      { id = 3, side = "top", name = "Overview footer toolbar", key = "drawer_3", tb = ftb({ {} }) },
+      { id = 4, side = "top", name = "Mine", key = "drawer_4", tb = ftb({}) },
+    }
+    local rch = DR.repair(rl)
+    local rp = {}
+    for _, d in ipairs(rl) do rp[#rp + 1] = d.id .. ":" .. d.side end
+    check("bars: strays repaired", tostring(rch) .. " " .. table.concat(rp, ",") .. " " .. gone, "true 2:tcp3,3:top,4:top 1")
+    check("bars: nothing to repair", DR.repair(rl), false)
     local mg = DR.migrate("1|top|1|128|both|Edit")
     local places = {}
     for _, d in ipairs(mg) do places[#places + 1] = d.side .. ":" .. d.key end
@@ -6943,6 +6960,31 @@ do
   check("new look: forgotten", MP.default_look("knob"), nil)
   check("new look: button kept", MP.default_look("toggle").style, "lens")
   MP.set_default_look("toggle", nil)
+  reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState = g, s, d
+end
+
+-- upkeep (TS_CV_Upkeep): one window at a time holds it
+do
+  local ext = {}
+  local g, s, d = reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState
+  reaper.GetExtState = function(sec, k) return ext[sec .. k] or "" end
+  reaper.SetExtState = function(sec, k, v) ext[sec .. k] = v end
+  reaper.DeleteExtState = function(sec, k) ext[sec .. k] = nil end
+  package.loaded["TS_CV_Upkeep"] = nil
+  local A = require("TS_CV_Upkeep")
+  package.loaded["TS_CV_Upkeep"] = nil
+  local B = require("TS_CV_Upkeep")
+  package.loaded["TS_CV_Upkeep"] = nil
+  check("upkeep: two windows, two names", A ~= B, true)
+  check("upkeep: the first takes it", A.claim(100), true)
+  check("upkeep: the other doesn't", B.claim(100.1), false)
+  A.claim(100.6)
+  check("upkeep: kept while renewed", B.claim(102.0), false)
+  check("upkeep: lapsed, taken over", B.claim(103.0), true)
+  check("upkeep: and the first now doesn't", A.claim(103.1), false)
+  B.release()
+  check("upkeep: let go, taken at once", A.claim(103.2), true)
+  A.release()
   reaper.GetExtState, reaper.SetExtState, reaper.DeleteExtState = g, s, d
 end
 

@@ -197,11 +197,17 @@ local dock_id     = tonumber(ext_get("dock", "0")) or 0
 -- "TCP by the transport" -- the space between the bottom of the arrange
 -- view and the bottom of the window. Built and arranged in Organise
 -- actions, which opens in the toolbars script from here.
-local TB, TB2
+-- Two more over and under the overview's column while it's on (Pro):
+-- "TCP over the overview" and "TCP under the overview", the TCP's two
+-- then stopping where the rows end.
+local TB, TB2, TB3, TB4
 local function bind_bars()
   local a = DR.ensure("tcp1", "TCP toolbar")
   local b = DR.ensure("tcp2", "TCP transport toolbar")
-  TB, TB2 = a.tb, b.tb
+  local pro = require("TS_CV_Edition").PRO
+  local c = pro and DR.ensure("tcp3", "Overview toolbar") or nil
+  local d = pro and DR.ensure("tcp4", "Overview footer toolbar") or nil
+  TB, TB2, TB3, TB4 = a.tb, b.tb, c and c.tb, d and d.tb
 end
 DR.load()
 DR.organise = function() DR.request_organiser() end
@@ -271,6 +277,9 @@ local function follow_selection()
   -- selected anywhere (the mixer, a control surface...): into view, as
   -- ChannelView's mixer view does
   app.scroll_to = first
+  -- the overview opens the newly selected track's row (after the rows
+  -- are placed, below)
+  app.ov_follow = first
   if app.fly and first and first ~= app.fly.track then
     app.fly = { track = first, guid = reaper.GetTrackGUID(first) }
   end
@@ -313,12 +322,18 @@ local function click_select(e, mods)
   reaper.UpdateArrange()
 end
 
+-- the overview (Pro): its functions after the patch bay's, whose
+-- docker drag it shares
+local OVW = { mod = nil, widened = 0, row_w = nil, first = nil, next_try = nil }
+
 local function on_click(e)
   local mods = ImGui.GetKeyMods(ctx)
   local was_open = app.fly and app.fly.guid == e.guid
   local was_sel  = G.is_selected(e.track)
   click_select(e, mods)
   if mods ~= 0 then return end
+  -- in the overview a click opens the row instead (TS_CV_Overview)
+  if OVW.on() then OVW.mod.open_row(e, app.geom, app.rows) return end
   -- The panel: the first click on a track only selects it. A click on a
   -- track that was ALREADY selected opens its panel -- or closes it, if
   -- that's the track it's showing.
@@ -436,7 +451,8 @@ local function draw_row_inner(dl, e, x, w, now)
     ImGui.DrawList_AddRectFilled(dl, ix, y1, ix + 3, y1 + e.env - 1,
       U.with_alpha(base, 0x77), 0)
   end
-  if sel then
+  -- (with the overview on, round the whole strip instead: track_overlays)
+  if sel and not app.ov_on then
     local oc = U.sel_colour(C.SEL_OUTLINE, col, C.COL.strip_sel)
     ImGui.DrawList_AddRect(dl, ix + 0.5, y0 + 0.5, x + w - 0.5, y1 - 1.5, oc, rr, 0, 1.0)
   end
@@ -671,6 +687,24 @@ local function draw_row_inner(dl, e, x, w, now)
       W.pop_small(ctx)
     end
   end
+  -- Collisions (Pro): the bands this track shares with the selected one,
+  -- along the panel's foot (over a short row's meter line)
+  if app.cl_a and tr ~= app.cl_a and not e.master then
+    local m = app.cl.mark(tr, app.cl_aname, TO.name(tr))
+    if m and not m.none then
+      local bh = math.max(3, C.S(5))
+      local by = (meter_h == C.TCP_METER_THIN and meter_y) and (meter_y - bh - 1) or (y1 - 1 - bh - 2)
+      if by > y0 + 2 then
+        app.cl.draw(ImGui, dl, m, body_l, by, x + w - body_l, false)
+        W.tip(ctx, "tcpcl" .. e.guid, m.tip,
+          hovered and ImGui.IsMouseHoveringRect(ctx, body_l, by - 1, x + w, by + bh + 1), false)
+      end
+    end
+  end
+  -- what's left of the row under its name, meter and delay (the
+  -- overview's panel glyphs and chain list use it on the open row)
+  e.side = { l = cl, r = cr, top = ((meter_h == C.TCP_METER_H) and (meter_y + meter_h + (C.TCP_PDC and th + 2 or 0))
+    or ((name_y or y0) + th)) + 6 }
 
   ImGui.DrawList_PopClipRect(dl)
 
@@ -739,9 +773,98 @@ local function draw_lanes(dl, e, x, w, top, bot)
   end
 end
 
-local function track_area(x, top, w, h, now)
+-- Folder borders (Options: Folder borders, and their width, C.fold_bw):
+-- each folder framed round its tracks' panels, from its row to its last
+-- shown track -- along the top in the folder's colour, along the foot in
+-- the last track's (as the mixer's bars are: the folder's first, the
+-- last track's last), down the right from one to the other. Not the
+-- left, where the rows' colour strips already separate the tracks. A
+-- folder inside another is framed a little further in. Drawn in a child
+-- of its own laid over the rows, taking no input.
+-- With the overview on (`ovw` its width), a selected track's outline
+-- goes round its whole strip -- its panel and its row in the overview --
+-- rather than round the panel alone.
+local function track_overlays(x, w, ovw, top, h)
+  local bw = C.fold_bw()
+  if bw <= 0 and ovw <= 0 then return end
+  local rows, g = app.rows, app.geom
+  local cut = g and (g.top + (g.pin or 0)) or top
+  ImGui.SetCursorScreenPos(ctx, x, top)
+  if ImGui.BeginChild(ctx, "tcpfolders", math.max(1, w + ovw), math.max(1, h), 0,
+      ImGui.WindowFlags_NoInputs | ImGui.WindowFlags_NoBackground
+      | ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse) then
+    local dl = ImGui.GetWindowDrawList(ctx)
+    local n = #rows
+    if ovw > 0 then
+      for _, e in ipairs(rows) do
+        if e.visible and G.is_selected(e.track) then
+          local col = U.track_colour(e.track, 0xff)
+          if e.master and not col then col = 0x8a90a0ff end
+          local oc = U.sel_colour(C.SEL_OUTLINE, col, C.COL.strip_sel)
+          local ix = x + (C.TCP_INDENT_FOLDERS and e.depth * C.TCP_INDENT or 0)
+          local rr = math.min(C.TCP_RR or 0, (e.h - 1) * 0.5)
+          ImGui.DrawList_PushClipRect(dl, x, e.pinned and top or math.max(top, cut), x + w + ovw, top + h, true)
+          -- (two rounded shapes, the row's and the overview's, their
+          -- corners meeting where the row ends)
+          -- (in a folder with its borders on, the row's right edge runs
+          -- down the outermost folder's bar rather than beside it)
+          local rx = x + w - 0.5
+          if bw > 0 and ((e.depth or 0) > 0 or e.folder) then rx = x + w - 1 - bw * 0.5 end
+          ImGui.DrawList_AddRect(dl, ix + 0.5, e.y + 0.5, rx, e.y + e.h - 1.5, oc, rr, 0, 1.0)
+          ImGui.DrawList_AddRect(dl, x + w + 1.5, e.y + 0.5, x + w + ovw - 1.5, e.y + e.h - 1.5, oc, rr, 0, 1.0)
+          ImGui.DrawList_PopClipRect(dl)
+        end
+      end
+    end
+    for i = 1, (bw > 0) and n or 0 do
+      local e = rows[i]
+      if e.folder and e.h > 0 and not e.pinned then
+        local last = nil
+        for j = i + 1, n do
+          local c = rows[j]
+          if c.depth <= e.depth or c.master then break end
+          if c.h > 0 then last = c end
+        end
+        local bot = last and (last.y + last.h + last.env) or nil
+        if bot and bot > cut and e.y < top + h then
+          local d = e.depth or 0
+          local inset = 1 + d * (bw + 2)
+          local y0, y1 = e.y + inset - 1, bot - inset - 1
+          local xj = x + (C.TCP_INDENT_FOLDERS and d * C.TCP_INDENT or 0)
+          local xl = xj + C.TCP_STRIP_W
+          local xr = x + w - inset
+          local c0 = U.track_colour(e.track, 0xff) or C.COL.header_bg
+          local c1 = U.track_colour(last.track, 0xff) or c0
+          -- its corners rounded: the top joined on the left to the folder's
+          -- own colour strip, turning down into the right side, and the
+          -- foot turning up into it
+          local r = math.min(math.max(bw * 2 + 2, C.TCP_RR or 0), (y1 - y0) * 0.5)
+          local rc = r - bw * 0.5
+          local HP = math.pi * 0.5
+          ImGui.DrawList_PushClipRect(dl, x, math.max(top, cut), x + w, top + h, true)
+          ImGui.DrawList_AddRectFilled(dl, xj + r, y0, xr - r, y0 + bw, c0)
+          ImGui.DrawList_AddRectFilled(dl, xl, y1 - bw, xr - r, y1, c1)
+          ImGui.DrawList_AddRectFilledMultiColor(dl, xr - bw, y0 + r, xr, y1 - r, c0, c0, c1, c1)
+          ImGui.DrawList_PathArcTo(dl, xj + r, y0 + r, rc, math.pi, math.pi + HP, 8)
+          ImGui.DrawList_PathStroke(dl, c0, 0, bw)
+          ImGui.DrawList_PathArcTo(dl, xr - r, y0 + r, rc, -HP, 0, 8)
+          ImGui.DrawList_PathStroke(dl, c0, 0, bw)
+          ImGui.DrawList_PathArcTo(dl, xr - r, y1 - r, rc, 0, HP, 8)
+          ImGui.DrawList_PathStroke(dl, c1, 0, bw)
+          ImGui.DrawList_PopClipRect(dl)
+        end
+      end
+    end
+    ImGui.EndChild(ctx)
+  end
+end
+
+-- `ovw`: the overview's column right of the rows (Pro), 0 without it
+local function track_area(x, top, w, h, now, ovw)
   local g = app.geom
-  local ok = ImGui.BeginChild(ctx, "tcptracks", w, h, 0,
+  ovw = ovw or 0
+  app.ov_on = ovw > 0
+  local ok = ImGui.BeginChild(ctx, "tcptracks", w + ovw, h, 0,
     ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
   if not ok then return end
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -765,11 +888,33 @@ local function track_area(x, top, w, h, now)
   local last_bottom = g.top
   for _, e in ipairs(app.rows) do
     if e.h > 0 then last_bottom = math.max(last_bottom, e.y + e.h + e.env) end
-    if e.visible then
-      draw_row(dl, e, x, w, now)
-      if e.env > 1 then draw_lanes(dl, e, x, w, top, top + h) end
+  end
+  -- The pinned tracks (the master, and any pinned to the top: REAPER
+  -- 7.83+) in their band at the top, drawn last; the rest scroll under
+  -- it, shown (and clickable) only below it.
+  for pass = 1, 2 do
+    for _, e in ipairs(app.rows) do
+      if e.visible and (pass == 2) == (e.pinned == true) then
+        ImGui.PushClipRect(ctx, x, math.max(top, e.clip_top or top), x + w, top + h, true)
+        draw_row(dl, e, x, w, now)
+        if e.env > 1 then draw_lanes(dl, e, x, w, top, top + h) end
+        ImGui.PopClipRect(ctx)
+      end
     end
   end
+  -- the overview's column: a row clicked there selects its track and opens
+  if ovw > 0 and OVW.mod then
+    local e = OVW.mod.draw(ctx, app.rows, x + w, ovw, top, top + h, g, now)
+    if e then
+      click_select(e, 0)
+      OVW.mod.open_row(e, g, app.rows)
+    end
+    -- the open row's own side: which panels it shows, and its chain
+    OVW.mod.draw_side(ctx, app.rows, now)
+  end
+  -- the folders, framed round their tracks' panels; the selected tracks'
+  -- outlines round their whole strips while the overview is on
+  track_overlays(x, w, ovw, top, h)
 
   -- The "+" tile, under the last track while there's room for it.
   local ay = last_bottom + 4
@@ -821,6 +966,9 @@ local function track_area(x, top, w, h, now)
       local mods = ImGui.GetKeyMods(ctx)
       if (mods & ImGui.Mod_Ctrl) ~= 0 or (mods & ImGui.Mod_Super) ~= 0 then
         reaper.Main_OnCommand(wheel > 0 and 40111 or 40112, 0)  -- View: Zoom in/out vertical
+      elseif ovw > 0 and OVW.mod.open_guid() then
+        -- the overview with a row open: the wheel steps from row to row
+        OVW.mod.step(app.rows, g, wheel > 0 and -1 or 1)
       else
         AR.scroll(-wheel * C.TCP_WHEEL_PX)
       end
@@ -910,6 +1058,67 @@ function BAY.follow(bay)
     if BAY.widened > 0 then BAY.resize(-BAY.widened) end
     BAY.widened = 0
   end
+end
+
+-- The overview (Pro, TS_CV_Overview): every track's plugins right of
+-- the rows. On, the docker widens by its width, as for the patch bay;
+-- off, the width goes back. Dragging the docker's edge while it's on
+-- changes its width, kept for next time.
+function OVW.ov()
+  if OVW.mod == nil then
+    OVW.mod = require("TS_CV_Edition").module("TS_CV_Overview") or false
+    if OVW.mod then
+      OVW.mod.attach(ImGui, { dir = script_dir, scroll_to = function(tr) app.scroll_to = tr end })
+    end
+  end
+  return OVW.mod or nil
+end
+function OVW.on()
+  local ov = OVW.ov()
+  return ov ~= nil and ov.is_on()
+end
+-- each frame, before the rows: `ww` the window's width, `bw` the patch
+-- bay's, `s` ImGui's units per REAPER pixel (they differ with Windows'
+-- display scaling); returns the overview column's width (0 when it's
+-- off). The docker is dragged, and the width kept, in REAPER's pixels.
+function OVW.follow(ww, bw, s)
+  s = (s and s > 0) and s or 1
+  local ov = OVW.ov()
+  if not ov then return 0 end
+  ov.poll()
+  local on, down = ov.is_on(), ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)
+  if on and OVW.widened == 0 and not down then
+    -- Just started (the overview left on): the docker may not be found for
+    -- the first frames, so a failed widening is tried again for a few
+    -- seconds before the rows give up room to it instead.
+    local now = reaper.time_precise()
+    OVW.first = OVW.first or now
+    if now < (OVW.next_try or 0) then return 0 end
+    OVW.row_w = ww - bw
+    local w = ov.width()
+    if BAY.resize(w) then
+      OVW.widened = w
+    elseif now - OVW.first > 3 then
+      OVW.widened = -1
+    else
+      OVW.next_try = now + 0.25
+    end
+    return 0
+  elseif not on and OVW.widened ~= 0 and not down then
+    if OVW.widened > 0 then BAY.resize(-OVW.widened) end
+    OVW.widened = 0
+  end
+  if not on then OVW.first, OVW.next_try = nil, nil end
+  if not on or OVW.widened == 0 then return 0 end
+  if OVW.widened < 0 then return math.floor((ww - bw) * 0.65) end
+  local now_w = math.max(0, ww - bw - OVW.row_w)
+  local now_n = math.floor(now_w / s + 0.5)
+  -- the docker's edge dragged: that's its width now
+  if not down and math.abs(now_n - OVW.widened) > 3 and now_n >= ov.W_MIN then
+    OVW.widened = now_n
+    ov.set_width(now_n)
+  end
+  return now_w
 end
 
 -- ---------------------------------------------------------------------
@@ -1131,6 +1340,26 @@ local function settings_menu()
       ImGui.SetTooltip(ctx, "Rest on the window's left edge: a chip that opens it.\nOff: no chip, and its actions do nothing.\nShared with ChannelView")
     end
   end
+  do
+    local ov = OVW.ov()
+    if require("TS_CV_Edition").item(ImGui, ctx, "Overview", nil, ov and ov.is_on()) and ov then
+      ov.set_on(not ov.is_on())
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Every track's plugins beside its row; the arrange view moves over.\nClick a row to open it.")
+    end
+    if ov and ov.is_on() then
+      ImGui.SetNextItemWidth(ctx, 150)
+      -- applied when let go: the lens scrolls the arrange view, and that
+      -- with the mouse held drops the drag and closes this menu
+      local lch, lv = ST.slider_int(ctx, "Lens size", app.lens_drag or ov.lens_pct(), 50, 200, "%d%%")
+      if lch then app.lens_drag = lv end
+      if app.lens_drag and not ImGui.IsItemActive(ctx) then
+        ov.set_lens_pct(app.lens_drag); app.lens_drag = nil
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "How tall the open row's neighbours are") end
+    end
+  end
   if ImGui.MenuItem(ctx, "Plugin delay (PDC) under meters", nil, C.TCP_PDC) then
     C.TCP_PDC = not C.TCP_PDC
     ext_set("pdc", C.TCP_PDC and "1" or "0")
@@ -1196,6 +1425,13 @@ local function frame()
     reaper.SetExtState(C.EXT_SECT, "tcp_alive", tostring(now), false)
   end
   follow_selection()
+  -- what's kept right on the selected tracks (TS_CV_Upkeep): by this
+  -- window or ChannelView, whichever holds it
+  if now - (app.upkeep_at or 0) >= C.RESCAN_INTERVAL then
+    app.upkeep_at = now
+    local _, took = require("TS_CV_Upkeep").run(now)
+    if took then require("TS_CV_State").clear_cache() end
+  end
   -- A double-click whose second release landed somewhere else never
   -- consumed its suppression; drop it once the mouse is plainly up.
   if app.suppress and not ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)
@@ -1209,7 +1445,29 @@ local function frame()
   app.geom = AR.available() and AR.geometry(ctx, ImGui) or nil
   if app.geom then
     app.rows = AR.place(AR.collect(), app.geom)
+    -- Collisions (Pro): each row against the selected track, as the
+    -- mixer's track buttons are
+    if app.cl == nil then app.cl = require("TS_CV_Edition").module("TS_CV_Collisions") or false end
+    app.cl_a = nil
+    if app.cl and app.cl.mode() then
+      local sel = reaper.GetSelectedTrack(0, 0)
+      if sel then
+        app.cl.tick(sel, app.rows)
+        app.cl_a, app.cl_aname = sel, TO.name(sel)
+      end
+    end
     app.any_lanes = C.TCP_LANES and LN.any()
+    -- the overview's lens, eased along; it places the open row itself
+    if OVW.on() then
+      if app.ov_follow then
+        for _, e in ipairs(app.rows) do
+          if e.track == app.ov_follow then OVW.mod.focus(e, app.geom, app.rows) break end
+        end
+      end
+      OVW.mod.tick(app.rows, app.geom, now)
+      if OVW.mod.open_guid() then app.scroll_to = nil end
+    end
+    app.ov_follow = nil
     if app.scroll_to then
       for _, e in ipairs(app.rows) do
         if e.track == app.scroll_to then
@@ -1224,6 +1482,8 @@ local function frame()
     app.rows = {}
   end
 
+  -- (the overview shows the channel in its open row: no flyout)
+  if OVW.on() then app.fly = nil end
   draw_flyout()
 
   ImGui.SetNextWindowSize(ctx, 240, 600, ImGui.Cond_FirstUseEver)
@@ -1277,14 +1537,6 @@ local function frame()
       -- The toolbar is everything above the arrange view's top edge:
       -- the ruler and marker/region lanes' own height, measured.
       local tb_bottom = math.max(cy, math.min(g.top, bottom))
-      local res = TB.draw(ctx, cx, cy, ww, tb_bottom - cy - 1)
-      if res.menu then app.open_settings = true end
-      app.overflow = res.overflow
-      if tb_bottom > cy then
-        local dl = ImGui.GetWindowDrawList(ctx)
-        ImGui.DrawList_AddLine(dl, wx, tb_bottom - 0.5, wx + ww, tb_bottom - 0.5,
-          C.COL.panel_border, 1.0)
-      end
 
       local area_top = tb_bottom
       local area_bot = math.min(g.bottom, bottom)
@@ -1303,13 +1555,34 @@ local function frame()
         BAY.follow(bay)
         if bay.is_open() and BAY.widened ~= 0 then bw = math.min(BAY.w, math.max(0, ww - 60)) end
       end
+      local ovw = OVW.follow(ww, bw, g.scale)
+      -- The toolbar: the TCP's as far as the rows go, and with the
+      -- overview on, the overview's own over its column (not the TCP's
+      -- stretched into it)
+      do
+        local split = wx + ww - ovw
+        local res = TB.draw(ctx, cx, cy, math.max(1, split - cx), tb_bottom - cy - 1)
+        if res.menu then app.open_settings = true end
+        app.overflow = res.overflow
+        local dl = ImGui.GetWindowDrawList(ctx)
+        if ovw > 0 and TB3 and tb_bottom > cy then
+          local r3 = TB3.draw(ctx, split + 1, cy, ovw - 1, tb_bottom - cy - 1, true)
+          for _, it in ipairs(r3.overflow or {}) do app.overflow[#app.overflow + 1] = it end
+          ImGui.DrawList_AddLine(dl, split + 0.5, cy, split + 0.5, tb_bottom, C.COL.panel_border, 1.0)
+        end
+        if tb_bottom > cy then
+          ImGui.DrawList_AddLine(dl, wx, tb_bottom - 0.5, wx + ww, tb_bottom - 0.5,
+            C.COL.panel_border, 1.0)
+        end
+      end
       if area_bot - area_top > 4 then
         ImGui.SetCursorScreenPos(ctx, wx + bw, area_top)
-        track_area(wx + bw, area_top, ww - bw, area_bot - area_top, now)
+        track_area(wx + bw, area_top, ww - bw - ovw, area_bot - area_top, now, ovw)
         if bay then
           -- a rest along the window's left edge brings up the chip, growing
-          -- out of that edge; the whole area keeps the bay open
-          local area = { wx, area_top, wx + ww, area_bot }
+          -- out of that edge; the bay and the rows keep it open (not the
+          -- overview beside them, nor the arrange view)
+          local area = { wx, area_top, wx + ww - ovw, area_bot }
           bay.remember({ wx, area_top, wx + C.TCP_STRIP_W, area_bot, side = "left", edge = wx }, area)
           bay.chip(ctx)
           if bw > 0 then
@@ -1317,6 +1590,43 @@ local function frame()
             for _, e in ipairs(app.rows) do list[#list + 1] = { track = e.track, num = e.num } end
             bay.draw_tcp(ctx, { x = wx, y = area_top, w = bw, h = area_bot - area_top, rows = app.rows,
               list = list, sel = G.is_selected, bay_rect = area })
+            -- A cable in hand dragged to the top or bottom edge, or past
+            -- it: the tracks scroll that way, faster the further past and
+            -- the longer it's held there, so far-off tracks can be reached
+            -- (smoothly: the fractions carry over from frame to frame)
+            local as = nil
+            if bay.dragging and bay.dragging() then
+              -- (the real pointer: it may be past the window's edge)
+              local py = select(2, ImGui.GetMousePos(ctx))
+              if reaper.GetMousePosition and ImGui.PointConvertNative then
+                local nx, ny = reaper.GetMousePosition()
+                py = select(2, ImGui.PointConvertNative(ctx, nx, ny))
+              end
+              local zone = C.S(10)
+              local top_edge = area_top + (g.pin or 0)
+              local d = 0
+              if py < top_edge + zone then d = py - (top_edge + zone)
+              elseif py > area_bot - zone then d = py - (area_bot - zone) end
+              if d ~= 0 then
+                local t = reaper.time_precise()
+                local dir = d < 0 and -1 or 1
+                as = BAY.as
+                if not as or as.dir ~= dir then as = { t0 = t, last = t, carry = 0, dir = dir } end
+                local dt = math.min(0.1, t - as.last)
+                as.last = t
+                local held = math.min(3, t - as.t0)
+                -- REAPER's scroll steps a second (as a control surface
+                -- scrolls: setting the scrollbar would end the drag)
+                local v = math.min(80, (4 + math.abs(d) / (g.scale or 1) * 0.25) * (1 + 2.5 * held))
+                as.carry = as.carry + v * dt * dir
+                local n = as.carry >= 0 and math.floor(as.carry) or math.ceil(as.carry)
+                if n ~= 0 then
+                  AR.scroll_steps(n)
+                  as.carry = as.carry - n
+                end
+              end
+            end
+            BAY.as = as
             -- the wheel over the bay scrolls (or with Ctrl, zooms) the
             -- arrange view, as over the rows -- unless a cable took it
             local mx, my = ImGui.GetMousePos(ctx)
@@ -1342,8 +1652,16 @@ local function frame()
         local dl = ImGui.GetWindowDrawList(ctx)
         ImGui.DrawList_AddLine(dl, wx, area_bot + 0.5, wx + ww, area_bot + 0.5,
           C.COL.panel_border, 1.0)
-        local res2 = TB2.draw(ctx, cx, area_bot + 1, ww, bottom - area_bot - 2, true, "up")
+        -- (with the overview on: as far as the rows go, the overview's
+        -- own under its column)
+        local split = wx + ww - ovw
+        local res2 = TB2.draw(ctx, cx, area_bot + 1, math.max(1, split - cx), bottom - area_bot - 2, true, "up")
         for _, it in ipairs(res2.overflow) do app.overflow[#app.overflow + 1] = it end
+        if ovw > 0 and TB4 then
+          local r4 = TB4.draw(ctx, split + 1, area_bot + 1, ovw - 1, bottom - area_bot - 2, true, "up")
+          for _, it in ipairs(r4.overflow or {}) do app.overflow[#app.overflow + 1] = it end
+          ImGui.DrawList_AddLine(dl, split + 0.5, area_bot, split + 0.5, bottom, C.COL.panel_border, 1.0)
+        end
       end
       ImGui.SetCursorScreenPos(ctx, cx, cy)
       ImGui.Dummy(ctx, 0, 0)
@@ -1355,6 +1673,8 @@ local function frame()
 
     TB.draw_menus(ctx)
     TB2.draw_menus(ctx)
+    if TB3 then TB3.draw_menus(ctx) end
+    if TB4 then TB4.draw_menus(ctx) end
     settings_menu()
     TM.draw(ctx)
     CP.draw(ctx, false) -- the colour picker, for a fader's colour
@@ -1403,7 +1723,11 @@ end
 
 reaper.atexit(function()
   TB.cancel_pick(); TB2.cancel_pick()
+  require("TS_CV_Upkeep").release()
   -- the patch bay's width, given back
   if BAY.widened > 0 then BAY.resize(-BAY.widened); BAY.widened = 0 end
+  -- the overview's too, and every track height it changed
+  if OVW.widened > 0 then BAY.resize(-OVW.widened); OVW.widened = 0 end
+  if OVW.mod then OVW.mod.restore() end
 end)
 reaper.defer(safe_frame)

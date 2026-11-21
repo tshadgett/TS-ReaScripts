@@ -48,14 +48,21 @@ local ARRANGE_ID = 1000   -- the arrange view's child id in REAPER's main window
 -- in ImGui coordinates, and returns the list. A track REAPER isn't
 -- drawing (hidden in the TCP, or inside a hidden folder) has no height
 -- and is never visible.
+-- Pinned tracks (REAPER 7.83+: the master, and any pinned to the top)
+-- stay in a band at the top of the arrange view while the rest scroll
+-- under it: g.pin is that band's height (ImGui units), and a row that
+-- isn't pinned shows only below it (e.clip_top).
 function AR.place(list, g)
   local s = g.scale or 1
+  g.pin = AR.pinned_h() * s
+  local cut = g.top + g.pin
   for _, e in ipairs(list) do
     e.y   = g.top + (e.tcpy or 0) * s
     e.h   = math.max(0, (e.tcph or 0) * s)
     e.env = math.max(0, ((e.wndh or 0) - (e.tcph or 0)) * s)
+    e.clip_top = e.pinned and g.top or cut
     e.visible = e.h > 0
-                and (e.y + e.h + e.env) > g.top
+                and (e.y + e.h + e.env) > e.clip_top
                 and e.y < g.bottom
   end
   return list
@@ -66,12 +73,13 @@ end
 -- when it's in view already or has no height. One taller than the view
 -- comes in at its top.
 function AR.into_view(e, g)
-  if not e or (e.h or 0) <= 0 then return nil end
+  if not e or (e.h or 0) <= 0 or e.pinned then return nil end
   local s = g.scale or 1
   local top, bot = e.y, e.y + e.h
-  if top < g.top then return math.floor((top - g.top) / s) end
+  local vt = g.top + (g.pin or 0)
+  if top < vt then return math.floor((top - vt) / s) end
   if bot > g.bottom then
-    local d = math.min(bot - g.bottom, top - g.top)
+    local d = math.min(bot - g.bottom, top - vt)
     return math.ceil(d / s)
   end
   return nil
@@ -197,12 +205,20 @@ end
 -- Every track REAPER's TCP would show, in its order, master first when
 -- it's visible there. Folder depth is worked out on the way down, since
 -- REAPER stores each track's CHANGE in depth, not the depth itself.
+-- The pinned band's height, REAPER pixels (REAPER 7.83+; 0 before)
+function AR.pinned_h()
+  if not (reaper and reaper.GetSetProjectInfo) then return 0 end
+  local ok, v = pcall(reaper.GetSetProjectInfo, 0, "ARRANGE_PROJECT_PINNED_H", 0, false)
+  return (ok and tonumber(v)) or 0
+end
+
 function AR.collect()
   local out = {}
   local master = reaper.GetMasterTrack(0)
+  local pinning = AR.pinned_h() > 0
   if master and (reaper.GetMasterTrackVisibility() & 1) == 1 then
     out[#out + 1] = {
-      track = master, master = true, num = 0, guid = "master", depth = 0,
+      track = master, master = true, num = 0, guid = "master", depth = 0, pinned = pinning,
       tcpy = reaper.GetMediaTrackInfo_Value(master, "I_TCPY") or 0,
       tcph = reaper.GetMediaTrackInfo_Value(master, "I_TCPH") or 0,
       wndh = reaper.GetMediaTrackInfo_Value(master, "I_WNDH") or 0,
@@ -219,6 +235,7 @@ function AR.collect()
       guid   = reaper.GetTrackGUID(tr) or ("t" .. i),
       depth  = depth,
       folder = fd > 0,
+      pinned = pinning and (reaper.GetMediaTrackInfo_Value(tr, "B_TCPPIN") or 0) > 0,
       tcpy   = reaper.GetMediaTrackInfo_Value(tr, "I_TCPY") or 0,
       tcph   = shown and (reaper.GetMediaTrackInfo_Value(tr, "I_TCPH") or 0) or 0,
       wndh   = shown and (reaper.GetMediaTrackInfo_Value(tr, "I_WNDH") or 0) or 0,
@@ -246,6 +263,15 @@ function AR.scroll(px)
   end
   reaper.CSurf_OnScroll(0, px > 0 and 1 or -1)
   return true
+end
+
+-- Scrolls the arrange view by `n` of REAPER's own scroll steps (positive
+-- down), as a control surface does. While a mouse button is held in one
+-- of our windows -- a cable being dragged -- this is the way: setting the
+-- scrollbar (AR.scroll) has the arrange view release the mouse, and the
+-- drag ends.
+function AR.scroll_steps(n)
+  if n ~= 0 then reaper.CSurf_OnScroll(0, n) end
 end
 
 -- Sets a height, in REAPER pixels, on each of `tracks`. 0 hands the

@@ -535,7 +535,7 @@ function CH.draw_header(ctx, dl, x, y, w, track, opts)
       opts.on_close()
     end
   elseif W.icon_button(ctx, idp .. "col", "collapse", btn, false, "Collapse channel strip", nil, opts.ink) then
-    St.toggle_collapsed(KEY)
+    St.toggle_collapsed(opts.ckey or KEY)     -- (a panel with a fold of its own: opts.ckey)
   end
 
   -- Automation mode, left of the collapse control -- the same corner the

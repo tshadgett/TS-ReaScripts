@@ -1,5 +1,46 @@
 # ChannelView — changelog
 
+## 4.5.0 — the overview in the TCP window
+
+### ChannelView
+
+- **Pinned tracks** (REAPER 7.83 and later) stay in their band at the top
+  of the TCP window, the rest scrolling under it.
+- **Folder borders** in the TCP window: round a folder's tracks, its top
+  joined to the folder's colour strip, the corners on the right rounded.
+- **With ChannelView closed**, the TCP window keeps the selected tracks
+  right as ChannelView does: probes in place and paired, helpers back
+  after an unfreeze, a copied track's settings taken up. Whichever is
+  open does it, never both.
+- **Action bars** keep a place they don't know (one a newer script made)
+  rather than moving its bar into ChannelView's top drawer; bars moved
+  there that way go back. After updating, restart every ChannelView
+  script.
+
+### ChannelView Pro
+
+- **The overview** in the TCP window (settings menu ▸ *Overview*, or the
+  *TS_ChannelView_TCP_Overview* action): every track's plugins beside its
+  row. Click a row to open it: ChannelView in the TCP window, with its
+  menus, editors, brackets, shared meters, Compare, frozen strips, the
+  console, drum, fader, Macros, Modulators, Sends and Receives panels.
+  The rows around it as a lens (*Lens size*), medium rows showing the
+  panels, short rows faceplates or tiles; the wheel steps from track to
+  track. Drag a panel along the row, onto another row, or out to pop it
+  out. A strip of glyphs on the track's side for its panels, Probes,
+  Trimmer, Freeze and the MIDI learn bar; a pin for pinning the track.
+- **Overview toolbars:** with the overview on, the TCP window's toolbar
+  and footer toolbar stop where the rows end, and two more bars take the
+  room over and under the overview.
+- **Collisions** in the TCP window, along the foot of each row's panel.
+- **Patch bay in the TCP window:** drag a cable past the top or bottom
+  of the rows and they scroll, faster the further you go; a cable keeps
+  to its jack while its track is out of sight.
+- With the overview on, the selected track is outlined from its row
+  across to its plugins.
+- A locked panel's sections, scrolled, stay inside the panel with its
+  header and foot hidden.
+
 ## 4.3.4 — shared meters, meter widths
 
 ### ChannelView

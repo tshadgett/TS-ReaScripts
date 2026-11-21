@@ -241,7 +241,9 @@ button (lit while it's open) or a control surface.
 
 **In the TCP window** the bay opens to the left of the track rows, from the
 chip that grows out of the window's left edge when you rest on it;
-the pin at the bay's top left keeps it open. The
+the pin at the bay's top left keeps it open. Drag a cable past the top or
+bottom of the rows and they scroll, faster the further you go; the cable
+stays on its jack while its track is out of sight. The
 jacks sit level with their tracks (IN above OUT), the rails run up beside
 the rows, and the outputs' box is under the last track. The docker widens
 to make room and REAPER's arrange view moves over; closing the bay gives
@@ -249,6 +251,60 @@ the width back. (The docker is widened by dragging its edge for you, so the
 pointer jumps there and back.) The rows stay live: select a track to
 brighten its cables. Moving the pointer out to the arrange view closes it,
 and the wheel over the bay scrolls the rows.
+
+## The overview in the TCP window (Pro)
+
+ChannelView's TCP window can show every track's plugins beside its row:
+settings menu ▸ **Overview**, or the **TS_ChannelView_TCP_Overview**
+action (a toolbar button for it lights while it's on). REAPER's arrange
+view moves over to make room. It works with ChannelView open or closed.
+
+**Click a row to open it.** The open row is ChannelView, in the TCP
+window: the plugins' panels with every menu, editor and window
+ChannelView has, brackets over containers and parallel plugins, shared
+meters between panels, the + tile to add a plugin, and *Compare with* in
+a panel's menu. Down its left the Console, DrumToolbox, fader, Macros
+and Modulators panels, Sends and Receives at the far right; the fader
+panel folds to a narrow strip from its header. Frozen plugins sit as
+narrow strips where they were. Drag a panel's header along the row to
+move it, onto another row to copy it there (Alt: move), or out of the
+window to pop it out (*Pop out* is in its menu too; both need ChannelView
+open, which draws popped-out panels). Alt+click a panel's name to take
+the plugin out.
+
+**The rows around it** are a lens: the ones beside it medium, the next
+short, the rest shorter still. Settings menu ▸ **Lens size** sets how tall
+they are; drag the open row's own edge to set every open row's height
+from then on (double-click it to go back to filling the view).
+
+- **Medium rows** show the panels themselves, header and foot hidden.
+- **Short rows** show each plugin's faceplate with its name, or a tile,
+  with bypass and plugin-window buttons; "+3" says how many more there
+  are. Click one to open the row.
+- **The wheel** steps from track to track, the open row easing along;
+  **Shift+wheel** scrolls a row sideways.
+- Right-click a plugin on a medium or short row for a shorter menu: its
+  window, bypass, offline, collapse, move, duplicate, insert a plugin
+  before or after it, remove it.
+
+**The track's side** of the open row lists its chain (click to scroll to
+a plugin, the dot bypasses) and has a strip of glyphs down the right, each
+in its own colour, lit while on: which panels the open row shows (Console
+setup when there's no console yet; DrumToolbox only on a drum's tracks),
+then **Probes**, **Trimmer** and **Freeze** as ChannelView's header has
+them, and **MIDI learn**, which slides the MIDI learn bar down over the
+top of the overview. The pin at the bottom left (REAPER 7.83 and later)
+pins the track to the top of the arrange view, or unpins it; a medium
+row has it too.
+
+**Comparing blind**, the overview keeps it blind: medium rows show the
+numbered boxes, short rows numbered tiles (click one to hear it), and
+the chain list says *Blind 1* and *Blind 2*.
+
+The overview's toolbars: with it on, the TCP window's toolbar stops where
+the rows end and **Overview toolbar** takes the room over the overview;
+the footer toolbar splits the same way, with **Overview footer toolbar**
+under it. Both are action bars like any other.
 
 ## Freeze
 
@@ -1087,9 +1143,10 @@ put them. Every bar is global, not per project.
   (above the MIDI learn bar), down the left or right, or along the bottom
   under the track names. A bar in **its own window**, floating or in one of
   REAPER's dockers (wider than tall: rows; taller: a column). The TCP
-  window's toolbar by the ruler or by the transport, or the web companion's
+  window's toolbar by the ruler or by the transport (and, Pro, over and
+  under its overview), or the web companion's
   Actions bar. Or **nowhere**, kept for later. One place per bar; the TCP's
-  two and the web's take one bar each, and moving a bar onto one swaps it
+  and the web's take one bar each, and moving a bar onto one swaps it
   with the bar there. The header's drawers button lists the drawers and
   windowed bars (click to open or close one), makes new ones and opens
   **Organise actions**. The **TS_ChannelView_ToggleToolbars** action hides
@@ -2276,7 +2333,18 @@ shut: REAPER sometimes opens it again at startup.
 
 Select a track anywhere (the mixer, ChannelView, a control surface) and
 the TCP window brings it into view, scrolling the arrange view with it as
-REAPER's own track panel does.
+REAPER's own track panel does. Tracks pinned to the top (REAPER 7.83 and
+later) stay in their band at the top of the window as the rest scroll
+under it. A folder's tracks have its border round them when Options ▸
+*Folder borders* is on, and with the overview on a selected track is
+outlined from its row across to its plugins.
+
+With ChannelView closed, the TCP window keeps the selected tracks right
+as ChannelView would: probes in place and paired, ChannelView's helpers
+back after an unfreeze, a console's stages following new and moved
+tracks, and the settings a copied track carries. Whichever of the two is
+open does it, never both. Collisions (Pro) mark the track buttons in the
+TCP window too, along the foot of each row's panel.
 
 In the TCP window, the settings menu's **Plugin delay (PDC) under
 meters** shows each track's plugin delay compensation under its meter,
@@ -2406,6 +2474,12 @@ with it, sent from the selected track. They're in the action list as
 | `TS_CV_Editor.lua` | the Setup Edit Parameters dialog |
 | `TS_CV_Mixer.lua` | mixer view, and the shared track row (`MX.draw_row`) both views draw into |
 | `TS_CV_PatchBay.lua` | the patch bay, under the name buttons and in the TCP window (Pro) |
+| `TS_ChannelView_TCP.lua` | **ChannelView TCP**: ChannelView's track panel, beside REAPER's arrange view |
+| `TS_CV_Arrange.lua` | where REAPER's arrange view and its tracks are, for the TCP window |
+| `TS_CV_Overview.lua` | the TCP window's overview (Pro) |
+| `TS_ChannelView_TCP_Overview.lua` | the *Overview* action: the TCP window's overview on or off (Pro) |
+| `TS_CV_Menus.lua` | the panels' menus, shared by ChannelView and the overview |
+| `TS_CV_Upkeep.lua` | keeping the selected tracks right, by whichever window is open |
 | `TS_CV_TrackStrip.lua` | asks the track row to scroll to the selection |
 | `TS_CV_Browser.lua` | the add-a-plugin picker |
 | `TS_CV_Search.lua` | the forgiving, ranked plugin search (picker, [+] menu and web page) |

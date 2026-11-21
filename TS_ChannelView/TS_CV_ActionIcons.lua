@@ -263,7 +263,7 @@ local function shapes(ic)
   c = {}
   for _, k in ipairs({ "d", "fi", "ti", "da" }) do
     local subs = {}
-    for _, p in ipairs(ic[k]) do
+    for _, p in ipairs(ic[k] or {}) do
       for _, sp in ipairs(AI.flatten(p)) do
         if #sp.pts >= 4 then subs[#subs + 1] = sp end
       end
@@ -325,6 +325,12 @@ AI.dashes = dashes
 function AI.draw(dl, icon, x, y, size, col)
   local ic = AI.get(icon)
   if not ic then return false end
+  return AI.draw_ic(dl, ic, x, y, size, col)
+end
+
+-- Draws an icon given as a table ({ key, d, fi, ti, da }, as the file
+-- has them) rather than by its key
+function AI.draw_ic(dl, ic, x, y, size, col)
   local sh = shapes(ic)
   local s = size / 24
   local th = math.max(1.0, math.min(2.2, 1.5 * size / 18))

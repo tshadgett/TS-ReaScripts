@@ -1168,3 +1168,50 @@ picker uses an optgroup per group.
   measuring. Canvas setup's guesses come from the same (CS.guess, and
   Guess from names keeps a band's own learning only when the guess has
   none).
+
+## The TCP window's overview (Pro, 4.5.0)
+
+- **Two Lua states.** ChannelView and the TCP window are separate scripts:
+  module tables (TS_CV_State's cache, TS_CV_PopOut's windows, TS_CV_MidiLearn's
+  open state) are per window. What has to cross goes through ExtState:
+  `popout_req` (a panel dragged or popped out of the overview: ChannelView
+  draws pop-outs), `midi_learn_tcp` (the overview's MIDI learn bar, open on
+  its own), `overview_on`, `upkeep_owner` / `upkeep_rev` (below). Pop-out
+  windows are read from the project (read only) but only ChannelView writes
+  them: its copy is cached.
+- **TS_CV_Menus.** ChannelView's menus (`MN.make(env)`) take their app, POP
+  and helpers from the caller; the overview passes its own `ov` app and
+  replaces `POP.pop_out` after make. POP functions are looked up at call
+  time, so replacing one after make works.
+- **One draw-list splitter per window.** TS_CV_Panel keys its splitters by
+  `P.SITE`; the overview sets it to its row's child (`ovrow<guid>`,
+  `ovmed<guid>`) while drawing there, or ReaImGui stops with "cannot use
+  DrawListSplitter over multiple windows".
+- **Hover and z-order.** Items overlapping in one window: the first submitted
+  takes the hover. Child windows submitted later sit above earlier ones, so
+  the MIDI learn bar (`##ovmlbar`) and the fade (`##ovfade`, NoInputs) are
+  children submitted after the rows.
+- **Scrolling the arrange view with the mouse held** (`JS_Window_SetScrollPos`)
+  makes it take the mouse: a drag ends, a popup menu closes. While a button is
+  held, scroll with `AR.scroll_steps` (CSurf_OnScroll), or wait for the
+  release (Lens size applies when let go).
+- **Pinned tracks** (REAPER 7.83+): `ARRANGE_PROJECT_PINNED_H` is the band's
+  height; the master (when shown) and `B_TCPPIN` tracks are in it. Rows are
+  drawn in two passes, the band last, the rest clipped below it.
+- **Action bar places.** A script running an older TS_CV_Drawers read an
+  unknown place as "top" and saved it there; `DR.parse` now keeps unknown
+  places and `DR.repair` puts back empty top bars named for a single place.
+  After an update every ChannelView script should restart.
+
+## Upkeep, by one window (TS_CV_Upkeep)
+
+What ChannelView's rescan used to keep right on its own track now runs from
+whichever window holds `upkeep_owner` ("<id>|<time>", renewed at most every
+0.5 s, lapsing after 2 s, deleted on exit): helpers back after an unfreeze,
+the probe pair completed and kept at the ends, the console's plugins in
+place, Carry adopt and write, `CD.follow`. It covers the selected tracks (up
+to 16) and the caller's own. Read-then-write of the claim is safe: REAPER
+runs deferred scripts one at a time on its main thread. Settings taken up
+bump `upkeep_rev`; every window clears TS_CV_State's cache when it sees it
+change. Two instances of the module in one Lua state (package.loaded
+cleared) stand in for two windows in the tests.

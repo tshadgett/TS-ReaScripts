@@ -2337,6 +2337,30 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   end
 end
 
+-- With the header hidden (C.HIDE_HEAD) and P.MINI_BTNS set (the TCP
+-- window's overview): bypass and float where the header has them, on a
+-- small backing, so they're there while the header isn't
+local function mini_buttons(ctx, dl, x, y, w, track, fx, enabled, req)
+  local btn, gap = C.ICON_SIZE, 2
+  local bx = x + w - (btn + gap) * 4 - 2 + (btn + gap)
+  local fx_x = bx + btn + gap
+  ImGui.DrawList_AddRectFilled(dl, bx - 3, y + 1, fx_x + btn + 3, y + btn + 5,
+    U.with_alpha(C.COL.header_bg, 0xd8), 3.0)
+  ImGui.SetCursorScreenPos(ctx, bx, y + 3)
+  local byp_tip = enabled and "Bypass" or "Bypassed\nClick: enable"
+  if C.POWER == "lamp" then
+    if W.power_lamp(ctx, "byp##" .. fx.guid, btn, enabled, byp_tip) then req.toggle_bypass = true end
+  elseif W.icon_button(ctx, "byp##" .. fx.guid, "power", btn, not enabled, byp_tip, C.COL.bypass_on) then
+    req.toggle_bypass = true
+  end
+  ImGui.SetCursorScreenPos(ctx, fx_x, y + 3)
+  local floating = T.is_floating(track, fx.addr)
+  if W.icon_button(ctx, "flt##" .. fx.guid, "float", btn, floating,
+      floating and "Close plugin window" or "Open plugin window", C.COL.float_on) then
+    req.toggle_float = true
+  end
+end
+
 -- A collapsed panel: a narrow bar with the name running down it, plus the
 -- two controls worth reaching without expanding -- bypass and float.
 local function draw_collapsed(ctx, dl, x, y, w, h, track, fx, enabled, req, meter)
@@ -3053,18 +3077,22 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   -- scrolls anywhere else (see the end of this function).
   if scroll then
     local cx = reg_x0 - 4
-    ImGui.SetCursorScreenPos(ctx, cx, y)
+    -- (cut a little inside the panel's edge, where the sections start
+    -- unscrolled: with the header or foot hidden that's the panel's own)
+    local ins = 3
+    ImGui.SetCursorScreenPos(ctx, cx, y + ins)
     ImGui.PushStyleColor(ctx, ImGui.Col_ChildBg, 0)
     ImGui.PushStyleColor(ctx, ImGui.Col_ScrollbarBg, 0)
     ImGui.PushStyleVar(ctx, ImGui.StyleVar_ScrollbarSize, C.SCROLL_W)
-    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + C.S(2) + 4, h, 0,
+    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + C.S(2) + 4, math.max(1, h - ins * 2), 0,
       ImGui.WindowFlags_NoScrollWithMouse)
     ImGui.PopStyleVar(ctx)
     ImGui.PopStyleColor(ctx, 2)
     if not ok then return end
     dl = ImGui.GetWindowDrawList(ctx)
-    -- the whole grid's height, so there's something to scroll
-    ImGui.Dummy(ctx, 1, C.GRID_TOP_PAD + lay.height + C.PANEL_PAD)
+    -- the whole grid's height, so there's something to scroll (less
+    -- the cut: it scrolls as far as it did)
+    ImGui.Dummy(ctx, 1, C.GRID_TOP_PAD + lay.height + C.PANEL_PAD - ins * 2)
     gy0 = gy0 - ImGui.GetScrollY(ctx)
   elseif hscroll then
     -- sideways, its scrollbar along the foot of the grid
@@ -4630,6 +4658,24 @@ end
 --   toggle_bypass, toggle_float, open_menu, open_editor, ctx_control
 -- (your own ranges for its parameters in force while it's drawn: TS_CV_Util
 -- U.with_ranges -- the values, scales, tooltips and canvases read them)
+-- A panel's faceplate alone (its own, Pro, or the theme's panel), no
+-- controls: the TCP window's overview, for a row too short for them
+function P.faceplate(ctx, dl, x, y, w, h, layout)
+  local plate = ED.PRO and layout and C.plate_of(layout.plate) or nil
+  if plate then
+    draw_plate(ctx, dl, x, y, w, h, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate))
+  else
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.panel_bg, C.PANEL_RR)
+  end
+  ImGui.DrawList_AddRect(dl, x, y, x + w, y + h, C.COL.panel_border, C.PANEL_RR, 0, 1.0)
+  return plate
+end
+
+-- A faceplate's inks for whatever's drawn on it next (a header over
+-- P.faceplate): returns what to give P.pop_plate after.
+function P.push_plate(plate) return plate and push_plate(plate) or nil end
+function P.pop_plate(saved) if saved then pop_plate(saved) end end
+
 function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   local was = U.with_ranges(layout and layout.ranges)
   local a, b, c, d = draw_panel(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
@@ -4724,10 +4770,12 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       local hv = P.hover[fx.guid] or {}
       local show_h = C.HIDE_HEAD and (hv.head or is_drag_source)
       local show_f = C.HIDE_FOOT and C.FOOTER_H > 0 and hv.foot
-      if show_h or show_f then
+      local mini = P.MINI_BTNS and C.HIDE_HEAD and not show_h
+      if show_h or show_f or mini then
         sp = P.split(dl, 2, fx.guid)
         ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
         if show_h then draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req) end
+        if mini then mini_buttons(ctx, dl, x, y, ww, track, fx, enabled, req) end
         if show_f then
           draw_footer(ctx, dl, x, y + wh - C.FOOTER_H, ww, C.FOOTER_H, track, fx, layout, avail_h,
             is_eq or is_trim, req)

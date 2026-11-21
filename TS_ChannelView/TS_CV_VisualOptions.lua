@@ -380,10 +380,13 @@ function VO.apply(tab)
   C.PANEL_RR  = pro and val(s, "corners") or 3.0
   C.STRIP_ROUND = C.PANEL_RR          -- the mixer's strips and name buttons too
   C.TCP_RR = pro and (s.tcp_rr or C.PANEL_RR) or 0   -- the TCP window's track panels
-  C.POWER     = pro and val(s, "power") or "icon"
+  -- (the TCP window's tab has no power switch or auto-hide of its own:
+  -- its overview's plugin panels take ChannelView's)
+  local ps = (tab == "tcp") and VO.effective("cv") or s
+  C.POWER     = pro and val(ps, "power") or "icon"
   C.TRACK_COL = pro and val(s, "trackcol") or "stripe"
-  C.HIDE_HEAD = pro and val(s, "hide_head") or false
-  C.HIDE_FOOT = pro and val(s, "hide_foot") or false
+  C.HIDE_HEAD = pro and val(ps, "hide_head") or false
+  C.HIDE_FOOT = pro and val(ps, "hide_foot") or false
   C.METER_WIDTH = pro and tab ~= "web" and val(s, "mwidth") or "normal"
   -- (figures on a Normal meter only: Narrow and Thin are the bar alone)
   C.METER_SCALES = pro and val(s, "mscale") and C.METER_WIDTH == "normal" or false

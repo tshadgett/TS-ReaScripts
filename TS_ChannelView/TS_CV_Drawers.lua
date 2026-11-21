@@ -19,6 +19,9 @@
                                floating or in a REAPER docker.
     tcp1, tcp2                 the TCP's toolbar beside the ruler, and the
                                one by the transport. One bar each.
+    tcp3, tcp4                 the toolbars over and under the TCP
+                               overview's column while it's on (Pro).
+                               One bar each.
     web                        the web companion's Actions bar. One bar.
     none                       kept, shown nowhere.
 
@@ -53,14 +56,21 @@ DR.KEY, DR.OLD_KEY = "bars", "drawers"
 DR.REV = "bars#rev"
 DR.SIDES = { "top", "left", "right", "bottom" }
 DR.PLACES = { "top", "left", "right", "bottom", "rtop", "rleft", "rright", "rbottom",
-              "window", "tcp1", "tcp2", "web", "none" }
+              "window", "tcp1", "tcp2", "tcp3", "tcp4", "web", "none" }
 DR.SIDE_NAME = { top = "Top", left = "Left", right = "Right", bottom = "Bottom",
                  rtop = "Rack \u{00B7} top", rleft = "Rack \u{00B7} left", rright = "Rack \u{00B7} right",
                  rbottom = "Rack \u{00B7} bottom",
                  window = "Own window", tcp1 = "TCP \u{00B7} by the ruler",
-                 tcp2 = "TCP \u{00B7} by the transport", web = "Web companion", none = "Nowhere" }
-DR.SINGLE = { tcp1 = true, tcp2 = true, web = true }
-DR.SINGLE_NAME = { tcp1 = "TCP toolbar", tcp2 = "TCP transport toolbar", web = "Web actions" }
+                 tcp2 = "TCP \u{00B7} by the transport", tcp3 = "TCP \u{00B7} over the overview",
+                 tcp4 = "TCP \u{00B7} under the overview",
+                 web = "Web companion", none = "Nowhere" }
+DR.SINGLE = { tcp1 = true, tcp2 = true, tcp3 = true, tcp4 = true, web = true }
+DR.SINGLE_NAME = { tcp1 = "TCP toolbar", tcp2 = "TCP transport toolbar", tcp3 = "Overview toolbar",
+                   tcp4 = "Overview footer toolbar",
+                   web = "Web actions" }
+-- A place a newer copy of this module added (another script still on the
+-- older one reads the list): kept as it is, drawn nowhere here.
+setmetatable(DR.SIDE_NAME, { __index = function() return "Elsewhere" end })
 DR.DRAWER = { top = true, left = true, right = true, bottom = true,
               rtop = true, rleft = true, rright = true, rbottom = true }
 -- The drawers THIS window draws: ChannelView's four sides, or the Rack
@@ -212,7 +222,7 @@ function DR.parse(s)
       key, dock = nil, "0"
     end
     if id then
-      out[#out + 1] = { id = tonumber(id), side = VALID[side] and side or "top", open = open == "1",
+      out[#out + 1] = { id = tonumber(id), side = side, open = open == "1",
                         width = math.max(DR.W_MIN, math.min(DR.W_MAX, tonumber(width) or DR.W_DEF)),
                         style = (style == "icons") and "icons" or "both",
                         key = (key and key ~= "") and key or ("drawer_" .. id),
@@ -517,8 +527,33 @@ function DR.load()
     DR.list = DR.parse(s)
   end
   for _, d in ipairs(DR.list) do d.tb = bar_for(d) end
+  if DR.repair(DR.list) then DR.save() end
   DR.stamp = reaper.GetExtState(C.EXT_SECT, DR.REV)
   DR.show_group_toggles(DR.list)
+end
+
+-- Older copies of this module put a place they didn't know at the top:
+-- an empty top bar named for a single place with no bar goes back there,
+-- other empty top bars by that name go. Returns true when it changed any.
+function DR.repair(list)
+  local changed = false
+  for i = #list, 1, -1 do
+    local d = list[i]
+    local place
+    for p, nm in pairs(DR.SINGLE_NAME) do if d.name == nm then place = p end end
+    if place and d.side == "top" and d.tb and #d.tb.items == 0 then
+      local taken = false
+      for _, e in ipairs(list) do if e.side == place then taken = true end end
+      if taken then
+        table.remove(list, i)
+        d.tb.cancel_pick(); d.tb.forget()
+      else
+        d.side = place        -- (its buttons stay under its own key)
+      end
+      changed = true
+    end
+  end
+  return changed
 end
 
 function DR.save()
