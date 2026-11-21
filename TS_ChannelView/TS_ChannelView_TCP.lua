@@ -508,8 +508,9 @@ local function draw_row_inner(dl, e, x, w, now)
 
   -- Fixed item lanes: a play button and name per lane, level with each
   -- lane. The column is kept on every row while any track uses fixed
-  -- lanes, so the meters stay one width.
-  if app.any_lanes then
+  -- lanes, so the meters stay one width. (With the overview on they're at
+  -- its far right instead, against the arrange view: lane_column)
+  if app.any_lanes and not app.ov_on then
     local lw = C.TCP_LANE_W
     if LN.is_fixed(tr) and LN.count(tr) > 0 then
       ImGui.DrawList_AddLine(dl, cr - lw - 2.5, y0 + 2, cr - lw - 2.5, y1 - 3,
@@ -859,6 +860,23 @@ local function track_overlays(x, w, ovw, top, h)
   end
 end
 
+-- With the overview on, the fixed lanes' controls in a column of their own
+-- at its far right, against the arrange view, each level with its lane
+local function lane_column(cx, cw, top, h)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.DrawList_AddLine(dl, cx + 0.5, top, cx + 0.5, top + h, C.COL.panel_border, 1.0)
+  for pass = 1, 2 do
+    for _, e in ipairs(app.rows) do
+      if e.visible and e.h > 0 and (pass == 2) == (e.pinned == true)
+         and LN.is_fixed(e.track) and LN.count(e.track) > 0 then
+        ImGui.PushClipRect(ctx, cx, math.max(top, e.clip_top or top), cx + cw, top + h, true)
+        LN.draw(ctx, dl, e.track, e, cx + 4, cx + cw - 4, e.guid)
+        ImGui.PopClipRect(ctx)
+      end
+    end
+  end
+end
+
 -- `ovw`: the overview's column right of the rows (Pro), 0 without it
 local function track_area(x, top, w, h, now, ovw)
   local g = app.geom
@@ -904,7 +922,10 @@ local function track_area(x, top, w, h, now, ovw)
   end
   -- the overview's column: a row clicked there selects its track and opens
   if ovw > 0 and OVW.mod then
-    local e = OVW.mod.draw(ctx, app.rows, x + w, ovw, top, top + h, g, now)
+    -- (the lanes' controls at its far right, against the arrange view)
+    local lcw = app.any_lanes and (C.TCP_LANE_W + 8) or 0
+    if lcw > 0 then lane_column(x + w + ovw - lcw, lcw, top, h) end
+    local e = OVW.mod.draw(ctx, app.rows, x + w, ovw - lcw, top, top + h, g, now)
     if e then
       click_select(e, 0)
       OVW.mod.open_row(e, g, app.rows)

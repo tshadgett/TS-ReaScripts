@@ -1,11 +1,11 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.5.0
+-- @version 4.5.1
 -- @changelog
---  The TCP window keeps pinned tracks (REAPER 7.83+) in their band at the
---  top, draws folder borders round its rows, and keeps the selected tracks
---  right with ChannelView closed. Action bars keep places they don't know.
---  Moves with ChannelView Pro 4.5.0 (the overview). See the CHANGELOG.
+--  The whole FX chain bypassed shows BYPASSED on every panel. Sends: New
+--  track with plugin. TS_TrackProbe 2.9.0 (reopen a project after
+--  updating). Fixed a memory leak from vertical text.
+--  Moves with ChannelView Pro 4.5.1. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

@@ -1203,6 +1203,40 @@ picker uses an optgroup per group.
   places and `DR.repair` puts back empty top bars named for a single place.
   After an update every ChannelView script should restart.
 
+## The overview's track side, rail and analysis (Pro, 4.5.1)
+
+- **Fixed lanes.** With lanes showing (`I_FREEMODE` 2, not
+  `C_LANESCOLLAPSED`), REAPER gives each of `I_NUMFIXEDLANES` lanes the
+  height in `I_HEIGHTOVERRIDE`: the lens sets the whole track's height
+  divided by the lane count (`lanes_of`, `override_for`).
+- **The rail** (`glyph_rail`) is drawn in the overview's window, before the
+  row's scrolling child, so it stays put; its popups open there. The track
+  side's glyphs are drawn in the TCP window's: `glyph_chooser` is called in
+  each. `OV.RAIL_KEYS` / `OV.SIDE_KEYS` split `OV.ACTIONS`.
+- **TS_CV_OverviewAnalysis.** `OA.height` picks the layout (`OA._mode`:
+  both, the tab's, or the one shown) and `OA.draw` follows it; call height
+  first each frame.
+- **The spectra:** after from `TP.spectrum` (0x3A0000), before from
+  `TP.pre_spectrum` (TS_TrackProbe 2.9.0, 0x520000 + (index + 1) * 272,
+  asked for by moving [6] of its own place: the probe block's 128 fields are
+  all taken). Collisions against one track: `CL.pair_tick` / `CL.pair`, a
+  state of its own beside the track buttons' (a pair's shares are sparse:
+  only bands the track has been in).
+- **The chain's waveform** (TS_TrackProbe 2.9.0, 0x640000): one track,
+  named in gmem[79], wanted while gmem[80] moves. Columns are numbered by
+  the play position (project sample / slice), so the two probes fill the
+  same column with the same moment without talking to each other; each
+  writes its own tag ([4] post, [5] pre). Within a block REAPER runs the
+  pre probe before the post probe. Gain reduction is sampled in Lua each
+  frame (`TP.track_total`), timed by the newest column.
+- **dev/TS_CV_ProbeJsfxTest.cpp** runs the probe in ysfx: two copies as a
+  pair on track 0, the waveform and both spectra checked.
+  `get_host_placement` isn't in ysfx: the test's copy takes the track and
+  place from two sliders.
+- **Turned text** (`W.vertical_text`): images are white, tinted where
+  drawn, one per window, text and size; `W.clear_rot` detaches them (a
+  dropped image left attached stays in memory until the window closes).
+
 ## Upkeep, by one window (TS_CV_Upkeep)
 
 What ChannelView's rescan used to keep right on its own track now runs from

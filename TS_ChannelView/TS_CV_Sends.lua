@@ -27,9 +27,9 @@
   Direct and sidechain leave the send's MIDI as REAPER set it. Going back
   to either from MIDI turns the audio on and the MIDI off -- the MIDI was
   the point of the MIDI mode, and leaving it on would make the button lie.
-  Each starts with "New track" and "New track from template", which
-  create the other track at the end of the project and route to or from
-  it in one step. The selection is left where it was, so the panel stays
+  Each starts with "New track", "New track from template", "New track
+  with FX chain" and "New track with plugin", which create the other
+  track at the end of the project and route to or from it in one step. The selection is left where it was, so the panel stays
   on the track you were working on.
 
   Tracks whose name is nothing but punctuation ("--------") are spacers,
@@ -368,6 +368,20 @@ local function make(kind)
       ImGui.SetTooltip(ctx, "No FX chains in " .. (CN.dir()))
     end
     if f and new_return(function() return CN.new_track(f, nil, true) end, track, mode) then added = true end
+    -- a new track with one plugin on it, named after it
+    local pe = nil
+    if ImGui.BeginMenu(ctx, "   New track with plugin##" .. ID .. "tp") then
+      require("TS_CV_Browser").menu_items(ctx, nil, { pick = function(e) pe = e end, single = true, search = true })
+      ImGui.EndMenu(ctx)
+    end
+    if pe and new_return(function()
+        local tr = TO.new_track_at_end()
+        if tr then
+          reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", pe.short or U.clean_fx_name(pe.name or ""), true)
+          reaper.TrackFX_AddByName(tr, pe.ident, false, -1)
+        end
+        return tr
+      end, track, mode) then added = true end
     ImGui.Separator(ctx)
     return added
   end

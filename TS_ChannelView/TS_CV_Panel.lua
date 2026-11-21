@@ -4621,7 +4621,8 @@ fold_pop = function(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate)
     if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate))
     else ImGui.DrawList_AddRectFilled(pdl, wx, wy, wx + pw, wy + ph, C.COL.panel_bg, C.PANEL_RR) end
     ImGui.DrawList_AddRect(pdl, wx, wy, wx + pw, wy + ph, C.COL.accent, 3.0, 0, 1.0)
-    local locked = not T.get_enabled(track, fx.addr)
+    -- (bypassed itself, or the whole chain is)
+    local locked = not T.get_enabled(track, fx.addr) or T.chain_bypassed(track)
     if locked then ImGui.BeginDisabled(ctx, true) end
     if P.RACK then
       draw_controls(ctx, pdl, wx, wy, pw, ph, track, fx, layout, key, req, nil, nil)
@@ -4797,7 +4798,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       local fh = P.footer_h()
       -- the body: as wide as the panel's own layout, centred on a wider plate
       local bx, bw = x + off, ww - (w - nat_w)
-      local locked = not enabled and not req.offline and not is_drag_source
+      -- (bypassed itself, or the whole chain is: BYPASSED either way)
+      local locked = (not enabled or T.chain_bypassed(track)) and not req.offline and not is_drag_source
       if locked then ImGui.BeginDisabled(ctx, true) end
       if req.offline then
         draw_offline(ctx, dl, bx, y + P.head_h(), bw, wh - P.head_h() - fh, track, fx)

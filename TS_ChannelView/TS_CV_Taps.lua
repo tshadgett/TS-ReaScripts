@@ -2345,7 +2345,7 @@ function TP.track_total(tr)
     -- (measured or reported: a reporting plugin's changes with its zero)
     local e = T.gr_estimated(tr, s.addr, s.guid)
     if e then est = true end
-    parts[#parts + 1] = { name = s.name, db = v, est = e,
+    parts[#parts + 1] = { name = s.name, db = v, est = e, guid = s.guid,
                           cal = e and TP.cal_status(tr, s.guid) or nil }
   end
   return total, est, parts
@@ -2424,6 +2424,70 @@ function TP.spectrum(tr)
   end
   spec_frame[key] = { t = now, s = out }
   return out
+end
+
+-- What goes into the chain, beside TP.spectrum's what comes out
+-- (TS_TrackProbe 2.9.0, A SPECTRUM PER TRACK, BEFORE TOO): the track's
+-- pre probe runs its own while this is asked, each frame it's drawn.
+-- The same shape as TP.spectrum's, or nil (none live, or an older probe).
+TP.PRE_SPEC_BASE, TP.PRE_SPEC_ASK = 0x520000, 6
+local pre_seen, pre_frame, pre_tick = {}, {}, 0
+function TP.pre_spectrum(tr)
+  if not tr then return nil end
+  local now = reaper.time_precise()
+  local key = tostring(tr)
+  local f = pre_frame[key]
+  if f and now - f.t < 0.012 then return f.s end
+  local idx = PL.track_index(tr)
+  local out
+  if idx and idx + 1 < TP.SPEC_TRACKS and TP.has_probes(tr) then
+    if not TP._spec_gm then reaper.gmem_attach(TP.GMEM_NS); TP._spec_gm = true end
+    local b = TP.PRE_SPEC_BASE + (idx + 1) * TP.SPEC_STRIDE
+    pre_tick = pre_tick % 1000000 + 1
+    reaper.gmem_write(b + TP.PRE_SPEC_ASK, pre_tick)
+    local seq = reaper.gmem_read(b)
+    local s = pre_seen[key]
+    if not s or s.seq ~= seq then s = { seq = seq, t = now }; pre_seen[key] = s end
+    local n = math.floor(reaper.gmem_read(b + 1))
+    if seq > 0 and now - s.t < 1.0 and n >= 2 and n <= 256 and reaper.gmem_read(b + 5) == idx + 2 then
+      out = { n = n, lo = reaper.gmem_read(b + 2), hi = reaper.gmem_read(b + 3), db = {} }
+      for i = 1, n do out.db[i] = reaper.gmem_read(b + 15 + i) end
+    end
+  end
+  pre_frame[key] = { t = now, s = out }
+  return out
+end
+
+-- One track's waveform going into its chain and coming out (TS_TrackProbe
+-- 2.9.0, THE CHAIN'S WAVEFORM): asked for while this is called, each frame
+-- it's drawn; one track at a time. Returns its header { newest, cols,
+-- slice, rate, w } once that track's probes write it, else nil (none, an
+-- older probe, not yet).
+TP.CW_BASE, TP.CW_TRK, TP.CW_HB = 0x640000, 79, 80
+local cw_tick = 0
+function TP.chain_wave(tr)
+  local idx = tr and PL.track_index(tr)
+  if not idx or not TP.has_probes(tr) then return nil end
+  if not TP._spec_gm then reaper.gmem_attach(TP.GMEM_NS); TP._spec_gm = true end
+  local b = TP.CW_BASE
+  if reaper.gmem_read(TP.CW_TRK) ~= idx + 2 then reaper.gmem_write(TP.CW_TRK, idx + 2) end
+  cw_tick = cw_tick % 1000000 + 1
+  reaper.gmem_write(TP.CW_HB, cw_tick)
+  if reaper.gmem_read(b + 4) ~= idx + 2 then return nil end
+  local h = { newest = math.floor(reaper.gmem_read(b)), cols = math.floor(reaper.gmem_read(b + 1)),
+              slice = reaper.gmem_read(b + 2), rate = reaper.gmem_read(b + 3), w = math.floor(reaper.gmem_read(b + 5)) }
+  if h.cols < 1 or h.slice <= 0 or h.rate <= 0 or h.w < 6 then return nil end
+  return h
+end
+-- Column `c` of it: in min, in max, out min, out max; nil when the post
+-- probe hasn't written that column (in: nil when the pre probe hasn't)
+function TP.chain_wave_col(h, c)
+  if c < 0 then return nil end
+  local a = TP.CW_BASE + 16 + (c % h.cols) * h.w
+  if reaper.gmem_read(a + 4) ~= c then return nil end
+  local lo, hi
+  if reaper.gmem_read(a + 5) == c then lo, hi = reaper.gmem_read(a), reaper.gmem_read(a + 1) end
+  return lo, hi, reaper.gmem_read(a + 2), reaper.gmem_read(a + 3)
 end
 
 -- Listening to a band (TS_TrackProbe 2.6.0, LISTENING TO A BAND): the

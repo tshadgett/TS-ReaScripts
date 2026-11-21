@@ -288,14 +288,39 @@ from then on (double-click it to go back to filling the view).
   before or after it, remove it.
 
 **The track's side** of the open row lists its chain (click to scroll to
-a plugin, the dot bypasses) and has a strip of glyphs down the right, each
-in its own colour, lit while on: which panels the open row shows (Console
-setup when there's no console yet; DrumToolbox only on a drum's tracks),
-then **Probes**, **Trimmer** and **Freeze** as ChannelView's header has
-them, and **MIDI learn**, which slides the MIDI learn bar down over the
-top of the overview. The pin at the bottom left (REAPER 7.83 and later)
-pins the track to the top of the arrange view, or unpins it; a medium
-row has it too.
+a plugin, the dot bypasses; red while a plugin or the whole chain is
+bypassed). Down its left, the chain's own glyphs as ChannelView's header
+has them: **FX chain bypass**, **Load FX chain**, the chain's
+**oversampling** and **Freeze**. The pin at the bottom left (REAPER 7.83
+and later) pins the track to the top of the arrange view, or unpins it; a
+medium row has it too. The master, and a track pinned to the top, open at
+full height in their band.
+
+**The rail** at the start of the open row, before its panels, keeps its
+place while the row scrolls: **Probes**, **Trimmer** and **MIDI learn**
+(which slides the MIDI learn bar down over the top of the overview), then
+which panels the open row shows (Console setup when there's no console
+yet; DrumToolbox only on a drum's tracks), each in its own colour, lit
+while on. Right-click the rail or the chain's glyphs to choose which show.
+
+**Under the chain**, where there's room, Track Analyser's two views of the
+track, from its probes (TS_TrackProbe 2.9.0: reopen a project after
+updating):
+
+- **Spectrum:** what goes into the chain in grey, what comes out in front.
+  Pick a track on its header to compare with, and the bands they share
+  show red inside the spectrum (the lamp turns that on and off).
+- **Dynamics:** the waveform going in (grey, outlined) and coming out,
+  with each plugin's gain reduction hanging from the top and a bar each
+  at the right. Its window is a number of beats, held to the beat so hits
+  land in the same place, or a number of seconds, running free.
+
+Both show one over the other when there's room, else tabs choose; each
+folds from its header, and ↗ opens Track Analyser. Options ▸ *TCP window* ▸
+*Panels* ▸ *Under the chain* turns either off. With fixed lanes showing, a
+track's lane buttons sit at the overview's far right. The overview keeps
+its own layout pick for each plugin, apart from ChannelView's and the
+rack's.
 
 **Comparing blind**, the overview keeps it blind: medium rows show the
 numbered boxes, short rows numbered tiles (click one to hear it), and
@@ -528,7 +553,8 @@ so its probes are the new ones.
   **FX chain bypass** — which bypasses every plugin on the track at once, a
   different thing from bypassing one panel, and belongs where it's always
   visible. While the whole chain is bypassed the header glows red along its
-  bottom edge. The bar's height comes from `C.MENU_PAD_Y`; see *Header
+  bottom edge and every panel says BYPASSED (in the rack, the overview,
+  pop-outs and the web companion too). The bar's height comes from `C.MENU_PAD_Y`; see *Header
   height* in `dev/NOTES.md` for why that is the only number that moves it.
 * **Run when REAPER starts** under **☰** — see below; it edits
   `Scripts/__startup.lua`, carefully.
@@ -2421,9 +2447,10 @@ A template's own folders are flattened, or kept as a folder inside
   (an instrument with its outputs), or all of them. *Disarm the others*,
   and with TS_TrackingMode installed, *Only in Tracking mode*.
 
-**FX returns:** the sends panel's *New track*, *New track from template*
-and *New track with FX chain* make a return: at the end of the project or
-into a folder you name, numbered, and coloured as an FX return.
+**FX returns:** the sends panel's *New track*, *New track from template*,
+*New track with FX chain* and *New track with plugin* (pick one from the
+plugin list; the track takes its name) make a return: at the end of the
+project or into a folder you name, numbered, and coloured as an FX return.
 
 **Keep at the end:** a track's name (SUM to start, Console setup's
 summing track). Anything ChannelView adds at the end goes before it.
@@ -2477,6 +2504,7 @@ with it, sent from the selected track. They're in the action list as
 | `TS_ChannelView_TCP.lua` | **ChannelView TCP**: ChannelView's track panel, beside REAPER's arrange view |
 | `TS_CV_Arrange.lua` | where REAPER's arrange view and its tracks are, for the TCP window |
 | `TS_CV_Overview.lua` | the TCP window's overview (Pro) |
+| `TS_CV_OverviewAnalysis.lua` | under the overview's open row's chain: its spectrum (Pro) |
 | `TS_ChannelView_TCP_Overview.lua` | the *Overview* action: the TCP window's overview on or off (Pro) |
 | `TS_CV_Menus.lua` | the panels' menus, shared by ChannelView and the overview |
 | `TS_CV_Upkeep.lua` | keeping the selected tracks right, by whichever window is open |

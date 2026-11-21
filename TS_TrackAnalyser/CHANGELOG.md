@@ -1,5 +1,11 @@
 # Track Analyser — changelog
 
+## 2.7.5 — TS_TrackProbe 2.9.0
+
+- **TS_TrackProbe 2.9.0:** each track's spectrum going into its chain, and
+  one track's waveform in and out, for ChannelView 4.5.1's overview.
+  Reopen a project after updating, so the new probe runs.
+
 ## 2.7.4 — TS_TrackProbe 2.8.0
 
 - **TS_TrackProbe 2.8.0:** each track's probe sends its ERB bands and

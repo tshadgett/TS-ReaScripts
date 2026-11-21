@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.8.0
+version: 2.9.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -61,12 +61,18 @@ author: Tim Shadgett
 //   0x4E0000   each track's ERB bands and left / right levels for
 //              ChannelView's Collisions, + (track index + 1) * 64
 //              (COLLISIONS)
+//   0x520000   each track's spectrum going in, + (track index + 1) * 272
+//              (A SPECTRUM PER TRACK, BEFORE TOO)
+//   0x640000   one track's waveform going in and coming out (THE CHAIN'S
+//              WAVEFORM)
 //   73         tap heartbeat, bumped by any reader
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
 //   77         which track writes the stereo scope (index + 2; 0 none)
 //   78         moving while ChannelView is learning a plugin: no zero is
 //              measured meanwhile (THE ZERO POINT)
+//   79         which track writes the chain's waveform (index + 2; 0 none)
+//   80         moving while it's wanted (THE CHAIN'S WAVEFORM)
 //
 // THE PROBE BLOCK, at 0x100000 + (track index + 1) * 128.
 //   The scripts write:
@@ -328,6 +334,29 @@ author: Tim Shadgett
 //   but not for Track Analyser, writes its own block at 0x4C0000 rather
 //   than over the PRE / POST block Track Analyser is reading.
 //
+// THE CHAIN'S WAVEFORM
+//   For the TCP window's overview: one track's waveform going into its
+//   chain and coming out, side by side, a column every 4 ms, 2048 columns
+//   (8.2 s), while the transport runs. ONE track writes it, the one named
+//   in gmem[79] (index + 2), while gmem[80] keeps moving; a second still
+//   and it stops. The columns follow the play position, so the two
+//   probes fill the same column with the same moment: column c is the
+//   samples from c * [2] to (c + 1) * [2] - 1 of the project.
+//     0x640000  [0] the newest column the post probe finished  [1] columns
+//               [2] samples per column  [3] sample rate
+//               [4] writer (track index + 2)  [5] values a column (6)
+//     0x640010 + (c mod [1]) * 6: [0] in min [1] in max (the pre probe's)
+//               [2] out min [3] out max [4] c, from the post probe
+//               [5] c, from the pre probe (a column is whole when both say c)
+//
+// A SPECTRUM PER TRACK, BEFORE TOO
+//   The pre probe's, the same way, at 0x520000 + (track index + 1) * 272,
+//   laid out as above: what goes into the chain, beside what comes out.
+//   Asked for apart from the other (it costs the pre probe an FFT): while
+//   [6] of its own place keeps moving, written by whatever draws it. A
+//   second without and it stops.
+//
+//
 // COLLISIONS
 //   ChannelView marks, on its track list, the tracks that cover the one
 //   in view, and how much of the time. The spectrum above is a display
@@ -587,6 +616,13 @@ out_pin:right
   COL_E = 43000;                  // COL_MAXB+1, band edges in bins
   col_nb = 0; col_hi = 20000; col_seq = 0; col_l = col_r = col_n = 0;
   cvs_v = cvs_last = 0; cvs_age = 1000000000; cvs_seq = 0; cv_active = 0;
+  // A SPECTRUM PER TRACK, BEFORE TOO
+  PRS_BASE = 0x520000; PRS_ASK = 6;
+  // THE CHAIN'S WAVEFORM
+  CW_BASE = 0x640000; CW_COLS = 2048; CW_W = 6; CTRL_CWTRK = 79; CTRL_CWHB = 80;
+  cw_hb = cw_hbl = 0; cw_age = 1000000000; cw_on = cw_run = 0;
+  cw_col = -1; cw_lo = 1; cw_hi = -1; cw_have = 0; cw_pos0 = cw_k = 0; cw_slice = 192;
+  prs_v = prs_last = 0; prs_age = 1000000000; prs_seq = 0; prs_active = 0;
   lsn_hb = lsn_last = 0; lsn_age = 1000000000; lsn_on = 0; lsn_mix = 0;
   lsn_f = lsn_q = lsn_k = -1;
   lsn_l1 = lsn_l2 = lsn_l3 = lsn_l4 = lsn_r1 = lsn_r2 = lsn_r3 = lsn_r4 = 0;
@@ -1810,6 +1846,27 @@ out_pin:right
   // (2: the post probe while Track Analyser compares against this track)
   cv_active = (role == 1 || role == 2) && cvs_last != 0 && cvs_age < srate && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
   cbase = CVS_BASE + (pl_tr + 1) * CVS_STRIDE;
+  // the pre probe's, while its place's [6] moves
+  pbase = PRS_BASE + (pl_tr + 1) * CVS_STRIDE;
+  prs_ok = role == 0 && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
+  prs_v = prs_ok ? gmem[pbase + PRS_ASK] : prs_last;
+  prs_v != prs_last ? ( prs_last = prs_v; prs_age = 0; ) : prs_age += samplesblock;
+  prs_active = prs_ok && prs_last != 0 && prs_age < srate;
+  // THE CHAIN'S WAVEFORM: this track's pair, while named and wanted
+  cw_hb = gmem[CTRL_CWHB];
+  cw_hb != cw_hbl ? ( cw_hbl = cw_hb; cw_age = 0; ) : cw_age += samplesblock;
+  cw_on = role >= 0 && pl_tr >= -1 && gmem[CTRL_CWTRK] == pl_tr + 2 && cw_hbl != 0 && cw_age < srate;
+  cw_run = cw_on && (play_state & 1) && play_position >= 0;
+  cw_on ? (
+    cw_slice = max(16, floor(srate * 0.004));
+    role >= 0.5 ? (
+      gmem[CW_BASE + 1] = CW_COLS; gmem[CW_BASE + 2] = cw_slice;
+      gmem[CW_BASE + 3] = srate; gmem[CW_BASE + 4] = pl_tr + 2; gmem[CW_BASE + 5] = CW_W;
+    );
+  );
+  // (where this block starts, in samples of the project)
+  cw_pos0 = floor(play_position * srate + 0.5); cw_k = 0;
+  !cw_run ? ( cw_col = -1; cw_have = 0; );
   // ChannelView listening to a band (LISTENING TO A BAND)
   lsn_ok = (role == 1 || role == 2) && pl_tr >= -1 && pl_tr + 1 < CVS_TRACKS;
   lsn_hb = lsn_ok ? gmem[cbase + 8] : 0;
@@ -1848,7 +1905,7 @@ out_pin:right
   // Visualizer watches several tracks at once, where Track Analyser's
   // Publish arms one pair at a time, driven by panel selection. The
   // Visualizer path does not touch Publish and is not touched by it.
-  active = role >= 0 && (publish >= 0.5 || vis_active || cv_active);
+  active = role >= 0 && (publish >= 0.5 || vis_active || cv_active || prs_active);
 
   active ? (
     // What size does the panel want? Fall back to something sane if it has
@@ -1914,6 +1971,11 @@ out_pin:right
       gmem[cbase + 1] = BANDS; gmem[cbase + 2] = BAND_LO;
       gmem[cbase + 3] = BAND_HI; gmem[cbase + 4] = fftsz;
       gmem[cbase + 5] = pl_tr + 2;
+    );
+    prs_active ? (
+      gmem[pbase + 1] = BANDS; gmem[pbase + 2] = BAND_LO;
+      gmem[pbase + 3] = BAND_HI; gmem[pbase + 4] = fftsz;
+      gmem[pbase + 5] = pl_tr + 2;
     );
     vis_active ? (
       vbase = VIS_SLOT_BASE + vis_slot * VIS_SLOT_STRIDE;
@@ -2182,6 +2244,28 @@ out_pin:right
 
 @sample
 
+  // THE CHAIN'S WAVEFORM: this sample into its column; a column done is
+  // written (the pre probe its "in", the post probe its "out")
+  cw_run ? (
+    cw_c = floor((cw_pos0 + cw_k) / cw_slice);
+    cw_c != cw_col ? (
+      (cw_col >= 0 && cw_have) ? (
+        cw_b = CW_BASE + 16 + (cw_col % CW_COLS) * CW_W;
+        role < 0.5 ? (
+          gmem[cw_b] = cw_lo; gmem[cw_b + 1] = cw_hi; gmem[cw_b + 5] = cw_col;
+        ) : (
+          gmem[cw_b + 2] = cw_lo; gmem[cw_b + 3] = cw_hi; gmem[cw_b + 4] = cw_col;
+          gmem[CW_BASE] = cw_col;
+        );
+      );
+      cw_col = cw_c; cw_lo = 1; cw_hi = -1; cw_have = 0;
+    );
+    cw_v = min(spl0, spl1); cw_v < cw_lo ? cw_lo = cw_v;
+    cw_v = max(spl0, spl1); cw_v > cw_hi ? cw_hi = cw_v;
+    cw_have = 1;
+    cw_k += 1;
+  );
+
   // The post probe, while the zero is measured: nothing out, and nothing
   // for its own analysis either -- but what came in is looked at first.
   cal_post ? (
@@ -2386,6 +2470,7 @@ out_pin:right
         // both sides of the bridge.
         vis_active ? gmem[vbase + VIS_OFF_BAND + bi] = dmax;
         cv_active ? gmem[cbase + CVS_OFF_BAND + bi] = dmax;
+        prs_active ? gmem[pbase + CVS_OFF_BAND + bi] = dmax;
         // Whether this band has a value at all. With the left edge held
         // from bin 1 the only bands that fail this are the ones above
         // Nyquist, where a floor is the truth. A band with no value is
@@ -2472,6 +2557,7 @@ out_pin:right
       gmem[base + H_SEQ] = seq;
       vis_active ? ( vis_seq += 1; gmem[vbase + VIS_H_SEQ] = vis_seq; );
       cv_active ? ( cvs_seq += 1; gmem[cbase] = cvs_seq; );
+      prs_active ? ( prs_seq += 1; gmem[pbase] = prs_seq; );
 
       memcpy(BUF_ACC, BUF_ACC + hop, hop);
       fill = hop;

@@ -2,11 +2,11 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.7.4
+-- @version 2.7.5
 -- @changelog
---  TS_TrackProbe 2.8.0: ERB bands for ChannelView 4.3.0's Collisions.
---  The front spectrum no longer stands still after selecting the track
---  compared against. Reopen a project after updating.
+--  TS_TrackProbe 2.9.0: each track's spectrum going in, and the chain's
+--  waveform, for ChannelView 4.5.1's overview. Reopen a project after
+--  updating.
 -- @about
 --  # Track Analyser
 --

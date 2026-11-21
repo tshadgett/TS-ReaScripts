@@ -4983,9 +4983,22 @@ end
 -- That needs js_ReaScriptAPI for the LICE and GDI calls. Without it, or
 -- if any part of it raises, the stacked-letter version below still runs
 -- and nothing here is tried again.
-local rot_img, rot_ok = {}, nil
+-- The images are drawn in white and tinted where they're drawn, so one
+-- serves every colour. Each is attached to its context; dropped from
+-- the cache it's detached too, or it would stay in memory for as long as
+-- the window runs.
+local rot_img, rot_n, rot_ok = {}, 0, nil
+W.ROT_MAX = 400       -- images kept at most: past this the cache starts over
 
-function W.clear_rot() rot_img = {} end
+function W.clear_rot()
+  for _, hit in pairs(rot_img) do
+    if hit.img and hit.ctx and ImGui.Detach then pcall(ImGui.Detach, hit.ctx, hit.img) end
+  end
+  rot_img, rot_n = {}, 0
+end
+
+-- (for the tests: how many are kept; `retry` asks again whether it can)
+function W._rot(retry) if retry then rot_ok = nil end return rot_n end
 
 local function rot_usable()
   if rot_ok == nil then
@@ -5001,18 +5014,17 @@ local function rot_usable()
   return rot_ok
 end
 
--- One image per (text, colour, size). Building one costs a bitmap, a
+-- One image per (window, text, size). Building one costs a bitmap, a
 -- font and a texture upload, so doing it per frame would be absurd.
-local function rot_build(ctx, text, col, px, w, h)
+local function rot_build(ctx, text, px, w, h)
   local gdi = reaper.JS_GDI_CreateFont(px, 400, 0, 0, 0, 0, C.ROT_FONT)
   if not gdi then return nil end
   local font = reaper.JS_LICE_CreateFont()
   reaper.JS_LICE_SetFontFromGDI(font, gdi, "")
   reaper.JS_GDI_DeleteObject(gdi)
 
-  -- Ours are 0xRRGGBBAA, LICE wants 0xAARRGGBB.
-  local a = col & 0xff
-  reaper.JS_LICE_SetFontColor(font, ((a << 24) | (col >> 8)) & 0xffffffff)
+  -- (LICE's colours are 0xAARRGGBB: opaque white)
+  reaper.JS_LICE_SetFontColor(font, 0xffffffff)
 
   local bm = reaper.JS_LICE_CreateBitmap(true, w, h)
   reaper.JS_LICE_Clear(bm, 0x00000000)
@@ -5028,12 +5040,13 @@ local function rot_build(ctx, text, col, px, w, h)
   return img
 end
 
-local function rot_get(ctx, text, col, px, w, h)
-  local key = ("%s|%08x|%d|%d"):format(text, col & 0xffffffff, px, w)
+local function rot_get(ctx, text, px, w, h)
+  local key = ("%s|%s|%d|%d"):format(tostring(ctx), text, px, w)
   local hit = rot_img[key]
   if hit ~= nil then return hit.img end
+  if rot_n >= W.ROT_MAX then W.clear_rot() end
 
-  local ok, img = pcall(rot_build, ctx, text, col, px, w, h)
+  local ok, img = pcall(rot_build, ctx, text, px, w, h)
   if not ok then
     -- One failure is enough: whatever is missing will still be missing
     -- next frame, and retrying sixty times a second to find that out
@@ -5041,7 +5054,8 @@ local function rot_get(ctx, text, col, px, w, h)
     rot_ok = false
     return nil
   end
-  rot_img[key] = { img = img }
+  rot_n = rot_n + 1
+  rot_img[key] = { img = img, ctx = ctx }
   return img
 end
 
@@ -5070,19 +5084,20 @@ function W.vertical_text(ctx, dl, cx, y, text, col, max_h)
     local bw = math.max(8, math.ceil(tw) + px)
     local bh = math.max(8, math.ceil(th) + 4)
 
-    local img = rot_get(ctx, text, col, px, bw, bh)
+    local img = rot_get(ctx, text, px, bw, bh)
     if img then
       -- A quarter turn. The image's top-left goes to the bottom-left of
       -- the destination and the rest follows round, which reads bottom
       -- to top; C.ROT_UP false sends it the other way.
       local x0, y0 = cx - bh * 0.5, y
       local x1, y1 = x0 + bh, y + bw
+      -- (white, tinted to the colour asked for)
       if C.ROT_UP then
         ImGui.DrawList_AddImageQuad(dl, img,
-          x0, y1,  x0, y0,  x1, y0,  x1, y1)
+          x0, y1,  x0, y0,  x1, y0,  x1, y1,  0, 0, 1, 0, 1, 1, 0, 1, col)
       else
         ImGui.DrawList_AddImageQuad(dl, img,
-          x1, y0,  x1, y1,  x0, y1,  x0, y0)
+          x1, y0,  x1, y1,  x0, y1,  x0, y0,  0, 0, 1, 0, 1, 1, 0, 1, col)
       end
       return bw
     end

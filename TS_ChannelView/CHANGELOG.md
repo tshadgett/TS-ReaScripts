@@ -1,5 +1,39 @@
 # ChannelView — changelog
 
+## 4.5.1 — the overview's analysis, chain bypass shown
+
+### ChannelView
+
+- **The whole FX chain bypassed:** every panel says BYPASSED and its
+  controls lock, as a bypassed plugin's do, in ChannelView, the rack,
+  pop-outs and the web companion.
+- **Sends: New track with plugin** in the add menu: pick a plugin, and a
+  return named after it is made with it on.
+- **TS_TrackProbe 2.9.0:** each track's spectrum going into its chain, and
+  the chain's waveform in and out, for the overview. Reopen a project after
+  updating, so the new probe runs.
+- Fixed: vertical text (collapsed panels, tiles) leaked memory on every
+  track change, until REAPER said it couldn't allocate any more.
+
+### ChannelView Pro
+
+- **Spectrum and Dynamics under the open row's chain** in the overview,
+  from the track's probes: before and after the chain, Collisions against
+  a track picked on the header, the waveform with each plugin's gain
+  reduction, held to the beat or running free. Stacked when there's room,
+  else tabs; Options ▸ TCP window ▸ Panels ▸ *Under the chain* turns
+  either off.
+- **The overview's glyphs:** a rail at the start of the open row
+  (Probes, Trimmer, MIDI learn, then the panels), and the chain's own
+  (bypass, load, oversampling, Freeze) down the left of the chain list.
+  The chain list's dots go red for a bypassed plugin or chain.
+- The master, and a track pinned to the top, open at full height.
+- With fixed lanes showing, the open row is the right height (each lane
+  took the whole height), and the lane buttons sit at the overview's far
+  right.
+- The overview keeps its own layout pick for each plugin, apart from
+  ChannelView's and the rack's.
+
 ## 4.5.0 — the overview in the TCP window
 
 ### ChannelView

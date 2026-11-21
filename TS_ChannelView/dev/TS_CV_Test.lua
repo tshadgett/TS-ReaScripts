@@ -12976,6 +12976,21 @@ do
   check("collisions: the menu counts it", CL.missing, 1)
   check("collisions: a muted track marks nothing", CL.mark(D, "Vox", "Pad"), nil)
   check("collisions: the vocal's own folder marks nothing", CL.mark(F, "Vox", "Vocals"), nil)
+  -- one pair on its own (the overview's spectrum), with the marks off
+  do
+    ext.collisions = ""
+    check("collisions: a pair, nothing before it's ticked", CL.pair(A, B), nil)
+    for _ = 1, 600 do now = now + 0.07; publish(); CL.pair_tick(A, B) end
+    local hz, sh = CL.pair(A, B)
+    local at2k, at100 = 0, 0
+    for k = 1, #hz do
+      if math.abs(hz[k] - 2000) < 300 then at2k = math.max(at2k, sh[k] or 0) end
+      if math.abs(hz[k] - 100) < 30 then at100 = math.max(at100, sh[k] or 0) end
+    end
+    check("collisions: a pair, the keys over the vocal at 2 kHz, nothing at 100 Hz", at2k > 0.5 and at100 == 0, true)
+    check("collisions: a pair, asked about another track, nothing", CL.pair(B, A), nil)
+    ext.collisions = "bands"
+  end
   -- stopped: the marks stay as they were
   play = 0
   local before = mb.dot
@@ -13929,6 +13944,187 @@ do
   local found = SR0.search(list, "pro q", nil, function(e) return fav[e.ident] and 100000 or 0 end)
   check("favourites: lead a search", found[1] and found[1].short, "Pro-Q 4")
   reaper.GetExtState, reaper.SetExtState = gx, sx
+end
+
+-- What goes into the chain (TS_TrackProbe 2.9.0, A SPECTRUM PER TRACK,
+-- BEFORE TOO): asked for at the track's place, read once its pre probe
+-- writes it
+do
+  local TP = require("TS_CV_Taps")
+  local saved = {}
+  for _, k in ipairs({ "gmem_read", "gmem_write", "gmem_attach", "time_precise", "GetMediaTrackInfo_Value" }) do saved[k] = reaper[k] end
+  local hp = TP.has_probes
+  local gm, now = {}, 500
+  reaper.gmem_read = function(a) return gm[a] or 0 end
+  reaper.gmem_write = function(a, v) gm[a] = v end
+  reaper.gmem_attach = function() end
+  reaper.time_precise = function() return now end
+  reaper.GetMediaTrackInfo_Value = function(_, k) if k == "IP_TRACKNUMBER" then return 3 end return 0 end
+  TP.has_probes = function() return true end
+  local tr = { "pre" }
+  local b = TP.PRE_SPEC_BASE + 3 * TP.SPEC_STRIDE      -- track index 2
+  check("before spectrum: nothing written yet, none", TP.pre_spectrum(tr), nil)
+  check("before spectrum: asked for at its place", gm[b + TP.PRE_SPEC_ASK] ~= nil and gm[b + TP.PRE_SPEC_ASK] > 0, true)
+  gm[b], gm[b + 1], gm[b + 2], gm[b + 3], gm[b + 5] = 7, 4, 20, 20000, 4
+  for i = 1, 4 do gm[b + 15 + i] = -10 * i end
+  now = now + 0.05
+  local sp = TP.pre_spectrum(tr)
+  check("before spectrum: read once written", sp and table.concat(sp.db, " "), "-10 -20 -30 -40")
+  gm[b + 5] = 9
+  now = now + 0.05
+  check("before spectrum: another track's, none", TP.pre_spectrum(tr), nil)
+  gm[b + 5] = 4
+  now = now + 1.5
+  check("before spectrum: stopped a second, none", TP.pre_spectrum(tr), nil)
+  for k, v in pairs(saved) do reaper[k] = v end
+  TP.has_probes = hp
+end
+
+-- The overview's spectrum section drawn, headless: a share for every
+-- band, or only some (a band the track hasn't been in has none yet), no
+-- probes, folded
+do
+  local ED = require("TS_CV_Edition")
+  local wasP = ED.PRO
+  ED.PRO = { RELEASE = ED.RELEASE }
+  local saved = {}
+  for _, k in ipairs({ "GetExtState", "SetExtState", "CountTracks", "GetTrack", "GetTrackGUID", "ValidatePtr2",
+                       "GetMasterTrack", "GetResourcePath", "new_array" }) do saved[k] = reaper[k] end
+  local ext = { compare = "{B}" }
+  reaper.GetExtState = function(_, k) return ext[k] or "" end
+  reaper.SetExtState = function(_, k, v) ext[k] = v end
+  local A, B = { "A" }, { "B" }
+  reaper.CountTracks = function() return 2 end
+  reaper.GetTrack = function(_, i) return i == 0 and A or B end
+  reaper.GetTrackGUID = function(t) return t == A and "{A}" or "{B}" end
+  reaper.ValidatePtr2 = function() return true end
+  reaper.GetMasterTrack = function() return "master" end
+  reaper.GetResourcePath = function() return "/nonexistent" end
+  reaper.new_array = function(n) return { n = n } end
+  local probes, share = true, nil
+  local hz = {}
+  for i = 1, 41 do hz[i] = 20 * 1000 ^ ((i - 0.5) / 41) end
+  local mods = {}
+  for _, k in ipairs({ "TS_CV_Taps", "TS_CV_Collisions", "TS_CV_OverviewAnalysis" }) do mods[k] = package.loaded[k] end
+  package.loaded["TS_CV_Taps"] = {
+    has_probes = function() return probes end,
+    spectrum = function() local db = {}; for i = 1, 256 do db[i] = -40 end; return { n = 256, lo = 20, hi = 20000, db = db } end,
+    pre_spectrum = function() local db = {}; for i = 1, 256 do db[i] = -30 end; return { n = 256, lo = 20, hi = 20000, db = db } end,
+  }
+  package.loaded["TS_CV_Collisions"] = { MIN = 0.08, pair_tick = function() end,
+    pair = function() return share and hz or nil, share end }
+  package.loaded["TS_CV_OverviewAnalysis"] = nil
+  local OA = require("TS_CV_OverviewAnalysis")
+  local calls = 0
+  local fake = setmetatable({
+    CalcTextSize = function(_, t) return 7 * #tostring(t), 12 end,
+    GetCursorScreenPos = function() return 0, 0 end,
+  }, { __index = function() return function() calls = calls + 1; return false end end })
+  OA.attach(fake)
+  local W = require("TS_CV_Widgets")
+  W.attach(fake)
+  local function try(label)
+    local ok, err = pcall(OA.draw, "ctx", "dl", A, 0, 0, 234, 180, {})
+    check("overview spectrum: drawn, " .. label, ok and true or tostring(err), true)
+  end
+  try("no share yet")
+  share = {}
+  for i = 1, 41 do share[i] = 0.5 end
+  try("a share in every band")
+  share = { [12] = 0.7, [20] = 0.3 }
+  try("a share in some bands")
+  probes = false
+  try("no probes")
+  ext.overview_spectrum_fold = "1"
+  try("folded")
+  check("overview analysis: spectrum folded, dynamics under it", OA.height("ctx", 300), 18 + 4 + OA.MAX_H)
+  ext.overview_dynamics_fold = "1"
+  check("overview analysis: both folded, their headers", OA.height("ctx", 300), 18 + 4 + 18)
+  ext.overview_spectrum_fold, ext.overview_dynamics_fold = "", ""
+  check("overview analysis: no room, none", OA.height("ctx", 80), nil)
+  check("overview analysis: room for both, each at most its height", OA.height("ctx", 600), OA.MAX_H * 2 + 4)
+  check("overview analysis: room for one, the tab's", OA.height("ctx", 200) .. " " .. OA._mode, OA.MAX_H .. " one")
+  ext.ov_spec = "0"
+  check("overview analysis: the spectrum off, the dynamics alone", OA.height("ctx", 600) .. " " .. OA._mode, OA.MAX_H .. " dyn")
+  ext.ov_dyn = "0"
+  check("overview analysis: both off, none", OA.height("ctx", 600), nil)
+  ext.ov_spec, ext.ov_dyn = nil, nil
+  -- the dynamics drawn: both, then alone
+  do
+    local TPs = package.loaded["TS_CV_Taps"]
+    probes = true
+    TPs.track_total = function() return 6, false, { { name = "Comp", db = 4, guid = "{c}" }, { name = "Lim", db = 1, guid = "{l}" } } end
+    local hd = { newest = 3000, cols = 2048, slice = 192, rate = 48000, w = 6 }
+    TPs.chain_wave = function() return hd end
+    TPs.chain_wave_col = function(h, c) return -0.4, 0.4, -0.2, 0.2 end
+    local tsv = { "TimeMap2_timeToBeats", "TimeMap2_GetDividedBpmAtTime", "GetPlayState" }
+    local sv = {}
+    for _, k in ipairs(tsv) do sv[k] = reaper[k] end
+    reaper.TimeMap2_timeToBeats = function(_, t) return 0, 0, 0, t * 2, 4 end
+    reaper.TimeMap2_GetDividedBpmAtTime = function() return 120 end
+    reaper.GetPlayState = function() return 1 end
+    OA.height("ctx", 600)
+    for f = 1, 3 do hd.newest = hd.newest + 10; try("both, dynamics too (" .. f .. ")") end
+    ext.overview_dynamics_window = "s2"
+    for f = 1, 2 do hd.newest = hd.newest + 10; try("both, the dynamics running free (" .. f .. ")") end
+    ext.overview_dynamics_window = nil
+    ext.overview_analysis_tab = "dyn"
+    OA.height("ctx", 200)
+    try("the dynamics alone, tabbed")
+    TPs.chain_wave = function() return nil end
+    try("the dynamics, an older probe")
+    ext.overview_analysis_tab = ""
+    for k, v in pairs(sv) do reaper[k] = v end
+  end
+  for k, v in pairs(saved) do reaper[k] = v end
+  for k, v in pairs(mods) do package.loaded[k] = v end
+  ED.PRO = wasP
+end
+
+-- Turned text: one image whatever its colour (tinted where drawn), and
+-- every image let go of when the cache is cleared or full
+do
+  local W = require("TS_CV_Widgets")
+  local saved = {}
+  local js = { "JS_LICE_CreateBitmap", "JS_LICE_CreateFont", "JS_LICE_SetFontFromGDI", "JS_LICE_DrawText",
+               "JS_GDI_CreateFont", "JS_GDI_DeleteObject", "JS_LICE_SetFontColor", "JS_LICE_Clear",
+               "JS_LICE_DestroyBitmap", "JS_LICE_DestroyFont" }
+  for _, k in ipairs(js) do saved[k] = reaper[k]; reaper[k] = function() return {} end end
+  local made, attached, detached, tints = 0, 0, 0, {}
+  local fake = setmetatable({
+    CalcTextSize = function(_, t) return 7 * #tostring(t), 12 end,
+    GetFontSize = function() return 13 end,
+    CreateImageFromLICE = function() made = made + 1; return { made } end,
+    Attach = function() attached = attached + 1 end,
+    Detach = function() detached = detached + 1 end,
+    DrawList_AddImageQuad = function(...) local a = { ... }; tints[#tints + 1] = a[#a] end,
+  }, { __index = function() return function() return false end end })
+  W.attach(fake)
+  local C = require("TS_CV_Config")
+  local wasRot = C.ROT_TEXT
+  C.ROT_TEXT = true
+  W.clear_rot(); W._rot(true)
+  detached = 0
+  W.vertical_text("ctx", "dl", 10, 0, "Falcon", 0xff0000ff, 200)
+  W.vertical_text("ctx", "dl", 10, 0, "Falcon", 0x00ff00ff, 200)
+  W.vertical_text("ctx", "dl", 10, 0, "Falcon", 0x00ff0080, 200)
+  check("turned text: one image for every colour", made, 1)
+  check("turned text: tinted where drawn", table.concat({ tints[1], tints[2], tints[3] }, " "),
+    table.concat({ 0xff0000ff, 0x00ff00ff, 0x00ff0080 }, " "))
+  W.vertical_text("ctx2", "dl", 10, 0, "Falcon", 0xff0000ff, 200)
+  check("turned text: each window its own", made, 2)
+  W.clear_rot()
+  check("turned text: cleared, every image let go of", detached, 2)
+  local cap = W.ROT_MAX
+  W.ROT_MAX = 5
+  detached = 0
+  for i = 1, 7 do W.vertical_text("ctx", "dl", 10, 0, "T" .. i, 0xffffffff, 200) end
+  check("turned text: full, it starts over and lets go of what it had", detached .. " " .. W._rot(), "5 2")
+  W.ROT_MAX = cap
+  W.clear_rot()
+  C.ROT_TEXT = wasRot
+  W._rot(true)
+  for _, k in ipairs(js) do reaper[k] = saved[k] end
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

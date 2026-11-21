@@ -143,7 +143,8 @@ end
 -- The layout variant an instance shows (TS_CV_Mappings, "<plugin> ::
 -- <name>"), per instance, saved with the project. nil for the plugin's
 -- own layout.
--- The Rack view picks its own ("rvariant:"), and so do popped-out panels
+-- The Rack view picks its own ("rvariant:"), the TCP window's overview
+-- its own ("tvariant:"), and so do popped-out panels
 -- ("pvariant:", S.VARIANT_ALSO the views they fall back on); `pfx` reads
 -- another view's.
 S.VARIANT = "variant:"
@@ -248,7 +249,8 @@ function S.layout_key(fx_name, guid, track, addr)
     end
   end
   v = v or (M.default_variant and M.default_variant(base))
-  -- the rack, with nothing picked for it: ChannelView's pick, then its default
+  -- the rack or the TCP window's overview, with nothing picked for it:
+  -- ChannelView's pick, then its default
   if not v and S.VARIANT ~= "variant:" then
     local nv = S.variant(guid, "variant:")
     if nv == S.OWN then return base end
