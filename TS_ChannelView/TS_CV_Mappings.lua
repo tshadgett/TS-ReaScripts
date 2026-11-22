@@ -163,6 +163,14 @@
   at its marks, "ten" 0 to 10; "|cap" prints them in the cap's colour.
   Medium and large knobs only (a small one has no room).
 
+  FORMS: F<k>.<line> (k 1 or 2) is a grid's short form, k rows of
+  controls tall, for a panel too short for the whole grid (the TCP
+  overview's rows): a layout's controls and grid of its own, in the same
+  lines (F1.Grid=, F1.Ctl0=, F1.At0= and the rest), its canvas, faceplate,
+  names and ranges the layout's. A panel takes the tallest form that
+  fits. (Form<k> with At<n>.<k>, the whole grid's controls placed again,
+  is read as one.)
+
   GRIDS: Grid=<columns>x<rows> makes the layout a grid, measured in
   quarter cells (an ordinary knob is 4 x 4, a small one 4 x 2, a large
   one 6 x 6), and At<n>=<column>,<row>,<width>,<height> puts control n
@@ -375,6 +383,7 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Lock=<rows>: layout locked, arranged at that many rows (a grid: never flows, scrolls instead)\n"
                 .. "; Grid=<columns>x<rows>: the layout is a grid, in quarter cells (an ordinary knob is 4x4)\n"
                 .. "; At<n>=<column>,<row>,<width>,<height>: control n's place on the grid, in quarter cells\n"
+                .. "; Form<k>=<columns>x<rows>: the grid's form k rows of controls tall (k 1 or 2); At<n>.<k>: control n on it\n"
                 .. ";   (a divider: a line to <column + width>,<row + height>, either way; a section: its rectangle)\n"
                 .. "; Edge<n>=<faceplate, or #rrggbb>: section n's outline, or line n's colour\n"
                 .. "; CanvasW=<px>, CanvasH=<px>: a canvas layout's canvas, its width in ChannelView, its height in the rack\n"
@@ -990,6 +999,136 @@ local function grid_of(v)
   return { cols = math.min(w, 400), rows = math.min(h, 400) }
 end
 M.grid_of = grid_of
+
+-- ---------------------------------------------------------------------
+-- a grid's short forms: layouts of their own, k rows of controls tall,
+-- for a panel too short for the whole grid (the F<k>. lines)
+-- ---------------------------------------------------------------------
+M.FORMS = { 1, 2 }
+
+-- The F<k>. lines of a section as a section of their own, per form; and
+-- the older lines, Form<k> with At<n>.<k>: the whole grid's controls
+-- placed again.
+local function form_sects(sect)
+  local out
+  for f, v in pairs(sect) do
+    local k, rest = f:match("^F(%d)%.(.+)$")
+    k = tonumber(k)
+    if k and (k == 1 or k == 2) then
+      out = out or {}
+      out[k] = out[k] or {}
+      out[k][rest] = v
+    end
+  end
+  return out
+end
+function M.old_forms_of(sect)
+  local out
+  for _, k in ipairs(M.FORMS) do
+    local g = grid_of(sect["Form" .. k])
+    if g then out = out or {}; out[k] = g end
+  end
+  return out
+end
+function M.at_forms_of(sect, i, line)
+  local out
+  for _, k in ipairs(M.FORMS) do
+    local a = at_of(sect["At" .. i .. "." .. k], line)
+    if a then out = out or {}; out[k] = a end
+  end
+  return out
+end
+
+-- A layout's forms, read: each its own controls and grid. One in the
+-- older lines becomes one of these, its controls copies of the whole
+-- grid's; the whole grid loses the ones it only had for its forms.
+local function forms_read(sect, controls, parse)
+  local out
+  for k, sub in pairs(form_sects(sect) or {}) do
+    local g = grid_of(sub.Grid)
+    if g then
+      local fc = parse(sub).controls
+      fc.grid = g
+      out = out or {}
+      out[k] = { grid = g, controls = fc }
+    end
+  end
+  local old = M.old_forms_of(sect)
+  for k, g in pairs(old or {}) do
+    if not (out and out[k]) then
+      local fc, seen = {}, {}
+      for _, c in ipairs(controls) do
+        local a = c.at_f and c.at_f[k]
+        -- (one the same as one before, in the same place: once)
+        local twin = a and table.concat({ c.type or "", tostring(c.param), tostring(c.param2), a.c, a.r, a.w, a.h }, "|")
+        if a and c.type ~= "page" and not seen[twin] then
+          seen[twin] = true
+          local cc = M.copy({ controls = { c } }).controls[1]
+          cc.at = { c = a.c, r = a.r, w = a.w, h = a.h }
+          fc[#fc + 1] = cc
+        end
+      end
+      fc.grid = { cols = g.cols, rows = g.rows }
+      out = out or {}
+      out[k] = { grid = fc.grid, controls = fc }
+    end
+  end
+  if old then
+    for i = #controls, 1, -1 do
+      local c = controls[i]
+      if not c.at and c.at_f and c.type ~= "page" then table.remove(controls, i) end
+    end
+  end
+  for _, c in ipairs(controls) do c.at_f = nil end
+  return out
+end
+
+-- Form k of a layout as a layout to draw or change: its own controls and
+-- grid, the rest (canvas, faceplate, names, ranges) read through to the
+-- layout's. M.set saves one as that form, and anything set on it as the
+-- layout's own.
+function M.form_of(layout, k)
+  local f = layout and k and layout.forms and layout.forms[k]
+  if not f then return nil end
+  return setmetatable({ controls = f.controls, grid = f.grid, form = k, _form_of = layout }, { __index = layout })
+end
+function M.is_form(layout) return layout ~= nil and rawget(layout, "_form_of") ~= nil end
+local FORM_OWN = { controls = true, grid = true, form = true, _form_of = true, forms = true, _c = true, _g = true }
+local function form_into(base, view)
+  for f, v in pairs(view) do
+    if not FORM_OWN[f] then base[f] = v end
+  end
+  local fc = view.controls or {}
+  fc.grid = view.grid
+  base.forms = base.forms or {}
+  base.forms[rawget(view, "form")] = { grid = view.grid, controls = fc }
+  return base
+end
+
+-- Form k started from the whole grid: a copy of what's in its top k rows
+-- of controls, where it is, with all its settings
+function M.form_seed(layout, k)
+  local out = M.copy(layout)
+  local fc = {}
+  for _, c in ipairs(M.copy(layout).controls) do
+    if c.at and c.type ~= "page" then
+      local _, _, _, r1 = M.at_box(c.at)
+      if r1 <= 4 * k then fc[#fc + 1] = c end
+    end
+  end
+  local g = { cols = (out.grid and out.grid.cols) or 16, rows = 4 * k }
+  fc.grid = g
+  out.forms = out.forms or {}
+  out.forms[k] = { grid = g, controls = fc }
+  return out
+end
+
+-- The layout without form k
+function M.form_clear(layout, k)
+  local out = M.copy(layout)
+  if out.forms then out.forms[k] = nil; if not next(out.forms) then out.forms = nil end end
+  return out
+end
 -- Whether a layout is a grid (a canvas layout's: the controls beside
 -- the canvas).
 function M.is_grid(layout) return layout ~= nil and layout.grid ~= nil end
@@ -2413,6 +2552,8 @@ local function parse_section(sect)
         -- its name (a text element's words) while a rule holds: NameWhen<n>.<k>
         namew   = (t ~= "page" and t ~= "section" and t ~= "divider") and M.namew_of(sect, i) or nil,
         at      = at_of(sect["At" .. i], t == "divider"),
+        -- (its places on the grid's short forms, in the older lines)
+        at_f    = (t ~= "page") and M.at_forms_of(sect, i, t == "divider") or nil,
         -- a knob in its place on a grid: at the top (none), centre or bottom
         place   = ({ centre = "centre", bottom = "bottom" })[U.trim(sect["Place" .. i] or "")],
         -- a section's outline or a line's colour: a faceplate's or your own
@@ -2472,6 +2613,8 @@ local function parse_section(sect)
   -- a grid's size goes with its controls, for the panel to lay out
   local grid = grid_of(sect.Grid)
   controls.grid = grid
+  local forms = forms_read(sect, controls, parse_section)
+  if not grid then forms = nil end
   return { controls = controls, aliases = aliases, states = states, ranges = next(ranges) and ranges or nil, meter = meter,
            btext = next(btext) and btext or nil,
            steps = next(steps) and steps or nil,
@@ -2497,7 +2640,7 @@ local function parse_section(sect)
            metal = (U.trim(sect.Metal or "") == "1") or nil,
            palette = M.palette_of(sect.Palette),
            lock = lock_of(sect.Lock),
-           grid = grid }
+           grid = grid, forms = forms }
 end
 
 -- Palette=: the plugin's own colours, sampled from its window (Faceplate >
@@ -2540,6 +2683,13 @@ local function serialize(layout)
   if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
   if layout.grid then out.Grid = math.floor(layout.grid.cols) .. "x" .. math.floor(layout.grid.rows) end
+  -- each short form: its controls and grid, on lines of their own
+  for _, k in ipairs(M.FORMS) do
+    local f = layout.grid and layout.forms and layout.forms[k]
+    if f and f.grid then
+      for fk, v in pairs(serialize({ controls = f.controls or {}, grid = f.grid })) do out["F" .. k .. "." .. fk] = v end
+    end
+  end
   out.Palette = M.palette_line(layout.palette)
   M.canvas_lines(layout.canvas, out)
   if not layout.canvas then
@@ -3849,6 +3999,8 @@ function M.display_name(key, param, slot_label, plugin_name, live)
 end
 
 function M.set(key, layout)
+  -- a form (M.form_of): saved as that form of the layout
+  if M.is_form(layout) then layout = form_into(M.get(key) or layout._form_of, layout) end
   def_cache = {}
   M.choice_ver = (M.choice_ver or 0) + 1
   -- the plugin's layout switching isn't the layout's to change: what the
@@ -4267,6 +4419,13 @@ function M.copy(layout)
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
                 fink = layout.fink, lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)),
                 grid = layout.grid and { cols = layout.grid.cols, rows = layout.grid.rows } or nil }
+  for k, f in pairs(layout.forms or {}) do
+    local fc = M.copy({ controls = f.controls or {}, grid = f.grid }).controls
+    out.forms = out.forms or {}
+    out.forms[k] = { grid = fc.grid, controls = fc }
+  end
+  -- (a form's: still that form, the copy)
+  if M.is_form(layout) then out.form, out._form_of = layout.form, layout._form_of end
   if layout.meter then
     out.meter = { on = layout.meter.on, range = layout.meter.range, win = layout.meter.win }
   end

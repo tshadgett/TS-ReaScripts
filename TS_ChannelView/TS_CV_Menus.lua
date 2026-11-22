@@ -28,7 +28,41 @@ local S = env.S
 local B, C, CN, CP, CS, CT, E, ED, KE, KPm, M, MD, ML, P, PC, RCP, RQ, ST, SWI, St, T, TP, TRM, U, W, AF, MX =
   env.B, env.C, env.CN, env.CP, env.CS, env.CT, env.E, env.ED, env.KE, env.KPm, env.M, env.MD, env.ML, env.P, env.PC, env.RCP, env.RQ, env.ST, env.SWI, env.St, env.T, env.TP, env.TRM, env.U, env.W, env.AF, env.MX
 local insert_target, layout_for, materialise, nudge, remove_fx, rescan, set_fold, set_parallel, toggle_fold =
-  env.insert_target, env.layout_for, env.materialise, env.nudge, env.remove_fx, env.rescan, env.set_fold, env.set_parallel, env.toggle_fold
+  env.insert_target, nil, nil, env.nudge, env.remove_fx, env.rescan, env.set_fold, env.set_parallel, env.toggle_fold
+-- A short form's menus (a control on one, TS_CV_Mappings FORMS): while
+-- FRM.on is { guid, k }, that plugin's layout is its form k, which M.set
+-- saves as the form
+local FRM = {}
+function FRM.k(fx) return FRM.on and fx and FRM.on.guid == fx.guid and FRM.on.k or nil end
+function FRM.set(fx, k) FRM.on = (k and fx) and { guid = fx.guid, k = k } or nil end
+-- `fn` for later (another window's Apply): on the form it's on now
+function FRM.keep(fx, fn)
+  local k = FRM.k(fx)
+  return function(...)
+    local was = FRM.on
+    FRM.set(fx, k)
+    fn(...)
+    FRM.on = was
+  end
+end
+-- (one not set up yet, as the editor shows it: Full's top rows, saved
+-- as the form once it's changed)
+layout_for = function(fx)
+  local l, k, d = env.layout_for(fx)
+  local f = FRM.k(fx)
+  if not (f and l and l.grid) then return l, k, d end
+  return M.form_of(l, f) or M.form_of(M.form_seed(l, f), f), k, d
+end
+materialise = function(fx)
+  local l, k = env.materialise(fx)
+  local f = FRM.k(fx)
+  if not (f and l and l.grid) then return l, k end
+  if not M.form_of(l, f) then
+    M.set(k, M.form_seed(l, f))
+    l = M.get(k)
+  end
+  return M.form_of(l, f), k
+end
 -- ---------------------------------------------------------------------
 -- menus
 -- ---------------------------------------------------------------------
@@ -505,11 +539,11 @@ local function toggle_colour_menu(fx, key, idx, c)
     if ImGui.Selectable(ctx, "Image...##bstyle_image", c.img ~= nil, 0, 150, 0) then
       KE.open_image({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Button"),
                       img = c.img, button = true,
-                      apply = function(im, scope)
+                      apply = FRM.keep(fx, function(im, scope)
                         local l, pk = materialise(fx)
                         M.put_img(l, idx, im, scope)
                         M.set(pk, l); M.save()
-                      end })
+                      end) })
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Pictures of your own for Off and On.") end
   end
@@ -724,7 +758,7 @@ local function back_menu(fx, key, idx, c)
   end
   if ED.PRO then KE.surface_tiles(ctx, "back", c.finish, put_pic, KEEP_OPEN) end
   if ED.PRO and ImGui.Selectable(ctx, "Picture...##back_pic", M.surface_of(c.finish) ~= nil, 0, 170, 0) then
-    KE.open_surface({ title = fx.name or "", what = "Background", key = c.finish, apply = put_pic })
+    KE.open_surface({ title = fx.name or "", what = "Background", key = c.finish, apply = FRM.keep(fx, put_pic) })
   end
   ImGui.Spacing(ctx)
   ImGui.TextWrapped(ctx, "Controls side by side or above each other with the same background join into one shape, across a divider too.")
@@ -798,7 +832,7 @@ local function section_menu(fx, key, idx, c)
   end
   if ED.PRO then KE.surface_tiles(ctx, "sec", c.finish, put_pic, KEEP_OPEN) end
   if ED.PRO and ImGui.Selectable(ctx, "Picture...##sec_pic", M.surface_of(c.finish) ~= nil, 0, 170, 0) then
-    KE.open_surface({ title = fx.name or "", what = "Section", key = c.finish, apply = put_pic })
+    KE.open_surface({ title = fx.name or "", what = "Section", key = c.finish, apply = FRM.keep(fx, put_pic) })
   end
 end
 
@@ -1018,7 +1052,7 @@ dual_style_grid = function(fx, key, idx, c)
               start = (not c.look) and (odef and c.style or DUAL_START) or nil,
               start2 = (not c.look2) and (idef and idef.key) or nil,
               plate = pl and pl.bg or nil,
-              apply = function(o, scope, i) apply_dual(fx, idx, o, i, scope) end })
+              apply = FRM.keep(fx, function(o, scope, i) apply_dual(fx, idx, o, i, scope) end) })
   end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Build both knobs from parts.") end
   ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff, "Style: " .. (hov or now_label))
@@ -1297,17 +1331,17 @@ local function style_menu(fx, key, idx, c)
       KE.open({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Knob"),
                 look = start, start = (not c.look and def and def.parts) and cur or nil,
                 plate = pl and pl.bg or nil,
-                apply = function(look, scope) apply_look(fx, idx, look, scope) end })
+                apply = FRM.keep(fx, function(look, scope) apply_look(fx, idx, look, scope) end) })
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Build this knob from parts.") end
     if c.type ~= "dual" and ImGui.Selectable(ctx, "Image...##style_image", c.img ~= nil, 0, 150, 0) then
       KE.open_image({ title = (fx.name or "") .. "  ·  " .. ((c.label and c.label ~= "") and c.label or "Knob"),
                       img = c.img,
-                      apply = function(im, scope)
+                      apply = FRM.keep(fx, function(im, scope)
                         local l, pk = materialise(fx)
                         M.put_img(l, idx, im, scope)
                         M.set(pk, l); M.save()
-                      end })
+                      end) })
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "A picture of your own: a filmstrip, or one that turns.") end
     ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff,
@@ -3184,9 +3218,17 @@ end
 -- track with the same layout, so they work on the same list.
 if ED.PRO then
 require("TS_CV_GridEditor").hooks = (function()
+  local GEd = require("TS_CV_GridEditor")
   local function live(fx)
     for _, f in ipairs(app.chain or {}) do if f.guid == fx.guid then return f end end
     return nil
+  end
+  -- (on a short form, the editor's: that form's controls)
+  local function on(fx, fn, ...)
+    local f = live(fx)
+    FRM.set(f, GEd.form())
+    fn(f, ...)
+    FRM.on = nil
   end
   return {
     ready = function(track, fx, key)
@@ -3195,18 +3237,21 @@ require("TS_CV_GridEditor").hooks = (function()
       local _, k = layout_for(f)
       return k == key
     end,
-    style    = function(fx, key, idx, c) style_menu(live(fx), key, idx, c) end,
-    back     = function(fx, key, idx, c) back_menu(live(fx), key, idx, c) end,
-    section  = function(fx, key, idx, c) section_menu(live(fx), key, idx, c) end,
-    look     = function(fx, key, layout, idx, c, locked) look_items(live(fx), key, layout, idx, c, locked) end,
+    style    = function(fx, key, idx, c) on(fx, style_menu, key, idx, c) end,
+    back     = function(fx, key, idx, c) on(fx, back_menu, key, idx, c) end,
+    section  = function(fx, key, idx, c) on(fx, section_menu, key, idx, c) end,
+    look     = function(fx, key, layout, idx, c, locked) on(fx, look_items, key, layout, idx, c, locked) end,
     plate    = function(fx, key, layout) plate_menu(live(fx), key, layout) end,
     -- a colour for control idx's `field` (a line's or a section
     -- outline's, Edge<n>): none (`none`), a faceplate's, the plugin's own,
     -- recent ones, or one of your own -- the same choices as a background
     colour   = function(fx, key, idx, c, field, title, none)
       local f = live(fx)
+      local form = GEd.form()
       local function cset(k, save)
+        FRM.set(f, form)
         local l, pk = materialise(f)
+        FRM.on = nil
         local lc = l.controls[idx]
         if lc then lc[field] = k end
         M.set(pk, l)
@@ -3259,6 +3304,7 @@ local function control_menu()
   local cm = app.ctl_menu
   local fx = cm and app.chain[cm.fx]
   if not fx then ImGui.EndPopup(ctx) return end
+  FRM.set(fx, cm.form)
 
   local layout, key = layout_for(fx)
   local c = layout.controls and layout.controls[cm.ctl]
@@ -3704,6 +3750,7 @@ end
 -- What a panel asked for this frame (P.draw's req): acted on the same way
 -- wherever it was drawn -- the row, or the Rack view's column.
 local function panel_requests(i, fx, layout, key, req)
+    FRM.set(fx, req.form)
     if req.toggle_bypass then
       T.set_enabled(app.track, fx.addr, not T.get_enabled(app.track, fx.addr))
     end
@@ -3729,7 +3776,10 @@ local function panel_requests(i, fx, layout, key, req)
       E.open(app.track, fx, key, layout)
     end
     -- (a number: an EQ curve's own bands, that control's)
-    if req.canvas_setup then CS.open(app.track, fx, key, math.type(req.canvas_setup) and req.canvas_setup or nil) end
+    if req.canvas_setup then
+      local n = math.type(req.canvas_setup) and req.canvas_setup or nil
+      CS.open(app.track, fx, key, n, n and req.form)
+    end
     -- a modulator's link dropped on a control: linked, after asking
     -- when that replaces another modulator
     if req.mod_drop then
@@ -3774,8 +3824,8 @@ local function panel_requests(i, fx, layout, key, req)
       M.set(key, l); M.save()
     end
     if req.ctx_control then
-      app.ctl_menu = { fx = i, ctl = req.ctx_control }
-      local c = layout.controls and layout.controls[req.ctx_control]
+      app.ctl_menu = { fx = i, ctl = req.ctx_control, form = req.form }
+      local c = (layout_for(fx).controls or {})[req.ctx_control]
       local pn = ""
       if c and c.param then
         pn = select(2, reaper.TrackFX_GetParamName(app.track, fx.addr, c.param, ""))
@@ -3793,6 +3843,7 @@ local function panel_requests(i, fx, layout, key, req)
       for t, nm in pairs(c and c.param and M.get_choice_names(key, c.param, app.track, fx.addr) or {}) do app.choice_buf[t] = nm end
       app.open_ctl_menu = true
     end
+    FRM.on = nil
 end
 
 -- The bracket strip: one bracket per FX container and per run of plugins
@@ -4056,7 +4107,9 @@ local function trimmer_menu()
 end
 
 return {
-  panel_menu = panel_menu, control_menu = control_menu, box_menu = box_menu,
+  panel_menu = panel_menu, box_menu = box_menu,
+  -- (a form's control: its form only while its menu draws)
+  control_menu = function() control_menu(); FRM.on = nil end,
   box_label = box_label, box_ancestors = box_ancestors, link_source = link_source,
   panel_requests = panel_requests, bracket_tip = bracket_tip, draw_brackets = draw_brackets,
   confirm_probes = confirm_probes, probes_menu = probes_menu,

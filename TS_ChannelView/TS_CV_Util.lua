@@ -242,6 +242,22 @@ function U.fx_format(name)
   return f
 end
 
+-- Whether plugin `fx` is an instrument (VSTi, VST3i, CLAPi, AUi...): by
+-- its format, from its own name when it's been renamed. Kept per GUID.
+local inst_cache = {}
+function U.is_instrument(track, fx)
+  local g = fx and fx.guid
+  if g and inst_cache[g] ~= nil then return inst_cache[g] end
+  local f = U.fx_format(fx and fx.name)
+  if not f and track and fx and fx.addr and reaper.TrackFX_GetNamedConfigParm then
+    local ok, orig = reaper.TrackFX_GetNamedConfigParm(track, fx.addr, "original_name")
+    if ok then f = U.fx_format(orig) end
+  end
+  local yes = f ~= nil and #f > 1 and f:sub(-1) == "i" or false
+  if g then inst_cache[g] = yes end
+  return yes
+end
+
 -- "VST3: Saturn 2 (FabFilter)" -> "FabFilter".
 --
 -- REAPER bakes the vendor on as a trailing parenthetical, the same

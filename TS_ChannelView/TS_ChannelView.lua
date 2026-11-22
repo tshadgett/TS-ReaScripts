@@ -1,10 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.5.2
+-- @version 4.6.0
 -- @changelog
---  The TCP window keeps its width, and where the tracks end and the
---  overview starts, through a restart of the script or REAPER.
---  Moves with ChannelView Pro 4.5.2. See the CHANGELOG.
+--  Reported gain reduction read as a meter (steady, the same with the
+--  plugin's window open or shut). No input meter on an instrument; the
+--  shared meter centred in its gap; Narrow meters narrower than Normal
+--  without scales; the add-plugin search keeps the keyboard.
+--  Moves with ChannelView Pro 4.6.0. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -1997,7 +1999,9 @@ local function panel_row(row_h, row_w)
       end
       local function io_of(i, fx, lay)
         local io = P.has_io(app.track, fx, lay)
-        if io and (shared[i - 1] or shared[i]) then io = { l = not shared[i - 1], r = not shared[i] } end
+        if io and (shared[i - 1] or shared[i]) then
+          io = { l = (io == true or io.l) and not shared[i - 1], r = (io == true or io.r) and not shared[i] }
+        end
         return io
       end
 
@@ -2012,7 +2016,7 @@ local function panel_row(row_h, row_w)
           local lay, k = layout_for(fx)
           local has_meter = M.meter_of(lay) ~= nil
                             and T.reports_gr(app.track, fx.addr, fx.guid)
-          total = total + P.width(P.visible(lay.controls or {}, app.track, fx), panel_h(i),
+          total = total + P.width(P.visible(P.form_layout(lay, panel_h(i)).controls or {}, app.track, fx), panel_h(i),
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   io_of(i, fx, lay),
                                   St.is_gr_open(fx.guid), M.locked(lay),
@@ -2048,9 +2052,11 @@ local function panel_row(row_h, row_w)
           local gx, gy0 = ImGui.GetCursorScreenPos(ctx)
           local gy = row_top + (drop[i] or 0) + P.head_h() + C.PANEL_PAD
           local gh = panel_h(i) - P.head_h() - P.footer_h() - C.PANEL_PAD * 2
-          P.draw_gap_io(ctx, ImGui.GetWindowDrawList(ctx), gx, gy, C.IO_COL_W, gh,
+          -- (its bar in the middle of the whole gap, panel edge to panel edge)
+          local nx = math.floor(gx + C.IO_COL_W + C.PANEL_GAP + 0.5)
+          P.draw_gap_io(ctx, ImGui.GetWindowDrawList(ctx), gx - C.PANEL_GAP, gy, nx - gx + C.PANEL_GAP, gh,
                         app.track, app.chain[i - 1], fx)
-          ImGui.SetCursorScreenPos(ctx, gx + C.IO_COL_W + C.PANEL_GAP, gy0)
+          ImGui.SetCursorScreenPos(ctx, nx, gy0)
         end
         local px = ImGui.GetCursorScreenPos(ctx)
         local py = row_top + (drop[i] or 0)
@@ -3100,17 +3106,21 @@ local function frame()
   -- right-clicked in it
   do
     local GE = ED.module("TS_CV_GridEditor", ED.stub())
-    GE.draw(ctx)
-    local m = GE.take_menu()
-    if m then
-      for i, f in ipairs(app.chain or {}) do
-        if f.guid == m.guid then
-          app.ctl_menu = { fx = i, ctl = m.idx, ed = true }
-          app.open_ctl_menu = true
-          break
+    -- (its menu in its own window: on top of it, wherever this one is)
+    GE.menus = function(ctx)
+      local m = GE.take_menu()
+      if m then
+        for i, f in ipairs(app.chain or {}) do
+          if f.guid == m.guid then
+            app.ctl_menu = { fx = i, ctl = m.idx, ed = true, form = m.form }
+            ImGui.OpenPopup(ctx, "ctlmenu")
+            break
+          end
         end
       end
+      control_menu()
     end
+    GE.draw(ctx)
   end
 
   -- The style pushes happened before Begin, so they unwind either way.

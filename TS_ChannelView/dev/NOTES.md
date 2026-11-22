@@ -1256,6 +1256,54 @@ picker uses an optgroup per group.
   (`OVW.divider`) moves `OVW.row_w`; `OVW.follow` then takes what's left as
   the overview's width, as for a docker edge dragged.
 
+## The lens in steps, tiles and forms (4.6.0)
+
+- **Steps** (OV.STEPS: names, faces, 1, 2, 3) are whole rows of controls:
+  OV.rows_imgui(n) in ImGui units, OV.px to REAPER pixels with the arrange
+  view's scale (at 125% one row is 104 px, two 184). ExtState
+  overview_lens_rows / overview_min_step. The lens rows' edges don't drag
+  (app.ov_roles from OV.lens_roles); a height changed another way is put
+  back each frame.
+- **Outside the lens:** OV.set_step / step_at / all_step; the actions
+  (TS_CV_RowHeight) leave ExtState row_height_req ("all:" for every track)
+  for OV.heights_tick to carry out, or, with the TCP window closed, use
+  the step heights it last stored (overview_step_px).
+- **Tiles** (P.TILE, set by draw_medium): P.tab_w() name tab; a canvas
+  layout's controls drawn first on splitter channel 1 over the canvas
+  (header on 2), so they take the clicks. P.NO_HEAD under 2 rows: the tab
+  is an InvisibleButton doing the header name's jobs. P.WHOLE_ROWS cuts a
+  locked grid's scroll area to whole rows.
+- **Quiet canvases:** P.hush sets C.CANVAS_QUIET while a tile's canvas
+  draws; free text checks it (small_text's `loud` for controls,
+  C.CANVAS_LOUD inside slim_strip). CP.SHORT draws any tile's canvas down
+  to CP.TILE_MIN_H (40).
+- **The canvas's own row:** slim_strip in tile mode (CP.TILE or CP.SHORT)
+  draws chips from CP.TILE_X (the controls' right edge) and leaves out
+  CP.TILE_ON (their parameters); CP.TILE_DROP orders what goes first when
+  there's no room. Role canvases get theirs in RP.draw from RP.TILE_ROW
+  (their knob boxes return early on a tile). dev/TS_CV_CanvasSizeTest.lua
+  draws every role and mapped canvas at tile sizes with a fake ImGui.
+- **Forms** (TS_CV_Mappings FORMS): `F<k>.` lines, a whole controls list
+  and grid per form, parsed by running parse_section over the prefixed
+  keys and written by serialize with the prefix. layout.forms[k] =
+  { grid, controls }. M.form_of gives a view (__index the layout;
+  `_form_of`, `form`); M.set of a view, or an M.copy of one, saves into
+  forms[k] and copies any other raw field to the layout. The 4.5 lines
+  (Form<k>, At<n>.<k>, at_f) are read as forms, twins dropped, and Full
+  loses its form-only controls. P.form_layout picks a form only under
+  k + 1 rows of room, measured by max(4k, the controls' reach), drawn
+  without empty rows under. req.form carries a form's index space to the
+  menus; TS_CV_Menus' FRM makes layout_for / materialise return the form
+  view (FRM.keep for deferred Apply callbacks), and CS.open takes a form.
+  The grid editor's st.cur is a copy of the form view; GE.form(),
+  GE.menus (the host draws the control menu inside the editor's window).
+- **Meters:** T.gain_reduction holds a reported figure (T.GR_FALL dB/s,
+  per track:addr); CP.meters_w() follows C.METER_COL_W; P.has_io returns
+  { l = false, r = true } for an instrument (U.is_instrument: the format's
+  trailing i, or original_name when renamed); a shared gap meter is drawn
+  centred in the whole gap. P.grid_w is a grid's width without
+  PANEL_MIN_W, for a canvas's controls.
+
 ## Upkeep, by one window (TS_CV_Upkeep)
 
 What ChannelView's rescan used to keep right on its own track now runs from

@@ -711,7 +711,10 @@ local function draw_row_inner(dl, e, x, w, now)
 
   -- The bottom edge: drag for height. Submitted last and WITHOUT
   -- allowing overlap, so across the few pixels it shares with the next
-  -- row's top, the edge wins.
+  -- row's top, the edge wins. None on the overview's lens rows but the
+  -- open one: their heights are the lens's.
+  local role = app.ov_roles and app.ov_roles[e.guid]
+  if role and role ~= "open" then return end
   local eh = C.TCP_EDGE
   ImGui.SetCursorScreenPos(ctx, ix, y1 - eh * 0.5)
   ImGui.InvisibleButton(ctx, "tcpedge" .. e.guid, rw, eh)
@@ -719,7 +722,8 @@ local function draw_row_inner(dl, e, x, w, now)
   if ehov or eact then ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeNS) end
   if ImGui.IsItemActivated(ctx) then
     local _, my = ImGui.GetMousePos(ctx)
-    app.resize = { tracks = selected_or(tr), h0 = e.tcph, my0 = my,
+    -- (the open row: just it, whatever's selected)
+    app.resize = { tracks = role and { tr } or selected_or(tr), h0 = e.tcph, my0 = my,
                    scale = (app.geom and app.geom.scale) or 1, last = e.tcph }
   end
   if eact and app.resize then
@@ -732,7 +736,7 @@ local function draw_row_inner(dl, e, x, w, now)
   end
   if ImGui.IsItemDeactivated(ctx) then app.resize = nil end
   if ehov and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
-    AR.set_height(selected_or(tr), 0)
+    AR.set_height(role and { tr } or selected_or(tr), 0)
   end
   W.tip(ctx, "tcpedge" .. e.guid,
     "Resize", ehov and not eact, false)
@@ -1138,6 +1142,24 @@ function OVW.on()
   local ov = OVW.ov()
   return ov ~= nil and ov.is_on()
 end
+-- The track menu's Height (TS_CV_TrackMenu TM.height_menu): the
+-- overview's steps for the tracks it's for, the one they're at ticked
+function OVW.height_menu(ctx, tr, tracks)
+  local ov = OVW.mod
+  if not ImGui.BeginMenu(ctx, "Height") then return end
+  local at = ov.step_at(tr)
+  for i, name in ipairs(ov.STEP_NAMES) do
+    if ImGui.MenuItem(ctx, name, nil, at == i) then ov.set_step(tracks, i) end
+  end
+  ImGui.Separator(ctx)
+  if ImGui.BeginMenu(ctx, "All tracks") then
+    for i, name in ipairs(ov.STEP_NAMES) do
+      if ImGui.MenuItem(ctx, name .. "##all") then ov.set_step(ov.all_tracks(), i) end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  ImGui.EndMenu(ctx)
+end
 -- each frame, before the rows: `ww` the window's width, `bw` the patch
 -- bay's, `s` ImGui's units per REAPER pixel (they differ with Windows'
 -- display scaling); returns the overview column's width (0 when it's
@@ -1438,15 +1460,40 @@ local function settings_menu()
       ImGui.SetTooltip(ctx, "Every track's plugins beside its row; the arrange view moves over.\nClick a row to open it.")
     end
     if ov and ov.is_on() then
-      ImGui.SetNextItemWidth(ctx, 150)
-      -- applied when let go: the lens scrolls the arrange view, and that
-      -- with the mouse held drops the drag and closes this menu
-      local lch, lv = ST.slider_int(ctx, "Lens size", app.lens_drag or ov.lens_pct(), 50, 200, "%d%%")
-      if lch then app.lens_drag = lv end
-      if app.lens_drag and not ImGui.IsItemActive(ctx) then
-        ov.set_lens_pct(app.lens_drag); app.lens_drag = nil
+      -- in steps: the neighbours 1 to 3 rows of controls; every other row
+      -- names, faceplates, or rows of controls up to the neighbours'
+      local function steps(lo, hi)
+        local out = {}
+        for i = lo, hi do out[#out + 1] = { ov.STEP_NAMES[i], i } end
+        return out
       end
-      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "How tall the open row's neighbours are") end
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.Text(ctx, "Lens size")
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "The open row's neighbours")
+      end
+      ImGui.SameLine(ctx, 110)
+      local li = ST.seg(ctx, "ovlens", steps(3, #ov.STEPS), ov.lens_i())
+      if li then ov.set_lens_i(li) end
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.Text(ctx, "Minimum height")
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Every other row")
+      end
+      ImGui.SameLine(ctx, 110)
+      local mi = ST.seg(ctx, "ovmin", steps(1, ov.lens_i()), ov.min_i())
+      if mi then ov.set_min_i(mi) end
+      -- every track's row at once, outside the lens (a row open, the lens
+      -- sets them)
+      local lens_on = ov.open_guid() ~= nil
+      ImGui.AlignTextToFramePadding(ctx)
+      ImGui.Text(ctx, "All tracks")
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, lens_on and "Not while a row's open" or "Every track's row")
+      end
+      ImGui.SameLine(ctx, 110)
+      local ai = ST.seg(ctx, "ovall", steps(1, #ov.STEPS), (not lens_on) and ov.all_step() or nil, { dim = lens_on })
+      if ai and not lens_on then ov.set_step(ov.all_tracks(), ai) end
     end
   end
   if ImGui.MenuItem(ctx, "Plugin delay (PDC) under meters", nil, C.TCP_PDC) then
@@ -1554,9 +1601,16 @@ local function frame()
         end
       end
       OVW.mod.tick(app.rows, app.geom, now)
+      app.ov_roles = OVW.mod.lens_roles(app.rows)
       if OVW.mod.open_guid() then app.scroll_to = nil end
     end
     app.ov_follow = nil
+    if not OVW.on() then app.ov_roles = nil end
+    -- the overview's row heights outside the lens: the track menu's, and
+    -- the row height actions' (TS_CV_RowHeight)
+    local ov = OVW.ov()
+    if ov then ov.heights_tick(app.geom) end
+    TM.height_menu = (ov and ov.is_on() and not ov.open_guid()) and OVW.height_menu or nil
     if app.scroll_to then
       for _, e in ipairs(app.rows) do
         if e.track == app.scroll_to then

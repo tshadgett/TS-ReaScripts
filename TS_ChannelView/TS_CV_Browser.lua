@@ -417,6 +417,36 @@ local search_results          -- (below, by the menu)
 -- the search box of a list drawn by B.menu_items with opts.search
 local msearch = { query = "", sel = 1, scroll = false }
 
+-- A menu's search box keeps the keyboard while the menu's open (a
+-- category the pointer opens takes the keyboard with it). Back to it whenever nothing else is in use and no category is open;
+-- typed while one is, the keys go in it and it takes the keyboard back
+-- (the category closing). Call just before the box; `m.live` is set
+-- after it (whether it had the keyboard).
+local function keep_search(ctx, m)
+  if m.focus or m.live then return m.focus end
+  -- (another field of the menu's, or a click on its way: theirs)
+  if ImGui.IsAnyItemActive(ctx) or ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then return false end
+  local typed, i = {}, 0
+  while true do
+    local ok, c = ImGui.GetInputQueueCharacter(ctx, i)
+    if not ok then break end
+    if c >= 32 then typed[#typed + 1] = utf8.char(c) end
+    i = i + 1
+  end
+  local back = ImGui.IsKeyPressed(ctx, ImGui.Key_Backspace)
+  if #typed > 0 or back then
+    local q = m.query or ""
+    if back and #typed == 0 then
+      local n = utf8.len(q)
+      if n and n > 0 then q = q:sub(1, utf8.offset(q, n) - 1) end
+    end
+    m.query = q .. table.concat(typed)
+    m.sel, m.scroll = 1, true
+    return true
+  end
+  return not ImGui.IsPopupOpen(ctx, "", ImGui.PopupFlags_AnyPopupId)
+end
+
 -- A format badge drawn over the leading space of a menu label.
 --
 -- The format is what tells apart the two entries a plugin installed in
@@ -967,11 +997,13 @@ function B.menu_items(ctx, track, opts)
   local q = ""
   if cur.search then
     if ImGui.IsWindowAppearing(ctx) then
-      msearch.query, msearch.sel = "", 1
-      ImGui.SetKeyboardFocusHere(ctx)
+      msearch.query, msearch.sel, msearch.live = "", 1, nil
+      msearch.focus = true
     end
+    if keep_search(ctx, msearch) then ImGui.SetKeyboardFocusHere(ctx); msearch.focus = false end
     ImGui.SetNextItemWidth(ctx, 240)
     local ch, nq = ImGui.InputTextWithHint(ctx, "##mfxq", "type to search\u{2026}", msearch.query)
+    msearch.live = ImGui.IsItemActive(ctx)
     if ch then msearch.query = nq; msearch.sel, msearch.scroll = 1, true end
     q = U.trim(msearch.query)
   end
@@ -1119,12 +1151,14 @@ function B.draw_menu(ctx, track)
     or "Add to the end of the chain"
   ImGui.TextDisabled(ctx, where)
 
-  if menu.focus then
+  if menu.focus then menu.live = nil end
+  if keep_search(ctx, menu) then
     ImGui.SetKeyboardFocusHere(ctx)
     menu.focus = false
   end
   ImGui.SetNextItemWidth(ctx, 240)
   local ch, q = ImGui.InputTextWithHint(ctx, "##addfxq", "type to search\u{2026}", menu.query)
+  menu.live = ImGui.IsItemActive(ctx)
   if ch then menu.query = q; menu.sel, menu.scroll = 1, true end
   ImGui.Separator(ctx)
 
@@ -1449,5 +1483,8 @@ function B._draw(ctx, track)
   if not open then st.open = false end
   return inserted
 end
+
+-- for the tests
+B._keep_search = function(...) return keep_search(...) end
 
 return B

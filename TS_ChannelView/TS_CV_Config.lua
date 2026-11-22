@@ -1340,12 +1340,12 @@ function C.set_ui(k)
   for name, sz in pairs(C.SIZES) do sz.d = r(ui_base.sizes[name]) end
   -- the plugin panels' meters (Options' Meter width): Narrow leaves out
   -- the readouts under them and the figures on them (the tooltip has the
-  -- readings), a bar halfway between Normal's room and Thin's; Thin is
-  -- narrower still
+  -- readings), a bar halfway between Normal's and Thin's (Normal's with
+  -- its figures, Meter scales, or without); Thin is narrower still
   local mw = C.METER_WIDTH
   C.METER_READOUT = mw ~= "narrow" and mw ~= "thin"
   if mw == "narrow" or mw == "thin" then
-    local bw = r(mw == "thin" and 5 or 12)
+    local bw = r(mw == "thin" and 5 or (C.METER_SCALES_SET and 12 or 7))
     C.IO_BAR_W, C.METER_W = bw, bw
     C.IO_BAR_W_SCALE, C.METER_W_SCALE = bw, bw
   end

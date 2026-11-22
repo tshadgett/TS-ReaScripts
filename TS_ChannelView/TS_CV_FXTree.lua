@@ -918,21 +918,37 @@ end
 -- it simply don't answer -- there is no level equivalent in the API, which
 -- is why this module meters gain reduction and nothing else.
 -- Returns a POSITIVE number of dB of reduction, or nil.
+-- What a plugin reports is its reduction at that moment (ReaComp's, at
+-- least, with its window shut; open, its window's own held peak): on a
+-- steady saw it jumps about with the wave. So it's read as a meter would:
+-- up at once, down no faster than T.GR_FALL dB a second.
+T.GR_FALL = 15
+local gr_hold = {}
 function T.gain_reduction(track, addr)
   -- A bypassed plugin keeps reporting whatever it last measured -- it has
   -- stopped processing, not stopped answering -- so without this check the
   -- meter would show a frozen, stale reading rather than the true current
   -- state. Bypassed means no reduction.
-  if not T.get_enabled(track, addr) then return 0 end
+  if not T.get_enabled(track, addr) then
+    gr_hold[tostring(track) .. ":" .. tostring(addr)] = nil
+    return 0
+  end
 
   local pok, ok, str = pcall(reaper.TrackFX_GetNamedConfigParm,
                              track, addr, "GainReduction_dB")
   local v = (pok and ok) and tonumber(str) or nil
   local TP = require("TS_CV_Taps")
   if v then
+    local raw = math.abs(v)
+    local hk = tostring(track) .. ":" .. tostring(addr)
+    local now = reaper.time_precise and reaper.time_precise() or os.clock()
+    local h = gr_hold[hk]
+    local held = raw
+    if h then held = math.max(raw, h.v - math.max(0, now - h.t) * T.GR_FALL) end
+    gr_hold[hk] = { v = held, t = now }
     -- reported, but measured too: the measured one, once its zero is in
     -- (Setup, a reporting plugin's meter: Measured)
-    return TP.measured_for_reporting(track, T.guid_at(track, addr), math.abs(v)) or math.abs(v)
+    return TP.measured_for_reporting(track, T.guid_at(track, addr), held) or held
   end
   -- Not reported: measured instead, when a tap is on it (TS_CV_Taps).
   return TP.reading(track, T.guid_at(track, addr))

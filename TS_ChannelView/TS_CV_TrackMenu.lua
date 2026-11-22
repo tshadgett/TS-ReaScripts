@@ -187,6 +187,9 @@ local function context_menu(ctx)
     end
   end
 
+  -- (the TCP window's overview, no row open: TS_ChannelView_TCP sets it)
+  if TM.height_menu then TM.height_menu(ctx, tr, tg) end
+
   ImGui.Separator(ctx)
 
   local into, why_in = TO.folder_plan(tr, true)

@@ -1902,6 +1902,24 @@ do
   reaper.TrackFX_GetEnabled = real
 end
 
+-- a reported reduction read as a meter would: up at once, down no faster
+-- than T.GR_FALL dB a second
+do
+  local real = reaper.time_precise
+  local t = 100
+  reaper.time_precise = function() return t end
+  GR = 3.2
+  T.gain_reduction(nil, 5)
+  GR = 1.0; t = t + 0.03
+  local a = T.gain_reduction(nil, 5)
+  GR = 3.0; t = t + 0.03
+  local b = T.gain_reduction(nil, 5)
+  GR = 1.0; t = t + 2
+  local c = T.gain_reduction(nil, 5)
+  check("reported reduction: held between frames, then falls", ("%.2f %.2f %.2f"):format(a, b, c), "2.75 3.00 1.00")
+  reaper.time_precise = real
+end
+
 -- peak hold: rises instantly, holds, then falls
 W.clear_peaks()
 NOW = 0
@@ -1981,9 +1999,13 @@ do
   C.set_ui(1); C.set_cell_w(cw0)
   -- the panels' meters narrower (Options' Meter width)
   local io0, gr0 = C.IO_COL_W, C.METER_COL_W
-  C.METER_WIDTH = "narrow"; C.set_ui(1)
+  C.METER_WIDTH = "narrow"; C.METER_SCALES_SET = true; C.set_ui(1)
   check("meter width: narrow, no readouts", ("%s %d %d"):format(tostring(C.METER_READOUT), C.IO_COL_W, C.METER_COL_W),
     "false 14 14")
+  -- (Normal without its figures has an 8 px bar: Narrow's under it)
+  C.METER_SCALES_SET = false; C.set_ui(1)
+  check("meter width: narrow, Normal without figures still wider", C.IO_BAR_W < 8 and C.IO_BAR_W > 5, true)
+  C.METER_SCALES_SET = nil
   C.METER_WIDTH = "thin"; C.set_ui(1.5)
   check("meter width: thin", ("%d %d %d"):format(C.IO_BAR_W, C.METER_W, C.IO_COL_W), "8 8 11")
   C.METER_WIDTH = nil; C.set_ui(1)
@@ -14165,6 +14187,302 @@ do
   C.ROT_TEXT = wasRot
   W._rot(true)
   for _, k in ipairs(js) do reaper[k] = saved[k] end
+end
+
+
+-- The overview's lens (TS_CV_Overview): Lens size and Minimum height
+do
+  local saved = {}
+  for _, k in ipairs({ "GetExtState", "SetExtState", "GetMediaTrackInfo_Value", "GetSetProjectInfo",
+                       "PreventUIRefresh", "TrackList_AdjustWindows" }) do saved[k] = reaper[k] end
+  reaper.PreventUIRefresh, reaper.TrackList_AdjustWindows = function() end, function() end
+  local ext = {}
+  reaper.GetSetProjectInfo = function() return 0 end
+  reaper.GetExtState = function(_, k) return ext[k] or "" end
+  reaper.SetExtState = function(_, k, v) ext[k] = v end
+  reaper.GetMediaTrackInfo_Value = function() return 0 end
+  package.loaded["TS_CV_Overview"] = nil
+  local OV = require("TS_CV_Overview")
+  local C = require("TS_CV_Config")
+  local cell = C.CELL_H
+  C.CELL_H = 64
+  check("lens: a row's height for whole rows of controls", OV.rows_imgui(1) .. " " .. OV.rows_imgui(2), "83 147")
+  check("lens: the usual steps", OV.STEP_NAMES[OV.lens_i()] .. " / " .. OV.STEP_NAMES[OV.min_i()], "2 rows / Names")
+  local rows = {}
+  for i = 1, 14 do rows[i] = { guid = "{" .. i .. "}", track = { i }, tcph = 50 } end
+  local g = { top = 0, bottom = 1000, scale = 1 }
+  local function plan()
+    local to, y = OV._lens_plan(rows, g, "{6}")
+    local hs = {}
+    for i = 4, 9 do hs[#hs + 1] = to["{" .. i .. "}"].h end
+    return table.concat(hs, " ") .. " | " .. to["{1}"].h .. " | " .. y
+  end
+  check("lens: names-only rows, the open row fills the view", plan(), "54 147 596 147 54 28 | 28 | 201")
+  OV.set_min_i(3)
+  check("lens: a row of controls each, the open row most of the view", plan(), "83 147 600 147 83 83 | 83 | 230")
+  ext.overview_open_h = "380"
+  check("lens: the open row's own height", plan(), "83 147 380 147 83 83 | 83 | 230")
+  ext.overview_open_h = nil
+  OV.set_min_i(5)
+  check("lens: the minimum no more than the lens size", OV.STEP_NAMES[OV.min_i()], "2 rows")
+  OV.set_lens_i(3)
+  check("lens: the minimum follows the lens size down", OV.STEP_NAMES[OV.min_i()], "1 row")
+  ext.overview_min_step = "faces"
+  check("lens: no row open, no rows in it", next(OV.lens_roles(rows)), nil)
+  OV.focus(rows[6])
+  check("lens: rows round the open one", (function()
+    local r = OV.lens_roles(rows)
+    return tostring(r["{6}"]) .. " " .. tostring(r["{5}"]) .. " " .. tostring(r["{4}"]) .. " " .. tostring(r["{1}"])
+  end)(), "open near mid far")
+  OV.restore()
+  -- Windows' display at 125%: ImGui's 100 is REAPER's 125
+  g.scale = 0.8
+  OV.set_lens_i(4)
+  OV.set_min_i(3)
+  local _ = plan()
+  check("lens: at 125%, a step in REAPER's pixels", OV.step_h(2) .. " " .. OV.step_h(3) .. " " .. OV.step_h(4) .. " " .. OV.step_h(5),
+    "54 104 184 264")
+  check("lens: at 125%, the rows", plan(), "104 184 750 184 104 104 | 104 | 288")
+  -- outside the lens: the steps for the selected tracks (the track menu,
+  -- the row height actions)
+  g.scale = 1
+  local hs, sel = {}, { { "A" }, { "B" } }
+  local was = {}
+  for _, k in ipairs({ "CountSelectedTracks", "GetSelectedTrack", "SetMediaTrackInfo_Value", "DeleteExtState",
+                       "time_precise", "defer", "CountTracks", "GetTrack" }) do was[k] = reaper[k] end
+  local every = { sel[1], sel[2], { "C" } }
+  reaper.CountTracks = function() return #every end
+  reaper.GetTrack = function(_, i) return every[i + 1] end
+  reaper.CountSelectedTracks = function() return #sel end
+  reaper.GetSelectedTrack = function(_, i) return sel[i + 1] end
+  reaper.GetMediaTrackInfo_Value = function(t, k) if k == "I_TCPH" or k == "I_HEIGHTOVERRIDE" then return hs[t] or 28 end return 0 end
+  reaper.SetMediaTrackInfo_Value = function(t, k, v) if k == "I_HEIGHTOVERRIDE" then hs[t] = v end end
+  reaper.DeleteExtState = function(_, k) ext[k] = nil end
+  reaper.defer = function() end
+  OV.heights_tick(g)
+  local seen = {}
+  for _ = 1, 4 do OV.height_request("cycle"); seen[#seen + 1] = hs[sel[1]] .. "/" .. hs[sel[2]] end
+  check("lens off: cycle names, 1 row, 2 rows, round again", table.concat(seen, " "), "83/83 147/147 28/28 83/83")
+  OV.height_request("faces")
+  check("lens off: a step by name", OV.STEP_NAMES[OV.step_at(sel[1])], "Faceplates")
+  OV.heights_tick(g)
+  check("lens off: the steps' heights kept for the actions", ext.overview_step_px, "28,54,83,147,211")
+  ext.row_height_req = "2"
+  OV.heights_tick(g)
+  check("lens off: an action's request carried out", hs[sel[2]] .. " " .. tostring(ext.row_height_req), "147 nil")
+  OV.height_request("all:1")
+  check("lens off: every track", hs[every[1]] .. " " .. hs[every[2]] .. " " .. hs[every[3]], "83 83 83")
+  OV.height_request("all:cycle")
+  check("lens off: every track, cycled", hs[every[3]], 147)
+  check("lens off: the step every track's at", OV.STEP_NAMES[OV.all_step()], "2 rows")
+  hs[every[3]] = 90
+  check("lens off: tracks at different steps, none", tostring(OV.all_step()), "nil")
+  OV.height_request("2")
+  OV.focus(rows[6])
+  check("lens off: nothing while a row's open", tostring(OV.height_request("3")) .. " " .. hs[sel[1]], "false 147")
+  OV.restore()
+  -- the actions themselves, ChannelView TCP closed: the heights it kept
+  local RH = dofile(HERE .. "../TS_CV_RowHeight.lua")
+  reaper.time_precise = function() return 100 end
+  ext.tcp_alive, ext.overview_step_px = "1", "28,54,104,184,264"
+  RH("cycle")
+  check("row height action: TCP closed, its kept heights", hs[sel[1]], 28)
+  RH("1")
+  check("row height action: a step", hs[sel[2]], 104)
+  ext.tcp_alive = "99.5"
+  RH("3")
+  check("row height action: TCP open, asked of it", tostring(ext.row_height_req) .. " " .. hs[sel[1]], "3 104")
+  RH("names", true)
+  check("row height action: every track, asked of it", ext.row_height_req, "all:names")
+  ext.tcp_alive = "1"
+  RH("2", true)
+  check("row height action: every track, TCP closed", hs[every[1]] .. " " .. hs[every[3]], "184 184")
+  for k, f in pairs(was) do reaper[k] = f end
+  C.CELL_H = cell
+  package.loaded["TS_CV_Overview"] = nil
+  for _, k in ipairs({ "GetExtState", "SetExtState", "GetMediaTrackInfo_Value", "GetSetProjectInfo",
+                       "PreventUIRefresh", "TrackList_AdjustWindows" }) do reaper[k] = saved[k] end
+end
+
+
+-- A grid's short forms (TS_CV_Mappings FORMS): layouts of their own,
+-- k rows of controls tall
+do
+  local function K(p, c, r) return { type = "knob", param = p, at = { c = c, r = r, w = 4, h = 4 } } end
+  local L = { controls = { K(0, 0, 0), K(1, 4, 0), K(2, 0, 4), K(3, 4, 4) }, grid = { cols = 8, rows = 8 }, plate = "black" }
+  L.controls.grid = L.grid
+  local S = M.form_seed(L, 1)
+  check("forms: started from the top row", #S.forms[1].controls .. " " .. S.forms[1].controls[2].param .. " "
+    .. S.forms[1].grid.cols .. "x" .. S.forms[1].grid.rows .. " " .. #S.controls, "2 1 8x4 4")
+  check("forms: copies, not the whole grid's", S.forms[1].controls[1] ~= S.controls[1], true)
+  local V = M.form_of(S, 1)
+  check("forms: a layout of its own, the rest read through", #V.controls .. " " .. V.form .. " " .. V.plate
+    .. " " .. tostring(M.is_form(V)) .. " " .. tostring(M.is_form(S)), "2 1 black true false")
+  local key = "FormPlug"
+  M.set(key, S)
+  -- a knob on the form changed: the whole grid's the same
+  local Vs = M.copy(M.form_of(M.get(key), 1))
+  check("forms: a copy still the form", tostring(M.is_form(Vs)) .. " " .. Vs.form, "true 1")
+  Vs.controls[1].size, Vs.controls[1].label = "large", "Drive"
+  Vs.controls[1].at.w = 8
+  Vs.controls[#Vs.controls + 1] = K(9, 8, 0)
+  Vs.grid.cols = 12
+  M.set(key, Vs)
+  local G = M.get(key)
+  check("forms: saved as the form", #G.forms[1].controls .. " " .. G.forms[1].controls[1].size .. " " .. G.forms[1].grid.cols,
+    "3 large 12")
+  check("forms: the whole grid as it was", #G.controls .. " " .. tostring(G.controls[1].size) .. " " .. tostring(G.controls[1].label)
+    .. " " .. G.controls[1].at.w, "4 nil nil 4")
+  -- what's set on a form that isn't its own is the layout's
+  local Vp = M.form_of(M.get(key), 1)
+  Vp.plate = "cream"
+  M.set(key, Vp)
+  check("forms: a faceplate set there, the layout's", M.get(key).plate .. " " .. tostring(rawget(M.get(key).forms[1], "plate")), "cream nil")
+  M.save(); M.reload()
+  local R = M.get(key)
+  check("forms: kept", R.forms and R.forms[1] and (#R.forms[1].controls .. " " .. R.forms[1].grid.cols .. "x" .. R.forms[1].grid.rows
+    .. " " .. R.forms[1].controls[1].label .. " " .. R.forms[1].controls[1].at.w), "3 12x4 Drive 8")
+  check("forms: the whole grid kept", #R.controls .. " " .. tostring(R.controls[1].label ~= "Drive") .. " " .. tostring(R.forms[2]), "4 true nil")
+  check("forms: copied", M.copy(R).forms[1].controls[3].param .. " " .. tostring(M.copy(R).forms[1].controls[3] ~= R.forms[1].controls[3]), "9 true")
+  local function ph(n) return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H end
+  check("forms: the whole grid where it fits", P.form_layout(R, ph(3)) == R, true)
+  local F = P.form_layout(R, ph(1))
+  check("forms: a row short, the form that fits", F.form .. " " .. #F.controls .. " " .. tostring(F.controls == R.forms[1].controls), "1 3 true")
+  check("forms: the same each time", P.form_layout(R, ph(1)) == F, true)
+  local was_rack = P.RACK
+  P.RACK = true
+  check("forms: none in the rack", P.form_layout(R, ph(1)) == R, true)
+  P.RACK = was_rack
+  local Cl = M.form_clear(R, 1)
+  check("forms: cleared", tostring(Cl.forms) .. " " .. #Cl.controls, "nil 4")
+  -- in the older lines (Form<k>, At<n>.<k>): forms of their own, the
+  -- whole grid without the ones only its forms had
+  M.remove(key); M.save(); M.reload()
+end
+
+-- (the older lines, read)
+do
+  M.import({ { key = "OldForms", raw = { Grid = "8x8", Ctl0 = "0|knob|0|", At0 = "0,0,4,4", ["At0.1"] = "4,0,4,4",
+    Ctl1 = "1|knob|0|", At1 = "0,4,4,4", Ctl2 = "2|knob|0|", ["At2.1"] = "0,0,4,4",
+    Ctl3 = "2|knob|0|", ["At3.1"] = "0,0,4,4", Form1 = "8x4" } } })
+  local O = M.get("OldForms")
+  check("forms: the old way, a form of its own", O and O.forms and O.forms[1] and (#O.forms[1].controls .. " "
+    .. O.forms[1].controls[1].param .. "@" .. O.forms[1].controls[1].at.c .. " " .. O.forms[1].controls[2].param .. "@"
+    .. O.forms[1].controls[2].at.c .. " " .. O.forms[1].grid.cols .. "x" .. O.forms[1].grid.rows), "2 0@4 2@0 8x4")
+  check("forms: the old way, the form's own off the whole grid", O and (#O.controls .. " " .. tostring(O.controls[1].at_f)), "2 nil")
+  M.set("OldForms", O)
+  local t = M.signature(M.get("OldForms"))
+  check("forms: written the new way", tostring(t:find("F1.Grid=8x4", 1, true) ~= nil) .. " " .. tostring(t:find("Form1=", 1, true) ~= nil)
+    .. " " .. tostring(t:find("At0.1=", 1, true) ~= nil), "true false false")
+  M.remove("OldForms"); M.save(); M.reload()
+end
+
+-- A form with an empty row under what's on it: still the form for its
+-- rows, drawn without that row
+do
+  local function K(p, c, r, w) return { type = "knob", param = p, at = { c = c, r = r, w = w or 4, h = 4 } } end
+  local L = { controls = { K(0, 0, 0), K(1, 0, 4), K(2, 0, 8), K(3, 0, 12) }, grid = { cols = 4, rows = 16 } }
+  L.controls.grid = L.grid
+  local f2 = { K(0, 0, 0, 6), K(1, 6, 0, 6) }
+  f2[2].at.h = 6
+  f2[#f2 + 1] = { type = "combo", param = 4, buttons = "across", at = { c = 0, r = 6, w = 12, h = 2 } }
+  f2.grid = { cols = 12, rows = 9 }
+  local f1 = { K(0, 0, 0) }
+  f1.grid = { cols = 4, rows = 4 }
+  L.forms = { [2] = { grid = f2.grid, controls = f2 }, [1] = { grid = f1.grid, controls = f1 } }
+  local function ph(n) return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H end
+  local F = P.form_layout(L, ph(2))
+  check("forms: an empty row under it, still 2 rows", F.form .. " " .. F.grid.rows .. " " .. F.controls.grid.rows .. " " .. #F.controls
+    .. " " .. L.forms[2].grid.rows, "2 8 8 3 9")
+end
+
+-- A form only once the panel is down to its rows: above them the whole
+-- grid (scrolling when locked)
+do
+  local function K(p, c, r) return { type = "knob", param = p, at = { c = c, r = r, w = 4, h = 4 } } end
+  local L = { controls = { K(0, 0, 0), K(1, 0, 4), K(2, 0, 8), K(3, 0, 12), K(4, 0, 16), K(5, 0, 20) }, grid = { cols = 4, rows = 24 }, lock = 6 }
+  L.controls.grid = L.grid
+  local f2 = { K(0, 0, 0), K(1, 4, 0), K(2, 0, 4) }
+  f2.grid = { cols = 8, rows = 8 }
+  L.forms = { [2] = { grid = f2.grid, controls = f2 } }
+  local function ph(n) return C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + n * C.CELL_H end
+  local function at(n) local F = P.form_layout(L, ph(n)); return M.is_form(F) and F.form or "full" end
+  check("forms: the whole grid down to 3 rows, then 2 rows' form", at(5) .. " " .. at(3) .. " " .. at(2.5) .. " " .. at(2) .. " " .. at(1),
+    "full full 2 2 2")
+  L.forms = { [1] = { grid = { cols = 4, rows = 4 }, controls = { K(0, 0, 0), grid = { cols = 4, rows = 4 } } } }
+  check("forms: only a 1-row form, the whole grid until 1 row", at(3) .. " " .. at(2) .. " " .. at(1.5) .. " " .. at(1), "full full 1 1")
+end
+
+-- A canvas's controls beside it: as wide as they are, no panel's least
+-- width round a single column of them
+do
+  local L = { { type = "knob", param = 0, at = { c = 0, r = 0, w = 4, h = 4 } } }
+  L.grid = { cols = 4, rows = 4 }
+  local cv = { kind = "comp", w = 400 }
+  local ph = C.HEADER_H + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD + C.CELL_H
+  check("canvas: one column beside it, no wider than it", P.width(L, ph, false, false, nil, false, false, nil, cv) - 400,
+    P.grid_w(L, ph) - C.PANEL_PAD)
+  check("canvas: that column narrower than a panel's least", P.grid_w(L, ph) < C.PANEL_MIN_W, true)
+end
+
+-- A menu's search box keeps the keyboard (TS_CV_Browser keep_search)
+do
+  local B = require("TS_CV_Browser")
+  local q, held, sub, active, back = {}, false, false, false, false
+  local fake = setmetatable({
+    GetInputQueueCharacter = function(_, i) if q[i + 1] then return true, q[i + 1] end return false end,
+    IsKeyPressed = function() return back end, IsAnyItemActive = function() return active end,
+    IsMouseDown = function() return held end, IsPopupOpen = function() return sub end,
+  }, { __index = function(_, k) if type(k) == "string" and k:find("_") then return 1 end return function() return false end end })
+  B.attach(fake)
+  local m = { query = "ab", live = false }
+  check("search keeps the keyboard: back when nothing's open", B._keep_search("ctx", m), true)
+  sub = true
+  check("search keeps the keyboard: not while a category is open", B._keep_search("ctx", m), false)
+  q = { 99 }
+  check("search keeps the keyboard: typed with a category open, into it", tostring(B._keep_search("ctx", m)) .. " " .. m.query, "true abc")
+  q, back = {}, true
+  check("search keeps the keyboard: backspace too", tostring(B._keep_search("ctx", m)) .. " " .. m.query, "true ab")
+  back, active = false, true
+  check("search keeps the keyboard: not from another field", B._keep_search("ctx", m), false)
+  m.live = true; active = false
+  check("search keeps the keyboard: already has it", B._keep_search("ctx", m), nil)
+end
+
+-- An instrument's input meter (its input is MIDI): none
+do
+  check("instrument: by its format", tostring(U.is_instrument(nil, { guid = "{i1}", name = "VSTi: SynthMaster (KV331)" })) .. " "
+    .. tostring(U.is_instrument(nil, { guid = "{i2}", name = "VST3: Pro-Q 4 (FabFilter)" })) .. " "
+    .. tostring(U.is_instrument(nil, { guid = "{i3}", name = "CLAPi: Surge XT" })), "true false true")
+  local was = reaper.TrackFX_GetNamedConfigParm
+  reaper.TrackFX_GetNamedConfigParm = function(_, _, k) if k == "original_name" then return true, "VST3i: Kontakt 7 (Native Instruments)" end return false, "" end
+  check("instrument: renamed, by its own name", U.is_instrument({}, { guid = "{i4}", name = "My strings", addr = 0 }), true)
+  reaper.TrackFX_GetNamedConfigParm = was
+  local TPm = require("TS_CV_Taps")
+  local was_m = TPm.is_metered
+  TPm.is_metered = function() return true end
+  local io = P.has_io({}, { guid = "{i1}", name = "VSTi: SynthMaster (KV331)" }, { levels = true })
+  check("instrument: its output meter only", type(io) == "table" and (tostring(io.l) .. " " .. tostring(io.r)), "false true")
+  check("instrument: an effect's both", P.has_io({}, { guid = "{i2}", name = "VST3: Pro-Q 4 (FabFilter)" }, { levels = true }), true)
+  TPm.is_metered = was_m
+  -- the reduction's strip beside a curve: as wide as the meters are
+  local CP = require("TS_CV_CompPanel")
+  local was_w = C.METER_COL_W
+  C.METER_COL_W = 7
+  local thin = CP.meters_w()
+  C.METER_COL_W = 26
+  check("reduction strip: follows the meters' width", tostring(thin < CP.meters_w()) .. " " .. tostring(CP.meters_w() < 44), "true true")
+  C.METER_COL_W = was_w
+end
+
+-- A button in a place half a cell tall (its name hidden): the button
+-- alone, in its place, not over the row above
+do
+  local L = { { type = "toggle", param = 0, noname = true, at = { c = 0, r = 2, w = 4, h = 2 } } }
+  L.grid = { cols = 4, rows = 4 }
+  local pl = P.layout(L, 400)
+  local it = pl.items[1]
+  check("short button: in its place, half a cell", tostring(it.y >= it.sy) .. " " .. it.h, "true 1")
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

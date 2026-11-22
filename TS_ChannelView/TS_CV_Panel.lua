@@ -84,6 +84,16 @@ P.canvas_of = canvas_of
 function P.footer_h() return C.HIDE_FOOT and 0 or C.FOOTER_H end
 function P.head_h() return C.HIDE_HEAD and 0 or C.HEADER_H end
 P.hover = {}    -- fx GUID -> { head, foot }: the pointer was over where they go, last frame
+-- A tile (P.TILE, set while the TCP window's overview draws its short
+-- rows): the name down a tab at the left instead of a header, and a
+-- canvas layout's canvas the whole body, its controls over its left side
+-- on a fade
+P.TILE = nil
+-- (P.NO_HEAD, a tile a row tall: no header even under the pointer; its
+-- tab does what the header's name does)
+P.NO_HEAD = nil
+function P.tab_w() return C.S(14) end
+P.TILE_GRAPH = 120   -- the least of a tile's canvas showing past its controls
 P.type_half = {} -- a dual knob's or XY pad's id -> which half a value is being typed for
 -- A draw-list splitter for a panel (`key`), split into n channels. Kept,
 -- since a new one every frame trips ReaImGui's limit on short-lived
@@ -798,6 +808,9 @@ local function put(out, ctl, c, r, w, h, dx, dy)
     elseif t ~= "combo" then it.x = x + half(qx(w) - hx(nw)); it.w = nw end
     -- a dropdown in a place half a cell tall: short, its box without its name
     if t == "combo" and h <= 2 then nh, it.short = 1, true end
+    -- a button in a place half a cell tall: the button alone, filling it
+    -- (its name on it, as a small one has)
+    if t == "toggle" and h <= 2 then nh = 1 end
     -- three quarters of a cell: a dropdown or a button, its name and its
     -- box, nothing kept under it
     if (t == "combo" or (t == "toggle" and ctl.size ~= "small")) and h == 3 and not ctl.buttons then nh = 1.5 end
@@ -1089,6 +1102,67 @@ function P.layout_w(controls, avail_w, lock)
     prev = u
   end
   return finish(out, controls, width, height)
+end
+
+-- A tile's canvas without free words (they're for the full panel; its
+-- buttons and controls keep theirs): C.CANVAS_QUIET while it's drawn,
+-- which the canvases' free text heeds (TS_CV_CompPanel small_text and the
+-- rest); what a handle reads is in its tip
+local function hush(on)
+  C.CANVAS_QUIET = on or nil
+  if not on then C.CANVAS_LOUD = nil end
+end
+P.hush = hush
+
+-- A grid too tall for a panel `panel_h` tall, with short forms (TS_CV_
+-- Mappings FORMS, each a layout of its own): form k only once the panel
+-- is down to k rows of controls (under k + 1; the whole grid, scrolling
+-- or flowing, until then), its tallest such form that fits, else under 2
+-- rows its shortest, reading the rest through to the layout; the layout
+-- itself when the whole grid fits, it has no forms, or in the rack. The
+-- same table while the form is.
+local form_views = setmetatable({}, { __mode = "k" })
+-- (a form's height: its k rows, or what's on it when that's more; rows
+-- left empty under that don't count)
+local function form_rows(f, k)
+  local _, ext = P.grid_size({ grid = { cols = 0, rows = 0 }, table.unpack(f.controls) })
+  return math.min(f.grid and f.grid.rows or ext, math.max(ext, 4 * k))
+end
+function P.form_layout(layout, panel_h)
+  if P.RACK or not (layout and layout.forms and layout.grid) or M.is_form(layout) then return layout end
+  local room = grid_room(panel_h)
+  local _, rows = P.grid_size(layout.controls or {})
+  if qy(rows) <= room + 0.5 then return layout end
+  local pick, least
+  for j = #M.FORMS, 1, -1 do
+    local k = M.FORMS[j]
+    local f = layout.forms[k]
+    if f and f.controls then
+      least = k
+      if not pick and room + 0.5 < qy(4 * (k + 1)) and qy(form_rows(f, k)) <= room + 0.5 then pick = k end
+    end
+  end
+  pick = pick or (room + 0.5 < qy(8) and least) or nil
+  if not pick then return layout end
+  local per = form_views[layout]
+  if not per then per = {}; form_views[layout] = per end
+  local v, f = per[pick], layout.forms[pick]
+  if not v or v._c ~= f.controls or v._g ~= f.grid then
+    v = M.form_of(layout, pick)
+    v._c, v._g = f.controls, f.grid
+    -- (drawn without its empty rows at the foot: the same controls, in
+    -- the same order, on a grid that much shorter)
+    local fr = form_rows(f, pick)
+    if f.grid and fr < f.grid.rows then
+      local g = { cols = f.grid.cols, rows = fr }
+      local fc = { table.unpack(f.controls) }
+      fc.grid = g
+      rawset(v, "grid", g)
+      rawset(v, "controls", fc)
+    end
+    per[pick] = v
+  end
+  return v
 end
 
 -- Places a list of controls in a panel `panel_h` tall: a grid where it
@@ -1403,30 +1477,9 @@ local function io_w(io)
   return ((io_l(io) and 1 or 0) + (io_r(io) and 1 or 0)) * (C.IO_COL_W + C.PANEL_PAD)
 end
 
-function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
-  if collapsed then return C.COLLAPSED_W end
-  -- the TS_CV Trimmer: its own panel, as wide as the strip's height needs
-  if key and own_trim(key) then
-    local l = own_layout[key] or M.get(key)
-    return (l and l.own_w) or TRP.width(avail_h)
-  end
-  -- an EQ or compressor canvas (any plugin): the canvas, and its layout's
-  -- controls in columns beside it
-  if canvas and MP then
-    local side = 0
-    local n = type(n_or_controls) == "table" and #n_or_controls or (n_or_controls or 0)
-    -- folded away, its controls pop out from the edge instead (fold_pop)
-    if n > 0 and not P.canvas_folded(canvas, key, false) then
-      side = P.width(n_or_controls, avail_h, false, false, nil, false, false, lock) - C.PANEL_PAD
-    end
-    -- with input/output meters: on the panel's two outside edges
-    return MP.width(canvas.kind, canvas) + side + io_w(has_io)
-  end
-  if key and own_eq(key) then
-    return P.own_w(key) + io_w(has_io)
-  end
-  -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
-  if key and own_rc(key) then return P.own_w(key) + io_w(has_io) end
+-- A grid's own width, its padding round it (a panel's least width not
+-- counted): its widest page and the scrollbar a locked one needs
+function P.grid_w(n_or_controls, avail_h, lock)
   local controls = n_or_controls
   if type(controls) == "number" then
     -- callers that only know the count get a plain grid, no dividers
@@ -1451,7 +1504,41 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
     local sb = P.scrolls(lay, avail_h, lock) and C.SCROLL_W + C.S(2) or 0
     inner = lay.width + sb
   end
-  local w = math.max(C.PANEL_MIN_W, inner + C.PANEL_PAD * 2)
+  return inner + C.PANEL_PAD * 2
+end
+
+function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
+  if collapsed then return C.COLLAPSED_W end
+  -- the TS_CV Trimmer: its own panel, as wide as the strip's height needs
+  if key and own_trim(key) then
+    local l = own_layout[key] or M.get(key)
+    return (l and l.own_w) or TRP.width(avail_h)
+  end
+  -- an EQ or compressor canvas (any plugin): the canvas, and its layout's
+  -- controls in columns beside it
+  if canvas and MP then
+    local side = 0
+    local n = type(n_or_controls) == "table" and #n_or_controls or (n_or_controls or 0)
+    -- folded away, its controls pop out from the edge instead (fold_pop)
+    -- (as wide as they are, the canvas giving the panel its width: no
+    -- panel's least width round them)
+    if n > 0 and not P.canvas_folded(canvas, key, false) then
+      side = P.grid_w(n_or_controls, avail_h, lock) - C.PANEL_PAD
+    end
+    -- with input/output meters: on the panel's two outside edges (a
+    -- tile's controls over the canvas: as wide as the canvas, or them and
+    -- some of it)
+    if P.TILE and side > 0 then
+      return math.max(MP.width(canvas.kind, canvas), side + C.PANEL_PAD + C.S(P.TILE_GRAPH)) + io_w(has_io)
+    end
+    return MP.width(canvas.kind, canvas) + side + io_w(has_io)
+  end
+  if key and own_eq(key) then
+    return P.own_w(key) + io_w(has_io)
+  end
+  -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
+  if key and own_rc(key) then return P.own_w(key) + io_w(has_io) end
+  local w = math.max(C.PANEL_MIN_W, P.grid_w(n_or_controls, avail_h, lock))
   -- The meter is a strip, not a column: it adds its own narrow width
   -- rather than pushing the panel out by a whole CELL_W.
   if has_meter then w = w + C.METER_COL_W + C.PANEL_PAD end
@@ -1463,8 +1550,12 @@ end
 
 -- Whether a panel shows input/output meters: the plugin is set to
 -- (Levels=1), and the probes are measuring this instance.
+-- An instrument (its input is MIDI): its output meter only,
+-- { l = false, r = true }.
 function P.has_io(track, fx, layout)
-  return layout ~= nil and layout.levels == true and TP.is_metered(track, fx.guid)
+  local on = layout ~= nil and layout.levels == true and TP.is_metered(track, fx.guid)
+  if on and U.is_instrument(track, fx) then return { l = false, r = true } end
+  return on
 end
 
 -- ---------------------------------------------------------------------
@@ -3084,7 +3175,12 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     ImGui.PushStyleColor(ctx, ImGui.Col_ChildBg, 0)
     ImGui.PushStyleColor(ctx, ImGui.Col_ScrollbarBg, 0)
     ImGui.PushStyleVar(ctx, ImGui.StyleVar_ScrollbarSize, C.SCROLL_W)
-    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + C.S(2) + 4, math.max(1, h - ins * 2), 0,
+    -- (P.WHOLE_ROWS, the overview's medium rows: as many whole rows of
+    -- controls as fit, none of the next showing)
+    local ch = math.max(1, h - ins * 2)
+    local n = P.WHOLE_ROWS and math.floor((h - C.GRID_TOP_PAD - C.PANEL_PAD) / C.CELL_H) or 0
+    if n >= 1 then ch = math.min(ch, C.GRID_TOP_PAD + n * C.CELL_H - ins) end
+    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + C.S(2) + 4, ch, 0,
       ImGui.WindowFlags_NoScrollWithMouse)
     ImGui.PopStyleVar(ctx)
     ImGui.PopStyleColor(ctx, 2)
@@ -3459,8 +3555,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         if lay.grid then size = (ctl.size == "small" or item.h <= 1) and "small" or nil end
         local said = M.button_text(key, p, raw, shown)
         changed, nv, act = W.toggle(ctx, id, label, value, st,
-          { tooltip = (size == "small") and (label .. ": " .. (st or "")) or st,
-            text = said or ((size == "small") and label or nil), w = (lay.grid and not ctl.img) and hx(item.w) or nil,
+          { tooltip = (size == "small") and (full_label .. ": " .. (st or "")) or st,
+            text = said or ((size == "small") and full_label or nil), w = (lay.grid and not ctl.img) and hx(item.w) or nil,
             under = M.under_text(st, said, value >= 0.5) or false,
             on_col = lit, size = size, style = ctl.style, mod = modded, img = ctl.img })
       elseif ctl.type == "combo" and item.kind == "buttons" then
@@ -3763,7 +3859,11 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     if ImGui.IsWindowHovered(ctx) and not W.wheel_taken() then
       local wheel = ImGui.GetMouseWheel(ctx)
       if wheel ~= 0 then
-        if scroll then ImGui.SetScrollY(ctx, ImGui.GetScrollY(ctx) - wheel * C.CELL_H * 0.5)
+        if scroll and P.WHOLE_ROWS then
+          -- a row at a time, landing on whole rows
+          local r = math.floor(ImGui.GetScrollY(ctx) / C.CELL_H + 0.5) - (wheel > 0 and 1 or -1)
+          ImGui.SetScrollY(ctx, math.max(0, r) * C.CELL_H)
+        elseif scroll then ImGui.SetScrollY(ctx, ImGui.GetScrollY(ctx) - wheel * C.CELL_H * 0.5)
         else ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - wheel * C.CELL_W * 0.5) end
         W.take_wheel()
       end
@@ -4097,7 +4197,7 @@ function P.draw_curve_item(ctx, dl, x, y, w, h, track, fx, layout, req, n, ctl)
   -- its own bands: set up by its control's number
   local setup
   if cv and ctl and ctl.vis then
-    for i, c in ipairs(layout.controls or {}) do if c == ctl then setup = i break end end
+    for i, c in ipairs(layout.controls or {}) do if not setup and c == ctl then setup = i break end end
   end
   if not (MP and cv) then
     W.push_small(ctx)
@@ -4254,8 +4354,13 @@ local function rc_body(ctx, dl, x, y, ww, bh, track, fx, req, io, enabled, plate
                     y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled, io) then
     ex, ew = x + (io_l(io) and C.IO_COL_W + C.PANEL_PAD or 0), ww - io_w(io)
   end
-  return on_screen(plate, saved, dl, ex + 1, y + P.head_h() + 1, ew - 2, bh - 2,
+  -- (a tile's: however short, without words)
+  local tile = P.TILE
+  if tile then hush(true); CP.SHORT = true end
+  local drawn = on_screen(plate, saved, dl, ex + 1, y + P.head_h() + 1, ew - 2, bh - 2,
     CP.draw, ctx, dl, ex, y + P.head_h(), ew, bh, track, fx, req)
+  if tile then hush(false); CP.SHORT = nil end
+  return drawn
 end
 
 local draw_panel, size_grip, fold_tab, fold_pop
@@ -4445,6 +4550,7 @@ local CANVAS_MIN = { w = 200, h = 120 }
 -- right down to its least before they go
 local FOLD_SLACK = { w = 60, h = 40 }
 local function ctl_room(track, fx, layout, key, ww, wh, canvas, io)
+  layout = P.form_layout(layout, wh)
   local vis = P.visible(layout.controls or {}, track, fx)
   if #vis == 0 then return 0 end
   if P.RACK then
@@ -4684,7 +4790,14 @@ function P.draw(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
   return a, b, c, d
 end
 draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_source)
-  local req = { is_drag_source = is_drag_source }
+  -- (too short for the whole grid: a short form of it, when it has one;
+  -- `own` the layout itself, for what's kept)
+  local own = layout
+  layout = P.form_layout(layout, avail_h)
+  if CP then CP.TILE, CP.SHORT, CP.TILE_X, CP.TILE_ON = nil, nil, nil, nil end   -- (left set by a canvas that failed)
+  hush(false)
+  -- (a form's controls are its own: what a request names is on it)
+  local req = { is_drag_source = is_drag_source, form = M.is_form(layout) and layout.form or nil }
   local collapsed = St.is_collapsed(fx.guid)
   local is_eq = own_eq(key)
   -- ReaComp's panel is its own canvas, with its own meters beside it
@@ -4704,11 +4817,14 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   -- sets P.io_next for the panel it draws next: P.shares_io)
   local share = P.io_next
   P.io_next = nil
-  if io and share then io = { l = not share.l, r = not share.r } end
+  if io and share then io = { l = io_l(io) and not share.l, r = io_r(io) and not share.r } end
   local canvas = (not is_eq and not is_rc and not is_trim) and canvas_of(layout) or nil
   if canvas then meter = nil end
   local nat_w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
                     St.is_gr_open(fx.guid), M.locked(layout), canvas)
+  -- (a tile: its name's tab at the left)
+  local tab = (P.TILE and not collapsed) and P.tab_w() or 0
+  nat_w = nat_w + tab
   local w = (P.FILL_W and P.FILL_W > nat_w) and P.FILL_W or nat_w
   local off = math.floor((w - nat_w) * 0.5)
   -- the rack: every panel the column's width, its body all of it
@@ -4769,13 +4885,18 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       local sp
       -- (each shown while the pointer is over where it goes)
       local hv = P.hover[fx.guid] or {}
-      local show_h = C.HIDE_HEAD and (hv.head or is_drag_source)
+      local show_h = C.HIDE_HEAD and (hv.head or is_drag_source) and not P.NO_HEAD
       -- (P.NO_FOOT: never, the overview's medium rows)
       local show_f = C.HIDE_FOOT and C.FOOTER_H > 0 and hv.foot and not P.NO_FOOT
       local mini = P.MINI_BTNS and C.HIDE_HEAD and not show_h
-      if show_h or show_f or mini then
-        sp = P.split(dl, 2, fx.guid)
-        ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
+      -- (a tile with a canvas: its controls on a channel of their own, over
+      -- the canvas and under the header)
+      local tile_cv = tab > 0 and canvas and not P.RACK and #(layout.controls or {}) > 0
+        and not P.canvas_folded(canvas, key, false)
+      local top = tile_cv and 2 or 1
+      if show_h or show_f or mini or tile_cv then
+        sp = P.split(dl, top + 1, fx.guid)
+        ImGui.DrawListSplitter_SetCurrentChannel(sp, top)
         if show_h then draw_header(ctx, dl, x, y, ww, track, fx, index, enabled, req) end
         if mini then mini_buttons(ctx, dl, x, y, ww, track, fx, enabled, req) end
         if show_f then
@@ -4791,14 +4912,44 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         local GC = require("TS_CV_GainCheck")
         if GC.due(track, fx, key) then
           sp = sp or P.split(dl, 2, fx.guid)
-          ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
+          ImGui.DrawListSplitter_SetCurrentChannel(sp, top)
           GC.offer(ctx, dl, track, fx, key, x, y + P.head_h(), ww)
           ImGui.DrawListSplitter_SetCurrentChannel(sp, 0)
         end
       end
       local fh = P.footer_h()
+      -- a tile's name, down its tab
+      if tab > 0 then
+        local off_ = T.get_offline(track, fx.addr)
+        ImGui.DrawList_AddRectFilled(dl, x, y, x + tab, y + wh,
+          off_ and C.COL.header_bg_off or ((enabled and not T.chain_bypassed(track)) and C.COL.header_bg or C.COL.header_bg_byp),
+          C.PANEL_RR, ImGui.DrawFlags_RoundCornersLeft)
+        W.push_small(ctx)
+        W.vertical_text(ctx, dl, x + tab * 0.5, y + 4, U.fx_label(fx),
+          (enabled and not off_) and C.COL.header_text or C.COL.header_dim, math.max(0, wh - 8))
+        W.pop_small(ctx)
+        -- the tab as the header's name: right-click its menu, Shift+click
+        -- bypass, Alt+click out of the chain, drag to move it; its full
+        -- name under the pointer
+        if not is_drag_source then
+          ImGui.SetCursorScreenPos(ctx, x, y)
+          ImGui.InvisibleButton(ctx, "tab##" .. fx.guid, tab, wh,
+            ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+          local mods = ImGui.GetKeyMods(ctx)
+          local alt, shift = (mods & ImGui.Mod_Alt) ~= 0, (mods & ImGui.Mod_Shift) ~= 0
+          if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Left) then
+            if alt then req.remove = true elseif shift then req.toggle_bypass = true end
+          end
+          if not alt and not shift and ImGui.IsItemActive(ctx) and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+            local dx = ImGui.GetMouseDragDelta(ctx, nil, nil, ImGui.MouseButton_Left)
+            if math.abs(dx) >= C.DRAG_THRESHOLD then req.begin_drag = true end
+          end
+          if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then req.open_menu = true end
+          W.tip(ctx, "tab##" .. fx.guid, U.clean_fx_name(fx.name), ImGui.IsItemHovered(ctx), false)
+        end
+      end
       -- the body: as wide as the panel's own layout, centred on a wider plate
-      local bx, bw = x + off, ww - (w - nat_w)
+      local bx, bw = x + off + tab, ww - (w - nat_w) - tab
       -- (bypassed itself, or the whole chain is: BYPASSED either way)
       local locked = (not enabled or T.chain_bypassed(track)) and not req.offline and not is_drag_source
       if locked then ImGui.BeginDisabled(ctx, true) end
@@ -4818,7 +4969,9 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
                           wh - P.head_h() - fh - C.PANEL_PAD * 2, track, fx, enabled, io) then
           ex, ew = bx + (io_l(io) and C.IO_COL_W + C.PANEL_PAD or 0), bw - io_w(io)
         end
+        if tab > 0 then hush(true) end
         EQP.draw(ctx, dl, ex, y + P.head_h(), ew, wh - P.head_h() - fh, track, fx, req)
+        hush(false)
       elseif canvas then
         -- any plugin's EQ or compressor layout: the canvas, then the
         -- layout's own controls in columns beside it; with input/output
@@ -4838,6 +4991,36 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
           cw = ew
           if #(layout.controls or {}) > 0 and not folded then bh = math.min(bh, P.rack_canvas_h(ew, canvas)) end
         end
+        -- a tile: the controls first, over the canvas's left side on a
+        -- fade, on their channel (submitted first, they take the clicks
+        -- where they cover it); the canvas the whole body under them
+        local tile = tile_cv and not stacked and not folded
+        if tile then
+          cw = ew
+          local vis_c = P.visible(layout.controls or {}, track, fx)
+          local cwid = P.grid_w(vis_c, wh, M.locked(layout))
+          ImGui.DrawListSplitter_SetCurrentChannel(sp, 1)
+          local by0, fade = y + P.head_h(), C.S(24)
+          local solid = U.with_alpha(C.COL.panel_bg, 0xd8)
+          ImGui.DrawList_AddRectFilled(dl, ex, by0, ex + cwid, by0 + bh, solid)
+          ImGui.DrawList_AddRectFilledMultiColor(dl, ex + cwid, by0, ex + cwid + fade, by0 + bh,
+            solid, U.with_alpha(C.COL.panel_bg, 0), U.with_alpha(C.COL.panel_bg, 0), solid)
+          draw_controls(ctx, dl, ex, by0, cwid, wh, track, fx, layout, key, req, nil, nil)
+          ImGui.DrawListSplitter_SetCurrentChannel(sp, 0)
+          if CP then
+            -- (the canvas's own row of values: clear of these, and not
+            -- what they are already)
+            local on = {}
+            for _, c in ipairs(vis_c) do
+              if c.param and c.param >= 0 then on[c.param] = true end
+              if c.param2 and c.param2 >= 0 then on[c.param2] = true end
+            end
+            CP.TILE, CP.TILE_X, CP.TILE_ON = true, ex + cwid + 4, on
+          end
+        end
+        -- (any tile's canvas: drawn however short, without words)
+        if CP and tab > 0 then CP.SHORT = true end
+        if tab > 0 then hush(true) end
         -- (a light faceplate gives the canvas a dark screen: on_screen)
         local todo = M.canvas_todo(canvas) or (canvas.kind ~= "eq" and not next(canvas.roles or {}))
         local function screen(fn, ...)
@@ -4856,7 +5039,11 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
         else
           screen(MP.draw_eq, ctx, dl, ex, y + P.head_h(), cw, bh, track, fx, layout, req)
         end
-        if #(layout.controls or {}) > 0 and folded then
+        if CP then CP.TILE, CP.SHORT, CP.TILE_X, CP.TILE_ON = nil, nil, nil, nil end
+        hush(false)
+        if tile then
+          -- (drawn above)
+        elseif #(layout.controls or {}) > 0 and folded then
           fold_req = true
         elseif #(layout.controls or {}) > 0 then
           if stacked then
@@ -4907,7 +5094,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     end
     if saved then pop_plate(saved) end
     if not collapsed and (canvas or is_eq or is_rc or is_trim) then
-      size_grip(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track)
+      size_grip(ctx, dl, fx, own, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track)
     end
     local folded_here = fold_req
     if folded_here then fold_tab(ctx, dl, fx, x, y, ww, wh) end

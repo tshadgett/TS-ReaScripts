@@ -390,6 +390,8 @@ function VO.apply(tab)
   C.METER_WIDTH = pro and tab ~= "web" and val(s, "mwidth") or "normal"
   -- (figures on a Normal meter only: Narrow and Thin are the bar alone)
   C.METER_SCALES = pro and val(s, "mscale") and C.METER_WIDTH == "normal" or false
+  -- (whether Normal would have them: a Narrow bar is narrower than Normal's)
+  C.METER_SCALES_SET = pro and val(s, "mscale") and true or false
   C.TRACK_ICONS = val(s, "icons")
   C.TCP_ICONS   = C.TRACK_ICONS
   -- the overall size first: the cell width and the type follow it
@@ -900,22 +902,20 @@ local function page_panels(ctx, tab, s)
       if tch then set(tab, "tcp_rr", tv) end
     end
   end
-  -- (the TCP window's track panels have neither a power switch nor a
-  -- header and foot)
-  if tab == "tcp" then
-    if not ED.PRO then ImGui.EndDisabled(ctx) end
-    return
+  -- (the TCP window's plugin panels take ChannelView's power switch and
+  -- auto-hide; their meters are their own)
+  if tab ~= "tcp" then
+    row(ctx, "Power switch")
+    local pw = ST.seg(ctx, "##vo_pw", { { "Icon", "icon" }, { "Lamp", "lamp" } }, val(s, "power"))
+    if pw then set(tab, "power", pw) end
+    row(ctx, "Auto-hide")
+    local hch, hv = ST.checkbox(ctx, "Header##vo_hh", val(s, "hide_head"))
+    if hch then set(tab, "hide_head", hv) end
+    ImGui.SameLine(ctx)
+    local fch, fv = ST.checkbox(ctx, "Foot##vo_hf", val(s, "hide_foot"))
+    if fch then set(tab, "hide_foot", fv) end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Shown while the pointer is over the panel.") end
   end
-  row(ctx, "Power switch")
-  local pw = ST.seg(ctx, "##vo_pw", { { "Icon", "icon" }, { "Lamp", "lamp" } }, val(s, "power"))
-  if pw then set(tab, "power", pw) end
-  row(ctx, "Auto-hide")
-  local hch, hv = ST.checkbox(ctx, "Header##vo_hh", val(s, "hide_head"))
-  if hch then set(tab, "hide_head", hv) end
-  ImGui.SameLine(ctx)
-  local fch, fv = ST.checkbox(ctx, "Foot##vo_hf", val(s, "hide_foot"))
-  if fch then set(tab, "hide_foot", fv) end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Shown while the pointer is over the panel.") end
   row(ctx, "Meter scales")
   local mch, mv = ST.checkbox(ctx, "On the GR and In / Out meters##vo_ms", val(s, "mscale"))
   if mch then set(tab, "mscale", mv) end
@@ -928,6 +928,7 @@ local function page_panels(ctx, tab, s)
       ImGui.SetTooltip(ctx, "The GR and In / Out meters. Narrow: no readouts or figures.\nThin: thinner still.")
     end
   end
+  if tab == "tcp" then ImGui.TextDisabled(ctx, "Power switch and auto-hide: ChannelView's.") end
   if not ED.PRO then ImGui.EndDisabled(ctx) end
 end
 

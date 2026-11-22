@@ -1,5 +1,59 @@
 # ChannelView — changelog
 
+## 4.6.0 — the overview in whole rows, short layouts of their own
+
+### ChannelView
+
+- **Gain reduction a plugin reports is read as a meter reads:** up at
+  once, falling no faster than 15 dB a second. A reduction that moves with
+  the wave (a low note, a fast detector) now holds steady at its peak, and
+  ReaComp reads the same with its window open or shut.
+- **An instrument has its output meter only** (its input is MIDI).
+- The meter two panels share sits in the middle of the gap between them.
+- **Meter width:** *Narrow* is narrower than *Normal* with *Meter scales*
+  off too (it was the wider).
+- **Add a plugin:** the menu's search box keeps the keyboard while the
+  menu's open; typing with a category open types into the search.
+
+### ChannelView Pro
+
+- **The overview's lens in whole rows of controls.** Settings menu ▸
+  *Lens size* (the open row's neighbours, 1 to 3 rows) and *Minimum
+  height* (every other row: names, faceplates, or rows up to the lens
+  size). While a row is open only its own edge drags; the lens keeps the
+  rest.
+- **Row heights with no row open:** the track menu's *Height* (the tracks
+  it's for, or all), settings menu ▸ *All tracks*, and twelve actions
+  (*TS_ChannelView_TCP_Height_Names*, *_Faceplates*, *_1Row*, *_2Rows*,
+  *_3Rows*, *_Cycle*, and an *_All_* version of each), which work with the
+  TCP window closed too.
+- **Medium rows as tiles:** whole rows of controls only; the plugin's name
+  down a tab at the left (right-click, Shift+click, Alt+click and drag do
+  what the header's name does); a canvas under the whole panel with the
+  layout's controls over its left side. Under 2 rows, no header at all.
+- **2 rows and 1 row forms** (Edit layout ▸ *Form*): a layout's short
+  forms, each with its own controls, sizes and looks, for panels only
+  that many rows tall. The canvas, faceplate, names and ranges stay
+  Full's. A form is used once the panel is under one more row than it;
+  until it's set up, the whole layout shows a row at a time. Forms made
+  in 4.5 are kept, as forms of their own.
+- **Canvases on tiles:** no free text (hover a handle for its value); the
+  canvas's own controls with no room left, attack, release, mix and the
+  like, along its foot as values to drag, right of the layout's controls
+  and not repeating them. The de-esser's threshold joins them when there's
+  no room for its waveform; the drive meter, reverb tail and delay echoes
+  fill the height; a multiband's bands show their switches alone.
+- **Edit layout:** a control's right-click menu opens over the editor,
+  and the look menus (style, background, colours, copy and paste) work on
+  the 2 rows and 1 row forms.
+- A button whose name is hidden fills its place, instead of standing over
+  the row above.
+- A canvas's controls beside it take only their own width, without a
+  panel's least width round them.
+- The reduction strip beside a compressor canvas follows *Meter width*.
+- **Options ▸ TCP window ▸ Panels:** *Meter scales* and *Meter width* of
+  its own.
+
 ## 4.5.2 — short canvases, the TCP window's widths
 
 ### ChannelView

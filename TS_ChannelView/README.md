@@ -274,13 +274,32 @@ window to pop it out (*Pop out* is in its menu too; both need ChannelView
 open, which draws popped-out panels). Alt+click a panel's name to take
 the plugin out.
 
-**The rows around it** are a lens: the ones beside it medium, the next
-short, the rest shorter still. Settings menu ▸ **Lens size** sets how tall
-they are; drag the open row's own edge to set every open row's height
+**The rows around it** are a lens, in whole rows of controls. Settings
+menu ▸ **Lens size** sets the open row's neighbours to 1, 2 or 3 rows of
+controls; **Minimum height** sets every other row: names, faceplates, or
+rows of controls up to the lens size (the rows two away sit halfway
+between). While a row is open the lens rows' heights are the lens's: only
+the open row's own edge drags, and that height is kept for every open row
 from then on (double-click it to go back to filling the view).
 
+**With no row open**, set rows to the same steps yourself: the track
+menu's **Height** (the tracks it's for, or *All tracks*), settings menu ▸
+**All tracks**, or the actions *TS_ChannelView_TCP_Height_Names*,
+*_Faceplates*, *_1Row*, *_2Rows*, *_3Rows* and *_Cycle* (names, 1 row,
+2 rows), each for the selected tracks, and an *_All_* version of each for
+every track. The actions work with the TCP window closed too.
+
 - **Medium rows** show the panels themselves, header and foot hidden (the
-  header slides in under the pointer; the foot stays hidden).
+  header slides in under the pointer; the foot stays hidden), only whole
+  rows of controls (the wheel scrolls a locked panel a row at a time).
+  Each panel is a **tile**: its name down a tab at its left (right-click
+  it for the plugin's menu, Shift+click to bypass, Alt+click to take it
+  out, drag to move it), and a canvas layout's canvas under the whole
+  panel with its controls over its left side. Under 2 rows there's no
+  header at all: the tab does its jobs.
+- **A layout's 2 rows and 1 row forms** (Edit layout ▸ *Form*) are what a
+  medium row 2 rows or 1 row tall shows; one not set up shows the whole
+  layout, a row at a time.
 - **Short rows** show each plugin's faceplate with its name, or a tile,
   with bypass and plugin-window buttons; "+3" says how many more there
   are. Click one to open the row.
@@ -764,7 +783,8 @@ so its probes are the new ones.
   compose — pick FabFilter, type `pro`, get the Pro- series. Arrows move,
   Enter adds, and the last ten you added sit at the top. The search box at
   the top of the menu itself works the same way: type, Up and Down to pick,
-  Enter to add.
+  Enter to add. It keeps the keyboard while the menu's open: typing with a
+  category open types there.
 * **Gain reduction meter** — a full-height strip down the edge of the panel
   for plugins that report GR to REAPER. Turn it on per plugin (panel menu,
   or the editor) and it saves with that plugin's layout like everything
@@ -777,7 +797,9 @@ so its probes are the new ones.
   gate or expander keeps its own figure (shut on the quiet test signal
   the probes use, it can't show its zero), and so does a multiband
   compressor, de-esser or dynamic EQ, whose reduction is in a band, not
-  the whole signal.
+  the whole signal. The plugin's own figure is read as a meter reads: up at
+  once, falling no faster than 15 dB a second, so a reduction that moves
+  with the wave (a low note, a fast detector) holds steady at its peak.
   The held peak sits under the bar as e.g. `6.4 dB`,
   in a smaller face so the bar itself stays thin — stacking the value over
   the unit when the space is too narrow for one line, as in a collapsed
@@ -1332,6 +1354,17 @@ empty space. Undo puts it back.
   another. An outline's or a line's colour offers what a background
   does: the faceplates', the plugin's own (From the plugin), recent
   ones, or one of your own.
+- **2 rows and 1 row.** **Form** in the grid editor's toolbar switches
+  between the whole grid (*Full*) and its two short forms, for a panel
+  only that many rows of controls tall (the overview's medium rows, a
+  short dock). Each form is a layout of its own: its own controls, sizes
+  and looks, so a knob made bigger to be usable on 1 row stays as it was
+  on Full. The canvas, faceplate, names and ranges are Full's. A form not
+  set up yet shows Full's top rows in the editor and becomes its own the
+  first time you change it; until then the panel shows the whole layout,
+  a row at a time. *Start again from Full* and *Clear this form* are on
+  the form's sheet. A panel takes the 2 rows form once it's under 3 rows
+  of controls tall, the 1 row form under 2.
 - **Locked to start with.** A layout made a grid is locked: where it
   doesn't fit it scrolls, up and down in ChannelView, sideways in the
   rack. Unlock it (the padlock in the panel's foot, or **Locked** in the
@@ -2009,6 +2042,18 @@ wheel; double-click for its default. A compressor drops its make-up and
 mix there, a saturation its harmonics (its knobs move off the curve), a
 reverb its decay-by-frequency strip (under 260 px).
 
+**On the overview's medium rows** a canvas fills its tile without its
+free text (scales, readings, labels: hover a handle for its value), and
+its own controls that have no room left, attack, release and mix and the
+like, sit along its foot as values to drag, right of the layout's
+controls and leaving out any that are already among them: a
+compressor's times, make-up and mix, a gate's times, a limiter's release,
+a de-esser's range (and its threshold, when there's no room for its
+waveform), a delay's cross, width and mix, a reverb's size, diffusion and
+mix, a modulation's delay, feedback and mix, a saturation's tone, output
+and mix. Too many for the room, the lesser ones go first. A multiband's
+bands show their switches alone.
+
 ### Values: when a plugin won't say
 
 Some plugins report their values as bare numbers (Acustica's, for one:
@@ -2054,11 +2099,13 @@ right-click ▸ *Group looks…*.
   every tab: **Values under controls** (off, a value shows while you
   hover its control).
 - **Panels (Pro):** corner rounding, the power switch (an icon or a
-  lamp), the header and foot hidden until the pointer is over them, and
+  lamp; the TCP window's take ChannelView's, as for the next), the
+  header and foot hidden until the pointer is over them, and
   **Meter scales**: figures on the GR and In / Out meters, as on the
   fader meters (the web page's GR meters too). **Meter width**, those
   meters: *Normal*, *Narrow* (no readouts under them and no figures on
-  them; hover for the readings) or *Thin* (narrower still). On the ChannelView and
+  them; hover for the readings) or *Thin* (narrower still), the TCP
+  window's its own. On the ChannelView and
   Rack tabs: **Panel alignment**, left or centred.
 - **Track buttons:** the track's colour on its name button (Pro: *Bar
   below*, *Bar above* or *Filled*) and the track icons.
@@ -2517,6 +2564,7 @@ with it, sent from the selected track. They're in the action list as
 | `TS_CV_Overview.lua` | the TCP window's overview (Pro) |
 | `TS_CV_OverviewAnalysis.lua` | under the overview's open row's chain: its spectrum (Pro) |
 | `TS_ChannelView_TCP_Overview.lua` | the *Overview* action: the TCP window's overview on or off (Pro) |
+| `TS_CV_RowHeight.lua`, `TS_ChannelView_TCP_Height_*.lua` | the row height actions: the overview's rows to names, faceplates or 1 to 3 rows of controls, for the selected tracks or all (Pro) |
 | `TS_CV_Menus.lua` | the panels' menus, shared by ChannelView and the overview |
 | `TS_CV_Upkeep.lua` | keeping the selected tracks right, by whichever window is open |
 | `TS_CV_TrackStrip.lua` | asks the track row to scroll to the selection |
@@ -3165,7 +3213,8 @@ probe copies. Under them is the change in level, output RMS minus input RMS.
 It works for any plugin between the probes, including ones that report their
 own reduction; those are tapped for their levels alone. Gain reduction and
 levels together share the limit of eight plugins per track. On a canvas the
-two meters run down the panel's left and right edges.
+two meters run down the panel's left and right edges. An instrument (VSTi,
+VST3i, CLAPi, AUi) has its output meter only: what goes into it is MIDI.
 
 Two panels side by side with their meters on, the second plugin straight
 after the first, **share one meter** in the gap between them: the first's
