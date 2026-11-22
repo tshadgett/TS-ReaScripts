@@ -4770,7 +4770,8 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       -- (each shown while the pointer is over where it goes)
       local hv = P.hover[fx.guid] or {}
       local show_h = C.HIDE_HEAD and (hv.head or is_drag_source)
-      local show_f = C.HIDE_FOOT and C.FOOTER_H > 0 and hv.foot
+      -- (P.NO_FOOT: never, the overview's medium rows)
+      local show_f = C.HIDE_FOOT and C.FOOTER_H > 0 and hv.foot and not P.NO_FOOT
       local mini = P.MINI_BTNS and C.HIDE_HEAD and not show_h
       if show_h or show_f or mini then
         sp = P.split(dl, 2, fx.guid)

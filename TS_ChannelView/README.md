@@ -258,6 +258,8 @@ ChannelView's TCP window can show every track's plugins beside its row:
 settings menu ▸ **Overview**, or the **TS_ChannelView_TCP_Overview**
 action (a toolbar button for it lights while it's on). REAPER's arrange
 view moves over to make room. It works with ChannelView open or closed.
+Drag the line between the tracks and the overview to share the window
+between them; both widths are kept, through restarts.
 
 **Click a row to open it.** The open row is ChannelView, in the TCP
 window: the plugins' panels with every menu, editor and window
@@ -277,7 +279,8 @@ short, the rest shorter still. Settings menu ▸ **Lens size** sets how tall
 they are; drag the open row's own edge to set every open row's height
 from then on (double-click it to go back to filling the view).
 
-- **Medium rows** show the panels themselves, header and foot hidden.
+- **Medium rows** show the panels themselves, header and foot hidden (the
+  header slides in under the pointer; the foot stays hidden).
 - **Short rows** show each plugin's faceplate with its name, or a tile,
   with bypass and plugin-window buttons; "+3" says how many more there
   are. Click one to open the row.
@@ -1997,6 +2000,14 @@ dragged from one note value to the next.
 rate and phase handles, shape chips, and up to three **voices** (a
 chorus's L/C/R, each in its own colour, with its pan). **Envelope:** the
 ADSR with its curve handles.
+
+**A short canvas** (under 200 px tall: a medium row in the TCP window's
+overview, a short dock) keeps its graph and its handles. A compressor's,
+gate's and limiter's times, and a de-esser's range, move from their boxes
+to a strip along its foot: drag each along it (Shift: fine), or use the
+wheel; double-click for its default. A compressor drops its make-up and
+mix there, a saturation its harmonics (its knobs move off the curve), a
+reverb its decay-by-frequency strip (under 260 px).
 
 ### Values: when a plugin won't say
 

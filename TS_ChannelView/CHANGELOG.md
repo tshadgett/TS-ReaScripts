@@ -1,5 +1,29 @@
 # ChannelView — changelog
 
+## 4.5.2 — short canvases, the TCP window's widths
+
+### ChannelView
+
+- **The TCP window keeps its width** through a restart of the script or
+  REAPER, and with the overview on, where the tracks end and the
+  overview starts (REAPER could save the window still widened by the
+  overview or the patch bay).
+
+### ChannelView Pro
+
+- **Short canvases** (under 200 px tall: the overview's medium rows, a
+  short dock): a compressor's, gate's and limiter's times and a
+  de-esser's range in a strip along the foot, instead of boxes over the
+  graph; no make-up and mix on a compressor, no harmonics on a
+  saturation (its knobs off the curve), no decay-by-frequency on a reverb
+  under 260 px.
+- **The overview:** a line between the tracks and the overview, dragged
+  to share the window. On medium rows a panel's foot no longer slides in
+  (its header still does), so what's along the canvas's foot stays in
+  reach.
+- A modulation canvas's knob box has no Pan while the voices' pans show
+  along its top.
+
 ## 4.5.1 — the overview's analysis, chain bypass shown
 
 ### ChannelView

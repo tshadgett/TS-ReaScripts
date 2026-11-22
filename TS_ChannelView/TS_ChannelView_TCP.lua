@@ -902,6 +902,8 @@ local function track_area(x, top, w, h, now, ovw)
     reaper.UpdateArrange()
   end
   if ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right) then TM.open_insert(nil) end
+  -- the divider with the overview, before the rows so it takes the pointer
+  if ovw > 0 then OVW.divider(x, w, top, h) end
 
   local last_bottom = g.top
   for _, e in ipairs(app.rows) do
@@ -1064,6 +1066,44 @@ function BAY.resize(delta)
   return false
 end
 
+-- The rows' own width (REAPER's pixels), kept. REAPER keeps the docker's
+-- width as it was when it last saved, which can include what the patch
+-- bay or the overview added (given back as this closes, but not when
+-- REAPER saves first, quitting), so at start the docker goes back to the
+-- rows' width before either widens it again. `ww` the window's width,
+-- `s` ImGui's units per REAPER pixel. False while it's being put right
+-- (nothing else widens the docker meanwhile).
+BAY.ROWS_KEY = "rows_w"
+BAY.settled, BAY.first, BAY.next_try = false, nil, 0
+function BAY.settle(ww, s)
+  s = (s and s > 0) and s or 1
+  if ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then return BAY.settled end
+  local cur = math.floor(ww / s + 0.5)
+  if not BAY.settled then
+    local now = reaper.time_precise()
+    BAY.first = BAY.first or now
+    local want = tonumber(ext_get(BAY.ROWS_KEY, ""))
+    if dock_id == 0 or not want or math.abs(want - cur) <= 3 then BAY.settled = true return true end
+    -- (a moment first: the window's size is the docker's once it's laid out)
+    if now < BAY.next_try or now - BAY.first < 0.3 then return false end
+    -- (the docker may not be found for the first frames: tried again
+    -- for a few seconds)
+    if BAY.dock_drag(want - cur) or now - BAY.first > 3 then BAY.settled = true
+    else BAY.next_try = now + 0.25 end
+    return false
+  end
+  -- the rows' width as it is: the whole window while nothing's added,
+  -- or what was left of it when the overview widened it
+  local rows
+  if BAY.widened == 0 and OVW.widened == 0 then rows = cur
+  elseif BAY.widened == 0 and OVW.widened > 0 and OVW.row_w then rows = math.floor(OVW.row_w / s + 0.5) end
+  if rows and dock_id ~= 0 and rows > 40 then
+    local was = tonumber(ext_get(BAY.ROWS_KEY, ""))
+    if not was or math.abs(was - rows) > 3 then ext_set(BAY.ROWS_KEY, rows) end
+  end
+  return true
+end
+
 -- Open or closed this frame: widen or give the width back. Not while the
 -- button is down (a click outside is closing it, or a cable is in hand).
 function BAY.follow(bay)
@@ -1106,6 +1146,7 @@ function OVW.follow(ww, bw, s)
   s = (s and s > 0) and s or 1
   local ov = OVW.ov()
   if not ov then return 0 end
+  OVW.ww, OVW.bw, OVW.s = ww, bw, s
   ov.poll()
   local on, down = ov.is_on(), ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)
   if on and OVW.widened == 0 and not down then
@@ -1140,6 +1181,33 @@ function OVW.follow(ww, bw, s)
     ov.set_width(now_n)
   end
   return now_w
+end
+
+-- The divider between the rows and the overview (`x`, `w` the rows'): a
+-- drag gives the rows more or less of the window, the overview the rest;
+-- OVW.follow keeps the overview's width when it's let go, BAY.settle the
+-- rows'.
+OVW.ROWS_MIN = 120      -- REAPER's pixels
+function OVW.divider(x, w, top, h)
+  if not (OVW.widened > 0 and OVW.row_w and OVW.ww) then return end
+  local ov = OVW.ov()
+  if not ov then return end
+  ImGui.SetCursorScreenPos(ctx, x + w - 5, top)
+  ImGui.InvisibleButton(ctx, "tcpovdiv", 6, math.max(1, h))
+  local hov, act = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+  if act then
+    local d = ImGui.GetMouseDelta(ctx)
+    if d ~= 0 then
+      local s = OVW.s or 1
+      local lo, hi = OVW.ROWS_MIN * s, OVW.ww - OVW.bw - ov.W_MIN * s
+      OVW.row_w = math.max(lo, math.min(math.max(lo, hi), OVW.row_w + d))
+    end
+  end
+  if hov or act then
+    ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW)
+    ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx), x + w - 0.5, top, x + w - 0.5, top + h, C.COL.accent, 2.0)
+  end
+  W.tip(ctx, "tcpovdiv", "Drag: the tracks' width beside the overview", hov, act)
 end
 
 -- ---------------------------------------------------------------------
@@ -1562,7 +1630,8 @@ local function frame()
       local area_top = tb_bottom
       local area_bot = math.min(g.bottom, bottom)
       -- the patch bay, left of the rows while it's open
-      local bay = BAY.pb()
+      local settled = BAY.settle(ww, g.scale)
+      local bay = settled and BAY.pb() or nil
       local bw = 0
       if bay then
         -- the real pointer: over the arrange view, ReaImGui still reports
@@ -1576,7 +1645,7 @@ local function frame()
         BAY.follow(bay)
         if bay.is_open() and BAY.widened ~= 0 then bw = math.min(BAY.w, math.max(0, ww - 60)) end
       end
-      local ovw = OVW.follow(ww, bw, g.scale)
+      local ovw = settled and OVW.follow(ww, bw, g.scale) or 0
       -- The toolbar: the TCP's as far as the rows go, and with the
       -- overview on, the overview's own over its column (not the TCP's
       -- stretched into it)

@@ -1237,6 +1237,25 @@ picker uses an optgroup per group.
   drawn, one per window, text and size; `W.clear_rot` detaches them (a
   dropped image left attached stays in memory until the window closes).
 
+## Short canvases and the TCP window's widths (4.5.2)
+
+- **CP.COMPACT_H (200)** is the canvas's own height, not "a medium row":
+  short docks get it too. `slim_strip` (CP.util) is the strip: each item a
+  parameter dragged sideways like a mini knob (macros and modulators
+  through cm_rect / shift_link). The limiter's slim row is its `bare`
+  (visualiser) layout. The reverb's decay-by-frequency strip has its own
+  floor (RP.RV_STRIP_MIN, 260): it's a fixed 116 px.
+- **P.NO_FOOT**: the overview's medium rows hide the foot for good (the
+  header still slides in); ChannelView's own hide-foot option is
+  C.HIDE_FOOT.
+- **The TCP window's docker width.** Only this window widens its docker
+  (patch bay, overview: BAY.dock_drag), giving it back in atexit. Quitting,
+  REAPER can save the docker sizes before that runs, so the window comes
+  back widened. `BAY.settle` keeps the rows' own width (`rows_w`) and drags
+  the docker back to it at start, before anything widens it. The divider
+  (`OVW.divider`) moves `OVW.row_w`; `OVW.follow` then takes what's left as
+  the overview's width, as for a docker edge dragged.
+
 ## Upkeep, by one window (TS_CV_Upkeep)
 
 What ChannelView's rescan used to keep right on its own track now runs from

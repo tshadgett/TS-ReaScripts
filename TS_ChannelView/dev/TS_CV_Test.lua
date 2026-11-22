@@ -10653,6 +10653,46 @@ do
     local lcv_ = { kind = "limit", rev = {}, roles = { Threshold = 0, Ceiling = 9, Release = 2 } }
     local okl_, errl_ = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 600, 260, {}, { addr = 0, guid = "rl2-draw", name = "VST: SomeLimit", path_t = { 0 } }, {}, lcv_)
     check("limiter: every handle driven", okl_ and "ok" or tostring(errl_), "ok")
+    -- short (a medium row in the overview): the times in a strip along the foot
+    do
+      local h_ = 130
+      local cases = {
+        { "comp, short", ccv, "cc-draw", "VST: SomeComp" }, { "gate, short", gcv, "ge-draw", "VST: SomeGate" },
+        { "reagate, short", cv, "rg-draw", "VST: ReaGate (Cockos)" }, { "limiter, short", lcv_, "rl2-draw", "VST: SomeLimit" },
+      }
+      for _, c_ in ipairs(cases) do
+        local ok_, err_ = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 400, h_, {}, { addr = 0, guid = c_[3], name = c_[4], path_t = { 0 } }, {}, c_[2])
+        check(c_[1] .. ": draws, driven", ok_ and "ok" or tostring(err_), "ok")
+      end
+      MDg.link_of = function() return nil end
+      for _, c_ in ipairs(cases) do
+        local ok_, err_ = pcall(CPm.draw_mapped, "ctx", "dl", 0, 0, 400, h_, {}, { addr = 0, guid = c_[3], name = c_[4], path_t = { 0 } }, {}, c_[2])
+        check(c_[1] .. ": draws", ok_ and "ok" or tostring(err_), "ok")
+      end
+      local dsv = { kind = "deess", rev = {}, roles = { Threshold = 0, Frequency = 1, Width = 2, Range = 9 } }
+      local okds, errds = pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 400, h_, {},
+        { addr = 0, guid = "ds-short", name = "VST: SomeDeEsser", path_t = { 0 } }, {}, dsv)
+      check("de-esser, short: draws", okds and "ok" or tostring(errds), "ok")
+      local rvv = { kind = "reverb", rev = {}, roles = { Predelay = 1, Decay = 2, Early = 3, Size = 4, Diffusion = 5, Mix = 6,
+        LowFreq = 7, HighFreq = 8 } }
+      for _, hh_ in ipairs({ 130, 170, 300 }) do
+        local okrv, errrv = pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 500, hh_, {},
+          { addr = 0, guid = "rv-short", name = "VST: SomeVerb", path_t = { 0 } }, {}, rvv)
+        check(("reverb, %d px: draws"):format(hh_), okrv and "ok" or tostring(errrv), "ok")
+      end
+      local others = {
+        { "saturation", { kind = "sat", rev = {}, roles = { Drive = 1, Mix = 2, Output = 3, Tone = 4 } } },
+        { "modulation", { kind = "mod", rev = {}, roles = { V1Rate = 1, V1Depth = 2, V1Phase = 3, V1Pan = 4, V2Rate = 5,
+          V2Depth = 6, V2Pan = 7, Feedback = 8, Mix = 9 } } },
+      }
+      for _, o_ in ipairs(others) do
+        for _, hh_ in ipairs({ 130, 300 }) do
+          local ok_, err_ = pcall(require("TS_CV_RolePanel").draw, "ctx", "dl", 0, 0, 500, hh_, {},
+            { addr = 0, guid = o_[1] .. "-short", name = "VST: Some " .. o_[1], path_t = { 0 } }, {}, o_[2])
+          check(("%s, %d px: draws"):format(o_[1], hh_), ok_ and "ok" or tostring(err_), "ok")
+        end
+      end
+    end
     MDg.link_of = function() return nil end
     reads[7] = "0"
     -- the same filter panel under a delay's echoes
@@ -10816,7 +10856,7 @@ do
                       Sine2Tune = 9, PulseWidth = 10, Detune = 11, Portamento = 12, Volume = 13 }, nil,
           "Attack Decay Detune Portamento PulseWidth Release Saw Sine Sine2Tune Sq Sustain Tri Volume" },
         { "mod",    { Rate = 1, Depth = 2, Phase = 3, Mix = 5 }, nil, "Depth Mix Phase Rate" },
-        { "mod",    { V1Rate = 1, V1Depth = 2, V1Phase = 3, V1Pan = 4, V2Rate = 5, V2Depth = 6, V2Pan = 7 }, nil, "Pan V1Depth V1Pan V1Phase V1Rate V2Pan" },
+        { "mod",    { V1Rate = 1, V1Depth = 2, V1Phase = 3, V1Pan = 4, V2Rate = 5, V2Depth = 6, V2Pan = 7 }, nil, "V1Depth V1Pan V1Phase V1Rate V2Pan" },
         { "multi",  { Crossover1 = 1, Crossover2 = 2, B1Threshold = 3, B2Threshold = 4, B3Threshold = 5,
                       B1Ratio = 6, B1Gain = 7, B1Attack = 8, Output = 9, Mix = 10 }, 3,
           "Atk B1Threshold B2Threshold B3Threshold Crossover1 Crossover2 Gain MIX OUT Ratio" },

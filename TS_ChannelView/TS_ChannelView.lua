@@ -1,11 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.5.1
+-- @version 4.5.2
 -- @changelog
---  The whole FX chain bypassed shows BYPASSED on every panel. Sends: New
---  track with plugin. TS_TrackProbe 2.9.0 (reopen a project after
---  updating). Fixed a memory leak from vertical text.
---  Moves with ChannelView Pro 4.5.1. See the CHANGELOG.
+--  The TCP window keeps its width, and where the tracks end and the
+--  overview starts, through a restart of the script or REAPER.
+--  Moves with ChannelView Pro 4.5.2. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
