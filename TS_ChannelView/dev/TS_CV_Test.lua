@@ -529,7 +529,7 @@ do
   check("rack: knobs need a row", P.tallest_rows({ { type = "knob" }, { type = "toggle" } }), 1)
   check("rack: a large knob needs two", P.tallest_rows({ { type = "knob", size = "large" } }), 2)
   check("rack: a fader its length", P.tallest_rows({ { type = "fader", len = 3 } }), 3)
-  check("rack: a full-height fader two", P.tallest_rows({ { type = "fader" } }), 2)
+  check("rack: a full-height fader any rows it gets", P.tallest_rows({ { type = "fader" } }), 1)
   check("rack: an across fader none", P.tallest_rows({ { type = "fader", dir = "h" } }), 1)
   -- the rows a layout fills in ChannelView: two sections of four, in a
   -- window ten rows tall, fill four
@@ -1214,6 +1214,30 @@ do
   GE.close()
   reaper.TrackFX_GetNumParams, reaper.TrackFX_GetParamName = gn, gp
   M.remove("CrossA"); M.remove("CrossB"); M.save()
+end
+-- words, pictures and visualisers (no parameter) copy and paste, on the
+-- same panel too
+do
+  local GE = require("TS_CV_GridEditor")
+  local T = GE._t
+  M.set("TextPaste", { grid = { cols = 24, rows = 8 }, controls = {
+    { param = -1, type = "text", label = "", text = { s = "DRIVE" }, at = { c = 0, r = 0, w = 4, h = 1 } },
+    { param = -1, type = "text", label = "", text = { s = "TONE" }, at = { c = 4, r = 0, w = 4, h = 1 } },
+    { param = 0, type = "knob", label = "", at = { c = 0, r = 2, w = 4, h = 4 } } } })
+  M.save()
+  GE.open({}, { addr = 0, guid = "gtp", name = "VST: TextPaste" }, "TextPaste", M.get("TextPaste"), nil, { rows = 2 })
+  T.select(2)
+  T.copy()
+  T.paste()
+  local n = 0
+  for _, c in ipairs(T.cur().controls) do if c.type == "text" then n = n + 1 end end
+  check("paste: a text block, though there are others", n .. " " .. tostring(T.warn()), "3 nil")
+  T.select(3)
+  T.copy()
+  T.paste()
+  check("paste: a parameter already there isn't", #T.cur().controls, 4)
+  GE.close()
+  M.remove("TextPaste"); M.save()
 end
 -- pages in the grid editor: added, controls moved onto one, reordered,
 -- taken out again (what was on it put where it fits)
@@ -14473,6 +14497,190 @@ do
   C.METER_COL_W = 26
   check("reduction strip: follows the meters' width", tostring(thin < CP.meters_w()) .. " " .. tostring(CP.meters_w() < 44), "true true")
   C.METER_COL_W = was_w
+end
+
+-- A plugin's own face: behind the rest, a spectrum, a faceplate picture
+-- over the grid, a fader's pictures
+do
+  local L = { grid = { cols = 16, rows = 8 }, plate = "black", finish = "img:face.png|stretch|16|grid", controls = {
+    { type = "vis", param = -1, label = "", layer = "back", vis = { kind = "spectrum", roles = {}, rev = {}, sdraw = "fill" },
+      at = { c = 0, r = 0, w = 16, h = 8 } },
+    { type = "image", param = -1, label = "", layer = "back", pic = { file = "plate.png", fill = "stretch", edge = 16, op = 100, rr = 0 },
+      at = { c = 1, r = 4, w = 14, h = 4 } },
+    { type = "fader", param = 3, label = "Tone", at = { c = 2.125, r = 4.5, w = 2, h = 3.25 },
+      img = { file = "cap.png", file2 = "slot.png", kind = "cap", frames = 1, dir = "down", size = 0, keep = true } },
+  } }
+  L.controls.grid = L.grid
+  M.set("FacePlug", L); M.save(); M.reload()
+  local R = M.get("FacePlug")
+  local v, im, f = R.controls[1], R.controls[2], R.controls[3]
+  check("face: behind, kept", tostring(v.layer) .. " " .. tostring(im.layer), "back back")
+  check("face: a spectrum, drawn filled", v.vis and (v.vis.kind .. " " .. tostring(v.vis.sdraw)), "spectrum fill")
+  check("face: the faceplate's picture over the grid", tostring(M.surface_of(R.finish).grid) .. " "
+    .. tostring(M.surface_of("img:a.png|tile|16").grid), "true nil")
+  check("face: a fader's cap and slot", f.img and (f.img.kind .. " " .. f.img.file .. " " .. tostring(f.img.file2) .. " " .. tostring(f.img.keep)),
+    "cap cap.png slot.png true")
+  check("face: a place in 1/32 steps", f.at.c .. "," .. f.at.h, "2.125,3.25")
+  check("face: copied", tostring(M.copy(R).controls[1].layer) .. " " .. tostring(M.copy(R).controls[1].vis.sdraw), "back fill")
+  local P2 = M.copy(R)
+  M.put_img(P2, 3, { file = "strip.png", kind = "strip", frames = 64, dir = "down", size = 0 }, "panel")
+  check("face: a fader's picture onto faders only", P2.controls[3].img.file .. " " .. tostring(P2.controls[1].img), "strip.png nil")
+  M.remove("FacePlug"); M.save(); M.reload()
+end
+
+-- A faceplate's gradient, and a plate section's: kept, copied, and only
+-- a known direction and colour read
+do
+  local L = { grid = { cols = 8, rows = 4 }, plate = "charcoal", grad = { dir = "radial", col = "#203040" }, controls = {
+    { type = "section", param = -1, label = "Drive", style = "plate", cap = "charcoal",
+      grad = { dir = "across", col = "charcoal" }, at = { c = 0, r = 0, w = 8, h = 2 } },
+    { type = "knob", param = 0, label = "Gain", at = { c = 0, r = 2, w = 2, h = 2 } },
+  } }
+  L.controls.grid = L.grid
+  M.set("GradPlug", L); M.save(); M.reload()
+  local R = M.get("GradPlug")
+  check("grad: the faceplate's", R.grad and (R.grad.dir .. " " .. R.grad.col), "radial #203040")
+  check("grad: a section's", R.controls[1].grad and (R.controls[1].grad.dir .. " " .. R.controls[1].grad.col), "across charcoal")
+  local K = M.copy(R)
+  K.grad.dir = "down"
+  check("grad: copied, not shared", R.grad.dir .. " " .. tostring(M.copy(R).controls[1].grad.col), "radial charcoal")
+  check("grad: unknown read as none", tostring(M.grad_of("sideways|charcoal")) .. " " .. tostring(M.grad_of("down|nocolour"))
+    .. " " .. tostring(M.grad_of("down | #102030") and "ok"), "nil nil ok")
+  M.remove("GradPlug"); M.save(); M.reload()
+end
+
+-- A concentric knob's own pictures: the ring's and the inner knob's, kept,
+-- copied, put on concentric knobs only, and drawn
+do
+  local L = { grid = { cols = 8, rows = 4 }, controls = {
+    { type = "dual", param = 0, param2 = 1, label = "Drive",
+      img = { file = "ring.png", kind = "strip", frames = 64, dir = "down", size = 0 },
+      img2 = { file = "cap.png", kind = "turn", frames = 1, dir = "down", size = 0 }, at = { c = 0, r = 0, w = 2, h = 2 } },
+    { type = "dual", param = 2, param2 = 3, label = "Tone", scale = "blank", at = { c = 2, r = 0, w = 2, h = 2 } },
+    { type = "knob", param = 4, label = "Mix", at = { c = 4, r = 0, w = 2, h = 2 } },
+  } }
+  L.controls.grid = L.grid
+  M.set("DualPic", L); M.save(); M.reload()
+  local R = M.get("DualPic")
+  local d = R.controls[1]
+  do
+    local u = C.CELL_H / (C.UI or 1) / 4
+    local full = P.knob_units({ type = "dual", size = "large" }, u)
+    local bare = P.knob_units({ type = "dual", size = "large", noname = true, scale = "blank" }, u)
+    check("dual: shorter with nothing round it, never taller", tostring(full <= 6) .. " " .. tostring(bare < full), "true true")
+    local d = { type = "dual", size = "large", at = { c = 0, r = 0, w = 6, h = full } }
+    local old = { type = "dual", size = "large", at = d.at }
+    d.noname, d.scale = true, "blank"
+    P.knob_reframe(d, old)
+    check("dual: its place follows", d.at.h, bare)
+    check("dual: its size kept in a shorter place", tostring(P.item_size({ w = 3, h = 2, ctl = d })), "large")
+  end
+  check("dual: nothing under it, kept", tostring(M.get("DualPic").controls[2].scale), "blank")
+  check("dual pics: kept", (d.img and d.img.file .. " " .. d.img.frames or "nil") .. " " .. (d.img2 and d.img2.kind or "nil"),
+    "ring.png 64 turn")
+  check("dual pics: in the pictures used", table.concat(M.raw_images({ Img0 = "ring.png|strip|64", ImgIn0 = "cap.png|turn|1" }), ","),
+    "cap.png,ring.png")
+  local K = M.copy(R)
+  check("dual pics: copied", tostring(K.controls[1].img2 and K.controls[1].img2.file), "cap.png")
+  M.put_img(K, 1, { file = "in2.png", kind = "turn", frames = 1, dir = "down", size = 0 }, "panel", "img2")
+  check("dual pics: the inner's onto concentric knobs only",
+    tostring(K.controls[2].img2 and K.controls[2].img2.file) .. " " .. tostring(K.controls[3].img2) .. " "
+    .. tostring(K.controls[1].img.file), "in2.png nil ring.png")
+  local o = { type = "dual" }
+  M.paste_look(o, M.look_of(d))
+  check("dual pics: a look pasted", tostring(o.img and o.img.file) .. " " .. tostring(o.img2 and o.img2.file), "ring.png cap.png")
+  local kn = { type = "knob" }
+  M.paste_look(kn, M.look_of(d))
+  check("dual pics: not onto a plain knob", tostring(kn.img), "nil")
+  local imgs = {}
+  W.attach(setmetatable({
+    DrawList_AddImage = function() imgs[#imgs + 1] = "strip" end,
+    DrawList_AddImageQuad = function() imgs[#imgs + 1] = "turn" end,
+  }, { __index = function() return function() end end }))
+  local had = W.picture
+  W.picture = function() return "img", 128, 128 * 64 end
+  local okd, e1 = pcall(W.dual_face, "dl", 50, 50, 20, 0.3, 0.6, { ctx = "ctx", img = d.img, img2 = d.img2, mod1 = true, mod2 = true })
+  local both = table.concat(imgs, ",")
+  imgs = {}
+  local oki, e2 = pcall(W.dual_face, "dl", 50, 50, 20, 0.3, 0.6, { ctx = "ctx", img2 = d.img2 })
+  local inner_only = imgs[#imgs]
+  local okr, e3 = pcall(W.dual_face, "dl", 50, 50, 20, 0.3, 0.6, { ctx = "ctx", img = d.img, style = "arc" })
+  W.picture = had
+  check("dual pics: drawn, the ring then the inner", tostring(okd) .. " " .. both .. " " .. tostring(oki) .. " "
+    .. tostring(inner_only) .. " " .. tostring(okr), "true strip,turn true turn true")
+  check("dual pics: the inner's size", tostring(e1) .. " " .. tostring(e3), "11.25 11.25")
+  check("dual pics: no error", tostring(oki or e2), "true")
+  check("dual pics: the inner knob's size on a picture", W.dual_inner_r(40, { img = d.img }), 22.5)
+  M.remove("DualPic"); M.save(); M.reload()
+end
+
+-- A dropdown's choices in folders (Folders<p>), and its box's own colour
+-- (BoxCol<n>): kept, copied, and the open list drawn in folders
+do
+  local L = { grid = { cols = 8, rows = 4 }, controls = {
+    { type = "combo", param = 3, label = "Style", boxc = "#7a2020", at = { c = 0, r = 0, w = 4, h = 1 } },
+    { type = "knob", param = 4, label = "Drive", boxc = "#7a2020", at = { c = 4, r = 0, w = 2, h = 2 } },
+  } }
+  L.controls.grid = L.grid
+  M.set("FoldPlug", L); M.save(); M.reload()
+  M.set_choice_names("FoldPlug", 3, { ["Warm Tube"] = "Warm" })
+  M.set_choice_folders("FoldPlug", 3, { ["Warm Tube"] = "Tube", ["Hot Tube"] = " Tube ", ["Old Tape"] = "Tape", Clean = "" })
+  M.save(); M.reload()
+  local R = M.get("FoldPlug")
+  check("folders: kept", tostring(R.choice_folders and R.choice_folders[3] and R.choice_folders[3]["Hot Tube"]) .. " "
+    .. tostring(R.choice_folders[3].Clean), "Tube nil")
+  check("folders: copied", tostring(M.copy(R).choice_folders[3]["Old Tape"]), "Tape")
+  check("box colour: a dropdown's only", tostring(R.controls[1].boxc) .. " " .. tostring(R.controls[2].boxc), "#7a2020 nil")
+  check("box colour: drawn", string.format("%08x", P.box_col(R.controls[1]) or 0), "7a2020ff")
+  local list = M.choice_list("FoldPlug", 3, { { norm = 0, text = "Clean" }, { norm = 0.25, text = "Warm Tube" },
+    { norm = 0.5, text = "Hot Tube" }, { norm = 0.75, text = "Old Tape" }, { norm = 1, text = "Fuzz" } })
+  local got = {}
+  for _, e in ipairs(list) do got[#got + 1] = e.text .. ":" .. tostring(e.folder) end
+  check("folders: in the list", table.concat(got, ","), "Clean:nil,Warm:Tube,Hot Tube:Tube,Old Tape:Tape,Fuzz:nil")
+  -- the open list: the top ones, then each folder as a submenu
+  local drawn = {}
+  W.attach(setmetatable({
+    BeginPopup = function() return true end,
+    BeginMenu = function(_, l) drawn[#drawn + 1] = "[" .. l:gsub("##.*", "") .. "]"; return l:find("Tube") ~= nil end,
+    Selectable = function(_, l) drawn[#drawn + 1] = l:gsub("##.*", ""); return false end,
+    CalcTextSize = function() return 10, 10 end, GetMousePos = function() return 0, 0 end,
+    GetCursorScreenPos = function() return 0, 0 end, GetTextLineHeightWithSpacing = function() return 16 end,
+    GetKeyMods = function() return 0 end, IsItemClicked = function() return false end,
+    IsItemHovered = function() return false end, IsWindowAppearing = function() return false end,
+    IsKeyPressed = function() return false end, IsMouseDoubleClicked = function() return false end,
+    GetMainViewport = false,
+  }, { __index = function(_, k)
+    -- (its flags and colours are numbers)
+    if k:find("_") and not k:find("^DrawList_") and not k:find("^Viewport_") then return 0 end
+    return function() end
+  end }))
+  local okc, err = pcall(W.combo, "ctx", "fold_t", "Style", 0.25, "Warm", 0.25, { steps = list, box = 0x7a2020ff })
+  check("folders: drawn in folders", tostring(okc) .. tostring(err or "") .. " " .. table.concat(drawn, ","),
+    "true Clean,Fuzz,[Tube],Warm,Hot Tube,[Tape]")
+  M.remove("FoldPlug"); M.save(); M.reload()
+end
+
+-- A Spectrum visualiser's smoothing (Canvas=spectrum|<draw>|s<n>): kept
+-- with how it's drawn, and none written when it's the usual
+do
+  local L = { grid = { cols = 8, rows = 4 }, controls = {
+    { type = "vis", param = -1, label = "", vis = { kind = "spectrum", roles = {}, rev = {}, ssmooth = 0 },
+      at = { c = 0, r = 0, w = 8, h = 4 } },
+    { type = "vis", param = -1, label = "", vis = { kind = "spectrum", roles = {}, rev = {}, sdraw = "line", ssmooth = 3 },
+      at = { c = 0, r = 0, w = 8, h = 4 } },
+    { type = "vis", param = -1, label = "", vis = { kind = "spectrum", roles = {}, rev = {}, sdraw = "fill" },
+      at = { c = 0, r = 0, w = 8, h = 4 } },
+  } }
+  L.controls.grid = L.grid
+  M.set("SmoothPlug", L); M.save(); M.reload()
+  local R = M.get("SmoothPlug")
+  local function d(i) local v = R.controls[i].vis; return tostring(v.sdraw) .. "/" .. tostring(v.ssmooth) end
+  check("spectrum smooth: kept", d(1) .. " " .. d(2) .. " " .. d(3), "nil/0 line/3 fill/nil")
+  check("spectrum smooth: copied", tostring(M.copy(R).controls[2].vis.ssmooth), "3")
+  -- (a medium knob with nothing round it, no name: a small one's height, still medium)
+  check("knob: medium in a short place", tostring(P.item_size({ w = 2, h = 1, ctl = { type = "knob", scale = "blank", noname = true } }))
+    .. " " .. tostring(P.item_size({ w = 2, h = 1, ctl = { type = "knob", size = "small" } })), "nil small")
+  M.remove("SmoothPlug"); M.save(); M.reload()
 end
 
 -- A button in a place half a cell tall (its name hidden): the button

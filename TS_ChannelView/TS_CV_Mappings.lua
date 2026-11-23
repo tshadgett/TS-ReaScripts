@@ -33,8 +33,8 @@
       Inner<n> = <parts recipe>     (dual: the inner knob's)
       Look2<n> = <knob parts>       (dual: the inner knob's own look)
       Metal<n> = 1
-      Scale<n> = values | ten [|cap]
-      Shape<n> = v | h  |  2 | 3 | 4 | full  |  full | half
+      Scale<n> = values | ten | none | blank [|cap]
+      Shape<n> = v | h  |  1 | 2 | 3 | 4 | full  |  full | half
       Dual<n>  = <second param index>   (xy: its Y; dual: the inner knob)
       Plate    = <faceplate>
       Brush    = <1|0>
@@ -369,8 +369,8 @@ local HEADER     = "; ChannelView layout library -- one section per plugin.\n"
                 .. "; Corners<n>=soft|round: the corners of control n's background (a divider: its section's)\n"
                 .. "; Look<n>=<k=v,...>: knob n's own look, built from parts (profile, grip, mat, col, ptr, skirt ...)\n"
                 .. "; Inner<n>=<recipe>, Look2<n>=<k=v,...>: a concentric knob's inner knob\n"
-                .. "; Scale<n>=values|ten[|cap]: numbers round knob n (its own values, or 0-10)\n"
-                .. "; Shape<n>=v|h|<2|3|4|full>|<full|half>: fader n's direction, length and thickness\n"
+                .. "; Scale<n>=values|ten|none|blank[|cap]: numbers round knob n (its own values, 0-10, none, or none and no value line)\n"
+                .. "; Shape<n>=v|h|<1|2|3|4|full>|<full|half>: fader n's direction, length and thickness\n"
                 .. "; Dual<n>=<param index>: the second parameter of an XY pad (its Y; Ctl is X)\n"
                 .. ";   or a concentric knob (the inner knob; Ctl is the outer ring)\n"
                 .. "; Size<n>=<2|3>x<2|3> on an XY pad: columns x rows (no line: 2x2)\n"
@@ -593,8 +593,8 @@ end
 function M.has_second(c) return c ~= nil and (c.type == "xy" or c.type == "dual") end
 
 -- Shape<n>=h|3|half: a fader's direction (v or h), length in rows or
--- columns (2, 3 or 4, or full) and thickness (a whole column or row, or
--- half of one). Returns dir ("h" or nil), len (2..4 or nil) and thin
+-- columns (1 to 4, or full) and thickness (a whole column or row, or
+-- half of one). Returns dir ("h" or nil), len (1..4 or nil) and thin
 -- (true or nil); nil throughout is the default fader -- vertical, full
 -- height, a column wide.
 local function shape_of(v)
@@ -602,7 +602,7 @@ local function shape_of(v)
   if not d then return nil, nil, nil end
   local dir = (d == "h") and "h" or nil
   local len = tonumber(l)
-  if len and (len < 2 or len > 4) then len = nil end
+  if len and (len < 1 or len > 4) then len = nil end
   if len then len = math.floor(len) end
   local thin = (t == "half") or nil
   return dir, len, thin
@@ -649,7 +649,8 @@ M.STEP_LEDS_MAX = 8
 -- <file>|<strip or turn>|<frames>|<down or across>|<lo or hi: the first
 -- frame>|<-1, 0 or 1: smaller, fits, larger>|<a, n, r: the value arc,
 -- the numbers and the modulation ring drawn over it; s or t: its shadow,
--- normal or tall>|<a button's On file>.
+-- normal or tall; m: a concentric knob's inner picture made as a pair with
+-- the outer's, drawn the outer's size>|<a button's On file>.
 -- The file is a name in the Images folder beside the layouts. A strip is
 -- a filmstrip, a frame for each position (a button's: Off, then On); a
 -- turning picture turns with the value.
@@ -659,7 +660,7 @@ function M.img_of(v)
   local file = parts[1]
   if not file or file == "" or file:find("[/\\]") then return nil end
   local flags = parts[7] or ""
-  local im = { file = file, kind = (parts[2] == "turn") and "turn" or "strip",
+  local im = { file = file, kind = ({ turn = "turn", cap = "cap" })[parts[2] or ""] or "strip",
                 frames = math.max(1, math.min(1024, math.floor(tonumber(parts[3]) or 1))),
                 dir = (parts[4] == "across") and "across" or "down", hi = parts[5] == "hi",
                 size = ({ ["-1"] = -1, ["1"] = 1 })[parts[6] or ""] or 0 }
@@ -667,6 +668,10 @@ function M.img_of(v)
   im.arc, im.ring = flags:find("a") ~= nil, flags:find("r") ~= nil
   im["nums"] = flags:find("n") ~= nil
   im.shadow = (flags:find("t") and "tall") or (flags:find("s") and "normal") or nil
+  -- (a fader's: its slot kept to its own proportions, not stretched)
+  im.keep = flags:find("k") ~= nil or nil
+  -- (a concentric knob's inner: matched to the outer, drawn its size)
+  im.pair = flags:find("m") ~= nil or nil
   if parts[8] and parts[8] ~= "" and not parts[8]:find("[/\\]") then im.file2 = parts[8] end
   return im
 end
@@ -675,7 +680,9 @@ function M.img_line(im)
   return table.concat({ im.file, im.kind or "strip", tostring(math.floor(im.frames or 1)), im.dir or "down",
     im.hi and "hi" or "lo", tostring(im.size or 0),
     (im.arc and "a" or "") .. (im.nums and "n" or "") .. (im.ring and "r" or "")
-      .. ((im.shadow == "tall" and "t") or (im.shadow == "normal" and "s") or ""), im.file2 or "" }, "|")
+      .. ((im.shadow == "tall" and "t") or (im.shadow == "normal" and "s") or "") .. (im.keep and "k" or "")
+      .. (im.pair and "m" or ""),
+    im.file2 or "" }, "|")
 end
 function M.copy_img(im)
   if not im then return nil end
@@ -685,17 +692,38 @@ function M.copy_img(im)
 end
 -- A picture (or none, img nil) onto control idx of a layout, its section
 -- (the controls between the dividers either side) or the whole panel: the
--- same kind only -- knobs (stepped ones too) or buttons.
-function M.put_img(layout, idx, img, scope)
+-- same kind only -- knobs (stepped ones too), buttons or faders.
+function M.put_img(layout, idx, img, scope, field)
   local ctl = layout.controls or {}
   local first = ctl[idx]
   if not first then return end
+  -- (a concentric knob's, `field` img or img2 (the inner's): onto those)
+  if first.type == "dual" then
+    field = (field == "img2") and "img2" or "img"
+    local function put_d(c)
+      if c and c.type == "dual" then c[field] = M.copy_img(img) end
+    end
+    if scope == "section" then
+      local function edge(c) return c.type == "divider" or c.type == "page" end
+      local a, b = idx, idx
+      while a > 1 and not edge(ctl[a - 1]) do a = a - 1 end
+      while b < #ctl and not edge(ctl[b + 1]) do b = b + 1 end
+      for i = a, b do put_d(ctl[i]) end
+    elseif scope == "panel" then
+      for _, c in ipairs(ctl) do put_d(c) end
+    else
+      put_d(first)
+    end
+    return
+  end
   -- (a button: a toggle, or a step button)
   local function is_button(c) return c.type == "toggle" or (c.type == "combo" and c.buttons == "step") end
   local button = is_button(first)
+  local fader = first.type == "fader"
   local function put(c)
     if not c then return end
-    local ok = button and is_button(c) or (not button and (c.type == "knob" or c.type == "stepped" or c.type == nil))
+    local ok = (fader and c.type == "fader") or (button and is_button(c))
+      or (not button and not fader and (c.type == "knob" or c.type == "stepped" or c.type == nil))
     if ok and (c.param or -1) >= 0 or (ok and M.is_virtual(c)) then c.img = M.copy_img(img) end
   end
   if scope == "section" then
@@ -791,13 +819,14 @@ local function back_of(v)
   return C.plate_key(v)
 end
 
--- Scale<n>=values|ten|none[|cap]: what knob n's scale is numbered with,
--- and whether in the cap's colour. With no line a knob shows its values
--- (the default, for every layout without a Scale line); "none" is the
--- only way to have no numbers.
+-- Scale<n>=values|ten|none|blank[|cap]: what knob n's scale is numbered
+-- with, and whether in the cap's colour. With no line a knob shows its
+-- values (the default, for every layout without a Scale line); "none" has
+-- no numbers (its value under it instead), "blank" neither numbers nor a
+-- value under it (the value in its tooltip).
 local function scale_of(v)
   local k = U.trim(v or ""):match("^(%a+)")
-  return (k == "values" or k == "ten" or k == "none") and k or nil
+  return (k == "values" or k == "ten" or k == "none" or k == "blank") and k or nil
 end
 -- ArcCol<n>: a value arc's colour, a cap colour's name or #rrggbb
 function M.arc_col_of(v)
@@ -808,7 +837,7 @@ function M.arc_col_of(v)
 end
 local function scale_ink_of(v)
   local k = scale_of(v)
-  return (k and k ~= "none" and U.trim(v or ""):match("|%s*cap%s*$")) and "cap" or nil
+  return (k and k ~= "none" and k ~= "blank" and U.trim(v or ""):match("|%s*cap%s*$")) and "cap" or nil
 end
 
 -- A dropdown's colours per choice: { [plugin's text] = lit colour's name
@@ -849,7 +878,7 @@ end
 -- or nil for none. Knobs and stepped knobs only.
 function M.scale_kind(c)
   if not c or (c.type ~= "knob" and c.type ~= "stepped" and c.type ~= nil) then return nil end
-  if c.scale == "none" then return nil end
+  if c.scale == "none" or c.scale == "blank" then return nil end
   return (c.scale == "ten") and "ten" or "values"
 end
 
@@ -915,16 +944,33 @@ end
 function M.pic_copy(p) return M.pic_of(M.pic_line(p)) end
 function M.surface_of(v)
   if type(v) ~= "string" or v:sub(1, 4) ~= "img:" then return nil end
-  local file, fill, edge = v:sub(5):match("^([^|]*)|?([^|]*)|?([^|]*)$")
+  local file, fill, edge, over = v:sub(5):match("^([^|]*)|?([^|]*)|?([^|]*)|?([^|]*)$")
   file = U.trim(file or "")
   if file == "" or file:find("[/\\]") then return nil end
   return { file = file, fill = M.SURFACE_FILLS[fill] and fill or "stretch",
-           edge = math.max(0, math.min(512, math.floor(tonumber(edge) or 16))) }
+           edge = math.max(0, math.min(512, math.floor(tonumber(edge) or 16))),
+           -- (a faceplate's: laid over a grid's area, not the panel's)
+           grid = (U.trim(over or "") == "grid") or nil }
 end
 function M.surface_key(s)
   if not (s and s.file) then return nil end
-  return "img:" .. s.file .. "|" .. (s.fill or "stretch") .. "|" .. math.floor(s.edge or 16)
+  return "img:" .. s.file .. "|" .. (s.fill or "stretch") .. "|" .. math.floor(s.edge or 16) .. (s.grid and "|grid" or "")
 end
+
+-- A gradient over a faceplate (Grad=, a section's Grad<n>=): from the
+-- faceplate's own colour to `col` (a faceplate's key or #rrggbb), down,
+-- across, or radial (the faceplate's colour in the middle). nil: none.
+M.GRAD_DIRS = { down = true, across = true, radial = true }
+function M.grad_of(v)
+  local dir, col = U.trim(v or ""):match("^(%a+)%s*|%s*(%S+)$")
+  if not (dir and M.GRAD_DIRS[dir] and C.plate_of(col)) then return nil end
+  return { dir = dir, col = col }
+end
+function M.grad_line(g)
+  if not (g and M.GRAD_DIRS[g.dir or ""] and C.plate_of(g.col)) then return nil end
+  return g.dir .. "|" .. g.col
+end
+function M.grad_copy(g) return g and { dir = g.dir, col = g.col } or nil end
 
 -- A FinishK line's strength, in percent (0..200), or nil for 100.
 local function fink_of(v)
@@ -1210,6 +1256,10 @@ M.VIS_NAMES.trimfilt = "Trimmer filters"
 -- and the frequency it makes mono below
 M.ROLES.width = { "Width", "Pan", "MonoBelow" }
 M.VIS_NAMES.width = "Width"
+-- The track's spectrum (its probes'), as the EQ canvas draws it: no
+-- roles; drawn as a line, a fill, or both (sdraw nil)
+M.ROLES.spectrum = {}
+M.VIS_NAMES.spectrum = "Spectrum"
 -- A frequency range visualiser: its first range a de-esser's band, and up
 -- to M.FR_MAX - 1 more, each with the same roles named R<k><role>; its
 -- Threshold is any control, drawn as a line across it ("Line")
@@ -1406,6 +1456,15 @@ function M.canvas_of(sect)
       local nb = tonumber(rest)
       cv.nb = (nb and nb >= 2 and nb <= M.MB_MAX) and math.floor(nb) or 3
     end
+    if kind == "spectrum" then
+      -- how it's drawn, and how smooth (s0 off .. s3 most; none: some)
+      for tok in ((rest or "") .. "|"):gmatch("([^|]*)|") do
+        tok = U.trim(tok)
+        if tok == "line" or tok == "fill" then cv.sdraw = tok end
+        local sm = tonumber(tok:match("^s(%d)$"))
+        if sm and sm <= 3 then cv.ssmooth = sm end
+      end
+    end
     if kind == "delay" then
       local nt = tonumber(rest)
       cv.nt = (nt and nt >= 1 and nt <= M.DL_TAPS) and math.floor(nt) or nil
@@ -1589,6 +1648,8 @@ function M.canvas_lines(cv, out)
   elseif M.ROLES[cv.kind] then
     out.Canvas = cv.kind .. ((cv.kind == "multi") and ("|" .. (cv.nb or 3)) or "")
       .. ((cv.kind == "delay" and cv.nt and cv.nt > 0) and ("|" .. cv.nt) or "")
+      .. ((cv.kind == "spectrum" and (cv.sdraw or cv.ssmooth)) and ("|" .. (cv.sdraw or "both")) or "")
+      .. ((cv.kind == "spectrum" and cv.ssmooth) and ("|s" .. cv.ssmooth) or "")
     if cv.kind == "delay" then out.DelayModes = M.dl_modes_write(cv.dmodes) end
     local dc = cv.dec_cal
     if dc and dc.p and dc.pts and #dc.pts >= 2 and not dc.builtin then
@@ -1629,7 +1690,7 @@ end
 function M.copy_canvas(cv)
   if not cv then return nil end
   local out = { kind = cv.kind, all_on = cv.all_on, model = cv.model, no_model = cv.no_model, nb = cv.nb, nt = cv.nt, ref0 = cv.ref0, dshape = cv.dshape,
-                w = cv.w, h = cv.h, fold = cv.fold, fold_rack = cv.fold_rack,
+                w = cv.w, h = cv.h, fold = cv.fold, fold_rack = cv.fold_rack, sdraw = cv.sdraw, ssmooth = cv.ssmooth,
                 cols = cv.cols and M.canvas_cols_of(M.canvas_cols_line(cv.cols)) or nil,
                  dmodes = cv.dmodes and M.dl_modes_parse(M.dl_modes_write(cv.dmodes)) or nil,
                  sat_cal = cv.sat_cal and M.sat_decode(M.sat_encode(cv.sat_cal)) or nil }
@@ -2431,7 +2492,7 @@ end
 
 local function parse_section(sect)
   local controls, aliases, states, ranges = {}, {}, {}, {}
-  local choice_names, choice_by, choice_ctx = {}, {}, {}
+  local choice_names, choice_by, choice_ctx, choice_folders = {}, {}, {}, {}
   local steps, btext = {}, {}
   local gainlaw, gainrole = {}, {}
   local meter = nil
@@ -2469,6 +2530,12 @@ local function parse_section(sect)
     if cp then
       local map = M.choices_of_line(v)
       if map then choice_names[tonumber(cp)] = map end
+    end
+    -- the folders its choices are in (Folders<p>=<plugin's text>=<folder>|...)
+    local fp = k:match("^Folders(%d+)$")
+    if fp then
+      local map = M.choices_of_line(v)
+      if map then choice_folders[tonumber(fp)] = map end
     end
     -- names that follow another control: which one, and a set for each of
     -- its settings (ChoicesBy<p>=<q>, ChoicesIn<p>.<n>=<its text>~<names>)
@@ -2520,6 +2587,9 @@ local function parse_section(sect)
         vin     = ((f & 256) ~= 0) or nil,
         -- bit 9: a curve or visualiser drawn without its frame
         noframe = ((f & 512) ~= 0 and (t == "curve" or t == "vis")) or nil,
+        -- behind the rest (Layer<n>=back): a picture, a visualiser or an
+        -- EQ curve the other controls may sit over
+        layer   = (t == "image" or t == "vis" or t == "curve") and U.trim(sect["Layer" .. i] or "") == "back" and "back" or nil,
         -- bit 4: the second parameter reversed (an XY pad's Y, a
         -- concentric knob's inner knob); bit 1 reverses the first
         invert2 = ((f & 16) ~= 0 and (t == "xy" or t == "dual")) or nil,
@@ -2532,14 +2602,20 @@ local function parse_section(sect)
         size    = size_of(sect["Size" .. i]),
         buttons = buttons_of(sect["Buttons" .. i]),
         back    = back_of(sect["Back" .. i]),
+        -- a dropdown's box: its own colour (a faceplate's, or yours)
+        boxc    = (t == "combo") and C.plate_key(U.trim(sect["BoxCol" .. i] or "")) or nil,
         nbtn    = nbtn_of(sect["Buttons" .. i]),
         bgap    = bgap_of(sect["Buttons" .. i]),
         brush   = brush_of(sect["Brush" .. i]),
         finish  = finish_of(sect["Finish" .. i]),
         fink    = fink_of(sect["FinishK" .. i]),
         corners = corners_of(sect["Corners" .. i]),
+        grad    = (t == "section" or t == "divider") and M.grad_of(sect["Grad" .. i]) or nil,
         look    = (t == "knob" or t == "stepped" or t == "dual") and KP.decode(sect["Look" .. i]) or nil,
-        img     = (t == "knob" or t == "stepped" or t == "toggle" or t == "combo") and M.img_of(sect["Img" .. i]) or nil,
+        img     = (t == "knob" or t == "stepped" or t == "toggle" or t == "combo" or t == "fader" or t == "dual")
+                  and M.img_of(sect["Img" .. i]) or nil,
+        -- a concentric knob's inner knob's own picture
+        img2    = (t == "dual") and M.img_of(sect["ImgIn" .. i]) or nil,
         -- a concentric knob's inner knob: its recipe, or its own look
         style2  = (t == "dual") and inner_of(sect["Inner" .. i]) or nil,
         look2   = (t == "dual") and KP.decode(sect["Look2" .. i]) or nil,
@@ -2622,6 +2698,7 @@ local function parse_section(sect)
            gainrole = next(gainrole) and gainrole or nil,
            gaincheck = (U.trim(sect.GainCheck or "") == "1") or nil,
            choice_names = next(choice_names) and choice_names or nil,
+           choice_folders = next(choice_folders) and choice_folders or nil,
            choice_by = next(choice_by) and choice_by or nil,
            choice_ctx = next(choice_ctx) and choice_ctx or nil,
            canvas = M.canvas_of(sect), switch = M.switch_of(sect),
@@ -2640,6 +2717,7 @@ local function parse_section(sect)
            metal = (U.trim(sect.Metal or "") == "1") or nil,
            palette = M.palette_of(sect.Palette),
            lock = lock_of(sect.Lock),
+           grad = M.grad_of(sect.Grad),
            grid = grid, forms = forms }
 end
 
@@ -2682,6 +2760,7 @@ local function serialize(layout)
   if fink_of(layout.fink) then out.FinishK = tostring(fink_of(layout.fink)) end
   if layout.metal then out.Metal = "1" end
   if lock_of(layout.lock) then out.Lock = tostring(math.floor(layout.lock)) end
+  if C.plate_key(layout.plate) then out.Grad = M.grad_line(layout.grad) end
   if layout.grid then out.Grid = math.floor(layout.grid.cols) .. "x" .. math.floor(layout.grid.rows) end
   -- each short form: its controls and grid, on lines of their own
   for _, k in ipairs(M.FORMS) do
@@ -2733,6 +2812,10 @@ local function serialize(layout)
     local line = M.choices_line(map)
     if line then out["Choices" .. p] = line end
   end
+  for p, map in pairs(layout.choice_folders or {}) do
+    local line = M.choices_line(map)
+    if line then out["Folders" .. p] = line end
+  end
   for p, q in pairs(layout.choice_by or {}) do out["ChoicesBy" .. p] = tostring(math.floor(q)) end
   for p, sets in pairs(layout.choice_ctx or {}) do
     local ctxs = {}
@@ -2779,12 +2862,14 @@ local function serialize(layout)
     end
     if shape_line(c) then out["Shape" .. (i - 1)] = shape_line(c) end
     if back_of(c.back) then out["Back" .. (i - 1)] = back_of(c.back) end
+    if c.type == "combo" and C.plate_key(c.boxc) then out["BoxCol" .. (i - 1)] = C.plate_key(c.boxc) end
     -- the grain of its background, or a divider's section, when it has one
     local styled = back_of(c.back) or ((c.type == "divider" or c.type == "section") and (c.style == "inset" or c.style == "plate"))
     if styled and c.brush ~= nil then out["Brush" .. (i - 1)] = c.brush and "1" or "0" end
     if styled and finish_of(c.finish) then out["Finish" .. (i - 1)] = c.finish end
     if styled and fink_of(c.fink) then out["FinishK" .. (i - 1)] = tostring(fink_of(c.fink)) end
     if styled and corners_of(c.corners) then out["Corners" .. (i - 1)] = c.corners end
+    if (c.type == "divider" or c.type == "section") and c.style == "plate" then out["Grad" .. (i - 1)] = M.grad_line(c.grad) end
     if c.look and (c.type == "knob" or c.type == "stepped" or c.type == "dual") then
       local enc = KP.encode(c.look)
       if enc and enc ~= "" then out["Look" .. (i - 1)] = enc end
@@ -2797,7 +2882,7 @@ local function serialize(layout)
     if styled and c.metal then out["Metal" .. (i - 1)] = "1" end
     -- values is the default, so it's only written to carry |cap
     local sk = scale_of(c.scale)
-    if sk == "none" then out["Scale" .. (i - 1)] = "none"
+    if sk == "none" or sk == "blank" then out["Scale" .. (i - 1)] = sk
     elseif sk == "ten" or c.scale_ink then
       out["Scale" .. (i - 1)] = (sk or "values") .. (c.scale_ink and "|cap" or "")
     end
@@ -2813,10 +2898,11 @@ local function serialize(layout)
       end
     end
     if c.arcc and (c.type == "knob" or c.type == "stepped") then out["ArcCol" .. (i - 1)] = c.arcc end
-    if c.img and (c.type == "knob" or c.type == "stepped" or c.type == "toggle" or c.type == nil
-                  or (c.type == "combo" and c.buttons == "step")) then
+    if c.img and (c.type == "knob" or c.type == "stepped" or c.type == "toggle" or c.type == nil or c.type == "dual"
+                  or c.type == "fader" or (c.type == "combo" and c.buttons == "step")) then
       out["Img" .. (i - 1)] = M.img_line(c.img)
     end
+    if c.img2 and c.type == "dual" then out["ImgIn" .. (i - 1)] = M.img_line(c.img2) end
     if c.lamp and M.LAMPS[c.lamp] then out["Lamp" .. (i - 1)] = c.lamp end
     if c.type == "vu" then out["Vu" .. (i - 1)] = M.vu_line(c.vu) end
     if c.type == "act" and M.ACTS[c.act or ""] then out["Act" .. (i - 1)] = c.act end
@@ -2830,6 +2916,7 @@ local function serialize(layout)
     if c.place then out["Place" .. (i - 1)] = c.place end
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
     if c.type == "text" and M.text_font_line(c.font) then out["TextFont" .. (i - 1)] = M.text_font_line(c.font) end
+    if c.layer == "back" and (c.type == "image" or c.type == "vis" or c.type == "curve") then out["Layer" .. (i - 1)] = "back" end
     if c.type == "image" and M.pic_line(c.pic) then out["Pic" .. (i - 1)] = M.pic_line(c.pic) end
     if c.type == "combo" and c.ccols then
       local line = M.choice_cols_line(c.ccols)
@@ -3545,7 +3632,7 @@ local function look_copy(v) return (type(v) == "table") and KP.copy(v) or v end
 function M.style_of(layout)
   if not layout then return nil end
   local s = { plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
-              fink = layout.fink, kinds = {} }
+              fink = layout.fink, grad = M.grad_copy(layout.grad), kinds = {} }
   if layout.canvas and layout.canvas.cols then
     s.cols = {}
     for k, v in pairs(layout.canvas.cols) do s.cols[k] = v end
@@ -3583,6 +3670,7 @@ function M.apply_style(layout, s)
   if not (layout and s) then return 0 end
   layout.plate, layout.brush, layout.metal, layout.finish = s.plate, s.brush, s.metal, s.finish
   layout.fink = s.fink
+  layout.grad = M.grad_copy(s.grad)
   if layout.canvas then
     if s.cols then
       layout.canvas.cols = {}
@@ -3845,6 +3933,28 @@ function M.set_choice_names(key, param, map, track, addr, ctx)
   M.set(key, l)
 end
 
+-- The folders a dropdown's choices are in, for the open list: { [plugin's
+-- text] = folder }, or nil (Folders<p>). Keyed as the names are; one
+-- folder set whatever the names follow.
+function M.get_choice_folders(key, param)
+  local l = M.get(key)
+  local map = l and l.choice_folders and l.choice_folders[param]
+  return (map and next(map)) and map or nil
+end
+function M.set_choice_folders(key, param, map)
+  local l = M.get(key) or { controls = {}, aliases = {} }
+  local keep = {}
+  for t, f in pairs(map or {}) do
+    t, f = clean_choice(t), U.trim((clean_choice(f):gsub("=", " ")))
+    if t ~= "" and f ~= "" then keep[t] = f end
+  end
+  l.choice_folders = l.choice_folders or {}
+  l.choice_folders[param] = next(keep) and keep or nil
+  if not next(l.choice_folders) then l.choice_folders = nil end
+  M.choice_ver = M.choice_ver + 1
+  M.set(key, l)
+end
+
 -- What a choice shows: your name for it, or the plugin's text `shown`.
 function M.choice_text(key, param, shown, track, addr)
   local map = M.get_choice_names(key, param, track, addr)
@@ -3860,25 +3970,30 @@ local renamed = setmetatable({}, { __mode = "k" })
 function M.choice_list(key, param, list, track, addr)
   if type(list) ~= "table" then return list end
   local map = M.get_choice_names(key, param, track, addr)
-  if not map then return list end
+  local fold = M.get_choice_folders(key, param)
+  if not map and not fold then return list end
   local hit = renamed[list]
-  if hit and hit.ver == M.choice_ver and hit.key == key and hit.param == param and hit.map == map then return hit.list end
+  if hit and hit.ver == M.choice_ver and hit.key == key and hit.param == param and hit.map == map
+     and hit.fold == fold then return hit.list end
   local out = {}
   for _, e in ipairs(list) do
-    local n = e.text and map[U.trim(e.text)]
+    local t = e.text and U.trim(e.text)
+    local n = t and map and map[t]
+    local f = t and fold and fold[t]
     if n == M.HIDDEN then
       -- (left out)
-    elseif n then
+    elseif n or f then
       local ne = {}
       for k, v in pairs(e) do ne[k] = v end
-      ne.text = n
+      ne.text = n or e.text
       ne.raw = e.raw or e.text      -- the plugin's own text (its colour is kept by it)
+      ne.folder = f
       out[#out + 1] = ne
     else
       out[#out + 1] = e
     end
   end
-  renamed[list] = { ver = M.choice_ver, key = key, param = param, map = map, list = out }
+  renamed[list] = { ver = M.choice_ver, key = key, param = param, map = map, fold = fold, list = out }
   return out
 end
 
@@ -4160,7 +4275,7 @@ local IMG_SECT = "TS_CV_Image "
 function M.raw_images(t)
   local out, seen = {}, {}
   for k, v in pairs(t or {}) do
-    if k:match("^Img%d+$") then
+    if k:match("^Img%d+$") or k:match("^ImgIn%d+$") then
       local im = M.img_of(v)
       for _, f in ipairs({ im and im.file, im and im.file2 }) do
         if f and not seen[f] then seen[f] = true; out[#out + 1] = f end
@@ -4274,7 +4389,7 @@ function M.import(entries, store_img)
       if next(renamed) then
         local raw = raw_copy(e.raw)
         for k, v in pairs(raw) do
-          if k:match("^Img%d+$") then
+          if k:match("^Img%d+$") or k:match("^ImgIn%d+$") then
             local im = M.img_of(v)
             if im then
               im.file = renamed[im.file] or im.file
@@ -4334,9 +4449,9 @@ end
 
 function M.look_of(c)
   return { fam = M.look_family(c), type = c.type, buttons = c.buttons, style = c.style, cap = c.cap, size = c.size,
-           scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc, back = c.back, brush = c.brush, metal = c.metal,
+           scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc, back = c.back, boxc = c.boxc, brush = c.brush, metal = c.metal,
            finish = c.finish, fink = c.fink, corners = c.corners, look = KP.copy(c.look),
-           style2 = c.style2, look2 = KP.copy(c.look2), img = M.copy_img(c.img),
+           style2 = c.style2, look2 = KP.copy(c.look2), img = M.copy_img(c.img), img2 = M.copy_img(c.img2),
            dir = c.dir, len = c.len, thin = c.thin }
 end
 
@@ -4386,16 +4501,21 @@ function M.paste_look(o, s)
       -- its own look, built from parts (on a concentric knob, the outer's),
       -- and a concentric knob's inner one from another concentric knob
       o.look = KP.copy(s.look)
-      -- a picture goes to a knob (not a concentric one)
-      o.img = (o.type ~= "dual") and M.copy_img(s.img) or nil
-      if o.type == "dual" and s.type == "dual" then o.style2, o.look2 = s.style2, KP.copy(s.look2) end
+      -- a picture goes to a knob, a concentric one's to a concentric one
+      local same = (o.type == "dual") == (s.type == "dual")
+      o.img = same and M.copy_img(s.img) or nil
+      if o.type == "dual" and s.type == "dual" then
+        o.style2, o.look2, o.img2 = s.style2, KP.copy(s.look2), M.copy_img(s.img2)
+      end
       -- a concentric knob comes medium or large
       if not (o.type == "dual" and s.size == "small") then o.size = s.size end
     elseif fam == "xy" and s.fam == "xy" then
       o.size = s.size
     elseif fam == "fader" and s.fam == "fader" then
-      -- a fader's shape goes to a fader: which way, how long, how thick
+      -- a fader's shape goes to a fader: which way, how long, how thick;
+      -- and its pictures (a cap and slot, or a filmstrip)
       o.dir, o.len, o.thin = s.dir, s.len, s.thin
+      o.img = M.copy_img(s.img)
     elseif o.type == "toggle" and s.type == "toggle" then
       o.size = s.size
       o.img = M.copy_img(s.img)
@@ -4407,6 +4527,8 @@ function M.paste_look(o, s)
   -- a hardware switch is a toggle's alone: a button row stays flat
   if o.type ~= "toggle" and o.style and C.SWITCH[o.style] then o.style = nil end
   o.back, o.brush, o.metal, o.finish, o.corners = s.back, s.brush, s.metal, s.finish, s.corners
+  -- (a dropdown's box colour, onto a dropdown)
+  if o.type == "combo" and s.type == "combo" then o.boxc = s.boxc end
   o.fink = s.fink
   return true
 end
@@ -4417,7 +4539,7 @@ function M.copy(layout)
                 measure = layout.measure, levels = layout.levels, mug = layout.mug,
                 own_w = layout.own_w, own_h = layout.own_h,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
-                fink = layout.fink, lock = layout.lock, palette = M.palette_of(M.palette_line(layout.palette)),
+                fink = layout.fink, lock = layout.lock, grad = M.grad_copy(layout.grad), palette = M.palette_of(M.palette_line(layout.palette)),
                 grid = layout.grid and { cols = layout.grid.cols, rows = layout.grid.rows } or nil }
   for k, f in pairs(layout.forms or {}) do
     local fc = M.copy({ controls = f.controls or {}, grid = f.grid }).controls
@@ -4432,11 +4554,12 @@ function M.copy(layout)
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
                         invert = c.invert, no_rule = c.no_rule, live = c.live, noname = c.noname, vin = c.vin, noframe = c.noframe,
+                        layer = c.layer, grad = M.grad_copy(c.grad),
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
-                        buttons = c.buttons, nbtn = c.nbtn, back = c.back, brush = c.brush,
+                        buttons = c.buttons, nbtn = c.nbtn, back = c.back, boxc = c.boxc, brush = c.brush,
                         leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),
                         nobtn = c.nobtn, bgap = c.bgap,
-                        img = M.copy_img(c.img),
+                        img = M.copy_img(c.img), img2 = M.copy_img(c.img2),
                         metal = c.metal, finish = c.finish, fink = c.fink, corners = c.corners, look = KP.copy(c.look),
                         style2 = c.style2, look2 = KP.copy(c.look2),
                         scale = c.scale, scale_ink = c.scale_ink, arc = c.arc, arcc = c.arcc,
@@ -4468,6 +4591,13 @@ function M.copy(layout)
     for p, map in pairs(layout.choice_names) do
       out.choice_names[p] = {}
       for t, n in pairs(map) do out.choice_names[p][t] = n end
+    end
+  end
+  if layout.choice_folders then
+    out.choice_folders = {}
+    for p, map in pairs(layout.choice_folders) do
+      out.choice_folders[p] = {}
+      for t, n in pairs(map) do out.choice_folders[p][t] = n end
     end
   end
   if layout.choice_by then

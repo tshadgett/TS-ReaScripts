@@ -1304,6 +1304,55 @@ picker uses an optgroup per group.
   centred in the whole gap. P.grid_w is a grid's width without
   PANEL_MIN_W, for a canvas's controls.
 
+## Plugin faces, gradients, folders (4.7.0)
+
+- **Layer** (`Layer<n>=back`, c.layer): drawn first in draw_controls,
+  under the sections. In the grid editor solid() ignores it and free()
+  lets it go anywhere; it's picked only where nothing in front is. A
+  behind canvas with handles is submitted first, so overlapping controls
+  can take the pointer from its handles.
+- **Spectrum visualiser:** `Canvas=spectrum|<line|fill|both>|s<0-3>`
+  (cv.sdraw, cv.ssmooth; none written for Both and Some).
+  EQP.util.draw_spectrum's `style` and `smooth`: smooth_db averages a
+  twelfth, sixth or third of an octave (triangular weights, in dB) and
+  eases 45% a frame towards it, per track and setting.
+- **Snap:** ExtState grid_snap 1/2/4/8 (an old grid_fine=1 reads as 8ths);
+  At lines print %g.
+- **Faceplate picture over the grid:** `img:file|fill|edge|grid` (sf.grid),
+  drawn over the grid's area in draw_controls; draw_plate skips it.
+- **Fader pictures:** Img kind "cap" (file the cap, file2 the slot, flag k
+  the slot kept to its own shape) or a strip. W.picture_fader.
+- **Gradients:** `Grad=dir|col` and `Grad<n>=` (a section or divider on a
+  faceplate); M.grad_of / grad_line / grad_copy. P.fill_grad: across is
+  W.grad4, down W.vgrad, radial 48 filled ellipses under a clip. It
+  replaces the 3D effect's own two gradients; lighting over 100% still
+  goes on top.
+- **Concentric pictures:** outer `Img<n>` (c.img), inner `ImgIn<n>`
+  (c.img2: `Img2<n>` would collide with `Img2x`). W.dual_face draws the
+  outer picture with the inner at IN_FRAC of it (a drawn inner from the
+  inner recipe when there's no inner picture), or a drawn ring with its
+  inner left out (o.no_inner) under the inner picture. Flag m (im.pair):
+  the inner drawn the outer's size, grabbed inside PAIR_IN.
+  M.put_img(l, idx, im, scope, "img"|"img2") puts it on concentric knobs
+  only.
+- **Concentric heights:** P.knob_units hands duals to P.dual_units (name,
+  dial, value line, never past the size's cell); cell_size, the grid
+  editor's natural() and P.knob_reframe use it. P.item_size keeps a
+  knob's or a dual's own size when its width matches, and a size-less
+  knob medium whatever its place (a bare one is a small one's height).
+- **Scale=blank** ("Nothing"): M.scale_kind nil, W.knob opts.blank drops
+  the value line; on a dual it's W.dual_knob o.blank.
+- **Folders:** `Folders<p>=<plugin's text>=<folder>|...`, the Choices
+  format, layout.choice_folders (one set even when names follow another
+  control). M.choice_list sets e.folder; W.combo's popup draws unfiled
+  ones, a separator, then BeginMenu per folder in first-met order (a
+  Selectable in the submenu closes the parent popup too); a search
+  flattens it.
+- **Box colour:** `BoxCol<n>=<plate key or #rrggbb>` (c.boxc, dropdowns
+  only), P.box_col, W.combo opts.box; ink cap_ink(box) unless set.
+- **Paste:** a control with param -1 (text, image, vis) is never "already
+  on the panel" (placed_index ignores p < 0).
+
 ## Upkeep, by one window (TS_CV_Upkeep)
 
 What ChannelView's rescan used to keep right on its own track now runs from

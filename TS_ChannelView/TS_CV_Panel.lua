@@ -258,7 +258,7 @@ function P.knob_px(ctl)
   local large = ctl.size == "large" or ctl.size == "xl"
   -- (a layout control has no numbers round it)
   local sc = M.scale_kind(ctl) ~= nil and not ctl.virtual and not (ctl.img and not ctl.img.nums)
-  local value = not ctl.vin and (large or not sc)
+  local value = not ctl.vin and (large or not sc) and ctl.scale ~= "blank"
   local cy = nb + r
   if sc then
     local r1 = W.mark_reach(r)
@@ -271,8 +271,20 @@ end
 -- How many units of `unit` px (at 100%) a knob's height takes, a couple
 -- of px short allowed for
 function P.knob_units(ctl, unit)
+  if ctl.type == "dual" then return P.dual_units(ctl, unit) end
   local px = P.knob_px(ctl)
   return px and math.max(1, math.ceil((px - 2) / unit)) or nil
+end
+
+-- A concentric knob's: its name, the knob, its values, but never taller
+-- than its size's cell (shorter with its name hidden or Nothing under it)
+function P.dual_units(ctl, unit)
+  local sz = (ctl.size == "large" or ctl.size == "xl") and C.SIZES[ctl.size] or C.SIZES.medium
+  local ui = C.UI or 1
+  local nb = ctl.noname and 0 or (11 + 5)
+  local px = nb + math.floor(sz.d / ui + 0.5) + 4 + ((ctl.scale ~= "blank") and 14 or 0)
+  local full = math.ceil((C.CELL_H / ui) * sz.h * 0.5 / unit - 0.01)
+  return math.max(1, math.min(full, math.ceil((px - 2) / unit)))
 end
 
 -- After a change to what a knob on a grid shows (`old`: a copy of it
@@ -286,7 +298,8 @@ function P.knob_reframe(c, old)
     c.at = { c = at.c, r = at.r, w = at.w, h = math.max(2, at.h + (c.noname and -1 or 1)) }
     return
   end
-  if not (c.at and is_knob(c) and is_knob(old)) then return end
+  local function k(o) return is_knob(o) or o.type == "dual" end
+  if not (c.at and k(c) and k(old)) then return end
   local u = C.CELL_H / (C.UI or 1) / 4
   local a, b = P.knob_units(old, u), P.knob_units(c, u)
   if a and b and a ~= b then
@@ -352,7 +365,7 @@ function P.cell_size(ctl, half_rows)
     or (ctl.type == "toggle" and ctl.size == "small")
   local sz = sizable and ctl.size and C.SIZES[ctl.size]
   -- a knob: as tall as what it shows takes
-  local kh = is_knob(ctl) and P.knob_units(ctl, C.CELL_H / (C.UI or 1) / 2)
+  local kh = (is_knob(ctl) or ctl.type == "dual") and P.knob_units(ctl, C.CELL_H / (C.UI or 1) / 2)
   if sz and sz.h <= half_rows then return sz.w, kh or sz.h end
   if kh and kh <= half_rows then return 2, kh end
   return 2, 2
@@ -364,9 +377,12 @@ end
 function P.item_size(item)
   -- a knob: its own size, unless it was given a medium's width instead
   local c = item.ctl
-  if c and is_knob(c) and c.size and C.SIZES[c.size] and item.w == C.SIZES[c.size].w then
+  if c and (is_knob(c) or c.type == "dual") and c.size and C.SIZES[c.size] and item.w == C.SIZES[c.size].w then
     return (c.size ~= "medium") and c.size or nil
   end
+  -- (a medium knob stays one in a short place: one with nothing under it
+  -- and no name over it is a small one's height)
+  if c and is_knob(c) and not c.size then return nil end
   for _, k in ipairs(C.SIZE_LIST) do
     local sz = C.SIZES[k]
     if k ~= "medium" and item.w == sz.w and item.h == sz.h then return k end
@@ -1432,12 +1448,12 @@ local function draw_virtual(ctx, dl, id, ctl, item, fx, controls, key)
     for i, t in ipairs(M.vchoices(ctl)) do list[i] = { norm = M.vnorm(ctl, i), text = t } end
     local n = #list
     changed, nv, act = W.combo(ctx, id, shown_name, v, shown, (n >= 2) and (1 / (n - 1)) or nil,
-      { tooltip = name .. ": " .. shown, steps = list, style = ctl.style })
+      { tooltip = name .. ": " .. shown, steps = list, style = ctl.style, box = P.box_col(ctl), ink = W.lit_col(ctl.cap) })
   else
     changed, nv, act = W.knob(ctx, id, shown_name, v, shown,
       { tooltip = name .. ": " .. shown .. "\n(layout control)", cap = W.cap_col(ctl.cap) or P.VIRT_COL,
         style = ctl.style, size = size, look = ctl.look, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc),
-        img = ctl.img, vin = ctl.vin, h = item.fh or hy(item.h), place = ctl.place })
+        img = ctl.img, vin = ctl.vin, blank = ctl.scale == "blank", h = item.fh or hy(item.h), place = ctl.place })
   end
   if ctl.noname then W.LABEL_H, C.LABEL_GAP, W.tip_name = keep_lh, keep_gap, nil end
   if act and act.double_click then nv, changed = (ctl.virtual and ctl.virtual.start) or 0, true end
@@ -1652,6 +1668,12 @@ end
 -- so each answer is kept on its own clock, staggered, rather than the
 -- whole lot being asked for again in one frame.
 local scale_cache = {}
+-- A dropdown's box colour of its own (BoxCol<n>), or nil
+function P.box_col(ctl)
+  local pl = ctl.boxc and C.plate_of(ctl.boxc)
+  return pl and pl.bg or nil
+end
+
 function P.knob_scale(track, fx, p, key, ctl, size, rev, st)
   local kind = M.scale_kind(ctl)
   if not kind or size == "small" then return nil end
@@ -3206,6 +3228,46 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     gx0 = gx0 - ImGui.GetScrollX(ctx)
   end
 
+  -- A faceplate's picture laid over the grid's area (Covers: Grid), so it
+  -- lines up with the controls whatever the panel's width
+  do
+    local pl = C.plate_of(layout.plate)
+    local fk = pl and M.finish(layout, pl)
+    local sf = fk and M.surface_of(fk)
+    if sf and sf.grid and FN and FN.surface then
+      FN.surface(ctx, dl, fk, gx0, gy0, gx0 + lay.width, gy0 + lay.height, gx0, gy0)
+    end
+  end
+
+  -- What's behind the rest (Layer back: a picture, an EQ curve, a
+  -- visualiser): first, under the sections, the controls free to sit over it
+  local behind = false
+  for _, it in ipairs(lay.items) do if it.ctl.layer == "back" then behind = true break end end
+  for _, im in ipairs(lay.images or {}) do if im.by.layer == "back" then behind = true break end end
+  for _, cu in ipairs(lay.curves or {}) do if cu.by.layer == "back" then behind = true break end end
+  if behind then
+    local m = C.CTL_MARGIN
+    for _, im in ipairs(FN and FN.draw_pic and lay.images or {}) do
+      if im.by.layer == "back" then
+        FN.draw_pic(ctx, dl, im.by.pic, gx0 + im.x + m, gy0 + im.y + m, gx0 + im.x + im.w - m, gy0 + im.y + im.h - m)
+      end
+    end
+    for n, cu in ipairs(lay.curves or {}) do
+      if cu.by.layer == "back" then
+        P.draw_curve_item(ctx, dl, gx0 + cu.x, gy0 + cu.y, cu.w, cu.h, track, fx, layout, req, n, cu.by)
+      end
+    end
+    for _, item in ipairs(lay.items) do
+      local ctl = item.ctl
+      if ctl.type == "vis" and ctl.layer == "back" then
+        local vi = 0
+        for k, c in ipairs(controls) do if c == ctl then vi = k break end end
+        P.draw_vis_item(ctx, dl, gx0 + (item.sx or item.x), gy0 + (item.sy or item.y), item.pw or item.sw or hx(item.w),
+          item.sh or hy(item.h), track, fx, layout, req, ctl, vi)
+      end
+    end
+  end
+
   -- Styled sections first, behind everything: an inset
   -- just darker than the plate it's on (lighter on a dark one), with a
   -- shadowed top edge and a lit bottom one, or a faceplate of its own.
@@ -3241,6 +3303,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       -- an outline alone (below)
     elseif kind == "plate" then
       ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, pl.bg, r)
+      -- (a gradient of its own, Grad<n>)
+      local g2 = s.by.grad and C.plate_of(s.by.grad.col)
+      if g2 then P.fill_grad(dl, x1 + 1, y1 + 1, x2 - 1, y2 - 1, pl.bg, g2.bg, s.by.grad.dir) end
       grained(pl.bg)
       ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, pl.border, r, 0, 1.0)
       ImGui.DrawList_AddLine(dl, x1 + math.max(4, inr), y1 + 1, x2 - math.max(4, inr), y1 + 1, 0xffffff18, 1.0)
@@ -3263,7 +3328,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     -- (in from its cells' edges as the controls are)
     local m = C.CTL_MARGIN
     for _, im in ipairs(lay.images or {}) do
-      FN.draw_pic(ctx, dl, im.by.pic, gx0 + im.x + m, gy0 + im.y + m, gx0 + im.x + im.w - m, gy0 + im.y + im.h - m)
+      if im.by.layer ~= "back" then
+        FN.draw_pic(ctx, dl, im.by.pic, gx0 + im.x + m, gy0 + im.y + m, gx0 + im.x + im.w - m, gy0 + im.y + im.h - m)
+      end
     end
   end
 
@@ -3296,7 +3363,9 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
 
   -- its EQ curves (curve controls): the canvas's bands in each place
   for n, cu in ipairs(lay.curves or {}) do
-    P.draw_curve_item(ctx, dl, gx0 + cu.x, gy0 + cu.y, cu.w, cu.h, track, fx, layout, req, n, cu.by)
+    if cu.by.layer ~= "back" then
+      P.draw_curve_item(ctx, dl, gx0 + cu.x, gy0 + cu.y, cu.w, cu.h, track, fx, layout, req, n, cu.by)
+    end
   end
 
   -- a grid's lines, from end to end
@@ -3360,9 +3429,10 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       end
 
     elseif ctl.type == "vis" then
-      -- a visualiser (Pro): its own roles drawn in its place
-      P.draw_vis_item(ctx, dl, gx0 + (item.sx or item.x), gy0 + (item.sy or item.y), item.pw or item.sw or hx(item.w),
-        item.sh or hy(item.h), track, fx, layout, req, ctl, i)
+      -- a visualiser (Pro): its own roles drawn in its place (one behind
+      -- the rest: drawn first, above)
+      if ctl.layer ~= "back" then P.draw_vis_item(ctx, dl, gx0 + (item.sx or item.x), gy0 + (item.sy or item.y), item.pw or item.sw or hx(item.w),
+        item.sh or hy(item.h), track, fx, layout, req, ctl, i) end
 
     elseif ctl.type == "act" then
       -- an act button (a Trimmer's Auto, Listen: TS_CV_TrimmerPanel)
@@ -3473,7 +3543,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
       local changed, nv, act
       -- its name hidden (a flag bit): no room for it, and the name in the
       -- tooltip
-      local nameless = ctl.noname and label ~= ""
+      local nameless = ctl.noname and (label ~= "" or ctl.type == "dual" or ctl.type == "xy")
       local keep_lh, keep_gap, full_label = W.LABEL_H, C.LABEL_GAP, label
       if nameless then
         W.tip_name, label = label, ""
@@ -3498,6 +3568,8 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         end
         local mod2 = ok2 and P.mod_on(track, fx, p2) or false
         local name = (ctl.label and ctl.label ~= "") and ctl.label or (name1 .. " / " .. name2)
+        -- (its name hidden: in the tooltip)
+        if ctl.noname then W.tip_name, name = name, "" end
         local tip2 = name1 .. ": " .. (shown or "") .. "\n" .. name2 .. ": " .. shown2
           .. (ok2 and "" or "\nRight-click: choose second parameter")
           .. ((modded or mod2) and "\nModulation on" or "")
@@ -3514,10 +3586,11 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           end
         else
           c1, v1, c2, v2, act = W.dual_knob(ctx, id, name, value, raw2,
-            { size = (P.item_size(item) == "large") and "large" or nil, cap = W.cap_col(ctl.cap),
+            { size = ({ large = "large", xl = "xl" })[P.item_size(item) or ""], cap = W.cap_col(ctl.cap),
               dim = not T.get_enabled(track, fx.addr), mod1 = modded, mod2 = mod2,
               shown1 = shown, shown2 = shown2, tip = tip2,
-              style = ctl.style, style2 = ctl.style2, look = ctl.look, look2 = ctl.look2, vin = ctl.vin })
+              style = ctl.style, style2 = ctl.style2, look = ctl.look, look2 = ctl.look2, vin = ctl.vin,
+              img = ctl.img, img2 = ctl.img2, blank = ctl.scale == "blank", h = cell_h })
           -- a double-click puts back the one under the pointer: the inner
           -- knob's here, the ring's below
           if act.double_click == "inner" then
@@ -3598,6 +3671,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
             w           = (M.combo_cells(ctl) > 1 or lay.grid) and hx(item.w) or nil,
             mod         = modded,
             style       = ctl.style,
+            box         = P.box_col(ctl),
             -- its text in the current choice's colour, else the control's
             ink         = W.lit_col(M.choice_col(ctl, said_raw)) or W.lit_col(ctl.cap),
             ink_of      = ctl.ccols and function(sv) return W.lit_col(M.choice_col(ctl, sv.raw or sv.text)) end or nil })
@@ -3656,7 +3730,15 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
         end
         local unity = ctl.bipolar and 0.5 or nil
         local under = cur_bg.plate and cur_bg.plate.bg or C.COL.panel_bg
-        if P.fader_kind(ctl) == "column" then
+        if ctl.img and W.picture(ctx, ctl.img, ctl.img.kind == "cap" and ctl.img.file or nil) then
+          -- a picture of your own (Style > Image...): the whole of its place
+          if link then W.allow_overlap(ctx) end
+          local fw_ = item.pw or item.sw or hx(item.w)
+          local fh_ = item.sh or (lay.grid and hy(item.h)) or lay.height
+          changed, nv, act = W.picture_fader(ctx, id, gx0 + (item.sx or item.x), gy0 + (item.sy or item.y), fw_, fh_,
+            value, ctl.img, ctl.dir, label .. "   " .. shown)
+          if modded then W.mod_corner(dl, gx0 + (item.sx or item.x) + fw_, gy0 + (item.sy or item.y), 6, under) end
+        elseif P.fader_kind(ctl) == "column" then
           local cw = hx(item.w)
           local fw = ctl.thin and 14 or C.FADER_W
           local fx0 = gx0 + item.x + (cw - fw) * 0.5
@@ -3699,7 +3781,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             step_norm = st, snaps = snaps, mod = modded, ring = ring, lamp = P.lamp(track, fx, layout, p),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, look = ctl.look, img = ctl.img, vin = ctl.vin,
-            h = cell_h, place = ctl.place,
+            h = cell_h, place = ctl.place, blank = ctl.scale == "blank",
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, st) })
       else
         local size = P.item_size(item)
@@ -3707,7 +3789,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
           { bipolar = ctl.bipolar, arc = ctl.arc, arc_col = ctl.arcc and W.cap_col(ctl.arcc), tooltip = tip, dim = not T.get_enabled(track, fx.addr),
             style = ctl.style, cap = W.cap_col(ctl.cap), size = size, mod = modded, ring = ring, look = ctl.look,
             lamp = P.lamp(track, fx, layout, p), img = ctl.img, vin = ctl.vin,
-            h = cell_h, place = ctl.place,
+            h = cell_h, place = ctl.place, blank = ctl.scale == "blank",
             scale = P.knob_scale(track, fx, p, key, ctl, size, rev, nil) })
       end
 
@@ -3938,15 +4020,42 @@ end
 -- layout's choice, or aluminium's own brushed grain), with the metallic
 -- flake and sheen over it if chosen. The border is drawn over it afterwards
 -- and tidies the corners.
-local function draw_plate(ctx, dl, x, y, w, h, pl, finish, metal)
+-- A gradient (TS_CV_Mappings grad_of) over x1..y2: from `c1` to `c2` down
+-- or across, or radial (`c1` in the middle, `c2` out to the corners, in
+-- steps fine enough not to show)
+function P.fill_grad(dl, x1, y1, x2, y2, c1, c2, dir)
+  if x2 - x1 < 1 or y2 - y1 < 1 then return end
+  if dir == "across" then W.grad4(dl, x1, y1, x2, y2, c1, c2, c2, c1)
+  elseif dir == "radial" then
+    ImGui.DrawList_AddRectFilled(dl, x1, y1, x2, y2, c2)
+    ImGui.DrawList_PushClipRect(dl, x1, y1, x2, y2, true)
+    local cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
+    local rx, ry = (x2 - x1) * 0.72, (y2 - y1) * 0.72
+    local n = 48
+    for i = 1, n do
+      local t = i / n
+      ImGui.DrawList_AddEllipseFilled(dl, cx, cy, rx * (1 - t) + 0.5, ry * (1 - t) + 0.5, mix(c2, c1, t))
+    end
+    ImGui.DrawList_PopClipRect(dl)
+  else W.vgrad(dl, x1, y1, x2, y2, c1, c2) end
+end
+
+local function draw_plate(ctx, dl, x, y, w, h, pl, finish, metal, grad)
   ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, pl.bg, C.PANEL_RR)
-  -- the light falling on it (3D effect)
-  if C.EFFECT_3D then
-    local split = y + h * 0.4
+  -- a gradient of its own: in place of the 3D effect's gentle one
+  local g2 = grad and C.plate_of(grad.col)
+  if g2 then P.fill_grad(dl, x + 1, y + 1, x + w - 1, y + h - 1, pl.bg, g2.bg, grad.dir) end
+  -- (the 3D effect's own: the light catching it from above)
+  if C.EFFECT_3D and not g2 then
     local L = (C.LIGHT or 100) / 100
+    local split = y + h * 0.4
     local sh = (pl.sheen or 1) * L
     W.vgrad(dl, x + 1, y + 1, x + w - 1, split, mix(pl.bg, 0xffffffff, math.min(0.5, 0.08 * sh)), pl.bg)
     W.vgrad(dl, x + 1, split, x + w - 1, y + h - 1, pl.bg, mix(pl.bg, 0x000000ff, math.min(0.6, 0.12 * sh)))
+  end
+  -- the light falling on it (3D effect), above 100% over a gradient too
+  if C.EFFECT_3D then
+    local L = (C.LIGHT or 100) / 100
     if L > 1 then
       -- View > Lighting above 100%: the light across it, bright on the top
       -- left and deep on the bottom right, and its edges falling away
@@ -3965,8 +4074,10 @@ local function draw_plate(ctx, dl, x, y, w, h, pl, finish, metal)
       W.grad4(dl, x + 1, y + 1, x + 1 + e, y + h - 1, lk, cl, cl, lk)                    -- left
     end
   end
-  -- its surface: the finish, then the flake over it
-  finish_rect(ctx, dl, finish, pl.bg, x + 1, y + 1, x + w - 1, y + h - 1, x, y)
+  -- its surface: the finish, then the flake over it (a picture laid over
+  -- the grid's area instead: draw_controls)
+  local sf = finish and M.surface_of(finish)
+  if not (sf and sf.grid) then finish_rect(ctx, dl, finish, pl.bg, x + 1, y + 1, x + w - 1, y + h - 1, x, y) end
   if metal then
     W.flake_rect(ctx, dl, x + 1, y + 1, x + w - 1, y + h - 1, U.is_light(pl.bg), x, y)
     W.metal_sheen(dl, x, y, w, h)
@@ -4223,7 +4334,13 @@ function P.draw_vis_item(ctx, dl, x, y, w, h, track, fx, layout, req, ctl, i)
   local cv = ctl.vis
   local name = M.VIS_NAMES[cv and cv.kind or ""] or "Visualiser"
   local drawn
-  if cv and cv.kind == "trimfilt" then
+  if cv and cv.kind == "spectrum" then
+    -- the track's spectrum, from its probes (nothing while there's none)
+    drawn = EQP and P.with_canvas_cols(cv, dl, x1, y1, x2 - x1, y2 - y1, function()
+      EQP.util.draw_spectrum(dl, x1 + 1, y1 + 1, x2 - x1 - 2, y2 - y1 - 2, track, nil, cv.sdraw, cv.ssmooth or 2)
+      return true
+    end) or false
+  elseif cv and cv.kind == "trimfilt" then
     -- the Trimmer's own filters (TS_CV_TrimmerPanel): its spectrum, slopes
     -- and nodes
     drawn = TRP and TR and TR.is(fx.name or "") and P.with_canvas_cols(cv, dl, x1, y1, x2 - x1, y2 - y1, TRP.draw_filters,
@@ -4388,13 +4505,13 @@ P.RACK_ROWS_MAX = 40
 P.RACK_ROWS = nil       -- ChannelView's own rows, when known
 
 -- The rows a grid's tallest control needs: a fader's length, a large knob,
--- an XY pad, a button row. An upright fader is never less than two rows
--- (a full-height one included).
+-- an XY pad, a button row. An upright fader can be a single row long (a
+-- full-height one takes the rows it's given).
 function P.tallest_rows(vis)
   local n = 1
   for _, c in ipairs(vis or {}) do
     local k = P.fader_kind(c)
-    if k == "column" then n = math.max(n, 2)
+    if k == "column" then n = math.max(n, 1)
     elseif k ~= "band" and c.type ~= "divider" and c.type ~= "page" then
       local _, h = P.cell_size(c, 2 * P.RACK_ROWS_MAX)
       n = math.max(n, math.ceil((h or 2) / 2))
@@ -4724,7 +4841,7 @@ fold_pop = function(ctx, track, fx, layout, key, req, x, y, ww, wh, io, plate)
     -- at the end of the frame, would be under this window
     local outer_tip = W.take_tip()
     local saved = plate and push_plate(plate)
-    if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate))
+    if plate then draw_plate(ctx, pdl, wx, wy, pw, ph, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate), layout.grad)
     else ImGui.DrawList_AddRectFilled(pdl, wx, wy, wx + pw, wy + ph, C.COL.panel_bg, C.PANEL_RR) end
     ImGui.DrawList_AddRect(pdl, wx, wy, wx + pw, wy + ph, C.COL.accent, 3.0, 0, 1.0)
     -- (bypassed itself, or the whole chain is)
@@ -4770,7 +4887,7 @@ end
 function P.faceplate(ctx, dl, x, y, w, h, layout)
   local plate = ED.PRO and layout and C.plate_of(layout.plate) or nil
   if plate then
-    draw_plate(ctx, dl, x, y, w, h, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate))
+    draw_plate(ctx, dl, x, y, w, h, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate), layout.grad)
   else
     ImGui.DrawList_AddRectFilled(dl, x, y, x + w, y + h, C.COL.panel_bg, C.PANEL_RR)
   end
@@ -4848,7 +4965,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     if is_drag_source then
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.header_drag, C.PANEL_RR)
     elseif plate then
-      draw_plate(ctx, dl, x, y, ww, wh, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate))
+      draw_plate(ctx, dl, x, y, ww, wh, plate, P.fin_k(M.finish(layout, plate), layout.fink), M.metal(layout, plate), layout.grad)
     else
       ImGui.DrawList_AddRectFilled(dl, x, y, x + ww, y + wh, C.COL.panel_bg, C.PANEL_RR)
     end

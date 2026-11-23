@@ -1,5 +1,50 @@
 # ChannelView — changelog
 
+## 4.7.0 — a plugin's own face, folders in dropdowns
+
+### ChannelView
+
+- **Folders in a dropdown's list.** Right-click ▸ Name ▸ *Choice names*
+  (or the editor's *Choice names* row) has a folder box beside each
+  choice: those in a folder open as a submenu of the list, the current
+  one's folder in the accent colour. Searching looks in them all.
+- **Nothing round the dial:** a knob's *Values* ▸ *Numbers round the
+  dial* (the editor's *Scale*) has *Nothing*: no numbers and no value
+  under it, the value in its tooltip. A concentric knob's *Values* has
+  *Under it*: *Values* or *Nothing*.
+- Hiding the name of a concentric knob or an XY pad hides it (in the
+  tooltip instead).
+- Concentric knobs come extra large too, and faders one row long.
+
+### ChannelView Pro
+
+- **Layer:** a picture, a visualiser or an EQ curve can sit *Behind*,
+  under everything else, with controls over it (Edit layout, on the
+  right).
+- **Spectrum visualiser** (Edit layout ▸ Visualisers): the track's
+  spectrum, drawn as a line, a fill or both, smoothed *Off*, *Light*,
+  *Some* or *More*.
+- **Snap** in the grid editor's toolbar: a quarter of a cell down to a
+  thirty-second (Alt while dragging: a step finer), in place of Fine grid.
+- **A faceplate's picture can cover the grid** alone (Faceplate ▸ Picture
+  ▸ *Covers*), to lay a plugin's own face out on it.
+- **Fader pictures** (a fader's Style ▸ *Image...*): a cap over a slot,
+  or a filmstrip.
+- **Concentric knobs from pictures:** Style ▸ *Outer image...* and
+  *Inner image...*, either or both; *Matched to the outer* for an inner
+  picture made at the outer's size.
+- **Gradient faceplates** (Faceplate ▸ *Gradient*, and a section's on a
+  faceplate): *Down*, *Across* or *Radial*, to a colour of your choosing.
+- **A dropdown's box colour** (Style ▸ *Box colour*); its text turns
+  light or dark to read on it unless you've set its colour.
+- A concentric knob's place on a grid is as tall as what it shows (its
+  name, the knob, its values), and keeps its size in a shorter place.
+- A medium knob in a short place (its name hidden, Nothing round it)
+  stays medium.
+- Copy and paste in Edit layout pastes text, pictures and visualisers
+  however many are on the panel already.
+- Copied looks carry a fader's pictures.
+
 ## 4.6.0 — the overview in whole rows, short layouts of their own
 
 ### ChannelView

@@ -1751,7 +1751,8 @@ function W.knob(ctx, id, label, value, formatted, opts)
              and opts.scale or nil
   local large = opts.size == "large" or opts.size == "xl"
   local vin = opts.vin and not small
-  local show_value = C.SHOW_VALUES and not small and (large or not sc) and not vin
+  -- (opts.blank: Numbers round the dial > Nothing, no value line either)
+  local show_value = C.SHOW_VALUES and not small and (large or not sc) and not vin and not opts.blank
   -- a small one in a frame tall enough shows its name, in small type
   local small_named = small and opts.h ~= nil and (label or "") ~= "" and label_h > 0
                       and ch >= small_h + label_h + 2
@@ -1924,7 +1925,7 @@ function W.knob(ctx, id, label, value, formatted, opts)
   end
 
   local tip = opts.tooltip
-  if small or (sc and not show_value) then
+  if small or (sc and not show_value) or opts.blank then
     tip = ((label and label ~= "") and (label .. ": ") or "") .. (formatted or "")
   end
   W.tip(ctx, id, tip, hovered, active)
@@ -1944,6 +1945,10 @@ end
 local DUAL_RING, DUAL_IN = 40, 22.5      -- the ring's radius, the inner knob's
 
 local IN_FRAC = DUAL_IN / DUAL_RING        -- the inner knob against the outer's body
+-- a matched pair of pictures (the inner's Matched to the outer): both drawn
+-- the outer's size, the inner knob taking about this much of it -- where a
+-- grab turns the inner
+local PAIR_IN = 0.75
 local DUAL_INNER = "softtouch"             -- the inner knob on a recipe pair, until one is chosen
 
 -- Its style: nil the default (the dark ring, lit), "arc" the flat one, or
@@ -1967,6 +1972,8 @@ end
 
 -- the inner knob's radius on a knob of radius r: where a grab turns it
 function W.dual_inner_r(r, o)
+  if o and o.img2 and o.img2.pair then return PAIR_IN * r end
+  if o and o.img then return IN_FRAC * r end
   if W.dual_flat(o) then return (r - 4) * 0.62 end
   local outer = W.dual_looks(o)
   if outer then return IN_FRAC * r / KP.reach(outer) end
@@ -2019,8 +2026,10 @@ local function dual_recipe(dl, cx, cy, r, v1, v2, o, outer, inner, odef, idef)
   pi.skirt, pi.washer, pi.nut, pi.sr, pi.sgrip = nil, nil, nil, nil, nil
   if pi.ptr == "skirtline" then pi.ptr = nil end
   local icap = o.cap or (idef and W.cap_col(idef.cap)) or nil
-  KP.draw(dl, cx, cy, ri * KP.reach(pi), v2, pi, { cap = icap, hot = o.hot == "inner", dim = o.dim,
-    hw = W.hw, shadow = W.hw_shadow_circle })
+  if not o.no_inner then
+    KP.draw(dl, cx, cy, ri * KP.reach(pi), v2, pi, { cap = icap, hot = o.hot == "inner", dim = o.dim,
+      hw = W.hw, shadow = W.hw_shadow_circle })
+  end
   if o.mod2 then W.mod_dot(dl, cx, cy, math.max(2.0, ri * 0.22), KP.centre_col(pi, icap)) end
   if o.mod1 then
     local t = A_MIN + A_SPAN * 0.5 + math.pi
@@ -2031,9 +2040,48 @@ local function dual_recipe(dl, cx, cy, r, v1, v2, o, outer, inner, odef, idef)
 end
 
 -- `o`: cap (the inner's colour), dim, hot ("outer" / "inner" / nil), mod1,
--- mod2, style, style2, look, look2, ctx.
+-- mod2, style, style2, look, look2, ctx; img, img2 (the outer's and the
+-- inner's own pictures, TS_CV_Mappings img_of).
+local dual_drawn
 function W.dual_face(dl, cx, cy, r, v1, v2, o)
   o = o or {}
+  local ctx = o.ctx
+  if not (ctx and (o.img or o.img2)) then return dual_drawn(dl, cx, cy, r, v1, v2, o) end
+  local ri
+  -- the outer: its picture, or as it's drawn with the inner left off
+  local pic = o.img and W.picture_knob(ctx, dl, cx, cy, r, v1 or 0, o.img, o.dim)
+  if pic then
+    ri = (o.img2 and o.img2.pair) and PAIR_IN * r or IN_FRAC * r
+    if not o.img2 then
+      -- the inner as it's drawn on a recipe pair
+      local _, inner, _, idef = W.dual_looks({ style = o.style ~= "arc" and o.style or DUAL_INNER, look = o.look,
+        style2 = o.style2, look2 = o.look2 })
+      inner = inner or C.KNOB_STYLE[DUAL_INNER].parts
+      local pi = KP.copy(inner)
+      pi.skirt, pi.washer, pi.nut, pi.sr, pi.sgrip = nil, nil, nil, nil, nil
+      if pi.ptr == "skirtline" then pi.ptr = nil end
+      local icap = o.cap or (idef and W.cap_col(idef.cap)) or nil
+      KP.draw(dl, cx, cy, ri * KP.reach(pi), v2, pi, { cap = icap, hot = o.hot == "inner", dim = o.dim,
+        hw = W.hw, shadow = W.hw_shadow_circle })
+    end
+  else
+    local p = {}
+    for kk, vv in pairs(o) do p[kk] = vv end
+    p.no_inner = o.img2 ~= nil and not W.dual_flat(o)
+    ri = dual_drawn(dl, cx, cy, r, v1, v2, p)
+  end
+  -- (a matched pair's inner is drawn the outer's size: the knob is in its
+  -- middle, a clear ring round it)
+  if o.img2 then W.picture_knob(ctx, dl, cx, cy, o.img2.pair and r or ri, v2 or 0, o.img2, o.dim) end
+  if pic and o.mod1 then
+    local t = A_MIN + A_SPAN * 0.5 + math.pi
+    local rm = (ri + r) * 0.5
+    W.mod_dot(dl, cx + math.cos(t) * rm, cy + math.sin(t) * rm, math.max(1.8, r * 0.065), 0x1b1c1fff)
+  end
+  if (pic or o.img2) and o.mod2 then W.mod_dot(dl, cx, cy, math.max(2.0, ri * 0.22), 0x1b1c1fff) end
+  return ri
+end
+dual_drawn = function(dl, cx, cy, r, v1, v2, o)
   if W.dual_flat(o) then return dual_arc(dl, cx, cy, r, v1, v2, o) end
   local k = r / DUAL_RING
   local function fade(col) return o.dim and U.with_alpha(col, 0x70) or col end
@@ -2075,10 +2123,11 @@ function W.dual_face(dl, cx, cy, r, v1, v2, o)
   local px1, py1 = at(a1, 27); local px2, py2 = at(a1, 36)
   ImGui.DrawList_AddLine(dl, px1, py1, px2, py2, fade(0xf3f3f1ff), math.max(1.5, 4 * k))
   -- the seam, then the inner knob in the cap colour, satin
-  ImGui.DrawList_AddCircleFilled(dl, cx, cy, 24.5 * k, fade(0x0b0c0dff), 32)
   local base = o.cap or C.COL.knob_fill
   if o.hot == "inner" then base = U.lighten(base, 0.1) end
   local ri = DUAL_IN * k
+  if o.no_inner then return ri end
+  ImGui.DrawList_AddCircleFilled(dl, cx, cy, 24.5 * k, fade(0x0b0c0dff), 32)
   if W.hw > 0 then
     W.hw_shadow_circle(dl, cx, cy, ri, 0.6)
     KP.lit_ring(dl, cx, cy, ri, ri * 0.86, U.darken(base, 0.40), U.lighten(base, 0.12), 32, nil, fade)
@@ -2121,10 +2170,10 @@ W.pair_text = pair_text
 
 local dual_grab = {}   -- id -> "outer" / "inner": which one this drag turns
 
--- A concentric knob in its cell at the cursor: the knob's size (medium or
--- large), its name line (both names), the knob, the value line (both
--- values). Where a drag starts says which one it turns: on the inner knob
--- the inner, anywhere else the ring. The wheel turns the inner, Shift+wheel
+-- A concentric knob in its cell at the cursor: the knob's size (medium,
+-- large or extra large), its name line (both names), the knob, the value
+-- line (both values). Where a drag starts says which one it turns: on the
+-- inner knob the inner, anywhere else the ring. The wheel turns the inner, Shift+wheel
 -- the ring. Returns changed1, v1, changed2, v2, act, where
 -- act.double_click is "outer" or "inner" (the one under the pointer).
 -- `o`: size, cap, dim, mod1, mod2, shown1, shown2, tip; bip1, bip2 (the
@@ -2133,18 +2182,21 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
   o = plain(o or {})
   local dl = ImGui.GetWindowDrawList(ctx)
   local x, y = ImGui.GetCursorScreenPos(ctx)
-  local sz = (o.size == "large") and C.SIZES.large or C.SIZES.medium
+  local sz = (o.size == "large" or o.size == "xl") and C.SIZES[o.size] or C.SIZES.medium
   local cw = math.tointeger(C.CELL_W * sz.w / 2) or C.CELL_W * sz.w / 2
   local ch = math.tointeger(C.CELL_H * sz.h / 2) or C.CELL_H * sz.h / 2
+  -- (o.h: the place it's given, when the panel gives it one)
+  if o.h and o.h > 0 then ch = o.h end
   local r = sz.d * 0.5
   W.allow_overlap(ctx)
   ImGui.InvisibleButton(ctx, id, cw, ch, ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
   local hovered = ImGui.IsItemHovered(ctx)
   local active = ImGui.IsItemActive(ctx)
-  local show_value = C.SHOW_VALUES
+  -- (o.blank: nothing under it, the values in its tooltip)
+  local show_value = C.SHOW_VALUES and not o.blank
   local room = ch - W.LABEL_H - C.LABEL_GAP - (show_value and 14 or 0)
   local cx, cy = x + cw * 0.5, y + W.LABEL_H + C.LABEL_GAP + room * 0.5
-  local look = { style = o.style, style2 = o.style2, look = o.look, look2 = o.look2 }
+  local look = { style = o.style, style2 = o.style2, look = o.look, look2 = o.look2, img = o.img, img2 = o.img2 }
   local ri = W.dual_inner_r(r, look)
   local mx, my = ImGui.GetMousePos(ctx)
   local function zone()
@@ -2188,7 +2240,7 @@ function W.dual_knob(ctx, id, label, v1, v2, o)
   local hot = turning or (hovered and zone()) or nil
   W.dual_face(dl, cx, cy, r, v1, v2, { cap = o.cap, dim = o.dim, hot = hot, mod1 = o.mod1, mod2 = o.mod2,
     bip1 = o.bip1, bip2 = o.bip2,
-    style = o.style, style2 = o.style2, look = o.look, look2 = o.look2, ctx = ctx })
+    style = o.style, style2 = o.style2, look = o.look, look2 = o.look2, img = o.img, img2 = o.img2, ctx = ctx })
   -- where it is, for a link's rings: the ring's radius and the inner knob's
   W.last_knob = { cx = cx, cy = cy, r = r, ri = ri, dual = true }
   -- its value inside: the inner knob's in its middle, the ring's under it
@@ -3018,13 +3070,29 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   -- has room (scrolling past COMBO_ROWS, or what fits), with a search box
   -- on top when it's long; the current one in view
   local list = steps or {}
+  -- in folders (sv.folder): those at the top, then each folder as a
+  -- submenu, in the order they're first met
+  local folders, n_rows = nil, #list
+  for _, sv in ipairs(list) do
+    if sv.folder then
+      folders = folders or { n = 0, at = {} }
+      if not folders.at[sv.folder] then
+        folders.n = folders.n + 1
+        folders[folders.n], folders.at[sv.folder] = sv.folder, folders.n
+      end
+    end
+  end
+  if folders then
+    n_rows = folders.n + 1
+    for _, sv in ipairs(list) do if not sv.folder then n_rows = n_rows + 1 end end
+  end
   local lh = ImGui.GetTextLineHeightWithSpacing(ctx)
   local pad_y = 8
   if ImGui.GetStyleVar then
     local ok, _, py = pcall(ImGui.GetStyleVar, ctx, ImGui.StyleVar_WindowPadding)
     if ok and py then pad_y = py end
   end
-  local list_h = math.min(#list, COMBO_ROWS) * lh + 2 * pad_y + 2
+  local list_h = math.min(n_rows, COMBO_ROWS) * lh + 2 * pad_y + 2
     + ((#list > COMBO_SEARCH) and ImGui.GetFrameHeightWithSpacing(ctx) or 0)
   local vp = ImGui.GetMainViewport and ImGui.GetMainViewport(ctx)
   if vp then list_h = math.min(list_h, select(2, ImGui.Viewport_GetWorkSize(vp)) * 0.85) end
@@ -3040,20 +3108,47 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
       q = U.trim(combo_find[pop] or ""):lower()
     end
     local first
-    for i, sv in ipairs(list) do
-      if q == "" or sv.text:lower():find(q, 1, true) then
-        local sel = st and math.abs(sv.norm - value) < st * 0.5
-                       or math.abs(sv.norm - value) < 1e-4
-        -- (a list read by name: the one with the name it shows now)
-        if opts.current then sel = (sv.text == opts.current) end
-        first = first or sv
-        local ink = opts.ink_of and opts.ink_of(sv)
-        if ink then ImGui.PushStyleColor(ctx, ImGui.Col_Text, ink) end
-        if ImGui.Selectable(ctx, sv.text .. "##s" .. i, sel and true or false) then
-          value, changed = sv.norm, true
+    local function is_sel(sv)
+      -- (a list read by name: the one with the name it shows now)
+      if opts.current then return sv.text == opts.current end
+      return (st and math.abs(sv.norm - value) < st * 0.5 or math.abs(sv.norm - value) < 1e-4) and true or false
+    end
+    local function item(i, sv)
+      local sel = is_sel(sv)
+      first = first or sv
+      local ink = opts.ink_of and opts.ink_of(sv)
+      if ink then ImGui.PushStyleColor(ctx, ImGui.Col_Text, ink) end
+      if ImGui.Selectable(ctx, sv.text .. "##s" .. i, sel) then
+        value, changed = sv.norm, true
+      end
+      if ink then ImGui.PopStyleColor(ctx) end
+      if sel and appearing then ImGui.SetScrollHereY(ctx, 0.4) end
+    end
+    if folders and q == "" then
+      local any_top = false
+      for i, sv in ipairs(list) do
+        if not sv.folder then item(i, sv); any_top = true end
+      end
+      if any_top then ImGui.Separator(ctx) end
+      for fi = 1, folders.n do
+        local f = folders[fi]
+        -- the current choice's folder in the accent colour
+        local here = false
+        for _, sv in ipairs(list) do if sv.folder == f and is_sel(sv) then here = true break end end
+        if here then ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.COL.accent) end
+        local open = ImGui.BeginMenu(ctx, f .. "##fold" .. fi)
+        if here then ImGui.PopStyleColor(ctx) end
+        if here and appearing then ImGui.SetScrollHereY(ctx, 0.4) end
+        if open then
+          for i, sv in ipairs(list) do
+            if sv.folder == f then item(i, sv) end
+          end
+          ImGui.EndMenu(ctx)
         end
-        if ink then ImGui.PopStyleColor(ctx) end
-        if sel and appearing then ImGui.SetScrollHereY(ctx, 0.4) end
+      end
+    else
+      for i, sv in ipairs(list) do
+        if q == "" or sv.text:lower():find(q, 1, true) then item(i, sv) end
       end
     end
     -- Enter takes the first match
@@ -3066,18 +3161,22 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   end
 
   if not opts.short then centred_text(ctx, dl, cx, y, label or "", C.COL.label, cw - 2, true) end
+  -- (opts.box: the box's own colour)
+  local box = opts.box
   if W.combo_raised(opts.style) then
     -- raised: a backlit button's cap, unlit, standing off the plate
+    local fill = box or C.COL.toggle_off
     W.hw_shadow_rect(dl, bx1, by1, bx2, by2, 3.0)
     ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
-      hovered and U.lighten(C.COL.toggle_off, 0.06) or C.COL.toggle_off, 3.0)
+      hovered and U.lighten(fill, 0.06) or fill, 3.0)
     vfill(dl, bx1 + 1, by1 + 1, bx2 - 1, by1 + (by2 - by1) * 0.5, 0xffffff12, 0xffffff00)
     ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, 0x00000099, 3.0, 0, 1.0)
   else
     -- flat, so no shadow (Minimal: no outline either)
     local mini = opts.style == "minimal"
     ImGui.DrawList_AddRectFilled(dl, bx1, by1, bx2, by2,
-      hovered and C.COL.knob_body_hi or C.COL.knob_body, mini and 2.0 or 3.0)
+      box and (hovered and U.lighten(box, 0.06) or box) or (hovered and C.COL.knob_body_hi or C.COL.knob_body),
+      mini and 2.0 or 3.0)
     if not mini then
       ImGui.DrawList_AddRect(dl, bx1, by1, bx2, by2, C.COL.knob_ring, 3.0, 0, 1.0)
     end
@@ -3098,7 +3197,8 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
   -- The box is a knob-body fill on every faceplate, so its text and caret
   -- take the toggle's ink, which is made for that fill -- not the panel's
   -- value ink, which a light faceplate (aluminium, cream) turns dark.
-  local ink = opts.ink or C.COL.toggle_text
+  -- (on a box of its own colour: light or dark to read on it)
+  local ink = opts.ink or (box and cap_ink(box)) or C.COL.toggle_text
   ImGui.DrawList_AddText(dl, cx - tw * 0.5, (by1 + by2) * 0.5 - th * 0.5, ink, txt)
 
   if wide then
@@ -3115,7 +3215,7 @@ function W.combo(ctx, id, label, value, formatted, step_norm, opts)
     ImGui.DrawList_AddTriangleFilled(dl, ax - 3, ay - 2, ax + 1, ay - 2, ax - 1, ay + 2,
       hovered and C.COL.icon_hot or U.with_alpha(ink, 0xa0))
   end
-  if opts.mod then W.mod_corner(dl, bx2, by1, 5, W.combo_raised(opts.style) and C.COL.toggle_off or C.COL.knob_body) end
+  if opts.mod then W.mod_corner(dl, bx2, by1, 5, box or (W.combo_raised(opts.style) and C.COL.toggle_off or C.COL.knob_body)) end
 
   W.tip(ctx, id, opts.tooltip, hovered, ImGui.IsItemActive(ctx))
   return changed, value, act, pressed
@@ -3542,6 +3642,94 @@ end
 -- the cell (x, y, w, h) the layout gave it. `o` = { dir = "h" or nil,
 -- thin, unity, look, tip, mod (the surface for the modulation mark, or
 -- nil for none) }. Returns changed, value, act.
+-- A fader of pictures (a control's Image, TS_CV_Mappings img_of): kind
+-- "cap", its cap (im.file) travelling the place less its own length over
+-- its slot (im.file2: stretched along the place, or with im.keep in its
+-- own proportions, centred); else a filmstrip, one frame per position.
+-- `dir` "h" runs across. The whole of x, y, w, h is its place; its name
+-- and value are in `tip`. Returns changed, value, act as W.fader.
+function W.picture_fader(ctx, id, x, y, w, h, value, im, dir, tip)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.SetCursorScreenPos(ctx, x, y)
+  ImGui.InvisibleButton(ctx, id, math.max(1, w), math.max(1, h),
+    ImGui.ButtonFlags_MouseButtonLeft | ImGui.ButtonFlags_MouseButtonRight)
+  local hovered = ImGui.IsItemHovered(ctx)
+  local active  = ImGui.IsItemActive(ctx)
+  local act = {
+    right_click  = ImGui.IsItemClicked(ctx, ImGui.MouseButton_Right),
+    double_click = hovered and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left),
+  }
+  local typing = type_press(ctx, id, act, active)
+  local across = dir == "h"
+  local changed = false
+  if active and not typing and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
+    local dx, dy = ImGui.GetMouseDelta(ctx)
+    local d = across and dx or -dy
+    if d ~= 0 then
+      local sens = 1 / math.max(1, across and w or h)
+      if (ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0 then sens = sens * C.FINE_MULT end
+      value = math.max(0, math.min(1, value + d * sens))
+      changed = true
+    end
+    ImGui.SetMouseCursor(ctx, across and ImGui.MouseCursor_ResizeEW or ImGui.MouseCursor_ResizeNS)
+  elseif hovered then
+    local wheel = W.control_wheel(ctx)
+    if wheel ~= 0 then
+      local stp = 0.01 * (((ImGui.GetKeyMods(ctx) & ImGui.Mod_Shift) ~= 0) and C.FINE_MULT or 1)
+      value = math.max(0, math.min(1, value + wheel * stp))
+      changed = true
+      W.take_wheel()
+    end
+  end
+  local tint = hovered and 0xffffffff or 0xf2f2f2ff
+  local v = math.max(0, math.min(1, value))
+  if im.kind == "cap" then
+    -- the slot
+    local slot, sw, sh
+    if im.file2 then slot, sw, sh = W.picture(ctx, im, im.file2) end
+    if slot and sw and sh then
+      if im.keep or type(slot) == "table" then
+        W.draw_frame(dl, slot, sw, sh, { frames = 1 }, 0, x, y, x + w, y + h)
+      else
+        ImGui.DrawList_AddImage(dl, slot, x, y, x + w, y + h)
+      end
+    else
+      local cx, cy = x + w * 0.5, y + h * 0.5
+      if across then ImGui.DrawList_AddRectFilled(dl, x + 2, cy - 1.5, x + w - 2, cy + 1.5, C.COL.knob_ring, 1)
+      else ImGui.DrawList_AddRectFilled(dl, cx - 1.5, y + 2, cx + 1.5, y + h - 2, C.COL.knob_ring, 1) end
+    end
+    -- the cap, its own proportions, across the place's width (height
+    -- across), Size larger or smaller
+    local img, iw, ih = W.picture(ctx, { frames = 1, dir = "down" }, im.file)
+    if img and iw and ih and iw > 0 and ih > 0 then
+      local grow = 1 + 0.18 * (im.size or 0)
+      local cw, ch, cx0, cy0
+      if across then
+        ch = h * grow; cw = ch * iw / ih
+        cx0 = x + (w - cw) * v; cy0 = y + (h - ch) * 0.5
+      else
+        cw = w * grow; ch = cw * ih / iw
+        cx0 = x + (w - cw) * 0.5; cy0 = y + (h - ch) * (1 - v)
+      end
+      local one = { frames = 1, shadow = im.shadow }
+      W.picture_shadow(one, math.min(cw, ch) * 0.5, function(ddx, ddy, g, col)
+        W.draw_frame(dl, img, iw, ih, { frames = 1 }, 0, cx0 + ddx - g, cy0 + ddy - g, cx0 + cw + ddx + g, cy0 + ch + ddy + g, col)
+      end)
+      W.draw_frame(dl, img, iw, ih, { frames = 1 }, 0, cx0, cy0, cx0 + cw, cy0 + ch, tint)
+    end
+  else
+    local img, iw, ih = W.picture(ctx, im)
+    if img then
+      local n = math.max(1, im.frames or 1)
+      local k = math.floor(v * (n - 1) + 0.5)
+      if im.hi then k = n - 1 - k end
+      W.draw_frame(dl, img, iw, ih, im, k, x, y, x + w, y + h, tint)
+    end
+  end
+  W.tip(ctx, id, tip, hovered, active)
+  return changed, value, act
+end
+
 function W.param_fader(ctx, id, x, y, w, h, value, label, shown, o)
   o = plain(o)
   -- no style of its own: Options' default fader

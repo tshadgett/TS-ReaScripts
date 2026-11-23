@@ -1350,13 +1350,15 @@ draw_entry_body = function(ctx)
     row_name("Scale")
     local kind = M.scale_kind(c)
     ImGui.SetNextItemWidth(ctx, 100)
-    local scch, sci = ImGui.Combo(ctx, "##scale", (kind == "values") and 1 or (kind == "ten") and 2 or 0,
-      "None\0Values\0" .. "0\u{2013}10\0")
+    local scch, sci = ImGui.Combo(ctx, "##scale",
+      (c.scale == "blank") and 3 or (kind == "values") and 1 or (kind == "ten") and 2 or 0,
+      "None\0Values\0" .. "0\u{2013}10\0Nothing\0")
     if scch then
-      c.scale = (sci == 0) and "none" or (sci == 2) and "ten" or nil
-      if c.scale == "none" then c.scale_ink = nil end
+      c.scale = (sci == 0) and "none" or (sci == 2) and "ten" or (sci == 3) and "blank" or nil
+      if c.scale == "none" or c.scale == "blank" then c.scale_ink = nil end
     end
     tip("Numbers round the dial: its values, or 0 to 10.\n" ..
+      "Nothing: no numbers and no value under it (it's in the tooltip).\n" ..
       "Not on small knobs.")
     values_row(c.param)
     if c.type == "stepped" then steps_row(c) end
@@ -1416,8 +1418,8 @@ draw_entry_body = function(ctx)
       if dch then c.dir = (di == 1) and "h" or nil end
       row_name("Length")
       ImGui.SetNextItemWidth(ctx, FIELD_W)
-      local lch, li = ImGui.Combo(ctx, "##len", c.len and (c.len - 2) or 3, "2\0" .. "3\0" .. "4\0Full\0")
-      if lch then c.len = (li < 3) and (li + 2) or nil end
+      local lch, li = ImGui.Combo(ctx, "##len", c.len and (c.len - 1) or 4, "1\0" .. "2\0" .. "3\0" .. "4\0Full\0")
+      if lch then c.len = (li < 4) and (li + 1) or nil end
       tip("In rows (across: columns), or full height (across: full width).")
     end
     if not st.grid then  -- (on a grid: the size of its place)
@@ -1437,12 +1439,19 @@ draw_entry_body = function(ctx)
     if sch then c.size = (si > 0) and list[si + 1] or nil end
     tip("Columns \u{00d7} rows.")
   elseif c.type == "dual" then
+    -- its values under it, or nothing there (Scale<n>=blank: in the tooltip)
+    row_name("Scale")
+    ImGui.SetNextItemWidth(ctx, 100)
+    local scch, sci = ImGui.Combo(ctx, "##dscale", (c.scale == "blank") and 1 or 0, "Values\0Nothing\0")
+    if scch then c.scale = (sci == 1) and "blank" or nil end
+    tip("Nothing: no values under it (they're in the tooltip).")
     values_row(c.param)
     if not st.grid then  -- (on a grid: the size of its place)
       row_name("Size")
       ImGui.SetNextItemWidth(ctx, FIELD_W)
-      local sch, si = ImGui.Combo(ctx, "##dsize", (c.size == "large") and 1 or 0, "Medium\0Large\0")
-      if sch then c.size = (si == 1) and "large" or nil end
+      local sch, si = ImGui.Combo(ctx, "##dsize", (c.size == "xl") and 2 or (c.size == "large") and 1 or 0,
+        "Medium\0Large\0Extra large\0")
+      if sch then c.size = ({ "large", "xl" })[si] end
     end
   end
 
@@ -1671,11 +1680,16 @@ draw_entry_body = function(ctx)
     else
       st.scratch.choice_names = st.scratch.choice_names or {}
       local map = st.scratch.choice_names[c.param] or {}
+      -- a dropdown's: the folder each is in, in the open list (Folders<p>)
+      local folds = c.type == "combo"
+      st.scratch.choice_folders = st.scratch.choice_folders or {}
+      local fmap = st.scratch.choice_folders[c.param] or {}
+      local fw = folds and math.floor((FIELD_W - 16) * 0.38) or 0
       local fh = ImGui.GetFrameHeightWithSpacing(ctx)
       if ImGui.BeginChild(ctx, "##edchn", FIELD_W, math.min(#list, 8) * fh + 4, 0) then
         for i, e in ipairs(list) do
           local t = e.text or tostring(i)
-          ImGui.SetNextItemWidth(ctx, FIELD_W - 16)
+          ImGui.SetNextItemWidth(ctx, FIELD_W - 16 - (folds and (fw + 4) or 0))
           local ch, nv = ImGui.InputTextWithHint(ctx, "##edchn" .. i, t, map[t] or "")
           if ch then
             -- (kept untrimmed while typing; trimmed when saved)
@@ -1683,6 +1697,16 @@ draw_entry_body = function(ctx)
             st.scratch.choice_names[c.param] = next(map) and map or nil
           end
           tip("For \"" .. t .. "\". Empty: the plugin's own.")
+          if folds then
+            ImGui.SameLine(ctx, 0, 4)
+            ImGui.SetNextItemWidth(ctx, fw)
+            local fch, fv = ImGui.InputTextWithHint(ctx, "##edchf" .. i, "folder", fmap[t] or "")
+            if fch then
+              fmap[t] = (U.trim(fv) ~= "") and fv or nil
+              st.scratch.choice_folders[c.param] = next(fmap) and fmap or nil
+            end
+            tip("Its folder in the open list. Empty: the top.")
+          end
         end
         ImGui.EndChild(ctx)
       end

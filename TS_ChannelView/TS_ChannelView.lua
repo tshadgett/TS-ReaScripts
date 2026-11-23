@@ -1,12 +1,12 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.6.0
+-- @version 4.7.0
 -- @changelog
---  Reported gain reduction read as a meter (steady, the same with the
---  plugin's window open or shut). No input meter on an instrument; the
---  shared meter centred in its gap; Narrow meters narrower than Normal
---  without scales; the add-plugin search keeps the keyboard.
---  Moves with ChannelView Pro 4.6.0. See the CHANGELOG.
+--  Folders in a dropdown's list (Choice names). Nothing round a knob's
+--  dial (no numbers, no value under it), and under a concentric knob.
+--  A concentric knob's or XY pad's name hides. Extra large concentric
+--  knobs, faders one row long. Moves with ChannelView Pro 4.7.0. See the
+--  CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

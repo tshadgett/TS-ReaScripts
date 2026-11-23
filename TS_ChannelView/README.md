@@ -1391,8 +1391,9 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   the plugin's own window puts it on the panel. A parameter already on the
   panel is greyed: click it to select it there, drag it to move it.
 - **In the middle**, the panel as it is, with the grid over it in quarter
-  cells (**Fine grid**, in the toolbar, or Alt held while dragging: half
-  steps). Drag a control to move
+  cells. **Snap**, in the toolbar, sets how finely things move and size:
+  a quarter of a cell, an eighth, a sixteenth or a thirty-second (Alt held
+  while dragging: a step finer). Drag a control to move
   it, and its corner to resize it: a knob's width steps it small, medium,
   large and extra large, and it can be made taller than it needs (a small
   one a step taller shows its name); a fader goes upright or across, a
@@ -1410,7 +1411,9 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   cells; **+** adds one at the end.
 - **On the right**, everything about what's selected. For a control: its
   type, its alias and label, its values and scale, state names,
-  Show when, a virtual control's name, choices and actions, then its
+  Show when, a virtual control's name, choices and actions, its **Layer**
+  (a picture, a visualiser or an EQ curve: *Normal*, or *Behind*, drawn
+  under everything else so controls can sit over it), then its
   **Style**, **Background** and **Copy and paste the style**, as its
   right-click has them (automation stays on the right-click). Its size
   (a knob's or a button's, a fader's length, thickness and way) is what
@@ -1460,8 +1463,9 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   settings the controls share (size, scale, Show when, centred, reverse,
   style, background), made on all of them. **Copy** and **Paste** make
   copies where they first fit, here or in another of the plugin's
-  layouts: a virtual control gets a name of its own, and a parameter
-  already on the panel isn't pasted. Into another plugin's layout, each
+  layouts: a virtual control gets a name of its own, a parameter already
+  on the panel isn't pasted, and text, pictures and visualisers always
+  are. Into another plugin's layout, each
   goes to the parameter of the same name there (or your alias for it),
   keeping its look and place; any that plugin hasn't got are left out and
   named. With several selected, a control's right-click has **Paste
@@ -1485,6 +1489,9 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
   controls by their names; **Set up its controls…** on the right picks
   them, **Guess them again** starts over. Drag their handles as on a
   canvas. Each draws as it would on its canvas:
+  - **Spectrum**: the track's spectrum, nothing to set up. **Draw**:
+    *Line*, *Fill* or *Both*; **Smooth**: *Off*, *Light*, *Some* (the
+    usual) or *More*. Put it *Behind* for a plugin's own backdrop.
   - **EQ curve**: an EQ's bands. On a layout with an EQ canvas, the
     canvas's bands (several curves share them, and there's no canvas
     beside the controls); otherwise bands of its own, guessed and set up
@@ -1518,7 +1525,7 @@ becomes one as it opens, arranged as it was (**Undo** puts it back).
     buttons*. **Stereo**: two meters, left and right (GR stays one). A
     peak lamp lights at -1 dBFS.
 
-  The meters, Threshold, Frequency range and Width are measured by the
+  The meters, Spectrum, Threshold, Frequency range and Width are measured by the
   TS_TrackProbe pair (Width and the stereo VU need TS_TrackProbe 2.4.0:
   reopen a project after updating); choosing one offers to add the pair.
   The web page shows VU meters too, its In / Out / GR buttons changing
@@ -1592,7 +1599,9 @@ or following ChannelView's).
   faceplate with a shadow under it; *Flat* (the default) prints it on the
   panel. *Apply to every dropdown on this panel* does the rest.
 - **(Pro) Dropdown colours.** Right-click a dropdown ▸ Style ▸ *Text
-  colour* sets the colour of its text, and *Choice colours* gives any of
+  colour* sets the colour of its text, *Box colour* the colour of its box
+  (its text, unless you've set one, turns light or dark to read on it),
+  and *Choice colours* gives any of
   its choices a colour of its own: the dropdown's text takes the colour of
   the choice it's on, and its list shows each in its colour. On a dropdown
   shown as buttons, each choice's button lights in its own colour. The web
@@ -1611,7 +1620,7 @@ or following ChannelView's).
   *Soft* or *Round*. Sections in a row with the same style, faceplate,
   finish and corners join into one.
 - **Faders of any shape.** Right-click a fader ▸ Style ▸ Shape, or in the
-  editor: *Direction* up or across, *Length* 2, 3 or 4 rows (columns,
+  editor: *Direction* up or across, *Length* 1, 2, 3 or 4 rows (columns,
   across) or *Full*, *Thickness* a whole column (row) or half of one. Up
   and full is the standard fader, a column of its own at the panel's full
   height. The rest sit among the controls, their name over
@@ -1628,12 +1637,14 @@ or following ChannelView's).
   knob (in the cap colour) a second, chosen in the control's menu or the
   editor. Where a drag starts decides which turns; the wheel turns the
   inner knob, Shift+wheel the ring; double-click puts back the one under
-  the pointer. Medium or large. Either half of a concentric knob or an XY
+  the pointer. Medium, large or extra large. Either half of a concentric knob or an XY
   pad can be reversed on its own. Its **Style** is *Default* (a lit ring
   round a soft dome), *Arc (flat)* (the outer value as an arc round a flat
   knob that shows the inner one, and how it draws with the 3D effect off),
   or any knob recipe for the outer knob with another for the inner;
-  *Customise…* edits either, with an *Outer / Inner* switch.
+  *Customise…* edits either, with an *Outer / Inner* switch. (Pro)
+  *Outer image…* and *Inner image…* make either half a picture of your
+  own (below, Your own pictures).
 - **Where they go.** Controls fill a column top to bottom, then the next,
   in the panel list's order. A fader among the controls or an XY pad takes
   every cell it covers — like merged cells in a spreadsheet — and what
@@ -1739,7 +1750,10 @@ Leave a box empty to keep the plugin's. They're the plugin's everywhere
 that parameter shows: the dropdown and its list, a dropdown shown as
 buttons, a stepped knob, tooltips, the Show-rule pickers and the web page.
 Each follows its choice by the plugin's name for it, so a plugin that
-reorders its list keeps them right. **Names follow** sets them per
+reorders its list keeps them right. A dropdown's have a **Folder** box
+beside each: choices in the same folder open as a submenu of the list
+(those with none at the top), the current one's folder in the accent
+colour; searching the list looks in them all. **Names follow** sets them per
 setting of another control, for a list that changes with it and only
 numbers its choices (a reverb's presets by bank): pick the setting to name
 in *Naming* (which switches the plugin to it). **How many** leaves the
@@ -2067,7 +2081,9 @@ number in that unit (20 kHz), whatever its range runs to. A readout that
 has a unit of the same kind already is put in it too: *ms* on one reading
 2000.0 ms shows 2.00 s. The same is in
 the editor's *Values* row. For a knob, *Values* also holds the **numbers
-round the dial**: *None*, *Values* or *0–10*.
+round the dial**: *None*, *Values*, *0–10* or *Nothing* (no numbers and no
+value under it either: the value's in its tooltip). A concentric knob's
+has *Under it*: *Values* or *Nothing*.
 
 ## Options
 
@@ -2191,7 +2207,13 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   the highest. *Size*: smaller, fitting the dial, or larger. The value
   arc, the numbers round it and the modulation ring can be drawn over it.
   A button's Style ▸ **Image...** takes a strip of two frames (Off, then
-  On) or a picture for each. *Shadow*: none (for pictures with their own),
+  On) or a picture for each. A concentric knob's Style has **Outer
+  image...** and **Inner image...**: the ring as a picture, the inner knob
+  as another, or either one alone with the other drawn; **Matched to the
+  outer** is for an inner picture made at the outer's size, the knob in
+  its middle. A fader's Style ▸ **Image...** takes a **cap** over a
+  **slot** (the slot stretched to the fader, or *kept* to its own shape)
+  or a filmstrip; the cap travels the fader's place. *Shadow*: none (for pictures with their own),
   normal or tall, cast by the picture's own shape. Apply it to the one control, its section or
   every one on the panel. Pictures are copied into `Images/` beside your
   layouts, and the web page shows them too. Every picture you add goes
@@ -2246,11 +2268,15 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   **Strength**, under the list, sets how strongly it shows (0 to 200 %),
   for the faceplate, and for each section and background in theirs. The
   **Metallic flake** (a fine flake and sheen, like metallic paint) goes
-  over any of them. **Picture...** (in the Faceplate menu, a section's and a
+  over any of them. **Gradient** (in the Faceplate menu, and a section's
+  on a faceplate) runs from its colour to another: *Down*, *Across* or
+  *Radial* (its colour in the middle). **Picture...** (in the Faceplate menu, a section's and a
   background's) puts a picture of your own on it instead: **Stretch**ed
   over it, **Fill**ing it (cut to its shape), **Tile**d at its own size,
   or with its **Edges kept** (the corners and edges as they are, the
-  middle stretched, for a rack panel with screws at any size). The labels
+  middle stretched, for a rack panel with screws at any size). A
+  faceplate's picture **Covers** *The panel*, or *The grid*: over the
+  grid's place alone, so a plugin's own face can be laid out on it. The labels
   on it take their ink from the picture's colour. Your surface pictures
   are kept in Your pictures, shown in those menus too: one click puts one
   on. The menus' lists of faceplates and pictures fold away. (On the web
@@ -2266,7 +2292,7 @@ panel's **=** menu ▸ **Faceplate** to change the panel behind it.
   Arc and LED ring knobs and Slim faders.
 - **Numbered scales:** knobs print numbers round their dial — **Values**
   (the plugin's own, units left off and thousands as k, so 12000 Hz reads
-  12k) unless a knob's **Values** menu (or the editor's *Scale*) says **0–10** or **None**. A large knob has room for seven
+  12k) unless a knob's **Values** menu (or the editor's *Scale*) says **0–10**, **None** or **Nothing**. A large knob has room for seven
   values (eleven for 0–10, or every step of a stepped knob with up to
   eleven); a medium one for three, its ends and middle (six for 0–10, or
   every step up to five). The knob keeps its size, so a number with no

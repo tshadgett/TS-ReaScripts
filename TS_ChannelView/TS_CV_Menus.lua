@@ -315,6 +315,42 @@ local function swatch_extras(id, now, from, title, pick_key, fx)
   palette_row(fx, id, pick_key)
 end
 
+-- A faceplate's gradient (TS_CV_Mappings grad_of), as a submenu: none,
+-- down, across or radial, and the colour it goes to. `g` the gradient now,
+-- `pl` the faceplate (its colour the start), `put(g, save)` sets it.
+local function grad_menu(id, g, pl, set_g, fx)
+  if ImGui.BeginMenu(ctx, "Gradient##" .. id, pl ~= nil) then
+    local dir = g and g.dir or nil
+    -- (to start with: the faceplate's colour, darker)
+    local function dark()
+      local rgb = (pl.bg >> 8) & 0xffffff
+      local r, gg, b = (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff
+      return hex_key((math.floor(r * 0.45) << 16) | (math.floor(gg * 0.45) << 8) | math.floor(b * 0.45))
+    end
+    for _, d in ipairs({ { nil, "None" }, { "down", "Down" }, { "across", "Across" }, { "radial", "Radial" } }) do
+      if ImGui.MenuItem(ctx, d[2] .. "##" .. id .. "_gd" .. d[2], nil, dir == d[1]) then
+        set_g(d[1] and { dir = d[1], col = (g and g.col) or dark() } or nil, true)
+      end
+      if d[1] == "radial" and ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "The faceplate's colour in the middle, the other out to the corners.")
+      end
+    end
+    ImGui.Separator(ctx)
+    ImGui.TextDisabled(ctx, "To")
+    local function to(k, save) set_g({ dir = dir or "down", col = k }, save) end
+    for _, p2 in ipairs(C.PLATES) do
+      if p2.bg and swatch_row(p2.label, id .. "_gc" .. p2.key, g ~= nil and g.col == p2.key, 150, p2.bg, p2.border) then
+        to(p2.key, true)
+      end
+    end
+    local now = g and C.plate_of(g.col)
+    custom_rows(id .. "_g", g and g.col, 150, to, "Gradient colour", now and (now.bg >> 8), fx)
+    ImGui.EndMenu(ctx)
+  elseif ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+    ImGui.SetTooltip(ctx, pl and "From the faceplate's colour to another." or "Choose a faceplate first.")
+  end
+end
+
 local function plate_menu(fx, key, layout)
   local cur = layout.plate or "theme"
   local dl = ImGui.GetWindowDrawList(ctx)
@@ -400,6 +436,12 @@ local function plate_menu(fx, key, layout)
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
     ImGui.SetTooltip(ctx, plate and "The faceplate's surface." or "Choose a faceplate first.")
   end
+  grad_menu("plate", layout.grad, plate, function(g, save)
+    local l, pk = materialise(fx)
+    l.grad = g
+    M.set(pk, l)
+    if save then M.save() end
+  end, fx)
   -- and/or a metallic flake, like metallic paint
   local mt = M.metal(layout, plate)
   if ImGui.MenuItem(ctx, "Metallic flake##plate_metal", nil, mt, plate ~= nil) then
@@ -818,6 +860,13 @@ local function section_menu(fx, key, idx, c)
   brush_tick(fx, key, idx, c, skind, spl, "sec_brush")
   corners_combo(fx, key, idx, c, skind, "sec_corners")
   ImGui.EndDisabled(ctx)
+  grad_menu("sec", c.grad, (skind == "plate") and spl or nil, function(g, save)
+    local l, pk = materialise(fx)
+    local lc = l.controls[idx]
+    if lc then lc.grad = g end
+    M.set(pk, l)
+    if save then M.save() end
+  end, fx)
   -- a picture of your own for the section
   local function put_pic(k, col)
     local l, pk = materialise(fx)
@@ -886,19 +935,19 @@ local function pad_style_menu(fx, key, idx, c)
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Columns \u{00d7} rows.") end
     end
   else
-    local now = (c.size == "large") and "large" or "medium"
-    for i, k in ipairs({ "medium", "large" }) do
+    local now = (c.size == "large" or c.size == "xl") and c.size or "medium"
+    for i, k in ipairs({ "medium", "large", "xl" }) do
       if i > 1 then ImGui.SameLine(ctx, 0, 4) end
       if ImGui.Selectable(ctx, C.SIZES[k].label .. "##psize_" .. k, k == now, KEEP_OPEN, 56, 0) then
-        set({ size = (k == "large") and "large" or false })
+        set({ size = (k ~= "medium") and k or false })
       end
     end
   end
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Reset to default", nil, false, c.cap ~= nil or c.size ~= nil
-      or c.style ~= nil or c.look ~= nil or c.style2 ~= nil or c.look2 ~= nil) then
-    set({ cap = false, size = false, style = false, look = false, style2 = false, look2 = false })
+      or c.style ~= nil or c.look ~= nil or c.style2 ~= nil or c.look2 ~= nil or c.img ~= nil or c.img2 ~= nil) then
+    set({ cap = false, size = false, style = false, look = false, style2 = false, look2 = false, img = false, img2 = false })
   end
 end
 
@@ -984,8 +1033,8 @@ dual_style_grid = function(fx, key, idx, c)
     local x, y = ImGui.GetCursorScreenPos(ctx)
     local on = not c.look and ((it.key or nil) == c.style)
     if on then now_label = it.label end
-    if ImGui.Selectable(ctx, "##dstyle_" .. i, on, KEEP_OPEN, CS, CS) then
-      set({ style = it.key, look = false })
+    if ImGui.Selectable(ctx, "##dstyle_" .. i, on and not c.img, KEEP_OPEN, CS, CS) then
+      set({ style = it.key, look = false, img = false })
     end
     if ImGui.IsItemHovered(ctx) then hov = it.label end
     thumb(x, y, { style = it.key or nil, style2 = c.style2, look2 = c.look2 })
@@ -998,7 +1047,7 @@ dual_style_grid = function(fx, key, idx, c)
       if (i - 1) % COLS ~= 0 then ImGui.SameLine(ctx, 0, 2) end
       local x, y = ImGui.GetCursorScreenPos(ctx)
       if ImGui.Selectable(ctx, "##dmine_" .. i, false, KEEP_OPEN, CS, CS) then
-        set({ look = KPm.copy(r.look), style = (c.style ~= "arc") and c.style or false })
+        set({ look = KPm.copy(r.look), style = (c.style ~= "arc") and c.style or false, img = false })
       end
       if ImGui.IsItemHovered(ctx) then hov = r.name end
       thumb(x, y, { look = r.look, style2 = c.style2, look2 = c.look2 })
@@ -1018,9 +1067,9 @@ dual_style_grid = function(fx, key, idx, c)
     for _, st in ipairs(C.KNOB_STYLES) do
       if st.parts then
         local x, y = cell()
-        local on = not c.look2 and (c.style2 or "softtouch") == st.key
+        local on = not c.look2 and not c.img2 and (c.style2 or "softtouch") == st.key
         if ImGui.Selectable(ctx, "##dinner_" .. st.key, on, KEEP_OPEN, CS, CS) then
-          set({ style2 = (st.key ~= "softtouch") and st.key or false, look2 = false })
+          set({ style2 = (st.key ~= "softtouch") and st.key or false, look2 = false, img2 = false })
         end
         if ImGui.IsItemHovered(ctx) then hov = "Inner: " .. st.label end
         thumb(x, y, { style = c.style, look = c.look, style2 = st.key })
@@ -1029,7 +1078,7 @@ dual_style_grid = function(fx, key, idx, c)
     for i, r in ipairs(mine) do
       local x, y = cell()
       if ImGui.Selectable(ctx, "##dinmine_" .. i, false, KEEP_OPEN, CS, CS) then
-        set({ look2 = KPm.copy(r.look), cap = false })
+        set({ look2 = KPm.copy(r.look), cap = false, img2 = false })
       end
       if ImGui.IsItemHovered(ctx) then hov = "Inner: " .. r.name end
       thumb(x, y, { style = c.style, look = c.look, look2 = r.look })
@@ -1055,6 +1104,23 @@ dual_style_grid = function(fx, key, idx, c)
               apply = FRM.keep(fx, function(o, scope, i) apply_dual(fx, idx, o, i, scope) end) })
   end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Build both knobs from parts.") end
+  -- pictures of your own, for the ring and the inner knob
+  if ED.PRO then
+    local name = (fx.name or "") .. "  \u{00B7}  " .. ((c.label and c.label ~= "") and c.label or "Concentric knob")
+    for _, w in ipairs({ { "img", "Outer image...", "Outer", "The ring as a picture of your own: a filmstrip, or one that turns." },
+                         { "img2", "Inner image...", "Inner", "The inner knob as a picture of your own." } }) do
+      if ImGui.Selectable(ctx, w[2] .. "##dstyle_" .. w[1], c[w[1]] ~= nil, 0, 150, 0) then
+        KE.open_image({ title = name .. "  \u{00B7}  " .. w[3], img = c[w[1]], inner = (w[1] == "img2") or nil,
+                        apply = FRM.keep(fx, function(im, scope)
+                          local l, pk = materialise(fx)
+                          M.put_img(l, idx, im, scope, w[1])
+                          M.set(pk, l); M.save()
+                        end) })
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, w[4]) end
+    end
+  end
+  if c.img then now_label = "Your picture" end
   ImGui.DrawList_AddText(dl, title_x, title_y, C.COL.header_dim or 0x9a9a9aff, "Style: " .. (hov or now_label))
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
@@ -1207,13 +1273,51 @@ local function combo_style_menu(fx, key, idx, c)
     local ink = W.lit_col(c.cap) or C.COL.toggle_text
     swatch_extras("ctext", c.cap, ink >> 8, "Text colour", choose, fx)
   end
+  -- the box's own colour: the theme's, a faceplate's or your own
+  ImGui.Spacing(ctx)
+  ImGui.TextDisabled(ctx, "Box colour")
+  do
+    local now = C.plate_key(c.boxc)
+    local function choose(k, save)
+      local l, pk = materialise(fx)
+      local lc = l.controls[idx]
+      if lc then lc.boxc = k end
+      M.set(pk, l)
+      if save then M.save() end
+    end
+    local n = 0
+    local function mark()
+      local x0, y0 = ImGui.GetItemRectMin(ctx)
+      local x1, y1 = ImGui.GetItemRectMax(ctx)
+      ImGui.DrawList_AddRect(dl, x0 - 2, y0 - 2, x1 + 2, y1 + 2, C.COL.header_text, 3.0, 0, 1.5)
+    end
+    if ImGui.ColorButton(ctx, "Theme##cbox_theme", W.combo_raised(c.style) and C.COL.toggle_off or C.COL.knob_body,
+        ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+      choose(nil, true)
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Theme") end
+    if not now then mark() end
+    for _, pl in ipairs(C.PLATES) do
+      if pl.bg then
+        n = n + 1
+        if n % 8 ~= 0 then ImGui.SameLine(ctx, 0, 4) end
+        if ImGui.ColorButton(ctx, pl.label .. "##cbox_" .. pl.key, pl.bg, ImGui.ColorEditFlags_NoTooltip, 18, 18) then
+          choose(pl.key, true)
+        end
+        if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, pl.label) end
+        if now == pl.key then mark() end
+      end
+    end
+    local pl_now = now and C.plate_of(now)
+    swatch_extras("cbox", c.boxc, pl_now and (pl_now.bg >> 8), "Box colour", choose, fx)
+  end
   app.choice_colours(fx, key, idx, c)
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
   if ImGui.MenuItem(ctx, "Apply to every dropdown on this panel") then
     local l = materialise(fx)
     for _, o in ipairs(l.controls) do
-      if o.type == "combo" and not o.buttons then o.style = c.style end
+      if o.type == "combo" and not o.buttons then o.style, o.boxc = c.style, c.boxc end
     end
     M.set(key, l); M.save()
   end
@@ -1349,9 +1453,22 @@ local function style_menu(fx, key, idx, c)
   else
     ImGui.TextDisabled(ctx, "Style")
     for _, st in ipairs(list) do
-      if ImGui.Selectable(ctx, st.label .. "##style_" .. st.key, st.key == cur, KEEP_OPEN, 150, row_h) then
-        set({ style = st.key })
+      if ImGui.Selectable(ctx, st.label .. "##style_" .. st.key, st.key == cur and not c.img, KEEP_OPEN, 150, row_h) then
+        set({ style = st.key, img = false })
       end
+    end
+    -- a fader of your own pictures: its cap over its slot, or a filmstrip
+    if fam == "fader" and ED.PRO then
+      if ImGui.Selectable(ctx, "Image...##style_fimage", c.img ~= nil, 0, 150, 0) then
+        KE.open_image({ title = (fx.name or "") .. "  \u{00B7}  " .. ((c.label and c.label ~= "") and c.label or "Fader"),
+                        img = c.img, fader = true, across = c.dir == "h",
+                        apply = FRM.keep(fx, function(im, scope)
+                          local l, pk = materialise(fx)
+                          M.put_img(l, idx, im, scope)
+                          M.set(pk, l); M.save()
+                        end) })
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Pictures of your own: a cap over a slot, or a filmstrip.") end
     end
   end
 
@@ -1371,7 +1488,7 @@ local function style_menu(fx, key, idx, c)
     end
     row("Direction", { { false, "Up" }, { "h", "Across" } }, c.dir or false,
       function(v) set({ dir = v }) end)
-    row("Length", { { 2, "2" }, { 3, "3" }, { 4, "4" }, { false, "Full" } }, c.len or false,
+    row("Length", { { 1, "1" }, { 2, "2" }, { 3, "3" }, { 4, "4" }, { false, "Full" } }, c.len or false,
       function(v) set({ len = v }) end)
     row("Thickness", { { false, "Full" }, { true, "Half" } }, c.thin or false,
       function(v) set({ thin = v }) end)
@@ -1524,7 +1641,7 @@ local function style_menu(fx, key, idx, c)
         if style_family(o.type) == fam then
           o.style, o.cap = src.style, src.cap
           if fam == "knob" then o.scale_ink, o.arc, o.bipolar, o.arcc = src.scale_ink, src.arc, src.bipolar, src.arcc end
-          if fam == "fader" then o.dir, o.len, o.thin = src.dir, src.len, src.thin end
+          if fam == "fader" then o.dir, o.len, o.thin, o.img = src.dir, src.len, src.thin, M.copy_img(src.img) end
         end
       end
     end
@@ -2353,8 +2470,10 @@ local function look_text(s)
   if s.fam == "knob" then
     local sc = M.scale_kind(s)
     if sc == "values" then parts[#parts + 1] = "values scale"
-    elseif sc == "ten" then parts[#parts + 1] = "0\u{2013}10 scale" end
+    elseif sc == "ten" then parts[#parts + 1] = "0\u{2013}10 scale"
+    elseif s.scale == "blank" then parts[#parts + 1] = "no numbers" end
   end
+  if s.img and s.img.file then parts[#parts + 1] = "picture" end
   if s.back then
     local pl = C.plate_of(s.back)
     parts[#parts + 1] = "on " .. ((s.back == "inset") and "Inset" or (pl and pl.label) or s.back)
@@ -2853,7 +2972,16 @@ local function name_menu(fx, key, layout, idx, c)
       local rows = math.min(#list, 12)
       local entered = false
       local fh = ImGui.GetFrameHeightWithSpacing(ctx)
-      if ImGui.BeginChild(ctx, "##chnames", 250, rows * fh + 4, 0) then
+      -- a dropdown's: the folder each is in, in the open list
+      local folds = c.type == "combo"
+      app.fold_buf = app.fold_buf or {}
+      local fbuf = app.fold_buf
+      if folds then
+        ImGui.TextDisabled(ctx, "Name")
+        ImGui.SameLine(ctx, 212)
+        ImGui.TextDisabled(ctx, "Folder")
+      end
+      if ImGui.BeginChild(ctx, "##chnames", folds and 360 or 250, rows * fh + 4, 0) then
         for i, e in ipairs(list) do
           local t = e.text or tostring(i)
           local hidden = buf[t] == HID
@@ -2863,6 +2991,16 @@ local function name_menu(fx, key, layout, idx, c)
           if not hidden then
             if enter_pressed() then entered = true end
             buf[t] = nv
+          end
+          if folds then
+            ImGui.SameLine(ctx, 0, 4)
+            ImGui.SetNextItemWidth(ctx, 106)
+            local _, fv = ImGui.InputTextWithHint(ctx, "##chf" .. i, "\u{2014}", hidden and "" or (fbuf[t] or ""))
+            if not hidden then
+              if enter_pressed() then entered = true end
+              fbuf[t] = fv
+            end
+            if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Its folder in the list. Empty: the top.") end
           end
           if hidden then ImGui.EndDisabled(ctx) end
           ImGui.SameLine(ctx, 0, 4)
@@ -2876,11 +3014,12 @@ local function name_menu(fx, key, layout, idx, c)
       if ImGui.Button(ctx, "Set##choices") or entered then
         materialise(fx)
         M.set_choice_names(key, c.param, buf, app.track, fx.addr, by and app.choice_ctx or nil)
+        if folds then M.set_choice_folders(key, c.param, fbuf) end
         M.save()
         ImGui.CloseCurrentPopup(ctx)
       end
       ImGui.SameLine(ctx)
-      if ImGui.Button(ctx, "Clear##choices") then app.choice_buf = {} end
+      if ImGui.Button(ctx, "Clear##choices") then app.choice_buf, app.fold_buf = {}, {} end
       tip("Empty: the plugin's own name (Set after Clear: all back).")
     end
   end
@@ -2917,19 +3056,42 @@ local function values_menu(fx, key, layout, idx, c)
   end
   -- numbers round the dial, like a hardware knob's printed scale (a
   -- knob's; values unless it says otherwise; a small knob has no room)
+  -- a concentric knob's: its values under it, or nothing there
+  if c.type == "dual" then
+    ImGui.TextDisabled(ctx, "Under it")
+    for i, o in ipairs({ { false, "Values" }, { "blank", "Nothing" } }) do
+      if i > 1 then ImGui.SameLine(ctx, 0, 4) end
+      if ImGui.Selectable(ctx, o[2] .. "##dscale_" .. i, (c.scale == "blank") == (o[1] == "blank"), KEEP_OPEN, 56, 0) then
+        local l = materialise(fx)
+        local lc = l.controls[idx]
+        if lc then
+          local old = {}
+          for k, v in pairs(lc) do old[k] = v end
+          lc.scale = o[1] or nil
+          P.knob_reframe(lc, old)
+        end
+        M.set(key, l); M.save()
+      end
+      if o[1] and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "No values under it: they're in the tooltip.") end
+    end
+    ImGui.Separator(ctx)
+  end
   if c.type == "knob" or c.type == "stepped" or c.type == nil then
     ImGui.TextDisabled(ctx, "Numbers round the dial")
-    local sc_now = M.scale_kind(c) or "none"
+    local sc_now = (c.scale == "blank") and "blank" or M.scale_kind(c) or "none"
     local small = c.size == "small"
     ImGui.BeginDisabled(ctx, small)
-    for i, o in ipairs({ { "none", "None" }, { "values", "Values" }, { "ten", "0\u{2013}10" } }) do
+    for i, o in ipairs({ { "none", "None" }, { "values", "Values" }, { "ten", "0\u{2013}10" }, { "blank", "Nothing" } }) do
       if i > 1 then ImGui.SameLine(ctx, 0, 4) end
       if ImGui.Selectable(ctx, o[2] .. "##scale_" .. o[1], o[1] == sc_now, KEEP_OPEN, 56, 0) then
         local l = materialise(fx)
         local lc = l.controls[idx]
         if lc then
+          local old = {}
+          for k, v in pairs(lc) do old[k] = v end
           lc.scale = (o[1] ~= "values") and o[1] or nil
-          if o[1] == "none" then lc.scale_ink = nil end
+          if o[1] == "none" or o[1] == "blank" then lc.scale_ink = nil end
+          P.knob_reframe(lc, old)
         end
         M.set(key, l); M.save()
       end
@@ -2937,7 +3099,8 @@ local function values_menu(fx, key, layout, idx, c)
         ImGui.SetTooltip(ctx, small and "A small knob has no room for numbers."
           or (o[1] == "values") and "Its values, without units (thousands as k).\nMedium knobs then show the value in the tooltip."
           or (o[1] == "ten") and "0 to 10."
-          or "No numbers.")
+          or (o[1] == "blank") and "No numbers and no value under it:\nthe value's in its tooltip."
+          or "No numbers: its value under it.")
       end
     end
     ImGui.EndDisabled(ctx)
@@ -3841,6 +4004,8 @@ local function panel_requests(i, fx, layout, key, req)
       app.choice_buf = {}
       app.choice_ctx = nil
       for t, nm in pairs(c and c.param and M.get_choice_names(key, c.param, app.track, fx.addr) or {}) do app.choice_buf[t] = nm end
+      app.fold_buf = {}
+      for t, f in pairs(c and c.param and M.get_choice_folders(key, c.param) or {}) do app.fold_buf[t] = f end
       app.open_ctl_menu = true
     end
     FRM.on = nil
