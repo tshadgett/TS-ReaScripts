@@ -1,5 +1,11 @@
 # Track Analyser — changelog
 
+## 2.7.6 — TS_TrackProbe 2.10.0
+
+- **TS_TrackProbe 2.10.0:** the first probe of a pair also measures what
+  comes into it, for ChannelView 4.8.0's meter of the instrument a chain
+  starts with. Reopen a project after updating, so the new probe runs.
+
 ## 2.7.5 — TS_TrackProbe 2.9.0
 
 - **TS_TrackProbe 2.9.0:** each track's spectrum going into its chain, and

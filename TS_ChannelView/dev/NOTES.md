@@ -1353,6 +1353,50 @@ picker uses an optgroup per group.
 - **Paste:** a control with param -1 (text, image, vis) is never "already
   on the panel" (placed_index ignores p < 0).
 
+## Steady meters, instruments, anchors (4.8.0)
+
+- **Held readings:** T.gr_held(hk, raw, now) keeps the most over the last
+  T.GR_WINDOW (0.3 s), then falls T.GR_FALL (15 dB/s); reported and
+  measured readings each have their own key (a measured one ":m").
+  U.track_peak holds Track_GetPeakInfo U.PEAK_HOLD (0.25 s), then falls
+  U.PEAK_FALL (20 dB/s).
+- **Reports its own reduction:** T.reports_gr_natively and TP.native_gr
+  keep a "no" for 2 s only (a VST3 still starting answers nothing at
+  first).
+- **Double-click:** U.param_default reads 0 off the plugin's own text
+  first (ranges off), and off a custom range only when the plugin can't
+  say; cached per instance, parameter and range.
+- **The pre probe's place:** TP.pre_slot / keep_in_place: after the
+  leading instruments (no inputs, or a format ending in "i"), else behind
+  ARA, else 0. An instrument with inputs on a track that gives it audio
+  (TP.feeds_audio: armed with an audio record input, a receive with
+  I_SRCCHAN >= 0, an audio item; cached a second) doesn't count, so the
+  probe goes in front of it. TP.feed_key goes into TS_CV_Upkeep's chain
+  hash so arming re-runs keep_in_place.
+- **Adding:** TS_CV_Browser puts a plugin at slot 0 when only probes are
+  in front of where it goes (TP.only_probes_before) or it reads as ARA
+  (TP.ara_name); keep_in_place then puts the pre probe back.
+- **The chain's input level (TS_TrackProbe 2.10.0):** the pre probe
+  publishes its input at gmem 0x650000 + (track index + 1) * 8: peak, RMS,
+  peaks L/R, RMS L/R, a count, [7] = 1. TP.lead_out(tr, guid) is the
+  top-level plugin right before the pre probe; TP.levels / levels_lr give
+  it the probe's input as its output (out_only), and P.has_io shows that
+  one meter.
+- **Anchors:** `Anchor<n>=b|tb`, `AnchorX<n>=r|lr`. P.anchored(controls,
+  room, room_w) in quarter cells (nil: that axis as it is): per axis one
+  shift for all; growing, the room less the grid; shrinking, held back
+  by each stretcher's least (P.anchor_min_h / _w) and by the nearest
+  non-moving item before each mover across the axis. Not rounded up (a
+  grid filling the room exactly mustn't scroll). draw_controls lays a grid
+  out again with its width; P.layout_w takes the panel's height in the
+  rack. The web page's gridAnchored / anchorShift do the same from c.an,
+  c.ax and c.avs (a visualiser's least height: it's a blank there).
+- **A grid panel's size:** size_grip on a grid panel sets layout.own_w
+  (ChannelView, the TCP window; CanvasW) or own_h in the rack (CanvasH);
+  P.width and P.rack_height take the larger. The web page widens to p.ow.
+- **A locked layout that scrolls** adds nothing to the panel's width: its
+  scrollbar is in the panel's right padding.
+
 ## Upkeep, by one window (TS_CV_Upkeep)
 
 What ChannelView's rescan used to keep right on its own track now runs from

@@ -420,12 +420,14 @@ local native = {}
 function TP.native_gr(tr, addr, guid)
   local key = guid ~= "" and guid or tostring(addr)
   local v = native[key]
-  if v == nil then
-    local ok = reaper.TrackFX_GetNamedConfigParm(tr, addr, "GainReduction_dB")
-    v = ok and true or false
-    native[key] = v
-  end
-  return v
+  if v == true then return true end
+  -- (a "no" asked again every couple of seconds: a plugin just loaded can
+  -- say nothing at first)
+  local now = reaper.time_precise()
+  if v and now - v < 2 then return false end
+  local ok = reaper.TrackFX_GetNamedConfigParm(tr, addr, "GainReduction_dB")
+  native[key] = ok and true or now
+  return ok and true or false
 end
 
 -- Whether a plugin should be tapped: ticked for measuring, and it doesn't
@@ -1541,8 +1543,17 @@ end
 -- where any other plugin has "". The names below are a fallback for an
 -- instance that hasn't saved one yet; one of them in the first slot
 -- without ARA just means the pre probe goes after it.
-TP.ARA_NAMES = { "melodyne", "vocalign", "revoice", "spectralayers",
-                 "spectral editor", "auto-tune" }
+TP.ARA_NAMES = { "melodyne", "vocalign", "revoice", "repitch", "spectralayers",
+                 "spectral editor", "auto-tune", "(celemony)", "(synchro arts)", "(ara)" }
+
+-- A plugin name (or REAPER ident) that reads as an ARA plugin's
+function TP.ara_name(name)
+  name = (name or ""):lower()
+  for _, n in ipairs(TP.ARA_NAMES) do
+    if name:find(n, 1, true) then return true end
+  end
+  return false
+end
 
 function TP.ara_header(line)
   local last = line and line:match("(%S+)%s*$")
@@ -1554,18 +1565,94 @@ function TP.ara_first(tr)
   if reaper.TrackFX_GetCount(tr) == 0 then return false end
   local ok, chunk = reaper.GetTrackStateChunk(tr, "", false)
   if ok and TP.ara_header(chunk:match("<FXCHAIN.-\n%s*(<[^\n]*)")) then return true end
-  local name = fx_name(tr, 0):lower()
-  for _, n in ipairs(TP.ARA_NAMES) do
-    if name:find(n, 1, true) then return true end
-  end
-  return false
+  return TP.ara_name(fx_name(tr, 0))
 end
 
--- A pre probe in the first slot (the second behind an ARA plugin) and a
--- post probe in the last, both idle, the way Track Analyser's own "insert
--- probes" does it. Returns true, or false and why not.
+-- Whether only probes come before top-level slot `slot` (the whole chain
+-- when nil): a plugin added there is the first of the chain's own.
+function TP.only_probes_before(tr, slot)
+  local n = reaper.TrackFX_GetCount(tr)
+  for a = 0, math.min(n, slot or n) - 1 do
+    if not is_probe(tr, a) then return false end
+  end
+  return true
+end
+
+-- Whether the track gives its plugins audio: an audio record input while
+-- it's armed, a receive that carries audio, or an audio item. Looked at
+-- again when the project changes, and at most once a second.
+local feeds = {}
+function TP.feeds_audio(tr)
+  if not tr then return false end
+  local sc, now = reaper.GetProjectStateChangeCount and reaper.GetProjectStateChangeCount(0) or 0, reaper.time_precise()
+  local f = feeds[tr]
+  if f and f.sc == sc and now - f.t < 1 then return f.yes end
+  local yes = false
+  local inp = reaper.GetMediaTrackInfo_Value(tr, "I_RECINPUT") or -1
+  if (reaper.GetMediaTrackInfo_Value(tr, "I_RECARM") or 0) > 0.5 and inp >= 0 and inp < 4096 then yes = true end
+  if not yes and reaper.GetTrackNumSends then
+    for k = 0, reaper.GetTrackNumSends(tr, -1) - 1 do
+      if (reaper.GetTrackSendInfo_Value(tr, -1, k, "I_SRCCHAN") or -1) >= 0 then yes = true break end
+    end
+  end
+  if not yes and reaper.CountTrackMediaItems then
+    for k = 0, reaper.CountTrackMediaItems(tr) - 1 do
+      local take = reaper.GetActiveTake(reaper.GetTrackMediaItem(tr, k))
+      if take and not reaper.TakeIsMIDI(take) then yes = true break end
+    end
+  end
+  feeds[tr] = { sc = sc, t = now, yes = yes }
+  return yes
+end
+function TP.forget_feeds() feeds = {} end
+
+-- What the probe's place hangs on beyond the chain itself: "a" or "m"
+-- when the chain starts with an instrument that takes audio and the track
+-- gives it some or not, "" otherwise (TS_CV_Upkeep looks again when it
+-- changes).
+function TP.feed_key(tr)
+  for a = 0, reaper.TrackFX_GetCount(tr) - 1 do
+    if not is_probe(tr, a) then
+      local _, ins = reaper.TrackFX_GetIOSize(tr, a)
+      if ins == 0 or not U.is_instrument(tr, { name = fx_name(tr, a), addr = a }) then return "" end
+      return TP.feeds_audio(tr) and "a" or "m"
+    end
+  end
+  return ""
+end
+
+-- Where the pre probe goes: the first slot, the second behind an ARA
+-- plugin, and after the instrument (or instruments) a chain starts with --
+-- an instrument makes its own sound, so what goes in before it is lost
+-- (the zero's test signal with it), and the chain's "before" is what the
+-- instrument plays. Unless the track gives it audio (a vocoder): then in
+-- front of it, so its input is metered too. A plugin with no inputs at
+-- all is always in front.
+local function leading_instrument(tr, a)
+  local _, ins = reaper.TrackFX_GetIOSize(tr, a)
+  if ins == 0 then return true end
+  return U.is_instrument(tr, { name = fx_name(tr, a), addr = a }) and not TP.feeds_audio(tr)
+end
+local function instruments_first(tr)
+  local k = 0
+  for a = 0, reaper.TrackFX_GetCount(tr) - 1 do
+    if not is_probe(tr, a) then
+      if leading_instrument(tr, a) then k = k + 1 else break end
+    end
+  end
+  return k
+end
+function TP.pre_slot(tr)
+  local k = instruments_first(tr)
+  if k > 0 then return k end
+  return TP.ara_first(tr) and 1 or 0
+end
+
+-- A pre probe in the first slot (TP.pre_slot) and a post probe in the
+-- last, both idle, the way Track Analyser's own "insert probes" does it.
+-- Returns true, or false and why not.
 local function add_pair(tr)
-  local first = TP.ara_first(tr) and 1 or 0
+  local first = TP.pre_slot(tr)
   -- one already there (the other deleted): only the missing one is added
   local have_pre, have_post = TP.top_probes(tr)
   reaper.PreventUIRefresh(1)
@@ -1596,7 +1683,8 @@ end
 -- ---------------------------------------------------------------------
 -- The probes have nothing to show, so the plugin row always leaves them
 -- out -- and since you can't see them, ChannelView keeps them where they
--- belong: the pre probe first (second behind an ARA plugin), the post
+-- belong: the pre probe first (TP.pre_slot: behind an ARA plugin or an
+-- instrument), the post
 -- probe last, after any insert, move or removal. One of the pair dragged
 -- into a container comes back out to its end; a pair kept together
 -- inside a container is left alone (that's deliberate).
@@ -1669,18 +1757,17 @@ function TP.keep_in_place(tr)
     if a then move_to(tr, a, reaper.TrackFX_GetCount(tr)); moved = true end
   elseif post and not pre then
     local a = nested_probe(tr, nil, 0)
-    if a then move_to(tr, a, TP.ara_first(tr) and 1 or 0); moved = true end
+    if a then move_to(tr, a, TP.pre_slot(tr)); moved = true end
   end
   pre, post = TP.top_probes(tr)
   if pre and post then
     local n = reaper.TrackFX_GetCount(tr)
     if post ~= n - 1 then move_to(tr, post, n - 1); moved = true end
     pre = TP.top_probes(tr)
-    if pre ~= 0 then
-      -- ask about ARA (it reads the chain) only when it could matter
-      local want = TP.ara_first(tr) and 1 or 0
-      if pre ~= want then move_to(tr, pre, want); moved = true end
-    end
+    local want = instruments_first(tr)
+    -- (ask about ARA, which reads the chain, only when it could matter)
+    if want == 0 and pre ~= 0 then want = TP.ara_first(tr) and 1 or 0 end
+    if pre ~= want then move_to(tr, pre, want); moved = true end
   end
   reaper.PreventUIRefresh(-1)
   if moved then TP.invalidate() end
@@ -1872,9 +1959,41 @@ function TP.is_tapped(tr, guid)
   return tap_for(tr, guid, "g") ~= nil
 end
 
+-- THE CHAIN'S INPUT LEVEL (TS_TrackProbe 2.10.0): what reaches the pre
+-- probe, which is the output of the instrument a chain starts with. The
+-- plugin right in front of the pre probe at the top level, when there is
+-- one, is that instrument: its levels are these. Looked up at most twice
+-- a second.
+TP.PIN_BASE, TP.PIN_STRIDE, TP.PIN_TRACKS = 0x650000, 8, 4096
+local lead = {}
+local function lead_guid(tr)
+  local now = reaper.time_precise()
+  local l = lead[tr]
+  if l and now - l.t < 0.5 then return l.guid end
+  local pre = TP.top_probes(tr)
+  local g = (pre and pre > 0) and fx_guid(tr, pre - 1) or nil
+  lead[tr] = { t = now, guid = g }
+  return g
+end
+-- { pk, rms, pk_l, pk_r, rms_l, rms_r } (dBFS), or nil from a probe that
+-- doesn't publish it
+local function chain_in(tr)
+  local ti = PL.track_index(tr)
+  if not ti or ti + 1 >= TP.PIN_TRACKS then return nil end
+  local b = TP.PIN_BASE + (ti + 1) * TP.PIN_STRIDE
+  if reaper.gmem_read(b + 7) < 0.5 then return nil end
+  local function g(k) return reaper.gmem_read(b + k) or -150 end
+  return { pk = g(0), rms = g(1), pk_l = g(2), pk_r = g(3), rms_l = g(4), rms_r = g(5) }
+end
+-- Whether `guid` is the instrument in front of the pre probe (its output
+-- metered by the probe, its input not at all).
+function TP.lead_out(tr, guid)
+  return tr ~= nil and guid ~= nil and tap_for(tr, guid, "l") == nil and lead_guid(tr) == guid
+end
+
 -- Whether this plugin's input and output levels are being measured.
 function TP.is_metered(tr, guid)
-  return tap_for(tr, guid, "l") ~= nil
+  return tap_for(tr, guid, "l") ~= nil or (TP.lead_out(tr, guid) and chain_in(tr) ~= nil)
 end
 
 -- Its levels, dBFS: { in_pk, out_pk, in_rms, out_rms }, or nil when it
@@ -1882,6 +2001,11 @@ end
 -- probe on the track predates levels (see TP.probe_has_levels).
 function TP.levels(tr, guid)
   local i, rd = tap_for(tr, guid, "l")
+  if not i and TP.lead_out(tr, guid) then
+    local ci = chain_in(tr)
+    if not ci then return nil end
+    return { in_pk = -150, out_pk = ci.pk, in_rms = -150, out_rms = ci.rms, out_only = true }
+  end
   if not i or not rd.probe then return nil end
   if not TP.probe_has_levels(tr, rd.probe) then return { old = true } end
   local function g(f) return PL.get(tr, rd.probe, f, i) or -150 end
@@ -1937,6 +2061,12 @@ end
 TP.LR_BASE, TP.LR_STRIDE, TP.LR_TRACKS = 0x350000, 64, 3000
 function TP.levels_lr(tr, guid)
   local i, rd = tap_for(tr, guid, "l")
+  if not i and TP.lead_out(tr, guid) then
+    local ci = chain_in(tr)
+    if not ci then return nil end
+    return { in_pk = { -150, -150 }, out_pk = { ci.pk_l, ci.pk_r }, in_rms = { -150, -150 },
+             out_rms = { ci.rms_l, ci.rms_r }, out_only = true }
+  end
   if not i or not rd.probe then return nil end
   if PL.is_legacy(tr, rd.probe) or PL.get(tr, rd.probe, "st_cap") < 0.5 then return { old = true } end
   local ti = PL.track_index(tr)

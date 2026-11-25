@@ -35,7 +35,7 @@ local variants = {} -- guid -> layout variant an instance shows ("" for the plug
 local SHARED_TTL = 1.0
 local gr_at, var_at = {}, {}   -- guid -> when it was last read
 
-function S.clear_cache() cache = {}; gr_open = {}; pages = {}; variants = {}; gr_at = {}; var_at = {}; S.clear_virt() end
+function S.clear_cache() cache = {}; gr_open = {}; pages = {}; variants = {}; gr_at = {}; var_at = {}; S.clear_own_gui(); S.clear_virt() end
 
 -- `default` is what an instance nobody has touched shows as -- false
 -- (expanded) unless a caller says otherwise. Only a departure from the
@@ -95,6 +95,30 @@ end
 function S.toggle_collapsed(guid, default)
   default = default or false
   S.set_collapsed(guid, not S.is_collapsed(guid, default), default)
+end
+
+-- Whether this instance shows the plugin's own window in its panel
+-- (TS_CV_PluginWindow, Pro): true or false when it says so itself, nil to
+-- follow its plugin's layout. Kept in the project; only a departure from
+-- `default` (the layout's say) is written.
+local own_gui = {}   -- guid -> "1", "0" or "" (as kept in the project)
+function S.clear_own_gui() own_gui = {} end
+function S.own_gui(guid)
+  if guid == nil or guid == "" or not ED.PRO then return nil end
+  local v = own_gui[guid]
+  if v == nil then
+    local _, str = reaper.GetProjExtState(0, NS, "gui:" .. guid)
+    v = str or ""
+    own_gui[guid] = v
+  end
+  if v == "1" then return true elseif v == "0" then return false end
+  return nil
+end
+function S.set_own_gui(guid, on, default)
+  if guid == nil or guid == "" or not ED.PRO then return end
+  local val = ((on and true or false) == (default and true or false)) and "" or (on and "1" or "0")
+  own_gui[guid] = val
+  reaper.SetProjExtState(0, NS, "gui:" .. guid, val)
 end
 
 -- Whether this instance's gain-reduction meter is opened out into its

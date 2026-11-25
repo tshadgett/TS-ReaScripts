@@ -44,13 +44,15 @@ local MR  = require("TS_CV_ModRack")
 
 local P   = {}
 local ImGui
+-- (Pro, with the TS_FXFrame extension: a plugin's own window in its panel)
+P.PW = ED.module("TS_CV_PluginWindow")
 local panel_at = {}
 
 -- (Pro's modules, the canvases, Trimmer and finishes, only when they're
 -- there: TS_CV_Edition)
 function P.attach(imgui)
   ImGui = imgui; PU.attach(imgui); require("TS_CV_GainCheck").attach(imgui)
-  for _, m in ipairs({ EQP, CP, MP, RP, TRP, FN, VU }) do if m then m.attach(imgui) end end
+  for _, m in ipairs({ EQP, CP, MP, RP, TRP, FN, VU, P.PW }) do if m then m.attach(imgui) end end
 end
 -- Whether `key` is a plugin with a panel of its own (Pro): ReaEQ, ReaComp,
 -- the Trimmer. Without Pro, each is an ordinary plugin's panel.
@@ -865,14 +867,121 @@ local function finish(out, controls, width, height)
   return out
 end
 
-local function place_grid(controls)
+-- `adj`: places anchoring moved or stretched (P.anchored), by control,
+-- and the rows they come to
+local function place_grid(controls, adj, adj_rows, adj_cols)
   local out = new_out()
   for _, c in ipairs(controls) do
-    local a = c.at
+    local a = (adj and adj[c]) or c.at
     if a then put(out, c, a.c, a.r, a.w, a.h, 0, 0) end
   end
   local cols, rows = P.grid_size(controls)
-  return finish(out, controls, qx(cols), qy(rows))
+  return finish(out, controls, qx(adj_cols or cols), qy(adj_rows or rows))
+end
+
+-- ANCHORS: a grid in a panel taller or shorter (Anchor<n>, c.anchor),
+-- wider or narrower (AnchorX<n>, c.anchor_x) than it. "b" / "r", the
+-- bottom / right: the item keeps its distance from that edge, moving out
+-- as the panel grows and back in as it shrinks -- past its place, as far
+-- as what's before it allows. "tb" / "lr", both edges: a canvas-like item
+-- (a visualiser, an EQ curve, a VU meter, a picture or a section)
+-- stretches with the panel, growing and shrinking down to its least;
+-- anything else takes it as "b" / "r". Everything anchored on an axis
+-- moves by the same amount, so a group at the edge keeps its shape.
+-- Returns the changed places by control and the rows and columns they
+-- come to, or nil when nothing is anchored. `room`, `room_w`: the panel's
+-- room for the grid in quarter cells (nil: that axis as it is).
+P.ANCHOR_STRETCH = { vis = true, curve = true, vu = true, image = true, section = true }
+function P.anchor_min_h(c)
+  if c.type == "vis" then return (c.vis and c.vis.kind == "fstrip") and 3 or 4 end
+  if c.type == "curve" then return 4 end
+  if c.type == "vu" then return 5 end
+  if c.type == "section" then return 2 end
+  return 1
+end
+-- each axis: the item's start and size in `at`, its anchor's field, the
+-- values that move it and stretch it, the least that stretches
+local AXES = {
+  y = { pos = "r", size = "h", key = "anchor", move = { b = true, tb = true }, both = "tb", least = function(c) return P.anchor_min_h(c) end },
+  x = { pos = "c", size = "w", key = "anchor_x", move = { r = true, lr = true }, both = "lr", least = function(c) return P.anchor_min_w(c) end },
+}
+function P.anchor_min_w(c)
+  if c.type == "vis" or c.type == "curve" then return 8 end
+  if c.type == "vu" then return 2 end
+  if c.type == "section" or c.type == "image" then return 4 end
+  return 1
+end
+-- how far the axis's anchored items go: `room` less the grid's own size,
+-- held back (shrinking) by the stretched items' least and by what's before
+-- each moving item (across the axis from it, overlapping it)
+local function anchor_shift(controls, ax, room, size)
+  local A = AXES[ax]
+  local function stretches(c) return c[A.key] == A.both and P.ANCHOR_STRETCH[c.type] end
+  local function moves(c) return A.move[c[A.key] or ""] and not stretches(c) end
+  local d = room - size
+  if d >= 0 then return d, stretches, moves end
+  for _, c in ipairs(controls) do
+    local a = c.at
+    if a and stretches(c) then d = math.max(d, math.min(0, A.least(c) - a[A.size])) end
+  end
+  local function box(o)
+    local c0, r0, c1, r1 = M.at_box(o.at)
+    if ax == "y" then return r0, r1, c0, c1 end
+    return c0, c1, r0, r1
+  end
+  for _, c in ipairs(controls) do
+    if c.at and moves(c) then
+      local p0, _, q0, q1 = box(c)
+      local top = 0
+      for _, o in ipairs(controls) do
+        if o ~= c and o.at and not moves(o) then
+          local op0, op1, oq0, oq1 = box(o)
+          if stretches(o) then op1 = op0 + math.min(A.least(o), op1 - op0) end
+          if oq0 < q1 - 1e-6 and oq1 > q0 + 1e-6 and op1 <= p0 + 1e-6 then top = math.max(top, op1) end
+        end
+      end
+      d = math.max(d, top - p0)
+    end
+  end
+  return math.min(d, 0), stretches, moves
+end
+function P.anchored(controls, room, room_w)
+  local any = false
+  for _, c in ipairs(controls) do
+    if c.at and ((room and (c.anchor == "b" or c.anchor == "tb"))
+                 or (room_w and (c.anchor_x == "r" or c.anchor_x == "lr"))) then any = true; break end
+  end
+  if not any then return nil end
+  local cols, rows = P.grid_size(controls)
+  local shift = {}
+  if room then shift.y = { anchor_shift(controls, "y", room, rows) } end
+  if room_w then shift.x = { anchor_shift(controls, "x", room_w, cols) } end
+  local adj, ext_r, ext_c = {}, 0, 0
+  for _, c in ipairs(controls) do
+    local a = c.at
+    if a then
+      local na
+      for ax, sh in pairs(shift) do
+        local d, stretches, moves = sh[1], sh[2], sh[3]
+        local A = AXES[ax]
+        if d ~= 0 and (stretches(c) or moves(c)) then
+          na = na or { c = a.c, r = a.r, w = a.w, h = a.h }
+          if stretches(c) then na[A.size] = a[A.size] + d else na[A.pos] = a[A.pos] + d end
+        end
+      end
+      if na then adj[c] = na end
+      local _, _, c1, r1 = M.at_box(na or a)
+      ext_r, ext_c = math.max(ext_r, r1), math.max(ext_c, c1)
+    end
+  end
+  -- (the grid's own size when growing, its far edge when shrinking; not
+  -- rounded up: a grid filling the room exactly mustn't scroll)
+  local g = controls.grid or {}
+  if not room or room >= rows then ext_r = math.max(ext_r, g.rows or 0) end
+  if not room_w or room_w >= cols then ext_c = math.max(ext_c, g.cols or 0) end
+  if not room then ext_r = math.max(ext_r, rows) end
+  if not room_w then ext_c = math.max(ext_c, cols) end
+  return adj, ext_r, ext_c
 end
 
 -- What a grid flows in (see "grids" above): its units, and its lines on
@@ -1072,10 +1181,16 @@ end
 -- Places a grid in a column `avail_w` wide, as the rack does (see "grids"
 -- above), or nil for a list that isn't a grid. Locked, or narrow enough,
 -- it's the grid as it is.
-function P.layout_w(controls, avail_w, lock)
+function P.layout_w(controls, avail_w, lock, panel_h)
   if not P.is_grid(controls) then return nil end
   place_new(controls)
   local cols = P.grid_size(controls)
+  -- (items anchored moved or stretched to the column's width, and to the
+  -- panel's height when it's given)
+  local room
+  if panel_h then room = grid_room(panel_h) / qy(1) end
+  local adj, arows, acols = P.anchored(controls, room, avail_w / qx(1))
+  if adj and (lock or qx(acols) <= avail_w + 0.5) then return place_grid(controls, adj, arows, acols) end
   if lock or qx(cols) <= avail_w + 0.5 then return place_grid(controls) end
   local units, loose = units_of(controls)
   local out, GX, GY = new_out(), qx(1), qy(1)
@@ -1185,11 +1300,20 @@ end
 -- says, flowing when it doesn't fit (or as it is, scrolling, when locked:
 -- `lock`); anything else down then across in the rows the panel has, or
 -- in a locked layout's own (`lock` is its Lock=<rows>).
-function P.layout(controls, panel_h, lock)
+-- (`avail_w`, optional: the width the grid has, for its items anchored
+-- across)
+function P.layout(controls, panel_h, lock, avail_w)
   if P.is_grid(controls) then
     place_new(controls)
     local _, rows = P.grid_size(controls)
-    if lock or qy(rows) <= grid_room(panel_h) + 0.5 then return place_grid(controls) end
+    local room = grid_room(panel_h)
+    -- (anchored items moved or stretched to the panel's size first)
+    local room_w
+    if avail_w then room_w = avail_w / qx(1) end
+    local adj, arows, acols = P.anchored(controls, room / qy(1), room_w)
+    if adj then
+      if lock or qy(arows) <= room + 0.5 then return place_grid(controls, adj, arows, acols) end
+    elseif lock or qy(rows) <= room + 0.5 then return place_grid(controls) end
     return flow_tall(controls, panel_h)
   end
   return layout_flow(controls, lock or P.rows_for(panel_h))
@@ -1475,7 +1599,7 @@ end
 function P.scrolls(lay, panel_h, lock)
   if not lock then return false end
   local body = panel_h - P.head_h() - P.footer_h()
-  return C.GRID_TOP_PAD + lay.height + C.PANEL_PAD > body
+  return C.GRID_TOP_PAD + lay.height + C.PANEL_PAD > body + 0.5
 end
 
 -- `key` is optional -- a caller drawing a plain grid needn't pass one --
@@ -1509,18 +1633,21 @@ function P.grid_w(n_or_controls, avail_h, lock)
   if pages then
     local body_h = avail_h - C.TAB_STRIP_H
     for _, pg in ipairs(pages) do
-      local lay = P.layout(pg.controls, body_h, lock)
-      local sb = P.scrolls(lay, body_h, lock) and C.SCROLL_W + C.S(2) or 0
-      inner = math.max(inner, lay.width + sb)
+      inner = math.max(inner, P.layout(pg.controls, body_h, lock).width)
     end
     inner = math.max(inner, tab_strip_est(pages) - C.PANEL_PAD * 2)
   else
-    local lay = P.layout(controls, avail_h, lock)
-    -- a locked grid too tall for the panel scrolls, its scrollbar beside it
-    local sb = P.scrolls(lay, avail_h, lock) and C.SCROLL_W + C.S(2) or 0
-    inner = lay.width + sb
+    -- (a locked grid too tall for the panel scrolls, its scrollbar in the
+    -- panel's edge: no wider for it)
+    inner = P.layout(controls, avail_h, lock).width
   end
   return inner + C.PANEL_PAD * 2
+end
+
+-- (Pro, TS_FXFrame) a panel showing the plugin's own window: as wide as
+-- the plugin, its meters either side (TS_CV_PluginWindow)
+function P.plugin_panel_w(fx, avail_h, has_io)
+  return math.max(C.PANEL_MIN_W, P.PW.body_w(fx, avail_h - P.head_h() - P.footer_h()) + io_w(has_io))
 end
 
 function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_trace, lock, canvas)
@@ -1555,6 +1682,11 @@ function P.width(n_or_controls, avail_h, collapsed, has_meter, key, has_io, has_
   -- ReaComp: its own canvas, meters included (TS_CV_CompPanel.lua)
   if key and own_rc(key) then return P.own_w(key) + io_w(has_io) end
   local w = math.max(C.PANEL_MIN_W, P.grid_w(n_or_controls, avail_h, lock))
+  -- a grid panel widened by its edge (size_grip): never narrower than its grid
+  if key and not P.RACK then
+    local l = M.get(key)
+    if l and l.grid and l.own_w then w = math.max(w, l.own_w) end
+  end
   -- The meter is a strip, not a column: it adds its own narrow width
   -- rather than pushing the panel out by a whole CELL_W.
   if has_meter then w = w + C.METER_COL_W + C.PANEL_PAD end
@@ -1570,7 +1702,7 @@ end
 -- { l = false, r = true }.
 function P.has_io(track, fx, layout)
   local on = layout ~= nil and layout.levels == true and TP.is_metered(track, fx.guid)
-  if on and U.is_instrument(track, fx) then return { l = false, r = true } end
+  if on and TP.lead_out(track, fx.guid) then return { l = false, r = true } end
   return on
 end
 
@@ -1729,7 +1861,10 @@ local pending_open = {}
 local live_lists, readable = {}, {}
 
 -- (the gain-reduction trace reads the probe once a frame, too)
-function P.begin_frame() scan_budget = C.SCAN_BUDGET; Tr.begin_frame() end
+function P.begin_frame()
+  scan_budget = C.SCAN_BUDGET; Tr.begin_frame()
+  if P.PW then P.PW.begin_frame() end
+end
 
 -- Returns a list of choices, or:
 --   nil    not scanned yet, but scannable -- ask again, or force it
@@ -2139,11 +2274,16 @@ local function draw_io(ctx, dl, lx, rx, y, w, h, track, fx, enabled, io)
     if l then W.io_bar(ctx, dl, lx, y, w, h, key .. "i", lv.in_pk, lv.in_rms, itxt, C.COL.header_dim, "l") end
     if r then W.io_bar(ctx, dl, rx, y, w, h, key .. "o", out_pk, out_rms, otxt, ocol, "r") end
     local function f(v) return (v and v > -149) and ("%.1f"):format(v) or "-inf" end
-    tip = ("Input   peak %s   RMS %s dBFS\nOutput  peak %s   RMS %s dBFS\n%s")
-      :format(f(lv.in_pk), f(lv.in_rms), f(not byp and lv.out_pk or nil), f(not byp and lv.out_rms or nil),
-              byp and "Bypassed"
-              or ((lv.in_rms > -70) and ("Change %+.1f dB RMS")
-                  :format(lv.out_rms - lv.in_rms) or "No input signal"))
+    if lv.out_only then
+      tip = ("Output  peak %s   RMS %s dBFS%s"):format(f(not byp and lv.out_pk or nil), f(not byp and lv.out_rms or nil),
+        byp and "\nBypassed" or "")
+    else
+      tip = ("Input   peak %s   RMS %s dBFS\nOutput  peak %s   RMS %s dBFS\n%s")
+        :format(f(lv.in_pk), f(lv.in_rms), f(not byp and lv.out_pk or nil), f(not byp and lv.out_rms or nil),
+                byp and "Bypassed"
+                or ((lv.in_rms > -70) and ("Change %+.1f dB RMS")
+                    :format(lv.out_rms - lv.in_rms) or "No input signal"))
+    end
   end
   for _, c in ipairs({ { l, lx, "ioi##" }, { r, rx, "ioo##" } }) do
     if c[1] then
@@ -2243,7 +2383,7 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
   -- collapse, bypass, float, menu; and a pin before float while its window
   -- is one ChannelView floated itself (View > Float plugins without controls)
   local auto = AF.is_auto(fx.guid)
-  local n_btn = auto and 5 or 4
+  local n_btn = (auto and 5 or 4) + (req.pw and 1 or 0)
   local btn_x = x + w - (btn + gap) * n_btn - 2
 
   -- The wet %, centred in the header: dim at 100%, in the accent colour
@@ -2433,6 +2573,18 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
                or "Its window closes when you change track\nClick: pin it open",
         C.COL.float_on) then
       req.toggle_pin = true
+    end
+  end
+
+  -- (Pro, TS_FXFrame) the plugin's own window in the panel, or its controls
+  if req.pw then
+    at(k); k = k + 1
+    local pw = req.pw
+    if W.icon_button(ctx, "gui##" .. fx.guid, "plugin_gui", btn, pw.on or pw.popped,
+        pw.popped and "In a window of its own\nClick: back into this panel"
+        or (pw.on and "Its own window\nClick: its controls" or "Its controls\nClick: its own window"),
+        C.COL.float_on) then
+      req.toggle_gui = true
     end
   end
 
@@ -3140,14 +3292,17 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
   -- locked one wider than that scrolls sideways
   local hscroll = false
   if P.RACK and P.is_grid(page_controls) then
-    lay = P.layout_w(page_controls, grid_w, lock)
+    lay = P.layout_w(page_controls, grid_w, lock, panel_h)
     scroll = false
     hscroll = lock and lay.width > grid_w + 0.5
+  elseif P.is_grid(page_controls) then
+    -- the width it has, for its items anchored across
+    lay = P.layout(page_controls, panel_h, lock, grid_w)
   end
 
-  -- a locked grid too tall to fit scrolls, its scrollbar at the right
+  -- a locked grid too tall to fit scrolls, its scrollbar in the panel's
+  -- right edge, over the grid's own edge by what the padding can't hold
   local reg_x0 = grid_x0
-  if scroll then grid_w = grid_w - (C.SCROLL_W + C.S(2)) end
   local reg_w = grid_w
 
   -- A grid narrower than the room it has is CENTRED in it. The panel has
@@ -3202,7 +3357,7 @@ local function draw_controls(ctx, dl, x, y, w, panel_h, track, fx, layout, key, 
     local ch = math.max(1, h - ins * 2)
     local n = P.WHOLE_ROWS and math.floor((h - C.GRID_TOP_PAD - C.PANEL_PAD) / C.CELL_H) or 0
     if n >= 1 then ch = math.min(ch, C.GRID_TOP_PAD + n * C.CELL_H - ins) end
-    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + C.SCROLL_W + C.S(2) + 4, ch, 0,
+    local ok = ImGui.BeginChild(ctx, "grid##" .. fx.guid, reg_w + 4 + math.max(0, C.PANEL_PAD - 1), ch, 0,
       ImGui.WindowFlags_NoScrollWithMouse)
     ImGui.PopStyleVar(ctx)
     ImGui.PopStyleColor(ctx, 2)
@@ -4605,6 +4760,12 @@ function P.rack_height(track, fx, layout, key, w, shared)
   if own_eq(key) or own_rc(key) then
     return base + P.rack_canvas_h(w - io_w(io), layout.own_h and { h = layout.own_h } or nil)
   end
+  -- (Pro, TS_FXFrame) the plugin's own window: as tall as the plugin
+  if P.PW and P.PW.ok() and P.PW.HOST and not fx.is_container and not fx.container_panel
+     and P.PW.showing(track, fx, layout) then
+    gr_across[fx.guid] = nil
+    return base + P.PW.body_h(fx, w - io_w(io))
+  end
   local vis = P.visible(layout.controls or {}, track, fx)
   local lock = M.locked(layout)
   local canvas = canvas_of(layout)
@@ -4631,11 +4792,13 @@ function P.rack_height(track, fx, layout, key, w, shared)
       local all, tall = rack_grid_tall(vis, avail, lock)
       return base + C.GRID_TOP_PAD + C.PANEL_PAD + all, tall
     end
-    if not has_meter then gr_across[fx.guid] = nil; return (grid_h(false)) end
+    -- (made taller by its foot: the body's height, kept with the layout)
+    local least = layout.own_h and (base + layout.own_h) or 0
+    if not has_meter then gr_across[fx.guid] = nil; return math.max(least, (grid_h(false))) end
     local h, tall = grid_h(true, St.is_gr_open(fx.guid))
-    if tall >= P.RACK_GR_ROWS * C.CELL_H - 0.5 then gr_across[fx.guid] = nil; return h end
+    if tall >= P.RACK_GR_ROWS * C.CELL_H - 0.5 then gr_across[fx.guid] = nil; return math.max(least, h) end
     gr_across[fx.guid] = true
-    return (grid_h(false)) + P.gr_strip_h()
+    return math.max(least, (grid_h(false)) + P.gr_strip_h())
   end
   local from = P.rack_from_rows(vis, shared)
   if not has_meter then
@@ -4697,7 +4860,7 @@ local function edge_button(ctx, id, x, y, w, h)
   return hov, act
 end
 
-size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track)
+size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track, gridp)
   local rack = P.RACK
   local gx, gy, gw, gh
   if rack then gx, gy, gw, gh = x + 10, y + wh - 5, ww - 20, 5
@@ -4711,7 +4874,9 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
     end
     -- the Trimmer: its body's height in the rack, its width here
     if is_trim then return rack and (layout.own_h or (wh - P.head_h() - P.footer_h())) or (layout.own_w or ww) end
+    if rack and gridp then return layout.own_h or (wh - P.head_h() - P.footer_h()) end
     if rack then return P.rack_canvas_h(ww - io_w(io), layout.own_h and { h = layout.own_h } or nil) end
+    if gridp then return layout.own_w or ww end
     return layout.own_w or (is_eq and C.EQ_PANEL_W or C.RC_PANEL_W)
   end
   local function put(v)
@@ -4735,8 +4900,9 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
     end
     local fold_tip = (canvas and #(layout.controls or {}) > 0)
       and ("\nPast the canvas: folds the controls away") or ""
-    W.tip(ctx, "szgrip##" .. fx.guid, (rack and ("Drag: the " .. (is_trim and "panel's" or "canvas's") .. " height in the rack")
-                                        or ("Drag: the " .. (is_trim and "panel's" or "canvas's") .. " width"))
+    local what = (is_trim or gridp) and "panel's" or "canvas's"
+    W.tip(ctx, "szgrip##" .. fx.guid, (rack and ("Drag: the " .. what .. " height in the rack")
+                                        or ("Drag: the " .. what .. " width"))
       .. ("  (%d px)"):format(math.floor(get())) .. fold_tip .. "\nDouble-click: the usual size", hov, act)
   end
   -- a plugin still on its generated default: nothing to put back
@@ -4779,7 +4945,10 @@ size_grip = function(ctx, dl, fx, layout, key, x, y, ww, wh, canvas, is_eq, is_r
       return
     end
     local v = size_drag.v0 + d
-    if rack then v = math.max(120, math.min(900, v)) else v = math.max(is_trim and 160 or 200, math.min(1200, v)) end
+    if rack and gridp then v = math.max(100, math.min(1200, v))
+    elseif rack then v = math.max(120, math.min(900, v))
+    elseif gridp then v = math.max(C.PANEL_MIN_W, math.min(2000, v))
+    else v = math.max(is_trim and 160 or 200, math.min(1200, v)) end
     put(math.floor(v + 0.5))
   elseif size_drag and size_drag.owner == owner then
     size_drag = nil
@@ -4937,8 +5106,18 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   if io and share then io = { l = io_l(io) and not share.l, r = io_r(io) and not share.r } end
   local canvas = (not is_eq and not is_rc and not is_trim) and canvas_of(layout) or nil
   if canvas then meter = nil end
-  local nat_w = P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
-                    St.is_gr_open(fx.guid), M.locked(layout), canvas)
+  -- (Pro, TS_FXFrame) the plugin's own window as the body; its button in
+  -- the header wherever that can be
+  local pw_on = false
+  if P.PW and P.PW.ok() and P.PW.HOST and not P.PREVIEW and not P.TILE
+     and not fx.is_container and not fx.container_panel then
+    pw_on = not collapsed and P.PW.showing(track, fx, own)
+    req.pw = { on = pw_on, popped = P.PW.popped(track, fx) }
+    if pw_on then meter, canvas = nil, nil end
+  end
+  local nat_w = pw_on and P.plugin_panel_w(fx, avail_h, io)
+    or P.width(P.visible(layout.controls or {}, track, fx), avail_h, collapsed, meter ~= nil, key, io,
+               St.is_gr_open(fx.guid), M.locked(layout), canvas)
   -- (a tile: its name's tab at the left)
   local tab = (P.TILE and not collapsed) and P.tab_w() or 0
   nat_w = nat_w + tab
@@ -5072,6 +5251,15 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       if locked then ImGui.BeginDisabled(ctx, true) end
       if req.offline then
         draw_offline(ctx, dl, bx, y + P.head_h(), bw, wh - P.head_h() - fh, track, fx)
+      elseif pw_on then
+        -- the plugin's own window, its input and output meters either side
+        local bh = wh - P.head_h() - fh
+        local ex, ew = bx, bw
+        if io and draw_io(ctx, dl, bx + C.PANEL_PAD, bx + bw - C.PANEL_PAD - C.IO_COL_W,
+                          y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled, io) then
+          ex, ew = bx + (io_l(io) and C.IO_COL_W + C.PANEL_PAD or 0), bw - io_w(io)
+        end
+        P.PW.draw(ctx, dl, ex, y + P.head_h(), ew, bh, track, fx, P.RACK)
       elseif is_trim then
         TRP.draw(ctx, dl, bx, y + P.head_h(), bw, wh - P.head_h() - fh, track, fx, req)
       elseif is_eq then
@@ -5210,8 +5398,10 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
       ImGui.DrawList_AddRect(dl, x + 0.5, y + 0.5, x + ww - 0.5, y + wh - 0.5, C.COL.accent, C.PANEL_RR, 0, 1.6)
     end
     if saved then pop_plate(saved) end
-    if not collapsed and (canvas or is_eq or is_rc or is_trim) then
-      size_grip(ctx, dl, fx, own, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track)
+    -- (a grid panel too, outside the rack: its width, for what's anchored across)
+    local gridp = not P.PREVIEW and own.grid ~= nil and not (canvas or is_eq or is_rc or is_trim)
+    if not collapsed and (canvas or is_eq or is_rc or is_trim or gridp) then
+      size_grip(ctx, dl, fx, own, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track, gridp)
     end
     local folded_here = fold_req
     if folded_here then fold_tab(ctx, dl, fx, x, y, ww, wh) end

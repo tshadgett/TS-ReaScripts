@@ -2306,6 +2306,20 @@ local function panel_menu()
   if POP.PO and not app.popout and ImGui.IsItemHovered(ctx) and not (fx.container_panel or fx.is_container) then
     ImGui.SetTooltip(ctx, "A copy of this panel, floating or docked.\nOr drag its header out of ChannelView.")
   end
+  -- the plugin's own window in its panel (Pro, the TS_FXFrame extension)
+  if P.PW and P.PW.ok() and not (fx.container_panel or fx.is_container) and ImGui.BeginMenu(ctx, "Its own window") then
+    local own = env.layout_for(fx)
+    if ImGui.MenuItem(ctx, "In this panel", nil, P.PW.wanted(fx, own) or false) then P.PW.toggle_here(app.track, fx, own) end
+    local def = own ~= nil and own.own_gui == true
+    if ImGui.MenuItem(ctx, "In every one of its panels", nil, def) then
+      local l, k = env.materialise(fx)
+      l.own_gui = (not def) or nil
+      M.set(k, l); M.save()
+      St.set_own_gui(fx.guid, not def, not def)   -- this one follows
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Every instance of this plugin, unless one says otherwise.") end
+    ImGui.EndMenu(ctx)
+  end
   -- two plugins side by side, one heard at a time (TS_CV_Compare, Pro)
   if POP.CMP and not RACK and not app.popout and not (fx.container_panel or fx.is_container) then
     local busy = POP.CMP.parts(app.track) ~= nil
@@ -3921,6 +3935,7 @@ local function panel_requests(i, fx, layout, key, req)
       T.toggle_float(app.track, fx.addr)
     end
     if req.toggle_pin then AF.toggle_pin(fx.guid) end
+    if req.toggle_gui and P.PW then P.PW.toggle_here(app.track, fx, env.layout_for(fx)) end
     if req.toggle_collapse then
       toggle_fold(fx)
     end

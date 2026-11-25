@@ -1,5 +1,48 @@
 # ChannelView — changelog
 
+## 4.8.0 — steady meters, instruments metered, anchors
+
+### ChannelView
+
+- **Steady meters on a steady tone.** Gain reduction shows the most it
+  reached over the last 0.3 s, then falls no faster than 15 dB a second,
+  with the plugin's window open or shut; the track meters hold their peak
+  a quarter of a second, then fall 20 dB a second.
+- **Measured** reduction on a plugin that reports its own is held the
+  same way.
+- **Instruments and the probes.** On a track that starts with an
+  instrument, the first probe goes after it, so its test signal reaches
+  the plugins and their measured readings work. The instrument's output
+  meter is read by that probe (TS_TrackProbe 2.10.0, with Track Analyser
+  2.7.6). When the track gives the instrument audio (armed with an audio
+  input, a receive, an audio item: a vocoder), the probe goes in front of
+  it and it has both meters.
+- **ARA plugins added from ChannelView** go in first, ahead of the
+  probes: REAPER refused them behind.
+- A plugin that reports its own reduction but said nothing at first (a
+  VST3 still starting) is asked again every couple of seconds.
+- **Double-click** puts a knob with a custom range back to the plugin's
+  own 0.
+- A locked layout too tall for its panel scrolls without making the
+  panel wider.
+
+### ChannelView Pro
+
+- **Anchors** in grid layouts (an item's sheet in the grid editor, or
+  several selected): *Up / down* Top, Bottom or Stretch, *Across* Left,
+  Right or Stretch. Bottom and Right keep an item's distance from that
+  edge; Stretch grows and shrinks a visualiser, an EQ curve, a VU meter,
+  a picture or a section with the panel. Knobs and buttons only move.
+  In ChannelView, the rack, the TCP window and the web page.
+- **A grid panel's size:** drag its right edge to make it wider (in the
+  rack, its bottom edge to make it taller); double-click for its own size.
+- **Under the chain** (the TCP window): Spectrum and Dynamics smoothing
+  (*Off*, *Light*, *Some*, *More*) and a crosshair on each that says
+  what's there.
+- The TCP window's traces and canvas histories move as they play.
+- A compressor canvas's reduction trace and trail are in its meter's
+  colour (pink when measured).
+
 ## 4.7.0 — a plugin's own face, folders in dropdowns
 
 ### ChannelView

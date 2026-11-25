@@ -984,13 +984,19 @@ local function tcp_rows(ctx, page)
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Per folder level.") end
     -- the overview's open row (Pro)
-    row(ctx, "Under the chain")
-    if not ED.PRO then ImGui.BeginDisabled(ctx, true) end
-    tcp_check(ctx, "Spectrum##vo_tspec", "ov_spec", true)
-    ImGui.SameLine(ctx)
-    tcp_check(ctx, "Dynamics##vo_tdyn", "ov_dyn", true)
-    if not ED.PRO then ImGui.EndDisabled(ctx); ImGui.SameLine(ctx); ImGui.TextDisabled(ctx, "(Pro)") end
-    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "On the overview's open row.") end
+    -- each shown or not, and how smooth (ov_spec_sm / ov_dyn_sm: 0..3)
+    local SMOOTH = { { "Off", "0" }, { "Light", "1" }, { "Some", "2" }, { "More", "3" } }
+    for i, k in ipairs({ { "spec", "Spectrum" }, { "dyn", "Dynamics" } }) do
+      row(ctx, (i == 1) and "Under the chain" or "")
+      if not ED.PRO then ImGui.BeginDisabled(ctx, true) end
+      tcp_check(ctx, k[2] .. "##vo_t" .. k[1], "ov_" .. k[1], true)
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "On the overview's open row.") end
+      ImGui.SameLine(ctx, 240)
+      ImGui.AlignTextToFramePadding(ctx); ImGui.Text(ctx, "Smooth"); ImGui.SameLine(ctx)
+      local sm = ST.seg(ctx, "##vo_t" .. k[1] .. "sm", SMOOTH, tcp_get("ov_" .. k[1] .. "_sm", "2"))
+      if sm then tcp_put("ov_" .. k[1] .. "_sm", sm) end
+      if not ED.PRO then ImGui.EndDisabled(ctx); ImGui.SameLine(ctx); ImGui.TextDisabled(ctx, "(Pro)") end
+    end
   elseif page == "tracks" then
     row(ctx, "Always show")
     local always = tcp_get("always", C.TCP_ALWAYS)

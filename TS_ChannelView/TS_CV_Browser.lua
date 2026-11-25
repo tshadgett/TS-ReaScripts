@@ -381,6 +381,15 @@ local function insert(track, entry, at, input)
   end
   -- instantiate doubles as a position: -1000 - n inserts at slot n.
   local instantiate = (at and not input) and (-1000 - at) or -1
+  -- The first of the chain's own plugins, or an ARA plugin (REAPER only
+  -- takes one as the very first): in front of ChannelView's probes, which
+  -- then move behind it where they belong (TS_CV_Taps keep_in_place)
+  if not input then
+    local TP = require("TS_CV_Taps")
+    if TP.ara_name((entry.ident or "") .. " " .. (entry.short or "")) or TP.only_probes_before(track, at) then
+      instantiate = -1000
+    end
+  end
   reaper.Undo_BeginBlock()
   local idx = reaper.TrackFX_AddByName(track, entry.ident, input and true or false, instantiate)
   reaper.Undo_EndBlock("ChannelView: add " .. entry.short, -1)

@@ -799,13 +799,29 @@ end
 -- per-FX actions
 -- ---------------------------------------------------------------------
 
-function T.is_floating(track, addr)
+-- REAPER's own window for the plugin is open (it may be hidden: a plugin
+-- in a TS_FXFrame keeps it, hidden)
+function T.native_floating(track, addr)
   local pok, hwnd = pcall(reaper.TrackFX_GetFloatingWindow, track, addr)
   return pok and hwnd ~= nil
 end
 
+-- (Pro, with the TS_FXFrame extension: TS_CV_PluginWindow sets this, and
+-- a plugin's window is a frame of ours. Each returns nil to leave it to
+-- REAPER's own window.)
+T.float_hook = nil
+
+function T.is_floating(track, addr)
+  if T.float_hook then
+    local v = T.float_hook.is(track, addr)
+    if v ~= nil then return v end
+  end
+  return T.native_floating(track, addr)
+end
+
 function T.toggle_float(track, addr)
-  if T.is_floating(track, addr) then
+  if T.float_hook and T.float_hook.toggle(track, addr) then return end
+  if T.native_floating(track, addr) then
     reaper.TrackFX_Show(track, addr, 2)   -- hide floating window
   else
     reaper.TrackFX_Show(track, addr, 3)   -- show floating window
@@ -920,17 +936,42 @@ end
 -- Returns a POSITIVE number of dB of reduction, or nil.
 -- What a plugin reports is its reduction at that moment (ReaComp's, at
 -- least, with its window shut; open, its window's own held peak): on a
--- steady saw it jumps about with the wave. So it's read as a meter would:
--- up at once, down no faster than T.GR_FALL dB a second.
+-- steady tone it jumps about with the wave, and a frame-rate reader
+-- catches it anywhere in its swing. So it's read as a meter would: the
+-- most it reached over the last T.GR_WINDOW seconds (which a steady tone
+-- fills, whatever the frame rate), then down no faster than T.GR_FALL dB
+-- a second. A tap's measured reading is held the same way.
 T.GR_FALL = 15
+T.GR_WINDOW = 0.3
 local gr_hold = {}
+function T.gr_held(hk, raw, now)
+  local h = gr_hold[hk]
+  if not h then h = { ts = {}, vs = {}, v = raw, t = now }; gr_hold[hk] = h end
+  local ts, vs = h.ts, h.vs
+  ts[#ts + 1], vs[#vs + 1] = now, raw
+  -- (only the window's)
+  local drop = 0
+  while drop < #ts - 1 and ts[drop + 1] < now - T.GR_WINDOW do drop = drop + 1 end
+  if drop > 0 then
+    local n = #ts
+    table.move(ts, drop + 1, n, 1); table.move(vs, drop + 1, n, 1)
+    for q = n - drop + 1, n do ts[q], vs[q] = nil, nil end
+  end
+  local m = raw
+  for i = 1, #vs do if vs[i] > m then m = vs[i] end end
+  local held = math.max(m, h.v - math.max(0, now - h.t) * T.GR_FALL)
+  h.v, h.t = held, now
+  return held
+end
+
 function T.gain_reduction(track, addr)
   -- A bypassed plugin keeps reporting whatever it last measured -- it has
   -- stopped processing, not stopped answering -- so without this check the
   -- meter would show a frozen, stale reading rather than the true current
   -- state. Bypassed means no reduction.
+  local hk = tostring(track) .. ":" .. tostring(addr)
   if not T.get_enabled(track, addr) then
-    gr_hold[tostring(track) .. ":" .. tostring(addr)] = nil
+    gr_hold[hk], gr_hold[hk .. ":m"] = nil, nil
     return 0
   end
 
@@ -938,20 +979,20 @@ function T.gain_reduction(track, addr)
                              track, addr, "GainReduction_dB")
   local v = (pok and ok) and tonumber(str) or nil
   local TP = require("TS_CV_Taps")
+  local now = reaper.time_precise and reaper.time_precise() or os.clock()
   if v then
-    local raw = math.abs(v)
-    local hk = tostring(track) .. ":" .. tostring(addr)
-    local now = reaper.time_precise and reaper.time_precise() or os.clock()
-    local h = gr_hold[hk]
-    local held = raw
-    if h then held = math.max(raw, h.v - math.max(0, now - h.t) * T.GR_FALL) end
-    gr_hold[hk] = { v = held, t = now }
+    local held = T.gr_held(hk, math.abs(v), now)
     -- reported, but measured too: the measured one, once its zero is in
-    -- (Setup, a reporting plugin's meter: Measured)
-    return TP.measured_for_reporting(track, T.guid_at(track, addr), held) or held
+    -- (Setup, a reporting plugin's meter: Measured), held the same way
+    local m = TP.measured_for_reporting(track, T.guid_at(track, addr), held)
+    if m then return T.gr_held(hk .. ":m", m, now) end
+    gr_hold[hk .. ":m"] = nil
+    return held
   end
   -- Not reported: measured instead, when a tap is on it (TS_CV_Taps).
-  return TP.reading(track, T.guid_at(track, addr))
+  local m = TP.reading(track, T.guid_at(track, addr))
+  if m == nil then gr_hold[hk] = nil; return nil end
+  return T.gr_held(hk, m, now)
 end
 
 -- Whether this plugin's reading is MEASURED by a probe tap rather than
@@ -970,14 +1011,18 @@ function T.clear_gr_cache() gr_cache = {} end
 
 -- The plugin's own answer, cached; a tap is checked each time instead,
 -- since it comes and goes as routing is laid and lifted.
+-- A "no" is asked again every couple of seconds: a plugin just loaded
+-- (a VST3 still starting) can say nothing at first and report later.
 function T.reports_gr_natively(track, addr, guid)
   local key = (guid ~= nil and guid ~= "") and guid or tostring(addr)
   local v = gr_cache[key]
-  if v ~= nil then return v end
+  local now = reaper.time_precise and reaper.time_precise() or os.clock()
+  if v == true then return true end
+  if v and now - v < 2 then return false end
   local pok, ok = pcall(reaper.TrackFX_GetNamedConfigParm, track, addr, "GainReduction_dB")
-  v = (pok and ok) and true or false
-  gr_cache[key] = v
-  return v
+  if pok and ok then gr_cache[key] = true; return true end
+  gr_cache[key] = now
+  return false
 end
 
 function T.reports_gr(track, addr, guid)

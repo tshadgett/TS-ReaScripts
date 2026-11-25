@@ -1052,6 +1052,24 @@ do
   local z = U.param_default("tr", 0, 1)
   check("double-click: a gain to 0 dB", db(z):match("^%-?0%.%d") ~= nil, true)
   check("double-click: a frequency to the middle", U.param_default("tr", 0, 2), 0.5)
+  -- your own range on it (linear -136..+30): still the plugin's own 0 dB,
+  -- not where your range would put 0 (19.2 dB on the plugin)
+  local was = U.with_ranges({ [1] = { lo = -136, hi = 30, unit = "dB", curve = "lin" } })
+  local z2 = U.param_default("tr", 0, 1)
+  check("double-click: the plugin's 0 dB, whatever your range", db(z2):match("^%-?0%.%d") ~= nil, true)
+  U.with_ranges(was)
+  -- a plugin that says nothing: your range's 0
+  reaper = setmetatable({
+    TrackFX_FormatParamValueNormalized = function() return false, "" end,
+    TrackFX_GetFormattedParamValue = function() return true, "" end,
+    TrackFX_GetFXGUID = function() return "{DEFTEST2}" end,
+    TrackFX_GetParamEx = function() return 0.5, 0, 1, 0.5 end,
+  }, { __index = real })
+  was = U.with_ranges({ [1] = { lo = -20, hi = 20, unit = "dB", curve = "lin" } })
+  check("double-click: a plugin that doesn't say, your range's 0", ("%.2f"):format(U.param_default("tr", 0, 1)), "0.50")
+  U.with_ranges({ [1] = { lo = -30, hi = 10, unit = "dB", curve = "lin" } })
+  check("double-click: your range changed, worked out again", ("%.2f"):format(U.param_default("tr", 0, 1)), "0.75")
+  U.with_ranges(was)
   reaper = real
 end
 -- an EQ curve on a grid: kept, and the canvas drawn there, not beside
@@ -1900,6 +1918,20 @@ check("reports_gr true",                T.reports_gr(nil, 0, "g1"), true)
 REPORTS = false; T.clear_gr_cache()
 check("no report -> nil",               T.gain_reduction(nil, 0), nil)
 check("reports_gr false",               T.reports_gr(nil, 0, "g2"), false)
+-- a plugin that says nothing at first (a VST3 still starting) and reports
+-- later: asked again after a couple of seconds
+do
+  local real = reaper.time_precise
+  local t = 500
+  reaper.time_precise = function() return t end
+  check("reports natively: not yet", T.reports_gr_natively(nil, 0, "late"), false)
+  REPORTS = true
+  t = t + 1
+  check("reports natively: not asked again at once", T.reports_gr_natively(nil, 0, "late"), false)
+  t = t + 1.5
+  check("reports natively: asked again later", T.reports_gr_natively(nil, 0, "late"), true)
+  reaper.time_precise = real
+end
 REPORTS = true; T.clear_gr_cache()
 
 -- A bypassed plugin keeps ANSWERING GainReduction_dB with whatever it
@@ -1926,8 +1958,35 @@ do
   reaper.TrackFX_GetEnabled = real
 end
 
--- a reported reduction read as a meter would: up at once, down no faster
--- than T.GR_FALL dB a second
+-- a track's peak read as a meter holds it: REAPER's figure dropping 6 dB
+-- for a few frames on a steady tone doesn't show; a real fall does
+do
+  local real_t, real_p, real_s = reaper.time_precise, reaper.Track_GetPeakInfo, U.solo_silenced
+  local t, pk = 50, 0.1
+  reaper.time_precise = function() return t end
+  reaper.Track_GetPeakInfo = function() return pk end
+  U.solo_silenced = function() return false end
+  local tr = {}
+  local lo = 1
+  for f = 1, 120 do
+    t = t + 1 / 60
+    pk = (f % 7 < 3) and 0.05 or 0.1         -- half (6 dB down) for 3 frames in 7
+    local v = U.track_peak(tr, 0)
+    if f > 10 then lo = math.min(lo, v) end
+  end
+  check("track peak: a steady tone reads steady", ("%.3f"):format(lo), "0.100")
+  pk = 0.001
+  t = t + 0.25 + 0.5
+  local fell = U.val2db(U.track_peak(tr, 0))
+  -- (held from its last rise, two frames back, then 20 dB a second)
+  check("track peak: a real drop falls at its rate", tostring(fell < -29.5 and fell > -31.5), "true")
+  t = t + 3
+  check("track peak: down to what it reads", ("%.3f"):format(U.track_peak(tr, 0)), "0.001")
+  reaper.time_precise, reaper.Track_GetPeakInfo, U.solo_silenced = real_t, real_p, real_s
+end
+
+-- a reported reduction read as a meter would: the most it reached over
+-- the last T.GR_WINDOW, then down no faster than T.GR_FALL dB a second
 do
   local real = reaper.time_precise
   local t = 100
@@ -1938,9 +1997,39 @@ do
   local a = T.gain_reduction(nil, 5)
   GR = 3.0; t = t + 0.03
   local b = T.gain_reduction(nil, 5)
+  GR = 1.0; t = t + 0.25
+  local b2 = T.gain_reduction(nil, 5)
   GR = 1.0; t = t + 2
   local c = T.gain_reduction(nil, 5)
-  check("reported reduction: held between frames, then falls", ("%.2f %.2f %.2f"):format(a, b, c), "2.75 3.00 1.00")
+  check("reported reduction: held over its window, then falls", ("%.2f %.2f %.2f %.2f"):format(a, b, b2, c),
+    "3.20 3.20 3.00 1.00")
+  -- a steady tone read at frame rate, caught anywhere in its swing: steady
+  local lo, hi = math.huge, -math.huge
+  local seed = 7
+  for f = 1, 240 do
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    GR = 1 + 3 * (seed / 2147483648)            -- anywhere from 1 to 4 dB
+    t = t + 1 / 60
+    local v = T.gain_reduction(nil, 5)
+    if f > 60 then lo, hi = math.min(lo, v), math.max(hi, v) end
+  end
+  check("reported reduction: a steady tone reads steady", tostring(hi - lo < 0.6 and lo > 3.2), "true")
+  -- measured instead (Setup: Measured), from a probe swinging the same way:
+  -- held the same way
+  local TPm = require("TS_CV_Taps")
+  local mfr = TPm.measured_for_reporting
+  local mv = 0
+  TPm.measured_for_reporting = function() return mv end
+  lo, hi = math.huge, -math.huge
+  for f = 1, 240 do
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    mv = 2 + 3 * (seed / 2147483648)
+    t = t + 1 / 60
+    local v = T.gain_reduction(nil, 5)
+    if f > 60 then lo, hi = math.min(lo, v), math.max(hi, v) end
+  end
+  check("measured reduction: a steady tone reads steady", tostring(hi - lo < 0.8 and lo > 4.2), "true")
+  TPm.measured_for_reporting = mfr
   reaper.time_precise = real
 end
 
@@ -6583,9 +6672,9 @@ do
   check("lock: a tall panel doesn't scroll", P.scrolls(a, tall, 4), false)
   check("lock: a short one does", P.scrolls(b, short, 4), true)
   check("lock: unlocked never does", P.scrolls(b, short, nil), false)
-  check("lock: its scrollbar widens the panel",
+  check("lock: its scrollbar in the panel's edge, no wider",
         P.width(knobs(16), short, false, false, nil, false, false, 4) - P.width(knobs(16), tall, false, false, nil, false, false, 4),
-        C.SCROLL_W + 2)
+        0)
   C.CELL_W = cw0
 end
 
@@ -10542,6 +10631,27 @@ do
   T.select(1); T.pick(3)
   local okm, errm = pcall(GE.draw, "ctx")
   check("grid sheet: several selected", okm and "ok" or tostring(errm), "ok")
+  -- Anchor on several at once: Bottom, then Right across
+  do
+    local ST_ = require("TS_CV_Style")
+    local was_seg = ST_.seg
+    local want = { ["##ge_anchor"] = "b", ["##ge_anchor_x"] = "r" }
+    ST_.seg = function(_, id) return want[id] end
+    T.select(1); T.pick(3)
+    local oka, erra = pcall(GE.draw, "ctx")
+    ST_.seg = was_seg
+    local c1, c3 = T.cur().controls[1], T.cur().controls[3]
+    check("grid sheet: several anchored at once", (oka and "ok" or tostring(erra)) .. " " .. tostring(c1.anchor) .. " "
+      .. tostring(c3.anchor) .. " " .. tostring(c1.anchor_x) .. " " .. tostring(c3.anchor_x), "ok b b r r")
+    -- and on one alone, above its Take it off the panel
+    want = { ["##ge_anchor"] = "t", ["##ge_anchor_x"] = "lr" }
+    ST_.seg = function(_, id) return want[id] end
+    T.select(3)
+    local oko, erro = pcall(GE.draw, "ctx")
+    ST_.seg = was_seg
+    check("grid sheet: one anchored", (oko and "ok" or tostring(erro)) .. " " .. tostring(c3.anchor) .. " "
+      .. tostring(c3.anchor_x) .. " " .. tostring(c1.anchor), "ok nil r b")
+  end
   check("grid sheet: the panel's menus drawn", (called.style or 0) > 0 and (called.back or 0) > 0 and (called.look or 0) > 0
     and (called.plate or 0) > 0 and (called.section or 0) > 0 and (called.colour or 0) > 0, true)
   -- Options: By time and its list drawn (Pro)
@@ -14117,6 +14227,23 @@ do
   share = {}
   for i = 1, 41 do share[i] = 0.5 end
   try("a share in every band")
+  -- the crosshair, over the graph, at each smoothing
+  fake.IsMouseHoveringRect = function() return true end
+  fake.IsWindowHovered = function() return true end
+  fake.GetMousePos = function() return 120, 90 end
+  for _, sm in ipairs({ "0", "1", "3" }) do
+    ext.ov_spec_sm, ext.ov_dyn_sm = sm, sm
+    try("the crosshair, smooth " .. sm)
+  end
+  local said = {}
+  fake.DrawList_AddText = function(_, _, _, _, t) said[#said + 1] = t end
+  fake.GetMousePos = function() return 230, 40 end
+  try("the crosshair at the right edge")
+  local got = {}
+  for _, t in ipairs(said) do if t:find("^After") or t:find("^Before") or t:find("Hz") then got[#got + 1] = t:gsub("%s.*", "") end end
+  check("overview spectrum: the crosshair's readout", table.concat(got, ","):find("After,Before") ~= nil, true)
+  fake.DrawList_AddText = nil
+  fake.IsMouseHoveringRect, fake.IsWindowHovered, fake.GetMousePos, ext.ov_spec_sm, ext.ov_dyn_sm = nil, nil, nil, nil, nil
   share = { [12] = 0.7, [20] = 0.3 }
   try("a share in some bands")
   probes = false
@@ -14157,6 +14284,26 @@ do
     ext.overview_analysis_tab = "dyn"
     OA.height("ctx", 200)
     try("the dynamics alone, tabbed")
+    -- its crosshair, held to the beat and free: when, the levels, what
+    -- the chain did, each plugin's reduction
+    local said = {}
+    fake.IsMouseHoveringRect = function() return true end
+    fake.IsWindowHovered = function() return true end
+    fake.GetMousePos = function() return 100, 120 end
+    fake.DrawList_AddText = function(_, _, _, _, t) said[#said + 1] = t end
+    hd.newest = hd.newest + 10; try("the dynamics' crosshair, held to the beat")
+    local function has(pat) for _, t in ipairs(said) do if t:find(pat) then return true end end return false end
+    check("dynamics crosshair: when, after, before, what the chain did",
+      tostring(has("^Beat %d%.%d of 4")) .. " " .. tostring(has("^After %-")) .. " " .. tostring(has("^Before %-"))
+      .. " " .. tostring(has("^Chain %-6%.0 dB")), "true true true true")
+    said = {}
+    ext.overview_dynamics_window = "s2"
+    fake.GetMousePos = function() return 225, 60 end
+    hd.newest = hd.newest + 10; try("the dynamics' crosshair, free, at the right")
+    check("dynamics crosshair: free, seconds ago, the newest's reduction", tostring(has(" s ago")) .. " " .. tostring(has("^Comp 4%.0 dB")),
+      "true true")
+    ext.overview_dynamics_window = nil
+    fake.IsMouseHoveringRect, fake.IsWindowHovered, fake.GetMousePos, fake.DrawList_AddText = nil, nil, nil, nil
     TPs.chain_wave = function() return nil end
     try("the dynamics, an older probe")
     ext.overview_analysis_tab = ""
@@ -14483,12 +14630,17 @@ do
   check("instrument: renamed, by its own name", U.is_instrument({}, { guid = "{i4}", name = "My strings", addr = 0 }), true)
   reaper.TrackFX_GetNamedConfigParm = was
   local TPm = require("TS_CV_Taps")
-  local was_m = TPm.is_metered
+  local was_m, was_lead = TPm.is_metered, TPm.lead_out
   TPm.is_metered = function() return true end
+  -- in front of the pre probe: the probe meters its output alone
+  TPm.lead_out = function(_, g) return g == "{i1}" end
   local io = P.has_io({}, { guid = "{i1}", name = "VSTi: SynthMaster (KV331)" }, { levels = true })
   check("instrument: its output meter only", type(io) == "table" and (tostring(io.l) .. " " .. tostring(io.r)), "false true")
   check("instrument: an effect's both", P.has_io({}, { guid = "{i2}", name = "VST3: Pro-Q 4 (FabFilter)" }, { levels = true }), true)
-  TPm.is_metered = was_m
+  -- given audio, the probe in front of it: both
+  TPm.lead_out = function() return false end
+  check("instrument: given audio, both", P.has_io({}, { guid = "{i1}", name = "VSTi: SynthMaster (KV331)" }, { levels = true }), true)
+  TPm.is_metered, TPm.lead_out = was_m, was_lead
   -- the reduction's strip beside a curve: as wide as the meters are
   local CP = require("TS_CV_CompPanel")
   local was_w = C.METER_COL_W
@@ -14683,6 +14835,137 @@ do
   M.remove("SmoothPlug"); M.save(); M.reload()
 end
 
+-- Smoothing a spectrum (across an octave's part, and over time) and a
+-- waveform's outline (over pixels either side)
+do
+  local sp = { n = 9, lo = 20, hi = 20480, db = { -60, -60, -60, -60, 0, -60, -60, -60, -60 } }
+  check("smooth spectrum: off is its own", U.smooth_spectrum(sp, 0) == sp.db, true)
+  local a = U.smooth_spectrum(sp, 3, nil, -80)
+  check("smooth spectrum: a spike spread, lower", tostring(a[5] < 0 and a[5] > -60) .. " " .. tostring(a[4] > -60), "true true")
+  U.smooth_spectrum(sp, 2, "t1", -80)
+  local sp2 = { n = 9, lo = 20, hi = 20480, db = { -20, -20, -20, -20, -20, -20, -20, -20, -20 } }
+  local b = U.smooth_spectrum(sp2, 2, "t1", -80)
+  check("smooth spectrum: eased over time", tostring(b[1] < -20 and b[1] > -60), "true")
+  local lo, hi = { [0] = -1, -0.2, nil, -0.6 }, { [0] = 1, 0.2, nil, 0.6 }
+  U.smooth_outline(lo, hi, 3, 1)
+  check("smooth outline: averaged, gaps kept", ("%.1f %.1f %s %.1f"):format(hi[0], hi[1], tostring(hi[2]), hi[3]), "0.6 0.6 nil 0.6")
+end
+
+-- Anchors: a grid in a panel taller than it. Stretched items grow (and
+-- shrink to their least), bottom ones move down but never up; kept
+do
+  local L = { grid = { cols = 16, rows = 8 }, controls = {
+    { type = "curve", param = -1, label = "", anchor = "tb", at = { c = 4, r = 0, w = 8, h = 8 } },
+    { type = "knob", param = 0, label = "", at = { c = 0, r = 0, w = 4, h = 4 } },
+    { type = "toggle", param = 1, label = "", anchor = "b", at = { c = 12, r = 6, w = 4, h = 2 } },
+    { type = "knob", param = 2, label = "", anchor = "tb", at = { c = 12, r = 0, w = 4, h = 4 } },
+  } }
+  L.controls.grid = L.grid
+  local adj, rows = P.anchored(L.controls, 20)
+  check("anchors: stretched to the room, moved to the foot, a knob's stretch taken as bottom",
+    adj[L.controls[1]].h .. " " .. adj[L.controls[3]].r .. " " .. adj[L.controls[4]].r .. " " .. tostring(adj[L.controls[2]]) .. " " .. rows,
+    "20 18 12 nil 20")
+  adj, rows = P.anchored(L.controls, 2)
+  check("anchors: shorter, but the bottom knob is already at the top: nothing moves",
+    tostring(adj[L.controls[1]]) .. " " .. tostring(adj[L.controls[3]]) .. " " .. rows, "nil nil 8")
+  -- shorter, with an unanchored knob above the bottom toggle: up as far as
+  -- that knob allows, the curve shrinking with it
+  local S = { grid = { cols = 16, rows = 8 },
+    { type = "curve", param = -1, label = "", anchor = "tb", at = { c = 4, r = 0, w = 8, h = 8 } },
+    { type = "knob", param = 0, label = "", at = { c = 12, r = 0, w = 4, h = 4 } },
+    { type = "toggle", param = 1, label = "", anchor = "b", at = { c = 12, r = 6, w = 4, h = 2 } },
+    { type = "toggle", param = 2, label = "", anchor = "b", at = { c = 0, r = 6, w = 4, h = 2 } },
+  }
+  adj, rows = P.anchored(S, 7)
+  check("anchors: shorter, lifted with the foot", adj[S[3]].r .. " " .. adj[S[4]].r .. " " .. adj[S[1]].h .. " " .. rows, "5 5 7 7")
+  adj, rows = P.anchored(S, 3)
+  check("anchors: much shorter, lifted as far as the knob above allows",
+    adj[S[3]].r .. " " .. adj[S[4]].r .. " " .. adj[S[1]].h .. " " .. tostring(adj[S[2]]) .. " " .. rows, "4 4 6 nil 6")
+  check("anchors: none, nothing", tostring(P.anchored({ { type = "knob", at = { c = 0, r = 0, w = 4, h = 4 } } }, 20)), "nil")
+  -- a room that isn't whole quarters: filled exactly, not scrolled (the
+  -- foot was cut off when the rows were rounded up)
+  local room = P.qy(1) * 20.4
+  local ph = room + P.head_h() + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD
+  local lay = P.layout(L.controls, ph, 4)
+  check("anchors: a room of part quarters, filled and not scrolled",
+    tostring(math.abs(lay.height - room) < 0.01) .. " " .. tostring(P.scrolls(lay, ph, 4)), "true false")
+  -- across: a curve stretched, a knob kept to the right, one at the left
+  local X = { grid = { cols = 16, rows = 8 },
+    { type = "curve", param = -1, label = "", anchor_x = "lr", at = { c = 4, r = 0, w = 8, h = 8 } },
+    { type = "knob", param = 0, label = "", at = { c = 0, r = 0, w = 4, h = 4 } },
+    { type = "knob", param = 1, label = "", anchor_x = "r", at = { c = 12, r = 0, w = 4, h = 4 } },
+    { type = "toggle", param = 2, label = "", anchor_x = "lr", at = { c = 12, r = 4, w = 4, h = 2 } },
+  }
+  local _, xr, xc
+  adj, xr, xc = P.anchored(X, nil, 24)
+  check("anchors across: stretched, kept right, a toggle's stretch taken as right, the left one stays",
+    adj[X[1]].w .. " " .. adj[X[3]].c .. " " .. adj[X[4]].c .. " " .. tostring(adj[X[2]]) .. " " .. xc .. " " .. xr, "16 20 20 nil 24 8")
+  local Y = { grid = { cols = 18, rows = 8 },
+    { type = "curve", param = -1, label = "", anchor_x = "lr", at = { c = 4, r = 0, w = 10, h = 8 } },
+    { type = "knob", param = 1, label = "", anchor_x = "r", at = { c = 14, r = 0, w = 4, h = 4 } },
+  }
+  adj, xr, xc = P.anchored(Y, nil, 12)
+  check("anchors across: narrower, in as far as the curve's least allows",
+    adj[Y[1]].w .. " " .. adj[Y[2]].c .. " " .. xc, "8 12 16")
+  X[1].anchor_x = nil
+  adj, xr, xc = P.anchored(X, nil, 10)
+  check("anchors across: narrower, held by the curve to its left", tostring(adj[X[3]]) .. " " .. xc, "nil 16")
+  X[1].anchor_x = "lr"
+  check("anchors: the height alone leaves across as it is", tostring(P.anchored(X, 8)), "nil")
+  local lw = P.layout(X, 400, 4, P.qx(1) * 24)
+  check("anchors across: laid out to the width it has", tostring(math.abs(lw.width - P.qx(1) * 24) < 0.01), "true")
+  local was_rack = P.RACK
+  P.RACK = true
+  lw = P.layout_w(X, P.qx(1) * 30, nil)
+  P.RACK = was_rack
+  check("anchors across: the rack's column", tostring(math.abs(lw.width - P.qx(1) * 30) < 0.01), "true")
+  L.controls[2].anchor_x = "r"
+  M.set("AnchorPlug", L); M.save(); M.reload()
+  local R = M.get("AnchorPlug")
+  check("anchors: kept", tostring(R.controls[1].anchor) .. " " .. tostring(R.controls[3].anchor) .. " "
+    .. tostring(R.controls[2].anchor) .. " " .. tostring(M.copy(R).controls[3].anchor), "tb b nil b")
+  check("anchors: across kept", tostring(R.controls[2].anchor_x) .. " " .. tostring(M.copy(R).controls[2].anchor_x)
+    .. " " .. tostring(R.controls[1].anchor_x), "r r nil")
+  -- a grid panel widened by its edge, never narrower than its grid
+  local nat = P.width(R.controls, 400, false, false, "AnchorPlug", nil, nil, 4)
+  R.own_w = nat + 150; M.set("AnchorPlug", R)
+  local wide = P.width(R.controls, 400, false, false, "AnchorPlug", nil, nil, 4)
+  R.own_w = 10; M.set("AnchorPlug", R)
+  local least = P.width(R.controls, 400, false, false, "AnchorPlug", nil, nil, 4)
+  check("grid panel width: widened, never narrower", (wide - nat) .. " " .. (least - nat), "150 0")
+  R.own_w = nat + 150; M.set("AnchorPlug", R); M.save(); M.reload()
+  check("grid panel width: kept", tostring(M.get("AnchorPlug").own_w == math.floor(nat + 150)), "true")
+  -- the rack: a grid panel made taller by its foot, and its anchors to it
+  do
+    local lay = { grid = { cols = 16, rows = 8 }, controls = {
+      { type = "knob", param = 0, label = "", at = { c = 0, r = 0, w = 4, h = 4 } },
+      { type = "toggle", param = 1, label = "", anchor = "b", at = { c = 4, r = 2, w = 4, h = 2 } } } }
+    lay.controls.grid = lay.grid
+    local was_rack = P.RACK
+    P.RACK = true
+    local fxr = { guid = "{rackgrid}", addr = 0, name = "VST: RackGrid" }
+    local h0 = P.rack_height({}, fxr, lay, "RackGridPlug", 600)
+    lay.own_h = h0 - P.head_h() - P.footer_h() + 200
+    local h1 = P.rack_height({}, fxr, lay, "RackGridPlug", 600)
+    lay.own_h = 100
+    local h2 = P.rack_height({}, fxr, lay, "RackGridPlug", 600)
+    local lw = P.layout_w(lay.controls, P.qx(1) * 16, nil, h1)
+    P.RACK = was_rack
+    local toggle_y
+    for _, it in ipairs(lw.items) do if it.ctl == lay.controls[2] then toggle_y = it.sy or it.y end end
+    check("rack grid height: taller by its foot, never shorter", ("%g %g"):format(h1 - h0, h2 - h0), "200 0")
+    check("rack grid height: what's anchored to the foot goes with it",
+      tostring(toggle_y and toggle_y > P.qy(2) + 150), "true")
+  end
+  M.remove("AnchorPlug"); M.save(); M.reload()
+  -- laid out in a tall panel: the toggle at the foot
+  local qy1 = P.qy(1)
+  local tall = P.layout(L.controls, 20 * qy1 + P.head_h() + P.footer_h() + C.GRID_TOP_PAD + C.PANEL_PAD, true)
+  local tog
+  for _, it in ipairs(tall.items) do if it.ctl == L.controls[3] then tog = it end end
+  check("anchors: laid out, the toggle at the foot", tog and math.floor(tog.y / qy1 + 0.5), 18)
+end
+
 -- A button in a place half a cell tall (its name hidden): the button
 -- alone, in its place, not over the row above
 do
@@ -14691,6 +14974,153 @@ do
   local pl = P.layout(L, 400)
   local it = pl.items[1]
   check("short button: in its place, half a cell", tostring(it.y >= it.sy) .. " " .. it.h, "true 1")
+end
+
+-- A plugin's own window in its panel (Pro, TS_CV_PluginWindow), against a
+-- stand-in for the TS_FXFrame extension (where the module is there)
+if pcall(require, "TS_CV_PluginWindow") then
+  local ED_ = require("TS_CV_Edition")
+  local was_pro = ED_.PRO
+  ED_.PRO = ED_.PRO or { RELEASE = ED_.RELEASE }
+  local PWm = require("TS_CV_PluginWindow")
+  local Stm = require("TS_CV_State")
+  local Tm = require("TS_CV_FXTree")
+  local fr, nid, fixed = {}, 0, {}
+  local saved = {}
+  local api = {
+    TS_FXFrame_Open = function(_, addr)
+      for id, f in pairs(fr) do if f.addr == addr and f.state > 0 then return id end end
+      nid = nid + 1
+      fr[nid] = { addr = addr, state = 1, w = 800, h = 500 }
+      return nid
+    end,
+    TS_FXFrame_Find = function(_, addr)
+      for id, f in pairs(fr) do if f.addr == addr and f.state > 0 then return id end end
+      return 0
+    end,
+    TS_FXFrame_GetState = function(id) return fr[id] and fr[id].state or 0 end,
+    TS_FXFrame_Embed = function(id, p, x, y)
+      -- (REAPER's API takes integers: a float with a fraction is an error there)
+      if math.type(x) ~= "integer" or math.type(y) ~= "integer" then error("Embed: not integers " .. x .. "," .. y) end
+      local f = fr[id]
+      if not f or f.state == 0 then return false end
+      if p then f.state, f.x, f.y = 4, x, y else f.state = 2 end
+      return true
+    end,
+    TS_FXFrame_SetClip = function(id, x, y, w, h)
+      for _, v in ipairs({ x, y, w, h }) do if math.type(v) ~= "integer" then error("SetClip: not integers") end end
+      fr[id].clip = { x, y, w, h }
+      return true
+    end,
+    TS_FXFrame_Show = function(id, on) fr[id].shown = on return true end,
+    TS_FXFrame_GetSize = function(id) local f = fr[id] return true, f.w, f.h end,
+    TS_FXFrame_SetSize = function(id, w, h)
+      if math.type(w) ~= "integer" or math.type(h) ~= "integer" then error("SetSize: not integers") end
+      local f = fr[id]
+      f.asked = w .. "x" .. h
+      if not fixed[f.addr] then f.w, f.h = w, h end
+      return true
+    end,
+    TS_FXFrame_Close = function(id) if fr[id] then fr[id].state = 0 end return true end,
+    TS_FXFrame_FindWindow = function(t) return t == "CV" and "HWND1" or nil end,
+  }
+  for k, v in pairs(api) do saved[k] = reaper[k]; reaper[k] = v end
+  local clock, was_clock = 1000, reaper.time_precise
+  reaper.time_precise = function() return clock end
+  local popup = false
+  local fake = setmetatable({
+    GetWindowDpiScale = function() return 1 end,
+    GetWindowViewport = function() return "vp" end,
+    Viewport_GetPos = function() return 0, 0 end,
+    IsRectVisibleEx = function(_, x1, _, x2) return x2 > 0 and x1 < 1000 end,   -- the row's left edge at 0
+    IsPopupOpen = function() return popup end,
+    GetDragDropPayload = function() return false end,
+    CalcTextSize = function(_, t) return #t * 6, 13 end,
+    GetMousePos = function() return 0, 0 end,
+    PopupFlags_AnyPopupId = 1, PopupFlags_AnyPopupLevel = 2,
+  }, { __index = function() return function() return false end end })
+  PWm.attach(fake)
+  local track = {}
+  local function frames(fx, n, x, layout)
+    for _ = 1, n do
+      PWm.begin_frame()
+      if PWm.showing(track, fx, layout) then PWm.draw("ctx", "dl", x or 100, 50, 900, 200, track, fx) end
+      PWm.end_frame()
+    end
+  end
+  PWm.HOST = "CV"
+  local L = { own_gui = true }
+  local fx = { guid = "{pw-1}", addr = 3 }
+  check("plugin window: wanted from its layout, not without a host", tostring(PWm.wanted(fx, L)) .. " "
+    .. tostring(PWm.wanted(fx, {})), "true false")
+  frames(fx, 6, nil, L)
+  local f1 = fr[1]
+  check("plugin window: opened, fitted to the row's height in proportion, shown once settled",
+    ("%s %s %dx%d %s %s"):format(f1.state, f1.asked, f1.w, f1.h, tostring(f1.shown), table.concat(f1.clip, ",")),
+    "4 307x192 307x192 true 104,54,307,192")
+  check("plugin window: the body as wide as the plugin", PWm.body_w(fx, 200), 307 + 8)
+  -- a menu open: hidden till it closes
+  popup = true; frames(fx, 1, nil, L)
+  local hid = fr[1].shown
+  popup = false; frames(fx, 1, nil, L)
+  check("plugin window: hidden while a menu is open", tostring(hid) .. " " .. tostring(fr[1].shown), "false true")
+  -- half out of the row at the left: cut there, at once
+  frames(fx, 1, -50, L)
+  check("plugin window: cut to what's on screen", table.concat(fr[1].clip, ","), "0,54,261,192")
+  -- one that won't resize keeps its size and scrolls
+  local fx2 = { guid = "{pw-2}", addr = 5 }
+  fixed[5] = true
+  Stm.set_own_gui(fx2.guid, true, false)
+  frames(fx2, 6)
+  local f2 = fr[2]
+  -- scrolled part way (the scrollbar gives fractions; a scale of 1.25 too)
+  PWm._frames()["{pw-2}"].sy = 10.6
+  fake.GetWindowDpiScale = function() return 1.25 end
+  local okf, errf = pcall(frames, fx2, 1)
+  fake.GetWindowDpiScale = function() return 1 end
+  frames(fx2, 1)
+  check("plugin window: scrolled by a fraction, whole pixels to the extension", okf and "ok" or tostring(errf), "ok")
+  check("plugin window: a fixed size scrolls, its scrollbar beside it", ("%dx%d %s %d"):format(f2.w, f2.h,
+    table.concat(f2.clip, ","), PWm.body_w(fx2, 200)), "800x500 104,54,800,192 818")
+  -- Float: out of its panel into a frame of its own; the panel shows its
+  -- controls; the plugin-window button puts it back
+  Tm.toggle_float(track, 3)
+  check("plugin window: Float pops it out", tostring(fr[1].state) .. " " .. tostring(PWm.popped(track, fx)) .. " "
+    .. tostring(PWm.showing(track, fx, L)) .. " " .. tostring(Tm.is_floating(track, 3)), "2 true false true")
+  PWm.toggle_here(track, fx, L)
+  frames(fx, 1, nil, L)
+  check("plugin window: put back in its panel", tostring(fr[1].state) .. " " .. tostring(PWm.showing(track, fx, L))
+    .. " " .. tostring(Tm.is_floating(track, 3)), "4 true false")
+  -- its controls instead: the plugin closes, this instance remembers
+  PWm.toggle_here(track, fx, L)
+  check("plugin window: its controls", tostring(fr[1].state) .. " " .. tostring(PWm.wanted(fx, L)) .. " "
+    .. tostring(Stm.own_gui(fx.guid)), "0 false false")
+  Stm.set_own_gui(fx.guid, true, true)
+  check("plugin window: back to its layout's say, nothing kept", tostring(Stm.own_gui(fx.guid)), "nil")
+  -- Float on a panel showing its controls: a frame of its own
+  Tm.toggle_float(track, 9)
+  check("plugin window: Float opens a frame of its own", tostring(fr[3] and fr[3].state), "1")
+  Tm.toggle_float(track, 9)
+  check("plugin window: and closes it", tostring(fr[3].state), "0")
+  -- kept with the layout
+  M.set("PWPlug", { own_gui = true, controls = { { param = 0, type = "knob", label = "" } } }); M.save(); M.reload()
+  check("plugin window: kept with the layout", tostring(M.get("PWPlug").own_gui) .. " " .. tostring(M.copy(M.get("PWPlug")).own_gui), "true true")
+  M.remove("PWPlug"); M.save(); M.reload()
+  -- a panel not drawn (another track, folded): hidden, then closed
+  frames(fx2, 3)
+  PWm.begin_frame(); PWm.end_frame()
+  local h1 = tostring(fr[2].shown) .. " " .. fr[2].state
+  clock = clock + 1; PWm.begin_frame(); PWm.end_frame()
+  clock = clock + 1.5; PWm.begin_frame(); PWm.end_frame()
+  check("plugin window: its panel gone, hidden then closed", h1 .. " " .. fr[2].state, "false 4 0")
+  frames(fx2, 2)
+  PWm.shutdown()
+  check("plugin window: closed with ChannelView", tostring(fr[4] and fr[4].state), "0")
+  PWm.HOST = nil
+  for k in pairs(api) do reaper[k] = saved[k] end
+  reaper.time_precise = was_clock
+  Stm.set_own_gui(fx2.guid, false, false)
+  ED_.PRO = was_pro
 end
 
 print(fails == 0 and "\nALL PASS" or ("\n" .. fails .. " FAILURES"))

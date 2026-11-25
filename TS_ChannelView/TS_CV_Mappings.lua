@@ -2590,6 +2590,10 @@ local function parse_section(sect)
         -- behind the rest (Layer<n>=back): a picture, a visualiser or an
         -- EQ curve the other controls may sit over
         layer   = (t == "image" or t == "vis" or t == "curve") and U.trim(sect["Layer" .. i] or "") == "back" and "back" or nil,
+        -- kept to the panel's foot (b), or stretched with it (tb): P.anchored
+        anchor  = ({ b = "b", tb = "tb" })[U.trim(sect["Anchor" .. i] or "")],
+        -- and across: to its right edge (r), or stretched with it (lr)
+        anchor_x = ({ r = "r", lr = "lr" })[U.trim(sect["AnchorX" .. i] or "")],
         -- bit 4: the second parameter reversed (an XY pad's Y, a
         -- concentric knob's inner knob); bit 1 reverses the first
         invert2 = ((f & 16) ~= 0 and (t == "xy" or t == "dual")) or nil,
@@ -2710,6 +2714,8 @@ local function parse_section(sect)
            measure = (U.trim(sect.Measure or "") == "1") or nil,
            mug = tonumber(U.trim(sect.Makeup or "")),
            levels = (U.trim(sect.Levels or "") == "1") or nil,
+           -- (Pro, TS_FXFrame) its panels show the plugin's own window
+           own_gui = (U.trim(sect.PluginWindow or "") == "1") or nil,
            plate = C.plate_key(U.trim(sect.Plate or "")),
            brush = brush_of(sect.Brush),
            finish = finish_of(sect.Finish),
@@ -2754,6 +2760,7 @@ local function serialize(layout)
   if layout.measure then out.Measure = "1" end
   if layout.mug then out.Makeup = tostring(math.floor(layout.mug)) end
   if layout.levels then out.Levels = "1" end
+  if layout.own_gui then out.PluginWindow = "1" end
   if C.plate_key(layout.plate) then out.Plate = C.plate_key(layout.plate) end
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
   if finish_of(layout.finish) then out.Finish = layout.finish end
@@ -2917,6 +2924,8 @@ local function serialize(layout)
     if c.type == "text" and c.align then out["Align" .. (i - 1)] = c.align end
     if c.type == "text" and M.text_font_line(c.font) then out["TextFont" .. (i - 1)] = M.text_font_line(c.font) end
     if c.layer == "back" and (c.type == "image" or c.type == "vis" or c.type == "curve") then out["Layer" .. (i - 1)] = "back" end
+    if (c.anchor == "b" or c.anchor == "tb") and c.at then out["Anchor" .. (i - 1)] = c.anchor end
+    if (c.anchor_x == "r" or c.anchor_x == "lr") and c.at then out["AnchorX" .. (i - 1)] = c.anchor_x end
     if c.type == "image" and M.pic_line(c.pic) then out["Pic" .. (i - 1)] = M.pic_line(c.pic) end
     if c.type == "combo" and c.ccols then
       local line = M.choice_cols_line(c.ccols)
@@ -4536,7 +4545,7 @@ end
 -- Deep copy, so the editor can work on a scratch layout and discard it.
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
-                measure = layout.measure, levels = layout.levels, mug = layout.mug,
+                measure = layout.measure, levels = layout.levels, mug = layout.mug, own_gui = layout.own_gui,
                 own_w = layout.own_w, own_h = layout.own_h,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
                 fink = layout.fink, lock = layout.lock, grad = M.grad_copy(layout.grad), palette = M.palette_of(M.palette_line(layout.palette)),
@@ -4554,7 +4563,7 @@ function M.copy(layout)
   for i, c in ipairs(layout.controls or {}) do
     out.controls[i] = { param = c.param, type = c.type, bipolar = c.bipolar,
                         invert = c.invert, no_rule = c.no_rule, live = c.live, noname = c.noname, vin = c.vin, noframe = c.noframe,
-                        layer = c.layer, grad = M.grad_copy(c.grad),
+                        layer = c.layer, anchor = c.anchor, anchor_x = c.anchor_x, grad = M.grad_copy(c.grad),
                         label = c.label, style = c.style, cap = c.cap, size = c.size,
                         buttons = c.buttons, nbtn = c.nbtn, back = c.back, boxc = c.boxc, brush = c.brush,
                         leds = c.leds, ledn = c.ledn, upto = c.upto, litp = c.litp, pat = M.copy_step_pat(c.pat),

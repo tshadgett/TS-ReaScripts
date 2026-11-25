@@ -92,7 +92,8 @@ function UK.track(track, full, now)
   full = full or T.collect(track)
   local g = reaper.GetTrackGUID(track)
   local took = false
-  local fh = T.hash(full)
+  -- (and whether an instrument at the top is given audio: TP.pre_slot)
+  local fh = T.hash(full) .. "|" .. TP.feed_key(track)
   if fh ~= hashes[g] then
     local moved = FZ.sync(track)
     FZ.forget()
@@ -102,7 +103,7 @@ function UK.track(track, full, now)
     local CD = ED.PRO and ED.module("TS_CV_ConsoleDrawer") or nil
     if CD and CD.keep_in_place(track) then moved = true end
     if TP.keep_in_place(track) or moved then full = T.collect(track) end
-    hashes[g] = T.hash(full)
+    hashes[g] = T.hash(full) .. "|" .. TP.feed_key(track)
     if CR.adopt(track, full) then took = true end
   end
   if now - (carry_at[g] or 0) > 2 then

@@ -1,5 +1,5 @@
 desc:- TS_TrackProbe -
-version: 2.9.0
+version: 2.10.0
 author: Tim Shadgett
 // @noindex
 // Ships as part of the Track Analyser package (its @provides lists this
@@ -65,6 +65,8 @@ author: Tim Shadgett
 //              (A SPECTRUM PER TRACK, BEFORE TOO)
 //   0x640000   one track's waveform going in and coming out (THE CHAIN'S
 //              WAVEFORM)
+//   0x650000   each track's level going into its chain, + (track index + 1)
+//              * 8 (THE CHAIN'S INPUT LEVEL)
 //   73         tap heartbeat, bumped by any reader
 //   74         which track's post probe writes the per-tap waveforms
 //   75         spectrum release, ms (0: 400)
@@ -349,6 +351,17 @@ author: Tim Shadgett
 //               [2] out min [3] out max [4] c, from the post probe
 //               [5] c, from the pre probe (a column is whole when both say c)
 //
+// THE CHAIN'S INPUT LEVEL
+//   The pre probe's input, for the meter of an instrument the chain starts
+//   with (ChannelView keeps the pre probe after it, so the instrument has
+//   no tap): at 0x650000 + (track index + 1) * 8, [0] the peak and [1] the
+//   RMS of both channels, [2] [3] the peaks and [4] [5] the RMS of left
+//   and right (dBFS; peaks falling 20 dB/s, RMS over 300 ms), [6] a count
+//   that moves with each publication, [7] 1 (a probe that publishes this).
+//   About thirty times a second while a reader keeps gmem[73] moving and
+//   the track is on screen (ONLY THE TRACKS ON SCREEN), as the taps' levels
+//   are; silence once when either stops. Tracks to index 4094.
+//
 // A SPECTRUM PER TRACK, BEFORE TOO
 //   The pre probe's, the same way, at 0x520000 + (track index + 1) * 272,
 //   laid out as above: what goes into the chain, beside what comes out.
@@ -620,6 +633,10 @@ out_pin:right
   PRS_BASE = 0x520000; PRS_ASK = 6;
   // THE CHAIN'S WAVEFORM
   CW_BASE = 0x640000; CW_COLS = 2048; CW_W = 6; CTRL_CWTRK = 79; CTRL_CWHB = 80;
+  // THE CHAIN'S INPUT LEVEL
+  PIN_BASE = 0x650000; PIN_STRIDE = 8; PIN_TRACKS = 4096;
+  pin_run = pin_sr = pin_c = 0; pin_dead = 1; pin_at = -1;
+  pin_pl = pin_pr = pin_rl = pin_rr = 0;
   cw_hb = cw_hbl = 0; cw_age = 1000000000; cw_on = cw_run = 0;
   cw_col = -1; cw_lo = 1; cw_hi = -1; cw_have = 0; cw_pos0 = cw_k = 0; cw_slice = 192;
   prs_v = prs_last = 0; prs_age = 1000000000; prs_seq = 0; prs_active = 0;
@@ -2097,6 +2114,36 @@ out_pin:right
     lvChanged = 0;
   );
 
+  // THE CHAIN'S INPUT LEVEL: the pre probe's, while a reader is alive and
+  // the track on screen; silence once when either goes away
+  pin_run = role > -0.5 && role < 0.5 && hb_age < srate * 3 && tap_seen
+            && pl_tr >= -1 && pl_tr + 1 < PIN_TRACKS;
+  pin_run ? (
+    pin_sr != srate ? (
+      pin_sr = srate;
+      pin_pk = 10 ^ (-LV_FALL / 20 / srate);
+      pin_rk = 1 - exp(-1 / (srate * LV_RMS));
+      pin_n = max(64, floor(srate / LV_RATE));
+    );
+    pin_dead = 0;
+    pin_at = PIN_BASE + (pl_tr + 1) * PIN_STRIDE;
+    pin_c += samplesblock;
+    pin_c >= pin_n ? (
+      pin_c = 0;
+      gmem[pin_at] = lvAmp(max(pin_pl, pin_pr)); gmem[pin_at + 1] = lvMS((pin_rl + pin_rr) * 0.5);
+      gmem[pin_at + 2] = lvAmp(pin_pl); gmem[pin_at + 3] = lvAmp(pin_pr);
+      gmem[pin_at + 4] = lvMS(pin_rl); gmem[pin_at + 5] = lvMS(pin_rr);
+      gmem[pin_at + 6] += 1; gmem[pin_at + 7] = 1;
+    );
+  ) : (pin_dead == 0 ? (
+    pin_dead = 1;
+    pin_pl = pin_pr = pin_rl = pin_rr = 0;
+    pin_at >= PIN_BASE ? (
+      pin_k = 0; loop(6, gmem[pin_at + pin_k] = -150; pin_k += 1; );
+      gmem[pin_at + 6] += 1;
+    );
+  ));
+
   (active && tap_cfg > 0) ? (
     gmem[TAPTR_HDR] = tap_run ? tap_cfg : 0;
     t = 0; loop(TAP_MAX, gmem[TAPTR_HDR + 1 + t] = TV_GR[t]; t += 1; );
@@ -2243,6 +2290,14 @@ out_pin:right
   writeReadings();
 
 @sample
+
+  // THE CHAIN'S INPUT LEVEL: what comes in, before anything here
+  pin_run ? (
+    pin_v = abs(spl0); pin_pl = max(pin_v, pin_pl * pin_pk);
+    pin_v = abs(spl1); pin_pr = max(pin_v, pin_pr * pin_pk);
+    pin_rl += (spl0 * spl0 - pin_rl) * pin_rk;
+    pin_rr += (spl1 * spl1 - pin_rr) * pin_rk;
+  );
 
   // THE CHAIN'S WAVEFORM: this sample into its column; a column done is
   // written (the pre probe its "in", the post probe its "out")

@@ -2047,6 +2047,8 @@ local function draw_meters(ctx)
         local ok, why = TP.insert_probes(st.track)
         if not ok then reaper.MB(why, "ChannelView", 0) end
       end
+    elseif status == "outside" and TP.lead_out(st.track, st.fx.guid) then
+      ImGui.TextDisabled(ctx, "Output meter only: the track gives it no audio.")
     elseif status == "outside" then
       ImGui.TextDisabled(ctx, "Input/output meters: not between this track's probes.")
     elseif status == "parallel" then

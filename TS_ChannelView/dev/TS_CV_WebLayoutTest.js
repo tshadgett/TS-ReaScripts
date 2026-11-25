@@ -23,7 +23,7 @@ const start = html.indexOf("const CELL_H =");
 const end = html.indexOf("\n// building the page from the layout");
 if (start < 0 || end < 0) { console.log("layout code not found in " + page); process.exit(1); }
 const src = html.slice(start, html.lastIndexOf("\n}", end) + 2);
-const api = new Function(src + "\nreturn { placeControls, CELL_H };")();
+const api = new Function(src + "\nreturn { placeControls, CELL_H, gridAnchored, placeGrid, CELL_W };")();
 
 const lua = fs.readFileSync(path.join(here, "TS_CV_LayoutFixture.lua"), "utf8");
 const cases = [...lua.matchAll(/\{ name = "((?:[^"\\]|\\.)*)", ctl = "([^"]*)" \}/g)].map(m => ({ name: m[1], ctl: m[2] }));
@@ -65,6 +65,26 @@ cases.forEach((c, ci) => {
     && lay.curves[0].y === api.CELL_H && lay.curves[0].h === 2 * api.CELL_H;
   console.log((ok ? "ok   " : "FAIL ") + "web flow: a curve and words placed, not controls");
   if (!ok) fails++;
+}
+// anchors, as TS_CV_Panel.anchored: the same cases as its tests
+{
+  const L = [{ t: "curve", an: "tb", at: [4, 0, 8, 8] }, { t: "knob", at: [0, 0, 4, 4] },
+             { t: "toggle", an: "b", at: [12, 6, 4, 2] }, { t: "knob", an: "tb", at: [12, 0, 4, 4] }];
+  let a = api.gridAnchored(L, 20, null, { c: 16, r: 8 });
+  let got = [a.adj.get(L[0])[3], a.adj.get(L[2])[1], a.adj.get(L[3])[1], String(a.adj.get(L[1])), a.rows].join(" ");
+  const ck = (name, g, w) => { const ok = g === w; console.log((ok ? "ok   " : "FAIL ") + name + (ok ? "" : `  got ${g} want ${w}`)); if (!ok) fails++; };
+  ck("web anchors: stretched, moved to the foot, a knob's stretch taken as bottom", got, "20 18 12 undefined 20");
+  const S = [{ t: "curve", an: "tb", at: [4, 0, 8, 8] }, { t: "knob", at: [12, 0, 4, 4] },
+             { t: "toggle", an: "b", at: [12, 6, 4, 2] }, { t: "toggle", an: "b", at: [0, 6, 4, 2] }];
+  a = api.gridAnchored(S, 3, null, { c: 16, r: 8 });
+  ck("web anchors: shorter, as far as the knob above allows", [a.adj.get(S[2])[1], a.adj.get(S[3])[1], a.adj.get(S[0])[3], a.rows].join(" "), "4 4 6 6");
+  const X = [{ t: "blank", avs: 4, ax: "lr", at: [4, 0, 8, 8] }, { t: "knob", at: [0, 0, 4, 4] },
+             { t: "knob", ax: "r", at: [12, 0, 4, 4] }, { t: "toggle", ax: "lr", at: [12, 4, 4, 2] }];
+  a = api.gridAnchored(X, null, 24, { c: 16, r: 8 });
+  ck("web anchors across: a visualiser stretched, kept right", [a.adj.get(X[0])[2], a.adj.get(X[2])[0], a.adj.get(X[3])[0], a.cols, a.rows].join(" "), "16 20 20 24 8");
+  const QW = api.CELL_W / 4;
+  const lay = api.placeGrid(X, 8 * api.CELL_H / 4, true, { c: 16, r: 8 }, 24 * QW);
+  ck("web anchors across: laid out to the width it has", String(Math.abs(lay.width - 24 * QW) < 0.01), "true");
 }
 console.log(fails ? `\n${fails} FAILURES` : "\nALL PASS");
 process.exit(fails ? 1 : 0);

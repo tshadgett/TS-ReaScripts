@@ -326,8 +326,8 @@ yet; DrumToolbox only on a drum's tracks), each in its own colour, lit
 while on. Right-click the rail or the chain's glyphs to choose which show.
 
 **Under the chain**, where there's room, Track Analyser's two views of the
-track, from its probes (TS_TrackProbe 2.9.0: reopen a project after
-updating):
+track, from its probes (TS_TrackProbe 2.9.0 or later: reopen a project
+after updating):
 
 - **Spectrum:** what goes into the chain in grey, what comes out in front.
   Pick a track on its header to compare with, and the bands they share
@@ -336,6 +336,12 @@ updating):
   with each plugin's gain reduction hanging from the top and a bar each
   at the right. Its window is a number of beats, held to the beat so hits
   land in the same place, or a number of seconds, running free.
+- **Smoothing and a crosshair.** Options ▸ *TCP window* ▸ *Panels* ▸
+  *Under the chain* has each view on a row of its own, its tick and
+  **Smooth**: *Off*, *Light*, *Some* or *More*. With the pointer over
+  either view, a crosshair and a box say what's there: the frequency and
+  the levels before and after on the spectrum; the moment, the levels
+  before and after and each plugin's reduction on the dynamics.
 
 Both show one over the other when there's room, else tabs choose; each
 folds from its header, and ↗ opens Track Analyser. Options ▸ *TCP window* ▸
@@ -450,6 +456,10 @@ as the peak one: a live figure changes sixty times a second, and beside
 one that does not, neither reads well. The moving strip beside the bar is
 live -- that is what a strip is for, and what a figure is for is
 catching a value and keeping it still long enough to look at.
+
+The bars themselves hold REAPER's peak for a quarter of a second and fall
+20 dB a second from it, so a steady tone reads as a steady bar rather than
+one that dances with the wave.
 
 How many bars get drawn comes from the track's own channel count, capped
 at two. REAPER never takes a track below two channels, so this always
@@ -797,9 +807,20 @@ so its probes are the new ones.
   gate or expander keeps its own figure (shut on the quiet test signal
   the probes use, it can't show its zero), and so does a multiband
   compressor, de-esser or dynamic EQ, whose reduction is in a band, not
-  the whole signal. The plugin's own figure is read as a meter reads: up at
-  once, falling no faster than 15 dB a second, so a reduction that moves
-  with the wave (a low note, a fast detector) holds steady at its peak.
+  the whole signal. Either figure is read as a meter reads: the most it
+  reached over the last 0.3 s, then falling no faster than 15 dB a second,
+  so a reduction that moves with the wave (a low note, a fast detector)
+  holds steady at its peak, the plugin's window open or shut.
+
+  ReaComp is the plainest case. The figure it reports is its reduction at
+  the moment REAPER asks: with a fast attack and release on a sustained
+  low note, that rises and falls with every cycle of the wave, so read
+  many times a second it jumps about, which the hold above steadies. It
+  also reports a little more with its window open than shut (about 1 dB
+  in our tests, on the same audio): that is ReaComp's own figure, and
+  ChannelView shows what it's given. A compressor that reports a smoothed
+  figure (Pro-C 3, say) does neither. On a track with probes, *Measured*
+  reads the same with the window open or shut.
   The held peak sits under the bar as e.g. `6.4 dB`,
   in a smaller face so the bar itself stays thin — stacking the value over
   the unit when the space is too narrow for one line, as in a collapsed
@@ -1377,6 +1398,20 @@ empty space. Undo puts it back.
   then across, in the rack across then down. A line between two of them
   is drawn between them still.
 - A control added to a grid layout goes on a new row under it.
+- **Anchors.** In a panel bigger or smaller than its grid, an item can
+  keep to an edge. On its sheet in the grid editor (or with several
+  selected), **Anchor** has two rows. *Up / down*: **Top** (as it is),
+  **Bottom** (it keeps its distance from the panel's foot) or **Stretch**
+  (a visualiser, an EQ curve, a VU meter, a picture or a section grows
+  and shrinks with the panel, down to its least). *Across*: **Left**,
+  **Right** or **Stretch**, the same way with the panel's width. Knobs,
+  buttons and the rest only move; they never change size. Everything
+  anchored to an edge moves together, so a group keeps its shape, and in
+  a panel smaller than the grid it comes back in as far as what's before
+  it allows. The rack and the web page follow them too.
+- **A grid panel's size.** Drag a grid panel's right edge to make it
+  wider (in the rack, its bottom edge to make it taller); double-click
+  the edge for its own size again. What's anchored goes with it.
 
 **Edit layout…** (the panel's ☰ menu, or a control's right-click) opens
 the grid editor, a window of its own. A layout that isn't a grid yet
@@ -2359,7 +2394,7 @@ in the track's colour.
 | wheel over empty space | scroll the row of panels sideways |
 | hold Shift | fine |
 | mouse wheel | step (unless *Options ▸ Behaviour ▸ Use mouse wheel on controls* is off: then it only ever scrolls) |
-| double-click | back to 0 when its range runs through 0 (a gain to 0 dB), else to its centre |
+| double-click | back to 0 when its range runs through 0 (a gain to 0 dB), else to its centre; the plugin's own 0, even with a custom range |
 | hover | the current value, in a tooltip that stays put |
 | right-click | control menu |
 | click a stepped value | its list of choices |
@@ -3120,7 +3155,13 @@ the audio while you play and sit idle until something reads them. The
 **Probes** button in the header bar adds a pair to the selected tracks
 that lack one, after asking. Inside a container is fine, so a pair baked into
 a track template works as is. On a track whose first plugin is an ARA plugin
-such as Melodyne, which REAPER keeps first, the first probe goes second.
+such as Melodyne, which REAPER keeps first, the first probe goes second, and
+an ARA plugin added from ChannelView goes in first, ahead of the probes. On
+a track that starts with an instrument, the first probe goes after it: what
+goes into an instrument is MIDI, and the probes' quiet test signal has to
+reach the plugins after it. When the track gives the instrument audio
+(armed with an audio input, a receive, an audio item: a vocoder, say), the
+probe goes in front of it instead.
 
 The probes are kept out of the plugin row, and the **Probes** button says
 what's there: dim with none (click it to add a pair), lit with a pair,
@@ -3240,7 +3281,9 @@ It works for any plugin between the probes, including ones that report their
 own reduction; those are tapped for their levels alone. Gain reduction and
 levels together share the limit of eight plugins per track. On a canvas the
 two meters run down the panel's left and right edges. An instrument (VSTi,
-VST3i, CLAPi, AUi) has its output meter only: what goes into it is MIDI.
+VST3i, CLAPi, AUi) at the start of the chain has its output meter only,
+read by the first probe (TS_TrackProbe 2.10.0): what goes into it is
+MIDI. One the track gives audio has both.
 
 Two panels side by side with their meters on, the second plugin straight
 after the first, **share one meter** in the gap between them: the first's

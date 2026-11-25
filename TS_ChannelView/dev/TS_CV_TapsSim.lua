@@ -897,6 +897,56 @@ do
   TP.keep_in_place(track)
   check("keep: pre back behind ARA",      order(), "MEL PRE EQ POST")
   reaper.GetTrackStateChunk = function() return true, "<TRACK\n<FXCHAIN\n<JS x \"\"\n>\n>\n>" end
+  -- an instrument first: the pre probe after it (what went in before it
+  -- would be lost, the zero's test signal with it)
+  track.fx = { P(0, "{PRE}"), fx("VSTi: ReaSynth (Cockos)", "{SYN}", 0, 2), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+  check("keep: pre moved after the instrument", (TP.keep_in_place(track)) and order(), "SYN PRE EQ POST")
+  check("keep: after the instrument, left alone", (TP.keep_in_place(track)), false)
+  track.fx = { P(0, "{PRE}"), fx("VST3i: Kontakt (NI)", "{KON}", 2, 2), fx("VSTi: Layer (X)", "{LAY}", 0, 2),
+               fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+  TP.keep_in_place(track)
+  check("keep: after every instrument it starts with, by name too", order(), "KON LAY PRE EQ POST")
+  check("pre slot: after them", TP.pre_slot(track), 2)
+  -- an ARA plugin, or the first of the chain's own, goes in front of the
+  -- probes (REAPER takes ARA only as the very first)
+  check("ara: by name", tostring(TP.ara_name("VST3: Melodyne (Celemony)")) .. " " .. tostring(TP.ara_name("VST3: RePitch Standard (Synchro Arts)"))
+    .. " " .. tostring(TP.ara_name("VST3: Pro-Q 4 (FabFilter)")), "true true false")
+  do
+    local keep = track.fx
+    track.fx = { P(0, "{PRE}"), P(1, "{POST}") }
+    index()
+    check("only probes: the whole chain, before a slot", tostring(TP.only_probes_before(track)) .. " "
+      .. tostring(TP.only_probes_before(track, 1)), "true true")
+    track.fx = { P(0, "{PRE}"), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+    index()
+    check("only probes: not past a plugin", tostring(TP.only_probes_before(track, 1)) .. " "
+      .. tostring(TP.only_probes_before(track, 2)) .. " " .. tostring(TP.only_probes_before(track)), "true false false")
+    track.fx = keep
+    index()
+  end
+  -- the instrument in front of the pre probe: its output is what reaches
+  -- the probe (THE CHAIN'S INPUT LEVEL), its input nothing
+  do
+    local b = TP.PIN_BASE + 3 * TP.PIN_STRIDE
+    check("instrument in front: nothing from an older probe", tostring(TP.levels(track, "{LAY}")), "nil")
+    gmem[b], gmem[b + 1], gmem[b + 2], gmem[b + 3], gmem[b + 4], gmem[b + 5], gmem[b + 7] = -12, -18, -12, -14, -18, -20, 1
+    local lv, lr = TP.levels(track, "{LAY}"), TP.levels_lr(track, "{LAY}")
+    check("instrument in front: its output from the probe", ("%s %s %s %s %s"):format(lv.out_pk, lv.out_rms, lv.in_pk,
+      tostring(lv.out_only), lr.out_pk[2]), "-12 -18 -150 true -14")
+    check("instrument in front: metered, the one before it not", tostring(TP.is_metered(track, "{LAY}")) .. " "
+      .. tostring(TP.is_metered(track, "{KON}")) .. " " .. tostring(TP.lead_out(track, "{LAY}")), "true false true")
+    for k = 0, 7 do gmem[b + k] = nil end
+  end
+  -- given audio (armed, its input audio), the pre probe in front of an
+  -- instrument that takes it; one with no inputs stays in front
+  track.recarm = 1; TP.forget_feeds()
+  check("feeds: armed with an audio input", TP.feeds_audio(track), true)
+  TP.keep_in_place(track)
+  check("keep: given audio, in front of the instrument", order(), "PRE KON LAY EQ POST")
+  track.fx = { P(0, "{PRE}"), fx("VSTi: ReaSynth (Cockos)", "{SYN}", 0, 2), fx("A", "{EQ}", 2, 2), P(1, "{POST}") }
+  TP.keep_in_place(track)
+  check("keep: given audio, one with no inputs still in front", order(), "SYN PRE EQ POST")
+  track.recarm = 0; TP.forget_feeds()
   -- one of the pair dragged into a container comes back out
   track.fx = { P(0, "{PRE}"), fx("Container", "{BOX}", 2, 2, { kids = { P(1, "{POST}"), fx("A", "{EQ}", 2, 2) },
                nch = 2, pin_in = {}, pin_out = {} }), fx("B", "{X}", 2, 2) }

@@ -727,26 +727,43 @@ end
 
 -- Where a double-click puts a parameter: where it reads 0 when its range
 -- runs from below 0 to above it (a gain of -136..+30 dB to 0 dB), else
--- U.param_mid_norm. Kept for the session per instance and parameter.
+-- U.param_mid_norm. Read off the plugin's own text first -- the 0 that
+-- matters is the plugin's -- and only for one that doesn't say, off your
+-- range for it (Values ▸ Custom range). Kept for the session per instance,
+-- parameter and range.
 local zero_at = {}
+local function zero_norm(track, addr, param)
+  local UN = require("TS_CV_Units")
+  local fmt = UN.formatter(track, addr, param)
+  local v0, v1 = UN.at(fmt, 0), UN.at(fmt, 1)
+  if not (v0 or v1) then return nil end     -- (can't be read just now)
+  if v0 and v1 and math.min(v0, v1) < 0 and math.max(v0, v1) > 0 then
+    local n, v = UN.find_norm(fmt, 0)
+    -- (near enough 0 to read as it: a stepped range may have no 0)
+    local function fin(x) return (x > -math.huge and x < math.huge) and x or 0 end
+    local span = math.abs(fin(v1) - fin(v0))
+    if n and v and math.abs(v) <= math.max(0.05, span * 0.002) then return n end
+  end
+  return false
+end
 function U.param_default(track, addr, param)
   local g = reaper.TrackFX_GetFXGUID and reaper.TrackFX_GetFXGUID(track, addr)
+  local rg = U.range_of(param)
+  local custom = rg and not rg.only
   local k = tostring(g or addr) .. ":" .. tostring(param)
+    .. (custom and (":" .. tostring(rg.lo) .. "," .. tostring(rg.hi) .. "," .. tostring(rg.curve)) or "")
   local z = zero_at[k]
   if z == nil then
-    z = false
-    local UN = require("TS_CV_Units")
-    local fmt = UN.formatter(track, addr, param)
-    local v0, v1 = UN.at(fmt, 0), UN.at(fmt, 1)
-    if v0 and v1 and math.min(v0, v1) < 0 and math.max(v0, v1) > 0 then
-      local n, v = UN.find_norm(fmt, 0)
-      -- (near enough 0 to read as it: a stepped range may have no 0)
-      local function fin(x) return (x > -math.huge and x < math.huge) and x or 0 end
-      local span = math.abs(fin(v1) - fin(v0))
-      if n and v and math.abs(v) <= math.max(0.05, span * 0.002) then z = n end
-    end
+    -- the plugin's own
+    local was = U.with_ranges(nil)
+    local ok, own = pcall(zero_norm, track, addr, param)
+    U.with_ranges(was)
+    own = ok and own or nil
+    z = own
+    -- a plugin that doesn't say: your range
+    if not z and custom then z = zero_norm(track, addr, param) end
     -- (a plugin that can't be read just now: asked again next time)
-    if v0 or v1 then zero_at[k] = z end
+    if z ~= nil then zero_at[k] = z end
   end
   return z or U.param_mid_norm(track, addr, param)
 end
@@ -825,10 +842,25 @@ function U.solo_silenced(track)
 end
 
 -- A track's meter reading on one channel (0-based), linear: REAPER's
--- peak, or nothing on a track a solo silences.
+-- peak, or nothing on a track a solo silences. Read at frame rate, REAPER's
+-- figure on a steady tone isn't steady (it drops 6 dB for a frame or
+-- several, where REAPER's own meter doesn't), so it's held as a meter
+-- holds: up at once, kept U.PEAK_HOLD seconds, then down U.PEAK_FALL dB a
+-- second.
+U.PEAK_HOLD, U.PEAK_FALL = 0.25, 20
+local tpeak = {}
 function U.track_peak(track, ch)
-  if U.solo_silenced(track) then return 0 end
-  return reaper.Track_GetPeakInfo(track, ch) or 0
+  local k = tostring(track) .. ":" .. tostring(ch)
+  if U.solo_silenced(track) then tpeak[k] = nil; return 0 end
+  local v = reaper.Track_GetPeakInfo(track, ch) or 0
+  local now = reaper.time_precise()
+  local h = tpeak[k]
+  if not h or v >= h.v or now < h.t then tpeak[k] = { v = v, t = now }; return v end
+  if now - h.t <= U.PEAK_HOLD then return h.v end
+  local fallen = (h.v > 0) and h.v * 10 ^ (-U.PEAK_FALL * (now - h.t - U.PEAK_HOLD) / 20) or 0
+  if v >= fallen then tpeak[k] = { v = v, t = now }; return v end
+  h.v, h.t = fallen, now - U.PEAK_HOLD
+  return fallen
 end
 
 function U.db2val(db)
@@ -1017,6 +1049,53 @@ end
 -- step of a stepped control with up to eleven); a medium one, in its
 -- narrow cell, for three -- the ends and the middle -- (six for 0-10, every
 -- step up to five). Evenly spread, so a centred control gets its middle.
+-- A probe's spectrum ({ n, lo, hi, db }) smoothed: across (`level` 1..3:
+-- a twelfth, a sixth or a third of an octave, weighted to the middle, in
+-- dB) and a little over time, eased from `key`'s last. Its own db when
+-- `level` is 0 or nil. `floor`: the dB of a band with none.
+local SMOOTH_OCT = { 1 / 12, 1 / 6, 1 / 3 }
+local smoothed = {}
+function U.smooth_spectrum(s, level, key, floor)
+  local w = SMOOTH_OCT[level or 0]
+  if not w or s.n < 3 then return s.db end
+  floor = floor or -80
+  local per = math.log(s.hi / s.lo, 2) / s.n          -- octaves a band
+  local k = math.max(1, math.floor(w * 0.5 / per + 0.5))
+  local out = {}
+  for i = 1, s.n do
+    local sum, tw = 0, 0
+    for j = math.max(1, i - k), math.min(s.n, i + k) do
+      local wt = 1 - math.abs(j - i) / (k + 1)
+      sum, tw = sum + math.max(floor, s.db[j] or floor) * wt, tw + wt
+    end
+    out[i] = sum / tw
+  end
+  -- (most of the way to now each frame)
+  local was = key and smoothed[key]
+  if was and #was == s.n then
+    for i = 1, s.n do out[i] = was[i] + (out[i] - was[i]) * 0.45 end
+  end
+  if key then smoothed[key] = out end
+  return out
+end
+
+-- A min/max outline per pixel (lo[p], hi[p] for p = 0..n, nil where
+-- nothing is) averaged over `r` pixels either side, in place.
+function U.smooth_outline(lo, hi, n, r)
+  if not r or r < 1 then return end
+  local l2, h2 = {}, {}
+  for p = 0, n do
+    if lo[p] then
+      local sl, sh, c = 0, 0, 0
+      for q = math.max(0, p - r), math.min(n, p + r) do
+        if lo[q] then sl, sh, c = sl + lo[q], sh + hi[q], c + 1 end
+      end
+      l2[p], h2[p] = sl / c, sh / c
+    end
+  end
+  for p = 0, n do lo[p], hi[p] = l2[p], h2[p] end
+end
+
 function U.scale_marks(kind, size, n_steps)
   local large = size == "large" or size == "xl"
   local n

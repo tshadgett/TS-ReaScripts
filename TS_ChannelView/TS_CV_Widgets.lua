@@ -4613,6 +4613,14 @@ local function icon_float(dl, x, y, sz, col)
   ImGui.DrawList_AddLine(dl, ax, ay, ax, ay + sz * 0.26, col, 1.4)
 end
 
+-- A plugin's own window: a window with its title bar, a knob in it
+local function icon_plugin_gui(dl, x, y, sz, col)
+  local x1, y1, x2, y2 = x + sz * 0.14, y + sz * 0.2, x + sz * 0.86, y + sz * 0.8
+  ImGui.DrawList_AddRect(dl, x1, y1, x2, y2, col, 1.5, 0, 1.3)
+  ImGui.DrawList_AddLine(dl, x1, y1 + sz * 0.15, x2, y1 + sz * 0.15, col, 1.3)
+  ImGui.DrawList_AddCircle(dl, x + sz * 0.5, y + sz * 0.57, sz * 0.13, col, 12, 1.3)
+end
+
 local function icon_chevron(dl, x, y, sz, col, dir)
   -- dir: -1 draws the point on the right (>), 1 on the left (<) --
   -- expand and collapse use them for a panel's side, next and prev for
@@ -4936,6 +4944,7 @@ W.ICONS = {
   record   = icon_record,
   power    = icon_power,
   float    = icon_float,
+  plugin_gui = icon_plugin_gui,
   pin      = icon_pin,
   patchbay = icon_patchbay,
   menu     = icon_menu,

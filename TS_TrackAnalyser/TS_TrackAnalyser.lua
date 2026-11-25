@@ -2,10 +2,10 @@
 -- @title TS_TrackAnalyser
 -- @description Track Analyser -- measured response over the spectrum, over dynamics
 -- @author Tim Shadgett
--- @version 2.7.5
+-- @version 2.7.6
 -- @changelog
---  TS_TrackProbe 2.9.0: each track's spectrum going in, and the chain's
---  waveform, for ChannelView 4.5.1's overview. Reopen a project after
+--  TS_TrackProbe 2.10.0: the first probe also measures what comes into
+--  it, for ChannelView 4.8.0's instrument meter. Reopen a project after
 --  updating.
 -- @about
 --  # Track Analyser

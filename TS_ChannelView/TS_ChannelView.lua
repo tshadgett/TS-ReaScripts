@@ -1,12 +1,14 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.7.0
+-- @version 4.8.0
 -- @changelog
---  Folders in a dropdown's list (Choice names). Nothing round a knob's
---  dial (no numbers, no value under it), and under a concentric knob.
---  A concentric knob's or XY pad's name hides. Extra large concentric
---  knobs, faders one row long. Moves with ChannelView Pro 4.7.0. See the
---  CHANGELOG.
+--  Steady meters on a steady tone (gain reduction and track meters held).
+--  Instruments: the first probe goes after one the chain starts with,
+--  which has its output metered (TS_TrackProbe 2.10.0, Track Analyser
+--  2.7.6); given audio, both. ARA plugins added from ChannelView go in
+--  first. Double-click to the plugin's own 0 with a custom range. A
+--  locked layout scrolls without widening its panel. Moves with
+--  ChannelView Pro 4.8.0. See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -1781,6 +1783,7 @@ function POP.window(w, now)
   ImGui.PushStyleVar(ctx, ImGui.StyleVar_WindowPadding, POP.PAD, POP.PAD)
   local vis, open = ImGui.Begin(ctx, w.name .. "###cvpop" .. w.id, true,
     ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse | ImGui.WindowFlags_NoCollapse)
+  if P.PW then P.PW.HOST, P.PW.HOST_ALT = vis and w.name or nil, w.name .. "###cvpop" .. w.id end
   ImGui.PopStyleVar(ctx)
   ImGui.PopStyleColor(ctx)
   if not open then POP.close = w.id end
@@ -1901,6 +1904,7 @@ function POP.window(w, now)
     W.draw_tip(ctx)
     ImGui.End(ctx)
   end
+  if P.PW then P.PW.HOST, P.PW.HOST_ALT = nil, nil end
 end
 
 -- Every popped-out window, after ChannelView's own.
@@ -2016,11 +2020,15 @@ local function panel_row(row_h, row_w)
           local lay, k = layout_for(fx)
           local has_meter = M.meter_of(lay) ~= nil
                             and T.reports_gr(app.track, fx.addr, fx.guid)
-          total = total + P.width(P.visible(P.form_layout(lay, panel_h(i)).controls or {}, app.track, fx), panel_h(i),
+          -- (Pro, TS_FXFrame: a panel showing the plugin's own window is as wide as it)
+          local own_w = P.PW and P.PW.ok() and P.PW.HOST and not St.is_collapsed(fx.guid)
+            and not fx.is_container and not fx.container_panel and P.PW.showing(app.track, fx, lay)
+            and P.plugin_panel_w(fx, panel_h(i), io_of(i, fx, lay))
+          total = total + (own_w or P.width(P.visible(P.form_layout(lay, panel_h(i)).controls or {}, app.track, fx), panel_h(i),
                                   St.is_collapsed(fx.guid), has_meter, k,
                                   io_of(i, fx, lay),
                                   St.is_gr_open(fx.guid), M.locked(lay),
-                                  (not P.own_eq(k) and not P.own_rc(k)) and P.canvas_of(lay) or nil)
+                                  (not P.own_eq(k) and not P.own_rc(k)) and P.canvas_of(lay) or nil))
           if i > 1 then total = total + C.PANEL_GAP end
           if shared[i] then total = total + C.IO_COL_W + C.PANEL_GAP end
         end
@@ -2674,6 +2682,8 @@ local function frame()
   require("TS_CV_TrackRules").tick()
 
   local visible, open = ImGui.Begin(ctx, C.WIN_TITLE, true, wflags)
+  -- (Pro, TS_FXFrame) plugins' own windows go into this window's panels
+  if P.PW then P.PW.HOST = visible and C.WIN_TITLE or nil end
 
   if visible then
     local d = ImGui.GetWindowDockID(ctx)
@@ -3091,9 +3101,12 @@ local function frame()
     W.draw_tip(ctx)
     ImGui.End(ctx)
   end
+  if P.PW then P.PW.HOST = nil end
   -- popped-out panels (Pro), each a window of its own
   POP.take_request()
   POP.windows()
+  -- (plugins' own windows whose panels weren't drawn this frame: hidden)
+  if P.PW then P.PW.end_frame() end
   -- the Organise actions window, its own window beside this one
   AE.draw(ctx)
   -- the knob look editor (Style > Customise...), its own window too
@@ -3217,6 +3230,7 @@ function safe_frame()
 end
 
 reaper.atexit(function()
+  if P.PW then P.PW.shutdown() end   -- plugins in panels close with the window
   DR.cancel_picks(); AE.cancel_picks(); E.cancel_vpick()
   M.save(); SC.save()
   reaper.DeleteExtState(C.EXT_SECT, ALIVE, false)
