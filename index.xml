@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="f2e2eb888fc21af5c8950a89785351aebc5a5025" name="TS-ReaScripts">
+<index version="1" commit="48d802730255ad0a7d31806362d7c0e06e10949a" name="TS-ReaScripts">
   <category name="TS_ChannelView">
     <reapack name="TS_ChannelView.lua" type="script" desc="ChannelView -- docked channel strip: one editable control panel per plugin">
       <metadata>
@@ -6550,6 +6550,16 @@ Level: says what it does (evens the hits, doesn't add level).]]></changelog>
         <source file="TS_DT_Edition.lua">https://github.com/tshadgett/TS-ReaScripts/raw/f2e2eb888fc21af5c8950a89785351aebc5a5025/TS_DrumToolbox/TS_DT_Edition.lua</source>
         <source main="main" file="TS_DrumToolbox_Detect.lua">https://github.com/tshadgett/TS-ReaScripts/raw/f2e2eb888fc21af5c8950a89785351aebc5a5025/TS_DrumToolbox/TS_DrumToolbox_Detect.lua</source>
         <source main="main" file="TS_DrumToolbox_Clear.lua">https://github.com/tshadgett/TS-ReaScripts/raw/f2e2eb888fc21af5c8950a89785351aebc5a5025/TS_DrumToolbox/TS_DrumToolbox_Clear.lua</source>
+      </version>
+      <version name="1.0.3" author="Tim Shadgett" time="2026-11-27T04:05:47Z">
+        <changelog><![CDATA[The user guide (PDF) now comes with DrumToolbox: the Guide button at the
+top right of the window opens it.]]></changelog>
+        <source main="main">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox.lua</source>
+        <source file="TS_DrumToolbox_core.lua">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox_core.lua</source>
+        <source file="TS_DT_Edition.lua">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DT_Edition.lua</source>
+        <source main="main" file="TS_DrumToolbox_Detect.lua">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox_Detect.lua</source>
+        <source main="main" file="TS_DrumToolbox_Clear.lua">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox_Clear.lua</source>
+        <source file="TS_DrumToolbox_Guide.pdf">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox_Guide.pdf</source>
       </version>
     </reapack>
   </category>
