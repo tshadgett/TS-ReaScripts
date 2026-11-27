@@ -1,10 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.9.0
+-- @version 4.10.0
 -- @changelog
---  The TCP window's overview keeps its width when REAPER starts. Moves
---  with ChannelView Pro 4.9.0 (a plugin's own window in its panel,
---  Windows). See the CHANGELOG.
+--  Moves with ChannelView Pro 4.10.0 (ChannelView Strip: the selected
+--  track's channel strip, its own window, in a dockable window of its
+--  own; Windows). See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua

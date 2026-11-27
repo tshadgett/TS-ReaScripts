@@ -32,7 +32,8 @@ plugin pictures on action bars, VU meters and visualisers, more than one layout 
 switching between them, the offer of a canvas for a new plugin, Show when
 rules and virtual controls, the TS_CV Trimmer, the gain-reduction trace,
 the patch bay (in the mixer and the TCP window), comparing two plugins,
-Console setup, Collisions and (Windows) a plugin's own window in its panel.
+Console setup, Collisions and (Windows) a plugin's own window in its panel
+and ChannelView Strip.
 
 Without Pro, everything else works as described, and a layout made with Pro
 still works: its grid, Show rules and virtual controls are drawn as they
@@ -188,6 +189,8 @@ popped-out panel, the rack and the TCP window's open row. Needs the **TS_FXFrame
 - **One place at a time.** A plugin's window shows in one of ChannelView,
   the rack and the TCP window: the last one you showed it in. The others
   show its controls, and their plugin-window button brings it there.
+  ChannelView Strip (below) comes first: while it shows a plugin, the
+  others show that plugin's controls.
 - Plugins you've just left stay open, hidden, for two minutes (the 8 most
   recent), so going back to a track is instant.
 
@@ -201,11 +204,35 @@ popped-out panel, the rack and the TCP window's open row. Needs the **TS_FXFrame
   windows: use the panel's Float button for that.
 - The tilt wheel over a UAD plugin stays with the plugin (it uses it for
   its own controls), so the row doesn't scroll there.
-- REAPER's own window can flash briefly as a plugin first opens.
 - A plugin that changes its own size (on a preset, say) keeps that size
   as if you'd resized it.
 - Plugins in a track's input FX or inside a container can open floating
   when a project loads.
+
+## ChannelView Strip (Pro, Windows)
+
+One dockable window showing the selected track's channel strip as the
+plugin's own window: for projects with the same strip on most tracks
+(InfiniStrip, Neutron, Nectar, an SSL or Plugin Alliance channel). Run
+*TS_ChannelView_Strip* from the Actions list. Needs the **TS_FXFrame**
+extension (see *Installing*).
+
+- **Your channel strips:** ≡ ▸ *Channel strips…* — type a name, or part
+  of one (any case; no "VST3:" or vendor needed), or *Add from list…* to
+  pick an installed plugin. The first in the list that's on the track is
+  shown; ↑ ↓ to reorder.
+- **Follows the selected track.** With more than one listed plugin on a
+  track, ≡ ▸ *Show the next match on this track*.
+- **No strip on the track:** *Add ▾* offers your list; a name that matches
+  several installed plugins opens a list of them.
+- **Its size.** The plugin fills the window in proportion and stays in
+  its middle, fitted again when you resize the window. Resize the plugin
+  itself and that size is kept for it; ≡ ▸ *Fit to the window* goes back
+  to fitting.
+- **Header:** the track, the plugin, bypass, Float (out into a window of
+  its own) and ≡ (*Run when REAPER starts*, *Dock*, *Close*).
+- While the Strip shows a plugin, ChannelView, the rack and the TCP window
+  show its controls.
 
 ## Comparing two plugins (Pro)
 
@@ -2978,7 +3005,8 @@ on a button in its header until then) and runs without Pro meanwhile; the
 Rack and the web companion say so and don't start. For the tablet page,
 see *On a tablet* above.
 
-**TS_FXFrame** (Pro, Windows), for a plugin's own window in its panel: in
+**TS_FXFrame** (Pro, Windows), for a plugin's own window in its panel and
+ChannelView Strip: in
 the same Pro repository, Browse packages ▸ *TS_FXFrame* ▸ Install, then
 restart REAPER (an extension loads as REAPER starts). Without it, panels
 show their controls as before.

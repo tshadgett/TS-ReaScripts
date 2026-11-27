@@ -2581,7 +2581,8 @@ local function draw_header(ctx, dl, x, y, w, track, fx, index, enabled, req)
     at(k); k = k + 1
     local pw = req.pw
     if W.icon_button(ctx, "gui##" .. fx.guid, "plugin_gui", btn, pw.on or pw.popped,
-        pw.popped and "In a window of its own\nClick: back into this panel"
+        pw.strip and "Its own window is in ChannelView Strip"
+        or pw.popped and "In a window of its own\nClick: back into this panel"
         or (pw.on and "Its own window\nClick: its controls" or "Its controls\nClick: its own window"),
         C.COL.float_on) then
       req.toggle_gui = true
@@ -5112,7 +5113,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
   if P.PW and P.PW.ok() and P.PW.HOST and not P.PREVIEW and not P.TILE
      and not fx.is_container and not fx.container_panel then
     pw_on = not collapsed and P.PW.showing(track, fx, own)
-    req.pw = { on = pw_on, popped = P.PW.popped(track, fx) }
+    req.pw = { on = pw_on, popped = P.PW.popped(track, fx), strip = P.PW.in_strip and P.PW.in_strip(fx) }
     if pw_on then meter, canvas = nil, nil end
   end
   local nat_w = pw_on and P.plugin_panel_w(fx, avail_h, io)

@@ -14995,6 +14995,7 @@ if pcall(require, "TS_CV_PluginWindow") then
       fr[nid] = { addr = addr, state = 1, w = s0[1], h = s0[2] }
       return nid
     end,
+    TS_FXFrame_OpenEmbedded = function(tr, addr) return reaper.TS_FXFrame_Open(tr, addr) end,
     TS_FXFrame_Find = function(_, addr)
       for id, f in pairs(fr) do if f.addr == addr and f.state > 0 then return id end end
       return 0
@@ -15354,6 +15355,83 @@ if pcall(require, "TS_CV_PluginWindow") then
       tostring(Stm.own_gui("{pw-p}")) .. " " .. tostring(Stm.last_gui("PlaceKey")) .. " | " .. tcp, "true true | nil nil")
     Stm.GUI, Stm.GUILAST = g0, l0; Stm.clear_own_gui()
     reaper.GetProjExtState, reaper.SetProjExtState, reaper.GetExtState, reaper.SetExtState = gp, sp, ge, se
+  end
+  -- ChannelView Strip comes first: the plugin it shows is its own, the
+  -- others show its controls; one it's left hidden in its window is taken
+  -- back. In the Strip, the plugin fits the whole window, in its middle.
+  do
+    local ext = {}
+    local ge, se, fw = reaper.GetExtState, reaper.SetExtState, reaper.TS_FXFrame_FindWindow
+    reaper.GetExtState = function(sec, k) return ext[sec .. k] or "" end
+    reaper.SetExtState = function(sec, k, v) ext[sec .. k] = v end
+    reaper.TS_FXFrame_FindWindow = function(t)
+      return (t == "CV" and "HWND1") or (t == PWm.STRIP_TITLE and "HWND_STRIP") or nil
+    end
+    local Cm = require("TS_CV_Config")
+    local function publish(g) ext[Cm.EXT_SECT .. PWm.STRIP_KEY] = (g or "-") .. (" %.3f"):format(clock) end
+    local fs = { guid = "{pw-s}", addr = 7, name = "VST3: Strip Thing (Co)" }
+    start[7] = { 800, 500 }
+    PWm.HOST = "CV"
+    frames(fs, 6, nil, L)
+    local id = PWm._frames()[fs.guid].id
+    publish(fs.guid); clock = clock + 0.01
+    fr[id].p = "HWND_STRIP"
+    local was_own = tostring(Stm.own_gui(fs.guid))
+    PWm.begin_frame()
+    PWm.toggle_here(track, fs, L)
+    check("strip: its plugin shows its controls elsewhere, the button leaves it there",
+      tostring(PWm.showing(track, fs, L)) .. " " .. tostring(PWm.in_strip(fs)) .. " " .. tostring(Stm.own_gui(fs.guid)),
+      "false true " .. was_own)
+    PWm.end_frame()
+    -- the Strip moves on, leaving it hidden in its window: taken back
+    publish(nil); clock = clock + 0.01
+    frames(fs, 4, nil, L)
+    check("strip: left hidden in the Strip, taken back", fr[id].p .. " " .. tostring(fr[id].shown), "HWND1 true")
+    -- the Strip's own side: takes it from ChannelView's window, fits it
+    PWm.PRIORITY, PWm.PLACE, PWm.HOST = true, "strip", PWm.STRIP_TITLE
+    PWm._frames()[fs.guid] = nil
+    fr[id].w, fr[id].h = 800, 500
+    local function strip_frames(n, w, h, key)
+      for _ = 1, n do
+        clock = clock + 0.1
+        PWm.begin_frame()
+        PWm.draw("ctx", "dl", 0, 0, w, h, track, fs, false, key, nil)
+        PWm.end_frame()
+      end
+    end
+    strip_frames(6, 600, 300)
+    local a1 = fr[id].p .. " " .. fr[id].w .. "x" .. fr[id].h .. " " .. fr[id].x .. "," .. fr[id].y
+    strip_frames(6, 600, 600)
+    check("strip: takes it, fits it in proportion in the middle, fitted again when resized",
+      a1 .. " | " .. fr[id].w .. "x" .. fr[id].h,
+      "HWND_STRIP 467x292 67,4 | 592x370")
+    -- resized by you: kept for its plugin, and how it opens next time
+    local de = reaper.DeleteExtState
+    reaper.DeleteExtState = function(sec, k) ext[sec .. k] = nil end
+    strip_frames(20, 600, 600, "Strip Thing")
+    fr[id].w, fr[id].h = 500, 312
+    strip_frames(25, 600, 600, "Strip Thing")
+    local kept = reaper.GetExtState(Cm.EXT_SECT, "strip_size:Strip Thing")
+    PWm._frames()[fs.guid] = nil
+    fr[id].w, fr[id].h = 800, 500
+    strip_frames(6, 600, 600, "Strip Thing")
+    local again = fr[id].w .. "x" .. fr[id].h
+    -- a new instance putting its own size up after ours: asked again
+    PWm._frames()[fs.guid] = nil
+    fr[id].w, fr[id].h = 800, 500
+    strip_frames(3, 600, 600, "Strip Thing")
+    fr[id].w, fr[id].h = 900, 560
+    strip_frames(25, 600, 600, "Strip Thing")
+    check("strip: a plugin taking its own size after ours is asked again", fr[id].w .. "x" .. fr[id].h, "500x312")
+    PWm.strip_fit(fs)
+    strip_frames(6, 600, 600, "Strip Thing")
+    check("strip: your size kept for the plugin, opened at it; Fit to the window forgets it",
+      kept .. " " .. again .. " " .. fr[id].w .. "x" .. fr[id].h .. " " .. tostring(PWm.strip_sized(fs)),
+      "500x312 500x312 592x370 false")
+    reaper.DeleteExtState = de
+    PWm.PRIORITY, PWm.PLACE = false, nil
+    PWm.shutdown()
+    reaper.GetExtState, reaper.SetExtState, reaper.TS_FXFrame_FindWindow = ge, se, fw
   end
   PWm.HOST = nil
   for k in pairs(api) do reaper[k] = saved[k] end

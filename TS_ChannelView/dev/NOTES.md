@@ -1443,6 +1443,31 @@ picker uses an optgroup per group.
   the 65 % split; rows_w kept only while OVW.sane; BAY.settle re-checks
   its own drag until the width's right.
 
+## ChannelView Strip (4.10.0)
+
+- **TS_ChannelView_Strip.lua** (Pro [main]): its own ImGui window, PW
+  with PW.PRIORITY = true, PW.PLACE = "strip". Matches the list
+  (ExtState strip_list, "pattern|ident" by tabs) against `fx_name`
+  (U.clean_fx_name, lower case, contains), list order first; cached per
+  track and project change count. Add ▾: plugins() (EnumInstalledFX,
+  one per cleaned name, VST3 < CLAP < VST) and choices(entry).
+- **Priority:** the Strip writes ExtState strip_fx "<guid> <time>" ("-"
+  for none) every frame; other scripts' PW (strip_now, PW.in_strip) show
+  controls for that plugin, and take back one left hidden in the Strip's
+  window (`par ~= strip.hwnd`). toggle_here does nothing meanwhile.
+- **Fit:** min(box_w/nw, box_h/nh), again 0.25 s after the window's size
+  holds; centred. Your size: ExtState strip_size:<plugin key> (ImGui
+  units); PW.strip_sized / strip_fit.
+- **Asked again:** f.target/f.tries — a plugin whose size differs from what
+  was asked once QUIET is over is asked again, up to 3 times (iZotope
+  puts its own size up late); a drag cancels it.
+- **TS_FXFrame 1.0.1:** OpenEmbedded(track, fx, parent, x, y) opens
+  straight into a window, hidden (capture() inside Open made a WS_POPUP
+  frame and showed it before the script's Embed); a WH_CBT hook keeps
+  REAPER's pin button (RPTopmostButton, made ~0.5 s after its FX window)
+  hidden while its owner is a frame's hidden window. PW uses OpenEmbedded
+  when it's there, else Open.
+
 ## Upkeep, by one window (TS_CV_Upkeep)
 
 What ChannelView's rescan used to keep right on its own track now runs from

@@ -1,5 +1,23 @@
 # ChannelView — changelog
 
+## 4.10.0 — ChannelView Strip
+
+### ChannelView Pro
+
+- **ChannelView Strip** (Windows, with TS_FXFrame): one dockable window
+  showing the selected track's channel strip as the plugin's own window.
+  List the strips you use (≡ ▸ *Channel strips…*, typed or picked from
+  your plugins); the first on the track shows, the list's order deciding.
+  It fills the window in proportion; a size you give a plugin is kept
+  (*Fit to the window* goes back). No strip on a track: *Add ▾* from your
+  list. Bypass, Float, *Show the next match on this track*, *Run when
+  REAPER starts*. While it shows a plugin, ChannelView, the rack and the
+  TCP window show its controls.
+- A plugin's own window no longer flashes up as a window of its own while
+  it opens (with TS_FXFrame 1.0.1).
+- A plugin that puts up a size of its own as it opens (a new instance) is
+  asked again for the size it should have.
+
 ## 4.9.0 — a plugin's own window in its panel
 
 ### ChannelView
