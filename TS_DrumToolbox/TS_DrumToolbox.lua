@@ -1,8 +1,14 @@
 -- @description TS_DrumToolbox - offline drum detection, bleed control, replacement, gate and noise for the whole kit
 -- @author Tim Shadgett
--- @version 1.0.1
+-- @version 1.0.2
 -- @changelog
---   How to get Pro opens the Ko-fi shop.
+--   Align: room mics are left where they are by default; Put back returns
+--   every track Align moved exactly as it was, and an undo of Apply is
+--   recognised.
+--   Quantise: slices of edited tracks (comps, crossfades, hairline gaps)
+--   are joined and crossfaded too, so no holes; any gap that's left is
+--   reported, with Next gap to find each; Undo quantise.
+--   Level: says what it does (evens the hits, doesn't add level).
 -- @provides
 --   [nomain] TS_DrumToolbox_core.lua
 --   [nomain] TS_DT_Edition.lua
@@ -606,6 +612,7 @@ local function apply_outcome()
   r.Undo_EndBlock2(0, "TS DrumToolbox: align the kit", -1)
   for _, o in ipairs(done) do o.applied = true end
   oc.applied = { n = #done, how = AOPT.how, when = os.date("%H:%M") }
+  UI.al_msg, UI.al_n, UI.al_was = nil, nil, nil
   UI.save_outcome()
   invalidate()
 end
@@ -864,8 +871,62 @@ local function toggle_icon(id, name, tooltip, on)
   return icon_button(id, name, tooltip, on and "main" or nil, 24)
 end
 
+-- Align's last Apply against the project as it is now: "after" (as
+-- applied), "before" (undone, or put back), "edited" (moved since), or nil
+-- (nothing applied). Checked when the project changes; an undo clears the
+-- applied marks, a redo puts them back.
+function UI.align_sync()
+  local n = r.GetProjectStateChangeCount(0)
+  if UI.al_n == n then return UI.al_state end
+  UI.al_n = n
+  local u = DT.align_undo_get()
+  UI.al_u, UI.al_state = u, nil
+  if not u then return nil end
+  local sa, ta = DT.align_matches(u.after)
+  local sb, tb = DT.align_matches(u.before)
+  if tb > 0 and sb == tb and sa < ta then UI.al_state = "before"
+  elseif ta > 0 and sa == ta and sb < tb then UI.al_state = "after"
+  elseif ta > 0 then UI.al_state = "edited" end
+  local oc = S.outcome
+  if oc and oc.list then
+    if UI.al_state == "before" and oc.applied then
+      UI.al_was = oc.applied
+      oc.applied = nil
+      for _, o in ipairs(oc.list) do UI.al_was[o] = o.applied; o.applied = nil end
+      UI.save_outcome()
+    elseif UI.al_state == "after" and not oc.applied and UI.al_was then
+      oc.applied = UI.al_was
+      for _, o in ipairs(oc.list) do o.applied = UI.al_was[o] end
+      UI.al_was = nil
+      UI.save_outcome()
+    end
+  end
+  return UI.al_state
+end
+
+-- Put back: every item Apply moved, exactly as it was before
+function UI.align_put_back(kit)
+  local u = DT.align_undo_get()
+  if not u then return end
+  r.Undo_BeginBlock2(0)
+  r.PreventUIRefresh(1)
+  local n, miss = DT.align_restore(u.before)
+  local kt = DT.kit_tracks()
+  if #kt > 1 then
+    for _, k in ipairs(kt) do pcall(DT.kit_check, k.track, { profile = DT.track_profile(k.track), kit = kt }) end
+  end
+  r.PreventUIRefresh(-1)
+  r.Undo_EndBlock2(0, "TS DrumToolbox: put the kit back as it was before Align", -1)
+  UI.al_msg = string.format("Put back at %s: %d items as they were%s", os.date("%H:%M"), n,
+    miss > 0 and string.format(" (%d since cut or deleted, left as they are)", miss) or "")
+  UI.al_n = nil
+  invalidate()
+end
+
 local function draw_align(kit)
-  UI.head("align", "Align", { help = "Measured on the hits each pair of mics shares:\nsecond mics to their drum, the rest to the reference." })
+  UI.head("align", "Align", { help = "Measured on the hits each pair of mics shares:\nsecond mics to their drum, overheads and the rest to the reference.\n"
+    .. "Room mics are left where they are (their distance is their sound): set one to move in its Plan if you want it to." })
+  local al_state = UI.align_sync()
   -- reference and options
   local ref = DT.align_reference(kit)
   ImGui.AlignTextToFramePadding(ctx); ImGui.Text(ctx, "Reference"); ImGui.SameLine(ctx)
@@ -977,6 +1038,16 @@ local function draw_align(kit)
     if icon_button("##reaper", "align", "Open REAPER's own Phase alignment instead (kit items selected)") then start_align(kit) end
     ImGui.EndDisabled(ctx)
     if oc and oc.error then ImGui.TextColored(ctx, COL.lo, oc.error) end
+    -- after Apply: straight back, whenever (also Ctrl+Z while it's the last thing done)
+    if al_state == "after" or al_state == "edited" then
+      ImGui.SameLine(ctx, 0, 24)
+      if ImGui.Button(ctx, "Put back##al_back") then UI.align_put_back(kit) end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "Every track Align moved, back exactly as it was before Apply (" .. (UI.al_u and UI.al_u.when or "") .. ")."
+          .. (al_state == "edited" and "\nSome of them have been moved or edited since: those edits are undone too." or ""))
+      end
+    end
+    if UI.al_msg and al_state ~= "after" then ImGui.TextColored(ctx, COL.label, UI.al_msg) end
     if oc and oc.applied then
       ImGui.TextColored(ctx, COL.accent, string.format("Applied at %s: %d tracks moved (%s) · hit maps moved with them · bleed re-checked",
         oc.applied.when, oc.applied.n, oc.applied.how == "items" and "items" or "contents"))
@@ -1122,6 +1193,8 @@ end
 local ACT = { start = 40042, ["end"] = 40043, playstop = 40044, play = 1007, pause = 1008, stop = 1016,
               rep = 1068, undo = 40029, redo = 40030, save = 40026 }
 local function act(id) r.Main_OnCommand(id, 0) end
+
+UI.Q_UNDO = "TS DrumToolbox: quantise the kit"
 
 local function draw_transport()
   local ps = r.GetPlayState()
@@ -1980,12 +2053,13 @@ local function draw_lanes(kit)
         if g.target and math.abs(g.target - g.hit) > 0.0001 then
           r.Undo_BeginBlock2(0)
           r.PreventUIRefresh(1)
-          local moved, gaps = DT.quant_move_one(kit, UI.qo or DT.quant_opts(), g.hit, g.target)
+          local moved, gaps, gat = DT.quant_move_one(kit, UI.qo or DT.quant_opts(), g.hit, g.target)
+          UI.qgaps, UI.qgap_i = gat or {}, 0
           r.PreventUIRefresh(-1)
           r.Undo_EndBlock2(0, "TS DrumToolbox: move a " .. g.e.name .. " hit", -1)
           UI.qmsg = { gaps > 0 and "warn" or "ok", string.format("%+.1f ms", (g.target - g.hit) * 1000),
             string.format("Moved a %s hit %+.1f ms: %d slices%s. Undo: Ctrl+Z.", g.e.name, (g.target - g.hit) * 1000, moved,
-            gaps > 0 and string.format(", %d short gaps just before the next hit", gaps) or "") }
+            gaps > 0 and string.format(", %d gaps left where there was no earlier audio to fill them", gaps) or "") }
           invalidate(); UI.qkey = nil; NSYNC.state = nil
         end
       end
@@ -2534,12 +2608,13 @@ function UI.draw_quant(kit)
     if ImGui.Button(ctx, string.format("Quantise %d tracks##q_go", #tracks)) then
       r.Undo_BeginBlock2(0)
       r.PreventUIRefresh(1)
-      local moved, gaps = DT.quant_apply(tracks, pts, o)
+      local moved, gaps, gat = DT.quant_apply(tracks, pts, o)
       r.PreventUIRefresh(-1)
-      r.Undo_EndBlock2(0, "TS DrumToolbox: quantise the kit", -1)
+      r.Undo_EndBlock2(0, UI.Q_UNDO, -1)
+      UI.qgaps, UI.qgap_i = gat or {}, 0
       UI.qover = {}; DT.quant_set_over(UI.qover)    -- the hits have moved: the manual choices are done
       UI.qmsg = { gaps > 0 and "warn" or "ok", os.date("%H:%M"), string.format("Quantised at %s: %d slices moved%s. One undo step.", os.date("%H:%M"), moved,
-        gaps > 0 and string.format(", %d short gaps left just before hits (moved later than their lead-in)", gaps) or "") }
+        gaps > 0 and string.format(", %d gaps left where there was no earlier audio to fill them (Next gap shows each)", gaps) or "") }
       invalidate(); UI.qkey = nil; NSYNC.state = nil
     end
     ImGui.EndDisabled(ctx)
@@ -2547,6 +2622,34 @@ function UI.draw_quant(kit)
       ImGui.SetTooltip(ctx, "Cut every kit track at the same points and move the slices (no stretching), crossfaded.\nOne undo step. The hit maps move with them; notes, gate keys and bands follow.")
     end
     if UI.qmsg then ImGui.SameLine(ctx, 0, 8); UI.badge("q_done", UI.qmsg[1], UI.qmsg[2], UI.qmsg[3]) end
+    -- straight back, while it's the last thing done
+    local last = r.Undo_CanUndo2 and r.Undo_CanUndo2(0)
+    if last == UI.Q_UNDO then
+      ImGui.SameLine(ctx, 0, 8)
+      if ImGui.Button(ctx, "Undo quantise##q_undo") then
+        r.Main_OnCommand(40029, 0)                -- Edit: Undo
+        UI.qmsg, UI.qgaps = nil, nil
+        invalidate(); UI.qkey = nil; NSYNC.state = nil
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Put every track back as it was before quantising (the same as Ctrl+Z)") end
+    end
+    -- any gaps left: one at a time, the edit cursor taken to it
+    if UI.qgaps and #UI.qgaps > 0 then
+      ImGui.SameLine(ctx, 0, 8)
+      if ImGui.Button(ctx, string.format("Next gap (%d)##q_gap", #UI.qgaps)) then
+        UI.qgap_i = UI.qgap_i % #UI.qgaps + 1
+        local gp = UI.qgaps[UI.qgap_i]
+        r.SetEditCurPos(gp.t, true, false)
+        if r.ValidatePtr(gp.track, "MediaTrack*") then r.SetOnlyTrackSelected(gp.track) end
+      end
+      if ImGui.IsItemHovered(ctx) then
+        local gp = UI.qgaps[UI.qgap_i % #UI.qgaps + 1]
+        local tn = "?"
+        if r.ValidatePtr(gp.track, "MediaTrack*") then tn = select(2, r.GetTrackName(gp.track)) end
+        ImGui.SetTooltip(ctx, string.format("A slice moved later where there was no earlier audio to fill behind it.\nNext: %s at %s (%.1f ms)",
+          tn, r.format_timestr_pos(gp.t, "", -1), gp.len * 1000))
+      end
+    end
     UI.section_end()
   end
 end

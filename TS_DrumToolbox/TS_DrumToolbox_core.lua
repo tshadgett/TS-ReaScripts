@@ -55,7 +55,7 @@ end
 local r = reaper
 local DT = {}
 
-DT.VERSION   = "1.0.1"
+DT.VERSION   = "1.0.2"
 DT.ED = require("TS_DT_Edition")   -- Standard, or with Pro (DT.ED.PRO)
 DT.NS        = "TS_DrumToolbox"
 DT.PREFIX    = "DT"
@@ -1743,6 +1743,14 @@ local function is_overhead(name)
   local n = name:lower()
   return n:find("over%s*head") or n:find("%f[%w]ohs?%f[%W]") or n:find("%f[%w]oh%d") or n:find("%f[%w]ovh")
 end
+-- room and ambience mics: their distance is their sound, so Align leaves
+-- them where they are unless told otherwise
+local function is_room(name)
+  local n = name:lower()
+  return n:find("room") or n:find("%f[%w]rm%d*%f[%W]") or n:find("amb") or n:find("hall") or n:find("far%f[%W]")
+    or n:find("crush") or n:find("trash") or n:find("%f[%w]mono%s*rm")
+end
+DT.is_room = is_room
 
 -- The default plan for a kit: { track, name, role, mode, target }.
 function DT.align_defaults(kit)
@@ -1755,7 +1763,9 @@ function DT.align_defaults(kit)
       if e.track == ref then p.mode = "ref"
       elseif e.role == "second" and e.of then p.mode, p.target = "to", e.of
       elseif e.role == "reference" then
-        if is_overhead(e.name) then
+        if is_room(e.name) and not is_overhead(e.name) then
+          p.mode = "leave"
+        elseif is_overhead(e.name) then
           if first_oh then p.mode, p.target = "with", first_oh
           else first_oh = e.track; p.mode, p.target = "to", ref end
         else
@@ -2507,12 +2517,106 @@ function DT.align_outcome(plan, results)
   return out
 end
 
+-- What Apply changes, as it is: every item of the tracks, by GUID -
+-- position, length, and each take's start offset and polarity.
+function DT.align_snapshot(tracks)
+  local snap = {}
+  for _, t in ipairs(tracks) do
+    for i = 0, r.CountTrackMediaItems(t) - 1 do
+      local it = r.GetTrackMediaItem(t, i)
+      local _, g = r.GetSetMediaItemInfo_String(it, "GUID", "", false)
+      -- (as text to the nanosecond: kept in the project whole)
+      local function n9(x) return string.format("%.10f", x) end
+      local e = { g = g, pos = n9(r.GetMediaItemInfo_Value(it, "D_POSITION")), len = n9(r.GetMediaItemInfo_Value(it, "D_LENGTH")), tk = {} }
+      for ti = 0, r.CountTakes(it) - 1 do
+        local tk = r.GetTake(it, ti)
+        if tk then e.tk[#e.tk + 1] = { o = n9(r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS")), p = r.GetMediaItemTakeInfo_Value(tk, "B_PHASE") } end
+      end
+      snap[#snap + 1] = e
+    end
+  end
+  return snap
+end
+
+local function item_by_guid(g)
+  local it = r.BR_GetMediaItemByGUID and r.BR_GetMediaItemByGUID(0, g)
+  if it then return it end
+  DT._items_by_guid = DT._items_by_guid or {}
+  local c = DT._items_by_guid
+  if c[g] and r.ValidatePtr(c[g], "MediaItem*") then return c[g] end
+  for i = 0, r.CountMediaItems(0) - 1 do
+    local x = r.GetMediaItem(0, i)
+    local _, xg = r.GetSetMediaItemInfo_String(x, "GUID", "", false)
+    c[xg] = x
+  end
+  return c[g]
+end
+
+-- How many of a snapshot's items are exactly as it says, of how many still there.
+function DT.align_matches(snap)
+  local same, there = 0, 0
+  for _, e in ipairs(snap or {}) do
+    local it = item_by_guid(e.g)
+    if it and r.ValidatePtr(it, "MediaItem*") then
+      there = there + 1
+      local ok = math.abs(r.GetMediaItemInfo_Value(it, "D_POSITION") - tonumber(e.pos)) < 1e-7
+        and math.abs(r.GetMediaItemInfo_Value(it, "D_LENGTH") - tonumber(e.len)) < 1e-7
+      for ti, k in ipairs(e.tk) do
+        local tk = r.GetTake(it, ti - 1)
+        if not tk or math.abs(r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") - tonumber(k.o)) > 1e-7
+          or r.GetMediaItemTakeInfo_Value(tk, "B_PHASE") ~= k.p then ok = false end
+      end
+      if ok then same = same + 1 end
+    end
+  end
+  return same, there
+end
+
+-- Puts every item of a snapshot back as it was. Gives put back, missing
+-- (items since split or deleted).
+function DT.align_restore(snap)
+  local done, missing = 0, 0
+  for _, e in ipairs(snap or {}) do
+    local it = item_by_guid(e.g)
+    if it and r.ValidatePtr(it, "MediaItem*") then
+      r.SetMediaItemInfo_Value(it, "D_POSITION", tonumber(e.pos))
+      r.SetMediaItemInfo_Value(it, "D_LENGTH", tonumber(e.len))
+      for ti, k in ipairs(e.tk) do
+        local tk = r.GetTake(it, ti - 1)
+        if tk then
+          r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", tonumber(k.o))
+          r.SetMediaItemTakeInfo_Value(tk, "B_PHASE", k.p)
+        end
+      end
+      done = done + 1
+    else
+      missing = missing + 1
+    end
+  end
+  r.UpdateArrange()
+  return done, missing
+end
+
+-- The last Apply, kept in the project: { before, after, when } snapshots.
+function DT.align_undo_get()
+  local _, v = r.GetProjExtState(0, EXT, "align_undo")
+  return DT.deserialize(v)
+end
+function DT.align_undo_set(u)
+  r.SetProjExtState(0, EXT, "align_undo", u and DT.serialize(u) or "")
+end
+
 -- Applies an outcome. how = "items" (move the items) or "contents" (move
 -- the audio inside them: start offset). An item that would move before
 -- the project start stays at 0 and its audio moves inside it instead. Weak entries and zero moves are
 -- skipped. Gives the list actually applied. Wrap in an undo block.
 function DT.align_apply(outcome, how)
   local done = {}
+  local movers = {}
+  for _, o in ipairs(outcome) do
+    if not o.weak and (math.abs(o.shift_ms or 0) >= DT.ALIGN_MIN_MS or o.flip) then movers[#movers + 1] = o.track end
+  end
+  local before = DT.align_snapshot(movers)
   for _, o in ipairs(outcome) do
     local s = (o.shift_ms or 0) / 1000
     local move = math.abs(o.shift_ms or 0) >= DT.ALIGN_MIN_MS
@@ -2556,6 +2660,7 @@ function DT.align_apply(outcome, how)
       done[#done + 1] = o
     end
   end
+  if #done > 0 then DT.align_undo_set({ before = before, after = DT.align_snapshot(movers), when = os.date("%H:%M") }) end
   r.UpdateArrange()
   return done
 end
@@ -2699,10 +2804,12 @@ function DT.quant_move_one(kit, o, hit, target)
   return DT.quant_apply(DT.quant_tracks(kit), pts, o)
 end
 
--- Cut and move. Gives the number of slices moved and of gaps left (only
--- where a moved slice had no earlier audio to reach back into).
+-- Cut and move. Gives the number of slices moved, of gaps left (only
+-- where a moved slice had no earlier audio to reach back into) and where
+-- they are: { {t, track, len} } in time order.
+local JOIN_GAP = 0.002     -- neighbours closer than this (or overlapping) count as joined
 function DT.quant_apply(tracks, pts, o)
-  if #pts == 0 then return 0 end
+  if #pts == 0 then return 0, 0, {} end
   local xf = o.xfade_ms / 1000
   local cuts = {}
   for i, p in ipairs(pts) do cuts[i] = p.cut end
@@ -2714,7 +2821,7 @@ function DT.quant_apply(tracks, pts, o)
     end
     return k
   end
-  local moved, gaps = 0, 0
+  local moved, gaps, gap_at = 0, 0, {}
   for _, tr in ipairs(tracks) do
     -- cut, right to left
     for ci = #cuts, 1, -1 do
@@ -2739,24 +2846,29 @@ function DT.quant_apply(tracks, pts, o)
     for _, x in ipairs(sl) do
       if x.move ~= 0 then r.SetMediaItemInfo_Value(x.it, "D_POSITION", x.pos + x.move); moved = moved + 1 end
     end
-    -- joins: where two slices met at a cut, the earlier one now reaches
-    -- xfade past the later one's new start; both fade over it
+    -- joins: every pair of neighbours that met or overlapped before (a cut,
+    -- or an edit already there - a comp's crossfade, a hair's gap) and now
+    -- moved apart or together: the earlier one reaches xfade past the
+    -- later one's new start, both fade over it. Neighbours that were apart
+    -- (silence left on purpose) stay as they were.
     for i = 2, #sl do
       local a, b = sl[i - 1], sl[i]
-      if b.k > 0 and math.abs(a.pos + a.len - b.pos) < 1e-6 and math.abs(b.pos - cuts[b.k]) < 1e-6 then
+      local gap0 = b.pos - (a.pos + a.len)                -- before: < 0 overlapped
+      if a.move ~= b.move and gap0 < JOIN_GAP then
         -- where they are now (a may have reached back already)
         local a_new = r.GetMediaItemInfo_Value(a.it, "D_POSITION")
         local b_new = r.GetMediaItemInfo_Value(b.it, "D_POSITION")
         -- what's past a's end in the recording is b's lead-in, then b's
         -- transient: a reaches at most 1 ms short of it (else it plays
-        -- twice); a gap past that stays, just before a hit (masked by it)
-        local cap = r.GetMediaItemInfo_Value(a.it, "D_LENGTH") + math.max(0, o.pre_ms - 1) / 1000
+        -- twice)
+        local a_len = r.GetMediaItemInfo_Value(a.it, "D_LENGTH")
+        local cap = a_len + math.max(0, gap0) + math.max(0, o.pre_ms - 1) / 1000
         local want = b_new + xf - a_new
         local newlen = math.max(0.001, math.min(want, cap))
         r.SetMediaItemInfo_Value(a.it, "D_LENGTH", newlen)
         r.SetMediaItemInfo_Value(a.it, "D_FADEOUTLEN", math.min(xf, newlen))
         r.SetMediaItemInfo_Value(b.it, "D_FADEINLEN", xf)
-        if want > cap then
+        if want > cap + 1e-9 then
           -- b moved later than a can follow: b reaches back into its own
           -- earlier audio (the tail before its hit - no transient there)
           -- to meet a, rather than leave a hole
@@ -2764,12 +2876,16 @@ function DT.quant_apply(tracks, pts, o)
           local back = b_new - s0
           local tk = r.GetActiveTake(b.it)
           local offs = tk and r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
-          if tk and back > 0 and offs - back >= 0 then
-            r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", offs - back)
+          local rate = tk and r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE") or 1
+          if rate <= 0 then rate = 1 end
+          if tk and back > 0 and offs - back * rate >= -1e-9 then
+            r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", math.max(0, offs - back * rate))
             r.SetMediaItemInfo_Value(b.it, "D_POSITION", s0)
             r.SetMediaItemInfo_Value(b.it, "D_LENGTH", r.GetMediaItemInfo_Value(b.it, "D_LENGTH") + back)
           else
+            -- nothing earlier to reach into (the recording's start)
             gaps = gaps + 1
+            gap_at[#gap_at + 1] = { t = a_new + newlen, track = tr, len = b_new - (a_new + newlen) }
           end
         end
         r.SetMediaItemInfo_Value(a.it, "C_FADEOUTSHAPE", 1)   -- equal power
@@ -2777,8 +2893,9 @@ function DT.quant_apply(tracks, pts, o)
       end
     end
   end
+  table.sort(gap_at, function(x, y) return x.t < y.t end)
   r.UpdateArrange()
-  return moved, gaps
+  return moved, gaps, gap_at
 end
 
 -- exposed for tests
