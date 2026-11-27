@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="48d802730255ad0a7d31806362d7c0e06e10949a" name="TS-ReaScripts">
+<index version="1" commit="58a8d5e806a4191c5b32b4c244f4504617dd96c6" name="TS-ReaScripts">
   <category name="TS_ChannelView">
     <reapack name="TS_ChannelView.lua" type="script" desc="ChannelView -- docked channel strip: one editable control panel per plugin">
       <metadata>
@@ -6560,6 +6560,29 @@ top right of the window opens it.]]></changelog>
         <source main="main" file="TS_DrumToolbox_Detect.lua">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox_Detect.lua</source>
         <source main="main" file="TS_DrumToolbox_Clear.lua">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox_Clear.lua</source>
         <source file="TS_DrumToolbox_Guide.pdf">https://github.com/tshadgett/TS-ReaScripts/raw/48d802730255ad0a7d31806362d7c0e06e10949a/TS_DrumToolbox/TS_DrumToolbox_Guide.pdf</source>
+      </version>
+      <version name="1.0.4" author="Tim Shadgett" time="2026-11-27T07:09:03Z">
+        <changelog><![CDATA[Quantise:
+- Preview: every move, stay and gap shown in the lanes before anything
+  changes; click a hit to keep it or move it, Shift+click to listen.
+- Stretch (new default): stretch markers on every kit track, no splits.
+  Max stretch limits how far audio is sped up or slowed down.
+- Cut: crossfades fit what's still ringing at each join (Fit).
+- Against the pocket (new default): each section keeps its push or
+  drag; only the hits out against the ones around them move.
+- Min move and Group: no move for tiny errors, fewer cuts and markers.
+- Presets: Tight, Natural (default), Light touch.
+- Rolls and fills no longer pile up on one grid line.
+- Slices no longer carry copies of every hit marker (projects stayed
+  large and slow); "Tidy the slices' hit markers" cleans up older ones.
+Setup: tracks with no audio (MIDI only, or empty) are ignored, and
+"Track ..." is no longer taken for a rack tom.]]></changelog>
+        <source main="main">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox.lua</source>
+        <source file="TS_DrumToolbox_core.lua">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox_core.lua</source>
+        <source file="TS_DT_Edition.lua">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DT_Edition.lua</source>
+        <source main="main" file="TS_DrumToolbox_Detect.lua">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox_Detect.lua</source>
+        <source main="main" file="TS_DrumToolbox_Clear.lua">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox_Clear.lua</source>
+        <source file="TS_DrumToolbox_Guide.pdf">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox_Guide.pdf</source>
       </version>
     </reapack>
   </category>
