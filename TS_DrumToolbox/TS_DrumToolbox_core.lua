@@ -55,7 +55,7 @@ end
 local r = reaper
 local DT = {}
 
-DT.VERSION   = "1.0.4"
+DT.VERSION   = "1.0.5"
 DT.ED = require("TS_DT_Edition")   -- Standard, or with Pro (DT.ED.PRO)
 DT.NS        = "TS_DrumToolbox"
 DT.PREFIX    = "DT"
@@ -2926,6 +2926,26 @@ function DT.quant_points(kit, o, from, to, over)
       if not changed then break end
     end
   end
+  -- Cut: a slice that moves later than the one before leaves room behind
+  -- it, filled from the audio before its own cut. That audio must not
+  -- reach back into the previous hit (its start would play twice, just
+  -- ahead of this one): a point moves later than its neighbour only as far
+  -- as there is room (p.short). Points placed by hand too.
+  if o.method ~= "stretch" then
+    local pre, xf = o.pre_ms / 1000, o.xfade_ms / 1000
+    for i = 2, #pts do
+      local a, b = pts[i - 1], pts[i]
+      if b.moves then
+        local room = (b.cut - a.hit - DT.QUANT_REACH_GUARD) + math.max(0, pre - 0.001) - xf
+        if b.move - a.move > room + 1e-9 then
+          local nm = a.move + math.max(0, room)
+          if nm * b.move < 0 or math.abs(nm) < 1e-6 then nm = 0 end
+          b.move, b.target, b.short = nm, b.hit + nm, true
+          if nm == 0 then b.moves = false end
+        end
+      end
+    end
+  end
   -- Too small to bother: a move under min_ms isn't made - the point stays
   -- where it was played (p.small). Points placed by hand still move.
   local minm = (o.min_ms or 0) / 1000
@@ -3177,6 +3197,15 @@ function DT.quant_ring(pts, meas)
 end
 
 local JOIN_GAP = 0.002     -- neighbours closer than this (or overlapping) count as joined
+DT.QUANT_REACH_GUARD = 0.020   -- a slice reaching back stops this far after the hit before it
+
+-- How far (s) slice b (from point k, starting at pos before the move) may
+-- reach back into its own earlier audio: not into the hit before it
+local function reach_room(pts, k, pos)
+  local prev = k > 1 and pts[k - 1]
+  if not prev then return math.huge end
+  return math.max(0, pos - (prev.hit + DT.QUANT_REACH_GUARD))
+end
 
 -- What Quantise would leave as gaps, worked out without touching anything:
 -- the same cuts, moves and joins as DT.quant_apply, on the items' numbers.
@@ -3228,10 +3257,13 @@ function DT.quant_gaps(tracks, pts, o)
         if want > cap + 1e-9 then
           local s0 = a.npos + newlen - xf
           local back = b.npos - s0
-          if b.has_tk and back > 0 and b.offs - back * b.rate >= -1e-9 then
-            b.offs = math.max(0, b.offs - back * b.rate)
-            b.npos, b.nlen = s0, b.nlen + back
-          else
+          local room = math.min(reach_room(pts, b.k, b.pos), b.has_tk and b.offs / b.rate or 0)
+          local got = math.max(0, math.min(back, room))
+          if got > 0 then
+            b.offs = math.max(0, b.offs - got * b.rate)
+            b.npos, b.nlen = b.npos - got, b.nlen + got
+          end
+          if got < back - 1e-9 and b.npos > a.npos + newlen + 1e-9 then
             out[#out + 1] = { t = a.npos + newlen, track = tr, len = b.npos - (a.npos + newlen), k = b.k }
           end
         end
@@ -3325,20 +3357,24 @@ function DT.quant_apply(tracks, pts, o)
           -- b moved later than a can follow: b reaches back into its own
           -- earlier audio (the tail before its hit - no transient there)
           -- to meet a, rather than leave a hole
+          -- (never into the hit before it: that would play its start twice)
           local s0 = a_new + newlen - xf
           local back = b_new - s0
           local tk = r.GetActiveTake(b.it)
           local offs = tk and r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
           local rate = tk and r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE") or 1
           if rate <= 0 then rate = 1 end
-          if tk and back > 0 and offs - back * rate >= -1e-9 then
-            r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", math.max(0, offs - back * rate))
-            r.SetMediaItemInfo_Value(b.it, "D_POSITION", s0)
-            r.SetMediaItemInfo_Value(b.it, "D_LENGTH", r.GetMediaItemInfo_Value(b.it, "D_LENGTH") + back)
-          else
-            -- nothing earlier to reach into (the recording's start)
+          local got = tk and math.max(0, math.min(back, reach_room(pts, b.k, b.pos), offs / rate)) or 0
+          if got > 0 then
+            r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", math.max(0, offs - got * rate))
+            r.SetMediaItemInfo_Value(b.it, "D_POSITION", b_new - got)
+            r.SetMediaItemInfo_Value(b.it, "D_LENGTH", r.GetMediaItemInfo_Value(b.it, "D_LENGTH") + got)
+          end
+          if got < back - 1e-9 and b_new - got > a_new + newlen + 1e-9 then
+            -- nothing earlier to reach into (the recording's start), or
+            -- only the hit before
             gaps = gaps + 1
-            gap_at[#gap_at + 1] = { t = a_new + newlen, track = tr, len = b_new - (a_new + newlen) }
+            gap_at[#gap_at + 1] = { t = a_new + newlen, track = tr, len = b_new - got - (a_new + newlen) }
           end
         end
         -- Fit: where this track is still ringing at the cut, a longer
@@ -3358,7 +3394,8 @@ function DT.quant_apply(tracks, pts, o)
             local offs = r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS")
             local rate = r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE")
             if not rate or rate <= 0 then rate = 1 end
-            local more = math.min(xfl - ov, offs / rate)
+            local used = (b.pos + b.move) - bpos           -- reached back already
+            local more = math.min(xfl - ov, offs / rate, reach_room(pts, b.k, b.pos) - used)
             if more > 0 then
               r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", offs - more * rate)
               r.SetMediaItemInfo_Value(b.it, "D_POSITION", bpos - more)
@@ -3373,6 +3410,11 @@ function DT.quant_apply(tracks, pts, o)
         end
         r.SetMediaItemInfo_Value(a.it, "C_FADEOUTSHAPE", 1)   -- equal power
         r.SetMediaItemInfo_Value(b.it, "C_FADEINSHAPE", 1)
+        -- REAPER's auto-crossfade lengths win over these when set (a split's
+        -- crossfade, an earlier edit): the same, so what's drawn and heard
+        -- is this join's, matched to the overlap
+        r.SetMediaItemInfo_Value(a.it, "D_FADEOUTLEN_AUTO", r.GetMediaItemInfo_Value(a.it, "D_FADEOUTLEN"))
+        r.SetMediaItemInfo_Value(b.it, "D_FADEINLEN_AUTO", r.GetMediaItemInfo_Value(b.it, "D_FADEINLEN"))
       end
     end
   end
@@ -3382,6 +3424,6 @@ function DT.quant_apply(tracks, pts, o)
 end
 
 -- exposed for tests
-DT._candidates, DT._measure, DT._take_hits = candidates, measure, take_hits
+DT._candidates, DT._measure, DT._take_hits, DT._rewrite_take = candidates, measure, take_hits, rewrite_take
 
 return DT

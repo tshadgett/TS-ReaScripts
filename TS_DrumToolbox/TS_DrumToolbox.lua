@@ -1,22 +1,16 @@
 -- @description TS_DrumToolbox - offline drum detection, bleed control, replacement, gate and noise for the whole kit
 -- @author Tim Shadgett
--- @version 1.0.4
+-- @version 1.0.5
 -- @changelog
---   Quantise:
---   - Preview: every move, stay and gap shown in the lanes before anything
---     changes; click a hit to keep it or move it, Shift+click to listen.
---   - Stretch (new default): stretch markers on every kit track, no splits.
---     Max stretch limits how far audio is sped up or slowed down.
---   - Cut: crossfades fit what's still ringing at each join (Fit).
---   - Against the pocket (new default): each section keeps its push or
---     drag; only the hits out against the ones around them move.
---   - Min move and Group: no move for tiny errors, fewer cuts and markers.
---   - Presets: Tight, Natural (default), Light touch.
---   - Rolls and fills no longer pile up on one grid line.
---   - Slices no longer carry copies of every hit marker (projects stayed
---     large and slow); "Tidy the slices' hit markers" cleans up older ones.
---   Setup: tracks with no audio (MIDI only, or empty) are ignored, and
---   "Track ..." is no longer taken for a rack tom.
+--   Quantise (Cut):
+--   - Crossfades always match the overlap at every join: REAPER's own auto
+--     crossfade lengths are set too, so an earlier split's or edit's fade
+--     no longer wins (no need for a crossfade clean-up script afterwards).
+--   - A late hit moved later no longer replays the start of the hit before
+--     it: the audio filling in behind it stops short of that hit. Where
+--     there isn't room, the hit moves part way (shown in the preview).
+--   Lanes: a hit's level label can be clicked and dragged like its line -
+--   easier with a trackpad.
 -- @provides
 --   [nomain] TS_DrumToolbox_core.lua
 --   [nomain] TS_DT_Edition.lua
@@ -1743,6 +1737,14 @@ local function lane_header(dl, e, x, y, w, h, tall, mini, focused)
   return rev
 end
 
+UI.hchips = {}
+-- the hit whose level chip (drawn this frame) is under the mouse, in a lane
+local function chip_at(e, mx, my)
+  for i = #UI.hchips, 1, -1 do
+    local c = UI.hchips[i]
+    if c.e == e and mx >= c.x0 and mx <= c.x1 and my >= c.y0 and my <= c.y1 then return c.hh end
+  end
+end
 local function draw_hits(dl, e, x0, x1, y, h, t2x, selected, compact)
   local lh = ImGui.GetTextLineHeight(ctx)
   -- bleed: dotted line, and the source's letter at the bottom
@@ -1792,6 +1794,10 @@ local function draw_hits(dl, e, x0, x1, y, h, t2x, selected, compact)
     if not compact and (x - last_lx > tw2 + 2 or sel) then
       ImGui.DrawList_AddRectFilled(dl, x, y + 2, x + tw2, y + 2 + lh, col, 2)
       ImGui.DrawList_AddText(dl, x + 3, y + 2, 0x11131aff, txt)
+      -- the chip is a handle too: easier to hit than the line (trackpads)
+      local fc = ImGui.GetFrameCount and ImGui.GetFrameCount(ctx) or 0
+      if UI.hchips_f ~= fc then UI.hchips, UI.hchips_f = {}, fc end
+      UI.hchips[#UI.hchips + 1] = { e = e, hh = hh, x0 = x - 1, x1 = x + tw2 + 1, y0 = y + 1, y1 = y + 3 + lh }
       if sel then ImGui.DrawList_AddRect(dl, x - 1, y + 1, x + tw2 + 1, y + 3 + lh, COL.text, 2, 0, 1.5) end
       last_lx = x
     end
@@ -1808,6 +1814,8 @@ function UI.qprev_what(p)
   elseif p.ride then
     s = p.moves and string.format("no cut: moves %+.1f ms with the audio around it, %.1f ms from the grid", p.move * 1000, math.abs(p.dev + p.move) * 1000)
       or string.format("no cut: stays with the audio around it, %.1f ms from the grid", math.abs(p.dev) * 1000)
+  elseif p.short and p.moves then s = string.format("moves %+.1f ms, part way: any later and the audio filling in behind it would replay the start of the hit before", p.move * 1000)
+  elseif p.short then s = "stays: moving it later would replay the start of the hit before (no audio behind it to fill in)"
   elseif p.small then s = string.format("stays: %.1f ms off the grid, under Min move", math.abs(p.dev) * 1000)
   elseif p.moves then s = string.format("moves %+.1f ms%s", p.move * 1000, p.manual and " (by hand)" or (math.abs(p.target - (p.hit - p.dev)) < 1e-6 and " onto the grid" or " towards the grid"))
   elseif p.too_far then s = "stays: it would need more stretch than Max stretch allows"
@@ -2141,6 +2149,7 @@ local function draw_lanes(kit)
           local d = math.abs(t2x(hh.proj) - mx)
           if not bd or d < bd then best, bd = hh, d end
         end
+        best = best or chip_at(l.e, mx, my)
         hover_hit = best
         if not best and not l.mini then
           for _, b in ipairs(near(l.e.bleedlist or {}, x2t(mx), 7 / (x1 - x0) * (t1 - t0))) do
@@ -2220,6 +2229,7 @@ local function draw_lanes(kit)
             local dd = math.abs(t2x(hh.proj) - mx)
             if dd <= 6 and (not bd or dd < bd) then best, bd = hh, dd end
           end
+          best = best or chip_at(l.e, mx, my)
           if best then UI.qgrab_hover = { hit = best.proj, e = l.e } end
         end
       end
@@ -2907,11 +2917,17 @@ function UI.draw_quant(kit)
       end
       chip(string.format("%d move", nm), COL.accent, "Arrows in the lanes: from each hit to where it lands")
       local crowd = 0
-      for _, p in ipairs(pts) do if p.crowded then crowd = crowd + 1 end end
+      local short = 0
+      for _, p in ipairs(pts) do
+        if p.crowded then crowd = crowd + 1 end
+        if p.short then short = short + 1 end
+      end
       chip(string.format("%d stay", ncut - nm), COL.label, "Grey dots: on the grid already, under Min move, another subdivision, or outside the window"
         .. (crowd > 0 and string.format("\n%d of them in rolls or fills: moving them would pile their slices on their neighbours'", crowd) or ""))
       if nride > 0 then chip(string.format("%d ride along", nride), COL.dim,
         string.format("Dim in the lanes: no %s of their own - they move with the audio around them,\nwithin Group (%.1f ms) of their own target", word:sub(1, -2), o.group_ms or 0)) end
+      if short > 0 then chip(string.format("%d part way", short), COL.mid,
+        "Late hits moved only as far as there's audio behind them to fill in:\nany further and the start of the hit before would play twice") end
       if kept > 0 then chip(string.format("%d kept by hand", kept), COL.mid, "Amber locks: points you clicked to keep where they are") end
       if ng > 0 then chip(string.format("%d gap%s", ng, ng == 1 and "" or "s"), UI.Q_RED,
         "Red in the lanes: a slice moving later with no earlier audio to fill behind it") end
