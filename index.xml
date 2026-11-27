@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="58a8d5e806a4191c5b32b4c244f4504617dd96c6" name="TS-ReaScripts">
+<index version="1" commit="d7c2d7f8472417a23504362da98787bbda77c344" name="TS-ReaScripts">
   <category name="TS_ChannelView">
     <reapack name="TS_ChannelView.lua" type="script" desc="ChannelView -- docked channel strip: one editable control panel per plugin">
       <metadata>
@@ -6583,6 +6583,23 @@ Setup: tracks with no audio (MIDI only, or empty) are ignored, and
         <source main="main" file="TS_DrumToolbox_Detect.lua">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox_Detect.lua</source>
         <source main="main" file="TS_DrumToolbox_Clear.lua">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox_Clear.lua</source>
         <source file="TS_DrumToolbox_Guide.pdf">https://github.com/tshadgett/TS-ReaScripts/raw/58a8d5e806a4191c5b32b4c244f4504617dd96c6/TS_DrumToolbox/TS_DrumToolbox_Guide.pdf</source>
+      </version>
+      <version name="1.0.5" author="Tim Shadgett" time="2026-11-27T23:54:57Z">
+        <changelog><![CDATA[Quantise (Cut):
+- Crossfades always match the overlap at every join: REAPER's own auto
+  crossfade lengths are set too, so an earlier split's or edit's fade
+  no longer wins (no need for a crossfade clean-up script afterwards).
+- A late hit moved later no longer replays the start of the hit before
+  it: the audio filling in behind it stops short of that hit. Where
+  there isn't room, the hit moves part way (shown in the preview).
+Lanes: a hit's level label can be clicked and dragged like its line -
+easier with a trackpad.]]></changelog>
+        <source main="main">https://github.com/tshadgett/TS-ReaScripts/raw/d7c2d7f8472417a23504362da98787bbda77c344/TS_DrumToolbox/TS_DrumToolbox.lua</source>
+        <source file="TS_DrumToolbox_core.lua">https://github.com/tshadgett/TS-ReaScripts/raw/d7c2d7f8472417a23504362da98787bbda77c344/TS_DrumToolbox/TS_DrumToolbox_core.lua</source>
+        <source file="TS_DT_Edition.lua">https://github.com/tshadgett/TS-ReaScripts/raw/d7c2d7f8472417a23504362da98787bbda77c344/TS_DrumToolbox/TS_DT_Edition.lua</source>
+        <source main="main" file="TS_DrumToolbox_Detect.lua">https://github.com/tshadgett/TS-ReaScripts/raw/d7c2d7f8472417a23504362da98787bbda77c344/TS_DrumToolbox/TS_DrumToolbox_Detect.lua</source>
+        <source main="main" file="TS_DrumToolbox_Clear.lua">https://github.com/tshadgett/TS-ReaScripts/raw/d7c2d7f8472417a23504362da98787bbda77c344/TS_DrumToolbox/TS_DrumToolbox_Clear.lua</source>
+        <source file="TS_DrumToolbox_Guide.pdf">https://github.com/tshadgett/TS-ReaScripts/raw/d7c2d7f8472417a23504362da98787bbda77c344/TS_DrumToolbox/TS_DrumToolbox_Guide.pdf</source>
       </version>
     </reapack>
   </category>
