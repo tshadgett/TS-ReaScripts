@@ -1,9 +1,22 @@
 -- @description TS_DrumToolbox - offline drum detection, bleed control, replacement, gate and noise for the whole kit
 -- @author Tim Shadgett
--- @version 1.0.3
+-- @version 1.0.4
 -- @changelog
---   The user guide (PDF) now comes with DrumToolbox: the Guide button at the
---   top right of the window opens it.
+--   Quantise:
+--   - Preview: every move, stay and gap shown in the lanes before anything
+--     changes; click a hit to keep it or move it, Shift+click to listen.
+--   - Stretch (new default): stretch markers on every kit track, no splits.
+--     Max stretch limits how far audio is sped up or slowed down.
+--   - Cut: crossfades fit what's still ringing at each join (Fit).
+--   - Against the pocket (new default): each section keeps its push or
+--     drag; only the hits out against the ones around them move.
+--   - Min move and Group: no move for tiny errors, fewer cuts and markers.
+--   - Presets: Tight, Natural (default), Light touch.
+--   - Rolls and fills no longer pile up on one grid line.
+--   - Slices no longer carry copies of every hit marker (projects stayed
+--     large and slow); "Tidy the slices' hit markers" cleans up older ones.
+--   Setup: tracks with no audio (MIDI only, or empty) are ignored, and
+--   "Track ..." is no longer taken for a rack tom.
 -- @provides
 --   [nomain] TS_DrumToolbox_core.lua
 --   [nomain] TS_DT_Edition.lua
@@ -25,8 +38,8 @@
                bleed check across the kit; the hits in lanes to review.
     Align      second mics to their drum and the rest to the reference,
                measured on the hits; moves the items or the audio in them.
-    Quantise   the whole kit cut at the same points and moved to the grid,
-               crossfaded, phase kept.
+    Quantise   the whole kit moved to the grid (or its own pocket) at the
+               same points - stretch markers or crossfaded cuts - phase kept.
   With DrumToolbox Pro:
     Level      each hit evened out (clip gain or a pre-FX envelope).
     Gate       ReaGate opened by the hit map; Duck, Clean, Debleed.
@@ -1237,8 +1250,12 @@ local function draw_transport()
   -- the user guide (a PDF beside the script), at the right
   local gl = "Guide"
   local gw = (ImGui.CalcTextSize(ctx, gl)) + 16
+  -- (back on this line first: the room left is measured from where the line ends,
+  -- not from the next line's start - that pushed the button past the window's edge)
+  ImGui.SameLine(ctx, 0, 0)
+  local cx = ImGui.GetCursorPosX(ctx)
   local avail = ImGui.GetContentRegionAvail(ctx)
-  ImGui.SameLine(ctx, 0, math.max(10, avail - gw))
+  ImGui.SetCursorPosX(ctx, cx + math.max(10, avail - gw))
   if ImGui.Button(ctx, gl .. "##guide") then UI.open_guide() end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Open the DrumToolbox user guide (PDF)") end
 end
@@ -1781,6 +1798,125 @@ local function draw_hits(dl, e, x0, x1, y, h, t2x, selected, compact)
   end
 end
 
+-- ---- Quantise preview: every cut point in the lanes, before anything is cut
+UI.Q_RED = 0xe05555ff
+-- what a cut point will do, in words
+function UI.qprev_what(p)
+  local where = r.format_timestr_pos(p.hit, "", 2)
+  local s
+  if p.manual and not p.moves then s = "stays: kept here by hand"
+  elseif p.ride then
+    s = p.moves and string.format("no cut: moves %+.1f ms with the audio around it, %.1f ms from the grid", p.move * 1000, math.abs(p.dev + p.move) * 1000)
+      or string.format("no cut: stays with the audio around it, %.1f ms from the grid", math.abs(p.dev) * 1000)
+  elseif p.small then s = string.format("stays: %.1f ms off the grid, under Min move", math.abs(p.dev) * 1000)
+  elseif p.moves then s = string.format("moves %+.1f ms%s", p.move * 1000, p.manual and " (by hand)" or (math.abs(p.target - (p.hit - p.dev)) < 1e-6 and " onto the grid" or " towards the grid"))
+  elseif p.too_far then s = "stays: it would need more stretch than Max stretch allows"
+  elseif p.crowded then s = "stays: too close to its neighbour to move without the two slices overlapping (a roll or a fill)"
+  elseif p.other then s = "stays: it plays another subdivision (a 16th or a triplet off this grid)"
+  elseif math.abs(p.dev) < 0.0002 then s = "stays: already on the grid"
+  else s = "stays: outside the window" end
+  return string.format("%s · %s · %s", p.name or "?", where, s)
+end
+-- click: keep it where it is, or let it move (back to what the settings say)
+function UI.qtoggle(p)
+  UI.qover = UI.qover or DT.quant_over()
+  local key = DT.quant_key(p.hit)
+  if p.manual then UI.qover[key] = nil
+  elseif p.moves then UI.qover[key] = { stay = true }
+  else UI.qover[key] = { target = p.hit - p.dev } end
+  DT.quant_set_over(UI.qover)
+  UI.qkey = nil
+end
+-- one lane's preview: arrows (moves), dots (stays), locks (kept by hand)
+-- on the drums the cuts come from; faint cut ticks on the rest; any gap
+-- Quantise would leave, red
+function UI.qprev_lane(dl, l, e, t0, t1, t2x)
+  local pts = UI.qpts or {}
+  local by = l.y + l.h - 8
+  local mine = false
+  for _, p in ipairs(pts) do if p.name == e.name then mine = true; break end end
+  for i, p in ipairs(pts) do
+    local lo, hi = math.min(p.hit, p.target), math.max(p.hit, p.target)
+    if hi >= t0 - 0.05 and lo <= t1 + 0.05 then
+      local gap = UI.qprev_gk and UI.qprev_gk[i]
+      if mine and p.name == e.name and l.tall then
+        local hx, tx = t2x(p.hit), t2x(p.target)
+        local hot = UI.qprev_hot == i
+        if p.moves then
+          local ring = UI.qring and UI.qring[i]
+          local c = gap and UI.Q_RED or hot and COL.text or ring and COL.mid or p.ride and COL.dim or COL.accent
+          -- where it is (dotted), where it lands (solid), the arrow between
+          for yy = l.y + 3, l.y + l.h - 12, 4 do ImGui.DrawList_AddLine(dl, hx, yy, hx, yy + 2, (c & 0xffffff00) | 0x99, 1) end
+          ImGui.DrawList_AddLine(dl, tx, l.y + 3, tx, l.y + l.h - 3, c, 2)
+          local d = tx >= hx and 1 or -1
+          if math.abs(tx - hx) > 3 then ImGui.DrawList_AddLine(dl, hx, by, tx - d * 2, by, c, 1.8) end
+          ImGui.DrawList_AddLine(dl, tx - d * 5, by - 4, tx, by, c, 1.8)
+          ImGui.DrawList_AddLine(dl, tx - d * 5, by + 4, tx, by, c, 1.8)
+          if p.manual then ImGui.DrawList_AddCircleFilled(dl, hx, by, 2.5, COL.mid) end
+        elseif p.manual then
+          -- kept here by hand: an amber lock
+          local c = hot and COL.text or COL.mid
+          ImGui.DrawList_AddLine(dl, hx, l.y + 3, hx, l.y + l.h - 14, c, 1.5)
+          ImGui.DrawList_AddRect(dl, hx - 6, by - 6, hx + 6, by + 6, c, 3, 0, 1.2)
+          ImGui.DrawList_AddRectFilled(dl, hx - 3.5, by - 1, hx + 3.5, by + 3.5, c, 1)
+          ImGui.DrawList_AddLine(dl, hx - 2.5, by - 1, hx - 2.5, by - 3.5, c, 1.2)
+          ImGui.DrawList_AddLine(dl, hx + 2.5, by - 1, hx + 2.5, by - 3.5, c, 1.2)
+          ImGui.DrawList_AddLine(dl, hx - 2.5, by - 3.5, hx + 2.5, by - 3.5, c, 1.2)
+        else
+          local c = hot and COL.text or COL.dim
+          ImGui.DrawList_AddLine(dl, hx, l.y + 3, hx, l.y + l.h - 10, (c & 0xffffff00) | 0xaa, 1)
+          ImGui.DrawList_AddCircleFilled(dl, hx, by, 3, c)
+        end
+      elseif p.moves and not p.ride then
+        local cx = t2x(p.target)
+        if (UI.qo or {}).method == "stretch" then
+          -- a stretch marker, the same on every track
+          ImGui.DrawList_AddTriangleFilled(dl, cx - 3.5, l.y + 2, cx + 3.5, l.y + 2, cx, l.y + 7, (COL.accent & 0xffffff00) | 0xcc)
+        else
+          -- the cut, faint, on every other track: it moves with it; amber
+          -- where this track is still ringing loud at the cut
+          local rg
+          for _, x in ipairs(UI.qring and UI.qring[i] or {}) do if x.track == e.track then rg = x end end
+          if rg then
+            ImGui.DrawList_AddRectFilled(dl, cx - 8, l.y + 3, cx + 8, l.y + l.h - 3, (COL.mid & 0xffffff00) | 0x30)
+            ImGui.DrawList_AddRect(dl, cx - 8, l.y + 3, cx + 8, l.y + l.h - 3, COL.mid, 0, 0, 1)
+            if l.h >= 18 then ImGui.DrawList_AddText(dl, cx + 11, l.y + (l.h - ImGui.GetTextLineHeight(ctx)) / 2, COL.mid, string.format("ringing %.0f dB", rg.rel)) end
+          else
+            ImGui.DrawList_AddLine(dl, cx, l.y + l.h - 8, cx, l.y + l.h - 2, gap and UI.Q_RED or ((COL.accent & 0xffffff00) | 0xaa), 1)
+          end
+        end
+      end
+    end
+  end
+  -- Stretch: how much each stretch speeds up or slows down, between points
+  if mine and l.tall and (UI.qo or {}).method == "stretch" then
+    local lim = ((UI.qo or {}).max_stretch or 8) / 100
+    for i = 2, #pts do
+      local a, b = pts[i - 1], pts[i]
+      if a.name == e.name and b.name == e.name and b.target >= t0 and a.target <= t1 and (a.moves or b.moves) then
+        local sd = b.hit - a.hit
+        local x0, x1 = t2x(a.target), t2x(b.target)
+        if sd > 0 and x1 - x0 > 46 then
+          local pct = ((b.target - a.target) / sd - 1) * 100
+          local txt = string.format("%+.1f%%", pct)          -- + longer (slower), - shorter
+          local tw = ImGui.CalcTextSize(ctx, txt)
+          ImGui.DrawList_AddText(dl, (x0 + x1 - tw) / 2, l.y + l.h - 4 - ImGui.GetTextLineHeight(ctx),
+            math.abs(pct) > lim * 75 and COL.mid or ((COL.accent & 0xffffff00) | 0xcc), txt)
+        end
+      end
+    end
+  end
+  for _, g in ipairs(UI.qprev_gaps or {}) do
+    if g.track == e.track and g.t + g.len >= t0 and g.t <= t1 then
+      local a = t2x(g.t)
+      local b = math.max(t2x(g.t + g.len), a + 3)
+      ImGui.DrawList_AddRectFilled(dl, a, l.y + 3, b, l.y + l.h - 3, (UI.Q_RED & 0xffffff00) | 0x40)
+      ImGui.DrawList_AddRect(dl, a, l.y + 3, b, l.y + l.h - 3, UI.Q_RED, 0, 0, 1)
+      if l.h >= 18 then ImGui.DrawList_AddText(dl, b + 4, l.y + (l.h - ImGui.GetTextLineHeight(ctx)) / 2, UI.Q_RED, string.format("gap %.1f ms", g.len * 1000)) end
+    end
+  end
+end
+
 local function draw_lanes(kit)
   local X, Y = ImGui.GetCursorScreenPos(ctx)
   local W, H = ImGui.GetContentRegionAvail(ctx)
@@ -1921,6 +2057,7 @@ local function draw_lanes(kit)
           ImGui.DrawList_AddLine(dl, hx, l.y, hx, l.y + l.h, 0xffffff40, 1)
         end
       end
+      if S.tab == "quant" and not UI.qgrab then UI.qprev_lane(dl, l, e, t0, t1, t2x) end
       if l.tall then draw_hits(dl, e, x0, x1, l.y, l.h, t2x, selected, l.mini)
       elseif S.tab == "level" and S.lplans then
         -- a second mic: its own gains, or (dim) its drum's that it follows
@@ -2035,7 +2172,47 @@ local function draw_lanes(kit)
   -- whole kit is cut around it and crossfaded - one undo step
   if S.tab == "quant" then
     UI.qgrab_hover = nil
-    if hov and not UI.qgrab then
+    -- the preview's markers (the foot of a lane the cuts come from): hover
+    -- says what the point will do; click keeps it / lets it move;
+    -- Shift+click listens from just before it
+    UI.qprev_hot, UI.qhover = nil, nil
+    if hov and not UI.qgrab and UI.qpts then
+      for _, l in ipairs(lanes) do
+        if l.tall and my >= l.y + l.h - 18 and my < l.y + l.h then
+          local best, bd
+          for i, p in ipairs(UI.qpts) do
+            if p.name == l.e.name then
+              local dd = math.min(math.abs(t2x(p.hit) - mx), math.abs(t2x(p.target) - mx))
+              if dd <= 6 and (not bd or dd < bd) then best, bd = i, dd end
+            end
+          end
+          if best then UI.qprev_hot = best end
+        end
+      end
+    end
+    local qh = UI.qprev_hot and UI.qpts[UI.qprev_hot]
+    if qh then
+      UI.qhover = true
+      hover_hit = nil; UI.hover_bleed = nil
+      local gap = UI.qprev_gk and UI.qprev_gk[UI.qprev_hot]
+      local ringtxt = ""
+      for _, x in ipairs(UI.qring and UI.qring[UI.qprev_hot] or {}) do
+        local tn = r.ValidatePtr(x.track, "MediaTrack*") and select(2, r.GetTrackName(x.track)) or "?"
+        ringtxt = ringtxt .. string.format("\n%s ringing %.0f dB under this cut", tn, x.rel)
+      end
+      ImGui.SetTooltip(ctx, UI.qprev_what(qh) .. (gap and string.format("\nwould leave a %.1f ms gap (no earlier audio to fill it)", gap.len * 1000) or "") .. ringtxt
+        .. "\nClick: " .. ((qh.manual and "back to the settings") or (qh.moves and "keep it where it is") or "move it onto the grid") .. " · Shift+click: listen")
+      if ImGui.IsMouseClicked(ctx, 0) then
+        UI.q_ate = true
+        if (mods & KEY_MOD_SHIFT) ~= 0 then
+          r.SetEditCurPos(math.max(0, qh.hit - 0.75), false, false)
+          act(ACT.play)
+        else
+          UI.qtoggle(qh)
+        end
+      end
+    end
+    if hov and not UI.qgrab and not qh then
       for _, l in ipairs(lanes) do
         if l.e.track == S.cur and l.tall and my >= l.y and my < l.y + l.h and l.e.hitlist then
           local best, bd
@@ -2548,8 +2725,27 @@ function UI.draw_quant(kit)
   local key = tostring(cache.state) .. DT.serialize(o) .. (scoped and string.format("%.3f-%.3f", ts0, ts1) or "")
   UI.qover = UI.qover or DT.quant_over()
   if UI.qkey ~= key then
-    UI.qpts = DT.quant_points(kit, o, scoped and ts0 or nil, scoped and ts1 or nil)   -- by hand: in the lanes
+    UI.qpts = DT.quant_points(kit, o, scoped and ts0 or nil, scoped and ts1 or nil, UI.qover)   -- by hand: in the lanes
     UI.qkey = key
+    UI.qprev_gk, UI.qprev_gaps, UI.qring, UI.qring_list = {}, {}, {}, {}
+    UI.qprev_gi, UI.qring_i = 0, 0
+    if o.method ~= "stretch" then
+      -- the gaps it would leave, and which cut point each is behind
+      UI.qprev_gaps = DT.quant_gaps(DT.quant_tracks(kit), UI.qpts, o)
+      for _, g in ipairs(UI.qprev_gaps) do if g.k > 0 then UI.qprev_gk[g.k] = g end end
+      -- what's still ringing on the other tracks at each cut (measured once
+      -- per change to the project)
+      local p1, pn = UI.qpts[1], UI.qpts[#UI.qpts]
+      if p1 then
+        if UI.qmeas_state ~= cache.state then
+          UI.qmeas = DT.quant_ring_measure(DT.quant_tracks(kit), math.max(0, p1.cut - 0.05), pn.hit + 0.05)
+          UI.qmeas_state = cache.state
+        end
+        UI.qring = DT.quant_ring(UI.qpts, UI.qmeas)
+        for k in pairs(UI.qring) do UI.qring_list[#UI.qring_list + 1] = k end
+        table.sort(UI.qring_list)
+      end
+    end
   end
   local pts = UI.qpts
   local tracks = DT.quant_tracks(kit)
@@ -2565,6 +2761,22 @@ function UI.draw_quant(kit)
   local cw = math.floor((avail - 8) * 0.58)
   if UI.section_begin("q_grid", cw, 0) then
     UI.head("qg", "Grid & feel")
+    -- presets: how much gets moved (Against, Strength, Min move, Group)
+    ImGui.TextDisabled(ctx, "Preset"); ImGui.SameLine(ctx, 90)
+    do
+      local cur = DT.quant_preset_of(o)
+      local labels, tips, ci = {}, {}, nil
+      for i, pr in ipairs(DT.QUANT_PRESETS) do
+        labels[i] = pr.name
+        local st = pr.set
+        tips[i] = string.format("%s\nAgainst %s · Strength %d%% · Min move %g ms · Group %g ms", pr.tip,
+          st.against == "pocket" and "the pocket" or "the grid", st.strength, st.min_ms, st.group_ms)
+        if pr.id == cur then ci = i end
+      end
+      local pk = UI.seg("q_preset", labels, ci, tips)
+      if pk then DT.quant_preset_apply(o, DT.QUANT_PRESETS[pk].id); save() end
+      if not ci then ImGui.SameLine(ctx, 0, 8); ImGui.TextDisabled(ctx, "custom") end
+    end
     ImGui.TextDisabled(ctx, "Grid"); ImGui.SameLine(ctx, 90)
     local DIVS = { 1, 0.5, 0.25, 0.125 }
     local di
@@ -2596,6 +2808,12 @@ function UI.draw_quant(kit)
         .. "and moves only if that line is on the grid: at 1/4, a 16th offbeat stays a 16th offbeat",
       "Any hit within the window moves to its nearest grid line" })
     if smp then o.smart = smp == 1; save() end
+    ImGui.TextDisabled(ctx, "Against"); ImGui.SameLine(ctx, 90)
+    local agp = UI.seg("q_against", { "Grid", "Pocket" }, o.against == "pocket" and 2 or 1, {
+      "Each hit towards its grid line",
+      string.format("Each hit towards its grid line plus the push or drag of the hits around it (%d bars either side):\n"
+        .. "a section that sits ahead or behind stays there, only the hits out against it move", o.pocket_bars or 2) })
+    if agp then o.against = agp == 2 and "pocket" or "grid"; save() end
     ImGui.TextDisabled(ctx, "Strength"); ImGui.SameLine(ctx, 90)
     local ch, v, sdone = UI.pull("##qstr", o.strength, 240, "How far each hit moves towards the grid: 100% on it, less keeps some of the feel\nDouble-click: 100%", 100)
     if ch then o.strength = v; UI.qkey = nil end
@@ -2606,37 +2824,193 @@ function UI.draw_quant(kit)
   end
   ImGui.SameLine(ctx, 0, 8)
   if UI.section_begin("q_cuts", 0, 0) then
-    local nm, maxm, b, a, nother = 0, 0, 0, 0, 0
+    -- nm / ncut: the points that cut (riding ones don't); nride: the rest
+    local nm, maxm, b, a, nother, ncut, nride = 0, 0, 0, 0, 0, 0, 0
     for _, p in ipairs(pts) do
       if p.other then nother = nother + 1 end
-      if p.moves then nm = nm + 1; maxm = math.max(maxm, math.abs(p.move)) end
+      if p.ride then nride = nride + 1 else ncut = ncut + 1 end
+      if p.moves and not p.ride then nm = nm + 1 end
+      if p.moves then maxm = math.max(maxm, math.abs(p.move)) end
       b = b + math.abs(p.dev); a = a + math.abs(p.dev + p.move)
     end
-    local qb = { nm > 0 and "ok" or "off", string.format("%d of %d move", nm, #pts),
-      string.format("%d cuts · %d move · %d stay put", #pts, nm, #pts - nm)
+    local word = o.method == "stretch" and "markers" or "cuts"
+    local qb = { nm > 0 and "ok" or "off", string.format("%d %s · %d hits", ncut, word, #pts),
+      string.format("%d hits · %d %s (%d move, %d stay put) · %d ride along with no %s of their own", #pts, ncut, word, nm, ncut - nm, nride, word:sub(1, -2))
       .. (nother > 0 and string.format("\n%d of them play another subdivision: a 16th or a triplet off the grid", nother) or "")
       .. (#pts > 0 and string.format("\noff the grid on average %.1f ms → %.1f ms; the biggest move %.1f ms", b / #pts * 1000, a / #pts * 1000, maxm * 1000) or "") }
-    UI.head("qc", "Cuts", { badges = { qb }, nbadges = 1 })
-    local jch, jdone = UI.join_view(o, math.min(360, ImGui.GetContentRegionAvail(ctx)), 84)
-    if jch then UI.qkey = nil end
-    if jdone then save() end
+    UI.head("qc", o.method == "stretch" and "Stretch" or "Cuts", { badges = { qb }, nbadges = 1, menu = function()
+      if ImGui.Selectable(ctx, "Tidy the slices' hit markers##q_tidy") then
+        r.Undo_BeginBlock2(0)
+        r.PreventUIRefresh(1)
+        local gone = DT.trim_tracks(tracks)
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock2(0, "TS DrumToolbox: tidy the hit markers", -1)
+        UI.qmsg = { "ok", os.date("%H:%M"), string.format("Tidied at %s: %d copies of hit markers taken off slices that can't play them.", os.date("%H:%M"), gone) }
+        invalidate(); UI.qkey = nil
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, "After a Quantise from DrumToolbox 1.0.3 or earlier: every slice carries a copy of all the take's\n"
+          .. "markers, which makes the project large and slow. This keeps on each item only the markers\n"
+          .. "it can play (and half a second either side). One undo step.")
+      end
+    end })
+    -- how: stretch markers (no splits) or slices
+    ImGui.TextDisabled(ctx, "Method"); ImGui.SameLine(ctx, 90)
+    local mp = UI.seg("q_method", { "Stretch", "Cut" }, o.method == "stretch" and 1 or 2, {
+      "Stretch markers on every track at each point: the hits land on the grid, REAPER stretches between.\nNo splits: items stay whole, nothing is repeated or cut out, every mic stays in phase.",
+      "Every track cut at the same points and the slices moved, crossfaded (no stretching)." })
+    if mp then o.method = mp == 1 and "stretch" or "cut"; save() end
+    if o.method == "stretch" then
+      ImGui.TextDisabled(ctx, "Max stretch"); ImGui.SameLine(ctx, 90)
+      local chm, vm, dm = UI.numbox("##q_maxst", o.max_stretch or 8, 1, 25, "±%.0f%%", 80, COL.accent,
+        "How much a stretch may speed up or slow down: a point that would need more stays where it was played", 8)
+      if chm then o.max_stretch = math.floor(vm + 0.5); UI.qkey = nil end
+      if dm then save() end
+      ImGui.SameLine(ctx, 0, 10)
+      ImGui.TextDisabled(ctx, "uses the project's stretch mode (Project settings)")
+    else
+      ImGui.TextDisabled(ctx, "Crossfades"); ImGui.SameLine(ctx, 90)
+      local fp = UI.seg("q_fit", { "Fit what's sounding", "Fixed" }, o.fit and 1 or 2, {
+        "3 ms where a track is quiet at the cut; up to 20 ms (equal power) where it's still ringing,\nso the join melts into the ring instead of ticking",
+        string.format("%.0f ms everywhere", o.xfade_ms) })
+      if fp then o.fit = fp == 1; save() end
+    end
+    -- fewer cuts: moves too small to make, and points that ride along
+    ImGui.TextDisabled(ctx, "Min move"); ImGui.SameLine(ctx, 90)
+    local chn, vn, dn = UI.numbox("##q_minms", o.min_ms or 0, 0, 25, "%.1f ms", 80, COL.accent,
+      "A hit closer to its target (the grid, or the pocket) than this isn't moved\n(it can still ride along with the audio around it). 0: every move is made", 10)
+    if chn then o.min_ms = math.floor(vn * 2 + 0.5) / 2; UI.qkey = nil end
+    if dn then save() end
+    ImGui.SameLine(ctx, 0, 14)
+    ImGui.TextDisabled(ctx, "Group"); ImGui.SameLine(ctx, 0, 8)
+    local chg, vg, dg = UI.numbox("##q_group", o.group_ms or 0, 0, 10, "%.1f ms", 80, COL.accent,
+      o.method == "stretch"
+        and "No stretch marker for a hit the stretch either side already lands within this of where it should be.\nFewer markers, each hit at most this far from its own target. 0: a marker at every hit"
+        or "No cut for a hit that needs (nearly) the same move as the slice it's in: it rides along.\nFewer cuts and joins, each hit at most this far from its own target. 0: a cut at every hit", 5)
+    if chg then o.group_ms = math.floor(vg * 2 + 0.5) / 2; UI.qkey = nil end
+    if dg then save() end
+    -- the preview, counted: what moves, what stays, what's kept by hand, the gaps
+    do
+      local kept = 0
+      for _, p in ipairs(pts) do if p.manual and not p.moves then kept = kept + 1 end end
+      local ng = #(UI.qprev_gaps or {})
+      local function chip(txt, c, tip)
+        local tw = ImGui.CalcTextSize(ctx, txt)
+        local cx, cy = ImGui.GetCursorScreenPos(ctx)
+        local hh = ImGui.GetTextLineHeight(ctx) + 4
+        local dl = ImGui.GetWindowDrawList(ctx)
+        ImGui.DrawList_AddRectFilled(dl, cx, cy, cx + tw + 14, cy + hh, (c & 0xffffff00) | 0x26, hh / 2)
+        ImGui.DrawList_AddText(dl, cx + 7, cy + 2, c, txt)
+        ImGui.Dummy(ctx, tw + 14, hh)
+        if tip and ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, tip) end
+        ImGui.SameLine(ctx, 0, 6)
+      end
+      chip(string.format("%d move", nm), COL.accent, "Arrows in the lanes: from each hit to where it lands")
+      local crowd = 0
+      for _, p in ipairs(pts) do if p.crowded then crowd = crowd + 1 end end
+      chip(string.format("%d stay", ncut - nm), COL.label, "Grey dots: on the grid already, under Min move, another subdivision, or outside the window"
+        .. (crowd > 0 and string.format("\n%d of them in rolls or fills: moving them would pile their slices on their neighbours'", crowd) or ""))
+      if nride > 0 then chip(string.format("%d ride along", nride), COL.dim,
+        string.format("Dim in the lanes: no %s of their own - they move with the audio around them,\nwithin Group (%.1f ms) of their own target", word:sub(1, -2), o.group_ms or 0)) end
+      if kept > 0 then chip(string.format("%d kept by hand", kept), COL.mid, "Amber locks: points you clicked to keep where they are") end
+      if ng > 0 then chip(string.format("%d gap%s", ng, ng == 1 and "" or "s"), UI.Q_RED,
+        "Red in the lanes: a slice moving later with no earlier audio to fill behind it") end
+      local nr = #(UI.qring_list or {})
+      if nr > 0 then chip(string.format("%d join%s over ringing", nr, nr == 1 and "" or "s"), COL.mid,
+        "Amber in the lanes: another track is still ringing loud at the cut and the slices either side move apart.\n"
+        .. (o.fit and "Crossfades fit: those joins get longer crossfades." or "Fit what's sounding would give them longer crossfades.")
+        .. "\nOr keep the point where it is, or lower the strength.") end
+      if o.method == "stretch" then
+        local worst = 0
+        for i = 2, #pts do
+          local sd = pts[i].hit - pts[i - 1].hit
+          if sd > 0 then worst = math.max(worst, math.abs((pts[i].target - pts[i - 1].target) / sd - 1)) end
+        end
+        chip(string.format("stretch ±%.1f%% at most", worst * 100), COL.label, "The most any stretch speeds up or slows down")
+      end
+      ImGui.NewLine(ctx)
+      ImGui.TextDisabled(ctx, "Click a point in the lanes to keep it where it is, or let it move")
+    end
+    if o.method ~= "stretch" then
+      local jch, jdone = UI.join_view(o, math.min(360, ImGui.GetContentRegionAvail(ctx)), 84)
+      if jch then UI.qkey = nil end
+      if jdone then save() end
+    end
     ImGui.Dummy(ctx, 0, 4)
     ImGui.BeginDisabled(ctx, nm == 0)
-    if ImGui.Button(ctx, string.format("Quantise %d tracks##q_go", #tracks)) then
+    if ImGui.Button(ctx, string.format("%s %d tracks##q_go", o.method == "stretch" and "Stretch" or "Quantise", #tracks)) then
       r.Undo_BeginBlock2(0)
       r.PreventUIRefresh(1)
-      local moved, gaps, gat = DT.quant_apply(tracks, pts, o)
-      r.PreventUIRefresh(-1)
-      r.Undo_EndBlock2(0, UI.Q_UNDO, -1)
-      UI.qgaps, UI.qgap_i = gat or {}, 0
+      if o.method == "stretch" then
+        local set, skipped = DT.quant_stretch(tracks, pts, o)
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock2(0, UI.Q_UNDO, -1)
+        UI.qgaps, UI.qgap_i = {}, 0
+        UI.qmsg = { skipped > 0 and "warn" or "ok", os.date("%H:%M"), string.format("Stretched at %s: %d stretch markers, no splits%s. One undo step.", os.date("%H:%M"), set,
+          skipped > 0 and string.format("; %d items skipped (their playrate isn't 1)", skipped) or "") }
+      else
+        o.ring = o.fit and UI.qring or nil
+        local moved, gaps, gat = DT.quant_apply(tracks, pts, o)
+        o.ring = nil
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock2(0, UI.Q_UNDO, -1)
+        UI.qgaps, UI.qgap_i = gat or {}, 0
+        UI.qmsg = { gaps > 0 and "warn" or "ok", os.date("%H:%M"), string.format("Quantised at %s: %d slices moved%s. One undo step.", os.date("%H:%M"), moved,
+          gaps > 0 and string.format(", %d gaps left where there was no earlier audio to fill them (Next gap shows each)", gaps) or "") }
+      end
       UI.qover = {}; DT.quant_set_over(UI.qover)    -- the hits have moved: the manual choices are done
-      UI.qmsg = { gaps > 0 and "warn" or "ok", os.date("%H:%M"), string.format("Quantised at %s: %d slices moved%s. One undo step.", os.date("%H:%M"), moved,
-        gaps > 0 and string.format(", %d gaps left where there was no earlier audio to fill them (Next gap shows each)", gaps) or "") }
       invalidate(); UI.qkey = nil; NSYNC.state = nil
     end
     ImGui.EndDisabled(ctx)
     if ImGui.IsItemHovered(ctx, K("HoveredFlags_AllowWhenDisabled") or 0) then
       ImGui.SetTooltip(ctx, "Cut every kit track at the same points and move the slices (no stretching), crossfaded.\nOne undo step. The hit maps move with them; notes, gate keys and bands follow.")
+    end
+    -- step through the moves (the edit cursor and the lanes follow), and to the gaps
+    ImGui.SameLine(ctx, 0, 8)
+    ImGui.BeginDisabled(ctx, nm == 0)
+    if ImGui.Button(ctx, "Next move \u{203A}##q_next") then
+      local cur = r.GetCursorPosition()
+      local first, nxt
+      for _, p in ipairs(pts) do
+        if p.moves then
+          first = first or p
+          if not nxt and p.hit > cur + 0.001 then nxt = p end
+        end
+      end
+      local p = nxt or first
+      if p then r.SetEditCurPos(p.hit, false, false); reveal(p.hit) end
+    end
+    ImGui.EndDisabled(ctx)
+    if ImGui.IsItemHovered(ctx, K("HoveredFlags_AllowWhenDisabled") or 0) then ImGui.SetTooltip(ctx, "The next hit that moves after the edit cursor") end
+    local rl = UI.qring_list or {}
+    if #rl > 0 then
+      ImGui.SameLine(ctx, 0, 8)
+      ImGui.PushStyleColor(ctx, K("Col_Text"), COL.mid)
+      if ImGui.Button(ctx, "Next ringing join \u{203A}##q_ring") then
+        UI.qring_i = (UI.qring_i or 0) % #rl + 1
+        local p = pts[rl[UI.qring_i]]
+        if p then r.SetEditCurPos(p.cut, false, false); reveal(p.cut) end
+      end
+      ImGui.PopStyleColor(ctx)
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "The next cut where another track is still ringing loud") end
+    end
+    local pg = UI.qprev_gaps or {}
+    if #pg > 0 then
+      ImGui.SameLine(ctx, 0, 8)
+      ImGui.PushStyleColor(ctx, K("Col_Text"), UI.Q_RED)
+      if ImGui.Button(ctx, (#pg == 1 and "Show the gap" or string.format("Show the gaps (%d)", #pg)) .. "##q_showgap") then
+        UI.qprev_gi = (UI.qprev_gi or 0) % #pg + 1
+        local g = pg[UI.qprev_gi]
+        r.SetEditCurPos(g.t, false, false); reveal(g.t)
+        if r.ValidatePtr(g.track, "MediaTrack*") then r.SetOnlyTrackSelected(g.track) end
+      end
+      ImGui.PopStyleColor(ctx)
+      if ImGui.IsItemHovered(ctx) then
+        local g = pg[(UI.qprev_gi or 0) % #pg + 1]
+        local tn = r.ValidatePtr(g.track, "MediaTrack*") and select(2, r.GetTrackName(g.track)) or "?"
+        ImGui.SetTooltip(ctx, string.format("Quantise would leave a %.1f ms gap on %s at %s: a slice moving later\nwith no earlier audio to fill behind it. Keep that point where it is (click it) to avoid it.",
+          g.len * 1000, tn, r.format_timestr_pos(g.t, "", 2)))
+      end
     end
     if UI.qmsg then ImGui.SameLine(ctx, 0, 8); UI.badge("q_done", UI.qmsg[1], UI.qmsg[2], UI.qmsg[3]) end
     -- straight back, while it's the last thing done
@@ -3364,7 +3738,9 @@ local function loop()
       if t and t.lines then S.det_result = t end
     end
   end
-  local visible, open = ImGui.Begin(ctx, TITLE .. " " .. DT.VERSION .. "###TS_DrumToolbox", true)
+  -- the window itself never scrolls: the lanes pan (wheel, tilt wheel) and
+  -- the panel scrolls inside its own child
+  local visible, open = ImGui.Begin(ctx, TITLE .. " " .. DT.VERSION .. "###TS_DrumToolbox", true, CHILD_NOSCROLL)
   if visible then
     draw_tabs()
     ImGui.End(ctx)

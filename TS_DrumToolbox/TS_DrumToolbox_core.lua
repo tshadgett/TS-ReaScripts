@@ -55,7 +55,7 @@ end
 local r = reaper
 local DT = {}
 
-DT.VERSION   = "1.0.3"
+DT.VERSION   = "1.0.4"
 DT.ED = require("TS_DT_Edition")   -- Standard, or with Pro (DT.ED.PRO)
 DT.NS        = "TS_DrumToolbox"
 DT.PREFIX    = "DT"
@@ -299,7 +299,7 @@ DT.NAME_HINTS = {
   { "hi%-?%s*hat", "Hi-Hat" }, { "%f[%w]hh%f[%W]", "Hi-Hat" }, { "%f[%w]hats?%f[%W]", "Hi-Hat" },
   { "kick%s*out", "Kick Out" }, { "kick", "Kick In" }, { "%f[%w]bd%f[%W]", "Kick In" },
   { "snare%s*b", "Snare Bottom" }, { "snr%s*b", "Snare Bottom" }, { "snare", "Snare Top" }, { "snr", "Snare Top" },
-  { "floor", "Floor Tom" }, { "%f[%w]ft%f[%W]", "Floor Tom" }, { "rack", "Rack Tom" }, { "tom", "Rack Tom" },
+  { "floor", "Floor Tom" }, { "%f[%w]ft%f[%W]", "Floor Tom" }, { "%f[%w]rack", "Rack Tom" }, { "%f[%w]tom", "Rack Tom" },   -- (not "track", "custom")
 }
 
 DT.TARGET_DEFAULT = {
@@ -487,6 +487,13 @@ function DT.suggest_role(track)
   if is_container(track) then return { role = "ignore", container = true } end
   -- no audio of its own (an effect return, a bus): not a mic, whatever its name
   if r.CountTrackMediaItems(track) == 0 then return { role = "ignore", no_audio = true } end
+  -- only MIDI on it (an instrument, a test synth): not a mic either
+  local audio = false
+  for i = 0, r.CountTrackMediaItems(track) - 1 do
+    local tk = r.GetActiveTake(r.GetTrackMediaItem(track, i))
+    if tk and not r.TakeIsMIDI(tk) then audio = true; break end
+  end
+  if not audio then return { role = "ignore", no_audio = true } end
   local nm = track_name(track):lower()
   for _, h in ipairs(DT.ROLE_HINTS) do
     if nm:find(h[1]) then return { role = h[2], of_profile = h[3] } end
@@ -626,6 +633,19 @@ end
 -- ---------------------------------------------------------------------
 -- tracks, items, takes
 -- ---------------------------------------------------------------------
+-- A take's stretch markers, { {pos (in the item), src} } in order, or nil
+function DT.stretch_markers(take)
+  local n = r.GetTakeNumStretchMarkers and r.GetTakeNumStretchMarkers(take) or 0
+  if not n or n < 1 then return nil end
+  local out = {}
+  for i = 0, n - 1 do
+    local _, pos, src = r.GetTakeStretchMarker(take, i)
+    if pos and src then out[#out + 1] = { pos = pos, src = src } end
+  end
+  table.sort(out, function(a, b) return a.src < b.src end)
+  return #out > 0 and out or nil
+end
+
 -- The audio takes on a track, in time order. opts.selected: only
 -- selected items.
 function DT.track_takes(track, opts)
@@ -642,6 +662,7 @@ function DT.track_takes(track, opts)
           len = r.GetMediaItemInfo_Value(item, "D_LENGTH"),
           offs = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS"),
           rate = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE"),
+          sm = DT.stretch_markers(take),
         }
       end
     end
@@ -651,8 +672,39 @@ function DT.track_takes(track, opts)
   return out
 end
 
-local function src_to_item(tk, srcpos) return (srcpos - tk.offs) / tk.rate end
-local function item_to_src(tk, t) return tk.offs + t * tk.rate end
+-- Where in the item a source position plays, and back: straight through
+-- the take's start offset and rate, or through its stretch markers where
+-- it has them (between two: in proportion; before the first and after the
+-- last: at the take's rate from that marker)
+local function src_to_item(tk, srcpos)
+  local sm = tk.sm
+  if not sm or #sm == 0 then return (srcpos - tk.offs) / tk.rate end
+  if srcpos <= sm[1].src then return sm[1].pos - (sm[1].src - srcpos) / tk.rate end
+  local n = #sm
+  if srcpos >= sm[n].src then return sm[n].pos + (srcpos - sm[n].src) / tk.rate end
+  local lo, hi = 1, n
+  while hi - lo > 1 do
+    local m = (lo + hi) // 2
+    if sm[m].src <= srcpos then lo = m else hi = m end
+  end
+  local a, b = sm[lo], sm[hi]
+  return a.pos + (srcpos - a.src) * (b.pos - a.pos) / (b.src - a.src)
+end
+local function item_to_src(tk, t)
+  local sm = tk.sm
+  if not sm or #sm == 0 then return tk.offs + t * tk.rate end
+  if t <= sm[1].pos then return sm[1].src - (sm[1].pos - t) * tk.rate end
+  local n = #sm
+  if t >= sm[n].pos then return sm[n].src + (t - sm[n].pos) * tk.rate end
+  local lo, hi = 1, n
+  while hi - lo > 1 do
+    local m = (lo + hi) // 2
+    if sm[m].pos <= t then lo = m else hi = m end
+  end
+  local a, b = sm[lo], sm[hi]
+  return a.src + (t - a.pos) * (b.src - a.src) / (b.pos - a.pos)
+end
+DT.src_to_item, DT.item_to_src = src_to_item, item_to_src
 
 -- Our hits on a take, as { idx = marker index, srcpos, hit }, sorted by
 -- position. Each hit: db (from the marker's name), c, dec, po, locked,
@@ -2678,7 +2730,38 @@ end
 -- the transient). Hits further than `window` (% of half a grid step) from
 -- the grid are cut but not moved: a deliberate push or a fill stays put.
 DT.QUANT_DEFAULT = { v = 2, snap = true, div = 0.25, triplet = false, strength = 100, window = 100, pre_ms = 5, xfade_ms = 3, merge_ms = 30, smart = true,
-                     from = { kick = true, snare = true } }
+                     from = { kick = true, snare = true },
+                     method = "stretch",          -- "stretch": stretch markers, no splits; "cut": slices
+                     fit = true,                  -- cut: crossfades fit what's sounding at each cut
+                     max_stretch = 8,             -- stretch: % a stretch may speed up or slow down
+                     min_ms = 10,                 -- a move smaller than this isn't made (p.small)
+                     group_ms = 5,                -- points whose moves agree within this share one cut (p.ride)
+                     against = "pocket",            -- "pocket": towards the grid plus the band's push or drag around it
+                     pocket_bars = 2 }            -- pocket: the bars either side it's measured over
+
+-- Presets: the settings that decide how much gets moved. Natural is what
+-- an editor would do by hand: only the hits that are out against the ones
+-- around them.
+DT.QUANT_PRESETS = {
+  { id = "tight", name = "Tight", tip = "Every hit onto the grid (anything over 3 ms)",
+    set = { against = "grid", min_ms = 3, group_ms = 3, strength = 100 } },
+  { id = "natural", name = "Natural", tip = "Keeps each section's push or drag; moves only the hits more than 10 ms out against it",
+    set = { against = "pocket", min_ms = 10, group_ms = 5, strength = 100 } },
+  { id = "light", name = "Light touch", tip = "Only the clearly late or early hits (over 15 ms against the pocket), three quarters of the way",
+    set = { against = "pocket", min_ms = 15, group_ms = 5, strength = 75 } },
+}
+function DT.quant_preset_of(o)
+  for _, pr in ipairs(DT.QUANT_PRESETS) do
+    local same = true
+    for k, v in pairs(pr.set) do if o[k] ~= v then same = false; break end end
+    if same then return pr.id end
+  end
+end
+function DT.quant_preset_apply(o, id)
+  for _, pr in ipairs(DT.QUANT_PRESETS) do
+    if pr.id == id then for k, v in pairs(pr.set) do o[k] = v end; return true end
+  end
+end
 
 function DT.quant_opts()
   local _, v = r.GetProjExtState(0, "TS_DrumToolbox", "quant")
@@ -2768,11 +2851,153 @@ function DT.quant_points(kit, o, from, to, over)
         elseif ov.target then moves, move = true, ov.target - h.proj end
       end
       pts[#pts + 1] = { hit = h.proj, cut = h.proj - o.pre_ms / 1000, target = h.proj + move, move = move,
-                        dev = h.proj - gt, frac = frac, moves = moves, other = other, manual = manual, name = h.name }
+                        dev = h.proj - gt, frac = frac, moves = moves, other = other, manual = manual, name = h.name,
+                        q = q, gt = gt }
       last = h.proj
     end
   end
+  -- Pocket: a band that pushes a chorus or lays back in a verse does it on
+  -- purpose. Each hit's target is its grid line plus the median push/drag
+  -- (p.pocket) of the on-grid hits within pocket_bars bars either side, so
+  -- a section stays where it sits and only the hits that are out against
+  -- the ones around them move. Points placed by hand keep their place.
+  if o.against == "pocket" then
+    local span = (o.pocket_bars or 2) * 4
+    local base = {}
+    for i, p in ipairs(pts) do if not p.other and p.frac <= o.window / 100 then base[#base + 1] = i end end
+    local lo = 1
+    for _, p in ipairs(pts) do
+      while lo <= #base and pts[base[lo]].q < p.q - span do lo = lo + 1 end
+      local d = {}
+      local j = lo
+      while j <= #base and pts[base[j]].q <= p.q + span do d[#d + 1] = pts[base[j]].dev; j = j + 1 end
+      local pk = 0
+      if #d > 0 then
+        table.sort(d)
+        pk = (#d % 2 == 1) and d[(#d + 1) // 2] or (d[#d // 2] + d[#d // 2 + 1]) / 2
+      end
+      p.pocket = pk
+      if p.moves and not p.manual then
+        p.move = (p.gt + pk - p.hit) * o.strength / 100
+        p.target = p.hit + p.move
+      end
+    end
+  end
+  -- Keep the order: no cut point may land on, or too close to, its
+  -- neighbour's new place - in a roll or a fill faster than the grid two
+  -- hits would quantise to the same line, piling their slices on top of
+  -- each other and leaving a hole behind. Where two would collide, the one
+  -- further from the grid stays where it was played (marked crowded).
+  local minsep = math.max(o.merge_ms, o.pre_ms + o.xfade_ms + 2) / 1000
+  local function stay(p) p.moves, p.move, p.target, p.crowded = false, 0, p.hit, true end
+  for _ = 1, #pts do
+    local changed = false
+    for i = 2, #pts do
+      local a, b = pts[i - 1], pts[i]
+      if (a.moves or b.moves) and b.target - a.target < minsep - 1e-9 then
+        local pick
+        if a.moves and b.moves then pick = (b.frac >= a.frac) and b or a
+        else pick = a.moves and a or b end
+        -- a point kept or placed by hand is the last to give way
+        if pick.manual and not ((pick == a and b.manual) or (pick == b and a.manual)) then
+          local other = pick == a and b or a
+          if other.moves then pick = other end
+        end
+        if pick.moves then stay(pick); changed = true end
+      end
+    end
+    if not changed then break end
+  end
+  -- Stretch: no stretch between two points past max_stretch (%): the
+  -- point further from the grid stays where it was played (too_far)
+  if o.method == "stretch" then
+    local lim = (o.max_stretch or 8) / 100
+    for _ = 1, #pts do
+      local changed = false
+      for i = 2, #pts do
+        local a, b = pts[i - 1], pts[i]
+        local src, dst = b.hit - a.hit, b.target - a.target
+        if (a.moves or b.moves) and src > 0 and math.abs(dst / src - 1) > lim + 1e-9 then
+          local pick
+          if a.moves and b.moves then pick = (b.frac >= a.frac) and b or a else pick = a.moves and a or b end
+          stay(pick); pick.crowded = nil; pick.too_far = true; changed = true
+        end
+      end
+      if not changed then break end
+    end
+  end
+  -- Too small to bother: a move under min_ms isn't made - the point stays
+  -- where it was played (p.small). Points placed by hand still move.
+  local minm = (o.min_ms or 0) / 1000
+  if minm > 0 then
+    for _, p in ipairs(pts) do
+      if p.moves and not p.manual and math.abs(p.move) < minm - 1e-9 then
+        p.moves, p.move, p.target, p.small = false, 0, p.hit, true
+      end
+    end
+  end
+  -- Fewer cuts: a point that would move (or stay) within group_ms of what
+  -- the audio around it does anyway needs no cut of its own - it rides
+  -- along (p.ride: no cut, no stretch marker), landing at most group_ms
+  -- from where it would have. Points kept or placed by hand always cut.
+  -- Cut: a slice moves as one, so a point rides when its move is within
+  -- group_ms of the last cut's (nothing moves before the first cut).
+  -- Stretch: the audio between two markers stretches evenly, so the
+  -- markers are thinned (Douglas-Peucker on hit -> move): a point rides
+  -- when its move is within group_ms of the line between the markers kept
+  -- either side. Every riding point gets the move it will actually make.
+  local grp = (o.group_ms or 0) / 1000
+  if grp > 0 and #pts > 0 then
+    if o.method == "stretch" then
+      local function thin(i0, i1)
+        if i1 - i0 < 2 then return end
+        local a, b = pts[i0], pts[i1]
+        local worst, wi = -1, nil
+        for i = i0 + 1, i1 - 1 do
+          local p = pts[i]
+          local m = a.move + (b.move - a.move) * (p.hit - a.hit) / math.max(1e-9, b.hit - a.hit)
+          local d = p.manual and math.huge or math.abs(p.move - m)
+          if d > worst then worst, wi = d, i end
+        end
+        if worst > grp + 1e-9 then thin(i0, wi); thin(wi, i1)
+        else for i = i0 + 1, i1 - 1 do pts[i].ride = true end end
+      end
+      thin(1, #pts)
+      local a = nil
+      for i, p in ipairs(pts) do
+        if p.ride then
+          local b
+          for j = i + 1, #pts do if not pts[j].ride then b = pts[j]; break end end
+          p.move = a.move + (b.move - a.move) * (p.hit - a.hit) / math.max(1e-9, b.hit - a.hit)
+        else a = p end
+      end
+    else
+      local prev = 0
+      for _, p in ipairs(pts) do
+        if not p.manual and math.abs(p.move - prev) <= grp + 1e-9 then
+          p.ride, p.move = true, prev
+        else prev = p.move end
+      end
+    end
+    for _, p in ipairs(pts) do
+      if p.ride then
+        p.target = p.hit + p.move
+        p.moves = math.abs(p.move) > 1e-9
+        if p.moves then p.small = nil end
+      end
+    end
+  end
   return pts
+end
+
+-- the points that cut (or pin a stretch marker): all but the riding ones;
+-- and for each, its index in pts
+function DT.quant_cuts(pts)
+  local cuts, idx = {}, {}
+  for i, p in ipairs(pts) do
+    if not p.ride then cuts[#cuts + 1] = p.cut; idx[#cuts] = i end
+  end
+  return cuts, idx
 end
 
 -- the tracks that move: every track in the kit but the ignored
@@ -2799,38 +3024,266 @@ function DT.quant_move_one(kit, o, hit, target)
     end
     if nxt then break end
   end
-  local pts = { { hit = hit, cut = hit - o.pre_ms / 1000, move = target - hit, moves = true } }
-  if nxt then pts[2] = { hit = nxt, cut = nxt - o.pre_ms / 1000, move = 0, moves = false } end
+  local pts = { { hit = hit, cut = hit - o.pre_ms / 1000, move = target - hit, target = target, moves = true } }
+  if nxt then pts[2] = { hit = nxt, cut = nxt - o.pre_ms / 1000, move = 0, target = nxt, moves = false } end
+  if o.method == "stretch" then
+    -- pinned either side: the hit before it too, so the stretch stays local
+    local prv
+    for _, e in ipairs(kit) do
+      if e.role == "drum" and e.hitlist then
+        for _, h in ipairs(e.hitlist) do
+          if h.proj < hit - o.merge_ms / 1000 and (not prv or h.proj > prv) then prv = h.proj end
+        end
+      end
+    end
+    if prv then table.insert(pts, 1, { hit = prv, cut = prv, move = 0, target = prv, moves = false }) end
+    local n = DT.quant_stretch(DT.quant_tracks(kit), pts, o)
+    return n, 0, {}
+  end
   return DT.quant_apply(DT.quant_tracks(kit), pts, o)
 end
 
--- Cut and move. Gives the number of slices moved, of gaps left (only
--- where a moved slice had no earlier audio to reach back into) and where
--- they are: { {t, track, len} } in time order.
+-- An item's takes keep only the markers (and our hit data) in the part of
+-- their source the item plays, plus `margin` seconds either side. Gives
+-- the number of markers taken away.
+function DT.trim_item(item, margin)
+  margin = margin or 0
+  local gone = 0
+  local len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+  for ti = 0, r.CountTakes(item) - 1 do
+    local take = r.GetTake(item, ti)
+    if take then
+      local offs = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+      local rate = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+      if not rate or rate <= 0 then rate = 1 end
+      local s0, s1 = offs - margin * rate - 1e-6, offs + (len + margin) * rate + 1e-6
+      for m = r.GetNumTakeMarkers(take) - 1, 0, -1 do
+        local sp = r.GetTakeMarker(take, m)
+        if sp and (sp < s0 or sp > s1) then r.DeleteTakeMarker(take, m); gone = gone + 1 end
+      end
+      local ok, sv = r.GetSetMediaItemTakeInfo_String(take, DT.KEY_HITS, "", false)
+      if ok and sv and sv ~= "" then
+        local keep = {}
+        for rec in sv:gmatch("[^;]+") do
+          local sp = tonumber(rec:match("^([^,]*)"))
+          if sp and sp >= s0 and sp <= s1 then keep[#keep + 1] = rec end
+        end
+        r.GetSetMediaItemTakeInfo_String(take, DT.KEY_HITS, table.concat(keep, ";"), true)
+      end
+    end
+  end
+  return gone
+end
+
+-- Every item on these tracks trimmed (half a second either side kept, in
+-- case an edge is pulled out): for a project quantised before the pieces
+-- kept only their own markers. Gives markers taken away.
+function DT.trim_tracks(tracks, margin)
+  local gone = 0
+  for _, tr in ipairs(tracks) do
+    for ii = 0, r.CountTrackMediaItems(tr) - 1 do gone = gone + DT.trim_item(r.GetTrackMediaItem(tr, ii), margin or 0.5) end
+  end
+  return gone
+end
+
+-- Stretch instead of cut: on every track, the same stretch markers - each
+-- cut point's hit pinned where it lands (the ones that stay pinned where
+-- they are, so a stretch stays between its two points). No splits: items
+-- stay whole, nothing is repeated or cut out, every mic stays in phase.
+-- Gives markers set, items skipped (a take at a playrate other than 1).
+function DT.quant_stretch(tracks, pts, o)
+  local set, skipped = 0, 0
+  if #pts == 0 then return 0, 0 end
+  for _, tr in ipairs(tracks) do
+    for _, tk in ipairs(DT.track_takes(tr)) do
+      local in_item = {}
+      for _, p in ipairs(pts) do
+        local t = p.hit - tk.pos
+        if not p.ride and t > 0.001 and t < tk.len - 0.001 then in_item[#in_item + 1] = p end
+      end
+      if #in_item > 0 then
+        if math.abs(tk.rate - 1) > 1e-9 then
+          skipped = skipped + 1
+        else
+          local want = {}
+          for _, p in ipairs(in_item) do
+            want[#want + 1] = { src = item_to_src(tk, p.hit - tk.pos), pos = p.target - tk.pos }
+          end
+          -- markers already at those places go first (a second Quantise)
+          for i = r.GetTakeNumStretchMarkers(tk.take) - 1, 0, -1 do
+            local _, _, sp = r.GetTakeStretchMarker(tk.take, i)
+            for _, w in ipairs(want) do
+              if sp and math.abs(sp - w.src) < 0.001 then r.DeleteTakeStretchMarkers(tk.take, i); break end
+            end
+          end
+          for _, w in ipairs(want) do r.SetTakeStretchMarker(tk.take, -1, w.pos, w.src); set = set + 1 end
+        end
+      end
+    end
+  end
+  r.UpdateArrange()
+  return set, skipped
+end
+
+-- How loud each track is just before each cut and just after its hit, from
+-- one pass of peaks per track (1 ms): { [track] = { t0, dt, v = {...} } }
+function DT.quant_ring_measure(tracks, t0, t1)
+  local out = {}
+  local n = math.max(1, math.floor((t1 - t0) * 1000))
+  for _, tr in ipairs(tracks) do
+    local hi, lo = DT.track_peaks(tr, t0, t1, n)
+    local v = {}
+    for i = 1, n do v[i] = math.max(hi[i] or 0, -(lo[i] or 0)) end
+    out[tr] = { t0 = t0, dt = (t1 - t0) / n, v = v }
+  end
+  return out
+end
+
+-- The joins Quantise (cut) would make over something still ringing: for
+-- each cut point k, { {track, rel (dB: the ring against what follows on that
+-- track), pre (dBFS)} } where a track is within RING_REL of what follows,
+-- above RING_FLOOR, and the slices either side move apart by RING_MOVE.
+DT.RING_REL, DT.RING_FLOOR, DT.RING_MOVE = -14, -45, 0.0025
+function DT.quant_ring(pts, meas)
+  local out = {}
+  local function peak(m, a, b)
+    local i0 = math.max(1, math.floor((a - m.t0) / m.dt) + 1)
+    local i1 = math.min(#m.v, math.floor((b - m.t0) / m.dt) + 1)
+    local x = 0
+    for i = i0, i1 do if m.v[i] > x then x = m.v[i] end end
+    return x
+  end
+  local prev = 0                        -- the move of the slice before (riding points make no join)
+  for k, p in ipairs(pts) do
+    if p.ride then goto next_pt end
+    if math.abs(p.move - prev) >= DT.RING_MOVE then
+      for tr, m in pairs(meas or {}) do
+        local pre = peak(m, p.cut - 0.012, p.cut - 0.001)
+        local post = peak(m, p.hit, p.hit + 0.015)
+        if pre > 0 then
+          local pre_db = 20 * math.log(pre, 10)
+          local rel = 20 * math.log(pre / math.max(post, 1e-9), 10)
+          if pre_db > DT.RING_FLOOR and rel > DT.RING_REL then
+            out[k] = out[k] or {}
+            out[k][#out[k] + 1] = { track = tr, rel = rel, pre = pre_db }
+          end
+        end
+      end
+    end
+    prev = p.move
+    ::next_pt::
+  end
+  return out
+end
+
 local JOIN_GAP = 0.002     -- neighbours closer than this (or overlapping) count as joined
-function DT.quant_apply(tracks, pts, o)
-  if #pts == 0 then return 0, 0, {} end
+
+-- What Quantise would leave as gaps, worked out without touching anything:
+-- the same cuts, moves and joins as DT.quant_apply, on the items' numbers.
+-- Gives { {t, track, len, k} } in time order (k: the cut point behind it).
+function DT.quant_gaps(tracks, pts, o)
+  local out = {}
+  if #pts == 0 then return out end
   local xf = o.xfade_ms / 1000
-  local cuts = {}
-  for i, p in ipairs(pts) do cuts[i] = p.cut end
-  local function slice_of(t)               -- which cut a slice starting at t follows
+  local cuts, ci = DT.quant_cuts(pts)    -- riding points make no cut
+  local function slice_of(t)              -- the point (index in pts) a slice starting at t follows
     local lo, hi, k = 1, #cuts, 0
     while lo <= hi do
       local m = (lo + hi) // 2
       if cuts[m] <= t + 1e-7 then k = m; lo = m + 1 else hi = m - 1 end
     end
-    return k
+    return k > 0 and ci[k] or 0
+  end
+  for _, tr in ipairs(tracks) do
+    -- the slices the cuts would make
+    local sl = {}
+    for ii = 0, r.CountTrackMediaItems(tr) - 1 do
+      local it = r.GetTrackMediaItem(tr, ii)
+      local pos = r.GetMediaItemInfo_Value(it, "D_POSITION")
+      local len = r.GetMediaItemInfo_Value(it, "D_LENGTH")
+      local tk = r.GetActiveTake(it)
+      local offs = tk and r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
+      local rate = tk and r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE") or 1
+      if rate <= 0 then rate = 1 end
+      local edges = { pos }
+      for _, c in ipairs(cuts) do if c > pos + 1e-6 and c < pos + len - 1e-6 then edges[#edges + 1] = c end end
+      edges[#edges + 1] = pos + len
+      for j = 1, #edges - 1 do
+        local a0 = edges[j]
+        local k = slice_of(a0)
+        sl[#sl + 1] = { pos = a0, len = edges[j + 1] - a0, offs = offs + (a0 - pos) * rate, rate = rate, has_tk = tk ~= nil,
+                        k = k, move = k > 0 and pts[k].move or 0 }
+      end
+    end
+    table.sort(sl, function(a, b) return a.pos < b.pos end)
+    for _, x in ipairs(sl) do x.npos, x.nlen = x.pos + x.move, x.len end
+    for i = 2, #sl do
+      local a, b = sl[i - 1], sl[i]
+      local gap0 = b.pos - (a.pos + a.len)
+      if a.move ~= b.move and gap0 < JOIN_GAP then
+        local cap = a.nlen + math.max(0, gap0) + math.max(0, o.pre_ms - 1) / 1000
+        local want = b.npos + xf - a.npos
+        local newlen = math.max(0.001, math.min(want, cap))
+        a.nlen = newlen
+        if want > cap + 1e-9 then
+          local s0 = a.npos + newlen - xf
+          local back = b.npos - s0
+          if b.has_tk and back > 0 and b.offs - back * b.rate >= -1e-9 then
+            b.offs = math.max(0, b.offs - back * b.rate)
+            b.npos, b.nlen = s0, b.nlen + back
+          else
+            out[#out + 1] = { t = a.npos + newlen, track = tr, len = b.npos - (a.npos + newlen), k = b.k }
+          end
+        end
+      end
+    end
+  end
+  table.sort(out, function(x, y) return x.t < y.t end)
+  return out
+end
+
+-- Cut and move. Gives the number of slices moved, of gaps left (only
+-- where a moved slice had no earlier audio to reach back into) and where
+-- they are: { {t, track, len} } in time order.
+function DT.quant_apply(tracks, pts, o)
+  if #pts == 0 then return 0, 0, {} end
+  local xf = o.xfade_ms / 1000
+  local cuts, ci = DT.quant_cuts(pts)     -- riding points make no cut
+  if #cuts == 0 then return 0, 0, {} end
+  local function slice_of(t)               -- which point (index in pts) a slice starting at t follows
+    local lo, hi, k = 1, #cuts, 0
+    while lo <= hi do
+      local m = (lo + hi) // 2
+      if cuts[m] <= t + 1e-7 then k = m; lo = m + 1 else hi = m - 1 end
+    end
+    return k > 0 and ci[k] or 0
   end
   local moved, gaps, gap_at = 0, 0, {}
   for _, tr in ipairs(tracks) do
-    -- cut, right to left
-    for ci = #cuts, 1, -1 do
-      local c = cuts[ci]
-      for ii = r.CountTrackMediaItems(tr) - 1, 0, -1 do
-        local it = r.GetTrackMediaItem(tr, ii)
-        local pos = r.GetMediaItemInfo_Value(it, "D_POSITION")
-        local len = r.GetMediaItemInfo_Value(it, "D_LENGTH")
-        if c > pos + 1e-6 and c < pos + len - 1e-6 then r.SplitMediaItem(it, c) end
+    -- cut: each item at the cuts inside it, halving as it goes, and each
+    -- piece keeps only its own hit markers (a split copies every marker of
+    -- the take into both pieces: 700 slices of a song would each carry the
+    -- whole song's markers)
+    local orig = {}
+    for ii = 0, r.CountTrackMediaItems(tr) - 1 do orig[#orig + 1] = r.GetTrackMediaItem(tr, ii) end
+    for _, it in ipairs(orig) do
+      local pos = r.GetMediaItemInfo_Value(it, "D_POSITION")
+      local len = r.GetMediaItemInfo_Value(it, "D_LENGTH")
+      local cl = {}
+      for _, c in ipairs(cuts) do if c > pos + 1e-6 and c < pos + len - 1e-6 then cl[#cl + 1] = c end end
+      if #cl > 0 then
+        local function split_set(x, lo, hi)
+          if lo > hi then return end
+          local mid = (lo + hi) // 2
+          local rt = r.SplitMediaItem(x, cl[mid])
+          DT.trim_item(x, 0)
+          if rt then
+            DT.trim_item(rt, 0)
+            split_set(rt, mid + 1, hi)
+          end
+          split_set(x, lo, mid - 1)
+        end
+        split_set(it, 1, #cl)
       end
     end
     -- the slices, in order, each with its move
@@ -2886,6 +3339,36 @@ function DT.quant_apply(tracks, pts, o)
             -- nothing earlier to reach into (the recording's start)
             gaps = gaps + 1
             gap_at[#gap_at + 1] = { t = a_new + newlen, track = tr, len = b_new - (a_new + newlen) }
+          end
+        end
+        -- Fit: where this track is still ringing at the cut, a longer
+        -- crossfade (6 ms at RING_REL, up to 20 ms as loud as what follows)
+        -- so the join melts into the ring: b reaches further back into its
+        -- own lead-in, both fade over the overlap
+        local rg = o.fit and o.ring and o.ring[b.k]
+        local rel
+        if rg then for _, x in ipairs(rg) do if x.track == tr then rel = x.rel end end end
+        if rel then
+          local xfl = (6 + math.max(0, math.min(1, (rel - DT.RING_REL) / -DT.RING_REL)) * 14) / 1000
+          local bpos = r.GetMediaItemInfo_Value(b.it, "D_POSITION")
+          local aend = r.GetMediaItemInfo_Value(a.it, "D_POSITION") + r.GetMediaItemInfo_Value(a.it, "D_LENGTH")
+          local ov = aend - bpos
+          local tk = r.GetActiveTake(b.it)
+          if tk and ov < xfl then
+            local offs = r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS")
+            local rate = r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE")
+            if not rate or rate <= 0 then rate = 1 end
+            local more = math.min(xfl - ov, offs / rate)
+            if more > 0 then
+              r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", offs - more * rate)
+              r.SetMediaItemInfo_Value(b.it, "D_POSITION", bpos - more)
+              r.SetMediaItemInfo_Value(b.it, "D_LENGTH", r.GetMediaItemInfo_Value(b.it, "D_LENGTH") + more)
+              ov = ov + more
+            end
+          end
+          if ov > 0 then
+            r.SetMediaItemInfo_Value(a.it, "D_FADEOUTLEN", ov)
+            r.SetMediaItemInfo_Value(b.it, "D_FADEINLEN", ov)
           end
         end
         r.SetMediaItemInfo_Value(a.it, "C_FADEOUTSHAPE", 1)   -- equal power
