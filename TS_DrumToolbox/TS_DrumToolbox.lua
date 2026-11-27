@@ -1,19 +1,15 @@
 -- @description TS_DrumToolbox - offline drum detection, bleed control, replacement, gate and noise for the whole kit
 -- @author Tim Shadgett
--- @version 1.0.2
+-- @version 1.0.3
 -- @changelog
---   Align: room mics are left where they are by default; Put back returns
---   every track Align moved exactly as it was, and an undo of Apply is
---   recognised.
---   Quantise: slices of edited tracks (comps, crossfades, hairline gaps)
---   are joined and crossfaded too, so no holes; any gap that's left is
---   reported, with Next gap to find each; Undo quantise.
---   Level: says what it does (evens the hits, doesn't add level).
+--   The user guide (PDF) now comes with DrumToolbox: the Guide button at the
+--   top right of the window opens it.
 -- @provides
 --   [nomain] TS_DrumToolbox_core.lua
 --   [nomain] TS_DT_Edition.lua
 --   [main] TS_DrumToolbox_Detect.lua
 --   [main] TS_DrumToolbox_Clear.lua
+--   TS_DrumToolbox_Guide.pdf
 -- @about
 --   Drum detection, alignment, quantising, levelling, gating and
 --   reinforcement for a whole multitrack kit, done with REAPER's own tools:
@@ -1196,6 +1192,20 @@ local function act(id) r.Main_OnCommand(id, 0) end
 
 UI.Q_UNDO = "TS DrumToolbox: quantise the kit"
 
+-- the user guide: installed beside this script
+UI.GUIDE = "TS_DrumToolbox_Guide.pdf"
+function UI.open_guide()
+  local f = dir .. UI.GUIDE
+  if not r.file_exists(f) then
+    r.MB("The user guide wasn't found:\n" .. f .. "\n\nReinstall DrumToolbox from ReaPack to get it.", "TS DrumToolbox", 0)
+  elseif r.CF_ShellExecute then r.CF_ShellExecute(f)
+  else
+    local win = package.config:sub(1, 1) == "\\"
+    local osx = (r.GetOS() or ""):find("OSX") or (r.GetOS() or ""):find("mac")
+    os.execute((win and 'start "" "' or osx and 'open "' or 'xdg-open "') .. f .. '"')
+  end
+end
+
 local function draw_transport()
   local ps = r.GetPlayState()
   local playing, paused = ps & 1 == 1, ps & 2 == 2
@@ -1224,6 +1234,13 @@ local function draw_transport()
   ImGui.SameLine(ctx, 0, 10)
   ImGui.TextDisabled(ctx, r.format_timestr_pos(pos, "", 0))
   if paused then ImGui.SameLine(ctx, 0, 10); ImGui.TextColored(ctx, COL.mid, "paused") end
+  -- the user guide (a PDF beside the script), at the right
+  local gl = "Guide"
+  local gw = (ImGui.CalcTextSize(ctx, gl)) + 16
+  local avail = ImGui.GetContentRegionAvail(ctx)
+  ImGui.SameLine(ctx, 0, math.max(10, avail - gw))
+  if ImGui.Button(ctx, gl .. "##guide") then UI.open_guide() end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Open the DrumToolbox user guide (PDF)") end
 end
 
 -- REAPER's usual keys, when this window has the keyboard and nothing in

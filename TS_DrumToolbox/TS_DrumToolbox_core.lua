@@ -55,7 +55,7 @@ end
 local r = reaper
 local DT = {}
 
-DT.VERSION   = "1.0.2"
+DT.VERSION   = "1.0.3"
 DT.ED = require("TS_DT_Edition")   -- Standard, or with Pro (DT.ED.PRO)
 DT.NS        = "TS_DrumToolbox"
 DT.PREFIX    = "DT"
