@@ -32,7 +32,7 @@ plugin pictures on action bars, VU meters and visualisers, more than one layout 
 switching between them, the offer of a canvas for a new plugin, Show when
 rules and virtual controls, the TS_CV Trimmer, the gain-reduction trace,
 the patch bay (in the mixer and the TCP window), comparing two plugins,
-Console setup and Collisions.
+Console setup, Collisions and (Windows) a plugin's own window in its panel.
 
 Without Pro, everything else works as described, and a layout made with Pro
 still works: its grid, Show rules and virtual controls are drawn as they
@@ -161,6 +161,51 @@ next to the MIDI editor.
   whose plugin has gone says so, with a button to take it out.
 - They're ChannelView's own windows, so they show while ChannelView runs
   (not from the rack).
+
+## A plugin's own window in its panel (Pro, Windows)
+
+A panel can show the plugin's own interface instead of ChannelView's
+controls: the plugin's window sits in the panel, in ChannelView's row, a
+popped-out panel, the rack and the TCP window's open row. Needs the **TS_FXFrame** extension
+(see *Installing*); Windows only for now.
+
+- **Switch it** with the panel's plugin-window button (in its header):
+  its own window, or its controls. Or right-click ▸ *Its own window* ▸
+  *In this panel*; *In every one of its panels* makes it that plugin's
+  way everywhere, unless an instance says otherwise. How you last left a
+  plugin is how its next new instance starts.
+- **Its size.** On opening, a plugin that can resize fills the panel (the
+  row's height; in the rack, the column's width). Drag the panel's right
+  edge (in the rack, its bottom edge) to resize it; that size is kept for
+  that plugin, ChannelView, the rack and the TCP window each their own.
+  Double-click the edge to fill the panel again. One too big for its
+  place scrolls in the panel.
+- **The horizontal wheel** over a plugin scrolls the row, as over the
+  rest of ChannelView.
+- **Float** takes the plugin out into a window of its own (dockable,
+  with a header); the panel shows its controls meanwhile, and its
+  plugin-window button brings the plugin back.
+- **One place at a time.** A plugin's window shows in one of ChannelView,
+  the rack and the TCP window: the last one you showed it in. The others
+  show its controls, and their plugin-window button brings it there.
+- Plugins you've just left stay open, hidden, for two minutes (the 8 most
+  recent), so going back to a track is instant.
+
+**Known limits**
+
+- Windows only (64-bit). On macOS and Linux, panels show their controls.
+- No ChannelView macros or modulation drawn over a plugin's window, and
+  ChannelView's tooltips go under it. A menu over a plugin hides it while
+  the menu is open.
+- Typing into some plugins (Softube's, for one) works only in REAPER's own
+  windows: use the panel's Float button for that.
+- The tilt wheel over a UAD plugin stays with the plugin (it uses it for
+  its own controls), so the row doesn't scroll there.
+- REAPER's own window can flash briefly as a plugin first opens.
+- A plugin that changes its own size (on a preset, say) keeps that size
+  as if you'd resized it.
+- Plugins in a track's input FX or inside a container can open floating
+  when a project loads.
 
 ## Comparing two plugins (Pro)
 
@@ -2932,6 +2977,11 @@ together. If they differ, ChannelView says which one to update (once, and
 on a button in its header until then) and runs without Pro meanwhile; the
 Rack and the web companion say so and don't start. For the tablet page,
 see *On a tablet* above.
+
+**TS_FXFrame** (Pro, Windows), for a plugin's own window in its panel: in
+the same Pro repository, Browse packages ▸ *TS_FXFrame* ▸ Install, then
+restart REAPER (an extension loads as REAPER starts). Without it, panels
+show their controls as before.
 
 ## Stepped parameters
 

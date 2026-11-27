@@ -14985,13 +14985,14 @@ if pcall(require, "TS_CV_PluginWindow") then
   local PWm = require("TS_CV_PluginWindow")
   local Stm = require("TS_CV_State")
   local Tm = require("TS_CV_FXTree")
-  local fr, nid, fixed = {}, 0, {}
+  local fr, nid, fixed, least, start = {}, 0, {}, {}, {}
   local saved = {}
   local api = {
     TS_FXFrame_Open = function(_, addr)
       for id, f in pairs(fr) do if f.addr == addr and f.state > 0 then return id end end
       nid = nid + 1
-      fr[nid] = { addr = addr, state = 1, w = 800, h = 500 }
+      local s0 = start[addr] or { 800, 500 }
+      fr[nid] = { addr = addr, state = 1, w = s0[1], h = s0[2] }
       return nid
     end,
     TS_FXFrame_Find = function(_, addr)
@@ -15004,7 +15005,7 @@ if pcall(require, "TS_CV_PluginWindow") then
       if math.type(x) ~= "integer" or math.type(y) ~= "integer" then error("Embed: not integers " .. x .. "," .. y) end
       local f = fr[id]
       if not f or f.state == 0 then return false end
-      if p then f.state, f.x, f.y = 4, x, y else f.state = 2 end
+      if p then f.state, f.x, f.y, f.p = 4, x, y, p else f.state, f.p = 2, nil end
       return true
     end,
     TS_FXFrame_SetClip = function(id, x, y, w, h)
@@ -15018,17 +15019,34 @@ if pcall(require, "TS_CV_PluginWindow") then
       if math.type(w) ~= "integer" or math.type(h) ~= "integer" then error("SetSize: not integers") end
       local f = fr[id]
       f.asked = w .. "x" .. h
+      -- (one with a least size goes no smaller: least[addr] = { w, h })
+      local lw = least[f.addr]
+      if lw then w, h = math.max(w, lw[1]), math.max(h, lw[2]) end
       if not fixed[f.addr] then f.w, f.h = w, h end
       return true
     end,
     TS_FXFrame_Close = function(id) if fr[id] then fr[id].state = 0 end return true end,
     TS_FXFrame_FindWindow = function(t) return t == "CV" and "HWND1" or nil end,
+    TS_FXFrame_GetParent = function(id) return fr[id] and fr[id].state == 4 and fr[id].p or nil end,
+    TS_FXFrame_TakeWheel = function(id) local d = fr[id].wheel or 0; fr[id].wheel = 0; return d end,
   }
   for k, v in pairs(api) do saved[k] = reaper[k]; reaper[k] = v end
   local clock, was_clock = 1000, reaper.time_precise
   reaper.time_precise = function() return clock end
   local popup = false
+  local mouse = { hov = false, act = false, down = false, dx = 0, dy = 0, dbl = false }
+  local pop_at = nil   -- a popup drawn there: { x, y, w, h }
   local fake = setmetatable({
+    BeginPopup = function() return pop_at ~= nil end,
+    GetWindowPos = function() return pop_at[1], pop_at[2] end,
+    GetWindowSize = function() return pop_at[3], pop_at[4] end,
+    WindowFlags_NoScrollbar = 1, WindowFlags_NoScrollWithMouse = 2, WindowFlags_NoBackground = 4, WindowFlags_NoNav = 8,
+    BeginChild = function() return true end,
+    IsItemHovered = function() return mouse.hov end,
+    IsItemActive = function() return mouse.act end,
+    IsMouseDown = function() return mouse.down end,
+    IsMouseDoubleClicked = function() return mouse.dbl end,
+    GetMouseDragDelta = function() return mouse.dx, mouse.dy end,
     GetWindowDpiScale = function() return 1 end,
     GetWindowViewport = function() return "vp" end,
     Viewport_GetPos = function() return 0, 0 end,
@@ -15044,7 +15062,7 @@ if pcall(require, "TS_CV_PluginWindow") then
   local function frames(fx, n, x, layout)
     for _ = 1, n do
       PWm.begin_frame()
-      if PWm.showing(track, fx, layout) then PWm.draw("ctx", "dl", x or 100, 50, 900, 200, track, fx) end
+      if PWm.showing(track, fx, layout) then PWm.draw("ctx", "dl", x or 100, 50, 900, 200, track, fx, nil) end
       PWm.end_frame()
     end
   end
@@ -15064,6 +15082,59 @@ if pcall(require, "TS_CV_PluginWindow") then
   local hid = fr[1].shown
   popup = false; frames(fx, 1, nil, L)
   check("plugin window: hidden while a menu is open", tostring(hid) .. " " .. tostring(fr[1].shown), "false true")
+  -- once it's known where the menu is: hidden only under one over it
+  local function with_menu(at)
+    popup, pop_at = true, at
+    fake.BeginPopup("ctx", "menu")
+    frames(fx, 1, nil, L)
+    fake.BeginPopup("ctx", "menu")
+    local shown = fr[1].shown
+    popup, pop_at = false, nil
+    frames(fx, 1, nil, L)
+    return tostring(shown)
+  end
+  -- the horizontal wheel over the plugin is for the row: one notch right
+  fr[1].wheel = 120
+  frames(fx, 1, nil, L)
+  local w1 = PWm.take_wheel()
+  check("plugin window: the horizontal wheel over it, for the row (once)", w1 .. " " .. PWm.take_wheel(), "1.0 0")
+  -- taken by another script's window (the TCP window): left there, said
+  -- so; clicked, or the panel shown here afresh, it comes back
+  do
+    fr[1].p, fr[1].x = "HWND_TCP", -1
+    frames(fx, 2, nil, L)
+    local left = tostring(fr[1].p) .. " " .. fr[1].x
+    PWm.begin_frame(); PWm.end_frame()   -- (not drawn for a frame)
+    frames(fx, 1, nil, L)
+    check("plugin window: in another script's window, left there; shown here afresh, back",
+      left .. " " .. tostring(fr[1].p), "HWND_TCP -1 HWND1")
+    -- taken again while showing here: this panel shows its controls; its
+    -- plugin-window button brings it back, at this place's size
+    fr[1].p = "HWND_TCP"; fr[1].w, fr[1].h = 640, 400
+    PWm.begin_frame()
+    local ctl = tostring(PWm.showing(track, fx, L))
+    PWm.end_frame()
+    PWm.toggle_here(track, fx, L)
+    frames(fx, 2, nil, L)
+    check("plugin window: taken by another window, its controls here; the button brings it back at this size",
+      ctl .. " " .. tostring(fr[1].p) .. " " .. fr[1].w .. "x" .. fr[1].h .. " " .. tostring(PWm.wanted(fx, L)), "false HWND1 307x192 true")
+    -- not drawn here while it's there: forgotten here, not closed
+    fr[1].p = "HWND_TCP"
+    PWm.begin_frame(); PWm.end_frame(); clock = clock + 3; PWm.begin_frame(); PWm.end_frame()
+    check("plugin window: another script's to close", fr[1].state .. " " .. tostring(PWm._frames()[fx.guid]), "4 nil")
+    fr[1].p = "HWND1"
+    frames(fx, 4, nil, L)
+  end
+  -- ReaImGui's own table errors on a name it doesn't have
+  do
+    local strict = setmetatable({ BeginPopup = function() return false end },
+      { __index = function(_, k) error("attempt to access a nil value (field '" .. k .. "')") end })
+    local ok, err = pcall(PWm.attach, strict)
+    PWm.attach(fake)
+    check("plugin window: noting popups with a ReaImGui missing some of them", ok and "ok" or tostring(err), "ok")
+  end
+  check("plugin window: a menu beside it leaves it, one over it hides it",
+    with_menu({ 450, 60, 120, 200 }) .. " " .. with_menu({ 200, 60, 120, 200 }), "true false")
   -- half out of the row at the left: cut there, at once
   frames(fx, 1, -50, L)
   check("plugin window: cut to what's on screen", table.concat(fr[1].clip, ","), "0,54,261,192")
@@ -15097,6 +15168,22 @@ if pcall(require, "TS_CV_PluginWindow") then
     .. tostring(Stm.own_gui(fx.guid)), "0 false false")
   Stm.set_own_gui(fx.guid, true, true)
   check("plugin window: back to its layout's say, nothing kept", tostring(Stm.own_gui(fx.guid)), "nil")
+  -- the way you leave a plugin is how its next instance starts, as with folding
+  do
+    local ext, ge, se = {}, reaper.GetExtState, reaper.SetExtState
+    reaper.GetExtState = function(sec, k) return ext[sec .. k] or "" end
+    reaper.SetExtState = function(sec, k, v) ext[sec .. k] = v end
+    local fxn = { guid = "{pw-n}", addr = 31, name = "VST3: Kirchhoff-EQ (TBTECH)" }
+    local key = require("TS_CV_Util").plugin_key(fxn.name)
+    local before = tostring(Stm.last_gui(key))
+    PWm.toggle_here(track, fxn, {})
+    local on = tostring(Stm.last_gui(key))
+    PWm.toggle_here(track, fxn, {})
+    check("plugin window: the way you last left a plugin kept for its next instance",
+      before .. " " .. on .. " " .. tostring(Stm.last_gui(key)), "nil true false")
+    Stm.set_own_gui(fxn.guid, false, false)
+    reaper.GetExtState, reaper.SetExtState = ge, se
+  end
   -- Float on a panel showing its controls: a frame of its own
   Tm.toggle_float(track, 9)
   check("plugin window: Float opens a frame of its own", tostring(fr[3] and fr[3].state), "1")
@@ -15106,16 +15193,168 @@ if pcall(require, "TS_CV_PluginWindow") then
   M.set("PWPlug", { own_gui = true, controls = { { param = 0, type = "knob", label = "" } } }); M.save(); M.reload()
   check("plugin window: kept with the layout", tostring(M.get("PWPlug").own_gui) .. " " .. tostring(M.copy(M.get("PWPlug")).own_gui), "true true")
   M.remove("PWPlug"); M.save(); M.reload()
-  -- a panel not drawn (another track, folded): hidden, then closed
+  -- opened smaller than the row: grows to fill its height, in proportion;
+  -- one that goes no smaller than 600 x 375 comes to that, the panel as
+  -- wide as it, and it scrolls down
+  local fx3, fx4 = { guid = "{pw-3}", addr = 11 }, { guid = "{pw-4}", addr = 12 }
+  Stm.set_own_gui(fx3.guid, true, false); Stm.set_own_gui(fx4.guid, true, false)
+  least[12] = { 600, 375 }
+  start[11] = { 160, 100 }
+  frames(fx3, 4)
+  frames(fx4, 4)
+  local f3 = fr[PWm._frames()[fx3.guid].id]
+  local f4 = fr[PWm._frames()[fx4.guid].id]
+  check("plugin window: grown to fill the row's height on opening", f3.asked .. " " .. f3.w .. "x" .. f3.h, "307x192 307x192")
+  check("plugin window: as small as it goes, the panel as wide as it", ("%s %dx%d %d"):format(f4.asked, f4.w, f4.h,
+    PWm.body_w(fx4, 200)), "307x192 600x375 618")
+  -- resized by its own buttons afterwards: left as it is
+  f3.w, f3.h = 400, 250
+  frames(fx3, 3, nil, nil, 208)
+  check("plugin window: resized afterwards, left as it is", f3.w .. "x" .. f3.h, "400x250")
+  Stm.set_own_gui(fx3.guid, false, false); Stm.set_own_gui(fx4.guid, false, false)
+  frames(fx3, 1); frames(fx4, 1)
+  -- a panel not drawn (another track, folded): hidden, kept open a while
+  -- (back to it: there at once), then closed
   frames(fx2, 3)
   PWm.begin_frame(); PWm.end_frame()
   local h1 = tostring(fr[2].shown) .. " " .. fr[2].state
-  clock = clock + 1; PWm.begin_frame(); PWm.end_frame()
-  clock = clock + 1.5; PWm.begin_frame(); PWm.end_frame()
-  check("plugin window: its panel gone, hidden then closed", h1 .. " " .. fr[2].state, "false 4 0")
+  clock = clock + 60; PWm.begin_frame(); PWm.end_frame()
+  local h2 = fr[2].state
+  frames(fx2, 4)
+  local back = tostring(fr[2].shown) .. " " .. tostring(PWm._frames()[fx2.guid].id)
+  PWm.begin_frame(); PWm.end_frame()
+  clock = clock + 301; PWm.begin_frame(); PWm.end_frame()
+  check("plugin window: its panel gone, hidden, kept open, back at once, closed after a while",
+    h1 .. " " .. h2 .. " " .. back .. " " .. fr[2].state, "false 4 4 true 2 0")
   frames(fx2, 2)
   PWm.shutdown()
   check("plugin window: closed with ChannelView", tostring(fr[4] and fr[4].state), "0")
+  -- resized in its panel: kept with its plugin's layout once it holds
+  -- still, and the next panel of it (folded and unfolded, a new instance)
+  -- opens at that size
+  do
+    M.set("PWSize", { own_gui = true, controls = { { param = 0, type = "knob", label = "" } } })
+    local function draw5(fx_, n)
+      for _ = 1, n do
+        PWm.begin_frame()
+        PWm.draw("ctx", "dl", 100, 50, 900, 200, track, fx_, nil, "PWSize", M.get("PWSize"))
+        PWm.grip("ctx", "dl", fx_, 100, 50, PWm.body_w(fx_, 200), 200, nil, 0)
+        PWm.end_frame()
+        clock = clock + 0.2
+      end
+    end
+    local fx5 = { guid = "{pw-5}", addr = 21 }
+    draw5(fx5, 12)
+    local f5 = fr[PWm._frames()[fx5.guid].id]
+    local fitted = f5.w .. "x" .. f5.h
+    f5.w, f5.h = 480, 300          -- its own size button
+    draw5(fx5, 6)
+    local kept = M.get("PWSize").own_gui_size
+    check("plugin window: fitted on opening, then your size kept with its plugin", fitted .. " " .. kept.w .. "x" .. kept.h, "307x192 480x300")
+    -- folded (closed), then unfolded: at your size, not fitted again
+    PWm.begin_frame(); PWm.end_frame(); clock = clock + 3; PWm.begin_frame(); PWm.end_frame()
+    draw5(fx5, 4)
+    local f5b = fr[PWm._frames()[fx5.guid].id]
+    -- a new instance too
+    local fx6 = { guid = "{pw-6}", addr = 22 }
+    draw5(fx6, 4)
+    local f6 = fr[PWm._frames()[fx6.guid].id]
+    check("plugin window: unfolded and a new instance at your size", f5b.w .. "x" .. f5b.h .. " " .. f6.w .. "x" .. f6.h, "480x300 480x300")
+    M.save(); M.reload()
+    check("plugin window: your size kept in the file", tostring(M.get("PWSize").own_gui_size and M.get("PWSize").own_gui_size.w)
+      .. " " .. tostring(M.copy(M.get("PWSize")).own_gui_size.h), "480 300")
+    -- its panel's right edge dragged 120 wider: asked for that width and
+    -- the row's height as you drag, kept once you let go
+    local f6f = fr[PWm._frames()[fx6.guid].id]
+    mouse.hov, mouse.act, mouse.down = true, true, true
+    draw5(fx6, 1)
+    local before = f6f.asked
+    mouse.dx = 120
+    draw5(fx6, 2)
+    local during = f6f.asked .. " " .. tostring(M.get("PWSize").own_gui_size.w)
+    mouse.act, mouse.down, mouse.hov = false, false, false
+    draw5(fx6, 5)
+    local k2 = M.get("PWSize").own_gui_size
+    check("plugin window: its edge dragged, the plugin wider and as tall as the row, kept when let go",
+      before .. " | " .. during .. " | " .. f6f.w .. "x" .. f6f.h .. " " .. k2.w .. "x" .. k2.h,
+      "480x300 | 600x192 480 | 600x192 600x192")
+    -- double-clicked: your size forgotten, it fills the row again
+    mouse.hov, mouse.dbl = true, true
+    draw5(fx6, 1)
+    mouse.hov, mouse.dbl, mouse.dx = false, false, 0
+    draw5(fx6, 3)
+    check("plugin window: its edge double-clicked, it fills the panel again, your size forgotten",
+      f6f.w .. "x" .. f6f.h .. " " .. tostring(M.get("PWSize").own_gui_size), "307x192 nil")
+    -- the rack keeps its own: the row's size isn't used there, and one set
+    -- there is kept apart (PluginWindowSizeRack=)
+    do
+      local fx7 = { guid = "{pw-7}", addr = 23 }
+      M.save(); M.reload()
+      local forgot = tostring(M.get("PWSize").own_gui_size)
+      for _ = 1, 12 do
+        PWm.begin_frame()
+        PWm.draw("ctx", "dl", 100, 50, 300, 600, track, fx7, true, "PWSize", M.get("PWSize"))
+        PWm.end_frame()
+        clock = clock + 0.2
+      end
+      local f7 = fr[PWm._frames()[fx7.guid].id]
+      local filled = f7.w .. "x" .. f7.h
+      f7.w, f7.h = 250, 150
+      for _ = 1, 14 do
+        PWm.begin_frame()
+        PWm.draw("ctx", "dl", 100, 50, 300, 600, track, fx7, true, "PWSize", M.get("PWSize"))
+        PWm.end_frame()
+        clock = clock + 0.2
+      end
+      M.save(); M.reload()
+      local l = M.get("PWSize")
+      check("plugin window: the rack fills its column, keeps its own size apart from the row's",
+        filled .. " " .. (l.own_gui_size_rack and (l.own_gui_size_rack.w .. "x" .. l.own_gui_size_rack.h) or "none")
+        .. " " .. tostring(l.own_gui_size) .. " " .. tostring((M.copy(l).own_gui_size_rack or {}).w), "292x183 250x150 nil 250")
+      check("plugin window: a forgotten size stays forgotten in the file", forgot, "nil")
+      clock = clock + 3; PWm.begin_frame(); PWm.end_frame()
+    end
+    M.remove("PWSize"); M.save(); M.reload()
+    clock = clock + 3; PWm.begin_frame(); PWm.end_frame()
+  end
+  -- two plugins newly shown: one opened a frame
+  do
+    local fa, fb = { guid = "{pw-a}", addr = 41 }, { guid = "{pw-b}", addr = 42 }
+    Stm.set_own_gui(fa.guid, true, false); Stm.set_own_gui(fb.guid, true, false)
+    PWm.begin_frame()
+    PWm.draw("ctx", "dl", 100, 50, 900, 200, track, fa, nil)
+    PWm.draw("ctx", "dl", 600, 50, 900, 200, track, fb, nil)
+    PWm.end_frame()
+    local first = tostring(PWm._frames()[fa.guid].id ~= nil) .. " " .. tostring(PWm._frames()[fb.guid].id ~= nil)
+    PWm.begin_frame()
+    PWm.draw("ctx", "dl", 100, 50, 900, 200, track, fa, nil)
+    PWm.draw("ctx", "dl", 600, 50, 900, 200, track, fb, nil)
+    PWm.end_frame()
+    check("plugin window: plugins newly shown open one a frame", first .. " " .. tostring(PWm._frames()[fb.guid].id ~= nil),
+      "true false true")
+    Stm.set_own_gui(fa.guid, false, false); Stm.set_own_gui(fb.guid, false, false)
+    for _, x in ipairs({ fa, fb }) do local f = PWm._frames()[x.guid]; if f and f.id then reaper.TS_FXFrame_Close(f.id) end end
+    PWm._frames()[fa.guid], PWm._frames()[fb.guid] = nil, nil
+  end
+  -- the rack and the TCP window keep their own (each script sets its keys)
+  do
+    local proj, ext = {}, {}
+    local gp, sp, ge, se = reaper.GetProjExtState, reaper.SetProjExtState, reaper.GetExtState, reaper.SetExtState
+    reaper.GetProjExtState = function(_, ns, k) return 1, proj[ns .. k] or "" end
+    reaper.SetProjExtState = function(_, ns, k, v) proj[ns .. k] = v end
+    reaper.GetExtState = function(sec, k) return ext[sec .. k] or "" end
+    reaper.SetExtState = function(sec, k, v) ext[sec .. k] = v end
+    local g0, l0 = Stm.GUI, Stm.GUILAST   -- (the TCP window's module, loaded by other tests, set its own)
+    Stm.GUI, Stm.GUILAST = "gui:", "guilast:"; Stm.clear_own_gui()
+    Stm.set_own_gui("{pw-p}", true, false); Stm.remember_gui("PlaceKey", true)
+    Stm.GUI, Stm.GUILAST = "tgui:", "tguilast:"; Stm.clear_own_gui()
+    local tcp = tostring(Stm.own_gui("{pw-p}")) .. " " .. tostring(Stm.last_gui("PlaceKey"))
+    Stm.GUI, Stm.GUILAST = "gui:", "guilast:"; Stm.clear_own_gui()
+    check("plugin window: its own window or its controls kept apart per window (CV, rack, TCP)",
+      tostring(Stm.own_gui("{pw-p}")) .. " " .. tostring(Stm.last_gui("PlaceKey")) .. " | " .. tcp, "true true | nil nil")
+    Stm.GUI, Stm.GUILAST = g0, l0; Stm.clear_own_gui()
+    reaper.GetProjExtState, reaper.SetProjExtState, reaper.GetExtState, reaper.SetExtState = gp, sp, ge, se
+  end
   PWm.HOST = nil
   for k in pairs(api) do reaper[k] = saved[k] end
   reaper.time_precise = was_clock

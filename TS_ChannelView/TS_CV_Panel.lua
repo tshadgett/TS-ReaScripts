@@ -5259,7 +5259,7 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
                           y + P.head_h() + C.PANEL_PAD, C.IO_COL_W, bh - C.PANEL_PAD * 2, track, fx, enabled, io) then
           ex, ew = bx + (io_l(io) and C.IO_COL_W + C.PANEL_PAD or 0), bw - io_w(io)
         end
-        P.PW.draw(ctx, dl, ex, y + P.head_h(), ew, bh, track, fx, P.RACK)
+        P.PW.draw(ctx, dl, ex, y + P.head_h(), ew, bh, track, fx, P.RACK, key, own)
       elseif is_trim then
         TRP.draw(ctx, dl, bx, y + P.head_h(), bw, wh - P.head_h() - fh, track, fx, req)
       elseif is_eq then
@@ -5400,9 +5400,11 @@ draw_panel = function(ctx, track, fx, layout, key, avail_h, index, is_drag_sourc
     if saved then pop_plate(saved) end
     -- (a grid panel too, outside the rack: its width, for what's anchored across)
     local gridp = not P.PREVIEW and own.grid ~= nil and not (canvas or is_eq or is_rc or is_trim)
-    if not collapsed and (canvas or is_eq or is_rc or is_trim or gridp) then
+    if not collapsed and not pw_on and (canvas or is_eq or is_rc or is_trim or gridp) then
       size_grip(ctx, dl, fx, own, key, x, y, ww, wh, canvas, is_eq, is_rc, io, is_trim, track, gridp)
     end
+    -- (its own window: its edge resizes the plugin)
+    if pw_on then P.PW.grip(ctx, dl, fx, x, y, ww, wh, P.RACK, P.head_h()) end
     local folded_here = fold_req
     if folded_here then fold_tab(ctx, dl, fx, x, y, ww, wh) end
     -- anything another module draws over the panel, on its own draw list

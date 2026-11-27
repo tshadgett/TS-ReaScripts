@@ -1,14 +1,10 @@
 -- @description ChannelView -- docked channel strip: one editable control panel per plugin
 -- @author Tim Shadgett
--- @version 4.8.0
+-- @version 4.9.0
 -- @changelog
---  Steady meters on a steady tone (gain reduction and track meters held).
---  Instruments: the first probe goes after one the chain starts with,
---  which has its output metered (TS_TrackProbe 2.10.0, Track Analyser
---  2.7.6); given audio, both. ARA plugins added from ChannelView go in
---  first. Double-click to the plugin's own 0 with a custom range. A
---  locked layout scrolls without widening its panel. Moves with
---  ChannelView Pro 4.8.0. See the CHANGELOG.
+--  The TCP window's overview keeps its width when REAPER starts. Moves
+--  with ChannelView Pro 4.9.0 (a plugin's own window in its panel,
+--  Windows). See the CHANGELOG.
 -- @license MIT
 -- @provides
 --  [main]   TS_CV_Diag.lua
@@ -254,6 +250,8 @@ if RACK then
   DR.host("rack"); P.RACK = true
   -- its panels fold on their own, apart from ChannelView's
   St.COLLAPSED, St.FOLD = "rcollapsed:", "rfold:"
+  -- and show plugins' own windows or their controls apart from it too
+  St.GUI, St.GUILAST = "rgui:", "rguilast:"
   MR.EXT_PFX = "rack_"
   -- its layouts picked apart from ChannelView's (each falls back to
   -- ChannelView's until one is picked here)
@@ -511,13 +509,19 @@ local function rescan(force)
   local moved = (h ~= app.chain_hash)
   if moved and app.track and app.scan_track == app.track then
     -- A plugin that has just turned up on the track being watched starts
-    -- the way you last left that plugin (St.last_fold). Not on a track
-    -- change or a project load: those are plugins that were already there.
+    -- the way you last left that plugin (St.last_fold, and in Pro its own
+    -- window or its controls, St.last_gui). Not on a track change or a
+    -- project load: those are plugins that were already there.
     local had = {}
     for _, fx in ipairs(app.chain) do had[fx.guid] = true end
     for _, fx in ipairs(list) do
-      if not had[fx.guid] and fx.guid ~= "" and not St.has_collapsed(fx.guid) then
-        if St.last_fold(U.plugin_key(fx.name)) then St.set_collapsed(fx.guid, true) end
+      if not had[fx.guid] and fx.guid ~= "" then
+        local key = U.plugin_key(fx.name)
+        if not St.has_collapsed(fx.guid) and St.last_fold(key) then St.set_collapsed(fx.guid, true) end
+        if St.own_gui(fx.guid) == nil then
+          local g = St.last_gui(key)
+          if g ~= nil then St.set_own_gui(fx.guid, g, not g) end
+        end
       end
     end
   end
@@ -1882,6 +1886,9 @@ function POP.window(w, now)
           if dx ~= 0 then ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - dx * C.WHEEL_SCROLL_PX) end
         end
       end
+      -- (over a plugin's own window ImGui sees no wheel: TS_FXFrame keeps it)
+      local pwx = not down and P.PW and P.PW.take_wheel and P.PW.take_wheel() or 0
+      if pwx ~= 0 then ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - pwx * C.WHEEL_SCROLL_PX) end
       ImGui.EndChild(ctx)
     end
 
@@ -2116,6 +2123,9 @@ local function panel_row(row_h, row_w)
         ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - d * C.WHEEL_SCROLL_PX)
       end
     end
+    -- (over a plugin's own window ImGui sees no wheel: TS_FXFrame keeps it)
+    local pwx = P.PW and P.PW.take_wheel and P.PW.take_wheel() or 0
+    if pwx ~= 0 then ImGui.SetScrollX(ctx, ImGui.GetScrollX(ctx) - pwx * C.WHEEL_SCROLL_PX) end
 
     -- Drop marker, drawn after the panels so it sits above them.
     -- The marker takes the container's colour when the drop goes into

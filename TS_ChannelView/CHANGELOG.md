@@ -1,5 +1,27 @@
 # ChannelView — changelog
 
+## 4.9.0 — a plugin's own window in its panel
+
+### ChannelView
+
+- The TCP window's overview keeps its width when REAPER starts: the
+  docker's widening is checked and tried again, where a busy start could
+  leave the overview no room and the track rows the whole window.
+
+### ChannelView Pro
+
+- **A plugin's own window in its panel** (Windows, with the new
+  **TS_FXFrame** extension in the Pro repository): the panel's
+  plugin-window button, or right-click ▸ *Its own window*, for one
+  instance or every one of that plugin. In ChannelView, popped-out
+  panels, the rack and the TCP window's open row. It fills the panel on
+  opening; the panel's edge resizes it, the size kept per plugin for
+  each of those places; double-click the edge to fill again. The
+  horizontal wheel over it scrolls the row. Float takes it out into a
+  window of its own (dockable). It shows in one place at a time, the
+  last you showed it in; plugins just left stay open, hidden, for two
+  minutes so going back is instant. See the README's known limits.
+
 ## 4.8.0 — steady meters, instruments metered, anchors
 
 ### ChannelView

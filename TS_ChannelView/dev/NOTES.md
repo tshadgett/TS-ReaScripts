@@ -1397,6 +1397,52 @@ picker uses an optgroup per group.
 - **A locked layout that scrolls** adds nothing to the panel's width: its
   scrollbar is in the panel's right padding.
 
+## A plugin's own window in its panel (4.9.0)
+
+- **TS_FXFrame** (C++, mingw-w64 against the REAPER SDK; source and the
+  DLL in the Pro repo's TS_FXFrame/, its own ReaPack package, Windows
+  x64 only). It borrows the host window REAPER opens a plugin's editor
+  into (opened hidden) and puts it in a frame: a window of its own
+  (header, dockable) or a WS_CHILD of the ReaImGui window
+  (TS_FXFrame_Embed, at whole pixels). API: Open, Find, Close, Embed,
+  SetHeader, Show, SetSize, GetSize, GetState (0-5), SetClip, GetParent,
+  TakeWheel, FindWindow.
+- **Freezes avoided:** the frame and the window it's in are
+  WS_EX_CONTROLPARENT (the dialog manager loops for ever on a broken
+  control-parent chain); an embedded frame is created as a child of its
+  window from the start (SetParent while a JUCE plugin pumps messages
+  froze REAPER); the focus leaves a frame before it hides. A watch thread
+  logs where it was (and writes at most 2 minidumps a session next to
+  the DLL) when the main thread stops for 10 s with frames open.
+- **Clipping:** SetWindowRgn to the visible part; none when all of it is
+  in view (GPU-drawn plugins can draw oddly with one); everything
+  repainted when the region grows.
+- **Wheel:** WH_GETMESSAGE on the main thread takes WM_MOUSEHWHEEL over a
+  shown embedded frame (TakeWheel, +d/120 in ReaImGui's sense). Plugins
+  with GUI threads of their own (UADx) keep theirs.
+- **Keys:** the accelerator hook sends keys to REAPER unless a text field
+  has focus, as from REAPER's own FX window. REAPER feeds a plugin typing
+  only from focus inside its own FX window (Softube): use Float.
+- **Saved with the project:** projectconfig writes `TSFXFRAME_IN_PANEL
+  {guid}` for plugins in panels; for 20 s after the first tick past a
+  load, REAPER's floats of those are closed unless a script has them.
+  mingw's vtable has two destructor slots to MSVC's one: AddLine is called
+  through MSVC's slot 1 (`addLine`), never `ctx->AddLine`.
+- **ChannelView side (TS_CV_PluginWindow, Pro):** PW.HOST is the
+  ReaImGui window's title, PW.PLACE "rack"/"tcp"/nil. One Open a frame;
+  unseen frames hidden, closed after KEEP_S 120 s, KEEP_N 8. Sizes per
+  place in the layout (PluginWindowSize=, PluginWindowSizeRack=,
+  PluginWindowSizeTCP=); own window or controls per instance kept per
+  window (St.GUI "gui:"/"rgui:"/"tgui:"), the last way per plugin
+  (St.GUILAST). Popups noted by wrapping ReaImGui's Begin... (rawget:
+  not every ReaImGui has every one); a plugin hides under one that
+  overlaps it. GetParent arbitrates between scripts: the last place shown
+  takes it.
+- **TCP window widths:** OVW.check verifies the docker grew after
+  BAY.dock_drag (a drag can be lost at startup), retries for 5 s, then
+  the 65 % split; rows_w kept only while OVW.sane; BAY.settle re-checks
+  its own drag until the width's right.
+
 ## Upkeep, by one window (TS_CV_Upkeep)
 
 What ChannelView's rescan used to keep right on its own track now runs from

@@ -107,7 +107,7 @@ function S.own_gui(guid)
   if guid == nil or guid == "" or not ED.PRO then return nil end
   local v = own_gui[guid]
   if v == nil then
-    local _, str = reaper.GetProjExtState(0, NS, "gui:" .. guid)
+    local _, str = reaper.GetProjExtState(0, NS, S.GUI .. guid)
     v = str or ""
     own_gui[guid] = v
   end
@@ -118,7 +118,26 @@ function S.set_own_gui(guid, on, default)
   if guid == nil or guid == "" or not ED.PRO then return end
   local val = ((on and true or false) == (default and true or false)) and "" or (on and "1" or "0")
   own_gui[guid] = val
-  reaper.SetProjExtState(0, NS, "gui:" .. guid, val)
+  reaper.SetProjExtState(0, NS, S.GUI .. guid, val)
+end
+
+-- Plugins' own windows or their controls are kept apart for ChannelView
+-- (and its pop-outs), the rack ("rgui:") and the TCP window ("tgui:"), as
+-- folding is: each script sets its own.
+S.GUI, S.GUILAST = "gui:", "guilast:"
+
+-- The way you last left a PLUGIN in a panel (by its layout key): true its
+-- own window, false its controls, nil never switched. Kept for every
+-- project, like S.last_fold, for the next instance of it that's inserted.
+function S.last_gui(key)
+  if not ED.PRO or not key or key == "" then return nil end
+  local v = reaper.GetExtState(NS, S.GUILAST .. key)
+  if v == "1" then return true elseif v == "0" then return false end
+  return nil
+end
+function S.remember_gui(key, on)
+  if not ED.PRO or not key or key == "" then return end
+  reaper.SetExtState(NS, S.GUILAST .. key, on and "1" or "0", true)
 end
 
 -- Whether this instance's gain-reduction meter is opened out into its

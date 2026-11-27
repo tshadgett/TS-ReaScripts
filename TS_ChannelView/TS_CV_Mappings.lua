@@ -2716,6 +2716,11 @@ local function parse_section(sect)
            levels = (U.trim(sect.Levels or "") == "1") or nil,
            -- (Pro, TS_FXFrame) its panels show the plugin's own window
            own_gui = (U.trim(sect.PluginWindow or "") == "1") or nil,
+           -- the size you left it at in a panel (ImGui units): ChannelView's
+           -- row, the rack, the TCP window, each its own
+           own_gui_size = M.size_of(sect.PluginWindowSize),
+           own_gui_size_rack = M.size_of(sect.PluginWindowSizeRack),
+           own_gui_size_tcp = M.size_of(sect.PluginWindowSizeTCP),
            plate = C.plate_key(U.trim(sect.Plate or "")),
            brush = brush_of(sect.Brush),
            finish = finish_of(sect.Finish),
@@ -2761,6 +2766,11 @@ local function serialize(layout)
   if layout.mug then out.Makeup = tostring(math.floor(layout.mug)) end
   if layout.levels then out.Levels = "1" end
   if layout.own_gui then out.PluginWindow = "1" end
+  for _, fk in ipairs({ { "own_gui_size", "PluginWindowSize" }, { "own_gui_size_rack", "PluginWindowSizeRack" },
+                       { "own_gui_size_tcp", "PluginWindowSizeTCP" } }) do
+    local z, k = layout[fk[1]], fk[2]
+    if z then out[k] = ("%dx%d"):format(math.floor(z.w), math.floor(z.h)) end
+  end
   if C.plate_key(layout.plate) then out.Plate = C.plate_key(layout.plate) end
   if layout.brush ~= nil then out.Brush = layout.brush and "1" or "0" end
   if finish_of(layout.finish) then out.Finish = layout.finish end
@@ -4543,9 +4553,19 @@ function M.paste_look(o, s)
 end
 
 -- Deep copy, so the editor can work on a scratch layout and discard it.
+-- A kept plugin-window size, "WxH" (32..8000 each), or nil
+function M.size_of(str)
+  local w, h = U.trim(str or ""):match("^(%d+)x(%d+)$")
+  w, h = tonumber(w), tonumber(h)
+  return (w and h and w >= 32 and h >= 32 and w <= 8000 and h <= 8000) and { w = w, h = h } or nil
+end
+
 function M.copy(layout)
   local out = { controls = {}, aliases = {}, live = layout.live,
                 measure = layout.measure, levels = layout.levels, mug = layout.mug, own_gui = layout.own_gui,
+                own_gui_size = layout.own_gui_size and { w = layout.own_gui_size.w, h = layout.own_gui_size.h } or nil,
+                own_gui_size_rack = layout.own_gui_size_rack and { w = layout.own_gui_size_rack.w, h = layout.own_gui_size_rack.h } or nil,
+                own_gui_size_tcp = layout.own_gui_size_tcp and { w = layout.own_gui_size_tcp.w, h = layout.own_gui_size_tcp.h } or nil,
                 own_w = layout.own_w, own_h = layout.own_h,
                 plate = layout.plate, brush = layout.brush, metal = layout.metal, finish = layout.finish,
                 fink = layout.fink, lock = layout.lock, grad = M.grad_copy(layout.grad), palette = M.palette_of(M.palette_line(layout.palette)),

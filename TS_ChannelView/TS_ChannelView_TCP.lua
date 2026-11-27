@@ -1090,9 +1090,11 @@ function BAY.settle(ww, s)
     if dock_id == 0 or not want or math.abs(want - cur) <= 3 then BAY.settled = true return true end
     -- (a moment first: the window's size is the docker's once it's laid out)
     if now < BAY.next_try or now - BAY.first < 0.3 then return false end
-    -- (the docker may not be found for the first frames: tried again
-    -- for a few seconds)
-    if BAY.dock_drag(want - cur) or now - BAY.first > 3 then BAY.settled = true
+    -- (the docker may not be found for the first frames, and a drag can
+    -- be lost while REAPER is starting: tried until it's that width, for
+    -- a few seconds)
+    if now - BAY.first > 5 then BAY.settled = true
+    elseif BAY.dock_drag(want - cur) then BAY.next_try = now + 0.5
     else BAY.next_try = now + 0.25 end
     return false
   end
@@ -1100,7 +1102,7 @@ function BAY.settle(ww, s)
   -- or what was left of it when the overview widened it
   local rows
   if BAY.widened == 0 and OVW.widened == 0 then rows = cur
-  elseif BAY.widened == 0 and OVW.widened > 0 and OVW.row_w then rows = math.floor(OVW.row_w / s + 0.5) end
+  elseif BAY.widened == 0 and OVW.widened > 0 and OVW.row_w and OVW.sane then rows = math.floor(OVW.row_w / s + 0.5) end
   if rows and dock_id ~= 0 and rows > 40 then
     local was = tonumber(ext_get(BAY.ROWS_KEY, ""))
     if not was or math.abs(was - rows) > 3 then ext_set(BAY.ROWS_KEY, rows) end
@@ -1181,7 +1183,7 @@ function OVW.follow(ww, bw, s)
     OVW.row_w = ww - bw
     local w = ov.width()
     if BAY.resize(w) then
-      OVW.widened = w
+      OVW.widened, OVW.check = w, now
     elseif now - OVW.first > 3 then
       OVW.widened = -1
     else
@@ -1192,11 +1194,26 @@ function OVW.follow(ww, bw, s)
     if OVW.widened > 0 then BAY.resize(-OVW.widened) end
     OVW.widened = 0
   end
-  if not on then OVW.first, OVW.next_try = nil, nil end
+  if not on then OVW.first, OVW.next_try, OVW.check = nil, nil, nil end
   if not on or OVW.widened == 0 then return 0 end
   if OVW.widened < 0 then return math.floor((ww - bw) * 0.65) end
   local now_w = math.max(0, ww - bw - OVW.row_w)
   local now_n = math.floor(now_w / s + 0.5)
+  OVW.sane = now_n >= ov.W_MIN
+  if OVW.check then
+    -- the docker grown, or the drag lost (REAPER starting, a window
+    -- opening): tried again for a few seconds, then the rows give up room
+    local now = reaper.time_precise()
+    if OVW.sane then OVW.check = nil
+    elseif not down and now - OVW.check > 0.5 then
+      OVW.check = nil
+      if now - (OVW.first or now) < 5 then OVW.widened, OVW.next_try = 0, 0
+      else OVW.widened = -1 end
+    end
+    if OVW.widened == 0 then return 0 end
+    if OVW.widened < 0 then return math.floor((ww - bw) * 0.65) end
+    if OVW.check then return now_w end
+  end
   -- the docker's edge dragged: that's its width now
   if not down and math.abs(now_n - OVW.widened) > 3 and now_n >= ov.W_MIN then
     OVW.widened = now_n
@@ -1832,6 +1849,7 @@ local function frame()
     app.win = nil
   end
   ImGui.PopStyleVar(ctx, 3)
+  if OVW.mod and OVW.mod.end_frame then OVW.mod.end_frame() end
   VO.draw(ctx, "tcp")      -- View ▸ Options, its own window
   W.pop_font(ctx, text_font)
   ST.pop(ctx)
